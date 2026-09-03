@@ -1,0 +1,353 @@
+[gd_scene format=3 uid="uid://lp56exjo4yw8"]
+
+[ext_resource type="PackedScene" uid="uid://5gylk5m307o0" path="res://tools/scenes/vpk_loader.tscn" id="1_ig7tw"]
+[ext_resource type="Script" uid="uid://cy854j3gxqe2a" path="res://ui/scripts/UIManager.cs" id="2_0xm2m"]
+[ext_resource type="Script" uid="uid://bd8nhtlxjpsn" path="res://tools/scripts/OrbitCamera.cs" id="2_h2yge"]
+[ext_resource type="Texture2D" uid="uid://cc2kpwg3tn3c8" path="res://assets/backgrounds/classic_menu_bg.png" id="4_1bvp3"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pgrle"]
+bg_color = Color(0, 0, 0, 0.23921569)
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_ig7tw"]
+sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+
+[sub_resource type="Sky" id="Sky_0xm2m"]
+sky_material = SubResource("ProceduralSkyMaterial_ig7tw")
+
+[sub_resource type="Environment" id="Environment_h2yge"]
+background_mode = 1
+background_color = Color(1, 1, 1, 0)
+sky = SubResource("Sky_0xm2m")
+glow_enabled = true
+
+[node name="Main" type="Node3D" unique_id=1345390019]
+
+[node name="BGCanvas" type="CanvasLayer" parent="." unique_id=407672992]
+layer = -1
+
+[node name="BackgroundRect" type="TextureRect" parent="BGCanvas" unique_id=1693684743]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_1bvp3")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=1110568820]
+script = ExtResource("2_0xm2m")
+
+[node name="MainHUD" type="Control" parent="UIRoot" unique_id=1322230385]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TopBar" type="PanelContainer" parent="UIRoot/MainHUD" unique_id=1709035603]
+custom_minimum_size = Vector2(0, 32)
+custom_maximum_size = Vector2(-1, 48)
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 32.0
+grow_horizontal = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+
+[node name="HBoxContainer" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar" unique_id=195226604]
+layout_mode = 2
+
+[node name="AppLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1495577756]
+layout_mode = 2
+text = "Deadlock Playground"
+
+[node name="_Spacer" type="Control" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1940920138]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+
+[node name="SettingsButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=311144505]
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Settings"
+
+[node name="SideBar" type="PanelContainer" parent="UIRoot/MainHUD" unique_id=383523676]
+custom_minimum_size = Vector2(230, 0)
+custom_maximum_size = Vector2(250, -1)
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -230.0
+offset_top = 32.0
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/SideBar" unique_id=1907826317]
+layout_mode = 2
+
+[node name="CharacterLabel" type="Label" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=1705357336]
+layout_mode = 2
+text = "Select character"
+
+[node name="CharacterButton" type="OptionButton" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=107393633]
+layout_mode = 2
+search_bar_enabled = true
+
+[node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=981269640]
+layout_mode = 2
+
+[node name="BGLabel" type="Label" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=1159905411]
+layout_mode = 2
+text = "Select background"
+
+[node name="BGButton" type="OptionButton" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=336038216]
+layout_mode = 2
+selected = 0
+item_count = 1
+popup/item_0/text = "Classic Menu"
+popup/item_0/id = 0
+
+[node name="HSeparator2" type="HSeparator" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=827415770]
+layout_mode = 2
+
+[node name="SSButton" type="Button" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=68002477]
+layout_mode = 2
+text = "Take a screenshot"
+
+[node name="Control" type="Control" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=1467469734]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="AboutButton" type="Button" parent="UIRoot/MainHUD/SideBar/VBoxContainer" unique_id=1419914513]
+layout_mode = 2
+text = "About"
+
+[node name="ModalsLayer" type="Control" parent="UIRoot/MainHUD" unique_id=1822188875]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="SettingsModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1993772100]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 167.0
+offset_top = 77.0
+offset_right = -300.0
+offset_bottom = -109.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal" unique_id=857077489]
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer" unique_id=2107951884]
+layout_mode = 2
+size_flags_horizontal = 8
+text = "Close"
+
+[node name="TabContainer" type="TabContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer" unique_id=92496794]
+layout_mode = 2
+size_flags_vertical = 3
+current_tab = 2
+
+[node name="General" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer" unique_id=1173003226]
+visible = false
+layout_mode = 2
+metadata/_tab_index = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General" unique_id=1958489029]
+layout_mode = 2
+
+[node name="LanguageLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=556435258]
+layout_mode = 2
+text = "Language"
+
+[node name="LanguageButton" type="OptionButton" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=1756708428]
+layout_mode = 2
+selected = 0
+item_count = 2
+popup/item_0/text = "English"
+popup/item_0/id = 0
+popup/item_1/text = "Español"
+popup/item_1/id = 1
+
+[node name="GamePathLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=973584011]
+layout_mode = 2
+text = "Game Route"
+
+[node name="GamePathSearchContainer" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=1023638057]
+layout_mode = 2
+
+[node name="GamePathLine" type="LineEdit" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer" unique_id=1903097079]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BrowseGamePathButton" type="Button" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer" unique_id=1049384754]
+layout_mode = 2
+text = "Search..."
+
+[node name="SavesPathLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=171246244]
+layout_mode = 2
+text = "Screenshot folder"
+
+[node name="SavesPathSearchContainer" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=976614898]
+layout_mode = 2
+
+[node name="SavesPathLine" type="LineEdit" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer" unique_id=1084768401]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BrowseSavePathButton" type="Button" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer" unique_id=1368660868]
+layout_mode = 2
+text = "Search..."
+
+[node name="Graphics" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer" unique_id=1680348267]
+visible = false
+layout_mode = 2
+metadata/_tab_index = 1
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics" unique_id=1506314001]
+layout_mode = 2
+
+[node name="ScreenshotResLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=1106197207]
+layout_mode = 2
+size_flags_vertical = 0
+text = "Screenshot resolution"
+
+[node name="ScreenshotResButton" type="OptionButton" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=458340424]
+layout_mode = 2
+item_count = 4
+popup/item_0/text = "480p"
+popup/item_0/id = 0
+popup/item_1/text = "720p"
+popup/item_1/id = 1
+popup/item_2/text = "1080p"
+popup/item_2/id = 2
+popup/item_3/text = "1440p"
+popup/item_3/id = 3
+
+[node name="TexQualityLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=418014794]
+layout_mode = 2
+text = "Character Texture Quality (Mipmaps)"
+
+[node name="TexQualityButton" type="OptionButton" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=419985996]
+layout_mode = 2
+selected = 1
+item_count = 3
+popup/item_0/text = "Low"
+popup/item_0/id = 0
+popup/item_1/text = "Medium"
+popup/item_1/id = 1
+popup/item_2/text = "High"
+popup/item_2/id = 2
+
+[node name="SSAOCheck" type="CheckBox" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=1834022340]
+layout_mode = 2
+button_pressed = true
+text = "Ambient Occlusion (SSAO)"
+
+[node name="SSRCheck" type="CheckBox" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=170272885]
+layout_mode = 2
+button_pressed = true
+text = "ScreenSpace Reflections (SSR)"
+
+[node name="Camera" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer" unique_id=1432162441]
+layout_mode = 2
+metadata/_tab_index = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Camera" unique_id=1121420871]
+layout_mode = 2
+
+[node name="TransparentBgCheck" type="CheckBox" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Camera/VBoxContainer" unique_id=63233221]
+layout_mode = 2
+button_pressed = true
+text = "Capture with transparent background"
+
+[node name="AboutModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=278220094]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 167.0
+offset_top = 77.0
+offset_right = -300.0
+offset_bottom = -109.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal" unique_id=1804606558]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer" unique_id=27239453]
+layout_mode = 2
+
+[node name="Button" type="Button" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=1519041944]
+layout_mode = 2
+size_flags_horizontal = 8
+size_flags_vertical = 0
+text = "Close"
+
+[node name="RichTextLabel" type="RichTextLabel" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=2057719133]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "[b]Deadlock 3D Playground[/b]
+[color=#A35A4E]Version 0.1.0-alpha[/color]
+
+An open-source, community-driven tool designed to view, inspect, and pose 3D character models from Valve's Deadlock for art reference, virtual photography, and content creation.
+
+[b]Built With & Open Source Credits[/b]
+• [b]Engine:[/b] Powered by [url=https://godotengine.org/]Godot Engine 4[/url] (.NET / C#).
+• [b]Asset Pipeline:[/b] Powered by [url=https://github.com/ValveResourceFormat/ValveResourceFormat]ValveResourceFormat (Source 2 Viewer)[/url], maintained by the Steam Database community.
+• [b]Project Source:[/b] Check out the code and contribute on [url=https://github.com/juliancz-a/deadlock-3d-playground]GitHub[/url].
+
+[b]Legal Disclaimer & Intellectual Property[/b]
+Deadlock, Source 2, the Source 2 logo, Valve, and the Valve logo are trademarks and/or registered trademarks of [b]Valve Corporation[/b]. All character models, textures, animations, and related assets extracted or rendered by this application are the copyrighted property of Valve Corporation.
+
+This project is an unofficial, non-commercial fan creation. It is neither affiliated with, endorsed by, nor sponsored by Valve Corporation. No proprietary game files are bundled, redistributed, or sold with this software; assets are parsed locally from the user's personal installation of Deadlock.
+
+by Julián Caceres."
+
+[node name="LoadingOverlay" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=273634408]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_pgrle")
+
+[node name="Label" type="Label" parent="UIRoot/MainHUD/ModalsLayer/LoadingOverlay" unique_id=305766545]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Loading character model..."
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=308130484]
+environment = SubResource("Environment_h2yge")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=382741540]
+transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
+shadow_enabled = true
+
+[node name="VpkLoaderTest" parent="." unique_id=919284788 instance=ExtResource("1_ig7tw")]
+
+[node name="CameraPivot" type="Node3D" parent="." unique_id=169823187]
+script = ExtResource("2_h2yge")
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot" unique_id=1438840901]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5854964, 5)
