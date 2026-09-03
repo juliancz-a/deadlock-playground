@@ -8,14 +8,14 @@
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pgrle"]
 bg_color = Color(0, 0, 0, 0.23921569)
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_ig7tw"]
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1bvp3"]
 sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
 ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
 
 [sub_resource type="Sky" id="Sky_0xm2m"]
-sky_material = SubResource("ProceduralSkyMaterial_ig7tw")
+sky_material = SubResource("ProceduralSkyMaterial_1bvp3")
 
-[sub_resource type="Environment" id="Environment_h2yge"]
+[sub_resource type="Environment" id="Environment_lquwl"]
 background_mode = 1
 background_color = Color(1, 1, 1, 0)
 sky = SubResource("Sky_0xm2m")
@@ -37,6 +37,7 @@ expand_mode = 1
 stretch_mode = 6
 
 [node name="UIRoot" type="CanvasLayer" parent="." unique_id=1110568820]
+layer = 2
 script = ExtResource("2_0xm2m")
 
 [node name="MainHUD" type="Control" parent="UIRoot" unique_id=1322230385]
@@ -305,7 +306,7 @@ text = "Close"
 layout_mode = 2
 size_flags_vertical = 3
 bbcode_enabled = true
-text = "[b]Deadlock 3D Playground[/b]
+text = "[b]Deadlock 3D Playground[/b] | [color=#8A8A8A]by Julián Caceres[/color]
 [color=#A35A4E]Version 0.1.0-alpha[/color]
 
 An open-source, community-driven tool designed to view, inspect, and pose 3D character models from Valve's Deadlock for art reference, virtual photography, and content creation.
@@ -318,9 +319,7 @@ An open-source, community-driven tool designed to view, inspect, and pose 3D cha
 [b]Legal Disclaimer & Intellectual Property[/b]
 Deadlock, Source 2, the Source 2 logo, Valve, and the Valve logo are trademarks and/or registered trademarks of [b]Valve Corporation[/b]. All character models, textures, animations, and related assets extracted or rendered by this application are the copyrighted property of Valve Corporation.
 
-This project is an unofficial, non-commercial fan creation. It is neither affiliated with, endorsed by, nor sponsored by Valve Corporation. No proprietary game files are bundled, redistributed, or sold with this software; assets are parsed locally from the user's personal installation of Deadlock.
-
-by Julián Caceres."
+This project is an unofficial, non-commercial fan creation. It is neither affiliated with, endorsed by, nor sponsored by Valve Corporation. No proprietary game files are bundled, redistributed, or sold with this software; assets are parsed locally from the user's personal installation of Deadlock."
 
 [node name="LoadingOverlay" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=273634408]
 visible = false
@@ -337,8 +336,8 @@ layout_mode = 2
 size_flags_horizontal = 4
 text = "Loading character model..."
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=308130484]
-environment = SubResource("Environment_h2yge")
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1799043600]
+environment = SubResource("Environment_lquwl")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=382741540]
 transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
@@ -350,4 +349,4 @@ shadow_enabled = true
 script = ExtResource("2_h2yge")
 
 [node name="Camera3D" type="Camera3D" parent="CameraPivot" unique_id=1438840901]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5854964, 5)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 1)

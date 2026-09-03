@@ -1,0 +1,115 @@
+[gd_scene format=3 uid="uid://cf1brnqf47rob"]
+
+[ext_resource type="Script" uid="uid://cdqd1ekpbnkrq" path="res://ui/scripts/PoseEditorUI.cs" id="1_gvau4"]
+
+[node name="PoseEditorUi" type="CanvasLayer" unique_id=166090087 node_paths=PackedStringArray("_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_selectedBoneLabel", "_resetButton", "_toggleXRayButton", "_toggleLinesButton", "_fastBoneGrid", "_poseOptionButton", "_allBonesOptionButton")]
+script = ExtResource("1_gvau4")
+_sliderX = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer/SliderX")
+_sliderY = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer2/SliderY")
+_sliderZ = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer3/SliderZ")
+_labelX = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer/LabelX")
+_labelY = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer2/LabelY")
+_labelZ = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer3/LabelZ")
+_selectedBoneLabel = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/BoneLabel")
+_resetButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/ResetButton")
+_toggleXRayButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer/ToggleXRayButton")
+_toggleLinesButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer/CheckXRayLines")
+_fastBoneGrid = NodePath("MarginContainer/PanelContainer/VBoxContainer/FastBoneGrid")
+_poseOptionButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/PoseOptionButton")
+_allBonesOptionButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/BoneOptionButton")
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=1910512466]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 35.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PanelContainer" type="FoldableContainer" parent="MarginContainer" unique_id=1352974405]
+custom_minimum_size = Vector2(200, 0)
+custom_maximum_size = Vector2(250, -1)
+layout_mode = 2
+size_flags_horizontal = 0
+title = "Bone Settings"
+title_alignment = 1
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer" unique_id=2136559190]
+layout_mode = 2
+
+[node name="SliderVBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=1359233649]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+size_flags_vertical = 0
+
+[node name="BoneOptionButton" type="OptionButton" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer" unique_id=2097021217]
+layout_mode = 2
+
+[node name="BoneLabel" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer" unique_id=215300470]
+layout_mode = 2
+text = "-- Select a Bone --"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer" unique_id=1268199492]
+layout_mode = 2
+
+[node name="LabelX" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer" unique_id=1549858673]
+layout_mode = 2
+text = "Rotation X"
+
+[node name="SliderX" type="HSlider" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer" unique_id=1040079596]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -180.0
+max_value = 180.0
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer" unique_id=676151207]
+layout_mode = 2
+
+[node name="LabelY" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer2" unique_id=339618858]
+layout_mode = 2
+text = "Rotation Y"
+
+[node name="SliderY" type="HSlider" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer2" unique_id=603259171]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -180.0
+max_value = 180.0
+
+[node name="HBoxContainer3" type="HBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer" unique_id=1631655086]
+layout_mode = 2
+
+[node name="LabelZ" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer3" unique_id=1029980595]
+layout_mode = 2
+text = "Rotation Z"
+
+[node name="SliderZ" type="HSlider" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer3" unique_id=1647008594]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -180.0
+max_value = 180.0
+
+[node name="ResetButton" type="Button" parent="MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer" unique_id=1003257825]
+layout_mode = 2
+text = "Reset All Poses"
+
+[node name="FastBoneGrid" type="GridContainer" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=1536160691]
+layout_mode = 2
+columns = 4
+
+[node name="PoseOptionButton" type="OptionButton" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=803487279]
+layout_mode = 2
+
+[node name="XrayVBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=826379148]
+layout_mode = 2
+size_flags_vertical = 8
+
+[node name="ToggleXRayButton" type="Button" parent="MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer" unique_id=1047397372]
+layout_mode = 2
+text = "Toggle X-Ray"
+
+[node name="CheckXRayLines" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer" unique_id=1622758842]
+layout_mode = 2
+text = "Xray Lines"
+alignment = 1

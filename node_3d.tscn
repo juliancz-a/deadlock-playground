@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://07on0cy4jyt4"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_4xowi"]
+sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+
+[sub_resource type="Sky" id="Sky_4xowi"]
+sky_material = SubResource("ProceduralSkyMaterial_4xowi")
+
+[sub_resource type="Environment" id="Environment_a202f"]
+background_mode = 1
+background_color = Color(1, 1, 1, 0)
+sky = SubResource("Sky_4xowi")
+glow_enabled = true
+
+[sub_resource type="BoxMesh" id="BoxMesh_dwvqn"]
+
+[node name="Node3D" type="Node3D" unique_id=1015773934]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=147110525]
+environment = SubResource("Environment_a202f")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1497466142]
+mesh = SubResource("BoxMesh_dwvqn")

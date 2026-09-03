@@ -18,6 +18,9 @@ public partial class VpkLoaderTest : Node3D
     public delegate void LoadFinishedEventHandler();
 
 	[Export]
+	public PackedScene PoseEditorScene;
+	
+	[Export]
 	public string VpkPath = @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk";
 
 
@@ -106,8 +109,39 @@ public partial class VpkLoaderTest : Node3D
 			    ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
 		    };
 
-		    exporter.AnimationFilter.Add("non_existent_animation_to_force_empty");
+		    exporter.AnimationFilter.Clear();
+            if (resource.DataBlock is Model vrfModel)
+            {
+                // Retrieve all animations using VRF API
+                var allAnims = vrfModel.GetAllAnimations(fileLoader);
+                foreach (var anim in allAnims)
+                {
+                    string lowerName = anim.Name.ToLower();
+                    
+                    bool isImportant = lowerName.EndsWith("stand_idle") || 
+                                       lowerName.EndsWith("run_center") || 
+                                       lowerName.EndsWith("walk_center") || 
+                                       lowerName == "shoot_idle" || 
+                                       lowerName == "idle_loadout" || 
+                                       lowerName == "primary_shoot" ||
+                                       lowerName == "out_of_combat_stand_idle";
+                    
+                    // Exclude crouch poses to keep it small, or keep them if needed. 
+                    // By checking EndsWith "stand_idle", we automatically avoid crouch_idle!
+                    
+                    if (isImportant && !lowerName.Contains("zoomed") && !lowerName.Contains("aim"))
+                    {
+                        exporter.AnimationFilter.Add(anim.Name);
+                    }
+                }
+            }
 
+			GD.Print($"Cantidad de animaciones que cumplen el filtro: {exporter.AnimationFilter.Count}");
+			foreach(var animation in exporter.AnimationFilter)
+			{
+				GD.Print($"Exportando animación: {animation}");
+			}
+			
 		    string tempGlbPath = Path.Combine(Path.GetTempPath(), $"{hero}_{Guid.NewGuid():N}.glb");
 		    try
 		    {
@@ -227,16 +261,18 @@ public partial class VpkLoaderTest : Node3D
 
 	private void InstantiateInScene(byte[] glbBytes, string hero, Package package, Dictionary<string, List<string>> meshMaterialMap)
 	{
-		var gltfDoc = new GltfDocument();
-		var gltfState = new GltfState();
-
-		// Parseamos el buffer GLB
-		Error err = gltfDoc.AppendFromBuffer(glbBytes, "", gltfState);
-		if (err != Error.Ok)
+		try
 		{
-			GD.PrintErr($"Error de Godot al parsear el buffer GLTF: {err}");
-			return;
-		}
+			var gltfDoc = new GltfDocument();
+			var gltfState = new GltfState();
+
+			// Parseamos el buffer GLB
+			Error err = gltfDoc.AppendFromBuffer(glbBytes, "", gltfState);
+			if (err != Error.Ok)
+			{
+				GD.PrintErr($"Error de Godot al parsear el buffer GLTF: {err}");
+				return;
+			}
 
 		// Generamos los nodos 3D (MeshInstance3D, Skeleton3D, etc.)
 		Node3D modelScene = (Node3D)gltfDoc.GenerateScene(gltfState);
@@ -252,20 +288,55 @@ public partial class VpkLoaderTest : Node3D
 
 		// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
 		var skeleton = SearchSkeleton(modelScene);
+		var animPlayer = SearchAnimationPlayer(modelScene);
 		if (skeleton != null)
 		{
 			GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
 			
 			// Instanciar y configurar la UI del Pose Editor
-			var poseEditor = new PoseEditorUI();
-			poseEditor.Name = "PoseEditorUI";
-            _currentPoseEditor = poseEditor;
-			AddChild(poseEditor);
-			poseEditor.SetSkeleton(skeleton);
+			PoseEditorUI poseEditor = null;
+			if (PoseEditorScene != null)
+			{
+				var instancedNode = PoseEditorScene.Instantiate();
+				poseEditor = instancedNode as PoseEditorUI;
+				
+				if (poseEditor != null)
+				{
+					poseEditor.Name = "PoseEditorUI";
+					_currentPoseEditor = poseEditor;
+					AddChild(poseEditor);
+					poseEditor.SetSkeleton(skeleton);
+					if (animPlayer != null)
+					{
+						poseEditor.SetAnimationPlayer(animPlayer);
+					}
+				}
+				else
+				{
+					GD.PrintErr("ERROR: The PoseEditorScene does not have the 'PoseEditorUI.cs' script attached to its root node!");
+					instancedNode.QueueFree();
+				}
+			}
+			else
+			{
+				GD.PrintErr("PoseEditorScene not set. Cannot instance UI.");
+			}
+			
+			// Setup SkeletonGizmoManager
+			var gizmoManager = new SkeletonGizmoManager();
+			gizmoManager.Name = "SkeletonGizmoManager";
+			gizmoManager.TargetSkeleton = skeleton;
+			gizmoManager.UIManager = poseEditor;
+			skeleton.AddChild(gizmoManager);
 		}
 		else
 		{
 			GD.Print("Aviso: No se detectó un Skeleton3D en la raíz de la malla generada.");
+		}
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[InstantiateInScene Crash]: {ex.Message}\n{ex.StackTrace}");
 		}
 	}
 
@@ -329,6 +400,18 @@ public partial class VpkLoaderTest : Node3D
 		foreach (Node child in node.GetChildren())
 		{
 			var res = SearchSkeleton(child);
+			if (res != null) return res;
+		}
+		return null;
+	}
+
+	private AnimationPlayer SearchAnimationPlayer(Node node)
+	{
+		if (node is AnimationPlayer ap) return ap;
+
+		foreach (Node child in node.GetChildren())
+		{
+			var res = SearchAnimationPlayer(child);
 			if (res != null) return res;
 		}
 		return null;

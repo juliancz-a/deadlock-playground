@@ -1,6 +1,8 @@
 [gd_scene format=3 uid="uid://5gylk5m307o0"]
 
 [ext_resource type="Script" uid="uid://cdynhrqddvot6" path="res://tools/scripts/VpkLoaderTest.cs" id="1_1eey3"]
+[ext_resource type="PackedScene" uid="uid://cf1brnqf47rob" path="res://ui/scenes/PoseEditorUI.tscn" id="2_dl0h1"]
 
 [node name="VpkLoaderTest" type="Node3D" unique_id=919284788]
 script = ExtResource("1_1eey3")
+PoseEditorScene = ExtResource("2_dl0h1")
