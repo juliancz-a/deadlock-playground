@@ -1,0 +1,123 @@
+[gd_scene format=3 uid="uid://b0avkl80hhgtj"]
+
+[ext_resource type="Script" uid="uid://b06hwksk8jaw6" path="res://ui/scripts/IntroScript.cs" id="1_falkw"]
+[ext_resource type="Texture2D" uid="uid://ctdilfr25jvj2" path="res://assets/backgrounds/intro/Paint_Splatter055.jpg" id="1_fm4gj"]
+[ext_resource type="Theme" uid="uid://cbawuwg8e0nxv" path="res://assets/themes/deadlock_main.tres" id="2_falkw"]
+[ext_resource type="Texture2D" uid="uid://c51pd0kgcpjue" path="res://assets/backgrounds/intro/godot_logo.png" id="3_d67h4"]
+[ext_resource type="Texture2D" uid="uid://c758a7ilf11ir" path="res://assets/backgrounds/intro/source2viewer_logo.png" id="4_jha30"]
+
+[sub_resource type="StyleBoxLine" id="StyleBoxLine_pgrle"]
+color = Color(0.18359044, 0.18359044, 0.18359044, 1)
+grow_begin = -232.0
+grow_end = -244.0
+thickness = 2
+
+[sub_resource type="Animation" id="Animation_10dtk"]
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("MarginContainer:modulate")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_x4cdl"]
+resource_name = "intro"
+length = 3.0
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("MarginContainer:modulate")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 1.3666667, 2.9666667),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Color(0, 0, 0, 0), Color(1, 1, 1, 1), Color(1, 1, 1, 1)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_t0pek"]
+_data = {
+&"RESET": SubResource("Animation_10dtk"),
+&"intro": SubResource("Animation_x4cdl")
+}
+
+[node name="Intro" type="Control" unique_id=1442811912]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_falkw")
+
+[node name="TextureRect" type="TextureRect" parent="." unique_id=616442420]
+layout_mode = 0
+offset_right = 2162.0
+offset_bottom = 2976.0
+texture = ExtResource("1_fm4gj")
+flip_v = true
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=758056905]
+layout_mode = 1
+anchors_preset = 14
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = -100.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer" unique_id=50693005]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer" unique_id=1871912264]
+layout_mode = 2
+size_flags_horizontal = 4
+theme = ExtResource("2_falkw")
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 48
+text = "Deadlock Playground"
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=721870756]
+layout_mode = 2
+theme_override_styles/separator = SubResource("StyleBoxLine_pgrle")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1914334121]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 6
+
+[node name="TextureRect" type="TextureRect" parent="MarginContainer/VBoxContainer/HBoxContainer" unique_id=324139084]
+custom_maximum_size = Vector2(128, 128)
+layout_mode = 2
+texture = ExtResource("3_d67h4")
+stretch_mode = 6
+
+[node name="TextureRect2" type="TextureRect" parent="MarginContainer/VBoxContainer/HBoxContainer" unique_id=267779144]
+custom_maximum_size = Vector2(128, 128)
+layout_mode = 2
+texture = ExtResource("4_jha30")
+stretch_mode = 6
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="." unique_id=1077755716]
+libraries/ = SubResource("AnimationLibrary_t0pek")
+autoplay = &"intro"
+
+[node name="Overlay" type="ColorRect" parent="." unique_id=1938097408]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.66177994)

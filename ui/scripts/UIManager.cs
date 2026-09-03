@@ -30,13 +30,23 @@ public partial class UIManager : CanvasLayer
     private FileDialog _gameFolderDialog;
     private FileDialog _saveFolderDialog;
 
-    // Campos de Configuración
+    // Controles de Configuración
     private OptionButton _langOption;
     private LineEdit _gamePathInput;
     private LineEdit _savePathInput;
     private OptionButton _resOption;
     private OptionButton _texQualityOption;
     private CheckBox _transparentBgCheck;
+    private CheckBox _jpgFormatCheck;
+
+    // Gestores
+    private GamePathManager _pathManager;
+    private ScreenshotHelper _screenshotHelper;
+    private AcceptDialog _fallbackPathDialog;
+    private PanelContainer _toastPanel;
+    private Label _toastLabel;
+    private Button _toastBtn;
+    private Godot.Timer _toastTimer;
 
     // Mapeo de personajes: Nombre legible en UI -> Identificador de carpeta/modelo
     private readonly List<(string DisplayName, string InternalId)> _characters = new()
@@ -85,9 +95,22 @@ public partial class UIManager : CanvasLayer
             envNode.Environment.ReflectedLightSource = Godot.Environment.ReflectionSource.Sky;
         }
 
+        // Instanciar Gestores
+        _pathManager = new GamePathManager();
+        AddChild(_pathManager);
+        
+        _screenshotHelper = new ScreenshotHelper();
+        _screenshotHelper.ScreenshotSaved += OnScreenshotSaved;
+        AddChild(_screenshotHelper);
+
         LinkNodes();
+        CreateToastUI();
+        CreateFallbackDialog();
         PopulateSelectors();
         ConnectEvents();
+
+        // Carga inicial y auto-detección
+        InitializePaths();
     }
 
 
@@ -111,8 +134,25 @@ public partial class UIManager : CanvasLayer
         // We assume the user creates a CloseButton for Settings as instructed
         _btnSettingsClose = GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/CloseButton");
 
-        // _gameFolderDialog = GetNode<FileDialog>("MainHUD/ModalsLayer/GameFolderDialog");
-        // _saveFolderDialog = GetNode<FileDialog>("MainHUD/ModalsLayer/ScreenshotFolderDialog");
+        _gameFolderDialog = GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/GameFolderDialog");
+        if (_gameFolderDialog == null)
+        {
+            _gameFolderDialog = new FileDialog();
+            _gameFolderDialog.FileMode = FileDialog.FileModeEnum.OpenDir;
+            _gameFolderDialog.Title = "Select Game Folder";
+            _gameFolderDialog.Access = FileDialog.AccessEnum.Filesystem;
+            GetNode("MainHUD/ModalsLayer").AddChild(_gameFolderDialog);
+        }
+
+        _saveFolderDialog = GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/ScreenshotFolderDialog");
+        if (_saveFolderDialog == null)
+        {
+            _saveFolderDialog = new FileDialog();
+            _saveFolderDialog.FileMode = FileDialog.FileModeEnum.OpenDir;
+            _saveFolderDialog.Title = "Select Screenshots Folder";
+            _saveFolderDialog.Access = FileDialog.AccessEnum.Filesystem;
+            GetNode("MainHUD/ModalsLayer").AddChild(_saveFolderDialog);
+        }
 
         // Controles de Configuración
         _langOption = GetNode<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/LanguageButton");
@@ -120,7 +160,115 @@ public partial class UIManager : CanvasLayer
         _savePathInput = GetNode<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/SavesPathLine");
         _resOption = GetNode<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/ScreenshotResButton");
         _texQualityOption = GetNode<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/TexQualityButton");
-        _transparentBgCheck = GetNode<CheckBox>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Camera/VBoxContainer/TransparentBgCheck");
+        
+        var cameraVBox = GetNode<VBoxContainer>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Camera/VBoxContainer");
+        _transparentBgCheck = cameraVBox.GetNode<CheckBox>("TransparentBgCheck");
+        
+        _jpgFormatCheck = new CheckBox();
+        _jpgFormatCheck.Text = "Save as JPG format (forces background on)";
+        cameraVBox.AddChild(_jpgFormatCheck);
+    }
+
+    private void CreateToastUI()
+    {
+        _toastPanel = new PanelContainer();
+        _toastPanel.Visible = false;
+        
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 15);
+        margin.AddThemeConstantOverride("margin_top", 10);
+        margin.AddThemeConstantOverride("margin_right", 15);
+        margin.AddThemeConstantOverride("margin_bottom", 10);
+        
+        var hbox = new HBoxContainer();
+        hbox.AddThemeConstantOverride("separation", 15);
+
+        _toastLabel = new Label();
+        _toastLabel.Text = "Screenshot saved!";
+        
+        _toastBtn = new Button();
+        _toastBtn.Text = "Open Folder";
+        
+        hbox.AddChild(_toastLabel);
+        hbox.AddChild(_toastBtn);
+        margin.AddChild(hbox);
+        _toastPanel.AddChild(margin);
+
+        // Estilos
+        var style = new StyleBoxFlat();
+        style.BgColor = new Color(0.1f, 0.1f, 0.1f, 0.9f);
+        style.CornerRadiusTopLeft = 8;
+        style.CornerRadiusTopRight = 8;
+        style.CornerRadiusBottomLeft = 8;
+        style.CornerRadiusBottomRight = 8;
+        _toastPanel.AddThemeStyleboxOverride("panel", style);
+
+        // Posicionar abajo al centro (usaremos anclas luego)
+        _toastPanel.SetAnchorsPreset(Control.LayoutPreset.CenterBottom);
+        _toastPanel.Position = new Vector2(_toastPanel.Position.X, -50); // Offset temporal
+
+        GetNode("MainHUD").AddChild(_toastPanel);
+        
+        // Timer de auto-cierre
+        _toastTimer = new Godot.Timer();
+        _toastTimer.OneShot = true;
+        _toastTimer.WaitTime = 5.0;
+        _toastTimer.Timeout += () => _toastPanel.Visible = false;
+        AddChild(_toastTimer);
+    }
+
+    private void CreateFallbackDialog()
+    {
+        _fallbackPathDialog = new AcceptDialog();
+        _fallbackPathDialog.Title = "Deadlock Path Not Found";
+        _fallbackPathDialog.DialogText = "Could not automatically detect the Deadlock installation path.\nPlease select the Deadlock game directory manually.";
+        _fallbackPathDialog.Exclusive = true; // Bloquea hasta que se cierre
+        
+        // Queremos que al dar OK, abra el selector de archivos.
+        _fallbackPathDialog.Confirmed += () => 
+        {
+            _gameFolderDialog.PopupCentered();
+        };
+
+        GetNode("MainHUD/ModalsLayer").AddChild(_fallbackPathDialog);
+    }
+
+    private async void InitializePaths()
+    {
+        ShowLoading(true);
+        GetNode<Label>("MainHUD/ModalsLayer/LoadingOverlay/Label").Text = "Detecting Deadlock path...";
+
+        // Si la ruta no es válida o está vacía
+        if (string.IsNullOrEmpty(_pathManager.CurrentGamePath) || !_pathManager.ValidateDeadlockPath(_pathManager.CurrentGamePath))
+        {
+            string autoPath = await _pathManager.AutoDetectDeadlockPathAsync();
+            if (!string.IsNullOrEmpty(autoPath))
+            {
+                _pathManager.SaveConfig(autoPath, _pathManager.CurrentSavePath);
+                GD.Print($"[UI] Deadlock detectado en: {autoPath}");
+            }
+            else
+            {
+                ShowLoading(false);
+                _fallbackPathDialog.PopupCentered();
+                return; // Esperamos al usuario
+            }
+        }
+
+        UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
+        _gamePathInput.Text = _pathManager.CurrentGamePath;
+        _savePathInput.Text = _pathManager.CurrentSavePath;
+        ShowLoading(false);
+        GetNode<Label>("MainHUD/ModalsLayer/LoadingOverlay/Label").Text = "Loading character model...";
+    }
+
+    private void UpdateVpkLoaderPath(string basePath)
+    {
+        var loader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
+        if (loader != null)
+        {
+            loader.VpkPath = System.IO.Path.Combine(basePath, "game/citadel/pak01_dir.vpk");
+        }
     }
 
     private void PopulateSelectors()
@@ -178,14 +326,21 @@ public partial class UIManager : CanvasLayer
         if (_btnSettingsClose != null) _btnSettingsClose.Pressed += () => _settingsModal.Visible = false;
 
         // Botones "Buscar..." en Settings
-        // GetNode<Button>("MainHUD/ModalsLayer/SettingsModal/TabContainer/General/VBoxContainer/GamePathSearchContainer/BrowseGamePathButton").Pressed += 
-        //     () => _gameFolderDialog.PopupCentered();
+        GetNode<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer/BrowseGamePathButton").Pressed += 
+            () => _gameFolderDialog.PopupCentered();
             
-        // GetNode<Button>("MainHUD/ModalsLayer/SettingsModal/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton").Pressed += 
-        //     () => _saveFolderDialog.PopupCentered();
+        GetNode<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton").Pressed += 
+            () => _saveFolderDialog.PopupCentered();
 
-        // _gameFolderDialog.DirSelected += OnGameDirSelected;
-        // _saveFolderDialog.DirSelected += OnSaveDirSelected;
+        _gameFolderDialog.DirSelected += OnGameDirSelected;
+        _saveFolderDialog.DirSelected += OnSaveDirSelected;
+
+        var loader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
+        if (loader != null)
+        {
+            loader.LoadStarted += () => ShowLoading(true);
+            loader.LoadFinished += () => ShowLoading(false);
+        }
     }
 
     private void OnCharacterSelected(long index)
@@ -200,12 +355,6 @@ public partial class UIManager : CanvasLayer
         var loader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
         if (loader != null)
         {
-            if (!loader.IsConnected("LoadStarted", Callable.From(() => ShowLoading(true))))
-            {
-                loader.Connect("LoadStarted", Callable.From(() => ShowLoading(true)));
-                loader.Connect("LoadFinished", Callable.From(() => ShowLoading(false)));
-            }
-            
             // We use the same name for hero and model by default 
             _ = loader.LoadHeroAsync(internalId, internalId);
         }
@@ -232,19 +381,97 @@ public partial class UIManager : CanvasLayer
     {
         int multiplier = _resOption.GetSelectedId();
         bool transparent = _transparentBgCheck.ButtonPressed;
-        GD.Print($"[UI] Captura pedida (Mult: {multiplier}x, Alfa: {transparent})");
+        bool useJpg = _jpgFormatCheck.ButtonPressed;
+        GD.Print($"[UI] Captura pedida (Mult: {multiplier}x, Alfa: {transparent}, JPG: {useJpg})");
         EmitSignal(SignalName.ScreenshotRequested, multiplier, transparent);
+
+        var camera = GetNodeOrNull<Camera3D>("/root/Main/CameraPivot/Camera3D");
+        var loader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
+        
+        Node3D gizmo = null;
+        if (loader != null && loader.GetChildCount() > 0)
+        {
+            var heroNode = loader.GetChildOrNull<Node3D>(0);
+            if (heroNode != null)
+            {
+                var skeleton = FindSkeleton(heroNode);
+                if (skeleton != null)
+                {
+                    gizmo = skeleton.GetNodeOrNull<Node3D>("SkeletonGizmoManager");
+                }
+            }
+        }
+
+        if (camera != null)
+        {
+            _ = _screenshotHelper.CaptureAsync(camera, multiplier, transparent, useJpg, _pathManager.CurrentSavePath, gizmo);
+        }
+    }
+
+    private Skeleton3D FindSkeleton(Node node)
+    {
+        if (node is Skeleton3D sk) return sk;
+        foreach (Node child in node.GetChildren())
+        {
+            var res = FindSkeleton(child);
+            if (res != null) return res;
+        }
+        return null;
+    }
+
+    private void OnScreenshotSaved(string path)
+    {
+        _toastLabel.Text = $"Screenshot saved:\n{path}";
+        
+        // Desconectar eventos previos si existen
+        var connections = _toastBtn.GetSignalConnectionList(Button.SignalName.Pressed);
+        foreach (var conn in connections)
+        {
+            _toastBtn.Disconnect(Button.SignalName.Pressed, conn["callable"].AsCallable());
+        }
+
+        _toastBtn.Pressed += () => 
+        {
+            string dir = System.IO.Path.GetDirectoryName(path);
+            OS.ShellOpen(dir);
+        };
+
+        // Layout hack para forzar el centro inferior con margen en Godot UI
+        _toastPanel.SetAnchorsPreset(Control.LayoutPreset.CenterBottom);
+        _toastPanel.Position = new Vector2(GetViewport().GetVisibleRect().Size.X / 2f - _toastPanel.Size.X / 2f, GetViewport().GetVisibleRect().Size.Y - _toastPanel.Size.Y - 20);
+
+        _toastPanel.Visible = true;
+        _toastTimer.Start();
     }
 
     private void OnGameDirSelected(string dir)
     {
-        _gamePathInput.Text = dir;
-        EmitSignal(SignalName.GamePathChanged, dir);
+        if (_pathManager.ValidateDeadlockPath(dir))
+        {
+            _gamePathInput.Text = dir;
+            _pathManager.SaveConfig(dir, _pathManager.CurrentSavePath);
+            UpdateVpkLoaderPath(dir);
+            EmitSignal(SignalName.GamePathChanged, dir);
+        }
+        else
+        {
+            var alert = new AcceptDialog();
+            alert.DialogText = "Invalid Deadlock path. Could not find game/citadel/pak01_dir.vpk";
+            GetNode("MainHUD/ModalsLayer").AddChild(alert);
+            alert.PopupCentered();
+            
+            // Si estábamos en el fallback y el usuario falló, volvemos a mostrar el fallback
+            if (string.IsNullOrEmpty(_pathManager.CurrentGamePath))
+            {
+                alert.Confirmed += () => _fallbackPathDialog.PopupCentered();
+            }
+        }
     }
 
     private void OnSaveDirSelected(string dir)
     {
         _savePathInput.Text = dir;
+        _pathManager.SaveConfig(_pathManager.CurrentGamePath, dir);
     }
 
     public void ShowLoading(bool show)

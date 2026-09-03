@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://5gylk5m307o0" path="res://tools/scenes/vpk_loader.tscn" id="1_ig7tw"]
 [ext_resource type="Script" uid="uid://cy854j3gxqe2a" path="res://ui/scripts/UIManager.cs" id="2_0xm2m"]
 [ext_resource type="Script" uid="uid://bd8nhtlxjpsn" path="res://tools/scripts/OrbitCamera.cs" id="2_h2yge"]
+[ext_resource type="Theme" uid="uid://cbawuwg8e0nxv" path="res://assets/themes/deadlock_main.tres" id="3_lquwl"]
 [ext_resource type="Texture2D" uid="uid://cc2kpwg3tn3c8" path="res://assets/backgrounds/classic_menu_bg.png" id="4_1bvp3"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pgrle"]
@@ -65,6 +66,7 @@ layout_mode = 2
 
 [node name="AppLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1495577756]
 layout_mode = 2
+theme = ExtResource("3_lquwl")
 text = "Deadlock Playground"
 
 [node name="_Spacer" type="Control" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1940920138]
@@ -138,6 +140,10 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
+[node name="ScreenshotFolderDialog" type="FileDialog" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1744525383]
+oversampling_override = 1.0
+title = "Screenshots Folder"
+
 [node name="SettingsModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1993772100]
 visible = false
 layout_mode = 1
@@ -162,10 +168,9 @@ text = "Close"
 [node name="TabContainer" type="TabContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer" unique_id=92496794]
 layout_mode = 2
 size_flags_vertical = 3
-current_tab = 2
+current_tab = 0
 
 [node name="General" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer" unique_id=1173003226]
-visible = false
 layout_mode = 2
 metadata/_tab_index = 0
 
@@ -266,6 +271,7 @@ button_pressed = true
 text = "ScreenSpace Reflections (SSR)"
 
 [node name="Camera" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer" unique_id=1432162441]
+visible = false
 layout_mode = 2
 metadata/_tab_index = 2
 
@@ -278,7 +284,6 @@ button_pressed = true
 text = "Capture with transparent background"
 
 [node name="AboutModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=278220094]
-visible = false
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -314,6 +319,7 @@ An open-source, community-driven tool designed to view, inspect, and pose 3D cha
 [b]Built With & Open Source Credits[/b]
 • [b]Engine:[/b] Powered by [url=https://godotengine.org/]Godot Engine 4[/url] (.NET / C#).
 • [b]Asset Pipeline:[/b] Powered by [url=https://github.com/ValveResourceFormat/ValveResourceFormat]ValveResourceFormat (Source 2 Viewer)[/url], maintained by the Steam Database community.
+• [b]Assets: [/b] Intro Background by [url=https://ayeaka.itch.io/ayeaka]ayeaka[/url]
 • [b]Project Source:[/b] Check out the code and contribute on [url=https://github.com/juliancz-a/deadlock-3d-playground]GitHub[/url].
 
 [b]Legal Disclaimer & Intellectual Property[/b]
@@ -335,6 +341,11 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_pgrle")
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Loading character model..."
+
+[node name="GameFolderDialog" type="FileDialog" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1697966616]
+oversampling_override = 1.0
+title = "Open a Directory"
+file_mode = 2
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1799043600]
 environment = SubResource("Environment_lquwl")

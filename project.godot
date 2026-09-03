@@ -11,8 +11,9 @@ config_version=5
 [application]
 
 config/name="Deadlock_Playground"
-run/main_scene="uid://lp56exjo4yw8"
+run/main_scene="uid://b0avkl80hhgtj"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+boot_splash/show_image=false
 config/icon="res://icon.svg"
 
 [display]

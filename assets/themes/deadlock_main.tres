@@ -1,0 +1,6 @@
+[gd_resource type="Theme" format=3 uid="uid://cbawuwg8e0nxv"]
+
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="1_y0u14"]
+
+[resource]
+Label/fonts/font = ExtResource("1_y0u14")
