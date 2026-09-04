@@ -51,6 +51,12 @@ public partial class UIManager : CanvasLayer
     [Export] private Button _btnAbout;
     [Export] private Button _btnSettings;
 
+    [ExportGroup("Top Bar - Modular Tabs")]
+    [Export] private MenuButton _btnModelParts;
+    [Export] private MenuButton _btnEnvironment;
+    [Export] private ModelPartsController _modelPartsController;
+    [Export] private EnvironmentLightingController _envLightingController;
+
     [ExportGroup("Modals & Dialogs")]
     [Export] private Control _modalsLayer;
     [Export] private PanelContainer _settingsModal;
@@ -146,6 +152,25 @@ public partial class UIManager : CanvasLayer
         _btnScreenshot ??= GetNodeOrNull<Button>("MainHUD/SideBar/VBoxContainer/SSButton");
         _btnAbout ??= GetNodeOrNull<Button>("MainHUD/SideBar/VBoxContainer/AboutButton");
         _btnSettings ??= GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/SettingsButton");
+
+        // Top Bar - Modular Tabs
+        _btnModelParts ??= GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/ModelPartsButton")
+                           ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/ModelPartsMenuButton");
+        _btnEnvironment ??= GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/EnvironmentButton")
+                            ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/EnvironmentMenuButton");
+
+        _modelPartsController ??= GetNodeOrNull<ModelPartsController>("MainHUD/ModelPartsPanel")
+                                  ?? GetNodeOrNull<ModelPartsController>("MainHUD/Panels/ModelPartsPanel")
+                                  ?? GetNodeOrNull<ModelPartsController>("MainHUD/TopBar/HBoxContainer/ModelPartsButton")
+                                  ?? GetNodeOrNull<ModelPartsController>("/root/Main/ModelPartsController")
+                                  ?? GetNodeOrNull<ModelPartsController>("ModelPartsController");
+
+        _envLightingController ??= GetNodeOrNull<EnvironmentLightingController>("MainHUD/EnvironmentPanel")
+                                   ?? GetNodeOrNull<EnvironmentLightingController>("MainHUD/Panels/EnvironmentPanel")
+                                   ?? GetNodeOrNull<EnvironmentLightingController>("MainHUD/TopBar/HBoxContainer/EnvironmentButton")
+                                   ?? GetNodeOrNull<EnvironmentLightingController>("MainHUD/TopBar/HBoxContainer/EnvironmentMenuButton")
+                                   ?? GetNodeOrNull<EnvironmentLightingController>("/root/Main/EnvironmentLightingController")
+                                   ?? GetNodeOrNull<EnvironmentLightingController>("EnvironmentLightingController");
 
         // 2. Modals & Dialogs
         _modalsLayer ??= GetNodeOrNull<Control>("MainHUD/ModalsLayer");
@@ -386,6 +411,17 @@ public partial class UIManager : CanvasLayer
                     _settingsModal.MoveToFront();
                 }
             };
+        }
+
+        // Modular Tabs in Top Bar
+        if (_btnModelParts != null && _btnModelParts is not MenuButton)
+        {
+            _btnModelParts.Pressed += () => _modelPartsController?.TogglePanel();
+        }
+
+        if (_btnEnvironment != null && _btnEnvironment is not MenuButton)
+        {
+            _btnEnvironment.Pressed += () => _envLightingController?.TogglePanel();
         }
 
         if (_btnAbout != null)

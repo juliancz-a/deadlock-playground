@@ -5,6 +5,8 @@
 [ext_resource type="Script" uid="uid://bd8nhtlxjpsn" path="res://tools/scripts/OrbitCamera.cs" id="2_h2yge"]
 [ext_resource type="Theme" uid="uid://cbawuwg8e0nxv" path="res://assets/themes/deadlock_main.tres" id="3_lquwl"]
 [ext_resource type="Texture2D" uid="uid://cc2kpwg3tn3c8" path="res://assets/backgrounds/classic_menu_bg.png" id="4_1bvp3"]
+[ext_resource type="Script" uid="uid://bt8cjbsx0uvdt" path="res://ui/scripts/ModelPartsController.cs" id="4_7mycd"]
+[ext_resource type="Script" uid="uid://daqhpryi0epx0" path="res://ui/scripts/EnvironmentLightingController.cs" id="4_272bh"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pgrle"]
 bg_color = Color(0, 0, 0, 0.23921569)
@@ -96,6 +98,295 @@ layout_mode = 2
 size_flags_horizontal = 0
 text = "Settings"
 
+[node name="ModelPartsButton" type="MenuButton" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=820342459 node_paths=PackedStringArray("_menuButton", "_panel", "_btnClose", "_btnShowAll", "_btnHideAccessories", "_checkboxContainer", "_vpkLoader")]
+layout_mode = 2
+text = "Character Parts"
+script = ExtResource("4_7mycd")
+_menuButton = NodePath(".")
+_panel = NodePath("Panel")
+_btnClose = NodePath("Panel/VBoxContainer/HBoxContainer/CloseButton")
+_btnShowAll = NodePath("Panel/VBoxContainer/HBoxContainer/ShowAllButton")
+_btnHideAccessories = NodePath("Panel/VBoxContainer/HBoxContainer/HideAccesoriesButton")
+_checkboxContainer = NodePath("Panel/VBoxContainer/SubmeshListContainer")
+_vpkLoader = NodePath("../../../../../VpkLoaderTest")
+
+[node name="Panel" type="PanelContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton" unique_id=648029670]
+visible = false
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel" unique_id=658637026]
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel/VBoxContainer" unique_id=1255270537]
+layout_mode = 2
+
+[node name="ShowAllButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel/VBoxContainer/HBoxContainer" unique_id=98072427]
+layout_mode = 2
+text = "Show All"
+
+[node name="HideAccesoriesButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel/VBoxContainer/HBoxContainer" unique_id=406501355]
+layout_mode = 2
+text = "Hide Accesories"
+
+[node name="CloseButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel/VBoxContainer/HBoxContainer" unique_id=1618371816]
+layout_mode = 2
+text = "Close"
+
+[node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel/VBoxContainer" unique_id=1193120241]
+layout_mode = 2
+
+[node name="SubmeshListContainer" type="VBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/ModelPartsButton/Panel/VBoxContainer" unique_id=1473402120]
+layout_mode = 2
+
+[node name="EnvironmentButton" type="MenuButton" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1590832131 node_paths=PackedStringArray("_menuButton", "_dropdownPanel", "_sunLight", "_worldEnv", "_camera", "_sunColorPicker", "_sunEnergySlider", "_sunEnergyLabel", "_sunHeadingSlider", "_sunHeadingLabel", "_sunPitchSlider", "_sunPitchLabel", "_ambientColorPicker", "_ambientEnergySlider", "_ambientEnergyLabel", "_dofFarToggle", "_dofFarDistanceSlider", "_dofFarDistanceLabel", "_dofNearToggle", "_dofNearDistanceSlider", "_dofNearDistanceLabel", "_tonemapOption", "_fogToggle", "_fogDensitySlider", "_fogDensityLabel", "_volumetricFogToggle", "_glowToggle", "_glowIntensitySlider", "_glowIntensityLabel", "_btnResetEnvironment")]
+layout_mode = 2
+text = "Lightning / Env"
+script = ExtResource("4_272bh")
+_menuButton = NodePath(".")
+_dropdownPanel = NodePath("PopupPanel")
+_sunLight = NodePath("../../../../../DirectionalLight3D")
+_worldEnv = NodePath("../../../../../WorldEnvironment")
+_camera = NodePath("../../../../../CameraPivot/Camera3D")
+_sunColorPicker = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunColorPicker")
+_sunEnergySlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunEnergyBox/HSlider")
+_sunEnergyLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunEnergyBox/SunEnergySliderLabel")
+_sunHeadingSlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunHeadingBox/HSlider")
+_sunHeadingLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunHeadingBox/SunHeadingLabel")
+_sunPitchSlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunPitchBox/HSlider")
+_sunPitchLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/SunPitchBox/SunPitchLabel")
+_ambientColorPicker = NodePath("PopupPanel/ScrollContainer/VBoxContainer/AmbientColorPicker")
+_ambientEnergySlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/AmbientEnergyBox/HSlider")
+_ambientEnergyLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/AmbientEnergyBox/AmbientEnergyLabel")
+_dofFarToggle = NodePath("PopupPanel/ScrollContainer/VBoxContainer/DoFFarToggle")
+_dofFarDistanceSlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/DofFarDistanceBox/HSlider")
+_dofFarDistanceLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/DofFarDistanceBox/DoFFarDistanceLabel")
+_dofNearToggle = NodePath("PopupPanel/ScrollContainer/VBoxContainer/DoFNearToggle")
+_dofNearDistanceSlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/DofNearDistanceBox/HSlider")
+_dofNearDistanceLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/DofNearDistanceBox/DoFNearDistanceLabel")
+_tonemapOption = NodePath("PopupPanel/ScrollContainer/VBoxContainer/TonemappingButton")
+_fogToggle = NodePath("PopupPanel/ScrollContainer/VBoxContainer/FogToggle")
+_fogDensitySlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/FogDensityBox/HSlider")
+_fogDensityLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/FogDensityBox/FogDensityLabel")
+_volumetricFogToggle = NodePath("PopupPanel/ScrollContainer/VBoxContainer/VolFogToggle")
+_glowToggle = NodePath("PopupPanel/ScrollContainer/VBoxContainer/GlowToggle")
+_glowIntensitySlider = NodePath("PopupPanel/ScrollContainer/VBoxContainer/GlowIntensityBox/HSlider")
+_glowIntensityLabel = NodePath("PopupPanel/ScrollContainer/VBoxContainer/GlowIntensityBox/GlowIntensityLabel")
+_btnResetEnvironment = NodePath("PopupPanel/ScrollContainer/VBoxContainer/ResetButton")
+
+[node name="PopupPanel" type="PopupPanel" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton" unique_id=1158685267]
+oversampling_override = 1.0
+size = Vector2i(306, 734)
+visible = true
+
+[node name="ScrollContainer" type="ScrollContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel" unique_id=940174785]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer" unique_id=550039931]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SunLightLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1316832135]
+layout_mode = 2
+text = "Directional Sun Light"
+
+[node name="SunColorPicker" type="ColorPickerButton" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=374904208]
+layout_mode = 2
+text = "Sun Color Picker"
+
+[node name="SunEnergyBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=312130094]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/SunEnergyBox" unique_id=759189963]
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 4.0
+step = 0.05
+value = 1.0
+
+[node name="SunEnergySliderLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/SunEnergyBox" unique_id=1633664888]
+layout_mode = 2
+text = "1.00"
+
+[node name="SunHeadingBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1686594011]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/SunHeadingBox" unique_id=133836869]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -180.0
+max_value = 180.0
+
+[node name="SunHeadingLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/SunHeadingBox" unique_id=113481226]
+layout_mode = 2
+text = "0°"
+
+[node name="SunPitchBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=573238280]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/SunPitchBox" unique_id=1244844457]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -90.0
+max_value = 90.0
+
+[node name="SunPitchLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/SunPitchBox" unique_id=1353658394]
+layout_mode = 2
+text = "0°"
+
+[node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=258802088]
+layout_mode = 2
+
+[node name="AmbientLightLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1949879455]
+layout_mode = 2
+text = "Ambient Light"
+
+[node name="AmbientColorPicker" type="ColorPickerButton" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=455250076]
+layout_mode = 2
+text = "Ambient Light Color Picker"
+
+[node name="AmbientEnergyBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1182774267]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/AmbientEnergyBox" unique_id=1016553466]
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 3.0
+step = 0.05
+value = 1.0
+
+[node name="AmbientEnergyLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/AmbientEnergyBox" unique_id=1095616238]
+layout_mode = 2
+text = "1.00"
+
+[node name="HSeparator2" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1162834370]
+layout_mode = 2
+
+[node name="DoFLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=287217066]
+layout_mode = 2
+text = "Depth Of Field "
+
+[node name="DoFFarToggle" type="CheckBox" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=572825392]
+layout_mode = 2
+text = "Far Blur"
+
+[node name="DofFarDistanceBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=732190001]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/DofFarDistanceBox" unique_id=578729421]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.5
+max_value = 50.0
+step = 0.5
+value = 10.0
+
+[node name="DoFFarDistanceLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/DofFarDistanceBox" unique_id=790263681]
+layout_mode = 2
+text = "10.0m"
+
+[node name="DoFNearToggle" type="CheckBox" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=846351393]
+layout_mode = 2
+text = "Near Blur"
+
+[node name="DofNearDistanceBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1199667973]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/DofNearDistanceBox" unique_id=1091380324]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.5
+max_value = 50.0
+step = 0.5
+value = 2.0
+
+[node name="DoFNearDistanceLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/DofNearDistanceBox" unique_id=1597867695]
+layout_mode = 2
+text = "2.0m"
+
+[node name="HSeparator3" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=20594024]
+layout_mode = 2
+
+[node name="TonemappingLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1986125155]
+layout_mode = 2
+text = "Tonemapping"
+
+[node name="TonemappingButton" type="OptionButton" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1200679812]
+layout_mode = 2
+
+[node name="HSeparator4" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=482294035]
+layout_mode = 2
+
+[node name="Atmos&FogLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=138643505]
+layout_mode = 2
+text = "Atmosphere & Fog"
+
+[node name="FogToggle" type="CheckBox" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1434840400]
+layout_mode = 2
+text = "Fog Enabled"
+
+[node name="VolFogToggle" type="CheckBox" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=271382971]
+layout_mode = 2
+text = "Volumetric Fog Enabled"
+
+[node name="FogDensityBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=98767348]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/FogDensityBox" unique_id=1154162546]
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 0.05
+step = 0.001
+value = 0.005
+
+[node name="FogDensityLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/FogDensityBox" unique_id=316530206]
+layout_mode = 2
+text = "0.005"
+
+[node name="HSeparator5" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1153096683]
+layout_mode = 2
+
+[node name="GlowBloomLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1011669430]
+layout_mode = 2
+text = "Glow & Bloom"
+
+[node name="GlowToggle" type="CheckBox" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1591559325]
+layout_mode = 2
+text = "Glow Enabled"
+
+[node name="GlowIntensityBox" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=307798627]
+layout_mode = 2
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/GlowIntensityBox" unique_id=234276129]
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 3.0
+step = 0.05
+value = 1.0
+
+[node name="GlowIntensityLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer/GlowIntensityBox" unique_id=993037998]
+layout_mode = 2
+text = "1.00"
+
+[node name="HSeparator6" type="HSeparator" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=1111942113]
+layout_mode = 2
+
+[node name="ResetButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer/EnvironmentButton/PopupPanel/ScrollContainer/VBoxContainer" unique_id=413799624]
+layout_mode = 2
+text = "Reset to Default"
+
 [node name="SideBar" type="PanelContainer" parent="UIRoot/MainHUD" unique_id=383523676]
 custom_minimum_size = Vector2(230, 0)
 custom_maximum_size = Vector2(250, -1)
@@ -150,6 +441,7 @@ layout_mode = 2
 text = "About"
 
 [node name="ModalsLayer" type="Control" parent="UIRoot/MainHUD" unique_id=1822188875]
+visible = false
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

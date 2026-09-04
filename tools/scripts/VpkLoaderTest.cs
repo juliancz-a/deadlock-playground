@@ -16,6 +16,10 @@ public partial class VpkLoaderTest : Node3D
     public delegate void LoadStartedEventHandler();
     [Signal]
     public delegate void LoadFinishedEventHandler();
+    [Signal]
+    public delegate void HeroLoadedEventHandler(Node3D heroNode);
+    [Signal]
+    public delegate void HeroUnloadedEventHandler();
 
 	[Export]
 	public PackedScene PoseEditorScene;
@@ -29,6 +33,7 @@ public partial class VpkLoaderTest : Node3D
 	public string HeroModelName = "viper";
 
     private Node3D _currentHeroNode;
+    public Node3D CurrentHeroNode => _currentHeroNode;
     private PoseEditorUI _currentPoseEditor;
 
 	public override void _Ready()
@@ -175,6 +180,8 @@ public partial class VpkLoaderTest : Node3D
 
     private void CleanupCurrentHero()
     {
+        EmitSignal(SignalName.HeroUnloaded);
+
         if (_currentPoseEditor != null)
         {
             _currentPoseEditor.QueueFree();
@@ -285,6 +292,7 @@ public partial class VpkLoaderTest : Node3D
 
 		GD.Print("Malla instanciada. Enlazando materiales por submalla...");
 		ApplyMaterialsRecursively(modelScene, package, meshMaterialMap);
+		EmitSignal(SignalName.HeroLoaded, modelScene);
 
 		// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
 		var skeleton = SearchSkeleton(modelScene);
