@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cdqd1ekpbnkrq" path="res://ui/scripts/PoseEditorUI.cs" id="1_gvau4"]
 
-[node name="PoseEditorUi" type="CanvasLayer" unique_id=166090087 node_paths=PackedStringArray("_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_selectedBoneLabel", "_resetButton", "_toggleXRayButton", "_toggleLinesButton", "_fastBoneGrid", "_poseOptionButton", "_allBonesOptionButton")]
+[node name="PoseEditorUi" type="CanvasLayer" unique_id=166090087 node_paths=PackedStringArray("_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_selectedBoneLabel", "_resetButton", "_toggleXRayButton", "_toggleLinesButton", "_fastBoneGrid", "_poseOptionButton", "_allBonesOptionButton", "_checkPrimary", "_checkClothing", "_checkFingers", "_checkFace", "_checkProps", "_checkHelpers")]
 script = ExtResource("1_gvau4")
 _sliderX = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer/SliderX")
 _sliderY = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/HBoxContainer2/SliderY")
@@ -17,6 +17,12 @@ _toggleLinesButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/Xray
 _fastBoneGrid = NodePath("MarginContainer/PanelContainer/VBoxContainer/FastBoneGrid")
 _poseOptionButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/PoseOptionButton")
 _allBonesOptionButton = NodePath("MarginContainer/PanelContainer/VBoxContainer/SliderVBoxContainer/BoneOptionButton")
+_checkPrimary = NodePath("MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer/CheckPrimary")
+_checkClothing = NodePath("MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer/CheckClothing")
+_checkFingers = NodePath("MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer/CheckFingers")
+_checkFace = NodePath("MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer/CheckFace")
+_checkProps = NodePath("MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer/CheckProps")
+_checkHelpers = NodePath("MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer/CheckHelpers")
 
 [node name="MarginContainer" type="MarginContainer" parent="." unique_id=1910512466]
 anchors_preset = 15
@@ -101,9 +107,53 @@ columns = 4
 [node name="PoseOptionButton" type="OptionButton" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=803487279]
 layout_mode = 2
 
+[node name="BoneListVBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=735849784]
+layout_mode = 2
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=528906124]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=1122270543]
+layout_mode = 2
+text = "Bone Layers Settings"
+horizontal_alignment = 1
+
+[node name="CheckPrimary" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=788267392]
+layout_mode = 2
+button_pressed = true
+text = "Body (Main Bones)"
+
+[node name="CheckClothing" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=762886594]
+layout_mode = 2
+text = "Clothing"
+
+[node name="CheckFace" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=1873269833]
+layout_mode = 2
+text = "Face"
+
+[node name="CheckFingers" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=371549052]
+layout_mode = 2
+text = "Fingers"
+
+[node name="CheckProps" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=672389204]
+layout_mode = 2
+text = "Weapons & Props"
+
+[node name="CheckHelpers" type="CheckBox" parent="MarginContainer/PanelContainer/VBoxContainer/BoneListVBoxContainer" unique_id=626352985]
+layout_mode = 2
+text = "Helpers & Internal"
+
 [node name="XrayVBoxContainer" type="VBoxContainer" parent="MarginContainer/PanelContainer/VBoxContainer" unique_id=826379148]
 layout_mode = 2
 size_flags_vertical = 8
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer" unique_id=188536388]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer" unique_id=1894035928]
+layout_mode = 2
+text = "X-Ray Settings"
+horizontal_alignment = 1
 
 [node name="ToggleXRayButton" type="Button" parent="MarginContainer/PanelContainer/VBoxContainer/XrayVBoxContainer" unique_id=1047397372]
 layout_mode = 2

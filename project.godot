@@ -39,6 +39,10 @@ folder_colors={
 "res://ui/": "green"
 }
 
+[layer_names]
+
+3d_physics/layer_32="Bone Picking"
+
 [physics]
 
 3d/physics_engine="Jolt Physics"
