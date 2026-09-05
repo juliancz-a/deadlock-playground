@@ -1,0 +1,76 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/CharacterTabUI.cs" id="1_char"]
+
+[node name="CharacterTab" type="VBoxContainer" node_paths=PackedStringArray("_heroOptionButton", "_submeshContainer", "_btnShowAll", "_btnHideAccessories")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_char")
+_heroOptionButton = NodePath("HeroSelectGroup/HeroOptionButton")
+_submeshContainer = NodePath("SubmeshPanel/ScrollContainer/SubmeshContainer")
+_btnShowAll = NodePath("SubmeshHeader/HBoxButtons/BtnShowAll")
+_btnHideAccessories = NodePath("SubmeshHeader/HBoxButtons/BtnHideAccessories")
+
+[node name="HeroSelectGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HeroLabel" type="Label" parent="HeroSelectGroup"]
+layout_mode = 2
+text = "Character Model"
+
+[node name="HeroOptionButton" type="OptionButton" parent="HeroSelectGroup"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+search_bar_enabled = true
+
+[node name="HSeparator1" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="SubmeshHeader" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="PartsLabel" type="Label" parent="SubmeshHeader"]
+layout_mode = 2
+text = "Submesh Visibility"
+
+[node name="HBoxButtons" type="HBoxContainer" parent="SubmeshHeader"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnShowAll" type="Button" parent="SubmeshHeader/HBoxButtons"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Show All"
+
+[node name="BtnHideAccessories" type="Button" parent="SubmeshHeader/HBoxButtons"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hide Accessories"
+
+[node name="SubmeshPanel" type="PanelContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ScrollContainer" type="ScrollContainer" parent="SubmeshPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SubmeshContainer" type="VBoxContainer" parent="SubmeshPanel/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 4

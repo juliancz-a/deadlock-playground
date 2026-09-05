@@ -1,0 +1,257 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/EffectsTabUI.cs" id="1_fx"]
+
+[node name="EffectsTab" type="VBoxContainer" node_paths=PackedStringArray("_dofFarToggle", "_dofFarDistanceSlider", "_dofFarDistanceLabel", "_dofNearToggle", "_dofNearDistanceSlider", "_dofNearDistanceLabel", "_tonemapOption", "_fogToggle", "_fogDensitySlider", "_fogDensityLabel", "_volumetricFogToggle", "_glowToggle", "_glowIntensitySlider", "_glowIntensityLabel", "_glowBloomSlider", "_glowBloomLabel", "_glowHdrSlider", "_glowHdrLabel", "_glowBlendOption", "_btnResetEffects")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_fx")
+_dofFarToggle = NodePath("DoFGroup/DoFFarToggle")
+_dofFarDistanceSlider = NodePath("DoFGroup/FarDistanceBox/FarDistanceSlider")
+_dofFarDistanceLabel = NodePath("DoFGroup/FarDistanceBox/FarDistanceLabel")
+_dofNearToggle = NodePath("DoFGroup/DoFNearToggle")
+_dofNearDistanceSlider = NodePath("DoFGroup/NearDistanceBox/NearDistanceSlider")
+_dofNearDistanceLabel = NodePath("DoFGroup/NearDistanceBox/NearDistanceLabel")
+_tonemapOption = NodePath("TonemapGroup/TonemapOption")
+_fogToggle = NodePath("FogGroup/FogToggle")
+_fogDensitySlider = NodePath("FogGroup/FogDensityBox/FogDensitySlider")
+_fogDensityLabel = NodePath("FogGroup/FogDensityBox/FogDensityLabel")
+_volumetricFogToggle = NodePath("FogGroup/VolumetricFogToggle")
+_glowToggle = NodePath("GlowGroup/GlowToggle")
+_glowIntensitySlider = NodePath("GlowGroup/GlowIntensityBox/GlowIntensitySlider")
+_glowIntensityLabel = NodePath("GlowGroup/GlowIntensityBox/GlowIntensityLabel")
+_glowBloomSlider = NodePath("GlowGroup/BloomBox/BloomSlider")
+_glowBloomLabel = NodePath("GlowGroup/BloomBox/BloomLabel")
+_glowHdrSlider = NodePath("GlowGroup/HdrBox/HdrSlider")
+_glowHdrLabel = NodePath("GlowGroup/HdrBox/HdrLabel")
+_glowBlendOption = NodePath("GlowGroup/BlendBox/BlendOption")
+_btnResetEffects = NodePath("BtnResetEffects")
+
+[node name="DoFGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DoFLabel" type="Label" parent="DoFGroup"]
+layout_mode = 2
+text = "Depth of Field (Portrait Blur)"
+
+[node name="DoFFarToggle" type="CheckBox" parent="DoFGroup"]
+layout_mode = 2
+text = "Far Blur Enabled"
+
+[node name="FarDistanceBox" type="HBoxContainer" parent="DoFGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="DoFGroup/FarDistanceBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Distance"
+
+[node name="FarDistanceSlider" type="HSlider" parent="DoFGroup/FarDistanceBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.5
+max_value = 50.0
+step = 0.5
+value = 10.0
+
+[node name="FarDistanceLabel" type="Label" parent="DoFGroup/FarDistanceBox"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "10.0m"
+
+[node name="DoFNearToggle" type="CheckBox" parent="DoFGroup"]
+layout_mode = 2
+text = "Near Blur Enabled"
+
+[node name="NearDistanceBox" type="HBoxContainer" parent="DoFGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="DoFGroup/NearDistanceBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Distance"
+
+[node name="NearDistanceSlider" type="HSlider" parent="DoFGroup/NearDistanceBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.5
+max_value = 50.0
+step = 0.5
+value = 2.0
+
+[node name="NearDistanceLabel" type="Label" parent="DoFGroup/NearDistanceBox"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "2.0m"
+
+[node name="HSeparator1" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="TonemapGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TonemapLabel" type="Label" parent="TonemapGroup"]
+layout_mode = 2
+text = "Tonemapping Operator"
+
+[node name="TonemapOption" type="OptionButton" parent="TonemapGroup"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HSeparator2" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="GlowGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GlowLabel" type="Label" parent="GlowGroup"]
+layout_mode = 2
+text = "Glow & Bloom"
+
+[node name="GlowToggle" type="CheckBox" parent="GlowGroup"]
+layout_mode = 2
+button_pressed = true
+text = "Glow Enabled"
+
+[node name="GlowIntensityBox" type="HBoxContainer" parent="GlowGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlowGroup/GlowIntensityBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Intensity"
+
+[node name="GlowIntensitySlider" type="HSlider" parent="GlowGroup/GlowIntensityBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 4.0
+step = 0.05
+value = 1.0
+
+[node name="GlowIntensityLabel" type="Label" parent="GlowGroup/GlowIntensityBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "1.00"
+
+[node name="BloomBox" type="HBoxContainer" parent="GlowGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlowGroup/BloomBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Bloom"
+
+[node name="BloomSlider" type="HSlider" parent="GlowGroup/BloomBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.05
+value = 0.35
+
+[node name="BloomLabel" type="Label" parent="GlowGroup/BloomBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.35"
+
+[node name="HdrBox" type="HBoxContainer" parent="GlowGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlowGroup/HdrBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Threshold"
+
+[node name="HdrSlider" type="HSlider" parent="GlowGroup/HdrBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 2.0
+step = 0.05
+value = 0.85
+
+[node name="HdrLabel" type="Label" parent="GlowGroup/HdrBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.85"
+
+[node name="BlendBox" type="HBoxContainer" parent="GlowGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlowGroup/BlendBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Blend Mode"
+
+[node name="BlendOption" type="OptionButton" parent="GlowGroup/BlendBox"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HSeparator3" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="FogGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FogLabel" type="Label" parent="FogGroup"]
+layout_mode = 2
+text = "Atmosphere & Fog"
+
+[node name="FogToggle" type="CheckBox" parent="FogGroup"]
+layout_mode = 2
+text = "Distance Fog Enabled"
+
+[node name="VolumetricFogToggle" type="CheckBox" parent="FogGroup"]
+layout_mode = 2
+text = "Volumetric Fog Enabled"
+
+[node name="FogDensityBox" type="HBoxContainer" parent="FogGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="FogGroup/FogDensityBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Density"
+
+[node name="FogDensitySlider" type="HSlider" parent="FogGroup/FogDensityBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 0.05
+step = 0.001
+value = 0.005
+
+[node name="FogDensityLabel" type="Label" parent="FogGroup/FogDensityBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.005"
+
+[node name="HSeparator4" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="BtnResetEffects" type="Button" parent="."]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Reset Effects to Defaults"

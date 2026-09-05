@@ -10,7 +10,13 @@ using System.Collections.Generic;
 public partial class SkeletonGizmoManager : Node3D
 {
     [Export] public Skeleton3D TargetSkeleton { get; set; }
-    [Export] public PoseEditorUI UIManager { get; set; }
+    
+    private IBoneUIController _uiManager;
+    public IBoneUIController UIManager
+    {
+        get => _uiManager;
+        set => SetUIManager(value);
+    }
     
     /// <summary>
     /// Physics layer for Area3D bone picking colliders (Default: Layer 32 = 2147483648).
@@ -32,6 +38,20 @@ public partial class SkeletonGizmoManager : Node3D
     private bool _isGizmoDragging = false;
     private bool _areDotsGloballyEnabled = true;
 
+    public void SetUIManager(IBoneUIController uiManager)
+    {
+        _uiManager = uiManager;
+        if (_boneLayerManager != null && _uiManager != null)
+        {
+            _uiManager.SetBoneLayerManager(_boneLayerManager);
+            _uiManager.OnXRayToggled += SetupDots;
+            _uiManager.OnLinesToggled += SetupLines;
+            _uiManager.OnBoneSelectedFromUI += SelectBone;
+            SetupDots(_uiManager.IsXRayEnabled);
+            SetupLines(_uiManager.IsLinesEnabled);
+        }
+    }
+
     public override void _Ready()
     {
         if (TargetSkeleton == null)
@@ -50,12 +70,12 @@ public partial class SkeletonGizmoManager : Node3D
         _boneLayerManager.BoneClicked += OnBonePicked;
 
         // 2. Connect UI events
-        if (UIManager != null)
+        if (_uiManager != null)
         {
-            UIManager.OnXRayToggled += SetupDots;
-            UIManager.OnLinesToggled += SetupLines;
-            UIManager.OnBoneSelectedFromUI += SelectBone;
-            UIManager.SetBoneLayerManager(_boneLayerManager);
+            _uiManager.OnXRayToggled += SetupDots;
+            _uiManager.OnLinesToggled += SetupLines;
+            _uiManager.OnBoneSelectedFromUI += SelectBone;
+            _uiManager.SetBoneLayerManager(_boneLayerManager);
         }
 
         // 3. Initialize Skeleton line wireframe & 3D Gizmo
@@ -228,7 +248,7 @@ public partial class SkeletonGizmoManager : Node3D
             TargetSkeleton.SetBonePosePosition(_selectedBoneIdx, localPose.Origin);
         }
 
-        PoseEditorUI.ConformProceduralClothPoses(TargetSkeleton);
+        ProceduralClothSolver.Conform(TargetSkeleton);
 
         if (UIManager != null)
         {

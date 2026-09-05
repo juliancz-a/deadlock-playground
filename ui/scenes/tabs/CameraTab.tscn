@@ -1,0 +1,145 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/CameraTabUI.cs" id="1_cam"]
+
+[node name="CameraTab" type="VBoxContainer" node_paths=PackedStringArray("_fovSlider", "_fovLabel", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_cam")
+_fovSlider = NodePath("FovGroup/HBoxContainer/FovSlider")
+_fovLabel = NodePath("FovGroup/HBoxContainer/FovLabel")
+_btnPresetPortrait = NodePath("PresetsGroup/VBoxButtons/BtnPortrait")
+_btnPresetFullBody = NodePath("PresetsGroup/VBoxButtons/BtnFullBody")
+_btnPresetCloseup = NodePath("PresetsGroup/VBoxButtons/BtnCloseup")
+_orbitSensSlider = NodePath("SensGroup/OrbitBox/OrbitSensSlider")
+_orbitSensLabel = NodePath("SensGroup/OrbitBox/OrbitSensLabel")
+_panSpeedSlider = NodePath("SensGroup/PanBox/PanSpeedSlider")
+_panSpeedLabel = NodePath("SensGroup/PanBox/PanSpeedLabel")
+_btnResetCamera = NodePath("BtnResetCamera")
+
+[node name="FovGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FovTitle" type="Label" parent="FovGroup"]
+layout_mode = 2
+text = "Field of View (FOV)"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="FovGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="FovSlider" type="HSlider" parent="FovGroup/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 15.0
+max_value = 90.0
+step = 1.0
+value = 75.0
+
+[node name="FovLabel" type="Label" parent="FovGroup/HBoxContainer"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "75°"
+
+[node name="HSeparator1" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="PresetsGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="PresetsLabel" type="Label" parent="PresetsGroup"]
+layout_mode = 2
+text = "Camera Framing Presets"
+
+[node name="VBoxButtons" type="VBoxContainer" parent="PresetsGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnPortrait" type="Button" parent="PresetsGroup/VBoxButtons"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Portrait Shot (Upper Body, FOV 35°)"
+
+[node name="BtnFullBody" type="Button" parent="PresetsGroup/VBoxButtons"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Full Body Shot (Full Hero, FOV 45°)"
+
+[node name="BtnCloseup" type="Button" parent="PresetsGroup/VBoxButtons"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Close-up Detail (Face, FOV 25°)"
+
+[node name="HSeparator2" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="SensGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SensLabel" type="Label" parent="SensGroup"]
+layout_mode = 2
+text = "Navigation Sensitivity"
+
+[node name="OrbitBox" type="HBoxContainer" parent="SensGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="SensGroup/OrbitBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Orbit"
+
+[node name="OrbitSensSlider" type="HSlider" parent="SensGroup/OrbitBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.001
+max_value = 0.02
+step = 0.001
+value = 0.005
+
+[node name="OrbitSensLabel" type="Label" parent="SensGroup/OrbitBox"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "0.005"
+
+[node name="PanBox" type="HBoxContainer" parent="SensGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="SensGroup/PanBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Pan Speed"
+
+[node name="PanSpeedSlider" type="HSlider" parent="SensGroup/PanBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 15.0
+step = 0.5
+value = 5.0
+
+[node name="PanSpeedLabel" type="Label" parent="SensGroup/PanBox"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "5.0"
+
+[node name="HSeparator3" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="BtnResetCamera" type="Button" parent="."]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Reset Camera View"

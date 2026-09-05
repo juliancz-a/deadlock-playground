@@ -1,0 +1,47 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/PoseTabUI.cs" id="1_pose"]
+
+[node name="PoseTab" type="VBoxContainer" node_paths=PackedStringArray("_animOptionButton", "_btnApplyPose", "_btnResetAllPoses")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_pose")
+_animOptionButton = NodePath("AnimGroup/AnimOptionButton")
+_btnApplyPose = NodePath("AnimGroup/HBoxButtons/BtnApplyPose")
+_btnResetAllPoses = NodePath("AnimGroup/HBoxButtons/BtnResetAllPoses")
+
+[node name="AnimGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AnimLabel" type="Label" parent="AnimGroup"]
+layout_mode = 2
+text = "Animation Sequences"
+
+[node name="AnimOptionButton" type="OptionButton" parent="AnimGroup"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+search_bar_enabled = true
+
+[node name="HBoxButtons" type="HBoxContainer" parent="AnimGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnApplyPose" type="Button" parent="AnimGroup/HBoxButtons"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Apply Pose"
+
+[node name="BtnResetAllPoses" type="Button" parent="AnimGroup/HBoxButtons"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reset Pose"

@@ -301,12 +301,11 @@ public partial class VpkLoaderTest : Node3D
 		{
 			GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
 			
-			// Instanciar y configurar la UI del Pose Editor
-			PoseEditorUI poseEditor = null;
+			// Instanciar y configurar la UI del Pose Editor legacy si está explícitamente asignada
 			if (PoseEditorScene != null)
 			{
 				var instancedNode = PoseEditorScene.Instantiate();
-				poseEditor = instancedNode as PoseEditorUI;
+				var poseEditor = instancedNode as PoseEditorUI;
 				
 				if (poseEditor != null)
 				{
@@ -318,6 +317,12 @@ public partial class VpkLoaderTest : Node3D
 					{
 						poseEditor.SetAnimationPlayer(animPlayer);
 					}
+
+					var gizmoManager = new SkeletonGizmoManager();
+					gizmoManager.Name = "SkeletonGizmoManager";
+					gizmoManager.TargetSkeleton = skeleton;
+					gizmoManager.UIManager = poseEditor;
+					skeleton.AddChild(gizmoManager);
 				}
 				else
 				{
@@ -325,17 +330,6 @@ public partial class VpkLoaderTest : Node3D
 					instancedNode.QueueFree();
 				}
 			}
-			else
-			{
-				GD.PrintErr("PoseEditorScene not set. Cannot instance UI.");
-			}
-			
-			// Setup SkeletonGizmoManager
-			var gizmoManager = new SkeletonGizmoManager();
-			gizmoManager.Name = "SkeletonGizmoManager";
-			gizmoManager.TargetSkeleton = skeleton;
-			gizmoManager.UIManager = poseEditor;
-			skeleton.AddChild(gizmoManager);
 		}
 		else
 		{

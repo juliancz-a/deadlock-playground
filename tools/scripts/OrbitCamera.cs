@@ -63,7 +63,7 @@ public partial class OrbitCamera : Node3D
         // Orbit (Middle Mouse Button)
         if (@event is InputEventMouseButton mouseBtnEvent)
         {
-            if (mouseBtnEvent.ButtonIndex == MouseButton.Middle)
+            if (mouseBtnEvent.ButtonIndex == MouseButton.Middle || mouseBtnEvent.ButtonIndex == MouseButton.Right)
             {
                 _isOrbiting = mouseBtnEvent.Pressed;
                 if (_isOrbiting)

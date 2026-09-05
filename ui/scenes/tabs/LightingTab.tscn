@@ -1,0 +1,166 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/LightingTabUI.cs" id="1_light"]
+
+[node name="LightingTab" type="VBoxContainer" node_paths=PackedStringArray("_sunColorPicker", "_sunEnergySlider", "_sunEnergyLabel", "_sunHeadingSlider", "_sunHeadingLabel", "_sunPitchSlider", "_sunPitchLabel", "_ambientColorPicker", "_ambientEnergySlider", "_ambientEnergyLabel", "_btnResetLighting")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_light")
+_sunColorPicker = NodePath("SunGroup/SunColorBox/SunColorPicker")
+_sunEnergySlider = NodePath("SunGroup/SunEnergyBox/SunEnergySlider")
+_sunEnergyLabel = NodePath("SunGroup/SunEnergyBox/SunEnergyLabel")
+_sunHeadingSlider = NodePath("SunGroup/SunHeadingBox/SunHeadingSlider")
+_sunHeadingLabel = NodePath("SunGroup/SunHeadingBox/SunHeadingLabel")
+_sunPitchSlider = NodePath("SunGroup/SunPitchBox/SunPitchSlider")
+_sunPitchLabel = NodePath("SunGroup/SunPitchBox/SunPitchLabel")
+_ambientColorPicker = NodePath("AmbientGroup/AmbientColorBox/AmbientColorPicker")
+_ambientEnergySlider = NodePath("AmbientGroup/AmbientEnergyBox/AmbientEnergySlider")
+_ambientEnergyLabel = NodePath("AmbientGroup/AmbientEnergyBox/AmbientEnergyLabel")
+_btnResetLighting = NodePath("BtnResetLighting")
+
+[node name="SunGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SunLabel" type="Label" parent="SunGroup"]
+layout_mode = 2
+text = "Directional Sun Light"
+
+[node name="SunColorBox" type="HBoxContainer" parent="SunGroup"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="SunGroup/SunColorBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Sun Color"
+
+[node name="SunColorPicker" type="ColorPickerButton" parent="SunGroup/SunColorBox"]
+custom_minimum_size = Vector2(80, 28)
+layout_mode = 2
+color = Color(1, 1, 1, 1)
+
+[node name="SunEnergyBox" type="HBoxContainer" parent="SunGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="SunGroup/SunEnergyBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Energy"
+
+[node name="SunEnergySlider" type="HSlider" parent="SunGroup/SunEnergyBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 4.0
+step = 0.05
+value = 1.0
+
+[node name="SunEnergyLabel" type="Label" parent="SunGroup/SunEnergyBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "1.00"
+
+[node name="SunHeadingBox" type="HBoxContainer" parent="SunGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="SunGroup/SunHeadingBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Heading"
+
+[node name="SunHeadingSlider" type="HSlider" parent="SunGroup/SunHeadingBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 1.0
+
+[node name="SunHeadingLabel" type="Label" parent="SunGroup/SunHeadingBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0°"
+
+[node name="SunPitchBox" type="HBoxContainer" parent="SunGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="SunGroup/SunPitchBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Pitch"
+
+[node name="SunPitchSlider" type="HSlider" parent="SunGroup/SunPitchBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -90.0
+max_value = 90.0
+step = 1.0
+
+[node name="SunPitchLabel" type="Label" parent="SunGroup/SunPitchBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0°"
+
+[node name="HSeparator1" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="AmbientGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AmbientLabel" type="Label" parent="AmbientGroup"]
+layout_mode = 2
+text = "Ambient Environment Light"
+
+[node name="AmbientColorBox" type="HBoxContainer" parent="AmbientGroup"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="AmbientGroup/AmbientColorBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Ambient Color"
+
+[node name="AmbientColorPicker" type="ColorPickerButton" parent="AmbientGroup/AmbientColorBox"]
+custom_minimum_size = Vector2(80, 28)
+layout_mode = 2
+color = Color(1, 1, 1, 1)
+
+[node name="AmbientEnergyBox" type="HBoxContainer" parent="AmbientGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="AmbientGroup/AmbientEnergyBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Energy"
+
+[node name="AmbientEnergySlider" type="HSlider" parent="AmbientGroup/AmbientEnergyBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 3.0
+step = 0.05
+value = 1.0
+
+[node name="AmbientEnergyLabel" type="Label" parent="AmbientGroup/AmbientEnergyBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "1.00"
+
+[node name="HSeparator2" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="BtnResetLighting" type="Button" parent="."]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Reset Lighting to Defaults"
