@@ -41,8 +41,13 @@ public partial class LightingTabUI : VBoxContainer
 
     private void LinkReferences()
     {
-        _sunLight ??= GetNodeOrNull<DirectionalLight3D>("/root/Main/DirectionalLight3D");
-        _worldEnv ??= GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment");
+        _sunLight ??= GetNodeOrNull<DirectionalLight3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/DirectionalLight3D")
+                   ?? GetNodeOrNull<DirectionalLight3D>("/root/Main/DirectionalLight3D")
+                   ?? GetTree().Root.FindChild("DirectionalLight3D", true, false) as DirectionalLight3D;
+
+        _worldEnv ??= GetNodeOrNull<WorldEnvironment>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/WorldEnvironment")
+                   ?? GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment")
+                   ?? GetTree().Root.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
     }
 
     private void CaptureDefaults()

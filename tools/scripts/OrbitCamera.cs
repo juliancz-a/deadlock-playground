@@ -21,18 +21,76 @@ public partial class OrbitCamera : Node3D
     [Export] public Vector3 MaxPanLimit = new Vector3(10f, 10f, 10f);
     [Export] public float PanLerpSpeed = 10.0f;
 
+    [ExportGroup("Orthogonal Settings")]
+    [Export] public float OrthoSizeMin = 0.5f;
+    [Export] public float OrthoSizeMax = 20.0f;
+    [Export] public float OrthoSizeSensitivity = 0.3f;
+    [Export] public bool LockOrbitInOrtho { get; set; } = true;
+
     private Camera3D _camera;
     private bool _isOrbiting = false;
 
     // Current state variables
     private float _yaw = 0f;
     private float _pitch = 0f;
+    private float _roll = 0f;
     
     private float _targetZoom = 5f;
     private float _currentZoom = 5f;
+    private float _targetOrthoSize = 3.0f;
 
     private Vector3 _targetPan;
     private Vector3 _currentPan;
+
+    public event Action<float, float, float> OnCameraRotated;
+
+    public float PitchDegrees => Mathf.RadToDeg(_pitch);
+    public float YawDegrees => Mathf.RadToDeg(_yaw);
+    public float RollDegrees => Mathf.RadToDeg(_roll);
+
+    public void SetPitchDegrees(float deg)
+    {
+        _pitch = Mathf.Clamp(Mathf.DegToRad(deg), PitchMin, PitchMax);
+        OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+    }
+
+    public void SetYawDegrees(float deg)
+    {
+        _yaw = Mathf.DegToRad(deg);
+        OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+    }
+
+    public void SetRollDegrees(float deg)
+    {
+        _roll = Mathf.DegToRad(deg);
+        OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+    }
+
+    public void ResetAngles()
+    {
+        _pitch = 0f;
+        _yaw = 0f;
+        _roll = 0f;
+        OnCameraRotated?.Invoke(0f, 0f, 0f);
+    }
+
+    public float GetTargetZoom() => _targetZoom;
+
+    public void SetTargetZoom(float zoom)
+    {
+        _targetZoom = Mathf.Clamp(zoom, ZoomMin, ZoomMax);
+    }
+
+    public void SetOrthoSize(float size)
+    {
+        _targetOrthoSize = Mathf.Clamp(size, OrthoSizeMin, OrthoSizeMax);
+        if (_camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal)
+        {
+            _camera.Size = _targetOrthoSize;
+        }
+    }
+
+    public float GetOrthoSize() => _camera != null ? _camera.Size : _targetOrthoSize;
 
     public override void _Ready()
     {
@@ -49,6 +107,7 @@ public partial class OrbitCamera : Node3D
         Vector3 rot = Rotation;
         _pitch = rot.X;
         _yaw = rot.Y;
+        _roll = rot.Z;
 
         _targetPan = Position;
         _currentPan = Position;
@@ -56,11 +115,22 @@ public partial class OrbitCamera : Node3D
         _currentZoom = _camera.Position.Length();
         if (_currentZoom == 0) _currentZoom = 5f;
         _targetZoom = _currentZoom;
+        _targetOrthoSize = _camera.Size > 0 ? _camera.Size : 3.0f;
+    }
+
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        HandleCameraInput(@event);
     }
 
     public override void _Input(InputEvent @event)
     {
-        // Orbit (Middle Mouse Button)
+        HandleCameraInput(@event);
+    }
+
+    private void HandleCameraInput(InputEvent @event)
+    {
+        // Orbit (Middle Mouse Button / Right Mouse Button)
         if (@event is InputEventMouseButton mouseBtnEvent)
         {
             if (mouseBtnEvent.ButtonIndex == MouseButton.Middle || mouseBtnEvent.ButtonIndex == MouseButton.Right)
@@ -74,26 +144,79 @@ public partial class OrbitCamera : Node3D
                 {
                     Input.MouseMode = Input.MouseModeEnum.Visible;
                 }
+                GetViewport()?.SetInputAsHandled();
+                return;
             }
 
             // Zoom (Scroll Wheel)
             if (mouseBtnEvent.Pressed)
             {
+                bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
                 if (mouseBtnEvent.ButtonIndex == MouseButton.WheelUp)
                 {
-                    _targetZoom = Mathf.Clamp(_targetZoom - ZoomSensitivity, ZoomMin, ZoomMax);
+                    if (isOrtho)
+                    {
+                        _targetOrthoSize = Mathf.Clamp(_targetOrthoSize - OrthoSizeSensitivity, OrthoSizeMin, OrthoSizeMax);
+                    }
+                    else
+                    {
+                        _targetZoom = Mathf.Clamp(_targetZoom - ZoomSensitivity, ZoomMin, ZoomMax);
+                    }
+                    GetViewport()?.SetInputAsHandled();
+                    return;
                 }
                 else if (mouseBtnEvent.ButtonIndex == MouseButton.WheelDown)
                 {
-                    _targetZoom = Mathf.Clamp(_targetZoom + ZoomSensitivity, ZoomMin, ZoomMax);
+                    if (isOrtho)
+                    {
+                        _targetOrthoSize = Mathf.Clamp(_targetOrthoSize + OrthoSizeSensitivity, OrthoSizeMin, OrthoSizeMax);
+                    }
+                    else
+                    {
+                        _targetZoom = Mathf.Clamp(_targetZoom + ZoomSensitivity, ZoomMin, ZoomMax);
+                    }
+                    GetViewport()?.SetInputAsHandled();
+                    return;
                 }
             }
         }
         else if (@event is InputEventMouseMotion mouseMotionEvent && _isOrbiting)
         {
+            bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
+            if (isOrtho && LockOrbitInOrtho)
+            {
+                // Lock 3D orbit rotation in Orthographic mode
+                return;
+            }
+
             _yaw -= mouseMotionEvent.Relative.X * OrbitSensitivity;
             _pitch -= mouseMotionEvent.Relative.Y * OrbitSensitivity;
             _pitch = Mathf.Clamp(_pitch, PitchMin, PitchMax);
+            OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+        else if (@event is InputEventKey keyEvent && keyEvent.Pressed && keyEvent.Keycode == Key.Escape)
+        {
+            if (_isOrbiting)
+            {
+                _isOrbiting = false;
+                Input.MouseMode = Input.MouseModeEnum.Visible;
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+        }
+    }
+
+    public override void _Notification(int what)
+    {
+        if (what == NotificationApplicationFocusOut)
+        {
+            if (_isOrbiting)
+            {
+                _isOrbiting = false;
+                Input.MouseMode = Input.MouseModeEnum.Visible;
+            }
         }
     }
 
@@ -102,13 +225,17 @@ public partial class OrbitCamera : Node3D
         float fDelta = (float)delta;
 
         // Apply rotation
-        Rotation = new Vector3(_pitch, _yaw, 0);
+        Rotation = new Vector3(_pitch, _yaw, _roll);
 
         // Apply Zoom smoothly
         _currentZoom = Mathf.Lerp(_currentZoom, _targetZoom, ZoomLerpSpeed * fDelta);
         if (_camera != null)
         {
             _camera.Position = new Vector3(0, 0, _currentZoom);
+            if (_camera.Projection == Camera3D.ProjectionType.Orthogonal)
+            {
+                _camera.Size = Mathf.Lerp(_camera.Size, _targetOrthoSize, ZoomLerpSpeed * fDelta);
+            }
         }
 
         // Handle Panning (WASD or Arrows)

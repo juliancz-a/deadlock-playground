@@ -9,24 +9,34 @@ public partial class ScreenshotHelper : Node
     public delegate void ScreenshotSavedEventHandler(string absolutePath);
 
     private SubViewport _captureViewport;
+    private SubViewportContainer _captureWorldContainer;
+    private SubViewport _capture3DViewport;
     private Camera3D _captureCamera;
+
     private CanvasLayer _bgCanvas;
     private ColorRect _bgColorRect;
     private TextureRect _bgRect;
 
+    private CanvasLayer _shaderCanvas;
+    private BackBufferCopy _captureToonBuffer;
+    private ColorRect _captureToonRect;
+    private BackBufferCopy _captureCrtBuffer;
+    private ColorRect _captureCrtRect;
+    private BackBufferCopy _captureGlitchBuffer;
+    private ColorRect _captureGlitchRect;
+
     public override void _Ready()
     {
-        // Setup off-screen viewport
-        _captureViewport = new SubViewport();
-        _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-        _captureViewport.RenderTargetClearMode = SubViewport.ClearMode.Always;
-        _captureViewport.TransparentBg = true;
+        // 1. Root composite capture viewport
+        _captureViewport = new SubViewport
+        {
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled,
+            RenderTargetClearMode = SubViewport.ClearMode.Always,
+            TransparentBg = true
+        };
 
-        _captureCamera = new Camera3D();
-        _captureViewport.AddChild(_captureCamera);
-
-        _bgCanvas = new CanvasLayer();
-        _bgCanvas.Layer = -1;
+        // 2. Background CanvasLayer (layer -2)
+        _bgCanvas = new CanvasLayer { Layer = -2 };
 
         _bgColorRect = new ColorRect();
         _bgColorRect.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -39,6 +49,49 @@ public partial class ScreenshotHelper : Node
         _bgCanvas.AddChild(_bgRect);
 
         _captureViewport.AddChild(_bgCanvas);
+
+        // 3. 3D Character SubViewport in SubViewportContainer
+        _captureWorldContainer = new SubViewportContainer
+        {
+            Stretch = true,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        _captureWorldContainer.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+
+        _capture3DViewport = new SubViewport
+        {
+            TransparentBg = true,
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled,
+            RenderTargetClearMode = SubViewport.ClearMode.Always
+        };
+
+        _captureCamera = new Camera3D();
+        _capture3DViewport.AddChild(_captureCamera);
+        _captureWorldContainer.AddChild(_capture3DViewport);
+        _captureViewport.AddChild(_captureWorldContainer);
+
+        // 4. Shader Overlay CanvasLayer (layer 1)
+        _shaderCanvas = new CanvasLayer { Layer = 1 };
+
+        _captureToonBuffer = new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport };
+        _captureToonRect = new ColorRect { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _captureToonRect.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _shaderCanvas.AddChild(_captureToonBuffer);
+        _shaderCanvas.AddChild(_captureToonRect);
+
+        _captureCrtBuffer = new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport };
+        _captureCrtRect = new ColorRect { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _captureCrtRect.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _shaderCanvas.AddChild(_captureCrtBuffer);
+        _shaderCanvas.AddChild(_captureCrtRect);
+
+        _captureGlitchBuffer = new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport };
+        _captureGlitchRect = new ColorRect { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _captureGlitchRect.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _shaderCanvas.AddChild(_captureGlitchBuffer);
+        _shaderCanvas.AddChild(_captureGlitchRect);
+
+        _captureViewport.AddChild(_shaderCanvas);
 
         AddChild(_captureViewport);
     }
@@ -84,15 +137,23 @@ public partial class ScreenshotHelper : Node
         string filePath = Path.Combine(saveDirectory, $"DeadlockCapture_{timestamp}{extension}").Replace("\\", "/");
 
         // 2. Setup Viewport matching main camera with custom aspect ratio
-        _captureViewport.World3D = mainCamera.GetWorld3D();
         _captureViewport.Size = targetResolution;
         _captureViewport.TransparentBg = transparent;
+
+        _captureWorldContainer.Size = targetResolution;
+        _capture3DViewport.Size = targetResolution;
+        _capture3DViewport.World3D = mainCamera.GetWorld3D();
 
         _captureCamera.GlobalTransform = mainCamera.GlobalTransform;
         _captureCamera.Near = mainCamera.Near;
         _captureCamera.Far = mainCamera.Far;
         _captureCamera.Environment = mainCamera.Environment;
         _captureCamera.Attributes = mainCamera.Attributes;
+        _captureCamera.Projection = mainCamera.Projection;
+        _captureCamera.Size = mainCamera.Size;
+        _captureCamera.CullMask = mainCamera.CullMask; // Exclude Gizmo layer (layer 2)
+
+        _captureCamera.Current = true;
 
         // In Deadlock Playground, framing overlay uses Height (fixed vertical FOV)
         _captureCamera.KeepAspect = Camera3D.KeepAspectEnum.Height;
@@ -129,15 +190,23 @@ public partial class ScreenshotHelper : Node
         else
         {
             _bgCanvas.Visible = true;
+            _bgColorRect.Size = targetResolution;
+            _bgRect.Size = targetResolution;
 
-            var mainColor = GetNodeOrNull<ColorRect>("/root/Main/BGCanvas/ColorRect");
+            var mainColor = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/ColorRect")
+                         ?? GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/BGCanvas/ColorRect")
+                         ?? GetNodeOrNull<ColorRect>("/root/Main/BGCanvas/ColorRect")
+                         ?? GetTree().Root.FindChild("ColorRect", true, false) as ColorRect;
             if (mainColor != null && _bgColorRect != null)
             {
                 _bgColorRect.Color = mainColor.Color;
                 _bgColorRect.Visible = mainColor.Visible;
             }
 
-            var mainBg = GetNodeOrNull<TextureRect>("/root/Main/BGCanvas/BackgroundRect");
+            var mainBg = GetNodeOrNull<TextureRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/BackgroundRect")
+                      ?? GetNodeOrNull<TextureRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/BGCanvas/BackgroundRect")
+                      ?? GetNodeOrNull<TextureRect>("/root/Main/BGCanvas/BackgroundRect")
+                      ?? GetTree().Root.FindChild("BackgroundRect", true, false) as TextureRect;
             if (mainBg != null && _bgRect != null)
             {
                 _bgRect.Texture = mainBg.Texture;
@@ -146,17 +215,59 @@ public partial class ScreenshotHelper : Node
             }
         }
 
-        // Wait for frame update
+        // 4. Replicate Active 2D Post-Processing Shaders (CRT & Glitch)
+        var mainCrt = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack/CRTRect")
+                   ?? GetTree().Root.FindChild("CRTRect", true, false) as ColorRect;
+        var mainGlitch = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack/GlitchRect")
+                      ?? GetTree().Root.FindChild("GlitchRect", true, false) as ColorRect;
+
+        bool hasShaders = false;
+
+        _captureToonRect.Visible = false;
+        _captureToonBuffer.Visible = false;
+
+        if (mainCrt != null && mainCrt.Visible && mainCrt.Material != null)
+        {
+            _captureCrtRect.Size = targetResolution;
+            _captureCrtRect.Visible = true;
+            _captureCrtBuffer.Visible = true;
+            _captureCrtRect.Material = (Material)mainCrt.Material.Duplicate();
+            hasShaders = true;
+        }
+        else
+        {
+            _captureCrtRect.Visible = false;
+            _captureCrtBuffer.Visible = false;
+        }
+
+        if (mainGlitch != null && mainGlitch.Visible && mainGlitch.Material != null)
+        {
+            _captureGlitchRect.Size = targetResolution;
+            _captureGlitchRect.Visible = true;
+            _captureGlitchBuffer.Visible = true;
+            _captureGlitchRect.Material = (Material)mainGlitch.Material.Duplicate();
+            hasShaders = true;
+        }
+        else
+        {
+            _captureGlitchRect.Visible = false;
+            _captureGlitchBuffer.Visible = false;
+        }
+
+        _shaderCanvas.Visible = hasShaders;
+
+        // 5. Render Pass
+        _capture3DViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+        _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+
+        // Wait two frames to ensure render completes in both viewports
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
-        // 4. Request Render
-        _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
+        _capture3DViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+        _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
 
-        // Wait two frames to ensure render completes
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-
-        // 5. Save Image
+        // 6. Save Image
         Image img = _captureViewport.GetTexture().GetImage();
 
         await Task.Run(() =>
@@ -167,7 +278,7 @@ public partial class ScreenshotHelper : Node
                 img.SaveJpg(filePath, 0.95f);
         });
 
-        // 6. Restore Gizmos
+        // 7. Restore Gizmos
         if (gizmoManager != null)
         {
             gizmoManager.Visible = wasGizmoVisible;

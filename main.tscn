@@ -3,16 +3,20 @@
 [ext_resource type="PackedScene" uid="uid://5gylk5m307o0" path="res://tools/scenes/vpk_loader.tscn" id="1_vpk"]
 [ext_resource type="Script" uid="uid://bd8nhtlxjpsn" path="res://tools/scripts/OrbitCamera.cs" id="2_orbit"]
 [ext_resource type="Theme" uid="uid://cbawuwg8e0nxv" path="res://assets/themes/deadlock_main.tres" id="3_theme"]
-[ext_resource type="Texture2D" uid="uid://cc2kpwg3tn3c8" path="res://assets/backgrounds/classic_menu_bg.png" id="4_bg"]
 [ext_resource type="Script" uid="uid://ccjoj2llg5baq" path="res://ui/scripts/StudioUIManager.cs" id="5_studio_ui"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/CharacterTab.tscn" id="6_char_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/tabs/BonesTab.tscn" id="7_bones_tab"]
+[ext_resource type="PackedScene" uid="uid://bj84jmt2jj101" path="res://ui/scenes/tabs/BonesTab.tscn" id="7_bones_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/CameraTab.tscn" id="8_cam_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/PoseTab.tscn" id="9_pose_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/tabs/SceneTab.tscn" id="10_scene_tab"]
+[ext_resource type="PackedScene" uid="uid://xq6td0qn5sfr" path="res://ui/scenes/tabs/SceneTab.tscn" id="10_scene_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/EffectsTab.tscn" id="11_fx_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/LightingTab.tscn" id="12_light_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/ExportPanel.tscn" id="13_export"]
+[ext_resource type="PackedScene" path="res://ui/scenes/tabs/ShadingTab.tscn" id="13_shading_tab"]
+[ext_resource type="PackedScene" path="res://ui/scenes/ExportPanel.tscn" id="14_export"]
+[ext_resource type="Shader" uid="uid://bh86e204ret45" path="res://assets/shaders/crt_shader.gdshader" id="16_crt_shader"]
+[ext_resource type="Shader" uid="uid://82snm4ouah2f" path="res://assets/shaders/glitch_shader.gdshader" id="17_glitch_shader"]
+[ext_resource type="Script" uid="uid://c7d8ndr06lxge" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
+[ext_resource type="Texture2D" uid="uid://djdwwfcdcwicj" path="res://assets/backgrounds/background_00.jpg" id="19_bg0"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stage"]
 albedo_color = Color(0.15, 0.16, 0.2, 1)
@@ -35,84 +39,69 @@ background_color = Color(1, 1, 1, 0)
 sky = SubResource("Sky_0xm2m")
 ambient_light_source = 2
 ambient_light_color = Color(0.28, 0.29, 0.32, 1)
-ambient_light_energy = 1.0
 glow_enabled = true
 glow_bloom = 0.35
 glow_hdr_threshold = 0.85
-glow_blend_mode = 1
+
+[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_dof"]
+dof_blur_far_distance = 5.0
+dof_blur_far_transition = 1.5
+dof_blur_near_distance = 3.5
+dof_blur_near_transition = 1.5
+dof_blur_amount = 0.35
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_crt"]
+shader = ExtResource("16_crt_shader")
+shader_parameter/scanlines_1 = 500.0
+shader_parameter/scanlines_2 = 25.0
+shader_parameter/scan_reduction = 0.1
+shader_parameter/blur = 0.35
+shader_parameter/diffusion = 0.1
+shader_parameter/vinnette_alpla = 0.8
+shader_parameter/vinnette_inner_radius = 3.5
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_glitch"]
+shader = ExtResource("17_glitch_shader")
+shader_parameter/pixel_size = 3.0
+shader_parameter/vhs_intensity = 3.0
+shader_parameter/opacity = 0.5
+shader_parameter/double_vision_split = 0.008
+
+[sub_resource type="CanvasItemMaterial" id="CanvasItemMaterial_premult"]
+blend_mode = 4
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pgrle"]
 bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="BGCanvas" type="CanvasLayer" parent="." unique_id=801495]
-layer = -1
-
-[node name="ColorRect" type="ColorRect" parent="BGCanvas" unique_id=999207432]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-color = Color(0.08, 0.09, 0.11, 1)
-
-[node name="BackgroundRect" type="TextureRect" parent="BGCanvas" unique_id=1098520063]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("4_bg")
-expand_mode = 1
-stretch_mode = 6
-
-[node name="StagePlatform" type="Node3D" parent="." unique_id=1773132385]
-visible = false
-
-[node name="FloorMesh" type="MeshInstance3D" parent="StagePlatform" unique_id=661159431]
-mesh = SubResource("PlaneMesh_stage")
-
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=494643305]
-environment = SubResource("Environment_lquwl")
-
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=219564876]
-transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
-shadow_enabled = true
-
-[node name="VpkLoaderTest" parent="." unique_id=1630809298 instance=ExtResource("1_vpk")]
-
-[node name="CameraPivot" type="Node3D" parent="." unique_id=830692313]
-script = ExtResource("2_orbit")
-
-[node name="Camera3D" type="Camera3D" parent="CameraPivot" unique_id=1625453219]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 1)
-
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_tabContentContainer", "_tabCharacter", "_tabBones", "_tabCamera", "_tabPose", "_tabScene", "_tabEffects", "_tabLighting", "_exportPanel", "_navBadge", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_tabContentContainer", "_tabCharacter", "_tabBones", "_tabCamera", "_tabPose", "_tabScene", "_tabEffects", "_tabLighting", "_tabShading", "_exportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
 layer = 2
 script = ExtResource("5_studio_ui")
-_btnSettings = NodePath("MainHUD/TopBar/HBoxContainer/SettingsButton")
-_btnAbout = NodePath("MainHUD/TopBar/HBoxContainer/AboutButton")
-_btnQuit = NodePath("MainHUD/TopBar/HBoxContainer/QuitButton")
-_btnTabCharacter = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
-_btnTabBones = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/BonesButton")
-_btnTabCamera = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/CameraButton")
-_btnTabPose = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/PoseButton")
-_btnTabScene = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/SceneButton")
-_btnTabEffects = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/EffectsButton")
-_btnTabLighting = NodePath("MainHUD/LeftPanel/VBoxContainer/TabGrid/LightButton")
-_tabContentContainer = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
-_tabCharacter = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CharacterTab")
-_tabBones = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/BonesTab")
-_tabCamera = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CameraTab")
-_tabPose = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/PoseTab")
-_tabScene = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/SceneTab")
-_tabEffects = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/EffectsTab")
-_tabLighting = NodePath("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/LightingTab")
-_exportPanel = NodePath("MainHUD/ExportPanel")
-_navBadge = NodePath("MainHUD/NavBadge")
+_btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
+_btnAbout = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
+_btnQuit = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
+_btnTabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
+_btnTabBones = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/BonesButton")
+_btnTabCamera = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CameraButton")
+_btnTabPose = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PoseButton")
+_btnTabScene = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/SceneButton")
+_btnTabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/EffectsButton")
+_btnTabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/LightButton")
+_btnTabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
+_tabContentContainer = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
+_tabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CharacterTab")
+_tabBones = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/BonesTab")
+_tabCamera = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CameraTab")
+_tabPose = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/PoseTab")
+_tabScene = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/SceneTab")
+_tabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/EffectsTab")
+_tabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/LightingTab")
+_tabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/ShadingTab")
+_exportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
+_navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge")
+_btnQuickXRay = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickXRay")
+_btnQuickFullscreen = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickFullscreen")
 _modalsLayer = NodePath("MainHUD/ModalsLayer")
 _settingsModal = NodePath("MainHUD/ModalsLayer/SettingsModal")
 _aboutModal = NodePath("MainHUD/ModalsLayer/AboutModal")
@@ -148,91 +137,67 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="FramingOverlay" type="Control" parent="UIRoot/MainHUD" unique_id=1777151932]
-anchors_preset = 0
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD" unique_id=1472979004]
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 2
+theme_override_constants/separation = 0
 
-[node name="BarTop" type="ColorRect" parent="UIRoot/MainHUD/FramingOverlay" unique_id=1528314790]
-visible = false
-layout_mode = 0
-mouse_filter = 2
-color = Color(0, 0, 0, 0.85)
-
-[node name="BarBottom" type="ColorRect" parent="UIRoot/MainHUD/FramingOverlay" unique_id=1801698015]
-visible = false
-layout_mode = 0
-mouse_filter = 2
-color = Color(0, 0, 0, 0.85)
-
-[node name="BarLeft" type="ColorRect" parent="UIRoot/MainHUD/FramingOverlay" unique_id=2119730913]
-visible = false
-layout_mode = 0
-mouse_filter = 2
-color = Color(0, 0, 0, 0.85)
-
-[node name="BarRight" type="ColorRect" parent="UIRoot/MainHUD/FramingOverlay" unique_id=2111769877]
-visible = false
-layout_mode = 0
-mouse_filter = 2
-color = Color(0, 0, 0, 0.85)
-
-[node name="TopBar" type="PanelContainer" parent="UIRoot/MainHUD" unique_id=1676064690]
+[node name="TopBar" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer" unique_id=1676064690]
 custom_minimum_size = Vector2(0, 36)
-layout_mode = 0
-anchor_right = 1.0
-offset_bottom = 36.0
-grow_horizontal = 2
+layout_mode = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="UIRoot/MainHUD/TopBar" unique_id=342201578]
+[node name="HBoxContainer" type="HBoxContainer" parent="UIRoot/MainHUD/VBoxContainer/TopBar" unique_id=342201578]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="AppLabel" type="Label" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1236653518]
+[node name="AppLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1236653518]
 layout_mode = 2
 theme = ExtResource("3_theme")
 text = "Deadlock Playground"
 
-[node name="_Spacer" type="Control" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=1906916890]
+[node name="_Spacer" type="Control" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1906916890]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="SettingsButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=578225235]
+[node name="SettingsButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=578225235]
 layout_mode = 2
 text = "Settings"
 
-[node name="AboutButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=63876577]
+[node name="AboutButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=63876577]
 layout_mode = 2
 text = "About"
 
-[node name="QuitButton" type="Button" parent="UIRoot/MainHUD/TopBar/HBoxContainer" unique_id=502220503]
+[node name="QuitButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=502220503]
 layout_mode = 2
 text = "Quit"
 
-[node name="LeftPanel" type="PanelContainer" parent="UIRoot/MainHUD" unique_id=2054274140]
-custom_minimum_size = Vector2(340, 0)
-layout_mode = 0
-anchor_bottom = 1.0
-offset_left = 12.0
-offset_top = 44.0
-offset_right = 352.0
-offset_bottom = -12.0
-grow_vertical = 2
+[node name="MainSplit" type="HSplitContainer" parent="UIRoot/MainHUD/VBoxContainer" unique_id=873218434]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+split_offsets = PackedInt32Array(360)
+split_offset = 360
 
-[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/LeftPanel" unique_id=17588370]
+[node name="LeftPanel" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=2054274140]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel" unique_id=17588370]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="TabGrid" type="GridContainer" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer" unique_id=1797602466]
+[node name="TabGrid" type="GridContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer" unique_id=1797602466]
 layout_mode = 2
 theme_override_constants/h_separation = 4
 theme_override_constants/v_separation = 4
 columns = 4
 
-[node name="CharacterButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=1933551885]
+[node name="CharacterButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1933551885]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -240,108 +205,321 @@ toggle_mode = true
 button_pressed = true
 text = "Character"
 
-[node name="BonesButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=1918146803]
+[node name="BonesButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1918146803]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "Bones"
 
-[node name="CameraButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=797531757]
+[node name="CameraButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=797531757]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "Camera"
 
-[node name="PoseButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=1883581334]
+[node name="PoseButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1883581334]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "Pose"
 
-[node name="SceneButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=1164696300]
+[node name="SceneButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1164696300]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "Scene"
 
-[node name="EffectsButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=1825249249]
+[node name="EffectsButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1825249249]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "Effects"
 
-[node name="LightButton" type="Button" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabGrid" unique_id=68502939]
+[node name="LightButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=68502939]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "Light"
 
-[node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer" unique_id=333301085]
+[node name="ShadingButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1966343959]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Shading"
+
+[node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer" unique_id=333301085]
 layout_mode = 2
 
-[node name="TabContentPanel" type="PanelContainer" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer" unique_id=877270874]
+[node name="TabContentPanel" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer" unique_id=877270874]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel" unique_id=946595028]
+[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel" unique_id=946595028]
 layout_mode = 2
 theme_override_constants/margin_left = 6
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 6
 theme_override_constants/margin_bottom = 6
 
-[node name="ScrollContainer" type="ScrollContainer" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer" unique_id=459272171]
+[node name="ScrollContainer" type="ScrollContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer" unique_id=459272171]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="TabContentContainer" type="VBoxContainer" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer" unique_id=864283575]
+[node name="TabContentContainer" type="VBoxContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer" unique_id=864283575]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="CharacterTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1305625636 instance=ExtResource("6_char_tab")]
+[node name="CharacterTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1305625636 instance=ExtResource("6_char_tab")]
 layout_mode = 2
 
-[node name="BonesTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=299447722 instance=ExtResource("7_bones_tab")]
+[node name="BonesTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=299447722 instance=ExtResource("7_bones_tab")]
 visible = false
 layout_mode = 2
 
-[node name="CameraTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=121734038 instance=ExtResource("8_cam_tab")]
+[node name="CameraTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=121734038 instance=ExtResource("8_cam_tab")]
 visible = false
 layout_mode = 2
 
-[node name="PoseTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=782018834 instance=ExtResource("9_pose_tab")]
+[node name="PoseTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=782018834 instance=ExtResource("9_pose_tab")]
 visible = false
 layout_mode = 2
 
-[node name="SceneTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=697551352 instance=ExtResource("10_scene_tab")]
+[node name="SceneTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=697551352 instance=ExtResource("10_scene_tab")]
 visible = false
 layout_mode = 2
 
-[node name="EffectsTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=382268050 instance=ExtResource("11_fx_tab")]
+[node name="EffectsTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=382268050 instance=ExtResource("11_fx_tab")]
 visible = false
 layout_mode = 2
 
-[node name="LightingTab" parent="UIRoot/MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1757033267 instance=ExtResource("12_light_tab")]
+[node name="LightingTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1757033267 instance=ExtResource("12_light_tab")]
 visible = false
 layout_mode = 2
 
-[node name="ExportPanel" parent="UIRoot/MainHUD" unique_id=156702132 instance=ExtResource("13_export")]
+[node name="ShadingTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1642219470 instance=ExtResource("13_shading_tab")]
+visible = false
+layout_mode = 2
+
+[node name="ViewportArea" type="Control" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=994090960]
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="BGCanvas" type="Control" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=801495]
 layout_mode = 1
-offset_left = -232.0
-offset_top = 44.0
-offset_right = -12.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
 
-[node name="NavBadge" type="PanelContainer" parent="UIRoot/MainHUD" unique_id=947025821]
+[node name="ColorRect" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas" unique_id=999207432]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.08, 0.09, 0.11, 1)
+
+[node name="BackgroundRect" type="TextureRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas" unique_id=1098520063]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("19_bg0")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="SubViewportContainer" type="SubViewportContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=149840021]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+stretch = true
+
+[node name="WorldViewport" type="SubViewport" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer" unique_id=688636459]
+transparent_bg = true
+handle_input_locally = false
+physics_object_picking = true
+size = Vector2i(1548, 1044)
+render_target_update_mode = 4
+
+[node name="StagePlatform" type="Node3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=1773132385]
+visible = false
+
+[node name="FloorMesh" type="MeshInstance3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/StagePlatform" unique_id=661159431]
+mesh = SubResource("PlaneMesh_stage")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=494643305]
+environment = SubResource("Environment_lquwl")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=219564876]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
+shadow_enabled = true
+
+[node name="VpkLoaderTest" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=1630809298 instance=ExtResource("1_vpk")]
+
+[node name="CameraPivot" type="Node3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=830692313]
+script = ExtResource("2_orbit")
+
+[node name="Camera3D" type="Camera3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/CameraPivot" unique_id=1625453219]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 1)
+cull_mask = 1048573
+attributes = SubResource("CameraAttributesPractical_dof")
+current = true
+
+[node name="ShaderOverlayStack" type="Control" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=1017002737]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="CRTBuffer" type="BackBufferCopy" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack" unique_id=981030530]
+copy_mode = 2
+
+[node name="CRTRect" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack" unique_id=358667082]
+visible = false
+material = SubResource("ShaderMaterial_crt")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="GlitchBuffer" type="BackBufferCopy" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack" unique_id=742370435]
+copy_mode = 2
+
+[node name="GlitchRect" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack" unique_id=808465897]
+visible = false
+material = SubResource("ShaderMaterial_glitch")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="GizmoViewportContainer" type="SubViewportContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=1849204811]
+material = SubResource("CanvasItemMaterial_premult")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+stretch = true
+
+[node name="GizmoViewport" type="SubViewport" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/GizmoViewportContainer" unique_id=1295847192]
+transparent_bg = true
+handle_input_locally = false
+gui_disable_input = true
+size = Vector2i(1548, 1044)
+render_target_update_mode = 4
+script = ExtResource("18_gizmo_sync")
+
+[node name="GizmoCamera3D" type="Camera3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/GizmoViewportContainer/GizmoViewport" unique_id=1409285184]
+cull_mask = 2
+
+[node name="FramingOverlay" type="Control" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=1777151932]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BarTop" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/FramingOverlay" unique_id=1528314790]
+visible = false
+layout_mode = 0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.85)
+
+[node name="BarBottom" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/FramingOverlay" unique_id=1801698015]
+visible = false
+layout_mode = 0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.85)
+
+[node name="BarLeft" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/FramingOverlay" unique_id=2119730913]
+visible = false
+layout_mode = 0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.85)
+
+[node name="BarRight" type="ColorRect" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/FramingOverlay" unique_id=2111769877]
+visible = false
+layout_mode = 0
+mouse_filter = 2
+color = Color(0, 0, 0, 0.85)
+
+[node name="ExportPanel" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=156702132 instance=ExtResource("14_export")]
+layout_mode = 1
+offset_left = -242.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 234.0
+
+[node name="QuickActionsStrip" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=420354827]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -260.0
+offset_top = -80.0
+offset_right = -12.0
+offset_bottom = -48.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="HBoxContainer" type="HBoxContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip" unique_id=2054075684]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnQuickXRay" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer" unique_id=2108463205]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "X-Ray: OFF"
+
+[node name="BtnQuickFullscreen" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer" unique_id=1627897725]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Fullscreen"
+
+[node name="NavBadge" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=947025821]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -356,14 +534,14 @@ grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 2
 
-[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/NavBadge" unique_id=931196230]
+[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge" unique_id=931196230]
 layout_mode = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 4
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 4
 
-[node name="NavLabel" type="Label" parent="UIRoot/MainHUD/NavBadge/MarginContainer" unique_id=1268961489]
+[node name="NavLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge/MarginContainer" unique_id=1268961489]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.75, 0.8, 0.9)
 text = "Move: WASD | Rotate: RMB | Zoom: Scroll"

@@ -1,8 +1,8 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://xq6td0qn5sfr"]
 
-[ext_resource type="Script" path="res://ui/scripts/tabs/SceneTabUI.cs" id="1_scene"]
+[ext_resource type="Script" uid="uid://dtn1nmwwblc28" path="res://ui/scripts/tabs/SceneTabUI.cs" id="1_scene"]
 
-[node name="SceneTab" type="VBoxContainer" node_paths=PackedStringArray("_modeOption", "_panelColor", "_panelGradient", "_panelPattern", "_panelImage", "_panelStage", "_solidColorPicker", "_gradTopPicker", "_gradBottomPicker", "_patternStyleOption", "_patternColorA", "_patternColorB", "_patternScaleSlider", "_patternScaleLabel", "_presetImagesOption", "_btnBrowseImage", "_lblImagePath", "_stageToggleCheck", "_stageShadowCheck", "_stageColorPicker", "_stageStyleOption")]
+[node name="SceneTab" type="VBoxContainer" unique_id=80761804 node_paths=PackedStringArray("_modeOption", "_panelColor", "_panelGradient", "_panelPattern", "_panelImage", "_panelStage", "_solidColorPicker", "_gradTopPicker", "_gradBottomPicker", "_patternStyleOption", "_patternColorA", "_patternColorB", "_patternScaleSlider", "_patternScaleLabel", "_presetImagesOption", "_btnBrowseImage", "_lblImagePath", "_stageToggleCheck", "_stageShadowCheck", "_stageColorPicker", "_stageStyleOption")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -34,130 +34,130 @@ _stageShadowCheck = NodePath("PanelStage/VBoxContainer/StageShadowCheck")
 _stageColorPicker = NodePath("PanelStage/VBoxContainer/HBoxColor/StageColorPicker")
 _stageStyleOption = NodePath("PanelStage/VBoxContainer/StageStyleOption")
 
-[node name="ModeGroup" type="VBoxContainer" parent="."]
+[node name="ModeGroup" type="VBoxContainer" parent="." unique_id=555423703]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ModeLabel" type="Label" parent="ModeGroup"]
+[node name="ModeLabel" type="Label" parent="ModeGroup" unique_id=1854074183]
 layout_mode = 2
 text = "Background Style"
 
-[node name="ModeOption" type="OptionButton" parent="ModeGroup"]
+[node name="ModeOption" type="OptionButton" parent="ModeGroup" unique_id=579309085]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HSeparator1" type="HSeparator" parent="."]
+[node name="HSeparator1" type="HSeparator" parent="." unique_id=1955508564]
 layout_mode = 2
 
-[node name="PanelColor" type="PanelContainer" parent="."]
+[node name="PanelColor" type="PanelContainer" parent="." unique_id=186534388]
 visible = false
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="PanelColor"]
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelColor" unique_id=1210082969]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ColorLabel" type="Label" parent="PanelColor/VBoxContainer"]
+[node name="ColorLabel" type="Label" parent="PanelColor/VBoxContainer" unique_id=1776381311]
 layout_mode = 2
 text = "Solid Background Color"
 
-[node name="ColorPickerButton" type="ColorPickerButton" parent="PanelColor/VBoxContainer"]
+[node name="ColorPickerButton" type="ColorPickerButton" parent="PanelColor/VBoxContainer" unique_id=1086909692]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 color = Color(0.08, 0.08, 0.1, 1)
 
-[node name="PanelGradient" type="PanelContainer" parent="."]
+[node name="PanelGradient" type="PanelContainer" parent="." unique_id=473680742]
 visible = false
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="PanelGradient"]
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelGradient" unique_id=1660023585]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="GradLabel" type="Label" parent="PanelGradient/VBoxContainer"]
+[node name="GradLabel" type="Label" parent="PanelGradient/VBoxContainer" unique_id=39585610]
 layout_mode = 2
 text = "2-Color Gradient Backdrop"
 
-[node name="HBoxTop" type="HBoxContainer" parent="PanelGradient/VBoxContainer"]
+[node name="HBoxTop" type="HBoxContainer" parent="PanelGradient/VBoxContainer" unique_id=981432151]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PanelGradient/VBoxContainer/HBoxTop"]
+[node name="Label" type="Label" parent="PanelGradient/VBoxContainer/HBoxTop" unique_id=259331927]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Top / Sky Color"
 
-[node name="GradTopPicker" type="ColorPickerButton" parent="PanelGradient/VBoxContainer/HBoxTop"]
+[node name="GradTopPicker" type="ColorPickerButton" parent="PanelGradient/VBoxContainer/HBoxTop" unique_id=468288241]
 custom_minimum_size = Vector2(80, 28)
 layout_mode = 2
 color = Color(0.12, 0.14, 0.18, 1)
 
-[node name="HBoxBottom" type="HBoxContainer" parent="PanelGradient/VBoxContainer"]
+[node name="HBoxBottom" type="HBoxContainer" parent="PanelGradient/VBoxContainer" unique_id=1174010452]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PanelGradient/VBoxContainer/HBoxBottom"]
+[node name="Label" type="Label" parent="PanelGradient/VBoxContainer/HBoxBottom" unique_id=1020315714]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Bottom / Floor Color"
 
-[node name="GradBottomPicker" type="ColorPickerButton" parent="PanelGradient/VBoxContainer/HBoxBottom"]
+[node name="GradBottomPicker" type="ColorPickerButton" parent="PanelGradient/VBoxContainer/HBoxBottom" unique_id=136974516]
 custom_minimum_size = Vector2(80, 28)
 layout_mode = 2
 color = Color(0.04, 0.05, 0.07, 1)
 
-[node name="PanelPattern" type="PanelContainer" parent="."]
+[node name="PanelPattern" type="PanelContainer" parent="." unique_id=1303221546]
 visible = false
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="PanelPattern"]
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelPattern" unique_id=1601686711]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="PatternLabel" type="Label" parent="PanelPattern/VBoxContainer"]
+[node name="PatternLabel" type="Label" parent="PanelPattern/VBoxContainer" unique_id=1108479824]
 layout_mode = 2
 text = "Pattern Backdrop"
 
-[node name="PatternStyleOption" type="OptionButton" parent="PanelPattern/VBoxContainer"]
+[node name="PatternStyleOption" type="OptionButton" parent="PanelPattern/VBoxContainer" unique_id=1087445146]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HBoxColorA" type="HBoxContainer" parent="PanelPattern/VBoxContainer"]
+[node name="HBoxColorA" type="HBoxContainer" parent="PanelPattern/VBoxContainer" unique_id=1210409459]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PanelPattern/VBoxContainer/HBoxColorA"]
+[node name="Label" type="Label" parent="PanelPattern/VBoxContainer/HBoxColorA" unique_id=529531507]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Pattern Color A"
 
-[node name="PatternColorA" type="ColorPickerButton" parent="PanelPattern/VBoxContainer/HBoxColorA"]
+[node name="PatternColorA" type="ColorPickerButton" parent="PanelPattern/VBoxContainer/HBoxColorA" unique_id=508979665]
 custom_minimum_size = Vector2(80, 28)
 layout_mode = 2
 color = Color(0.1, 0.11, 0.14, 1)
 
-[node name="HBoxColorB" type="HBoxContainer" parent="PanelPattern/VBoxContainer"]
+[node name="HBoxColorB" type="HBoxContainer" parent="PanelPattern/VBoxContainer" unique_id=1815406154]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PanelPattern/VBoxContainer/HBoxColorB"]
+[node name="Label" type="Label" parent="PanelPattern/VBoxContainer/HBoxColorB" unique_id=1141809466]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Pattern Color B"
 
-[node name="PatternColorB" type="ColorPickerButton" parent="PanelPattern/VBoxContainer/HBoxColorB"]
+[node name="PatternColorB" type="ColorPickerButton" parent="PanelPattern/VBoxContainer/HBoxColorB" unique_id=981388239]
 custom_minimum_size = Vector2(80, 28)
 layout_mode = 2
 color = Color(0.18, 0.2, 0.25, 1)
 
-[node name="ScaleBox" type="HBoxContainer" parent="PanelPattern/VBoxContainer"]
+[node name="ScaleBox" type="HBoxContainer" parent="PanelPattern/VBoxContainer" unique_id=352677505]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Label" type="Label" parent="PanelPattern/VBoxContainer/ScaleBox"]
+[node name="Label" type="Label" parent="PanelPattern/VBoxContainer/ScaleBox" unique_id=446244665]
 custom_minimum_size = Vector2(70, 0)
 layout_mode = 2
 text = "Pattern Scale"
 
-[node name="ScaleSlider" type="HSlider" parent="PanelPattern/VBoxContainer/ScaleBox"]
+[node name="ScaleSlider" type="HSlider" parent="PanelPattern/VBoxContainer/ScaleBox" unique_id=1243498758]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -166,72 +166,72 @@ max_value = 128.0
 step = 4.0
 value = 48.0
 
-[node name="ScaleLabel" type="Label" parent="PanelPattern/VBoxContainer/ScaleBox"]
+[node name="ScaleLabel" type="Label" parent="PanelPattern/VBoxContainer/ScaleBox" unique_id=55724540]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 text = "48px"
 
-[node name="PanelImage" type="PanelContainer" parent="."]
+[node name="PanelImage" type="PanelContainer" parent="." unique_id=1937351285]
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="PanelImage"]
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelImage" unique_id=320783842]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ImageLabel" type="Label" parent="PanelImage/VBoxContainer"]
+[node name="ImageLabel" type="Label" parent="PanelImage/VBoxContainer" unique_id=413456862]
 layout_mode = 2
 text = "Background Image Presets"
 
-[node name="PresetImagesOption" type="OptionButton" parent="PanelImage/VBoxContainer"]
+[node name="PresetImagesOption" type="OptionButton" parent="PanelImage/VBoxContainer" unique_id=1911959019]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="BtnBrowseImage" type="Button" parent="PanelImage/VBoxContainer"]
+[node name="BtnBrowseImage" type="Button" parent="PanelImage/VBoxContainer" unique_id=1798222901]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Load Custom Image File..."
 
-[node name="LblImagePath" type="Label" parent="PanelImage/VBoxContainer"]
+[node name="LblImagePath" type="Label" parent="PanelImage/VBoxContainer" unique_id=610965683]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.6, 0.65, 0.7, 1)
-text = "Classic Menu"
+text = "In-Game Background 1"
 
-[node name="PanelStage" type="PanelContainer" parent="."]
+[node name="PanelStage" type="PanelContainer" parent="." unique_id=1871981049]
 visible = false
 layout_mode = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="PanelStage"]
+[node name="VBoxContainer" type="VBoxContainer" parent="PanelStage" unique_id=1166124214]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="StageLabel" type="Label" parent="PanelStage/VBoxContainer"]
+[node name="StageLabel" type="Label" parent="PanelStage/VBoxContainer" unique_id=1856074093]
 layout_mode = 2
 text = "3D Studio Stage"
 
-[node name="StageToggleCheck" type="CheckBox" parent="PanelStage/VBoxContainer"]
+[node name="StageToggleCheck" type="CheckBox" parent="PanelStage/VBoxContainer" unique_id=1147017068]
 layout_mode = 2
 button_pressed = true
 text = "Show 3D Stage Floor"
 
-[node name="StageShadowCheck" type="CheckBox" parent="PanelStage/VBoxContainer"]
+[node name="StageShadowCheck" type="CheckBox" parent="PanelStage/VBoxContainer" unique_id=1684521047]
 layout_mode = 2
 button_pressed = true
 text = "Receive Ground Shadows"
 
-[node name="HBoxColor" type="HBoxContainer" parent="PanelStage/VBoxContainer"]
+[node name="HBoxColor" type="HBoxContainer" parent="PanelStage/VBoxContainer" unique_id=2108625183]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="PanelStage/VBoxContainer/HBoxColor"]
+[node name="Label" type="Label" parent="PanelStage/VBoxContainer/HBoxColor" unique_id=789401983]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Floor Material Color"
 
-[node name="StageColorPicker" type="ColorPickerButton" parent="PanelStage/VBoxContainer/HBoxColor"]
+[node name="StageColorPicker" type="ColorPickerButton" parent="PanelStage/VBoxContainer/HBoxColor" unique_id=971569537]
 custom_minimum_size = Vector2(80, 28)
 layout_mode = 2
 color = Color(0.15, 0.16, 0.18, 1)
 
-[node name="StageStyleOption" type="OptionButton" parent="PanelStage/VBoxContainer"]
+[node name="StageStyleOption" type="OptionButton" parent="PanelStage/VBoxContainer" unique_id=264590267]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2

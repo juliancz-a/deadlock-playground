@@ -1,8 +1,8 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://bj84jmt2jj101"]
 
-[ext_resource type="Script" path="res://ui/scripts/tabs/BonesTabUI.cs" id="1_bones"]
+[ext_resource type="Script" uid="uid://cyw82tcufopac" path="res://ui/scripts/tabs/BonesTabUI.cs" id="1_bones"]
 
-[node name="BonesTab" type="VBoxContainer" node_paths=PackedStringArray("_allBonesOptionButton", "_selectedBoneLabel", "_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_btnResetBone", "_btnDeselect", "_fastBoneGrid", "_checkPrimary", "_checkClothing", "_checkFace", "_checkFingers", "_checkProps", "_checkHelpers", "_toggleXRayButton", "_toggleLinesButton")]
+[node name="BonesTab" type="VBoxContainer" unique_id=2092527891 node_paths=PackedStringArray("_allBonesOptionButton", "_selectedBoneLabel", "_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_btnResetBone", "_btnDeselect", "_checkPrimary", "_checkClothing", "_checkFace", "_checkFingers", "_checkProps", "_checkHelpers", "_toggleXRayButton", "_toggleLinesButton")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -22,7 +22,6 @@ _labelY = NodePath("TransformGroup/SliderYBox/LabelY")
 _labelZ = NodePath("TransformGroup/SliderZBox/LabelZ")
 _btnResetBone = NodePath("TransformGroup/ActionHBox/BtnResetBone")
 _btnDeselect = NodePath("TransformGroup/ActionHBox/BtnDeselect")
-_fastBoneGrid = NodePath("FastBonesGroup/FastBoneGrid")
 _checkPrimary = NodePath("LayersGroup/GridContainer/CheckPrimary")
 _checkClothing = NodePath("LayersGroup/GridContainer/CheckClothing")
 _checkFace = NodePath("LayersGroup/GridContainer/CheckFace")
@@ -32,182 +31,167 @@ _checkHelpers = NodePath("LayersGroup/GridContainer/CheckHelpers")
 _toggleXRayButton = NodePath("XRayGroup/HBoxContainer/ToggleXRayButton")
 _toggleLinesButton = NodePath("XRayGroup/HBoxContainer/CheckLines")
 
-[node name="LayersGroup" type="VBoxContainer" parent="."]
+[node name="LayersGroup" type="VBoxContainer" parent="." unique_id=1001586927]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="LayersLabel" type="Label" parent="LayersGroup"]
+[node name="LayersLabel" type="Label" parent="LayersGroup" unique_id=1690391033]
 layout_mode = 2
 text = "Bone Layer Filters"
 
-[node name="GridContainer" type="GridContainer" parent="LayersGroup"]
+[node name="GridContainer" type="GridContainer" parent="LayersGroup" unique_id=454008934]
 layout_mode = 2
 columns = 2
 
-[node name="CheckPrimary" type="CheckBox" parent="LayersGroup/GridContainer"]
+[node name="CheckPrimary" type="CheckBox" parent="LayersGroup/GridContainer" unique_id=1891576180]
 layout_mode = 2
 size_flags_horizontal = 3
 button_pressed = true
 text = "Body (Primary)"
 
-[node name="CheckClothing" type="CheckBox" parent="LayersGroup/GridContainer"]
+[node name="CheckClothing" type="CheckBox" parent="LayersGroup/GridContainer" unique_id=72852017]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Clothing / Skirts"
 
-[node name="CheckFace" type="CheckBox" parent="LayersGroup/GridContainer"]
+[node name="CheckFace" type="CheckBox" parent="LayersGroup/GridContainer" unique_id=1825646948]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Face & Head"
 
-[node name="CheckFingers" type="CheckBox" parent="LayersGroup/GridContainer"]
+[node name="CheckFingers" type="CheckBox" parent="LayersGroup/GridContainer" unique_id=438717588]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Fingers"
 
-[node name="CheckProps" type="CheckBox" parent="LayersGroup/GridContainer"]
+[node name="CheckProps" type="CheckBox" parent="LayersGroup/GridContainer" unique_id=2066418536]
 layout_mode = 2
 size_flags_horizontal = 3
 button_pressed = true
 text = "Props & Weapons"
 
-[node name="CheckHelpers" type="CheckBox" parent="LayersGroup/GridContainer"]
+[node name="CheckHelpers" type="CheckBox" parent="LayersGroup/GridContainer" unique_id=1571508320]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Helpers"
 
-[node name="HSeparator1" type="HSeparator" parent="."]
+[node name="HSeparator1" type="HSeparator" parent="." unique_id=768322451]
 layout_mode = 2
 
-[node name="FastBonesGroup" type="VBoxContainer" parent="."]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="FastBonesLabel" type="Label" parent="FastBonesGroup"]
-layout_mode = 2
-text = "Quick Select"
-
-[node name="FastBoneGrid" type="GridContainer" parent="FastBonesGroup"]
-layout_mode = 2
-columns = 3
-
-[node name="HSeparator2" type="HSeparator" parent="."]
-layout_mode = 2
-
-[node name="BoneSelectGroup" type="VBoxContainer" parent="."]
+[node name="XRayGroup" type="VBoxContainer" parent="." unique_id=418540040]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="SearchLabel" type="Label" parent="BoneSelectGroup"]
-layout_mode = 2
-text = "Search & Pick Bone"
-
-[node name="BoneOptionButton" type="OptionButton" parent="BoneSelectGroup"]
-custom_minimum_size = Vector2(0, 30)
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="TransformGroup" type="VBoxContainer" parent="."]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="HeaderHBox" type="HBoxContainer" parent="TransformGroup"]
-layout_mode = 2
-
-[node name="SelectedBoneLabel" type="Label" parent="TransformGroup/HeaderHBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "No Bone Selected"
-
-[node name="SliderXBox" type="HBoxContainer" parent="TransformGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="LabelX" type="Label" parent="TransformGroup/SliderXBox"]
-custom_minimum_size = Vector2(75, 0)
-layout_mode = 2
-text = "X: 0.0°"
-
-[node name="SliderX" type="HSlider" parent="TransformGroup/SliderXBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = -180.0
-max_value = 180.0
-step = 0.5
-
-[node name="SliderYBox" type="HBoxContainer" parent="TransformGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="LabelY" type="Label" parent="TransformGroup/SliderYBox"]
-custom_minimum_size = Vector2(75, 0)
-layout_mode = 2
-text = "Y: 0.0°"
-
-[node name="SliderY" type="HSlider" parent="TransformGroup/SliderYBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = -180.0
-max_value = 180.0
-step = 0.5
-
-[node name="SliderZBox" type="HBoxContainer" parent="TransformGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="LabelZ" type="Label" parent="TransformGroup/SliderZBox"]
-custom_minimum_size = Vector2(75, 0)
-layout_mode = 2
-text = "Z: 0.0°"
-
-[node name="SliderZ" type="HSlider" parent="TransformGroup/SliderZBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = -180.0
-max_value = 180.0
-step = 0.5
-
-[node name="ActionHBox" type="HBoxContainer" parent="TransformGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="BtnResetBone" type="Button" parent="TransformGroup/ActionHBox"]
-custom_minimum_size = Vector2(0, 28)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Reset Bone"
-
-[node name="BtnDeselect" type="Button" parent="TransformGroup/ActionHBox"]
-custom_minimum_size = Vector2(0, 28)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Deselect"
-
-[node name="HSeparator3" type="HSeparator" parent="."]
-layout_mode = 2
-
-[node name="XRayGroup" type="VBoxContainer" parent="."]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="XRayLabel" type="Label" parent="XRayGroup"]
+[node name="XRayLabel" type="Label" parent="XRayGroup" unique_id=1715145338]
 layout_mode = 2
 text = "Gizmo & Viewport Display"
 
-[node name="HBoxContainer" type="HBoxContainer" parent="XRayGroup"]
+[node name="HBoxContainer" type="HBoxContainer" parent="XRayGroup" unique_id=1268961532]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ToggleXRayButton" type="Button" parent="XRayGroup/HBoxContainer"]
+[node name="ToggleXRayButton" type="Button" parent="XRayGroup/HBoxContainer" unique_id=1663283504]
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Toggle X-Ray"
 
-[node name="CheckLines" type="CheckBox" parent="XRayGroup/HBoxContainer"]
+[node name="CheckLines" type="CheckBox" parent="XRayGroup/HBoxContainer" unique_id=963887857]
 layout_mode = 2
 button_pressed = true
 text = "Wireframe Lines"
+
+[node name="BoneSelectGroup" type="VBoxContainer" parent="." unique_id=1021608458]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SearchLabel" type="Label" parent="BoneSelectGroup" unique_id=41470276]
+layout_mode = 2
+text = "Search & Pick Bone"
+
+[node name="BoneOptionButton" type="OptionButton" parent="BoneSelectGroup" unique_id=1266874624]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TransformGroup" type="VBoxContainer" parent="." unique_id=1521552237]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HeaderHBox" type="HBoxContainer" parent="TransformGroup" unique_id=1311880437]
+layout_mode = 2
+
+[node name="SelectedBoneLabel" type="Label" parent="TransformGroup/HeaderHBox" unique_id=539377409]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "No Bone Selected"
+
+[node name="SliderXBox" type="HBoxContainer" parent="TransformGroup" unique_id=709309808]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LabelX" type="Label" parent="TransformGroup/SliderXBox" unique_id=1832555706]
+custom_minimum_size = Vector2(75, 0)
+layout_mode = 2
+text = "X: 0.0°"
+
+[node name="SliderX" type="HSlider" parent="TransformGroup/SliderXBox" unique_id=1720901452]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 0.5
+
+[node name="SliderYBox" type="HBoxContainer" parent="TransformGroup" unique_id=1652609266]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LabelY" type="Label" parent="TransformGroup/SliderYBox" unique_id=1980372547]
+custom_minimum_size = Vector2(75, 0)
+layout_mode = 2
+text = "Y: 0.0°"
+
+[node name="SliderY" type="HSlider" parent="TransformGroup/SliderYBox" unique_id=1596149811]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 0.5
+
+[node name="SliderZBox" type="HBoxContainer" parent="TransformGroup" unique_id=519552639]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LabelZ" type="Label" parent="TransformGroup/SliderZBox" unique_id=16030543]
+custom_minimum_size = Vector2(75, 0)
+layout_mode = 2
+text = "Z: 0.0°"
+
+[node name="SliderZ" type="HSlider" parent="TransformGroup/SliderZBox" unique_id=959262889]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 0.5
+
+[node name="ActionHBox" type="HBoxContainer" parent="TransformGroup" unique_id=1516688112]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnResetBone" type="Button" parent="TransformGroup/ActionHBox" unique_id=1622403694]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reset Bone"
+
+[node name="BtnDeselect" type="Button" parent="TransformGroup/ActionHBox" unique_id=466229168]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Deselect"
+
+[node name="HSeparator3" type="HSeparator" parent="." unique_id=900992387]
+layout_mode = 2

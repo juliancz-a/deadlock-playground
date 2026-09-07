@@ -10,13 +10,73 @@ public static class GizmoDisplaySettings
     private const string ConfigPath = "user://settings.cfg";
     private const string SectionName = "GizmoDisplay";
 
-    public static Color XRayLineColor { get; set; } = new Color(0.15f, 0.85f, 1.0f);
-    public static float XRayLineOpacity { get; set; } = 0.4f;
+    private static bool _isLoading = false;
 
-    public static Color BonePrimaryColor { get; set; } = new Color(0.15f, 0.85f, 1.0f);
-    public static Color BoneClothingColor { get; set; } = new Color(1.0f, 0.35f, 0.75f);
-    public static float BoneMarkerOpacity { get; set; } = 0.75f;
-    public static float BoneMarkerScale { get; set; } = 1.0f;
+    private static Color _xRayLineColor = new Color(0.15f, 0.85f, 1.0f);
+    public static Color XRayLineColor
+    {
+        get => _xRayLineColor;
+        set
+        {
+            _xRayLineColor = value;
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static float _xRayLineOpacity = 0.75f;
+    public static float XRayLineOpacity
+    {
+        get => _xRayLineOpacity;
+        set
+        {
+            _xRayLineOpacity = Mathf.Clamp(value, 0.05f, 1.0f);
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static Color _bonePrimaryColor = new Color(0.15f, 0.85f, 1.0f);
+    public static Color BonePrimaryColor
+    {
+        get => _bonePrimaryColor;
+        set
+        {
+            _bonePrimaryColor = value;
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static Color _boneClothingColor = new Color(1.0f, 0.35f, 0.75f);
+    public static Color BoneClothingColor
+    {
+        get => _boneClothingColor;
+        set
+        {
+            _boneClothingColor = value;
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static float _boneMarkerOpacity = 0.75f;
+    public static float BoneMarkerOpacity
+    {
+        get => _boneMarkerOpacity;
+        set
+        {
+            _boneMarkerOpacity = Mathf.Clamp(value, 0.05f, 1.0f);
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static float _boneMarkerScale = 1.0f;
+    public static float BoneMarkerScale
+    {
+        get => _boneMarkerScale;
+        set
+        {
+            _boneMarkerScale = Mathf.Clamp(value, 0.2f, 3.0f);
+            if (!_isLoading) NotifyChanged();
+        }
+    }
 
     public static event Action OnSettingsChanged;
 
@@ -28,13 +88,14 @@ public static class GizmoDisplaySettings
 
     public static void ResetToDefaults()
     {
+        _isLoading = true;
         XRayLineColor = new Color(0.15f, 0.85f, 1.0f);
-        XRayLineOpacity = 0.4f;
-
+        XRayLineOpacity = 0.75f;
         BonePrimaryColor = new Color(0.15f, 0.85f, 1.0f);
         BoneClothingColor = new Color(1.0f, 0.35f, 0.75f);
         BoneMarkerOpacity = 0.75f;
         BoneMarkerScale = 1.0f;
+        _isLoading = false;
 
         NotifyChanged();
     }
@@ -44,6 +105,7 @@ public static class GizmoDisplaySettings
         var config = new ConfigFile();
         if (config.Load(ConfigPath) == Error.Ok)
         {
+            _isLoading = true;
             if (config.HasSectionKey(SectionName, "XRayLineColor"))
                 XRayLineColor = (Color)config.GetValue(SectionName, "XRayLineColor", XRayLineColor);
 
@@ -61,6 +123,7 @@ public static class GizmoDisplaySettings
 
             if (config.HasSectionKey(SectionName, "BoneMarkerScale"))
                 BoneMarkerScale = (float)config.GetValue(SectionName, "BoneMarkerScale", BoneMarkerScale);
+            _isLoading = false;
         }
     }
 

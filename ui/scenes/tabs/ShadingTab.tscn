@@ -1,0 +1,518 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/ShadingTabUI.cs" id="1_shading"]
+
+[node name="ShadingTab" type="VBoxContainer" node_paths=PackedStringArray("_masterToggle", "_btnResetDefaults", "_checkToonEnable", "_sliderToonIntensity", "_lblToonIntensity", "_sliderToonSteps", "_lblToonSteps", "_sliderToonSmoothness", "_lblToonSmoothness", "_checkToonOutline", "_sliderToonOutlineWidth", "_lblToonOutlineWidth", "_colorToonOutline", "_sliderToonShadowAmount", "_lblToonShadowAmount", "_colorToonShadow", "_checkCrtEnable", "_sliderCrtScan1", "_lblCrtScan1", "_sliderCrtScan2", "_lblCrtScan2", "_sliderCrtScanReduction", "_lblCrtScanReduction", "_sliderCrtBlur", "_lblCrtBlur", "_sliderCrtDiffusion", "_lblCrtDiffusion", "_sliderCrtVignetteAlpha", "_lblCrtVignetteAlpha", "_sliderCrtVignetteRadius", "_lblCrtVignetteRadius", "_checkGlitchEnable", "_sliderGlitchIntensity", "_lblGlitchIntensity", "_sliderGlitchPixelSize", "_lblGlitchPixelSize", "_sliderGlitchSplit", "_lblGlitchSplit", "_sliderGlitchOpacity", "_lblGlitchOpacity")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_shading")
+_masterToggle = NodePath("MasterHeader/MasterToggle")
+_btnResetDefaults = NodePath("BtnResetDefaults")
+_checkToonEnable = NodePath("ToonGroup/CheckToon")
+_sliderToonIntensity = NodePath("ToonGroup/IntensityBox/SliderIntensity")
+_lblToonIntensity = NodePath("ToonGroup/IntensityBox/LabelIntensity")
+_sliderToonSteps = NodePath("ToonGroup/StepsBox/SliderSteps")
+_lblToonSteps = NodePath("ToonGroup/StepsBox/LabelSteps")
+_sliderToonSmoothness = NodePath("ToonGroup/SmoothBox/SliderSmooth")
+_lblToonSmoothness = NodePath("ToonGroup/SmoothBox/LabelSmooth")
+_checkToonOutline = NodePath("ToonGroup/CheckOutline")
+_sliderToonOutlineWidth = NodePath("ToonGroup/OutlineWidthBox/SliderWidth")
+_lblToonOutlineWidth = NodePath("ToonGroup/OutlineWidthBox/LabelWidth")
+_colorToonOutline = NodePath("ToonGroup/OutlineColorBox/ColorOutline")
+_sliderToonShadowAmount = NodePath("ToonGroup/ShadowAmountBox/SliderShadow")
+_lblToonShadowAmount = NodePath("ToonGroup/ShadowAmountBox/LabelShadow")
+_colorToonShadow = NodePath("ToonGroup/ShadowColorBox/ColorShadow")
+_checkCrtEnable = NodePath("CRTGroup/CheckCRT")
+_sliderCrtScan1 = NodePath("CRTGroup/Scan1Box/SliderScan1")
+_lblCrtScan1 = NodePath("CRTGroup/Scan1Box/LabelScan1")
+_sliderCrtScan2 = NodePath("CRTGroup/Scan2Box/SliderScan2")
+_lblCrtScan2 = NodePath("CRTGroup/Scan2Box/LabelScan2")
+_sliderCrtScanReduction = NodePath("CRTGroup/ScanIntensityBox/SliderIntensity")
+_lblCrtScanReduction = NodePath("CRTGroup/ScanIntensityBox/LabelIntensity")
+_sliderCrtBlur = NodePath("CRTGroup/BlurBox/SliderBlur")
+_lblCrtBlur = NodePath("CRTGroup/BlurBox/LabelBlur")
+_sliderCrtDiffusion = NodePath("CRTGroup/DiffusionBox/SliderDiffusion")
+_lblCrtDiffusion = NodePath("CRTGroup/DiffusionBox/LabelDiffusion")
+_sliderCrtVignetteAlpha = NodePath("CRTGroup/VignetteAlphaBox/SliderVignetteAlpha")
+_lblCrtVignetteAlpha = NodePath("CRTGroup/VignetteAlphaBox/LabelVignetteAlpha")
+_sliderCrtVignetteRadius = NodePath("CRTGroup/VignetteRadiusBox/SliderVignetteRadius")
+_lblCrtVignetteRadius = NodePath("CRTGroup/VignetteRadiusBox/LabelVignetteRadius")
+_checkGlitchEnable = NodePath("GlitchGroup/CheckGlitch")
+_sliderGlitchIntensity = NodePath("GlitchGroup/IntensityBox/SliderIntensity")
+_lblGlitchIntensity = NodePath("GlitchGroup/IntensityBox/LabelIntensity")
+_sliderGlitchPixelSize = NodePath("GlitchGroup/PixelSizeBox/SliderPixelSize")
+_lblGlitchPixelSize = NodePath("GlitchGroup/PixelSizeBox/LabelPixelSize")
+_sliderGlitchSplit = NodePath("GlitchGroup/SplitBox/SliderSplit")
+_lblGlitchSplit = NodePath("GlitchGroup/SplitBox/LabelSplit")
+_sliderGlitchOpacity = NodePath("GlitchGroup/OpacityBox/SliderOpacity")
+_lblGlitchOpacity = NodePath("GlitchGroup/OpacityBox/LabelOpacity")
+
+[node name="MasterHeader" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="MasterToggle" type="CheckBox" parent="MasterHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+button_pressed = true
+text = "Enable Post-Processing Stack"
+
+[node name="HSeparator0" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="ToonGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GroupLabel" type="Label" parent="ToonGroup"]
+layout_mode = 2
+text = "Cel Shading (Toon)"
+
+[node name="CheckToon" type="CheckBox" parent="ToonGroup"]
+layout_mode = 2
+text = "Enable Toon Shader"
+
+[node name="IntensityBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/IntensityBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Toon Strength"
+
+[node name="SliderIntensity" type="HSlider" parent="ToonGroup/IntensityBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.6
+
+[node name="LabelIntensity" type="Label" parent="ToonGroup/IntensityBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.60"
+
+[node name="StepsBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/StepsBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Bands (Steps)"
+
+[node name="SliderSteps" type="HSlider" parent="ToonGroup/StepsBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 2.0
+max_value = 16.0
+step = 1.0
+value = 8.0
+
+[node name="LabelSteps" type="Label" parent="ToonGroup/StepsBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "8"
+
+[node name="SmoothBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/SmoothBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Smoothness"
+
+[node name="SliderSmooth" type="HSlider" parent="ToonGroup/SmoothBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.35
+
+[node name="LabelSmooth" type="Label" parent="ToonGroup/SmoothBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.35"
+
+[node name="CheckOutline" type="CheckBox" parent="ToonGroup"]
+layout_mode = 2
+button_pressed = true
+text = "Outline (Edge Detection)"
+
+[node name="OutlineWidthBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/OutlineWidthBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Outline Width"
+
+[node name="SliderWidth" type="HSlider" parent="ToonGroup/OutlineWidthBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.5
+max_value = 4.0
+step = 0.1
+value = 0.8
+
+[node name="LabelWidth" type="Label" parent="ToonGroup/OutlineWidthBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.8px"
+
+[node name="OutlineColorBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/OutlineColorBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Outline Color"
+
+[node name="ColorOutline" type="ColorPickerButton" parent="ToonGroup/OutlineColorBox"]
+custom_minimum_size = Vector2(70, 24)
+layout_mode = 2
+color = Color(0, 0, 0, 1)
+
+[node name="ShadowAmountBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/ShadowAmountBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Shadow Tint"
+
+[node name="SliderShadow" type="HSlider" parent="ToonGroup/ShadowAmountBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.12
+
+[node name="LabelShadow" type="Label" parent="ToonGroup/ShadowAmountBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.12"
+
+[node name="ShadowColorBox" type="HBoxContainer" parent="ToonGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ToonGroup/ShadowColorBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Shadow Color"
+
+[node name="ColorShadow" type="ColorPickerButton" parent="ToonGroup/ShadowColorBox"]
+custom_minimum_size = Vector2(70, 24)
+layout_mode = 2
+color = Color(0.15, 0.15, 0.25, 1)
+
+[node name="HSeparator1" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="CRTGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GroupLabel" type="Label" parent="CRTGroup"]
+layout_mode = 2
+text = "CRT / Retro Monitor"
+
+[node name="CheckCRT" type="CheckBox" parent="CRTGroup"]
+layout_mode = 2
+text = "Enable CRT Shader"
+
+[node name="Scan1Box" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/Scan1Box"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Scanlines 1"
+
+[node name="SliderScan1" type="HSlider" parent="CRTGroup/Scan1Box"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 50.0
+max_value = 1000.0
+step = 10.0
+value = 500.0
+
+[node name="LabelScan1" type="Label" parent="CRTGroup/Scan1Box"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "500"
+
+[node name="Scan2Box" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/Scan2Box"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Scanlines 2"
+
+[node name="SliderScan2" type="HSlider" parent="CRTGroup/Scan2Box"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 5.0
+max_value = 100.0
+step = 5.0
+value = 25.0
+
+[node name="LabelScan2" type="Label" parent="CRTGroup/Scan2Box"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "25"
+
+[node name="ScanIntensityBox" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/ScanIntensityBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Intensity"
+
+[node name="SliderIntensity" type="HSlider" parent="CRTGroup/ScanIntensityBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 0.4
+step = 0.01
+value = 0.1
+
+[node name="LabelIntensity" type="Label" parent="CRTGroup/ScanIntensityBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.10"
+
+[node name="BlurBox" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/BlurBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Blur / Softness"
+
+[node name="SliderBlur" type="HSlider" parent="CRTGroup/BlurBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 3.0
+step = 0.05
+value = 0.35
+
+[node name="LabelBlur" type="Label" parent="CRTGroup/BlurBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.35"
+
+[node name="DiffusionBox" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/DiffusionBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Diffusion"
+
+[node name="SliderDiffusion" type="HSlider" parent="CRTGroup/DiffusionBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -0.2
+max_value = 0.3
+step = 0.01
+value = 0.1
+
+[node name="LabelDiffusion" type="Label" parent="CRTGroup/DiffusionBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.10"
+
+[node name="VignetteAlphaBox" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/VignetteAlphaBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Vignette Alpha"
+
+[node name="SliderVignetteAlpha" type="HSlider" parent="CRTGroup/VignetteAlphaBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.8
+
+[node name="LabelVignetteAlpha" type="Label" parent="CRTGroup/VignetteAlphaBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.80"
+
+[node name="VignetteRadiusBox" type="HBoxContainer" parent="CRTGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="CRTGroup/VignetteRadiusBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Vignette Size"
+
+[node name="SliderVignetteRadius" type="HSlider" parent="CRTGroup/VignetteRadiusBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 5.0
+step = 0.1
+value = 3.5
+
+[node name="LabelVignetteRadius" type="Label" parent="CRTGroup/VignetteRadiusBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "3.5"
+
+[node name="HSeparator2" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="GlitchGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GroupLabel" type="Label" parent="GlitchGroup"]
+layout_mode = 2
+text = "Glitch / VHS Artifacts"
+
+[node name="CheckGlitch" type="CheckBox" parent="GlitchGroup"]
+layout_mode = 2
+text = "Enable Glitch Shader"
+
+[node name="IntensityBox" type="HBoxContainer" parent="GlitchGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlitchGroup/IntensityBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "VHS Intensity"
+
+[node name="SliderIntensity" type="HSlider" parent="GlitchGroup/IntensityBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 10.0
+step = 0.1
+value = 3.0
+
+[node name="LabelIntensity" type="Label" parent="GlitchGroup/IntensityBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "3.0"
+
+[node name="PixelSizeBox" type="HBoxContainer" parent="GlitchGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlitchGroup/PixelSizeBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Pixel Size"
+
+[node name="SliderPixelSize" type="HSlider" parent="GlitchGroup/PixelSizeBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 10.0
+step = 0.5
+value = 3.0
+
+[node name="LabelPixelSize" type="Label" parent="GlitchGroup/PixelSizeBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "3.0px"
+
+[node name="SplitBox" type="HBoxContainer" parent="GlitchGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlitchGroup/SplitBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "RGB Split"
+
+[node name="SliderSplit" type="HSlider" parent="GlitchGroup/SplitBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 0.04
+step = 0.001
+value = 0.008
+
+[node name="LabelSplit" type="Label" parent="GlitchGroup/SplitBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.008"
+
+[node name="OpacityBox" type="HBoxContainer" parent="GlitchGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="GlitchGroup/OpacityBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Opacity"
+
+[node name="SliderOpacity" type="HSlider" parent="GlitchGroup/OpacityBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 1.0
+step = 0.05
+value = 0.5
+
+[node name="LabelOpacity" type="Label" parent="GlitchGroup/OpacityBox"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "0.50"
+
+[node name="HSeparator3" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="BtnResetDefaults" type="Button" parent="."]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Reset Shader Defaults"

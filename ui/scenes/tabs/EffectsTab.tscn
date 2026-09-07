@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://ui/scripts/tabs/EffectsTabUI.cs" id="1_fx"]
 
-[node name="EffectsTab" type="VBoxContainer" node_paths=PackedStringArray("_dofFarToggle", "_dofFarDistanceSlider", "_dofFarDistanceLabel", "_dofNearToggle", "_dofNearDistanceSlider", "_dofNearDistanceLabel", "_tonemapOption", "_fogToggle", "_fogDensitySlider", "_fogDensityLabel", "_volumetricFogToggle", "_glowToggle", "_glowIntensitySlider", "_glowIntensityLabel", "_glowBloomSlider", "_glowBloomLabel", "_glowHdrSlider", "_glowHdrLabel", "_glowBlendOption", "_btnResetEffects")]
+[node name="EffectsTab" type="VBoxContainer" node_paths=PackedStringArray("_dofFarToggle", "_dofFarDistanceSlider", "_dofFarDistanceLabel", "_dofNearToggle", "_dofNearDistanceSlider", "_dofNearDistanceLabel", "_dofBlurAmountSlider", "_dofBlurAmountLabel", "_tonemapOption", "_fogToggle", "_fogDensitySlider", "_fogDensityLabel", "_volumetricFogToggle", "_glowToggle", "_glowIntensitySlider", "_glowIntensityLabel", "_glowBloomSlider", "_glowBloomLabel", "_glowHdrSlider", "_glowHdrLabel", "_glowBlendOption", "_btnResetEffects")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -18,6 +18,8 @@ _dofFarDistanceLabel = NodePath("DoFGroup/FarDistanceBox/FarDistanceLabel")
 _dofNearToggle = NodePath("DoFGroup/DoFNearToggle")
 _dofNearDistanceSlider = NodePath("DoFGroup/NearDistanceBox/NearDistanceSlider")
 _dofNearDistanceLabel = NodePath("DoFGroup/NearDistanceBox/NearDistanceLabel")
+_dofBlurAmountSlider = NodePath("DoFGroup/BlurAmountBox/BlurAmountSlider")
+_dofBlurAmountLabel = NodePath("DoFGroup/BlurAmountBox/BlurAmountLabel")
 _tonemapOption = NodePath("TonemapGroup/TonemapOption")
 _fogToggle = NodePath("FogGroup/FogToggle")
 _fogDensitySlider = NodePath("FogGroup/FogDensityBox/FogDensitySlider")
@@ -41,6 +43,29 @@ theme_override_constants/separation = 6
 layout_mode = 2
 text = "Depth of Field (Portrait Blur)"
 
+[node name="BlurAmountBox" type="HBoxContainer" parent="DoFGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="DoFGroup/BlurAmountBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Strength"
+
+[node name="BlurAmountSlider" type="HSlider" parent="DoFGroup/BlurAmountBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.05
+max_value = 1.0
+step = 0.05
+value = 0.35
+
+[node name="BlurAmountLabel" type="Label" parent="DoFGroup/BlurAmountBox"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "0.35"
+
 [node name="DoFFarToggle" type="CheckBox" parent="DoFGroup"]
 layout_mode = 2
 text = "Far Blur Enabled"
@@ -59,14 +84,14 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = 0.5
-max_value = 50.0
-step = 0.5
-value = 10.0
+max_value = 25.0
+step = 0.1
+value = 5.0
 
 [node name="FarDistanceLabel" type="Label" parent="DoFGroup/FarDistanceBox"]
 custom_minimum_size = Vector2(50, 0)
 layout_mode = 2
-text = "10.0m"
+text = "5.0m"
 
 [node name="DoFNearToggle" type="CheckBox" parent="DoFGroup"]
 layout_mode = 2
@@ -86,14 +111,14 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = 0.5
-max_value = 50.0
-step = 0.5
-value = 2.0
+max_value = 25.0
+step = 0.1
+value = 3.5
 
 [node name="NearDistanceLabel" type="Label" parent="DoFGroup/NearDistanceBox"]
 custom_minimum_size = Vector2(50, 0)
 layout_mode = 2
-text = "2.0m"
+text = "3.5m"
 
 [node name="HSeparator1" type="HSeparator" parent="."]
 layout_mode = 2

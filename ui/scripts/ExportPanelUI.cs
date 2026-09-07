@@ -52,14 +52,18 @@ public partial class ExportPanelUI : PanelContainer
 
     public override void _Ready()
     {
-        _framingOverlay ??= GetNodeOrNull<Control>("/root/Main/UIRoot/MainHUD/FramingOverlay") 
-                         ?? GetNodeOrNull<Control>("../FramingOverlay");
+        _framingOverlay ??= GetNodeOrNull<Control>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/FramingOverlay")
+                         ?? GetNodeOrNull<Control>("/root/Main/UIRoot/MainHUD/FramingOverlay") 
+                         ?? GetNodeOrNull<Control>("../FramingOverlay")
+                         ?? GetTree().Root.FindChild("FramingOverlay", true, false) as Control;
+
         if (_framingOverlay != null)
         {
             _overlayBarTop ??= _framingOverlay.GetNodeOrNull<ColorRect>("BarTop");
             _overlayBarBottom ??= _framingOverlay.GetNodeOrNull<ColorRect>("BarBottom");
             _overlayBarLeft ??= _framingOverlay.GetNodeOrNull<ColorRect>("BarLeft");
             _overlayBarRight ??= _framingOverlay.GetNodeOrNull<ColorRect>("BarRight");
+            _framingOverlay.Resized += UpdateFramingOverlay;
         }
 
         _screenshotHelper = new ScreenshotHelper();
@@ -156,7 +160,9 @@ public partial class ExportPanelUI : PanelContainer
     {
         if (_framingOverlay == null) return;
 
-        Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
+        Vector2 viewportSize = (_framingOverlay != null && _framingOverlay.Size.X > 10 && _framingOverlay.Size.Y > 10) 
+            ? _framingOverlay.Size 
+            : GetViewport().GetVisibleRect().Size;
         float targetAspect = _currentRatio switch
         {
             AspectRatioMode.Ratio1x1 => 1.0f,
@@ -223,7 +229,9 @@ public partial class ExportPanelUI : PanelContainer
         var camera = GetViewport().GetCamera3D();
         if (camera == null)
         {
-            camera = GetNodeOrNull<Camera3D>("/root/Main/CameraPivot/Camera3D");
+            camera = GetNodeOrNull<Camera3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/CameraPivot/Camera3D")
+                  ?? GetNodeOrNull<Camera3D>("/root/Main/CameraPivot/Camera3D")
+                  ?? GetTree().Root.FindChild("Camera3D", true, false) as Camera3D;
         }
 
         if (camera == null)
@@ -238,11 +246,13 @@ public partial class ExportPanelUI : PanelContainer
 
         if (_btnExport != null) _btnExport.Disabled = true;
 
-        var studioUI = GetNodeOrNull<StudioUIManager>("/root/Main/UIRoot");
+        var studioUI = GetNodeOrNull<StudioUIManager>("/root/Main/UIRoot")
+                    ?? GetTree().Root.FindChild("UIRoot", true, false) as StudioUIManager;
         string saveDir = studioUI?.SavePath ?? OS.GetSystemDir(OS.SystemDir.Pictures);
 
         Node3D gizmo = GetNodeOrNull<Node3D>("/root/Main/VpkLoaderTest/SkeletonGizmoManager")
-                    ?? GetNodeOrNull<Node3D>("/root/Main/SkeletonGizmoManager");
+                    ?? GetNodeOrNull<Node3D>("/root/Main/SkeletonGizmoManager")
+                    ?? GetTree().Root.FindChild("SkeletonGizmoManager", true, false) as Node3D;
 
         EmitSignal(SignalName.ExportRequested, res, includeBg);
 

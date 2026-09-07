@@ -164,7 +164,8 @@ public partial class BoneLayerManager : Node3D
                 Mesh = CreateMarkerMeshForBone(boneName, category),
                 MaterialOverride = GetMaterialForCategory(category),
                 Scale = Vector3.One * GizmoDisplaySettings.BoneMarkerScale,
-                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                Layers = 2
             };
             attachment.AddChild(markerMesh);
 
@@ -331,18 +332,18 @@ public partial class BoneLayerManager : Node3D
     {
         if (item == null) return;
 
-        if (item.MarkerMesh != null)
+        if (GodotObject.IsInstanceValid(item.MarkerMesh))
         {
             item.MarkerMesh.Visible = enabled;
         }
 
-        if (item.Area != null)
+        if (GodotObject.IsInstanceValid(item.Area))
         {
             item.Area.CollisionLayer = enabled ? PickingCollisionLayer : 0;
             item.Area.Monitorable = enabled;
         }
 
-        if (item.Shape != null)
+        if (GodotObject.IsInstanceValid(item.Shape))
         {
             item.Shape.Disabled = !enabled;
         }
@@ -402,6 +403,24 @@ public partial class BoneLayerManager : Node3D
             Color clothCol = GizmoDisplaySettings.BoneClothingColor;
             clothCol.A = GizmoDisplaySettings.BoneMarkerOpacity;
             _matClothing.AlbedoColor = clothCol;
+        }
+
+        if (_matFingers != null)
+        {
+            Color col = new Color(1.0f, 0.8f, 0.2f, GizmoDisplaySettings.BoneMarkerOpacity);
+            _matFingers.AlbedoColor = col;
+        }
+
+        if (_matFace != null)
+        {
+            Color col = new Color(0.7f, 0.4f, 1.0f, GizmoDisplaySettings.BoneMarkerOpacity);
+            _matFace.AlbedoColor = col;
+        }
+
+        if (_matProps != null)
+        {
+            Color col = new Color(0.2f, 1.0f, 0.4f, GizmoDisplaySettings.BoneMarkerOpacity);
+            _matProps.AlbedoColor = col;
         }
 
         // Update scale on existing markers

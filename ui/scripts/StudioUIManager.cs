@@ -17,6 +17,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnTabScene;
     [Export] private Button _btnTabEffects;
     [Export] private Button _btnTabLighting;
+    [Export] private Button _btnTabShading;
 
     [ExportCategory("Tab Sub-Scene Instances (in Editor)")]
     [Export] private Container _tabContentContainer;
@@ -27,10 +28,13 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private SceneTabUI _tabScene;
     [Export] private EffectsTabUI _tabEffects;
     [Export] private LightingTabUI _tabLighting;
+    [Export] private ShadingTabUI _tabShading;
 
     [ExportCategory("Floating & Overlay Panels")]
     [Export] private ExportPanelUI _exportPanel;
     [Export] private Control _navBadge;
+    [Export] private Button _btnQuickXRay;
+    [Export] private Button _btnQuickFullscreen;
 
     [ExportCategory("Modals & Dialogs")]
     [Export] private Control _modalsLayer;
@@ -80,7 +84,10 @@ public partial class StudioUIManager : CanvasLayer
     {
         GetViewport().TransparentBg = true;
         
-        var envNode = GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment");
+        var envNode = GetNodeOrNull<WorldEnvironment>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/WorldEnvironment")
+                   ?? GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment")
+                   ?? GetTree().Root.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
+
         if (envNode != null && envNode.Environment != null)
         {
             envNode.Environment.BackgroundMode = Godot.Environment.BGMode.Canvas;
@@ -103,28 +110,91 @@ public partial class StudioUIManager : CanvasLayer
         InitializeDisplaySettingsUI();
         InitializePaths();
 
+        UpdateCharacterDependencyState(false);
+
         // Switch to default Character tab
         SwitchTab(0);
+    }
+
+    private SubViewport _worldViewport;
+
+    public void ToggleFullscreen()
+    {
+        var win = GetWindow();
+        if (win == null) return;
+
+        if (win.IsEmbedded())
+        {
+            ShowToast("Fullscreen is not supported while embedded in the Godot Editor. Run in a separate window.");
+            return;
+        }
+
+        var currentMode = DisplayServer.WindowGetMode();
+        bool isFs = currentMode == DisplayServer.WindowMode.Fullscreen ||
+                    currentMode == DisplayServer.WindowMode.ExclusiveFullscreen ||
+                    win.Mode == Window.ModeEnum.Fullscreen ||
+                    win.Mode == Window.ModeEnum.ExclusiveFullscreen;
+
+        if (isFs)
+        {
+            DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
+            win.Mode = Window.ModeEnum.Windowed;
+            if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Fullscreen";
+        }
+        else
+        {
+            DisplayServer.WindowSetMode(DisplayServer.WindowMode.ExclusiveFullscreen);
+            win.Mode = Window.ModeEnum.ExclusiveFullscreen;
+            if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Windowed";
+        }
+    }
+
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (@event is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.F11)
+        {
+            ToggleFullscreen();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        _worldViewport ??= GetNodeOrNull<SubViewport>("MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
+                        ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
+
+        _worldViewport?.PushInput(@event);
     }
 
     private void LinkNodes()
     {
         // Top Bar
-        _btnSettings ??= GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/SettingsButton");
-        _btnAbout ??= GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/AboutButton");
-        _btnQuit ??= GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/QuitButton");
+        _btnSettings ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
+                      ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/SettingsButton");
+        _btnAbout ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
+                   ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/AboutButton");
+        _btnQuit ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
+                  ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/QuitButton");
 
         // Tab Buttons
-        _btnTabCharacter ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/CharacterButton");
-        _btnTabBones ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/BonesButton");
-        _btnTabCamera ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/CameraButton");
-        _btnTabPose ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/PoseButton");
-        _btnTabScene ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/SceneButton");
-        _btnTabEffects ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/EffectsButton");
-        _btnTabLighting ??= GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/LightButton");
+        _btnTabCharacter ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
+                          ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/CharacterButton");
+        _btnTabBones ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/BonesButton")
+                      ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/BonesButton");
+        _btnTabCamera ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CameraButton")
+                       ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/CameraButton");
+        _btnTabPose ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PoseButton")
+                     ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/PoseButton");
+        _btnTabScene ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/SceneButton")
+                      ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/SceneButton");
+        _btnTabEffects ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/EffectsButton")
+                        ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/EffectsButton");
+        _btnTabLighting ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/LightButton")
+                         ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/LightButton");
+        _btnTabShading ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
+                        ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/ShadingButton");
 
         // Tab Content
-        _tabContentContainer ??= GetNodeOrNull<Container>("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer");
+        _tabContentContainer ??= GetNodeOrNull<Container>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
+                              ?? GetNodeOrNull<Container>("MainHUD/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer");
         _tabCharacter ??= _tabContentContainer?.GetNodeOrNull<CharacterTabUI>("CharacterTab");
         _tabBones ??= _tabContentContainer?.GetNodeOrNull<BonesTabUI>("BonesTab");
         _tabCamera ??= _tabContentContainer?.GetNodeOrNull<CameraTabUI>("CameraTab");
@@ -132,10 +202,18 @@ public partial class StudioUIManager : CanvasLayer
         _tabScene ??= _tabContentContainer?.GetNodeOrNull<SceneTabUI>("SceneTab");
         _tabEffects ??= _tabContentContainer?.GetNodeOrNull<EffectsTabUI>("EffectsTab");
         _tabLighting ??= _tabContentContainer?.GetNodeOrNull<LightingTabUI>("LightingTab");
+        _tabShading ??= _tabContentContainer?.GetNodeOrNull<ShadingTabUI>("ShadingTab");
 
-        // Floating Panels
-        _exportPanel ??= GetNodeOrNull<ExportPanelUI>("MainHUD/ExportPanel");
-        _navBadge ??= GetNodeOrNull<Control>("MainHUD/NavBadge");
+        // Floating Panels & Quick Actions
+        _exportPanel ??= GetNodeOrNull<ExportPanelUI>("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
+                      ?? GetNodeOrNull<ExportPanelUI>("MainHUD/ExportPanel");
+        _navBadge ??= GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge")
+                   ?? GetNodeOrNull<Control>("MainHUD/NavBadge");
+
+        _btnQuickXRay ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/BtnQuickXRay")
+                       ?? GetTree().Root.FindChild("BtnQuickXRay", true, false) as Button;
+        _btnQuickFullscreen ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/BtnQuickFullscreen")
+                             ?? GetTree().Root.FindChild("BtnQuickFullscreen", true, false) as Button;
 
         // Modals
         _modalsLayer ??= GetNodeOrNull<Control>("MainHUD/ModalsLayer");
@@ -181,7 +259,8 @@ public partial class StudioUIManager : CanvasLayer
             _tabPose,
             _tabScene,
             _tabEffects,
-            _tabLighting
+            _tabLighting,
+            _tabShading
         };
 
         _tabButtons = new Button[]
@@ -192,7 +271,8 @@ public partial class StudioUIManager : CanvasLayer
             _btnTabPose,
             _btnTabScene,
             _btnTabEffects,
-            _btnTabLighting
+            _btnTabLighting,
+            _btnTabShading
         };
 
         for (int i = 0; i < _tabButtons.Length; i++)
@@ -220,7 +300,10 @@ public partial class StudioUIManager : CanvasLayer
             {
                 bool active = (i == tabIndex);
                 _tabButtons[i].ButtonPressed = active;
-                _tabButtons[i].Modulate = active ? new Color(1.15f, 1.05f, 0.75f) : new Color(0.85f, 0.85f, 0.85f);
+                if (!_tabButtons[i].Disabled)
+                {
+                    _tabButtons[i].Modulate = active ? new Color(1.15f, 1.05f, 0.75f) : new Color(0.85f, 0.85f, 0.85f);
+                }
             }
         }
     }
@@ -290,8 +373,41 @@ public partial class StudioUIManager : CanvasLayer
         if (_gameFolderDialog != null) _gameFolderDialog.DirSelected += OnGameDirSelected;
         if (_saveFolderDialog != null) _saveFolderDialog.DirSelected += OnSaveDirSelected;
 
+        // Quick Action Buttons
+        if (_btnQuickXRay != null)
+        {
+            _btnQuickXRay.ToggleMode = true;
+            _btnQuickXRay.Toggled += (pressed) =>
+            {
+                _tabBones?.SetXRay(pressed);
+            };
+
+            if (_tabBones != null)
+            {
+                _tabBones.OnXRayToggled += (pressed) =>
+                {
+                    if (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed != pressed)
+                    {
+                        _btnQuickXRay.ButtonPressed = pressed;
+                    }
+                };
+            }
+        }
+
+        if (_btnQuickFullscreen != null)
+        {
+            var win = GetWindow();
+            if (win != null)
+            {
+                var mode = DisplayServer.WindowGetMode();
+                bool isFs = mode == DisplayServer.WindowMode.Fullscreen || mode == DisplayServer.WindowMode.ExclusiveFullscreen;
+                _btnQuickFullscreen.Text = isFs ? "Windowed" : "Fullscreen";
+            }
+            _btnQuickFullscreen.Pressed += ToggleFullscreen;
+        }
+
         // VPK Loader Bridge
-        var loader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
+        var loader = GetVpkLoader();
         if (loader != null)
         {
             loader.LoadStarted += () => ShowLoading(true);
@@ -301,12 +417,46 @@ public partial class StudioUIManager : CanvasLayer
         }
     }
 
+    public void UpdateCharacterDependencyState(bool hasCharacter)
+    {
+        if (_btnTabBones != null)
+        {
+            _btnTabBones.Disabled = !hasCharacter;
+            _btnTabBones.Modulate = hasCharacter ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            _btnTabBones.TooltipText = hasCharacter ? "" : "Requires an active character model";
+        }
+
+        if (_btnTabPose != null)
+        {
+            _btnTabPose.Disabled = !hasCharacter;
+            _btnTabPose.Modulate = hasCharacter ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            _btnTabPose.TooltipText = hasCharacter ? "" : "Requires an active character model";
+        }
+
+        _tabCharacter?.SetControlsEnabled(hasCharacter);
+
+        if (!hasCharacter && (_currentTabIndex == 1 || _currentTabIndex == 3))
+        {
+            SwitchTab(0);
+        }
+    }
+
+    private VpkLoaderTest GetVpkLoader()
+    {
+        return GetNodeOrNull<VpkLoaderTest>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/VpkLoaderTest")
+            ?? GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest")
+            ?? GetTree().Root.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+    }
+
     private void OnHeroLoaded(Node3D heroNode)
     {
         if (heroNode == null) return;
 
+        UpdateCharacterDependencyState(true);
+
         // Populate Character Tab
         _tabCharacter?.SetHero(heroNode);
+        _tabShading?.SetHero(heroNode);
 
         // Find Skeleton & Animation Player
         var skeleton = SearchSkeleton(heroNode);
@@ -342,9 +492,11 @@ public partial class StudioUIManager : CanvasLayer
     private void OnHeroUnloaded()
     {
         _tabCharacter?.ClearSubmeshes();
+        _tabShading?.ClearHero();
         _tabBones?.SetSkeleton(null);
         _tabPose?.SetSkeleton(null);
         _tabPose?.SetAnimationPlayer(null);
+        UpdateCharacterDependencyState(false);
     }
 
     private Skeleton3D SearchSkeleton(Node node)
@@ -497,7 +649,7 @@ public partial class StudioUIManager : CanvasLayer
 
     private void UpdateVpkLoaderPath(string basePath)
     {
-        var loader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
+        var loader = GetVpkLoader();
         if (loader != null)
         {
             loader.VpkPath = Path.Combine(basePath, "game", "citadel", "pak01_dir.vpk");

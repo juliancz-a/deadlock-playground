@@ -56,7 +56,9 @@ public partial class CharacterTabUI : VBoxContainer
 
         if (_vpkLoader == null)
         {
-            _vpkLoader = GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest");
+            _vpkLoader = GetNodeOrNull<VpkLoaderTest>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/VpkLoaderTest")
+                      ?? GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest")
+                      ?? GetTree().Root.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
         }
 
         if (_vpkLoader != null)
@@ -67,6 +69,24 @@ public partial class CharacterTabUI : VBoxContainer
             {
                 SetHero(_vpkLoader.CurrentHeroNode);
             }
+            else
+            {
+                SetControlsEnabled(false);
+            }
+        }
+        else
+        {
+            SetControlsEnabled(false);
+        }
+    }
+
+    public void SetControlsEnabled(bool enabled)
+    {
+        if (_btnShowAll != null) _btnShowAll.Disabled = !enabled;
+        if (_btnHideAccessories != null) _btnHideAccessories.Disabled = !enabled;
+        if (_submeshContainer != null)
+        {
+            _submeshContainer.Modulate = enabled ? Colors.White : new Color(1, 1, 1, 0.4f);
         }
     }
 
@@ -122,10 +142,15 @@ public partial class CharacterTabUI : VBoxContainer
     public void SetHero(Node3D heroNode)
     {
         ClearSubmeshes();
-        if (heroNode == null) return;
+        if (heroNode == null)
+        {
+            SetControlsEnabled(false);
+            return;
+        }
 
         CollectSubmeshesRecursive(heroNode);
         PopulateSubmeshList();
+        SetControlsEnabled(true);
     }
 
     public void ClearSubmeshes()
@@ -138,6 +163,7 @@ public partial class CharacterTabUI : VBoxContainer
             }
         }
         _submeshes.Clear();
+        SetControlsEnabled(false);
     }
 
     private void CollectSubmeshesRecursive(Node node)

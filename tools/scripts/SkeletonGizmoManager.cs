@@ -40,10 +40,20 @@ public partial class SkeletonGizmoManager : Node3D
 
     public void SetUIManager(IBoneUIController uiManager)
     {
-        _uiManager = uiManager;
-        if (_boneLayerManager != null && _uiManager != null)
+        if (_uiManager != null)
         {
-            _uiManager.SetBoneLayerManager(_boneLayerManager);
+            _uiManager.OnXRayToggled -= SetupDots;
+            _uiManager.OnLinesToggled -= SetupLines;
+            _uiManager.OnBoneSelectedFromUI -= SelectBone;
+        }
+
+        _uiManager = uiManager;
+        if (_uiManager != null)
+        {
+            if (_boneLayerManager != null)
+            {
+                _uiManager.SetBoneLayerManager(_boneLayerManager);
+            }
             _uiManager.OnXRayToggled += SetupDots;
             _uiManager.OnLinesToggled += SetupLines;
             _uiManager.OnBoneSelectedFromUI += SelectBone;
@@ -69,13 +79,17 @@ public partial class SkeletonGizmoManager : Node3D
         _boneLayerManager.BuildBoneHierarchyOverlay(TargetSkeleton, CollisionLayer);
         _boneLayerManager.BoneClicked += OnBonePicked;
 
-        // 2. Connect UI events
+        // 2. Connect UI events safely without duplicate subscriptions
         if (_uiManager != null)
         {
+            _uiManager.SetBoneLayerManager(_boneLayerManager);
+            _uiManager.OnXRayToggled -= SetupDots;
+            _uiManager.OnLinesToggled -= SetupLines;
+            _uiManager.OnBoneSelectedFromUI -= SelectBone;
+
             _uiManager.OnXRayToggled += SetupDots;
             _uiManager.OnLinesToggled += SetupLines;
             _uiManager.OnBoneSelectedFromUI += SelectBone;
-            _uiManager.SetBoneLayerManager(_boneLayerManager);
         }
 
         // 3. Initialize Skeleton line wireframe & 3D Gizmo
@@ -95,6 +109,16 @@ public partial class SkeletonGizmoManager : Node3D
     public override void _ExitTree()
     {
         GizmoDisplaySettings.OnSettingsChanged -= ApplyDisplaySettings;
+        if (_uiManager != null)
+        {
+            _uiManager.OnXRayToggled -= SetupDots;
+            _uiManager.OnLinesToggled -= SetupLines;
+            _uiManager.OnBoneSelectedFromUI -= SelectBone;
+        }
+        if (_boneLayerManager != null && GodotObject.IsInstanceValid(_boneLayerManager))
+        {
+            _boneLayerManager.BoneClicked -= OnBonePicked;
+        }
     }
 
     private void ApplyDisplaySettings()
@@ -111,6 +135,7 @@ public partial class SkeletonGizmoManager : Node3D
     {
         _gizmo = new Gizmo3D();
         _gizmo.Mode = Gizmo3D.ToolMode.Rotate;
+        _gizmo.Layers = 2;
         AddChild(_gizmo);
 
         _dummyTarget = new Node3D { Name = "GizmoDummyTarget" };
@@ -259,14 +284,17 @@ public partial class SkeletonGizmoManager : Node3D
     private void InitSkeletonMesh()
     {
         _skeletonMeshInstance = new MeshInstance3D();
+        _skeletonMeshInstance.Layers = 2;
         _immediateMesh = new ImmediateMesh();
         _skeletonMeshInstance.Mesh = _immediateMesh;
 
         if (XRayMaterial == null)
         {
+            Color col = GizmoDisplaySettings.XRayLineColor;
+            col.A = GizmoDisplaySettings.XRayLineOpacity;
             var mat = new StandardMaterial3D
             {
-                AlbedoColor = new Color(0, 1, 1, 0.3f),
+                AlbedoColor = col,
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 NoDepthTest = true
@@ -281,7 +309,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void SetupLines(bool enabled)
     {
-        if (_skeletonMeshInstance != null)
+        if (GodotObject.IsInstanceValid(_skeletonMeshInstance))
         {
             _skeletonMeshInstance.Visible = enabled;
         }
@@ -290,12 +318,12 @@ public partial class SkeletonGizmoManager : Node3D
     private void SetupDots(bool enabled)
     {
         _areDotsGloballyEnabled = enabled;
-        if (_boneLayerManager == null) return;
+        if (_boneLayerManager == null || !GodotObject.IsInstanceValid(_boneLayerManager)) return;
 
         // If dots are globally disabled, hide all markers without altering layer configuration
         foreach (var item in _boneLayerManager.BoneControls.Values)
         {
-            if (item.MarkerMesh != null)
+            if (item != null && GodotObject.IsInstanceValid(item.MarkerMesh))
             {
                 bool isLayerActive = _boneLayerManager.IsLayerEnabled(item.Category);
                 item.MarkerMesh.Visible = enabled && isLayerActive;
@@ -305,16 +333,16 @@ public partial class SkeletonGizmoManager : Node3D
 
     public override void _Process(double delta)
     {
-        if (_skeletonMeshInstance != null && _skeletonMeshInstance.Visible && TargetSkeleton != null)
+        if (GodotObject.IsInstanceValid(_skeletonMeshInstance) && _skeletonMeshInstance.Visible && GodotObject.IsInstanceValid(TargetSkeleton))
         {
             DrawSkeleton();
         }
 
         // Keep Gizmo attached to bone in case animation or slider moves it
-        if (_gizmo != null && _gizmo.Visible && _selectedBoneIdx != -1 && !_isGizmoDragging)
+        if (GodotObject.IsInstanceValid(_gizmo) && _gizmo.Visible && _selectedBoneIdx != -1 && !_isGizmoDragging)
         {
             var item = _boneLayerManager?.GetControl(_selectedBoneIdx);
-            if (item != null && item.Attachment != null)
+            if (item != null && GodotObject.IsInstanceValid(item.Attachment) && GodotObject.IsInstanceValid(_dummyTarget))
             {
                 _dummyTarget.GlobalTransform = item.Attachment.GlobalTransform;
             }
@@ -323,6 +351,8 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void DrawSkeleton()
     {
+        if (!GodotObject.IsInstanceValid(TargetSkeleton) || !GodotObject.IsInstanceValid(_immediateMesh)) return;
+
         _immediateMesh.ClearSurfaces();
         _immediateMesh.SurfaceBegin(Mesh.PrimitiveType.Lines);
 

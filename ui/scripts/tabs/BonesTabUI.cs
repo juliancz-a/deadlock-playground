@@ -12,7 +12,6 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
     [Export] private Label _labelX, _labelY, _labelZ;
     [Export] private Button _btnResetBone;
     [Export] private Button _btnDeselect;
-    [Export] private GridContainer _fastBoneGrid;
 
     [ExportCategory("Layer Filters")]
     [Export] private CheckBox _checkPrimary;
@@ -37,6 +36,30 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
 
     public bool IsXRayEnabled => _toggleXRayButton != null && _toggleXRayButton.ButtonPressed;
     public bool IsLinesEnabled => _toggleLinesButton == null || _toggleLinesButton.ButtonPressed;
+
+    public void SetXRay(bool enabled)
+    {
+        if (_toggleXRayButton != null)
+        {
+            if (_toggleXRayButton.ButtonPressed != enabled)
+            {
+                _toggleXRayButton.ButtonPressed = enabled;
+            }
+            else
+            {
+                OnXRayToggled?.Invoke(enabled);
+            }
+        }
+        else
+        {
+            OnXRayToggled?.Invoke(enabled);
+        }
+    }
+
+    public void ToggleXRay()
+    {
+        SetXRay(!IsXRayEnabled);
+    }
 
     public override void _Ready()
     {
@@ -76,7 +99,6 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
 
         if (_skeleton != null)
         {
-            PopulateFastBones();
             PopulateAllBones();
         }
     }
@@ -85,8 +107,12 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
     {
         _skeleton = skeleton;
         _selectedBoneIdx = -1;
+        if (_skeleton == null)
+        {
+            _layerManager = null;
+            _allBonesOptionButton?.Clear();
+        }
         UpdateSelectedBoneLabel();
-        PopulateFastBones();
         PopulateAllBones();
     }
 
@@ -138,57 +164,6 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
             BoneCategory cat = BoneLayerManager.ClassifyBone(bName);
             _allBonesOptionButton.AddItem($"[{cat}] {bName}", i + 1);
             _allBonesOptionButton.SetItemMetadata(i + 1, i);
-        }
-    }
-
-    private void PopulateFastBones()
-    {
-        if (_fastBoneGrid == null || _skeleton == null) return;
-
-        foreach (Node child in _fastBoneGrid.GetChildren())
-        {
-            child.QueueFree();
-        }
-
-        var fastBones = new Dictionary<string, string>
-        {
-            { "Weapon R", "weapon_hand_R" },
-            { "Weapon L", "weapon_hand_L" },
-            { "Head", "head" },
-            { "Neck", "neck_0" },
-            { "Spine 3", "spine_3" },
-            { "Spine 2", "spine_2" },
-            { "Pelvis", "pelvis" },
-            { "Hand R", "hand_R" },
-            { "Hand L", "hand_L" },
-            { "Foot R", "ankle_R" },
-            { "Foot L", "ankle_L" },
-            { "Arm R", "arm_upper_R" },
-            { "Arm L", "arm_upper_L" },
-            { "Thigh R", "leg_upper_R" },
-            { "Thigh L", "leg_upper_L" }
-        };
-
-        foreach (var pair in fastBones)
-        {
-            int bIdx = _skeleton.FindBone(pair.Value);
-            if (bIdx == -1) continue;
-
-            var btn = new Button
-            {
-                Text = pair.Key,
-                SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                CustomMinimumSize = new Vector2(0, 26)
-            };
-
-            int localIdx = bIdx;
-            btn.Pressed += () =>
-            {
-                SelectBone(localIdx);
-                OnBoneSelectedFromUI?.Invoke(localIdx);
-            };
-
-            _fastBoneGrid.AddChild(btn);
         }
     }
 

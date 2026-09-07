@@ -14,6 +14,8 @@ public partial class EffectsTabUI : VBoxContainer
     [Export] private CheckBox _dofNearToggle;
     [Export] private HSlider _dofNearDistanceSlider;
     [Export] private Label _dofNearDistanceLabel;
+    [Export] private HSlider _dofBlurAmountSlider;
+    [Export] private Label _dofBlurAmountLabel;
 
     [ExportCategory("Tonemapping")]
     [Export] private OptionButton _tonemapOption;
@@ -42,8 +44,7 @@ public partial class EffectsTabUI : VBoxContainer
 
     public override void _Ready()
     {
-        LinkReferences();
-        InitCameraAttributes();
+        EnsureCameraAttributes();
         PopulateDropdowns();
         ConnectEvents();
         SyncUIToScene();
@@ -51,29 +52,47 @@ public partial class EffectsTabUI : VBoxContainer
 
     private void LinkReferences()
     {
-        _worldEnv ??= GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment");
-        _camera ??= GetNodeOrNull<Camera3D>("/root/Main/CameraPivot/Camera3D");
+        _worldEnv ??= GetNodeOrNull<WorldEnvironment>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/WorldEnvironment")
+                   ?? GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment")
+                   ?? GetTree()?.Root?.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
+
+        _camera ??= GetNodeOrNull<Camera3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/CameraPivot/Camera3D")
+                 ?? GetNodeOrNull<Camera3D>("/root/Main/CameraPivot/Camera3D")
+                 ?? GetTree()?.Root?.FindChild("Camera3D", true, false) as Camera3D;
     }
 
-    private void InitCameraAttributes()
+    private CameraAttributesPractical EnsureCameraAttributes()
     {
-        if (_camera == null) return;
+        if (_cameraAttributesPractical != null) return _cameraAttributesPractical;
 
-        if (_camera.Attributes is CameraAttributesPractical practical)
+        LinkReferences();
+
+        if (_worldEnv?.CameraAttributes is CameraAttributesPractical envPractical)
         {
-            _cameraAttributesPractical = practical;
+            _cameraAttributesPractical = envPractical;
+        }
+        else if (_camera?.Attributes is CameraAttributesPractical camPractical)
+        {
+            _cameraAttributesPractical = camPractical;
         }
         else
         {
             _cameraAttributesPractical = new CameraAttributesPractical
             {
                 DofBlurFarEnabled = false,
-                DofBlurFarDistance = 10.0f,
+                DofBlurFarDistance = 5.0f,
+                DofBlurFarTransition = 1.5f,
                 DofBlurNearEnabled = false,
-                DofBlurNearDistance = 2.0f
+                DofBlurNearDistance = 3.5f,
+                DofBlurNearTransition = 1.5f,
+                DofBlurAmount = 0.35f
             };
-            _camera.Attributes = _cameraAttributesPractical;
         }
+
+        if (_camera != null) _camera.Attributes = _cameraAttributesPractical;
+        if (_worldEnv != null) _worldEnv.CameraAttributes = _cameraAttributesPractical;
+
+        return _cameraAttributesPractical;
     }
 
     private void PopulateDropdowns()
@@ -104,8 +123,9 @@ public partial class EffectsTabUI : VBoxContainer
         {
             _dofFarToggle.Toggled += (enabled) =>
             {
-                if (!_isSyncing && _cameraAttributesPractical != null)
-                    _cameraAttributesPractical.DofBlurFarEnabled = enabled;
+                var attrs = EnsureCameraAttributes();
+                if (!_isSyncing && attrs != null)
+                    attrs.DofBlurFarEnabled = enabled;
             };
         }
 
@@ -114,8 +134,9 @@ public partial class EffectsTabUI : VBoxContainer
             _dofFarDistanceSlider.ValueChanged += (v) =>
             {
                 if (_dofFarDistanceLabel != null) _dofFarDistanceLabel.Text = $"{v:F1}m";
-                if (!_isSyncing && _cameraAttributesPractical != null)
-                    _cameraAttributesPractical.DofBlurFarDistance = (float)v;
+                var attrs = EnsureCameraAttributes();
+                if (!_isSyncing && attrs != null)
+                    attrs.DofBlurFarDistance = (float)v;
             };
         }
 
@@ -124,8 +145,9 @@ public partial class EffectsTabUI : VBoxContainer
         {
             _dofNearToggle.Toggled += (enabled) =>
             {
-                if (!_isSyncing && _cameraAttributesPractical != null)
-                    _cameraAttributesPractical.DofBlurNearEnabled = enabled;
+                var attrs = EnsureCameraAttributes();
+                if (!_isSyncing && attrs != null)
+                    attrs.DofBlurNearEnabled = enabled;
             };
         }
 
@@ -134,8 +156,21 @@ public partial class EffectsTabUI : VBoxContainer
             _dofNearDistanceSlider.ValueChanged += (v) =>
             {
                 if (_dofNearDistanceLabel != null) _dofNearDistanceLabel.Text = $"{v:F1}m";
-                if (!_isSyncing && _cameraAttributesPractical != null)
-                    _cameraAttributesPractical.DofBlurNearDistance = (float)v;
+                var attrs = EnsureCameraAttributes();
+                if (!_isSyncing && attrs != null)
+                    attrs.DofBlurNearDistance = (float)v;
+            };
+        }
+
+        // DoF Blur Amount
+        if (_dofBlurAmountSlider != null)
+        {
+            _dofBlurAmountSlider.ValueChanged += (v) =>
+            {
+                if (_dofBlurAmountLabel != null) _dofBlurAmountLabel.Text = $"{v:F2}";
+                var attrs = EnsureCameraAttributes();
+                if (!_isSyncing && attrs != null)
+                    attrs.DofBlurAmount = (float)v;
             };
         }
 
@@ -238,20 +273,27 @@ public partial class EffectsTabUI : VBoxContainer
     {
         _isSyncing = true;
 
-        if (_cameraAttributesPractical != null)
+        var attrs = EnsureCameraAttributes();
+        if (attrs != null)
         {
-            if (_dofFarToggle != null) _dofFarToggle.ButtonPressed = _cameraAttributesPractical.DofBlurFarEnabled;
+            if (_dofFarToggle != null) _dofFarToggle.ButtonPressed = attrs.DofBlurFarEnabled;
             if (_dofFarDistanceSlider != null)
             {
-                _dofFarDistanceSlider.Value = _cameraAttributesPractical.DofBlurFarDistance;
-                if (_dofFarDistanceLabel != null) _dofFarDistanceLabel.Text = $"{_cameraAttributesPractical.DofBlurFarDistance:F1}m";
+                _dofFarDistanceSlider.Value = attrs.DofBlurFarDistance;
+                if (_dofFarDistanceLabel != null) _dofFarDistanceLabel.Text = $"{attrs.DofBlurFarDistance:F1}m";
             }
 
-            if (_dofNearToggle != null) _dofNearToggle.ButtonPressed = _cameraAttributesPractical.DofBlurNearEnabled;
+            if (_dofNearToggle != null) _dofNearToggle.ButtonPressed = attrs.DofBlurNearEnabled;
             if (_dofNearDistanceSlider != null)
             {
-                _dofNearDistanceSlider.Value = _cameraAttributesPractical.DofBlurNearDistance;
-                if (_dofNearDistanceLabel != null) _dofNearDistanceLabel.Text = $"{_cameraAttributesPractical.DofBlurNearDistance:F1}m";
+                _dofNearDistanceSlider.Value = attrs.DofBlurNearDistance;
+                if (_dofNearDistanceLabel != null) _dofNearDistanceLabel.Text = $"{attrs.DofBlurNearDistance:F1}m";
+            }
+
+            if (_dofBlurAmountSlider != null)
+            {
+                _dofBlurAmountSlider.Value = attrs.DofBlurAmount;
+                if (_dofBlurAmountLabel != null) _dofBlurAmountLabel.Text = $"{attrs.DofBlurAmount:F2}";
             }
         }
 
@@ -314,12 +356,16 @@ public partial class EffectsTabUI : VBoxContainer
 
     private void ResetToDefaults()
     {
-        if (_cameraAttributesPractical != null)
+        var attrs = EnsureCameraAttributes();
+        if (attrs != null)
         {
-            _cameraAttributesPractical.DofBlurFarEnabled = false;
-            _cameraAttributesPractical.DofBlurFarDistance = 10.0f;
-            _cameraAttributesPractical.DofBlurNearEnabled = false;
-            _cameraAttributesPractical.DofBlurNearDistance = 2.0f;
+            attrs.DofBlurFarEnabled = false;
+            attrs.DofBlurFarDistance = 5.0f;
+            attrs.DofBlurFarTransition = 1.5f;
+            attrs.DofBlurNearEnabled = false;
+            attrs.DofBlurNearDistance = 3.5f;
+            attrs.DofBlurNearTransition = 1.5f;
+            attrs.DofBlurAmount = 0.35f;
         }
 
         if (_worldEnv?.Environment != null)

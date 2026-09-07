@@ -72,6 +72,15 @@ public partial class SceneTabUI : VBoxContainer
     private StandardMaterial3D _stageMaterial;
     private ImageTexture _patternTexture;
 
+    private static readonly (string Name, string ResPath)[] DefaultBackgrounds = new[]
+    {
+        ("In-Game Background 1", "res://assets/backgrounds/background_00.jpg"),
+        ("In-Game Background 2", "res://assets/backgrounds/background_01.jpg"),
+        ("In-Game Background 3", "res://assets/backgrounds/background_02.jpg"),
+        ("In-Game Background 4", "res://assets/backgrounds/background_03.jpg"),
+        ("In-Game Background 5", "res://assets/backgrounds/background_04.jpg"),
+    };
+
     public override void _Ready()
     {
         LinkReferences();
@@ -80,16 +89,29 @@ public partial class SceneTabUI : VBoxContainer
         PopulateDropdowns();
         ConnectEvents();
 
-        // Default to Classic Menu on start
+        // Default to Image Background on start
         SetMode(BgMode.CustomImage);
     }
 
     private void LinkReferences()
     {
-        _bgColorRect ??= GetNodeOrNull<ColorRect>("/root/Main/BGCanvas/ColorRect");
-        _bgTextureRect ??= GetNodeOrNull<TextureRect>("/root/Main/BGCanvas/BackgroundRect");
-        _stagePlatform ??= GetNodeOrNull<Node3D>("/root/Main/StagePlatform");
-        _stageMesh ??= GetNodeOrNull<MeshInstance3D>("/root/Main/StagePlatform/FloorMesh");
+        _bgColorRect ??= GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/ColorRect")
+                      ?? GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/BGCanvas/ColorRect")
+                      ?? GetNodeOrNull<ColorRect>("/root/Main/BGCanvas/ColorRect")
+                      ?? GetTree().Root.FindChild("ColorRect", true, false) as ColorRect;
+
+        _bgTextureRect ??= GetNodeOrNull<TextureRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/BackgroundRect")
+                        ?? GetNodeOrNull<TextureRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/BGCanvas/BackgroundRect")
+                        ?? GetNodeOrNull<TextureRect>("/root/Main/BGCanvas/BackgroundRect")
+                        ?? GetTree().Root.FindChild("BackgroundRect", true, false) as TextureRect;
+
+        _stagePlatform ??= GetNodeOrNull<Node3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/StagePlatform")
+                        ?? GetNodeOrNull<Node3D>("/root/Main/StagePlatform")
+                        ?? GetTree().Root.FindChild("StagePlatform", true, false) as Node3D;
+
+        _stageMesh ??= GetNodeOrNull<MeshInstance3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/StagePlatform/FloorMesh")
+                    ?? GetNodeOrNull<MeshInstance3D>("/root/Main/StagePlatform/FloorMesh")
+                    ?? GetTree().Root.FindChild("FloorMesh", true, false) as MeshInstance3D;
 
         if (_imageFileDialog == null)
         {
@@ -165,12 +187,20 @@ public partial class SceneTabUI : VBoxContainer
         if (_presetImagesOption != null)
         {
             _presetImagesOption.Clear();
-            _presetImagesOption.AddItem("Classic Menu Backdrop", 0);
-            _presetImagesOption.AddItem("Dark Studio Vignette", 1);
-            _presetImagesOption.AddItem("Neutral Photography Gray", 2);
-            _presetImagesOption.AddItem("Warm Studio Stage", 3);
-            _presetImagesOption.AddItem("Cyberpunk Neon Studio", 4);
+            for (int i = 0; i < DefaultBackgrounds.Length; i++)
+            {
+                _presetImagesOption.AddItem(DefaultBackgrounds[i].Name, i);
+            }
+            _presetImagesOption.AddItem("Dark Studio Vignette", 5);
+            _presetImagesOption.AddItem("Neutral Photography Gray", 6);
+            _presetImagesOption.AddItem("Warm Studio Stage", 7);
+            _presetImagesOption.AddItem("Cyberpunk Neon Studio", 8);
             _presetImagesOption.Select(0);
+        }
+
+        if (_lblImagePath != null && string.IsNullOrEmpty(_lblImagePath.Text))
+        {
+            _lblImagePath.Text = DefaultBackgrounds[0].Name;
         }
 
         if (_stageStyleOption != null)
@@ -473,33 +503,36 @@ public partial class SceneTabUI : VBoxContainer
         if (_bgTextureRect == null) return;
         _bgTextureRect.StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered;
 
+        if (presetIdx >= 0 && presetIdx < DefaultBackgrounds.Length)
+        {
+            var (name, resPath) = DefaultBackgrounds[presetIdx];
+            var tex = GD.Load<Texture2D>(resPath);
+            if (tex != null)
+            {
+                _bgTextureRect.Texture = tex;
+                if (_lblImagePath != null) _lblImagePath.Text = name;
+            }
+            return;
+        }
+
         switch (presetIdx)
         {
-            case 0: // Classic Menu
-                var classic = GD.Load<Texture2D>("res://assets/backgrounds/classic_menu_bg.png");
-                if (classic != null)
-                {
-                    _bgTextureRect.Texture = classic;
-                    if (_lblImagePath != null) _lblImagePath.Text = "Classic Menu Backdrop";
-                }
-                break;
-
-            case 1: // Dark Studio Vignette
+            case 5: // Dark Studio Vignette
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.14f, 0.16f, 0.20f), new Color(0.04f, 0.05f, 0.07f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Dark Studio Vignette";
                 break;
 
-            case 2: // Neutral Photography Gray
+            case 6: // Neutral Photography Gray
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.24f, 0.25f, 0.27f), new Color(0.09f, 0.09f, 0.10f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Neutral Photography Gray";
                 break;
 
-            case 3: // Warm Studio Stage
+            case 7: // Warm Studio Stage
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.25f, 0.18f, 0.16f), new Color(0.07f, 0.05f, 0.04f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Warm Studio Stage";
                 break;
 
-            case 4: // Cyberpunk Neon Studio
+            case 8: // Cyberpunk Neon Studio
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.18f, 0.13f, 0.28f), new Color(0.05f, 0.04f, 0.09f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Cyberpunk Neon Studio";
                 break;

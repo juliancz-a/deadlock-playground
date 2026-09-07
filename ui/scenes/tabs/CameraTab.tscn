@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://ui/scripts/tabs/CameraTabUI.cs" id="1_cam"]
 
-[node name="CameraTab" type="VBoxContainer" node_paths=PackedStringArray("_fovSlider", "_fovLabel", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera")]
+[node name="CameraTab" type="VBoxContainer" node_paths=PackedStringArray("_projectionOption", "_fovGroup", "_fovSlider", "_fovLabel", "_checkDollyZoom", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -12,8 +12,21 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 12
 script = ExtResource("1_cam")
+_projectionOption = NodePath("ProjectionGroup/ProjectionOption")
+_fovGroup = NodePath("FovGroup")
 _fovSlider = NodePath("FovGroup/HBoxContainer/FovSlider")
 _fovLabel = NodePath("FovGroup/HBoxContainer/FovLabel")
+_checkDollyZoom = NodePath("FovGroup/CheckDollyZoom")
+_sizeGroup = NodePath("SizeGroup")
+_sizeSlider = NodePath("SizeGroup/HBoxContainer/SizeSlider")
+_sizeLabel = NodePath("SizeGroup/HBoxContainer/SizeLabel")
+_pitchSlider = NodePath("AnglesGroup/PitchBox/PitchSlider")
+_pitchLabel = NodePath("AnglesGroup/PitchBox/PitchLabel")
+_yawSlider = NodePath("AnglesGroup/YawBox/YawSlider")
+_yawLabel = NodePath("AnglesGroup/YawBox/YawLabel")
+_rollSlider = NodePath("AnglesGroup/RollBox/RollSlider")
+_rollLabel = NodePath("AnglesGroup/RollBox/RollLabel")
+_btnResetAngles = NodePath("AnglesGroup/BtnResetAngles")
 _btnPresetPortrait = NodePath("PresetsGroup/VBoxButtons/BtnPortrait")
 _btnPresetFullBody = NodePath("PresetsGroup/VBoxButtons/BtnFullBody")
 _btnPresetCloseup = NodePath("PresetsGroup/VBoxButtons/BtnCloseup")
@@ -22,6 +35,24 @@ _orbitSensLabel = NodePath("SensGroup/OrbitBox/OrbitSensLabel")
 _panSpeedSlider = NodePath("SensGroup/PanBox/PanSpeedSlider")
 _panSpeedLabel = NodePath("SensGroup/PanBox/PanSpeedLabel")
 _btnResetCamera = NodePath("BtnResetCamera")
+
+[node name="ProjectionGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ProjectionTitle" type="Label" parent="ProjectionGroup"]
+layout_mode = 2
+text = "Lens Projection Mode"
+
+[node name="ProjectionOption" type="OptionButton" parent="ProjectionGroup"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+selected = 0
+item_count = 2
+popup/item_0/text = "Perspective (3D Lens)"
+popup/item_0/id = 0
+popup/item_1/text = "Orthogonal (Isometric)"
+popup/item_1/id = 1
 
 [node name="FovGroup" type="VBoxContainer" parent="."]
 layout_mode = 2
@@ -40,7 +71,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = 15.0
-max_value = 90.0
+max_value = 120.0
 step = 1.0
 value = 75.0
 
@@ -49,7 +80,124 @@ custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 text = "75°"
 
+[node name="CheckDollyZoom" type="CheckBox" parent="FovGroup"]
+layout_mode = 2
+button_pressed = true
+text = "Dolly Zoom (Keep Subject Size)"
+
+[node name="SizeGroup" type="VBoxContainer" parent="."]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SizeTitle" type="Label" parent="SizeGroup"]
+layout_mode = 2
+text = "Orthographic Framing Size"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="SizeGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SizeSlider" type="HSlider" parent="SizeGroup/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.5
+max_value = 20.0
+step = 0.1
+value = 3.0
+
+[node name="SizeLabel" type="Label" parent="SizeGroup/HBoxContainer"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "3.0"
+
 [node name="HSeparator1" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="AnglesGroup" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AnglesTitle" type="Label" parent="AnglesGroup"]
+layout_mode = 2
+text = "Camera View Angles"
+
+[node name="PitchBox" type="HBoxContainer" parent="AnglesGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="AnglesGroup/PitchBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Pitch (Tilt)"
+
+[node name="PitchSlider" type="HSlider" parent="AnglesGroup/PitchBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -85.0
+max_value = 85.0
+step = 1.0
+value = 0.0
+
+[node name="PitchLabel" type="Label" parent="AnglesGroup/PitchBox"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "0°"
+
+[node name="YawBox" type="HBoxContainer" parent="AnglesGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="AnglesGroup/YawBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Yaw (Pan)"
+
+[node name="YawSlider" type="HSlider" parent="AnglesGroup/YawBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 1.0
+value = 0.0
+
+[node name="YawLabel" type="Label" parent="AnglesGroup/YawBox"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "0°"
+
+[node name="RollBox" type="HBoxContainer" parent="AnglesGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="AnglesGroup/RollBox"]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Roll (Bank)"
+
+[node name="RollSlider" type="HSlider" parent="AnglesGroup/RollBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 1.0
+value = 0.0
+
+[node name="RollLabel" type="Label" parent="AnglesGroup/RollBox"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "0°"
+
+[node name="BtnResetAngles" type="Button" parent="AnglesGroup"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+text = "Level Camera / Reset Angles"
+
+[node name="HSeparator2" type="HSeparator" parent="."]
 layout_mode = 2
 
 [node name="PresetsGroup" type="VBoxContainer" parent="."]
