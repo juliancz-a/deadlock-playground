@@ -3,7 +3,6 @@
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="1_colus"]
 [ext_resource type="FontFile" uid="uid://b54vaqwgncgu5" path="res://assets/fonts/dahlia-bold.otf" id="2_dahlia"]
 [ext_resource type="FontFile" uid="uid://dcds1t4ij4ajc" path="res://assets/fonts/Supersonic Rocketship.ttf" id="3_supersonic"]
-[ext_resource type="FontFile" uid="uid://b6278xif40kfo" path="res://dahlia-bold.otf" id="4_tnbtn"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_disabled"]
 content_margin_left = 12.0
@@ -555,7 +554,7 @@ SecondaryButton/colors/font_focus_color = Color(1, 1, 1, 1)
 SecondaryButton/colors/font_hover_color = Color(1, 1, 1, 1)
 SecondaryButton/colors/font_pressed_color = Color(0.937255, 0.870588, 0.74902, 1)
 SecondaryButton/font_sizes/font_size = 15
-SecondaryButton/fonts/font = ExtResource("4_tnbtn")
+SecondaryButton/fonts/font = ExtResource("2_dahlia")
 SecondaryButton/styles/disabled = SubResource("StyleBoxFlat_btn_disabled")
 SecondaryButton/styles/focus = SubResource("StyleBoxFlat_btn_focus")
 SecondaryButton/styles/hover = SubResource("StyleBoxFlat_btn_hover")

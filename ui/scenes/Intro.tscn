@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://b06hwksk8jaw6" path="res://ui/scripts/IntroScript.cs" id="1_falkw"]
 [ext_resource type="Texture2D" uid="uid://ctdilfr25jvj2" path="res://assets/backgrounds/intro/Paint_Splatter055.jpg" id="1_fm4gj"]
-[ext_resource type="Theme" uid="uid://cbawuwg8e0nxv" path="res://assets/themes/deadlock_main.tres" id="2_falkw"]
 [ext_resource type="Texture2D" uid="uid://c51pd0kgcpjue" path="res://assets/backgrounds/intro/godot_logo.png" id="3_d67h4"]
 [ext_resource type="Texture2D" uid="uid://c758a7ilf11ir" path="res://assets/backgrounds/intro/source2viewer_logo.png" id="4_jha30"]
 
@@ -26,10 +25,22 @@ tracks/0/keys = {
 "update": 0,
 "values": [Color(1, 1, 1, 1)]
 }
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("TextureRect:modulate")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
 
 [sub_resource type="Animation" id="Animation_x4cdl"]
 resource_name = "intro"
-length = 3.0
+length = 3.0000000000000004
 tracks/0/type = "value"
 tracks/0/imported = false
 tracks/0/enabled = true
@@ -40,7 +51,19 @@ tracks/0/keys = {
 "times": PackedFloat32Array(0, 1.3666667, 2.9666667),
 "transitions": PackedFloat32Array(1, 1, 1),
 "update": 0,
-"values": [Color(0, 0, 0, 0), Color(1, 1, 1, 1), Color(1, 1, 1, 1)]
+"values": [Color(0, 0, 0, 0), Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
+}
+tracks/1/type = "value"
+tracks/1/imported = false
+tracks/1/enabled = true
+tracks/1/path = NodePath("TextureRect:modulate")
+tracks/1/interp = 1
+tracks/1/loop_wrap = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 2.6, 3),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 1), Color(0, 0, 0, 1)]
 }
 
 [sub_resource type="AnimationLibrary" id="AnimationLibrary_t0pek"]
@@ -82,7 +105,6 @@ layout_mode = 2
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer" unique_id=1871912264]
 layout_mode = 2
 size_flags_horizontal = 4
-theme = ExtResource("2_falkw")
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_font_sizes/font_size = 48
 text = "Deadlock Playground"
