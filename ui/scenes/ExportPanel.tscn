@@ -1,6 +1,7 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://bmnaxn7uec4qy"]
 
-[ext_resource type="Script" path="res://ui/scripts/ExportPanelUI.cs" id="1_export"]
+[ext_resource type="Script" uid="uid://db18cpkof7gcb" path="res://ui/scripts/ExportPanelUI.cs" id="1_export"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_dwmip"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 bg_color = Color(0.0784314, 0.0862745, 0.109804, 0.941176)
@@ -11,10 +12,10 @@ border_width_bottom = 1
 border_color = Color(0.282353, 0.321569, 0.419608, 0.6)
 corner_radius_top_left = 10
 corner_radius_top_right = 10
-corner_radius_bottom_left = 10
 corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
 
-[node name="ExportPanel" type="PanelContainer" node_paths=PackedStringArray("_btnFormat1x1", "_btnFormat4x3", "_btnFormat16x9", "_btnFormat9x16", "_btnRes1080p", "_btnRes1440p", "_btnRes4K", "_checkIncludeBg", "_btnExport", "_lblDimensionPreview")]
+[node name="ExportPanel" type="PanelContainer" unique_id=714186449 node_paths=PackedStringArray("_btnFormat1x1", "_btnFormat4x3", "_btnFormat16x9", "_btnFormat9x16", "_btnRes1080p", "_btnRes1440p", "_btnRes4K", "_checkIncludeBg", "_btnExport", "_lblDimensionPreview")]
 custom_minimum_size = Vector2(230, 0)
 anchors_preset = 1
 anchor_left = 1.0
@@ -24,7 +25,6 @@ offset_top = 46.0
 offset_right = -16.0
 offset_bottom = 260.0
 grow_horizontal = 0
-grow_vertical = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 script = ExtResource("1_export")
 _btnFormat1x1 = NodePath("MarginContainer/VBoxContainer/FormatBox/GridContainer/Btn1x1")
@@ -38,46 +38,46 @@ _checkIncludeBg = NodePath("MarginContainer/VBoxContainer/HBoxExport/CheckInclud
 _btnExport = NodePath("MarginContainer/VBoxContainer/HBoxExport/BtnExport")
 _lblDimensionPreview = NodePath("MarginContainer/VBoxContainer/LblDimensions")
 
-[node name="MarginContainer" type="MarginContainer" parent="."]
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=682550156]
 layout_mode = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer" unique_id=1556895319]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="FormatBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="FormatBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=166967233]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/FormatBox"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1480415954]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
 theme_override_font_sizes/font_size = 12
 text = "FORMAT (ASPECT RATIO)"
 
-[node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/FormatBox"]
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1646729911]
 layout_mode = 2
 columns = 4
 
-[node name="Btn1x1" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer"]
+[node name="Btn1x1" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer" unique_id=1685181731]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "1:1"
 
-[node name="Btn4x3" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer"]
+[node name="Btn4x3" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer" unique_id=1722466585]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "4:3"
 
-[node name="Btn16x9" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer"]
+[node name="Btn16x9" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer" unique_id=1876303531]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -85,28 +85,28 @@ toggle_mode = true
 button_pressed = true
 text = "16:9"
 
-[node name="Btn9x16" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer"]
+[node name="Btn9x16" type="Button" parent="MarginContainer/VBoxContainer/FormatBox/GridContainer" unique_id=88028952]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "9:16"
 
-[node name="ResBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="ResBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=769987631]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ResBox"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ResBox" unique_id=571090747]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
 theme_override_font_sizes/font_size = 12
 text = "RESOLUTION PRESET"
 
-[node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/ResBox"]
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/ResBox" unique_id=924703207]
 layout_mode = 2
 columns = 3
 
-[node name="Btn1080p" type="Button" parent="MarginContainer/VBoxContainer/ResBox/GridContainer"]
+[node name="Btn1080p" type="Button" parent="MarginContainer/VBoxContainer/ResBox/GridContainer" unique_id=1093296806]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -114,42 +114,43 @@ toggle_mode = true
 button_pressed = true
 text = "1080p"
 
-[node name="Btn1440p" type="Button" parent="MarginContainer/VBoxContainer/ResBox/GridContainer"]
+[node name="Btn1440p" type="Button" parent="MarginContainer/VBoxContainer/ResBox/GridContainer" unique_id=2145047938]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "1440p"
 
-[node name="Btn4K" type="Button" parent="MarginContainer/VBoxContainer/ResBox/GridContainer"]
+[node name="Btn4K" type="Button" parent="MarginContainer/VBoxContainer/ResBox/GridContainer" unique_id=111722455]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
 text = "4K"
 
-[node name="LblDimensions" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="LblDimensions" type="Label" parent="MarginContainer/VBoxContainer" unique_id=1183140895]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.7, 0.78, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_dwmip")
+theme_override_font_sizes/font_size = 10
 text = "1920 × 1080 px"
 horizontal_alignment = 1
 
-[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer"]
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=534120226]
 layout_mode = 2
 
-[node name="HBoxExport" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="HBoxExport" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1375457073]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="CheckIncludeBg" type="CheckBox" parent="MarginContainer/VBoxContainer/HBoxExport"]
+[node name="CheckIncludeBg" type="CheckBox" parent="MarginContainer/VBoxContainer/HBoxExport" unique_id=779199194]
 layout_mode = 2
 size_flags_horizontal = 3
 button_pressed = true
 text = "Include BG"
 
-[node name="BtnExport" type="Button" parent="MarginContainer/VBoxContainer/HBoxExport"]
+[node name="BtnExport" type="Button" parent="MarginContainer/VBoxContainer/HBoxExport" unique_id=2101226669]
 custom_minimum_size = Vector2(76, 32)
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.9, 0.7, 1)
+theme_type_variation = &"AccentButton"
 text = "Export"

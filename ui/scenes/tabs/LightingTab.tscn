@@ -30,6 +30,7 @@ theme_override_constants/separation = 8
 
 [node name="SunLabel" type="Label" parent="SunGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Directional Sun Light"
 
 [node name="SunColorBox" type="HBoxContainer" parent="SunGroup"]
@@ -65,6 +66,7 @@ value = 1.0
 [node name="SunEnergyLabel" type="Label" parent="SunGroup/SunEnergyBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "1.00"
 
 [node name="SunHeadingBox" type="HBoxContainer" parent="SunGroup"]
@@ -87,6 +89,7 @@ step = 1.0
 [node name="SunHeadingLabel" type="Label" parent="SunGroup/SunHeadingBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0°"
 
 [node name="SunPitchBox" type="HBoxContainer" parent="SunGroup"]
@@ -109,6 +112,7 @@ step = 1.0
 [node name="SunPitchLabel" type="Label" parent="SunGroup/SunPitchBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0°"
 
 [node name="HSeparator1" type="HSeparator" parent="."]
@@ -120,6 +124,7 @@ theme_override_constants/separation = 8
 
 [node name="AmbientLabel" type="Label" parent="AmbientGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Ambient Environment Light"
 
 [node name="AmbientColorBox" type="HBoxContainer" parent="AmbientGroup"]
@@ -155,6 +160,7 @@ value = 1.0
 [node name="AmbientEnergyLabel" type="Label" parent="AmbientGroup/AmbientEnergyBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "1.00"
 
 [node name="HSeparator2" type="HSeparator" parent="."]

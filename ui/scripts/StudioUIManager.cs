@@ -114,6 +114,8 @@ public partial class StudioUIManager : CanvasLayer
 
         // Switch to default Character tab
         SwitchTab(0);
+
+        PlaygroundThemeHelper.AutoDecorate(this);
     }
 
     private SubViewport _worldViewport;
@@ -279,6 +281,7 @@ public partial class StudioUIManager : CanvasLayer
         {
             if (_tabButtons[i] != null)
             {
+                PlaygroundThemeHelper.MakeTabButton(_tabButtons[i], i == _currentTabIndex);
                 int tabIdx = i;
                 _tabButtons[i].Pressed += () => SwitchTab(tabIdx);
             }
@@ -299,11 +302,7 @@ public partial class StudioUIManager : CanvasLayer
             if (_tabButtons[i] != null)
             {
                 bool active = (i == tabIndex);
-                _tabButtons[i].ButtonPressed = active;
-                if (!_tabButtons[i].Disabled)
-                {
-                    _tabButtons[i].Modulate = active ? new Color(1.15f, 1.05f, 0.75f) : new Color(0.85f, 0.85f, 0.85f);
-                }
+                PlaygroundThemeHelper.UpdateTabButtonState(_tabButtons[i], active);
             }
         }
     }
@@ -565,20 +564,9 @@ public partial class StudioUIManager : CanvasLayer
         margin.AddChild(hbox);
         _toastPanel.AddChild(margin);
 
-        var style = new StyleBoxFlat
-        {
-            BgColor = new Color(0.1f, 0.12f, 0.16f, 0.95f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.3f, 0.35f, 0.45f, 0.8f)
-        };
-        _toastPanel.AddThemeStyleboxOverride("panel", style);
+        PlaygroundThemeHelper.MakeCard(_toastPanel);
+        PlaygroundThemeHelper.MakeAccentButton(_toastBtn);
+        PlaygroundThemeHelper.MakeHeaderLabel(_toastLabel);
 
         _toastPanel.SetAnchorsPreset(Control.LayoutPreset.CenterBottom);
         _toastPanel.Position = new Vector2(_toastPanel.Position.X, -60);

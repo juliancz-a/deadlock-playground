@@ -2,21 +2,62 @@
 
 [ext_resource type="PackedScene" uid="uid://5gylk5m307o0" path="res://tools/scenes/vpk_loader.tscn" id="1_vpk"]
 [ext_resource type="Script" uid="uid://bd8nhtlxjpsn" path="res://tools/scripts/OrbitCamera.cs" id="2_orbit"]
-[ext_resource type="Theme" uid="uid://cbawuwg8e0nxv" path="res://assets/themes/deadlock_main.tres" id="3_theme"]
+[ext_resource type="Texture2D" uid="uid://cn4yq50qo3u8k" path="res://assets/logo/dl-playground-logo.svg" id="3_074og"]
+[ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="3_theme"]
 [ext_resource type="Script" uid="uid://ccjoj2llg5baq" path="res://ui/scripts/StudioUIManager.cs" id="5_studio_ui"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/CharacterTab.tscn" id="6_char_tab"]
 [ext_resource type="PackedScene" uid="uid://bj84jmt2jj101" path="res://ui/scenes/tabs/BonesTab.tscn" id="7_bones_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/tabs/CameraTab.tscn" id="8_cam_tab"]
+[ext_resource type="PackedScene" uid="uid://c0f244rs3jgfn" path="res://ui/scenes/tabs/CameraTab.tscn" id="8_cam_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/PoseTab.tscn" id="9_pose_tab"]
 [ext_resource type="PackedScene" uid="uid://xq6td0qn5sfr" path="res://ui/scenes/tabs/SceneTab.tscn" id="10_scene_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/EffectsTab.tscn" id="11_fx_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/LightingTab.tscn" id="12_light_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/tabs/ShadingTab.tscn" id="13_shading_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/ExportPanel.tscn" id="14_export"]
+[ext_resource type="PackedScene" uid="uid://c600l2pc2ya3d" path="res://ui/scenes/tabs/ShadingTab.tscn" id="13_shading_tab"]
+[ext_resource type="PackedScene" uid="uid://bmnaxn7uec4qy" path="res://ui/scenes/ExportPanel.tscn" id="14_export"]
 [ext_resource type="Shader" uid="uid://bh86e204ret45" path="res://assets/shaders/crt_shader.gdshader" id="16_crt_shader"]
 [ext_resource type="Shader" uid="uid://82snm4ouah2f" path="res://assets/shaders/glitch_shader.gdshader" id="17_glitch_shader"]
 [ext_resource type="Script" uid="uid://c7d8ndr06lxge" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
 [ext_resource type="Texture2D" uid="uid://djdwwfcdcwicj" path="res://assets/backgrounds/background_00.jpg" id="19_bg0"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
+
+[sub_resource type="Animation" id="Animation_cegan"]
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Panel/Sprite2D:rotation")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+[sub_resource type="Animation" id="Animation_82xsv"]
+resource_name = "spin"
+length = 3.0333333
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Panel/Sprite2D:rotation")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 3.0333333),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [0.0, -6.283185307179586]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_getpj"]
+_data = {
+&"RESET": SubResource("Animation_cegan"),
+&"spin": SubResource("Animation_82xsv")
+}
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stage"]
 albedo_color = Color(0.15, 0.16, 0.2, 1)
@@ -136,6 +177,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+theme = ExtResource("3_theme")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD" unique_id=1472979004]
 layout_mode = 1
@@ -154,9 +196,21 @@ layout_mode = 2
 layout_mode = 2
 theme_override_constants/separation = 10
 
+[node name="Panel" type="Panel" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1401327701]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+theme_override_styles/panel = SubResource("StyleBoxEmpty_pgrle")
+
+[node name="Sprite2D" type="Sprite2D" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer/Panel" unique_id=1610179577]
+position = Vector2(16, 16)
+scale = Vector2(0.063, 0.063)
+texture = ExtResource("3_074og")
+
 [node name="AppLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1236653518]
 layout_mode = 2
-theme = ExtResource("3_theme")
+theme_type_variation = &"TitleLabel"
 text = "Deadlock Playground"
 
 [node name="_Spacer" type="Control" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1906916890]
@@ -174,6 +228,10 @@ text = "About"
 [node name="QuitButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=502220503]
 layout_mode = 2
 text = "Quit"
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1384400420]
+libraries/ = SubResource("AnimationLibrary_getpj")
+autoplay = &"spin"
 
 [node name="MainSplit" type="HSplitContainer" parent="UIRoot/MainHUD/VBoxContainer" unique_id=873218434]
 layout_mode = 2
@@ -362,7 +420,7 @@ stretch = true
 transparent_bg = true
 handle_input_locally = false
 physics_object_picking = true
-size = Vector2i(1548, 1044)
+size = Vector2i(1532, 1028)
 render_target_update_mode = 4
 
 [node name="StagePlatform" type="Node3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=1773132385]
@@ -441,7 +499,7 @@ stretch = true
 transparent_bg = true
 handle_input_locally = false
 gui_disable_input = true
-size = Vector2i(1548, 1044)
+size = Vector2i(1532, 1028)
 render_target_update_mode = 4
 script = ExtResource("18_gizmo_sync")
 

@@ -1,8 +1,8 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://c0f244rs3jgfn"]
 
-[ext_resource type="Script" path="res://ui/scripts/tabs/CameraTabUI.cs" id="1_cam"]
+[ext_resource type="Script" uid="uid://bmejex7p20wei" path="res://ui/scripts/tabs/CameraTabUI.cs" id="1_cam"]
 
-[node name="CameraTab" type="VBoxContainer" node_paths=PackedStringArray("_projectionOption", "_fovGroup", "_fovSlider", "_fovLabel", "_checkDollyZoom", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera")]
+[node name="CameraTab" type="VBoxContainer" unique_id=479136000 node_paths=PackedStringArray("_projectionOption", "_fovGroup", "_fovSlider", "_fovLabel", "_checkDollyZoom", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -36,15 +36,16 @@ _panSpeedSlider = NodePath("SensGroup/PanBox/PanSpeedSlider")
 _panSpeedLabel = NodePath("SensGroup/PanBox/PanSpeedLabel")
 _btnResetCamera = NodePath("BtnResetCamera")
 
-[node name="ProjectionGroup" type="VBoxContainer" parent="."]
+[node name="ProjectionGroup" type="VBoxContainer" parent="." unique_id=289482035]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="ProjectionTitle" type="Label" parent="ProjectionGroup"]
+[node name="ProjectionTitle" type="Label" parent="ProjectionGroup" unique_id=199807341]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Lens Projection Mode"
 
-[node name="ProjectionOption" type="OptionButton" parent="ProjectionGroup"]
+[node name="ProjectionOption" type="OptionButton" parent="ProjectionGroup" unique_id=1141342357]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 selected = 0
@@ -54,51 +55,53 @@ popup/item_0/id = 0
 popup/item_1/text = "Orthogonal (Isometric)"
 popup/item_1/id = 1
 
-[node name="FovGroup" type="VBoxContainer" parent="."]
+[node name="FovGroup" type="VBoxContainer" parent="." unique_id=588630354]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="FovTitle" type="Label" parent="FovGroup"]
+[node name="FovTitle" type="Label" parent="FovGroup" unique_id=1899186313]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Field of View (FOV)"
 
-[node name="HBoxContainer" type="HBoxContainer" parent="FovGroup"]
+[node name="HBoxContainer" type="HBoxContainer" parent="FovGroup" unique_id=788459767]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="FovSlider" type="HSlider" parent="FovGroup/HBoxContainer"]
+[node name="FovSlider" type="HSlider" parent="FovGroup/HBoxContainer" unique_id=1430451357]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = 15.0
 max_value = 120.0
-step = 1.0
 value = 75.0
 
-[node name="FovLabel" type="Label" parent="FovGroup/HBoxContainer"]
+[node name="FovLabel" type="Label" parent="FovGroup/HBoxContainer" unique_id=680126867]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "75°"
 
-[node name="CheckDollyZoom" type="CheckBox" parent="FovGroup"]
+[node name="CheckDollyZoom" type="CheckBox" parent="FovGroup" unique_id=500298457]
 layout_mode = 2
 button_pressed = true
 text = "Dolly Zoom (Keep Subject Size)"
 
-[node name="SizeGroup" type="VBoxContainer" parent="."]
+[node name="SizeGroup" type="VBoxContainer" parent="." unique_id=1299454125]
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="SizeTitle" type="Label" parent="SizeGroup"]
+[node name="SizeTitle" type="Label" parent="SizeGroup" unique_id=1875651765]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Orthographic Framing Size"
 
-[node name="HBoxContainer" type="HBoxContainer" parent="SizeGroup"]
+[node name="HBoxContainer" type="HBoxContainer" parent="SizeGroup" unique_id=2051297715]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SizeSlider" type="HSlider" parent="SizeGroup/HBoxContainer"]
+[node name="SizeSlider" type="HSlider" parent="SizeGroup/HBoxContainer" unique_id=1900561074]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -107,147 +110,148 @@ max_value = 20.0
 step = 0.1
 value = 3.0
 
-[node name="SizeLabel" type="Label" parent="SizeGroup/HBoxContainer"]
+[node name="SizeLabel" type="Label" parent="SizeGroup/HBoxContainer" unique_id=1453386058]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "3.0"
 
-[node name="HSeparator1" type="HSeparator" parent="."]
+[node name="HSeparator1" type="HSeparator" parent="." unique_id=1173475029]
 layout_mode = 2
 
-[node name="AnglesGroup" type="VBoxContainer" parent="."]
+[node name="AnglesGroup" type="VBoxContainer" parent="." unique_id=384786720]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="AnglesTitle" type="Label" parent="AnglesGroup"]
+[node name="AnglesTitle" type="Label" parent="AnglesGroup" unique_id=343055145]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Camera View Angles"
 
-[node name="PitchBox" type="HBoxContainer" parent="AnglesGroup"]
+[node name="PitchBox" type="HBoxContainer" parent="AnglesGroup" unique_id=695947687]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Label" type="Label" parent="AnglesGroup/PitchBox"]
+[node name="Label" type="Label" parent="AnglesGroup/PitchBox" unique_id=2092135090]
 custom_minimum_size = Vector2(85, 0)
 layout_mode = 2
 text = "Pitch (Tilt)"
 
-[node name="PitchSlider" type="HSlider" parent="AnglesGroup/PitchBox"]
+[node name="PitchSlider" type="HSlider" parent="AnglesGroup/PitchBox" unique_id=821849898]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = -85.0
 max_value = 85.0
-step = 1.0
-value = 0.0
 
-[node name="PitchLabel" type="Label" parent="AnglesGroup/PitchBox"]
+[node name="PitchLabel" type="Label" parent="AnglesGroup/PitchBox" unique_id=727746492]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0°"
 
-[node name="YawBox" type="HBoxContainer" parent="AnglesGroup"]
+[node name="YawBox" type="HBoxContainer" parent="AnglesGroup" unique_id=1607974470]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Label" type="Label" parent="AnglesGroup/YawBox"]
+[node name="Label" type="Label" parent="AnglesGroup/YawBox" unique_id=1413497203]
 custom_minimum_size = Vector2(85, 0)
 layout_mode = 2
 text = "Yaw (Pan)"
 
-[node name="YawSlider" type="HSlider" parent="AnglesGroup/YawBox"]
+[node name="YawSlider" type="HSlider" parent="AnglesGroup/YawBox" unique_id=1958280665]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = -180.0
 max_value = 180.0
-step = 1.0
-value = 0.0
 
-[node name="YawLabel" type="Label" parent="AnglesGroup/YawBox"]
+[node name="YawLabel" type="Label" parent="AnglesGroup/YawBox" unique_id=1434006095]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0°"
 
-[node name="RollBox" type="HBoxContainer" parent="AnglesGroup"]
+[node name="RollBox" type="HBoxContainer" parent="AnglesGroup" unique_id=960377393]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Label" type="Label" parent="AnglesGroup/RollBox"]
+[node name="Label" type="Label" parent="AnglesGroup/RollBox" unique_id=1421547121]
 custom_minimum_size = Vector2(85, 0)
 layout_mode = 2
 text = "Roll (Bank)"
 
-[node name="RollSlider" type="HSlider" parent="AnglesGroup/RollBox"]
+[node name="RollSlider" type="HSlider" parent="AnglesGroup/RollBox" unique_id=1379241433]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = -180.0
 max_value = 180.0
-step = 1.0
-value = 0.0
 
-[node name="RollLabel" type="Label" parent="AnglesGroup/RollBox"]
+[node name="RollLabel" type="Label" parent="AnglesGroup/RollBox" unique_id=1602524846]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0°"
 
-[node name="BtnResetAngles" type="Button" parent="AnglesGroup"]
+[node name="BtnResetAngles" type="Button" parent="AnglesGroup" unique_id=267266803]
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 text = "Level Camera / Reset Angles"
 
-[node name="HSeparator2" type="HSeparator" parent="."]
+[node name="HSeparator2" type="HSeparator" parent="." unique_id=2019355371]
 layout_mode = 2
 
-[node name="PresetsGroup" type="VBoxContainer" parent="."]
+[node name="PresetsGroup" type="VBoxContainer" parent="." unique_id=1569423531]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="PresetsLabel" type="Label" parent="PresetsGroup"]
+[node name="PresetsLabel" type="Label" parent="PresetsGroup" unique_id=664711933]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Camera Framing Presets"
 
-[node name="VBoxButtons" type="VBoxContainer" parent="PresetsGroup"]
+[node name="VBoxButtons" type="VBoxContainer" parent="PresetsGroup" unique_id=1116319766]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="BtnPortrait" type="Button" parent="PresetsGroup/VBoxButtons"]
+[node name="BtnPortrait" type="Button" parent="PresetsGroup/VBoxButtons" unique_id=1586148572]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Portrait Shot (Upper Body, FOV 35°)"
 
-[node name="BtnFullBody" type="Button" parent="PresetsGroup/VBoxButtons"]
+[node name="BtnFullBody" type="Button" parent="PresetsGroup/VBoxButtons" unique_id=787778868]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Full Body Shot (Full Hero, FOV 45°)"
 
-[node name="BtnCloseup" type="Button" parent="PresetsGroup/VBoxButtons"]
+[node name="BtnCloseup" type="Button" parent="PresetsGroup/VBoxButtons" unique_id=2023800790]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Close-up Detail (Face, FOV 25°)"
 
-[node name="HSeparator2" type="HSeparator" parent="."]
+[node name="HSeparator3" type="HSeparator" parent="." unique_id=1689482392]
 layout_mode = 2
 
-[node name="SensGroup" type="VBoxContainer" parent="."]
+[node name="SensGroup" type="VBoxContainer" parent="." unique_id=35671492]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SensLabel" type="Label" parent="SensGroup"]
+[node name="SensLabel" type="Label" parent="SensGroup" unique_id=145806985]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Navigation Sensitivity"
 
-[node name="OrbitBox" type="HBoxContainer" parent="SensGroup"]
+[node name="OrbitBox" type="HBoxContainer" parent="SensGroup" unique_id=310567945]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Label" type="Label" parent="SensGroup/OrbitBox"]
+[node name="Label" type="Label" parent="SensGroup/OrbitBox" unique_id=1181133752]
 custom_minimum_size = Vector2(70, 0)
 layout_mode = 2
 text = "Orbit"
 
-[node name="OrbitSensSlider" type="HSlider" parent="SensGroup/OrbitBox"]
+[node name="OrbitSensSlider" type="HSlider" parent="SensGroup/OrbitBox" unique_id=1464553727]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -256,21 +260,22 @@ max_value = 0.02
 step = 0.001
 value = 0.005
 
-[node name="OrbitSensLabel" type="Label" parent="SensGroup/OrbitBox"]
+[node name="OrbitSensLabel" type="Label" parent="SensGroup/OrbitBox" unique_id=1963408534]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0.005"
 
-[node name="PanBox" type="HBoxContainer" parent="SensGroup"]
+[node name="PanBox" type="HBoxContainer" parent="SensGroup" unique_id=422727819]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Label" type="Label" parent="SensGroup/PanBox"]
+[node name="Label" type="Label" parent="SensGroup/PanBox" unique_id=2098936089]
 custom_minimum_size = Vector2(70, 0)
 layout_mode = 2
 text = "Pan Speed"
 
-[node name="PanSpeedSlider" type="HSlider" parent="SensGroup/PanBox"]
+[node name="PanSpeedSlider" type="HSlider" parent="SensGroup/PanBox" unique_id=1578184535]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -279,15 +284,16 @@ max_value = 15.0
 step = 0.5
 value = 5.0
 
-[node name="PanSpeedLabel" type="Label" parent="SensGroup/PanBox"]
+[node name="PanSpeedLabel" type="Label" parent="SensGroup/PanBox" unique_id=339744837]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "5.0"
 
-[node name="HSeparator3" type="HSeparator" parent="."]
+[node name="HSeparator4" type="HSeparator" parent="." unique_id=2125820814]
 layout_mode = 2
 
-[node name="BtnResetCamera" type="Button" parent="."]
+[node name="BtnResetCamera" type="Button" parent="." unique_id=35836319]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Reset Camera View"

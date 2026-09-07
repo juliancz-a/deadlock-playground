@@ -37,6 +37,7 @@ theme_override_constants/separation = 4
 
 [node name="LayersLabel" type="Label" parent="LayersGroup" unique_id=1690391033]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Bone Layer Filters"
 
 [node name="GridContainer" type="GridContainer" parent="LayersGroup" unique_id=454008934]
@@ -84,6 +85,7 @@ theme_override_constants/separation = 4
 
 [node name="XRayLabel" type="Label" parent="XRayGroup" unique_id=1715145338]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Gizmo & Viewport Display"
 
 [node name="HBoxContainer" type="HBoxContainer" parent="XRayGroup" unique_id=1268961532]
@@ -107,6 +109,7 @@ theme_override_constants/separation = 4
 
 [node name="SearchLabel" type="Label" parent="BoneSelectGroup" unique_id=41470276]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Search & Pick Bone"
 
 [node name="BoneOptionButton" type="OptionButton" parent="BoneSelectGroup" unique_id=1266874624]
@@ -133,6 +136,7 @@ theme_override_constants/separation = 8
 [node name="LabelX" type="Label" parent="TransformGroup/SliderXBox" unique_id=1832555706]
 custom_minimum_size = Vector2(75, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "X: 0.0°"
 
 [node name="SliderX" type="HSlider" parent="TransformGroup/SliderXBox" unique_id=1720901452]
@@ -150,6 +154,7 @@ theme_override_constants/separation = 8
 [node name="LabelY" type="Label" parent="TransformGroup/SliderYBox" unique_id=1980372547]
 custom_minimum_size = Vector2(75, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "Y: 0.0°"
 
 [node name="SliderY" type="HSlider" parent="TransformGroup/SliderYBox" unique_id=1596149811]
@@ -167,6 +172,7 @@ theme_override_constants/separation = 8
 [node name="LabelZ" type="Label" parent="TransformGroup/SliderZBox" unique_id=16030543]
 custom_minimum_size = Vector2(75, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "Z: 0.0°"
 
 [node name="SliderZ" type="HSlider" parent="TransformGroup/SliderZBox" unique_id=959262889]

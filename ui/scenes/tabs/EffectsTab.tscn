@@ -41,6 +41,7 @@ theme_override_constants/separation = 6
 
 [node name="DoFLabel" type="Label" parent="DoFGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Depth of Field (Portrait Blur)"
 
 [node name="BlurAmountBox" type="HBoxContainer" parent="DoFGroup"]
@@ -64,6 +65,7 @@ value = 0.35
 [node name="BlurAmountLabel" type="Label" parent="DoFGroup/BlurAmountBox"]
 custom_minimum_size = Vector2(50, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0.35"
 
 [node name="DoFFarToggle" type="CheckBox" parent="DoFGroup"]
@@ -91,6 +93,7 @@ value = 5.0
 [node name="FarDistanceLabel" type="Label" parent="DoFGroup/FarDistanceBox"]
 custom_minimum_size = Vector2(50, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "5.0m"
 
 [node name="DoFNearToggle" type="CheckBox" parent="DoFGroup"]
@@ -118,6 +121,7 @@ value = 3.5
 [node name="NearDistanceLabel" type="Label" parent="DoFGroup/NearDistanceBox"]
 custom_minimum_size = Vector2(50, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "3.5m"
 
 [node name="HSeparator1" type="HSeparator" parent="."]
@@ -129,6 +133,7 @@ theme_override_constants/separation = 4
 
 [node name="TonemapLabel" type="Label" parent="TonemapGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Tonemapping Operator"
 
 [node name="TonemapOption" type="OptionButton" parent="TonemapGroup"]
@@ -145,6 +150,7 @@ theme_override_constants/separation = 6
 
 [node name="GlowLabel" type="Label" parent="GlowGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Glow & Bloom"
 
 [node name="GlowToggle" type="CheckBox" parent="GlowGroup"]
@@ -172,6 +178,7 @@ value = 1.0
 [node name="GlowIntensityLabel" type="Label" parent="GlowGroup/GlowIntensityBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "1.00"
 
 [node name="BloomBox" type="HBoxContainer" parent="GlowGroup"]
@@ -194,6 +201,7 @@ value = 0.35
 [node name="BloomLabel" type="Label" parent="GlowGroup/BloomBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0.35"
 
 [node name="HdrBox" type="HBoxContainer" parent="GlowGroup"]
@@ -216,6 +224,7 @@ value = 0.85
 [node name="HdrLabel" type="Label" parent="GlowGroup/HdrBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0.85"
 
 [node name="BlendBox" type="HBoxContainer" parent="GlowGroup"]
@@ -241,6 +250,7 @@ theme_override_constants/separation = 6
 
 [node name="FogLabel" type="Label" parent="FogGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Atmosphere & Fog"
 
 [node name="FogToggle" type="CheckBox" parent="FogGroup"]
@@ -271,6 +281,7 @@ value = 0.005
 [node name="FogDensityLabel" type="Label" parent="FogGroup/FogDensityBox"]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "0.005"
 
 [node name="HSeparator4" type="HSeparator" parent="."]

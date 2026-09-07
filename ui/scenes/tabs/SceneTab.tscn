@@ -40,6 +40,7 @@ theme_override_constants/separation = 4
 
 [node name="ModeLabel" type="Label" parent="ModeGroup" unique_id=1854074183]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Background Style"
 
 [node name="ModeOption" type="OptionButton" parent="ModeGroup" unique_id=579309085]
@@ -60,6 +61,7 @@ theme_override_constants/separation = 8
 
 [node name="ColorLabel" type="Label" parent="PanelColor/VBoxContainer" unique_id=1776381311]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Solid Background Color"
 
 [node name="ColorPickerButton" type="ColorPickerButton" parent="PanelColor/VBoxContainer" unique_id=1086909692]
@@ -77,6 +79,7 @@ theme_override_constants/separation = 8
 
 [node name="GradLabel" type="Label" parent="PanelGradient/VBoxContainer" unique_id=39585610]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "2-Color Gradient Backdrop"
 
 [node name="HBoxTop" type="HBoxContainer" parent="PanelGradient/VBoxContainer" unique_id=981432151]
@@ -115,6 +118,7 @@ theme_override_constants/separation = 8
 
 [node name="PatternLabel" type="Label" parent="PanelPattern/VBoxContainer" unique_id=1108479824]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Pattern Backdrop"
 
 [node name="PatternStyleOption" type="OptionButton" parent="PanelPattern/VBoxContainer" unique_id=1087445146]
@@ -169,6 +173,7 @@ value = 48.0
 [node name="ScaleLabel" type="Label" parent="PanelPattern/VBoxContainer/ScaleBox" unique_id=55724540]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
+theme_type_variation = &"NumericLabel"
 text = "48px"
 
 [node name="PanelImage" type="PanelContainer" parent="." unique_id=1937351285]
@@ -207,6 +212,7 @@ theme_override_constants/separation = 8
 
 [node name="StageLabel" type="Label" parent="PanelStage/VBoxContainer" unique_id=1856074093]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "3D Studio Stage"
 
 [node name="StageToggleCheck" type="CheckBox" parent="PanelStage/VBoxContainer" unique_id=1147017068]

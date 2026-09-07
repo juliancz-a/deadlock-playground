@@ -22,6 +22,7 @@ theme_override_constants/separation = 8
 
 [node name="AnimLabel" type="Label" parent="AnimGroup"]
 layout_mode = 2
+theme_type_variation = &"TitleLabel"
 text = "Animation Sequences"
 
 [node name="AnimOptionButton" type="OptionButton" parent="AnimGroup"]

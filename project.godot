@@ -14,7 +14,7 @@ config/name="Deadlock_Playground"
 run/main_scene="uid://b0avkl80hhgtj"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 boot_splash/show_image=false
-config/icon="res://icon.svg"
+config/icon="uid://67nlgu7dndiv"
 
 [display]
 
@@ -39,6 +39,10 @@ folder_colors={
 "res://tools/": "gray",
 "res://ui/": "green"
 }
+
+[gui]
+
+theme/custom="res://assets/themes/PlaygroundTheme.tres"
 
 [layer_names]
 
