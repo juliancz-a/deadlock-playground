@@ -78,6 +78,17 @@ public static class GizmoDisplaySettings
         }
     }
 
+    private static float _ikHandlesOpacity = 0.70f;
+    public static float IKHandlesOpacity
+    {
+        get => _ikHandlesOpacity;
+        set
+        {
+            _ikHandlesOpacity = Mathf.Clamp(value, 0.05f, 1.0f);
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
     public static event Action OnSettingsChanged;
 
     public static void NotifyChanged()
@@ -95,6 +106,7 @@ public static class GizmoDisplaySettings
         BoneClothingColor = new Color(1.0f, 0.35f, 0.75f);
         BoneMarkerOpacity = 0.75f;
         BoneMarkerScale = 1.0f;
+        IKHandlesOpacity = 0.70f;
         _isLoading = false;
 
         NotifyChanged();
@@ -123,6 +135,9 @@ public static class GizmoDisplaySettings
 
             if (config.HasSectionKey(SectionName, "BoneMarkerScale"))
                 BoneMarkerScale = (float)config.GetValue(SectionName, "BoneMarkerScale", BoneMarkerScale);
+
+            if (config.HasSectionKey(SectionName, "IKHandlesOpacity"))
+                IKHandlesOpacity = (float)config.GetValue(SectionName, "IKHandlesOpacity", IKHandlesOpacity);
             _isLoading = false;
         }
     }
@@ -138,6 +153,7 @@ public static class GizmoDisplaySettings
         config.SetValue(SectionName, "BoneClothingColor", BoneClothingColor);
         config.SetValue(SectionName, "BoneMarkerOpacity", BoneMarkerOpacity);
         config.SetValue(SectionName, "BoneMarkerScale", BoneMarkerScale);
+        config.SetValue(SectionName, "IKHandlesOpacity", IKHandlesOpacity);
 
         config.Save(ConfigPath);
     }

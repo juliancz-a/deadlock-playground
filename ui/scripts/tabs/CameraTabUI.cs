@@ -39,6 +39,8 @@ public partial class CameraTabUI : VBoxContainer
 
     [ExportCategory("Actions")]
     [Export] private Button _btnResetCamera;
+    [Export] private Button _btnRecenterOnModel;
+    [Export] private Button _btnResetCameraTransform;
 
     private float _defaultFov = 75.0f;
     private float _defaultOrthoSize = 3.0f;
@@ -207,6 +209,8 @@ public partial class CameraTabUI : VBoxContainer
         if (_btnPresetCloseup != null) _btnPresetCloseup.Pressed += ApplyCloseupPreset;
 
         if (_btnResetCamera != null) _btnResetCamera.Pressed += ResetCamera;
+        if (_btnRecenterOnModel != null) _btnRecenterOnModel.Pressed += RecenterOnModel;
+        if (_btnResetCameraTransform != null) _btnResetCameraTransform.Pressed += ResetCameraTransform;
     }
 
     public void SetProjection(Camera3D.ProjectionType mode)
@@ -361,6 +365,11 @@ public partial class CameraTabUI : VBoxContainer
 
     public void ResetCamera()
     {
+        ResetCameraTransform();
+    }
+
+    public void ResetCameraTransform()
+    {
         SetProjection(Camera3D.ProjectionType.Perspective);
         if (_camera != null)
         {
@@ -370,15 +379,57 @@ public partial class CameraTabUI : VBoxContainer
 
         if (_orbitCamera != null)
         {
-            _orbitCamera.Position = new Vector3(0, 1.0f, 0);
-            _orbitCamera.Rotation = Vector3.Zero;
+            _orbitCamera.ResetTransform();
             _orbitCamera.OrbitSensitivity = _defaultOrbitSens;
             _orbitCamera.PanSpeed = _defaultPanSpeed;
-            _orbitCamera.SetTargetZoom(5.0f);
             _orbitCamera.SetOrthoSize(_defaultOrthoSize);
-            _orbitCamera.ResetAngles();
         }
 
         SyncUIToScene();
+    }
+
+    public void RecenterOnModel()
+    {
+        LinkReferences();
+        if (_orbitCamera == null) return;
+
+        var vpkLoader = GetNodeOrNull<VpkLoaderTest>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/VpkLoaderTest")
+                     ?? GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest")
+                     ?? GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+
+        Node3D heroNode = vpkLoader?.CurrentHeroNode;
+        Vector3 targetCenter = new Vector3(0, 1.0f, 0);
+
+        if (heroNode != null && GodotObject.IsInstanceValid(heroNode))
+        {
+            // Find chest / spine bone
+            var skeleton = SearchSkeleton(heroNode);
+            if (skeleton != null)
+            {
+                string[] candidates = { "chest", "spine_3", "spine_2", "spine_1", "pelvis" };
+                foreach (var boneName in candidates)
+                {
+                    int idx = skeleton.FindBone(boneName);
+                    if (idx != -1)
+                    {
+                        targetCenter = (skeleton.GlobalTransform * skeleton.GetBoneGlobalPose(idx)).Origin;
+                        break;
+                    }
+                }
+            }
+        }
+
+        _orbitCamera.RecenterOnTarget(targetCenter);
+    }
+
+    private Skeleton3D SearchSkeleton(Node node)
+    {
+        if (node is Skeleton3D sk) return sk;
+        foreach (Node child in node.GetChildren())
+        {
+            var res = SearchSkeleton(child);
+            if (res != null) return res;
+        }
+        return null;
     }
 }

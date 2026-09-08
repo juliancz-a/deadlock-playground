@@ -54,6 +54,8 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private LineEdit _savePathInput;
     [Export] private Button _btnBrowseSavePath;
     [Export] private OptionButton _texQualityOption;
+    [Export] private OptionButton _fpsLimitOption;
+    [Export] private CheckBox _vsyncCheck;
     [Export] private ColorPickerButton _xrayLineColorPicker;
     [Export] private HSlider _xrayLineOpacitySlider;
     [Export] private Label _xrayLineOpacityLabel;
@@ -63,7 +65,11 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Label _boneMarkerOpacityLabel;
     [Export] private HSlider _boneMarkerSizeSlider;
     [Export] private Label _boneMarkerSizeLabel;
+    [Export] private HSlider _ikHandlesOpacitySlider;
+    [Export] private Label _ikHandlesOpacityLabel;
     [Export] private Button _btnResetDisplaySettings;
+
+    private CharacterIKManager _currentIKManager;
 
     // Services
     private GamePathManager _pathManager;
@@ -108,7 +114,13 @@ public partial class StudioUIManager : CanvasLayer
         InitTabs();
         ConnectEvents();
         InitializeDisplaySettingsUI();
+        InitializeGraphicsSettingsUI();
         InitializePaths();
+
+        // Enforce Performance & Frame Limiting
+        Engine.MaxFps = 60;
+        DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Enabled);
+        ApplySubViewportOptimizations();
 
         UpdateCharacterDependencyState(false);
 
@@ -237,6 +249,8 @@ public partial class StudioUIManager : CanvasLayer
         _savePathInput ??= GetNodeOrNull<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/SavesPathLine");
         _btnBrowseSavePath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton");
         _texQualityOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/TexQualityButton");
+        _fpsLimitOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/FpsLimitButton");
+        _vsyncCheck ??= GetNodeOrNull<CheckBox>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/VsyncCheck");
 
         _xrayLineColorPicker ??= GetNodeOrNull<ColorPickerButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineColor/ColorPickerButton");
         _xrayLineOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineOpacity/HSlider");
@@ -248,6 +262,8 @@ public partial class StudioUIManager : CanvasLayer
         _boneMarkerOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneOpacity/LabelCurrOpacity");
         _boneMarkerSizeSlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneSize/HSlider");
         _boneMarkerSizeLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneSize/LabelCurrSize");
+        _ikHandlesOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity/HSlider");
+        _ikHandlesOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity/LabelCurrOpacity");
         _btnResetDisplaySettings ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/ResetButton");
     }
 
@@ -480,6 +496,17 @@ public partial class StudioUIManager : CanvasLayer
             {
                 gizmoManager.UIManager = _tabBones;
             }
+
+            // Configure CharacterIKManager
+            var ikManager = new CharacterIKManager
+            {
+                Name = "CharacterIKManager"
+            };
+            skeleton.AddChild(ikManager);
+            ikManager.Setup(skeleton);
+            _currentIKManager = ikManager;
+            _currentIKManager.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
+            _tabBones?.SetIKManager(ikManager);
         }
 
         if (animPlayer != null)
@@ -490,9 +517,11 @@ public partial class StudioUIManager : CanvasLayer
 
     private void OnHeroUnloaded()
     {
+        _currentIKManager = null;
         _tabCharacter?.ClearSubmeshes();
         _tabShading?.ClearHero();
         _tabBones?.SetSkeleton(null);
+        _tabBones?.SetIKManager(null);
         _tabPose?.SetSkeleton(null);
         _tabPose?.SetAnimationPlayer(null);
         UpdateCharacterDependencyState(false);
@@ -725,12 +754,80 @@ public partial class StudioUIManager : CanvasLayer
             };
         }
 
+        if (_ikHandlesOpacitySlider != null)
+        {
+            _ikHandlesOpacitySlider.Value = GizmoDisplaySettings.IKHandlesOpacity;
+            if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{GizmoDisplaySettings.IKHandlesOpacity:P0}";
+            _ikHandlesOpacitySlider.ValueChanged += (v) =>
+            {
+                GizmoDisplaySettings.IKHandlesOpacity = (float)v;
+                if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{v:P0}";
+                _currentIKManager?.SetHandlesOpacity((float)v);
+            };
+        }
+
         if (_btnResetDisplaySettings != null)
         {
             _btnResetDisplaySettings.Pressed += () =>
             {
                 GizmoDisplaySettings.ResetToDefaults();
+                _currentIKManager?.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
                 InitializeDisplaySettingsUI();
+            };
+        }
+    }
+
+    private void ApplySubViewportOptimizations()
+    {
+        var worldViewport = GetNodeOrNull<SubViewport>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
+                         ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
+
+        if (worldViewport != null)
+        {
+            // Cap shadow atlas to 2048 to prevent 4K/8K shadow buffer overhead
+            worldViewport.PositionalShadowAtlasSize = 2048;
+            worldViewport.PositionalShadowAtlas16Bits = true;
+        }
+
+        var gizmoViewport = GetNodeOrNull<SubViewport>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/GizmoViewportContainer/GizmoViewport")
+                         ?? GetTree().Root.FindChild("GizmoViewport", true, false) as SubViewport;
+
+        if (gizmoViewport != null)
+        {
+            // Gizmo viewport only renders line wireframes & markers on Layer 2, so zero shadow allocation needed
+            gizmoViewport.PositionalShadowAtlasSize = 0;
+        }
+    }
+
+    private void InitializeGraphicsSettingsUI()
+    {
+        if (_fpsLimitOption != null)
+        {
+            _fpsLimitOption.Clear();
+            _fpsLimitOption.AddItem("30 FPS", 30);
+            _fpsLimitOption.AddItem("60 FPS (Default)", 60);
+            _fpsLimitOption.AddItem("120 FPS", 120);
+            _fpsLimitOption.AddItem("144 FPS", 144);
+            _fpsLimitOption.AddItem("Uncapped", 0);
+
+            // Select 60 FPS by default
+            _fpsLimitOption.Select(1);
+            _fpsLimitOption.ItemSelected += (idx) =>
+            {
+                int maxFps = _fpsLimitOption.GetItemId((int)idx);
+                Engine.MaxFps = maxFps;
+                GD.Print($"[Performance] Max FPS set to: {(maxFps > 0 ? maxFps.ToString() : "Uncapped")}");
+            };
+        }
+
+        if (_vsyncCheck != null)
+        {
+            _vsyncCheck.ButtonPressed = true;
+            _vsyncCheck.Toggled += (enabled) =>
+            {
+                var mode = enabled ? DisplayServer.VSyncMode.Enabled : DisplayServer.VSyncMode.Disabled;
+                DisplayServer.WindowSetVsyncMode(mode);
+                GD.Print($"[Performance] VSync set to: {mode}");
             };
         }
     }

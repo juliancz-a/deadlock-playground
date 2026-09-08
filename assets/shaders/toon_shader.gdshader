@@ -3,9 +3,15 @@ render_mode blend_mix, depth_draw_opaque, cull_back;
 
 group_uniforms Shader.Albedo;
 uniform vec4 albedo_color : source_color = vec4(1.0);
-uniform sampler2D albedo_texture : source_color, filter_linear_mipmap;
+uniform sampler2D albedo_texture : source_color, hint_default_white, filter_linear_mipmap;
+
+group_uniforms Shader.Emission;
+uniform vec4 emission_color : source_color = vec4(0.0, 0.0, 0.0, 1.0);
+uniform float emission_energy = 0.0;
+uniform sampler2D emission_texture : hint_default_white, filter_linear_mipmap;
 
 group_uniforms Shader.Light;
+uniform float toon_intensity : hint_range(0.0, 1.0, 0.05) = 1.0;
 uniform bool use_stepped = true;
 uniform float steps = 3.0;
 uniform float step_smoothness : hint_range(0.0, 1.0, 0.05) = 0.3;
@@ -67,10 +73,13 @@ void fragment() {
 	vec4 normal_map = texture(normal_texture, UV);
 
 	ALBEDO = albedo.rgb;
-
 	NORMAL_MAP = mix(vec3(0.5,0.5,1.0), normal_map.rgb, normal_strength);
-
 	SPECULAR = specular;
+
+	if (emission_energy > 0.0) {
+		vec4 em_tex = texture(emission_texture, UV);
+		EMISSION = emission_color.rgb * em_tex.rgb * emission_energy;
+	}
 }
 
 void light () {
@@ -84,7 +93,8 @@ void light () {
 		float light_factor = light_mult - step_base;
 
 		light_factor = smoothstep(0.5 - step_smoothness, 0.5 + step_smoothness, light_factor);
-		light = (step_base + light_factor) / steps;
+		float stepped_light = (step_base + light_factor) / steps;
+		light = mix(ndotl, stepped_light, toon_intensity);
 	}
 
 	if(use_pattern){
@@ -105,5 +115,11 @@ void light () {
 	}
 
 	DIFFUSE_LIGHT += diffuse;
-	SPECULAR_LIGHT += vec3(pow(light, 50.0)) * specular;
+
+	if (specular > 0.0) {
+		vec3 half_vec = normalize(VIEW + LIGHT);
+		float NdotH = max(dot(normalize(NORMAL), half_vec), 0.0);
+		float spec_term = smoothstep(0.65, 0.75, pow(NdotH, 32.0)) * specular;
+		SPECULAR_LIGHT += (LIGHT_COLOR / PI) * spec_term;
+	}
 }

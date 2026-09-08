@@ -9,6 +9,8 @@ using ValveResourceFormat.IO;
 using ValveResourceFormat.ResourceTypes;
 using ValveResourceFormat.Serialization.KeyValues;
 using System.Threading.Tasks;
+using DeadlockPlayground.Materials;
+using DeadlockPlayground.Catalog;
 
 public partial class VpkLoaderTest : Node3D
 {
@@ -41,141 +43,158 @@ public partial class VpkLoaderTest : Node3D
 		// Don't auto-load, wait for UI to trigger
 	}
 
+	/// <summary>
+	/// Loads a hero model using its explicit catalog entry.
+	/// Handles arbitrary directory depths, folder name mismatches, and staging vs WIP models.
+	/// </summary>
+	public async Task<Node3D> LoadHeroModelAsync(DeadlockHeroEntry entry)
+	{
+		if (entry == null) return null;
+		HeroName = entry.InternalCodename;
+		HeroModelName = Path.GetFileNameWithoutExtension(entry.VmdlRelativePath);
+		return await LoadModelInternalAsync(entry.VmdlRelativePath, entry.InternalCodename, entry.DisplayName);
+	}
+
 	public async Task LoadHeroAsync(string hero, string model)
 	{
-        EmitSignal(SignalName.LoadStarted);
+		var catalogEntry = DeadlockHeroCatalog.GetByCodename(hero) ??
+		                   DeadlockHeroCatalog.GetByCodename(model);
+		if (catalogEntry != null)
+		{
+			await LoadHeroModelAsync(catalogEntry);
+			return;
+		}
 
-        // 1. Cleanup old hero completely
-        CleanupCurrentHero();
+		string internalRoute = $"models/heroes_staging/{hero}/{model}.vmdl_c";
+		await LoadModelInternalAsync(internalRoute, hero, hero);
+	}
+
+	private async Task<Node3D> LoadModelInternalAsync(string internalRoute, string heroKey, string displayName)
+	{
+		HeroName = heroKey;
+		HeroModelName = Path.GetFileNameWithoutExtension(internalRoute);
+		EmitSignal(SignalName.LoadStarted);
+
+		// 1. Cleanup old hero completely
+		CleanupCurrentHero();
 
 		if (!File.Exists(VpkPath))
 		{
 			GD.PrintErr($"No se encontró el archivo VPK en: {VpkPath}");
-            EmitSignal(SignalName.LoadFinished);
-			return;
+			EmitSignal(SignalName.LoadFinished);
+			return null;
 		}
 
-		GD.Print($"Abriendo VPK e indexando archivos...");
+		GD.Print($"[VpkLoader] Abriendo VPK para cargar '{displayName}' ({internalRoute})...");
 		using var package = new Package();
 		package.Read(VpkPath);
 
-		// Ruta interna dentro del VPK según la estructura de Deadlock
-		// Nota: en el índice de VRF las extensiones no llevan el punto en TypeName
-		string internal_route = $"models/heroes_staging/{hero}/{model}.vmdl_c";
-		
-		var entry = package.FindEntry(internal_route);
+		string searchRoute = internalRoute.Replace('\\', '/');
+		if (!searchRoute.EndsWith("_c")) searchRoute += "_c";
+
+		var entry = package.FindEntry(searchRoute);
 
 		// Fallback por si la convención de nombres difiere levemente
 		if (entry == null)
 		{
-			GD.Print($"Ruta exacta no encontrada ({internal_route}), buscando coincidencia parcial...");
+			string fileNameOnly = Path.GetFileNameWithoutExtension(internalRoute);
+			GD.Print($"Ruta exacta no encontrada ({searchRoute}), buscando archivo '{fileNameOnly}'...");
 			if (package.Entries.TryGetValue("vmdl_c", out var modelEntries))
 			{
-				entry = modelEntries.Find(e => 
-					e.DirectoryName.Contains($"heroes_staging/{hero}") && 
-					e.FileName.Contains(hero));
+				entry = modelEntries.Find(e => e.FileName.Equals(fileNameOnly, StringComparison.OrdinalIgnoreCase));
 			}
 		}
 
 		if (entry == null)
 		{
-			GD.PrintErr($"No se encontró el modelo para '{hero}' dentro del VPK.");
-            EmitSignal(SignalName.LoadFinished);
-			return;
+			GD.PrintErr($"No se encontró el modelo para '{internalRoute}' dentro del VPK.");
+			EmitSignal(SignalName.LoadFinished);
+			return null;
 		}
 
 		GD.Print($"Modelo encontrado: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName}");
-		
-        byte[] glbBytes = null;
-        Dictionary<string, List<string>> meshMaterialMap = null;
 
-        // Run heavy extraction and GLTF export in background thread
-        await Task.Run(() => 
-        {
-		    // 1. Extraemos y parseamos el recurso de Source 2
-		    package.ReadEntry(entry, out byte[] resourceData);
-		    using var resource = new ValveResourceFormat.Resource();
-		    using var stream = new MemoryStream(resourceData);
-		    resource.Read(stream);
+		byte[] glbBytes = null;
+		Dictionary<string, List<string>> meshMaterialMap = null;
 
-		    // 2. Extraemos el mapa mesh → materiales desde los draw calls del VMDL
-		    meshMaterialMap = BuildMeshMaterialMap(resource);
+		// Run heavy extraction and GLTF export in background thread
+		await Task.Run(() => 
+		{
+			// 1. Extraemos y parseamos el recurso de Source 2
+			package.ReadEntry(entry, out byte[] resourceData);
+			using var resource = new ValveResourceFormat.Resource();
+			using var stream = new MemoryStream(resourceData);
+			resource.Read(stream);
 
-		    // 3. Exportamos a glTF 2.0 (GLB binario)
-		    GD.Print("Generando GLB con VRF...");
+			// 2. Extraemos el mapa mesh → materiales desde los draw calls del VMDL
+			meshMaterialMap = BuildMeshMaterialMap(resource);
 
-		    var fileLoader = new GameFileLoader(package, internal_route);
-		    var exporter = new GltfModelExporter(fileLoader)
-		    {
-			    ExportAnimations = true,
-			    AdaptTextures = true,
-			    ExportMaterials = false,
-			    ExportExtras = false,
-			    ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
-		    };
+			// 3. Exportamos a glTF 2.0 (GLB binario)
+			GD.Print("Generando GLB con VRF...");
 
-		    exporter.AnimationFilter.Clear();
-            if (resource.DataBlock is Model vrfModel)
-            {
-                // Retrieve all animations using VRF API
-                var allAnims = vrfModel.GetAllAnimations(fileLoader);
-                foreach (var anim in allAnims)
-                {
-                    string lowerName = anim.Name.ToLower();
-                    
-                    bool isImportant = lowerName.EndsWith("stand_idle") || 
-                                       lowerName.EndsWith("run_center") || 
-                                       lowerName.EndsWith("walk_center") || 
-                                       lowerName == "shoot_idle" || 
-                                       lowerName == "idle_loadout" || 
-                                       lowerName == "primary_shoot" ||
-                                       lowerName == "out_of_combat_stand_idle";
-                    
-                    // Exclude crouch poses to keep it small, or keep them if needed. 
-                    // By checking EndsWith "stand_idle", we automatically avoid crouch_idle!
-                    
-                    if (isImportant && !lowerName.Contains("zoomed") && !lowerName.Contains("aim"))
-                    {
-                        exporter.AnimationFilter.Add(anim.Name);
-                    }
-                }
-            }
+			var fileLoader = new GameFileLoader(package, entry.DirectoryName);
+			var exporter = new GltfModelExporter(fileLoader)
+			{
+				ExportAnimations = true,
+				AdaptTextures = true,
+				ExportMaterials = false,
+				ExportExtras = false,
+				ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
+			};
+
+			exporter.AnimationFilter.Clear();
+			if (resource.DataBlock is Model vrfModel)
+			{
+				// Retrieve all animations using VRF API
+				var allAnims = vrfModel.GetAllAnimations(fileLoader);
+				foreach (var anim in allAnims)
+				{
+					string lowerName = anim.Name.ToLower();
+					
+					bool isImportant = lowerName.EndsWith("stand_idle") || 
+					                   lowerName.EndsWith("run_center") || 
+					                   lowerName.EndsWith("walk_center") || 
+					                   lowerName == "shoot_idle" || 
+					                   lowerName == "idle_loadout" || 
+					                   lowerName == "primary_shoot" ||
+					                   lowerName == "out_of_combat_stand_idle";
+					
+					if (isImportant && !lowerName.Contains("zoomed") && !lowerName.Contains("aim"))
+					{
+						exporter.AnimationFilter.Add(anim.Name);
+					}
+				}
+			}
 
 			GD.Print($"Cantidad de animaciones que cumplen el filtro: {exporter.AnimationFilter.Count}");
-			foreach(var animation in exporter.AnimationFilter)
+			foreach (var animation in exporter.AnimationFilter)
 			{
 				GD.Print($"Exportando animación: {animation}");
 			}
 			
-		    string tempGlbPath = Path.Combine(Path.GetTempPath(), $"{hero}_{Guid.NewGuid():N}.glb");
-		    try
-		    {
-			    exporter.Export(resource, tempGlbPath);
-			    glbBytes = File.ReadAllBytes(tempGlbPath);
-		    }
-		    finally
-		    {
-			    if (File.Exists(tempGlbPath))
-			    {
-				    File.Delete(tempGlbPath);
-			    }
-		    }
-        });
+			string tempGlbPath = Path.Combine(Path.GetTempPath(), $"{heroKey}_{Guid.NewGuid():N}.glb");
+			try
+			{
+				exporter.Export(resource, tempGlbPath);
+				glbBytes = File.ReadAllBytes(tempGlbPath);
+			}
+			finally
+			{
+				if (File.Exists(tempGlbPath))
+				{
+					File.Delete(tempGlbPath);
+				}
+			}
+		});
 
-        if (glbBytes != null)
-        {
-		    GD.Print($"GLB generado con éxito ({glbBytes.Length / (1024 * 1024)} MB). Importando a Godot...");
-		    
-            // Marshal back to Main Thread safely for node instantiation
-            Callable.From(() => {
-                InstantiateInScene(glbBytes, hero, package, meshMaterialMap);
-                EmitSignal(SignalName.LoadFinished);
-            }).CallDeferred();
-        }
-        else
-        {
-            EmitSignal(SignalName.LoadFinished);
-        }
+		if (glbBytes != null)
+		{
+			GD.Print($"GLB generado con éxito ({glbBytes.Length / (1024 * 1024)} MB). Importando a Godot...");
+			InstantiateInScene(glbBytes, heroKey, package, meshMaterialMap);
+		}
+
+		EmitSignal(SignalName.LoadFinished);
+		return _currentHeroNode;
 	}
 
     private void CleanupCurrentHero()
@@ -291,7 +310,7 @@ public partial class VpkLoaderTest : Node3D
 		GD.Print($"¡Héroe '{hero}' instanciado en el Viewport con éxito!");
 
 		GD.Print("Malla instanciada. Enlazando materiales por submalla...");
-		ApplyMaterialsRecursively(modelScene, package, meshMaterialMap);
+		ApplyMaterialsRecursively(modelScene, hero, package, meshMaterialMap);
 		EmitSignal(SignalName.HeroLoaded, modelScene);
 
 		// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
@@ -348,13 +367,20 @@ public partial class VpkLoaderTest : Node3D
 	/// VRF prefija los nombres de malla con "." al generar el GLB,
 	/// por lo que quitamos ese punto para buscar en el mapa.
 	/// </summary>
-	private void ApplyMaterialsRecursively(Node node, Package package, Dictionary<string, List<string>> meshMaterialMap)
+	private void ApplyMaterialsRecursively(Node node, string heroName, Package package, Dictionary<string, List<string>> meshMaterialMap)
 	{
 		if (node is MeshInstance3D meshInstance && meshInstance.Mesh != null)
 		{
 			// VRF nombra los nodos como ".body", ".head", etc.
 			// Godot convierte el "." a "_" en nombres de nodo, así que quitamos ambos
 			string meshName = meshInstance.Name.ToString().TrimStart('.', '_');
+
+			// Viscous's bodyoutline or generic outline submeshes: hide by default so they do not occlude the hero body
+			if (meshName.Equals("bodyoutline", StringComparison.OrdinalIgnoreCase) ||
+				meshName.Equals("outline", StringComparison.OrdinalIgnoreCase))
+			{
+				meshInstance.Visible = false;
+			}
 
 			if (meshMaterialMap.TryGetValue(meshName, out var materialPaths))
 			{
@@ -369,6 +395,8 @@ public partial class VpkLoaderTest : Node3D
 					var mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath);
 					if (mat != null)
 					{
+						mat.ResourceName = vmatPath;
+						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat);
 						meshInstance.SetSurfaceOverrideMaterial(i, mat);
 						GD.Print($"  ✓ Material aplicado: '{Path.GetFileNameWithoutExtension(vmatPath)}' → {meshName}[{i}]");
 					}
@@ -391,7 +419,7 @@ public partial class VpkLoaderTest : Node3D
 
 		foreach (Node child in node.GetChildren())
 		{
-			ApplyMaterialsRecursively(child, package, meshMaterialMap);
+			ApplyMaterialsRecursively(child, heroName, package, meshMaterialMap);
 		}
 	}
 

@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using DeadlockPlayground.Catalog;
 
 public partial class CharacterTabUI : VBoxContainer
 {
@@ -22,32 +23,7 @@ public partial class CharacterTabUI : VBoxContainer
     }
 
     private readonly List<SubmeshItem> _submeshes = new();
-
-    private readonly List<(string DisplayName, string InternalId)> _heroes = new()
-    {
-        ("Abrams", "abrams"),
-        ("Bebop", "bebop"),
-        ("Dynamo", "dynamo"),
-        ("Grey Talon", "archer"),
-        ("Haze", "haze"),
-        ("Infernus", "chronos"),
-        ("Ivy", "tengu"),
-        ("Kelvin", "kelvin"),
-        ("Lady Geist", "ghost"),
-        ("Lash", "lash_v2"),
-        ("McGinnis", "engineer"),
-        ("Mirage", "mirage"),
-        ("Mo & Krill", "digger"),
-        ("Paradox", "chrono"),
-        ("Pocket", "pocket"),
-        ("Seven", "wrecker"),
-        ("Shiv", "shiv"),
-        ("Vindicta", "hornet"),
-        ("Viscous", "viscous"),
-        ("Warden", "warden"),
-        ("Wraith", "wraith"),
-        ("Yamato", "yamato")
-    };
+    private readonly List<DeadlockHeroEntry> _selectableEntries = new();
 
     public override void _Ready()
     {
@@ -95,13 +71,35 @@ public partial class CharacterTabUI : VBoxContainer
         if (_heroOptionButton == null) return;
 
         _heroOptionButton.Clear();
+        _selectableEntries.Clear();
+
         _heroOptionButton.AddItem("Select a Hero...", -1);
         _heroOptionButton.SetItemDisabled(0, true);
 
-        for (int i = 0; i < _heroes.Count; i++)
+        // Header: -- Heroes --
+        _heroOptionButton.AddItem("-- Heroes --", -1);
+        int heroHeaderIndex = _heroOptionButton.ItemCount - 1;
+        _heroOptionButton.SetItemDisabled(heroHeaderIndex, true);
+
+        foreach (var hero in DeadlockHeroCatalog.UpdatedHeroes)
         {
-            _heroOptionButton.AddItem(_heroes[i].DisplayName, i);
+            int currentId = _selectableEntries.Count;
+            _selectableEntries.Add(hero);
+            _heroOptionButton.AddItem($"  {hero.DisplayName}", currentId);
         }
+
+        // Header: -- Legacy / Prototype Heroes --
+        _heroOptionButton.AddItem("-- Legacy / Prototype Heroes --", -1);
+        int legacyHeaderIndex = _heroOptionButton.ItemCount - 1;
+        _heroOptionButton.SetItemDisabled(legacyHeaderIndex, true);
+
+        foreach (var hero in DeadlockHeroCatalog.LegacyHeroes)
+        {
+            int currentId = _selectableEntries.Count;
+            _selectableEntries.Add(hero);
+            _heroOptionButton.AddItem($"  {hero.DisplayName}", currentId);
+        }
+
         _heroOptionButton.Select(0);
     }
 
@@ -127,15 +125,15 @@ public partial class CharacterTabUI : VBoxContainer
     {
         if (_heroOptionButton == null) return;
         int id = _heroOptionButton.GetItemId((int)index);
-        if (id < 0 || id >= _heroes.Count) return;
+        if (id < 0 || id >= _selectableEntries.Count) return;
 
-        string internalId = _heroes[id].InternalId;
-        GD.Print($"[CharacterTab] Loading hero: {_heroes[id].DisplayName} ({internalId})");
-        EmitSignal(SignalName.CharacterRequested, internalId);
+        var entry = _selectableEntries[id];
+        GD.Print($"[CharacterTab] Loading hero: {entry.DisplayName} ({entry.InternalCodename}) from {entry.VmdlRelativePath}");
+        EmitSignal(SignalName.CharacterRequested, entry.InternalCodename);
 
         if (_vpkLoader != null)
         {
-            _ = _vpkLoader.LoadHeroAsync(internalId, internalId);
+            _ = _vpkLoader.LoadHeroModelAsync(entry);
         }
     }
 

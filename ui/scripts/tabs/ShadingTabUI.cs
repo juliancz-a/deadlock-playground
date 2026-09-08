@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using DeadlockPlayground.Materials;
 
 public partial class ShadingTabUI : VBoxContainer
 {
@@ -56,13 +57,20 @@ public partial class ShadingTabUI : VBoxContainer
     [Export] private HSlider _sliderGlitchOpacity;
     [Export] private Label _lblGlitchOpacity;
 
+    [ExportCategory("Hero Signature Effect")]
+    [Export] private CheckBox _checkHeroSignature;
+    [Export] private Label _lblHeroSignature;
+    [Export] private VBoxContainer _dynamicHeroControls;
+
     private bool _masterEnabled = true;
     private bool _toonEnabled = false;
     private bool _crtEnabled = false;
     private bool _glitchEnabled = false;
+    private bool _heroSignatureEnabled = true;
     private bool _isSyncing = false;
+    private string _currentHeroName = string.Empty;
 
-    // 3D Spatial Toon Shader and Mesh Material Management
+    // 3D Spatial Shaders
     private Shader _toonShader;
     private Shader _toonOutlineShader;
 
@@ -71,8 +79,14 @@ public partial class ShadingTabUI : VBoxContainer
         public MeshInstance3D Mesh;
         public int SurfaceIndex;
         public Material OriginalMaterial;
+        public string MaterialPath = string.Empty;
+        public bool IsWeapon = false;
+        public bool IsBuiltinOutline = false;
+        public bool IsAdditive = false;
+
         public ShaderMaterial ToonMaterial;
         public ShaderMaterial OutlineMaterial;
+        public ShaderMaterial SignatureMaterial;
     }
 
     private readonly List<SurfaceRecord> _characterSurfaces = new();
@@ -87,7 +101,6 @@ public partial class ShadingTabUI : VBoxContainer
         ConnectEvents();
         ResetToDefaults();
 
-        // Connect to VPK loader if hero is already loaded or will load
         var loader = GetVpkLoader();
         if (loader != null)
         {
@@ -108,30 +121,28 @@ public partial class ShadingTabUI : VBoxContainer
             loader.HeroLoaded -= SetHero;
             loader.HeroUnloaded -= ClearHero;
         }
-        ClearHero();
     }
 
     private VpkLoaderTest GetVpkLoader()
     {
         return GetNodeOrNull<VpkLoaderTest>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/VpkLoaderTest")
             ?? GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest")
-            ?? GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+            ?? GetTree().Root.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
     }
 
     private void LinkRects()
     {
-        _crtRect ??= GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack/CRTRect")
-                   ?? GetNodeOrNull<ColorRect>("/root/Main/ShaderOverlayStack/CRTRect")
-                   ?? GetTree()?.Root?.FindChild("CRTRect", true, false) as ColorRect;
+        if (_crtRect == null)
+            _crtRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/OverlayShaders/CRT")
+                ?? GetTree().Root.FindChild("CRT", true, false) as ColorRect;
 
-        _glitchRect ??= GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack/GlitchRect")
-                      ?? GetNodeOrNull<ColorRect>("/root/Main/ShaderOverlayStack/GlitchRect")
-                      ?? GetTree()?.Root?.FindChild("GlitchRect", true, false) as ColorRect;
+        if (_glitchRect == null)
+            _glitchRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/OverlayShaders/Glitch")
+                ?? GetTree().Root.FindChild("Glitch", true, false) as ColorRect;
     }
 
     private void ConnectEvents()
     {
-        // Master
         if (_masterToggle != null)
         {
             _masterToggle.Toggled += (pressed) =>
@@ -146,7 +157,7 @@ public partial class ShadingTabUI : VBoxContainer
             _btnResetDefaults.Pressed += ResetToDefaults;
         }
 
-        // Toon
+        // Toon Events
         if (_checkToonEnable != null)
         {
             _checkToonEnable.Toggled += (pressed) =>
@@ -160,15 +171,15 @@ public partial class ShadingTabUI : VBoxContainer
             _sliderToonIntensity.ValueChanged += (v) =>
             {
                 if (_lblToonIntensity != null) _lblToonIntensity.Text = $"{v:F2}";
-                if (!_isSyncing) SetToonParam("rim_blend", (float)v);
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
         if (_sliderToonSteps != null)
         {
             _sliderToonSteps.ValueChanged += (v) =>
             {
-                if (_lblToonSteps != null) _lblToonSteps.Text = $"{v:F0}";
-                if (!_isSyncing) SetToonParam("steps", (float)v);
+                if (_lblToonSteps != null) _lblToonSteps.Text = $"{(int)v}";
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
         if (_sliderToonSmoothness != null)
@@ -176,14 +187,14 @@ public partial class ShadingTabUI : VBoxContainer
             _sliderToonSmoothness.ValueChanged += (v) =>
             {
                 if (_lblToonSmoothness != null) _lblToonSmoothness.Text = $"{v:F2}";
-                if (!_isSyncing) SetToonParam("step_smoothness", (float)v);
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
         if (_checkToonOutline != null)
         {
             _checkToonOutline.Toggled += (pressed) =>
             {
-                if (!_isSyncing) UpdateToonOutlines(pressed);
+                if (!_isSyncing) ApplyToonState();
             };
         }
         if (_sliderToonOutlineWidth != null)
@@ -206,18 +217,18 @@ public partial class ShadingTabUI : VBoxContainer
             _sliderToonShadowAmount.ValueChanged += (v) =>
             {
                 if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = $"{v:F2}";
-                if (!_isSyncing) SetToonParam("shadow_tint_amount", (float)v);
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
         if (_colorToonShadow != null)
         {
             _colorToonShadow.ColorChanged += (c) =>
             {
-                if (!_isSyncing) SetToonParam("shadow_tint", c);
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
 
-        // CRT
+        // CRT Events
         if (_checkCrtEnable != null)
         {
             _checkCrtEnable.Toggled += (pressed) =>
@@ -283,7 +294,7 @@ public partial class ShadingTabUI : VBoxContainer
             };
         }
 
-        // Glitch
+        // Glitch Events
         if (_checkGlitchEnable != null)
         {
             _checkGlitchEnable.Toggled += (pressed) =>
@@ -324,6 +335,16 @@ public partial class ShadingTabUI : VBoxContainer
                 if (!_isSyncing) SetShaderParam(_glitchRect, "opacity", (float)v);
             };
         }
+
+        // Hero Signature Events
+        if (_checkHeroSignature != null)
+        {
+            _checkHeroSignature.Toggled += (pressed) =>
+            {
+                _heroSignatureEnabled = pressed;
+                UpdateShaderVisibility();
+            };
+        }
     }
 
     #region Hero Character Mesh Tracking & Spatial Toon Application
@@ -334,6 +355,48 @@ public partial class ShadingTabUI : VBoxContainer
         _currentHero = heroNode;
         if (_currentHero == null) return;
 
+        string heroName = heroNode.Name.ToString().ToLowerInvariant();
+        var vpk = GetVpkLoader();
+        if (vpk != null && !string.IsNullOrEmpty(vpk.HeroName)) heroName += " " + vpk.HeroName.ToLowerInvariant();
+        _currentHeroName = heroName;
+
+        // Clear dynamic controls container
+        if (_dynamicHeroControls != null)
+        {
+            foreach (Node child in _dynamicHeroControls.GetChildren())
+            {
+                child.QueueFree();
+            }
+        }
+
+        // Build dynamic UI for hero config
+        var heroConfig = HeroMaterialManager.GetConfigForHero(_currentHeroName);
+        if (heroConfig != null)
+        {
+            if (_lblHeroSignature != null) _lblHeroSignature.Text = heroConfig.DisplayName;
+            if (_checkHeroSignature != null)
+            {
+                _checkHeroSignature.Visible = true;
+                _checkHeroSignature.ButtonPressed = true;
+                _checkHeroSignature.Text = "Enable Signature Shader";
+            }
+
+            var dynamicUI = heroConfig.BuildUI((paramName, value) => SetSignatureParam(paramName, value));
+            if (dynamicUI != null && _dynamicHeroControls != null)
+            {
+                _dynamicHeroControls.AddChild(dynamicUI);
+            }
+        }
+        else
+        {
+            if (_lblHeroSignature != null) _lblHeroSignature.Text = "Standard PBR / Toon shading";
+            if (_checkHeroSignature != null)
+            {
+                _checkHeroSignature.Visible = false;
+                _checkHeroSignature.ButtonPressed = false;
+            }
+        }
+
         CollectMeshesRecursively(_currentHero);
         UpdateToonMaterialsUniforms();
         ApplyToonState();
@@ -341,7 +404,6 @@ public partial class ShadingTabUI : VBoxContainer
 
     public void ClearHero()
     {
-        // Restore original materials before clearing
         foreach (var record in _characterSurfaces)
         {
             if (GodotObject.IsInstanceValid(record.Mesh))
@@ -351,6 +413,15 @@ public partial class ShadingTabUI : VBoxContainer
         }
         _characterSurfaces.Clear();
         _currentHero = null;
+        _currentHeroName = string.Empty;
+
+        if (_dynamicHeroControls != null)
+        {
+            foreach (Node child in _dynamicHeroControls.GetChildren())
+            {
+                child.QueueFree();
+            }
+        }
     }
 
     private void CollectMeshesRecursively(Node node)
@@ -363,25 +434,62 @@ public partial class ShadingTabUI : VBoxContainer
 
         if (node is MeshInstance3D mi && mi.Mesh != null)
         {
+            string meshNameLower = mi.Name.ToString().ToLowerInvariant();
+            bool isWeapon = meshNameLower.Contains("gun") || meshNameLower.Contains("weapon") ||
+                            meshNameLower.Contains("sword") || meshNameLower.Contains("katana") ||
+                            meshNameLower.Contains("bow") || meshNameLower.Contains("shortsword") ||
+                            meshNameLower.Contains("longhilt") || meshNameLower.Contains("beltscabbard");
+            bool isBuiltinOutline = meshNameLower.Contains("bodyoutline") || meshNameLower.Contains("outline");
+
             int surfaceCount = mi.Mesh.GetSurfaceCount();
             for (int i = 0; i < surfaceCount; i++)
             {
                 Material origMat = mi.GetSurfaceOverrideMaterial(i) ?? mi.Mesh.SurfaceGetMaterial(i);
+                string matPath = origMat?.ResourceName?.ToLowerInvariant() ?? "";
 
+                if (matPath.Contains("outline")) isBuiltinOutline = true;
+
+                bool isAdditive = false;
+                if (origMat is StandardMaterial3D sm)
+                {
+                    isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add ||
+                                 sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+                }
+
+                // 1. Signature material from HeroMaterialManager
+                ShaderMaterial sigMat = HeroMaterialManager.GetSignatureMaterial(_currentHeroName, meshNameLower, i, matPath, origMat as StandardMaterial3D);
+
+                // 2. Toon material
                 var toonMat = new ShaderMaterial { Shader = _toonShader };
                 var outlineMat = new ShaderMaterial { Shader = _toonOutlineShader };
 
-                // Transfer diffuse and normal maps from original StandardMaterial3D
+                // Transfer properties from original StandardMaterial3D
                 if (origMat is StandardMaterial3D stdMat)
                 {
-                    if (stdMat.AlbedoTexture != null)
-                        toonMat.SetShaderParameter("albedo_texture", stdMat.AlbedoTexture);
                     toonMat.SetShaderParameter("albedo_color", stdMat.AlbedoColor);
+
+                    if (stdMat.AlbedoTexture != null)
+                    {
+                        toonMat.SetShaderParameter("albedo_texture", stdMat.AlbedoTexture);
+                    }
 
                     if (stdMat.NormalTexture != null)
                     {
                         toonMat.SetShaderParameter("normal_texture", stdMat.NormalTexture);
                         toonMat.SetShaderParameter("normal_strength", stdMat.NormalEnabled ? 1.0f : 0.0f);
+                    }
+
+                    float spec = Mathf.Clamp(1.0f - stdMat.Roughness, 0.05f, 1.0f);
+                    toonMat.SetShaderParameter("specular", spec);
+
+                    if (stdMat.EmissionEnabled)
+                    {
+                        toonMat.SetShaderParameter("emission_color", stdMat.Emission);
+                        toonMat.SetShaderParameter("emission_energy", stdMat.EmissionEnergyMultiplier);
+                        if (stdMat.EmissionTexture != null)
+                        {
+                            toonMat.SetShaderParameter("emission_texture", stdMat.EmissionTexture);
+                        }
                     }
                 }
 
@@ -390,8 +498,13 @@ public partial class ShadingTabUI : VBoxContainer
                     Mesh = mi,
                     SurfaceIndex = i,
                     OriginalMaterial = origMat,
+                    MaterialPath = matPath,
+                    IsWeapon = isWeapon,
+                    IsBuiltinOutline = isBuiltinOutline,
+                    IsAdditive = isAdditive,
                     ToonMaterial = toonMat,
-                    OutlineMaterial = outlineMat
+                    OutlineMaterial = outlineMat,
+                    SignatureMaterial = sigMat
                 });
             }
         }
@@ -404,27 +517,59 @@ public partial class ShadingTabUI : VBoxContainer
 
     private void ApplyToonState()
     {
-        bool enableToon = _masterEnabled && _toonEnabled;
+        bool master = _masterEnabled;
+        bool enableToon = master && _toonEnabled;
+        bool enableSignature = master && _heroSignatureEnabled;
+        bool enableOutline = enableToon && _checkToonOutline != null && _checkToonOutline.ButtonPressed;
+
         foreach (var record in _characterSurfaces)
         {
             if (!GodotObject.IsInstanceValid(record.Mesh)) continue;
 
-            if (enableToon)
+            // Built-in outline meshes (like Viscous's bodyoutline) maintain their original material
+            if (record.IsBuiltinOutline)
             {
-                record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.ToonMaterial);
+                record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
+                continue;
+            }
+
+            Material baseMat = record.OriginalMaterial;
+
+            if (enableSignature && record.SignatureMaterial != null)
+            {
+                baseMat = record.SignatureMaterial;
+            }
+            else if (enableToon)
+            {
+                baseMat = record.ToonMaterial;
             }
             else
             {
-                record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
+                baseMat = record.OriginalMaterial;
             }
+
+            // Outline NextPass for Toon: ONLY on opaque toon materials, NEVER on built-in outlines or additive auras
+            if (baseMat is ShaderMaterial shMat)
+            {
+                if (enableOutline && baseMat == record.ToonMaterial && !record.IsBuiltinOutline && !record.IsAdditive)
+                {
+                    shMat.NextPass = record.OutlineMaterial;
+                }
+                else
+                {
+                    shMat.NextPass = null;
+                }
+            }
+
+            record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, baseMat);
         }
     }
 
-    private void SetToonParam(string paramName, Variant value)
+    private void SetSignatureParam(string paramName, Variant value)
     {
         foreach (var record in _characterSurfaces)
         {
-            record.ToonMaterial?.SetShaderParameter(paramName, value);
+            record.SignatureMaterial?.SetShaderParameter(paramName, value);
         }
     }
 
@@ -436,106 +581,104 @@ public partial class ShadingTabUI : VBoxContainer
         }
     }
 
-    private void UpdateToonOutlines(bool enableOutline)
-    {
-        foreach (var record in _characterSurfaces)
-        {
-            if (record.ToonMaterial != null)
-            {
-                record.ToonMaterial.NextPass = enableOutline ? record.OutlineMaterial : null;
-            }
-        }
-    }
-
     private void UpdateToonMaterialsUniforms()
     {
+        float intensity = _sliderToonIntensity != null ? (float)_sliderToonIntensity.Value : 1.0f;
         float steps = _sliderToonSteps != null ? (float)_sliderToonSteps.Value : 3.0f;
-        float smooth = _sliderToonSmoothness != null ? (float)_sliderToonSmoothness.Value : 0.3f;
-        float shadowAmount = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.4f;
-        Color shadowColor = _colorToonShadow != null ? _colorToonShadow.Color : new Color(0.2f, 0.2f, 0.3f, 1.0f);
-        float rimBlend = _sliderToonIntensity != null ? (float)_sliderToonIntensity.Value : 0.6f;
-        bool outline = _checkToonOutline != null && _checkToonOutline.ButtonPressed;
-        float outlineWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.0f;
-        Color outlineColor = _colorToonOutline != null ? _colorToonOutline.Color : new Color(0, 0, 0, 1);
+        float smooth = _sliderToonSmoothness != null ? (float)_sliderToonSmoothness.Value : 0.05f;
+        float shadowAmt = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.45f;
+        Color shadowCol = _colorToonShadow != null ? _colorToonShadow.Color : new Color(0.15f, 0.15f, 0.25f, 1.0f);
+
+        float outWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.5f;
+        Color outCol = _colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f);
 
         foreach (var record in _characterSurfaces)
         {
             if (record.ToonMaterial != null)
             {
+                record.ToonMaterial.SetShaderParameter("toon_intensity", intensity);
                 record.ToonMaterial.SetShaderParameter("use_stepped", true);
                 record.ToonMaterial.SetShaderParameter("steps", steps);
                 record.ToonMaterial.SetShaderParameter("step_smoothness", smooth);
-                record.ToonMaterial.SetShaderParameter("shadow_tint", shadowColor);
-                record.ToonMaterial.SetShaderParameter("shadow_tint_amount", shadowAmount);
+                record.ToonMaterial.SetShaderParameter("shadow_tint", shadowCol);
+                record.ToonMaterial.SetShaderParameter("shadow_tint_amount", shadowAmt);
                 record.ToonMaterial.SetShaderParameter("use_rim", true);
                 record.ToonMaterial.SetShaderParameter("rim_color", new Color(1.0f, 1.0f, 1.0f, 1.0f));
                 record.ToonMaterial.SetShaderParameter("rim_amount", 2.0f);
                 record.ToonMaterial.SetShaderParameter("rim_smoothness", 0.2f);
-                record.ToonMaterial.SetShaderParameter("rim_blend", rimBlend);
-                record.ToonMaterial.NextPass = outline ? record.OutlineMaterial : null;
+                record.ToonMaterial.SetShaderParameter("rim_blend", 0.5f);
             }
 
             if (record.OutlineMaterial != null)
             {
-                record.OutlineMaterial.SetShaderParameter("outline_width", outlineWidth);
-                record.OutlineMaterial.SetShaderParameter("outline_color", outlineColor);
+                record.OutlineMaterial.SetShaderParameter("outline_width", outWidth);
+                record.OutlineMaterial.SetShaderParameter("outline_color", outCol);
             }
         }
     }
 
     #endregion
 
-    public void UpdateShaderVisibility()
+    private void UpdateShaderVisibility()
     {
         LinkRects();
-        ApplyToonState();
 
-        if (_crtRect != null) _crtRect.Visible = _masterEnabled && _crtEnabled;
-        if (_glitchRect != null) _glitchRect.Visible = _masterEnabled && _glitchEnabled;
+        if (_crtRect != null)
+        {
+            _crtRect.Visible = _masterEnabled && _crtEnabled;
+        }
+
+        if (_glitchRect != null)
+        {
+            _glitchRect.Visible = _masterEnabled && _glitchEnabled;
+        }
+
+        ApplyToonState();
     }
 
     public void ResetToDefaults()
     {
         _isSyncing = true;
 
+        // Master
         _masterEnabled = true;
         if (_masterToggle != null) _masterToggle.ButtonPressed = true;
 
         // Toon Defaults
         _toonEnabled = false;
         if (_checkToonEnable != null) _checkToonEnable.ButtonPressed = false;
-        if (_sliderToonIntensity != null) _sliderToonIntensity.Value = 0.6f;
-        if (_lblToonIntensity != null) _lblToonIntensity.Text = "0.60";
-        if (_sliderToonSteps != null) _sliderToonSteps.Value = 3.0f;
+        if (_sliderToonIntensity != null) _sliderToonIntensity.Value = 1.0;
+        if (_lblToonIntensity != null) _lblToonIntensity.Text = "1.00";
+        if (_sliderToonSteps != null) _sliderToonSteps.Value = 3.0;
         if (_lblToonSteps != null) _lblToonSteps.Text = "3";
-        if (_sliderToonSmoothness != null) _sliderToonSmoothness.Value = 0.3f;
-        if (_lblToonSmoothness != null) _lblToonSmoothness.Text = "0.30";
+        if (_sliderToonSmoothness != null) _sliderToonSmoothness.Value = 0.05;
+        if (_lblToonSmoothness != null) _lblToonSmoothness.Text = "0.05";
         if (_checkToonOutline != null) _checkToonOutline.ButtonPressed = true;
-        if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 1.0f;
-        if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "1.0px";
-        if (_colorToonOutline != null) _colorToonOutline.Color = new Color(0, 0, 0, 1);
-        if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.4f;
-        if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.40";
-        if (_colorToonShadow != null) _colorToonShadow.Color = new Color(0.2f, 0.2f, 0.3f, 1);
+        if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 1.5;
+        if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "1.5px";
+        if (_colorToonOutline != null) _colorToonOutline.Color = new Color(0.08f, 0.08f, 0.08f, 1.0f);
+        if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.45;
+        if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.45";
+        if (_colorToonShadow != null) _colorToonShadow.Color = new Color(0.15f, 0.15f, 0.25f, 1.0f);
 
         UpdateToonMaterialsUniforms();
 
         // CRT Defaults
         _crtEnabled = false;
         if (_checkCrtEnable != null) _checkCrtEnable.ButtonPressed = false;
-        if (_sliderCrtScan1 != null) _sliderCrtScan1.Value = 500.0f;
+        if (_sliderCrtScan1 != null) _sliderCrtScan1.Value = 500.0;
         if (_lblCrtScan1 != null) _lblCrtScan1.Text = "500";
-        if (_sliderCrtScan2 != null) _sliderCrtScan2.Value = 25.0f;
+        if (_sliderCrtScan2 != null) _sliderCrtScan2.Value = 25.0;
         if (_lblCrtScan2 != null) _lblCrtScan2.Text = "25";
-        if (_sliderCrtScanReduction != null) _sliderCrtScanReduction.Value = 0.1f;
+        if (_sliderCrtScanReduction != null) _sliderCrtScanReduction.Value = 0.1;
         if (_lblCrtScanReduction != null) _lblCrtScanReduction.Text = "0.10";
-        if (_sliderCrtBlur != null) _sliderCrtBlur.Value = 0.35f;
+        if (_sliderCrtBlur != null) _sliderCrtBlur.Value = 0.35;
         if (_lblCrtBlur != null) _lblCrtBlur.Text = "0.35";
-        if (_sliderCrtDiffusion != null) _sliderCrtDiffusion.Value = 0.1f;
+        if (_sliderCrtDiffusion != null) _sliderCrtDiffusion.Value = 0.1;
         if (_lblCrtDiffusion != null) _lblCrtDiffusion.Text = "0.10";
-        if (_sliderCrtVignetteAlpha != null) _sliderCrtVignetteAlpha.Value = 0.8f;
+        if (_sliderCrtVignetteAlpha != null) _sliderCrtVignetteAlpha.Value = 0.8;
         if (_lblCrtVignetteAlpha != null) _lblCrtVignetteAlpha.Text = "0.80";
-        if (_sliderCrtVignetteRadius != null) _sliderCrtVignetteRadius.Value = 3.5f;
+        if (_sliderCrtVignetteRadius != null) _sliderCrtVignetteRadius.Value = 3.5;
         if (_lblCrtVignetteRadius != null) _lblCrtVignetteRadius.Text = "3.5";
 
         SetShaderParam(_crtRect, "scanlines_1", 500.0f);
@@ -549,9 +692,9 @@ public partial class ShadingTabUI : VBoxContainer
         // Glitch Defaults
         _glitchEnabled = false;
         if (_checkGlitchEnable != null) _checkGlitchEnable.ButtonPressed = false;
-        if (_sliderGlitchIntensity != null) _sliderGlitchIntensity.Value = 3.0f;
+        if (_sliderGlitchIntensity != null) _sliderGlitchIntensity.Value = 3.0;
         if (_lblGlitchIntensity != null) _lblGlitchIntensity.Text = "3.0";
-        if (_sliderGlitchPixelSize != null) _sliderGlitchPixelSize.Value = 3.0f;
+        if (_sliderGlitchPixelSize != null) _sliderGlitchPixelSize.Value = 3.0;
         if (_lblGlitchPixelSize != null) _lblGlitchPixelSize.Text = "3.0px";
         if (_sliderGlitchSplit != null) _sliderGlitchSplit.Value = 0.008f;
         if (_lblGlitchSplit != null) _lblGlitchSplit.Text = "0.008";
@@ -562,6 +705,10 @@ public partial class ShadingTabUI : VBoxContainer
         SetShaderParam(_glitchRect, "pixel_size", 3.0f);
         SetShaderParam(_glitchRect, "double_vision_split", 0.008f);
         SetShaderParam(_glitchRect, "opacity", 0.5f);
+
+        // Signature Effects Defaults
+        _heroSignatureEnabled = true;
+        if (_checkHeroSignature != null) _checkHeroSignature.ButtonPressed = true;
 
         _isSyncing = false;
         UpdateShaderVisibility();

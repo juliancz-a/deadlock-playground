@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cyw82tcufopac" path="res://ui/scripts/tabs/BonesTabUI.cs" id="1_bones"]
 
-[node name="BonesTab" type="VBoxContainer" unique_id=2092527891 node_paths=PackedStringArray("_allBonesOptionButton", "_selectedBoneLabel", "_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_btnResetBone", "_btnDeselect", "_checkPrimary", "_checkClothing", "_checkFace", "_checkFingers", "_checkProps", "_checkHelpers", "_toggleXRayButton", "_toggleLinesButton")]
+[node name="BonesTab" type="VBoxContainer" unique_id=2092527891 node_paths=PackedStringArray("_allBonesOptionButton", "_selectedBoneLabel", "_sliderX", "_sliderY", "_sliderZ", "_labelX", "_labelY", "_labelZ", "_btnResetBone", "_btnDeselect", "_checkPrimary", "_checkClothing", "_checkFace", "_checkFingers", "_checkProps", "_checkHelpers", "_toggleXRayButton", "_toggleLinesButton", "_checkMasterIK", "_checkArmsIK", "_checkLegsIK", "_sliderIKBlend", "_labelIKBlend", "_sliderIKOpacity", "_labelIKOpacity", "_btnSnapIKToFK")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -30,6 +30,14 @@ _checkProps = NodePath("LayersGroup/GridContainer/CheckProps")
 _checkHelpers = NodePath("LayersGroup/GridContainer/CheckHelpers")
 _toggleXRayButton = NodePath("XRayGroup/HBoxContainer/ToggleXRayButton")
 _toggleLinesButton = NodePath("XRayGroup/HBoxContainer/CheckLines")
+_checkMasterIK = NodePath("IKGroup/CheckMasterIK")
+_checkArmsIK = NodePath("IKGroup/LimbGrid/CheckArmsIK")
+_checkLegsIK = NodePath("IKGroup/LimbGrid/CheckLegsIK")
+_sliderIKBlend = NodePath("IKGroup/BlendHBox/SliderIKBlend")
+_labelIKBlend = NodePath("IKGroup/BlendHBox/LabelIKBlend")
+_sliderIKOpacity = NodePath("IKGroup/OpacityHBox/SliderIKOpacity")
+_labelIKOpacity = NodePath("IKGroup/OpacityHBox/LabelIKOpacity")
+_btnSnapIKToFK = NodePath("IKGroup/BtnSnapIK")
 
 [node name="LayersGroup" type="VBoxContainer" parent="." unique_id=1001586927]
 layout_mode = 2
@@ -102,6 +110,92 @@ text = "Toggle X-Ray"
 layout_mode = 2
 button_pressed = true
 text = "Wireframe Lines"
+
+[node name="HSeparatorIK" type="HSeparator" parent="." unique_id=1982736450]
+layout_mode = 2
+
+[node name="IKGroup" type="VBoxContainer" parent="." unique_id=1982736451]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="IKTitleLabel" type="Label" parent="IKGroup" unique_id=1982736452]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Inverse Kinematics (IK)"
+
+[node name="CheckMasterIK" type="CheckBox" parent="IKGroup" unique_id=1982736453]
+layout_mode = 2
+text = "Enable IK Posing"
+
+[node name="LimbGrid" type="GridContainer" parent="IKGroup" unique_id=1982736454]
+layout_mode = 2
+columns = 2
+
+[node name="CheckArmsIK" type="CheckBox" parent="IKGroup/LimbGrid" unique_id=1982736455]
+layout_mode = 2
+size_flags_horizontal = 3
+button_pressed = true
+text = "IK Arms"
+
+[node name="CheckLegsIK" type="CheckBox" parent="IKGroup/LimbGrid" unique_id=1982736456]
+layout_mode = 2
+size_flags_horizontal = 3
+button_pressed = true
+text = "IK Legs"
+
+[node name="BlendHBox" type="HBoxContainer" parent="IKGroup" unique_id=1982736457]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="IKGroup/BlendHBox" unique_id=1982736458]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "FK/IK Blend"
+
+[node name="SliderIKBlend" type="HSlider" parent="IKGroup/BlendHBox" unique_id=1982736459]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 100.0
+value = 100.0
+
+[node name="LabelIKBlend" type="Label" parent="IKGroup/BlendHBox" unique_id=1982736460]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_type_variation = &"NumericLabel"
+text = "100%"
+
+[node name="OpacityHBox" type="HBoxContainer" parent="IKGroup" unique_id=1982736465]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="IKGroup/OpacityHBox" unique_id=1982736466]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+text = "Handles Opacity"
+
+[node name="SliderIKOpacity" type="HSlider" parent="IKGroup/OpacityHBox" unique_id=1982736467]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 100.0
+value = 85.0
+
+[node name="LabelIKOpacity" type="Label" parent="IKGroup/OpacityHBox" unique_id=1982736468]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_type_variation = &"NumericLabel"
+text = "85%"
+
+[node name="BtnSnapIK" type="Button" parent="IKGroup" unique_id=1982736461]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+text = "Snap IK to Current Pose"
+
+[node name="HSeparator2" type="HSeparator" parent="." unique_id=1982736462]
+layout_mode = 2
 
 [node name="BoneSelectGroup" type="VBoxContainer" parent="." unique_id=1021608458]
 layout_mode = 2

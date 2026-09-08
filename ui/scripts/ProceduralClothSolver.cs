@@ -9,9 +9,26 @@ using System.Collections.Generic;
 /// </summary>
 public static class ProceduralClothSolver
 {
-    public static void Conform(Skeleton3D skeleton)
+    private static bool _isDirty = true;
+    private static ulong _lastSolvedFrame = 0;
+
+    public static void MarkDirty()
     {
+        _isDirty = true;
+    }
+
+    public static void Conform(Skeleton3D skeleton, bool force = false)
+    {
+        if (skeleton == null) return;
+        ulong currentFrame = Engine.GetProcessFrames();
+        if (!force && !_isDirty && currentFrame == _lastSolvedFrame)
+        {
+            return;
+        }
+
         ConformProceduralClothPoses(skeleton);
+        _isDirty = false;
+        _lastSolvedFrame = currentFrame;
     }
 
     private const float SkirtFlapTracking = 0.94f;

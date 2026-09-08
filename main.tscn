@@ -18,6 +18,7 @@
 [ext_resource type="Shader" uid="uid://82snm4ouah2f" path="res://assets/shaders/glitch_shader.gdshader" id="17_glitch_shader"]
 [ext_resource type="Script" uid="uid://c7d8ndr06lxge" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
 [ext_resource type="Texture2D" uid="uid://djdwwfcdcwicj" path="res://assets/backgrounds/background_00.jpg" id="19_bg0"]
+[ext_resource type="Script" path="res://ui/scripts/CameraControlPadUI.cs" id="20_cam_pad"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -116,7 +117,7 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_tabContentContainer", "_tabCharacter", "_tabBones", "_tabCamera", "_tabPose", "_tabScene", "_tabEffects", "_tabLighting", "_tabShading", "_exportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_exportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_fpsLimitOption", "_vsyncCheck", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
@@ -158,6 +159,8 @@ _btnBrowseGamePath = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/T
 _savePathInput = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/SavesPathLine")
 _btnBrowseSavePath = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton")
 _texQualityOption = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/TexQualityButton")
+_fpsLimitOption = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/FpsLimitButton")
+_vsyncCheck = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/VsyncCheck")
 _xrayLineColorPicker = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineColor/ColorPickerButton")
 _xrayLineOpacitySlider = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineOpacity/HSlider")
 _xrayLineOpacityLabel = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineOpacity/LabelCurrOpacity")
@@ -243,6 +246,7 @@ split_offset = 360
 
 [node name="LeftPanel" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=2054274140]
 custom_minimum_size = Vector2(280, 0)
+custom_maximum_size = Vector2(400, -1)
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -540,6 +544,18 @@ layout_mode = 0
 mouse_filter = 2
 color = Color(0, 0, 0, 0.85)
 
+[node name="CameraControlPad" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=987654321]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -118.0
+offset_right = 92.0
+offset_bottom = -12.0
+grow_vertical = 0
+script = ExtResource("20_cam_pad")
+
 [node name="ExportPanel" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=156702132 instance=ExtResource("14_export")]
 layout_mode = 1
 offset_left = -242.0
@@ -750,6 +766,18 @@ layout_mode = 2
 button_pressed = true
 text = "ScreenSpace Reflections (SSR)"
 
+[node name="FpsLimitLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=1498302194]
+layout_mode = 2
+text = "Target Frame Rate (FPS Limit)"
+
+[node name="FpsLimitButton" type="OptionButton" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=1849201948]
+layout_mode = 2
+
+[node name="VsyncCheck" type="CheckBox" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer" unique_id=1740928301]
+layout_mode = 2
+button_pressed = true
+text = "Vertical Sync (VSync)"
+
 [node name="Camera" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer" unique_id=699096539]
 visible = false
 layout_mode = 2
@@ -880,6 +908,27 @@ value = 1.0
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
+[node name="HBoxContainerIKOpacity" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=48203690]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity" unique_id=1205133203]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "IK Handles Opacity"
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity" unique_id=1485220530]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+min_value = 0.05
+max_value = 1.0
+step = 0.05
+value = 0.7
+
+[node name="LabelCurrOpacity" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity" unique_id=416714002]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "70%"
+
 [node name="HSeparator2" type="HSeparator" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=1089709324]
 layout_mode = 2
 
@@ -888,6 +937,7 @@ layout_mode = 2
 text = "Reset UI Properties"
 
 [node name="AboutModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1871805012]
+visible = false
 layout_mode = 0
 anchor_left = 0.5
 anchor_top = 0.5

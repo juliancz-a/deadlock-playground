@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bcs8l0x7n8je1" path="res://ui/scripts/tabs/ShadingTabUI.cs" id="1_shading"]
 
-[node name="ShadingTab" type="VBoxContainer" unique_id=389545055 node_paths=PackedStringArray("_masterToggle", "_btnResetDefaults", "_checkToonEnable", "_sliderToonIntensity", "_lblToonIntensity", "_sliderToonSteps", "_lblToonSteps", "_sliderToonSmoothness", "_lblToonSmoothness", "_checkToonOutline", "_sliderToonOutlineWidth", "_lblToonOutlineWidth", "_colorToonOutline", "_sliderToonShadowAmount", "_lblToonShadowAmount", "_colorToonShadow", "_checkCrtEnable", "_sliderCrtScan1", "_lblCrtScan1", "_sliderCrtScan2", "_lblCrtScan2", "_sliderCrtScanReduction", "_lblCrtScanReduction", "_sliderCrtBlur", "_lblCrtBlur", "_sliderCrtDiffusion", "_lblCrtDiffusion", "_sliderCrtVignetteAlpha", "_lblCrtVignetteAlpha", "_sliderCrtVignetteRadius", "_lblCrtVignetteRadius", "_checkGlitchEnable", "_sliderGlitchIntensity", "_lblGlitchIntensity", "_sliderGlitchPixelSize", "_lblGlitchPixelSize", "_sliderGlitchSplit", "_lblGlitchSplit", "_sliderGlitchOpacity", "_lblGlitchOpacity")]
+[node name="ShadingTab" type="VBoxContainer" unique_id=389545055 node_paths=PackedStringArray("_masterToggle", "_btnResetDefaults", "_checkToonEnable", "_sliderToonIntensity", "_lblToonIntensity", "_sliderToonSteps", "_lblToonSteps", "_sliderToonSmoothness", "_lblToonSmoothness", "_checkToonOutline", "_sliderToonOutlineWidth", "_lblToonOutlineWidth", "_colorToonOutline", "_sliderToonShadowAmount", "_lblToonShadowAmount", "_colorToonShadow", "_checkCrtEnable", "_sliderCrtScan1", "_lblCrtScan1", "_sliderCrtScan2", "_lblCrtScan2", "_sliderCrtScanReduction", "_lblCrtScanReduction", "_sliderCrtBlur", "_lblCrtBlur", "_sliderCrtDiffusion", "_lblCrtDiffusion", "_sliderCrtVignetteAlpha", "_lblCrtVignetteAlpha", "_sliderCrtVignetteRadius", "_lblCrtVignetteRadius", "_checkGlitchEnable", "_sliderGlitchIntensity", "_lblGlitchIntensity", "_sliderGlitchPixelSize", "_lblGlitchPixelSize", "_sliderGlitchSplit", "_lblGlitchSplit", "_sliderGlitchOpacity", "_lblGlitchOpacity", "_checkHeroSignature", "_lblHeroSignature", "_dynamicHeroControls")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -52,6 +52,9 @@ _sliderGlitchSplit = NodePath("GlitchGroup/SplitBox/SliderSplit")
 _lblGlitchSplit = NodePath("GlitchGroup/SplitBox/LabelSplit")
 _sliderGlitchOpacity = NodePath("GlitchGroup/OpacityBox/SliderOpacity")
 _lblGlitchOpacity = NodePath("GlitchGroup/OpacityBox/LabelOpacity")
+_checkHeroSignature = NodePath("SignatureGroup/CheckHeroSignature")
+_lblHeroSignature = NodePath("SignatureGroup/LblHeroSignature")
+_dynamicHeroControls = NodePath("SignatureGroup/DynamicHeroControls")
 
 [node name="MasterHeader" type="VBoxContainer" parent="." unique_id=832762212]
 layout_mode = 2
@@ -220,6 +223,31 @@ text = "Shadow Color"
 custom_minimum_size = Vector2(70, 24)
 layout_mode = 2
 color = Color(0.15, 0.15, 0.25, 1)
+
+[node name="HSeparatorSignature" type="HSeparator" parent="." unique_id=1498301823]
+layout_mode = 2
+
+[node name="SignatureGroup" type="VBoxContainer" parent="." unique_id=1498301824]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SignatureTitle" type="Label" parent="SignatureGroup" unique_id=1498301825]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Hero Signature Effect"
+
+[node name="LblHeroSignature" type="Label" parent="SignatureGroup" unique_id=1498301826]
+layout_mode = 2
+text = "No Signature Effect for current hero"
+
+[node name="CheckHeroSignature" type="CheckBox" parent="SignatureGroup" unique_id=1498301827]
+layout_mode = 2
+button_pressed = true
+text = "Enable Signature Effect"
+
+[node name="DynamicHeroControls" type="VBoxContainer" parent="SignatureGroup" unique_id=1498301830]
+layout_mode = 2
+theme_override_constants/separation = 6
 
 [node name="HSeparator1" type="HSeparator" parent="." unique_id=1315122143]
 layout_mode = 2

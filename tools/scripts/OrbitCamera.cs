@@ -92,6 +92,48 @@ public partial class OrbitCamera : Node3D
 
     public float GetOrthoSize() => _camera != null ? _camera.Size : _targetOrthoSize;
 
+    public void NudgePan(float deltaX, float deltaY)
+    {
+        Vector3 right = GlobalTransform.Basis.X.Normalized();
+        Vector3 up = Vector3.Up;
+        Vector3 move = right * deltaX + up * deltaY;
+        _targetPan += move;
+        _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
+        _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
+        _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+    }
+
+    public void NudgeRotation(float deltaPitchDeg, float deltaYawDeg)
+    {
+        _pitch = Mathf.Clamp(_pitch + Mathf.DegToRad(deltaPitchDeg), PitchMin, PitchMax);
+        _yaw += Mathf.DegToRad(deltaYawDeg);
+        OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+    }
+
+    public void RecenterOnTarget(Vector3? targetCenter = null, float? targetZoom = null)
+    {
+        Vector3 center = targetCenter ?? new Vector3(0, 1.0f, 0);
+        _targetPan = new Vector3(
+            Mathf.Clamp(center.X, MinPanLimit.X, MaxPanLimit.X),
+            Mathf.Clamp(center.Y, MinPanLimit.Y, MaxPanLimit.Y),
+            Mathf.Clamp(center.Z, MinPanLimit.Z, MaxPanLimit.Z)
+        );
+        if (targetZoom.HasValue)
+        {
+            SetTargetZoom(targetZoom.Value);
+        }
+    }
+
+    public void ResetTransform()
+    {
+        _targetPan = new Vector3(0, 1.0f, 0);
+        _pitch = 0f;
+        _yaw = 0f;
+        _roll = 0f;
+        _targetZoom = 5.0f;
+        OnCameraRotated?.Invoke(0f, 0f, 0f);
+    }
+
     public override void _Ready()
     {
         _camera = GetNodeOrNull<Camera3D>("Camera3D");

@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bmejex7p20wei" path="res://ui/scripts/tabs/CameraTabUI.cs" id="1_cam"]
 
-[node name="CameraTab" type="VBoxContainer" unique_id=479136000 node_paths=PackedStringArray("_projectionOption", "_fovGroup", "_fovSlider", "_fovLabel", "_checkDollyZoom", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera")]
+[node name="CameraTab" type="VBoxContainer" unique_id=479136000 node_paths=PackedStringArray("_projectionOption", "_fovGroup", "_fovSlider", "_fovLabel", "_checkDollyZoom", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera", "_btnRecenterOnModel", "_btnResetCameraTransform")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -34,7 +34,9 @@ _orbitSensSlider = NodePath("SensGroup/OrbitBox/OrbitSensSlider")
 _orbitSensLabel = NodePath("SensGroup/OrbitBox/OrbitSensLabel")
 _panSpeedSlider = NodePath("SensGroup/PanBox/PanSpeedSlider")
 _panSpeedLabel = NodePath("SensGroup/PanBox/PanSpeedLabel")
-_btnResetCamera = NodePath("BtnResetCamera")
+_btnResetCamera = NodePath("ActionsBox/BtnResetCameraTransform")
+_btnRecenterOnModel = NodePath("ActionsBox/BtnRecenterOnModel")
+_btnResetCameraTransform = NodePath("ActionsBox/BtnResetCameraTransform")
 
 [node name="ProjectionGroup" type="VBoxContainer" parent="." unique_id=289482035]
 layout_mode = 2
@@ -293,7 +295,16 @@ text = "5.0"
 [node name="HSeparator4" type="HSeparator" parent="." unique_id=2125820814]
 layout_mode = 2
 
-[node name="BtnResetCamera" type="Button" parent="." unique_id=35836319]
+[node name="ActionsBox" type="VBoxContainer" parent="." unique_id=35836319]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnRecenterOnModel" type="Button" parent="ActionsBox" unique_id=1849204910]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-text = "Reset Camera View"
+text = "Recenter on Model"
+
+[node name="BtnResetCameraTransform" type="Button" parent="ActionsBox" unique_id=1409285291]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Reset Camera Transform"

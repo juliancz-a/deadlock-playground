@@ -25,8 +25,19 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
     [Export] private Button _toggleXRayButton;
     [Export] private CheckBox _toggleLinesButton;
 
+    [ExportCategory("Inverse Kinematics (IK)")]
+    [Export] private CheckBox _checkMasterIK;
+    [Export] private CheckBox _checkArmsIK;
+    [Export] private CheckBox _checkLegsIK;
+    [Export] private HSlider _sliderIKBlend;
+    [Export] private Label _labelIKBlend;
+    [Export] private HSlider _sliderIKOpacity;
+    [Export] private Label _labelIKOpacity;
+    [Export] private Button _btnSnapIKToFK;
+
     private Skeleton3D _skeleton;
     private BoneLayerManager _layerManager;
+    private CharacterIKManager _ikManager;
     private int _selectedBoneIdx = -1;
     private bool _updatingSliders = false;
 
@@ -96,11 +107,90 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
         }
 
         InitLayerCheckboxes();
+        InitIKControls();
 
         if (_skeleton != null)
         {
             PopulateAllBones();
         }
+    }
+
+    private void InitIKControls()
+    {
+        if (_checkMasterIK != null)
+        {
+            _checkMasterIK.Toggled += (pressed) =>
+            {
+                _ikManager?.SetMasterIKEnabled(pressed);
+                UpdateIKUIState();
+            };
+        }
+
+        if (_checkArmsIK != null)
+        {
+            _checkArmsIK.ButtonPressed = true;
+            _checkArmsIK.Toggled += (pressed) => _ikManager?.SetArmsIKEnabled(pressed);
+        }
+
+        if (_checkLegsIK != null)
+        {
+            _checkLegsIK.ButtonPressed = true;
+            _checkLegsIK.Toggled += (pressed) => _ikManager?.SetLegsIKEnabled(pressed);
+        }
+
+        if (_sliderIKBlend != null)
+        {
+            _sliderIKBlend.Value = 100.0;
+            if (_labelIKBlend != null) _labelIKBlend.Text = "100%";
+            _sliderIKBlend.ValueChanged += (val) =>
+            {
+                if (_labelIKBlend != null) _labelIKBlend.Text = $"{val:F0}%";
+                _ikManager?.SetIKBlendWeight((float)val / 100.0f);
+            };
+        }
+
+        if (_sliderIKOpacity != null)
+        {
+            float initVal = GizmoDisplaySettings.IKHandlesOpacity * 100.0f;
+            _sliderIKOpacity.Value = initVal;
+            if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{initVal:F0}%";
+            _sliderIKOpacity.ValueChanged += (val) =>
+            {
+                if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{val:F0}%";
+                float op = (float)val / 100.0f;
+                GizmoDisplaySettings.IKHandlesOpacity = op;
+                _ikManager?.SetHandlesOpacity(op);
+            };
+        }
+
+        if (_btnSnapIKToFK != null)
+        {
+            _btnSnapIKToFK.Pressed += () => _ikManager?.SnapAllToFK();
+        }
+
+        UpdateIKUIState();
+    }
+
+    public void SetIKManager(CharacterIKManager ikManager)
+    {
+        _ikManager = ikManager;
+        if (_sliderIKOpacity != null)
+        {
+            float curVal = GizmoDisplaySettings.IKHandlesOpacity * 100.0f;
+            _sliderIKOpacity.Value = curVal;
+            if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{curVal:F0}%";
+        }
+        UpdateIKUIState();
+    }
+
+    private void UpdateIKUIState()
+    {
+        bool isIK = _checkMasterIK != null && _checkMasterIK.ButtonPressed;
+        if (_checkArmsIK != null) _checkArmsIK.Disabled = !isIK;
+        if (_checkLegsIK != null) _checkLegsIK.Disabled = !isIK;
+        if (_sliderIKBlend != null) _sliderIKBlend.Editable = isIK;
+        if (_sliderIKOpacity != null) _sliderIKOpacity.Editable = isIK;
+        if (_btnSnapIKToFK != null) _btnSnapIKToFK.Disabled = !isIK;
     }
 
     public void SetSkeleton(Skeleton3D skeleton)
