@@ -83,6 +83,7 @@ public partial class ShadingTabUI : VBoxContainer
         public bool IsWeapon = false;
         public bool IsBuiltinOutline = false;
         public bool IsAdditive = false;
+        public bool IsTranslucent = false;
 
         public ShaderMaterial ToonMaterial;
         public ShaderMaterial OutlineMaterial;
@@ -450,10 +451,11 @@ public partial class ShadingTabUI : VBoxContainer
                 if (matPath.Contains("outline")) isBuiltinOutline = true;
 
                 bool isAdditive = false;
+                bool isTranslucent = false;
                 if (origMat is StandardMaterial3D sm)
                 {
-                    isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add ||
-                                 sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+                    isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add;
+                    isTranslucent = sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
                 }
 
                 // 1. Signature material from HeroMaterialManager
@@ -479,8 +481,16 @@ public partial class ShadingTabUI : VBoxContainer
                         toonMat.SetShaderParameter("normal_strength", stdMat.NormalEnabled ? 1.0f : 0.0f);
                     }
 
-                    float spec = Mathf.Clamp(1.0f - stdMat.Roughness, 0.05f, 1.0f);
+                    toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                    float spec = stdMat.Metallic > 0.5f ? 0.45f : 0.30f;
                     toonMat.SetShaderParameter("specular", spec);
+                    toonMat.SetShaderParameter("uv1_scale", stdMat.Uv1Scale);
+                    toonMat.SetShaderParameter("uv1_offset", stdMat.Uv1Offset);
+
+                    if (stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor)
+                    {
+                        toonMat.SetShaderParameter("alpha_scissor_threshold", stdMat.AlphaScissorThreshold > 0.01f ? stdMat.AlphaScissorThreshold : 0.5f);
+                    }
 
                     if (stdMat.EmissionEnabled)
                     {
@@ -502,6 +512,7 @@ public partial class ShadingTabUI : VBoxContainer
                     IsWeapon = isWeapon,
                     IsBuiltinOutline = isBuiltinOutline,
                     IsAdditive = isAdditive,
+                    IsTranslucent = isTranslucent,
                     ToonMaterial = toonMat,
                     OutlineMaterial = outlineMat,
                     SignatureMaterial = sigMat
@@ -541,17 +552,34 @@ public partial class ShadingTabUI : VBoxContainer
             }
             else if (enableToon)
             {
-                baseMat = record.ToonMaterial;
+                // Preserve additive VFX and translucent glass surfaces so they do not become opaque toon blocks
+                if (record.IsAdditive || record.IsTranslucent)
+                {
+                    baseMat = record.OriginalMaterial;
+                }
+                else
+                {
+                    baseMat = record.ToonMaterial;
+                }
             }
             else
             {
                 baseMat = record.OriginalMaterial;
             }
 
-            // Outline NextPass for Toon: ONLY on opaque toon materials, NEVER on built-in outlines or additive auras
+            // Outline NextPass for Toon: ONLY on structural body/clothing meshes using DeadlockMaterialResolver selective filter
+            // Automatically excludes eyes, mouth interior, teeth, decals, glasses/lenses, fur layers, and particle/fire meshes.
             if (baseMat is ShaderMaterial shMat)
             {
-                if (enableOutline && baseMat == record.ToonMaterial && !record.IsBuiltinOutline && !record.IsAdditive)
+                string meshCleanName = record.Mesh.Name.ToString().TrimStart('.', '_');
+                bool isEligibleForOutline = DeadlockMaterialResolver.ShouldApplyOutline(
+                    meshCleanName,
+                    record.MaterialPath,
+                    record.IsAdditive,
+                    record.IsTranslucent
+                );
+
+                if (enableOutline && baseMat == record.ToonMaterial && isEligibleForOutline)
                 {
                     shMat.NextPass = record.OutlineMaterial;
                 }
@@ -585,11 +613,11 @@ public partial class ShadingTabUI : VBoxContainer
     {
         float intensity = _sliderToonIntensity != null ? (float)_sliderToonIntensity.Value : 1.0f;
         float steps = _sliderToonSteps != null ? (float)_sliderToonSteps.Value : 3.0f;
-        float smooth = _sliderToonSmoothness != null ? (float)_sliderToonSmoothness.Value : 0.05f;
-        float shadowAmt = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.45f;
-        Color shadowCol = _colorToonShadow != null ? _colorToonShadow.Color : new Color(0.15f, 0.15f, 0.25f, 1.0f);
+        float smooth = _sliderToonSmoothness != null ? (float)_sliderToonSmoothness.Value : 0.30f;
+        float shadowAmt = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.40f;
+        Color shadowCol = _colorToonShadow != null ? _colorToonShadow.Color : new Color(0.18f, 0.16f, 0.26f, 1.0f);
 
-        float outWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.5f;
+        float outWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.0f;
         Color outCol = _colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f);
 
         foreach (var record in _characterSurfaces)
@@ -602,11 +630,13 @@ public partial class ShadingTabUI : VBoxContainer
                 record.ToonMaterial.SetShaderParameter("step_smoothness", smooth);
                 record.ToonMaterial.SetShaderParameter("shadow_tint", shadowCol);
                 record.ToonMaterial.SetShaderParameter("shadow_tint_amount", shadowAmt);
+                record.ToonMaterial.SetShaderParameter("specular", record.IsWeapon ? 0.45f : 0.30f);
                 record.ToonMaterial.SetShaderParameter("use_rim", true);
                 record.ToonMaterial.SetShaderParameter("rim_color", new Color(1.0f, 1.0f, 1.0f, 1.0f));
                 record.ToonMaterial.SetShaderParameter("rim_amount", 2.0f);
                 record.ToonMaterial.SetShaderParameter("rim_smoothness", 0.2f);
-                record.ToonMaterial.SetShaderParameter("rim_blend", 0.5f);
+                record.ToonMaterial.SetShaderParameter("rim_blend", 1.0f);
+                record.ToonMaterial.SetShaderParameter("rim_mask_shadow", 1.0f);
             }
 
             if (record.OutlineMaterial != null)
@@ -651,15 +681,15 @@ public partial class ShadingTabUI : VBoxContainer
         if (_lblToonIntensity != null) _lblToonIntensity.Text = "1.00";
         if (_sliderToonSteps != null) _sliderToonSteps.Value = 3.0;
         if (_lblToonSteps != null) _lblToonSteps.Text = "3";
-        if (_sliderToonSmoothness != null) _sliderToonSmoothness.Value = 0.05;
-        if (_lblToonSmoothness != null) _lblToonSmoothness.Text = "0.05";
+        if (_sliderToonSmoothness != null) _sliderToonSmoothness.Value = 0.30;
+        if (_lblToonSmoothness != null) _lblToonSmoothness.Text = "0.30";
         if (_checkToonOutline != null) _checkToonOutline.ButtonPressed = true;
-        if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 1.5;
-        if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "1.5px";
+        if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 1.0;
+        if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "1.0px";
         if (_colorToonOutline != null) _colorToonOutline.Color = new Color(0.08f, 0.08f, 0.08f, 1.0f);
-        if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.45;
-        if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.45";
-        if (_colorToonShadow != null) _colorToonShadow.Color = new Color(0.15f, 0.15f, 0.25f, 1.0f);
+        if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.40;
+        if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.40";
+        if (_colorToonShadow != null) _colorToonShadow.Color = new Color(0.18f, 0.16f, 0.26f, 1.0f);
 
         UpdateToonMaterialsUniforms();
 

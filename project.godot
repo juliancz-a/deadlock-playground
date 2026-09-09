@@ -13,9 +13,9 @@ config_version=5
 config/name="Deadlock_Playground"
 run/main_scene="uid://b0avkl80hhgtj"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+run/max_fps=60
 boot_splash/show_image=false
 config/icon="uid://67nlgu7dndiv"
-run/max_fps=60
 
 [display]
 

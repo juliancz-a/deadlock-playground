@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
+using SteamDatabase.ValvePak;
 using DeadlockPlayground.Materials.Heroes;
 
 namespace DeadlockPlayground.Materials;
@@ -15,13 +16,10 @@ public static class HeroMaterialManager
 
     static HeroMaterialManager()
     {
+        // Core heroes with interactive signature shaders
         RegisterConfig(new ViscousMaterialConfig());
         RegisterConfig(new VindictaMaterialConfig());
         RegisterConfig(new LadyGeistMaterialConfig());
-        RegisterConfig(new ParadoxMaterialConfig());
-        RegisterConfig(new YamatoMaterialConfig());
-        RegisterConfig(new ShivMaterialConfig());
-        RegisterConfig(new BebopMaterialConfig());
     }
 
     public static void RegisterConfig(IHeroMaterialConfig config)
@@ -32,7 +30,7 @@ public static class HeroMaterialManager
 
     /// <summary>
     /// Resolves the matching hero config based on the hero name or internal model identifier.
-    /// Supports aliases (e.g. "hornet" -> Vindicta, "ghost" -> Lady Geist, "chrono" -> Paradox).
+    /// Supports aliases (e.g. "hornet" -> Vindicta, "ghost" -> Lady Geist).
     /// </summary>
     public static IHeroMaterialConfig GetConfigForHero(string heroName)
     {
@@ -44,10 +42,6 @@ public static class HeroMaterialManager
         if (lower.Contains("viscous")) return _configs.GetValueOrDefault("viscous");
         if (lower.Contains("hornet") || lower.Contains("vindicta")) return _configs.GetValueOrDefault("vindicta");
         if (lower.Contains("ghost") || lower.Contains("lady") || lower.Contains("geist")) return _configs.GetValueOrDefault("ghost");
-        if (lower.Contains("chrono") || lower.Contains("paradox")) return _configs.GetValueOrDefault("chrono");
-        if (lower.Contains("yamato")) return _configs.GetValueOrDefault("yamato");
-        if (lower.Contains("shiv")) return _configs.GetValueOrDefault("shiv");
-        if (lower.Contains("bebop")) return _configs.GetValueOrDefault("bebop");
 
         return null;
     }
@@ -55,7 +49,7 @@ public static class HeroMaterialManager
     /// <summary>
     /// Configures the base StandardMaterial3D during VPK model loading using the appropriate hero configuration.
     /// </summary>
-    public static void ConfigureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
+    public static void ConfigureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material, Package package = null)
     {
         if (material == null) return;
         var config = GetConfigForHero(heroName);

@@ -9,6 +9,7 @@ using ValveResourceFormat.IO;
 using ValveResourceFormat.ResourceTypes;
 using ValveResourceFormat.Serialization.KeyValues;
 using System.Threading.Tasks;
+using DeadlockPlayground.Tools;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Catalog;
 
@@ -129,8 +130,8 @@ public partial class VpkLoaderTest : Node3D
 			// 2. Extraemos el mapa mesh → materiales desde los draw calls del VMDL
 			meshMaterialMap = BuildMeshMaterialMap(resource);
 
-			// 3. Exportamos a glTF 2.0 (GLB binario)
-			GD.Print("Generando GLB con VRF...");
+			// 3. Exportamos a glTF 2.0 (GLB binario) sin pistas continuas pesadas (Zero-RAM Pose Mode)
+			GD.Print("Generando GLB con VRF (Zero-RAM Pose Mode)...");
 
 			var fileLoader = new GameFileLoader(package, entry.DirectoryName);
 			var exporter = new GltfModelExporter(fileLoader)
@@ -142,36 +143,70 @@ public partial class VpkLoaderTest : Node3D
 				ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
 			};
 
-			exporter.AnimationFilter.Clear();
-			if (resource.DataBlock is Model vrfModel)
+			// Curated high-value posing animation filter to keep GLB lightweight while exporting undeformed, retargeted animations
+			if (resource.DataBlock is Model vModel)
 			{
-				// Retrieve all animations using VRF API
-				var allAnims = vrfModel.GetAllAnimations(fileLoader);
-				foreach (var anim in allAnims)
+				try
 				{
-					string lowerName = anim.Name.ToLower();
-					
-					bool isImportant = lowerName.EndsWith("stand_idle") || 
-					                   lowerName.EndsWith("run_center") || 
-					                   lowerName.EndsWith("walk_center") || 
-					                   lowerName == "shoot_idle" || 
-					                   lowerName == "idle_loadout" || 
-					                   lowerName == "primary_shoot" ||
-					                   lowerName == "out_of_combat_stand_idle";
-					
-					if (isImportant && !lowerName.Contains("zoomed") && !lowerName.Contains("aim"))
+					var allAnims = vModel.GetAllAnimations(fileLoader).ToList();
+					string[] targetKeywords = new[]
 					{
-						exporter.AnimationFilter.Add(anim.Name);
+						"parry", "reload", "stand_idle", "primary_idle", "crouch_idle", "primary_crouch_idle",
+						"shoot_idle", "primary_shoot", "ui_hero_select", "ui_pose", "hero_pose",
+						"melee", "cast", "attack", "idle"
+					};
+
+					int GetPriority(string name)
+					{
+						if (name.Contains("parry")) return 1;
+						if (name.Contains("reload")) return 2;
+						if (name.Contains("stand_idle") || name.Contains("primary_idle") || name.Contains("ui_hero_select")) return 3;
+						return 4;
 					}
+
+					var matchedAnims = allAnims.Where(a =>
+					{
+						string n = a.Name.ToLowerInvariant();
+						bool matchesKeyword = targetKeywords.Any(k => n.Contains(k));
+						if (!matchesKeyword) return false;
+
+						if (n.Contains("_nw") || n.Contains("_ne") || n.Contains("_sw") || n.Contains("_se") ||
+						    n.EndsWith("_w") || n.EndsWith("_e") || n.EndsWith("_s")) return false;
+
+						if (n.Contains("ragdoll") || n.Contains("death") || n.Contains("knockdown") ||
+						    n.Contains("flinch") || n.Contains("drown") || n.Contains("hit_") || n.Contains("pain_")) return false;
+
+						return true;
+					})
+					.OrderBy(a => GetPriority(a.Name.ToLowerInvariant()))
+					.Take(40)
+					.ToList();
+
+					if (matchedAnims.Count == 0 && allAnims.Count > 0)
+					{
+						matchedAnims = allAnims.Take(10).ToList();
+					}
+
+					foreach (var a in matchedAnims)
+					{
+						string raw = a.Name;
+						string clean = raw.Replace('\\', '/');
+						string withoutExt = Path.ChangeExtension(clean, null);
+						exporter.AnimationFilter.Add(raw);
+						exporter.AnimationFilter.Add(clean);
+						exporter.AnimationFilter.Add("@" + clean);
+						exporter.AnimationFilter.Add(withoutExt);
+						exporter.AnimationFilter.Add(Path.GetFileName(clean));
+						exporter.AnimationFilter.Add(Path.GetFileName(withoutExt));
+					}
+					GD.Print($"[VRF] Exporting {matchedAnims.Count} curated posing animations into GLTF.");
+				}
+				catch (Exception ex)
+				{
+					GD.PrintErr($"[VRF] Error populating animation filter: {ex.Message}");
 				}
 			}
 
-			GD.Print($"Cantidad de animaciones que cumplen el filtro: {exporter.AnimationFilter.Count}");
-			foreach (var animation in exporter.AnimationFilter)
-			{
-				GD.Print($"Exportando animación: {animation}");
-			}
-			
 			string tempGlbPath = Path.Combine(Path.GetTempPath(), $"{heroKey}_{Guid.NewGuid():N}.glb");
 			try
 			{
@@ -190,7 +225,13 @@ public partial class VpkLoaderTest : Node3D
 		if (glbBytes != null)
 		{
 			GD.Print($"GLB generado con éxito ({glbBytes.Length / (1024 * 1024)} MB). Importando a Godot...");
-			InstantiateInScene(glbBytes, heroKey, package, meshMaterialMap);
+			package.ReadEntry(entry, out byte[] modelData);
+			using var modelRes = new ValveResourceFormat.Resource();
+			using var ms = new MemoryStream(modelData);
+			modelRes.Read(ms);
+			var vrfModel = modelRes.DataBlock as Model;
+
+			InstantiateInScene(glbBytes, heroKey, package, meshMaterialMap, vrfModel, entry.DirectoryName);
 		}
 
 		EmitSignal(SignalName.LoadFinished);
@@ -209,6 +250,7 @@ public partial class VpkLoaderTest : Node3D
 
         if (_currentHeroNode != null)
         {
+            DeadlockAnimLoader.ClearHeroPoses(_currentHeroNode);
             DisposeNodeRecursively(_currentHeroNode);
             _currentHeroNode.GetParent()?.RemoveChild(_currentHeroNode);
             _currentHeroNode.QueueFree();
@@ -285,7 +327,7 @@ public partial class VpkLoaderTest : Node3D
 		return map;
 	}
 
-	private void InstantiateInScene(byte[] glbBytes, string hero, Package package, Dictionary<string, List<string>> meshMaterialMap)
+	private void InstantiateInScene(byte[] glbBytes, string hero, Package package, Dictionary<string, List<string>> meshMaterialMap, Model vrfModel, string vmdlDirectory)
 	{
 		try
 		{
@@ -300,22 +342,29 @@ public partial class VpkLoaderTest : Node3D
 				return;
 			}
 
-		// Generamos los nodos 3D (MeshInstance3D, Skeleton3D, etc.)
-		Node3D modelScene = (Node3D)gltfDoc.GenerateScene(gltfState);
-		modelScene.Name = $"Hero_{hero}";
+			// Generamos los nodos 3D (MeshInstance3D, Skeleton3D, etc.)
+			Node3D modelScene = (Node3D)gltfDoc.GenerateScene(gltfState);
+			modelScene.Name = $"Hero_{hero}";
 
-        _currentHeroNode = modelScene;
+			_currentHeroNode = modelScene;
 
-		AddChild(modelScene);
-		GD.Print($"¡Héroe '{hero}' instanciado en el Viewport con éxito!");
+			AddChild(modelScene);
+			GD.Print($"¡Héroe '{hero}' instanciado en el Viewport con éxito!");
 
-		GD.Print("Malla instanciada. Enlazando materiales por submalla...");
-		ApplyMaterialsRecursively(modelScene, hero, package, meshMaterialMap);
-		EmitSignal(SignalName.HeroLoaded, modelScene);
+			GD.Print("Malla instanciada. Enlazando materiales por submalla...");
+			ApplyMaterialsRecursively(modelScene, hero, package, meshMaterialMap);
 
-		// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
-		var skeleton = SearchSkeleton(modelScene);
-		var animPlayer = SearchAnimationPlayer(modelScene);
+			// Apply initial submesh visibility rules (e.g. Viscous core/body, hair, weapons)
+			DeadlockMaterialResolver.ApplyInitialSubmeshVisibility(modelScene, hero);
+
+			// Note: Retargeted, clean poses were exported directly into glTF AnimationPlayer by VRF.
+			// DeadlockAnimLoader.LoadHeroPoses is bypassed here so it does not clear AnimationPlayer or push unretargeted raw bone frames.
+
+			EmitSignal(SignalName.HeroLoaded, modelScene);
+
+			// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
+			var skeleton = SearchSkeleton(modelScene);
+			var animPlayer = SearchAnimationPlayer(modelScene);
 		if (skeleton != null)
 		{
 			GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
@@ -396,7 +445,7 @@ public partial class VpkLoaderTest : Node3D
 					if (mat != null)
 					{
 						mat.ResourceName = vmatPath;
-						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat);
+						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat, package);
 						meshInstance.SetSurfaceOverrideMaterial(i, mat);
 						GD.Print($"  ✓ Material aplicado: '{Path.GetFileNameWithoutExtension(vmatPath)}' → {meshName}[{i}]");
 					}

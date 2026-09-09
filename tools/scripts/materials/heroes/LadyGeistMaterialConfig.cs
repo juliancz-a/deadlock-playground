@@ -6,7 +6,7 @@ namespace DeadlockPlayground.Materials.Heroes;
 public class LadyGeistMaterialConfig : IHeroMaterialConfig
 {
     public string HeroKey => "ghost";
-    public string DisplayName => "Lady Geist: Crystalline Demon Arm";
+    public string DisplayName => "Lady Geist Arm";
 
     private Shader _armShader;
 
@@ -20,44 +20,15 @@ public class LadyGeistMaterialConfig : IHeroMaterialConfig
 
     public void ConfigureBaseMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
     {
-        string vmatLower = vmatPath.ToLowerInvariant();
-
-        // Lady Geist arm base material (when realistic PBR is active)
-        if (vmatLower.Contains("ghost2_arm") || vmatLower.Contains("demon_arm"))
-        {
-            material.AlbedoColor = new Color(0.10f, 0.85f, 0.45f, 0.90f);
-            material.Roughness = 0.12f;
-            material.Metallic = 0.05f;
-            material.ClearcoatEnabled = true;
-            material.Clearcoat = 1.0f;
-            material.ClearcoatRoughness = 0.08f;
-            material.EmissionEnabled = true;
-            material.Emission = new Color(0.12f, 0.95f, 0.52f);
-            material.EmissionEnergyMultiplier = 1.4f;
-            return;
-        }
-
-        // Clothes, hair, body, shawl, gun
-        material.EmissionEnabled = false;
-
-        if (vmatLower.Contains("gun"))
-        {
-            material.Metallic = 0.75f;
-            material.Roughness = 0.35f;
-        }
-        else
-        {
-            material.Roughness = 0.65f;
-            material.Metallic = 0.05f;
-        }
+        // Base materials are accurately parsed and configured directly from VPK attributes by Source2MaterialHelper
     }
 
     public ShaderMaterial GetSignatureMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D baseMat)
     {
         string vmatLower = vmatPath.ToLowerInvariant();
 
-        // Custom arm shader is applied ONLY to Lady Geist's demon arm
-        if (vmatLower.Contains("ghost2_arm") || vmatLower.Contains("demon_arm"))
+        // Custom crystalline arm shader is applied to Lady Geist's demon arm (excluding the additive armglow submesh)
+        if ((vmatLower.Contains("geist_arm") || vmatLower.Contains("ghost2_arm") || vmatLower.Contains("demon_arm")) && !vmatLower.Contains("armglow"))
         {
             if (_armShader == null) return null;
 

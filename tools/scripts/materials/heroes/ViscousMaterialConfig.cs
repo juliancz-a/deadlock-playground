@@ -20,77 +20,7 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
 
     public void ConfigureBaseMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
     {
-        string meshLower = meshName.ToLowerInvariant();
-        string vmatLower = vmatPath.ToLowerInvariant();
-
-        // 1. Body outline: Deadlock inverted-hull NPR shell mesh
-        if (meshLower.Contains("bodyoutline") || vmatLower.Contains("viscous_outline"))
-        {
-            material.CullMode = BaseMaterial3D.CullModeEnum.Front; // Cull frontfaces so only backfaces form the outline rim
-            material.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
-            material.AlbedoColor = new Color(0.40f, 0.95f, 0.42f, 1.0f);
-            material.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
-            material.EmissionEnabled = false;
-            return;
-        }
-
-        // 2. Viscous helmet glass
-        if (vmatLower.Contains("viscous_glass"))
-        {
-            material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-            material.AlbedoColor = new Color(0.30f, 0.85f, 0.55f, 0.35f);
-            material.Roughness = 0.05f;
-            material.Metallic = 0.1f;
-            material.ClearcoatEnabled = true;
-            material.Clearcoat = 1.0f;
-            material.ClearcoatRoughness = 0.05f;
-            material.EmissionEnabled = false;
-            return;
-        }
-
-        // 3. Slime ball and slime body base PBR
-        if (vmatLower.Contains("viscous_ball") || vmatLower.Contains("viscous_body"))
-        {
-            material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-            material.AlbedoColor = new Color(0.18f, 0.75f, 0.35f, 0.70f);
-            material.Roughness = 0.08f;
-            material.Metallic = 0.0f;
-            material.ClearcoatEnabled = true;
-            material.Clearcoat = 1.0f;
-            material.ClearcoatRoughness = 0.05f;
-            material.EmissionEnabled = false;
-            return;
-        }
-
-        // 4. Viscous boots, gloves, collar details, gun (black.vmat)
-        if (vmatLower.Contains("black"))
-        {
-            material.AlbedoColor = new Color(0.15f, 0.18f, 0.15f, 1.0f);
-            material.Roughness = 0.50f;
-            material.Metallic = 0.20f;
-            material.EmissionEnabled = false;
-            return;
-        }
-
-        // 5. Core organs (viscous_swatches)
-        if (vmatLower.Contains("viscous_swatches"))
-        {
-            material.AlbedoColor = new Color(0.20f, 0.70f, 0.30f, 1.0f);
-            material.Roughness = 0.35f;
-            material.EmissionEnabled = false;
-            return;
-        }
-
-        // 6. Head sphere
-        if (vmatLower.Contains("viscous_head"))
-        {
-            material.AlbedoColor = new Color(0.20f, 0.82f, 0.32f, 1.0f);
-            material.Roughness = 0.12f;
-            material.ClearcoatEnabled = true;
-            material.Clearcoat = 1.0f;
-            material.EmissionEnabled = false;
-            return;
-        }
+        // Base materials are accurately parsed and configured directly from VPK attributes by Source2MaterialHelper
     }
 
     public ShaderMaterial GetSignatureMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D baseMat)

@@ -1,7 +1,7 @@
-#pragma warning disable CS0618
 using Godot;
 using System;
 using System.Collections.Generic;
+using DeadlockPlayground.Materials;
 
 public partial class PoseTabUI : VBoxContainer
 {
@@ -50,12 +50,32 @@ public partial class PoseTabUI : VBoxContainer
             for (int i = 0; i < animList.Length; i++)
             {
                 string lower = animList[i].ToLower();
-                if (lower.EndsWith("stand_idle") || lower == "shoot_idle" || lower == "idle_loadout" || lower.EndsWith("out_of_combat_stand_idle"))
+                if (lower.EndsWith("stand_idle") || lower == "shoot_idle" || lower == "idle_loadout" || lower.EndsWith("out_of_combat_stand_idle") || lower.Contains("primary_idle"))
                 {
                     bestIdx = i + 1; // 1-indexed in _animOptionButton
                     bestAnim = animList[i];
                     break;
                 }
+            }
+
+            if (bestIdx == -1)
+            {
+                for (int i = 0; i < animList.Length; i++)
+                {
+                    string lower = animList[i].ToLower();
+                    if (lower.Contains("idle"))
+                    {
+                        bestIdx = i + 1;
+                        bestAnim = animList[i];
+                        break;
+                    }
+                }
+            }
+
+            if (bestIdx == -1 && animList.Length > 0)
+            {
+                bestIdx = 1;
+                bestAnim = animList[0];
             }
 
             if (bestIdx > 0)
@@ -127,10 +147,9 @@ public partial class PoseTabUI : VBoxContainer
 
     public void ApplyPoseFromAnimation(string animName)
     {
-        if (_animPlayer == null || _skeleton == null) return;
+        if (_animPlayer == null || _skeleton == null || string.IsNullOrEmpty(animName)) return;
 
-        var anim = _animPlayer.GetAnimation(animName);
-        if (anim == null) return;
+        if (!_animPlayer.HasAnimation(animName)) return;
 
         // Reset all bone poses cleanly to rest
         for (int i = 0; i < _skeleton.GetBoneCount(); i++)
@@ -138,51 +157,37 @@ public partial class PoseTabUI : VBoxContainer
             _skeleton.ResetBonePose(i);
         }
 
-        int trackCount = anim.GetTrackCount();
-        for (int i = 0; i < trackCount; i++)
-        {
-            var trackType = anim.TrackGetType(i);
-            if (trackType == Animation.TrackType.Position3D ||
-                trackType == Animation.TrackType.Rotation3D ||
-                trackType == Animation.TrackType.Scale3D)
-            {
-                string trackPath = anim.TrackGetPath(i).ToString();
-                string[] parts = trackPath.Split(':');
-                if (parts.Length > 1)
-                {
-                    string boneName = parts[parts.Length - 1];
-                    int boneIdx = _skeleton.FindBone(boneName);
-                    if (boneIdx != -1)
-                    {
-                        if (trackType == Animation.TrackType.Position3D && anim.TrackGetKeyCount(i) > 0)
-                        {
-                            Vector3 pos = (Vector3)anim.PositionTrackInterpolate(i, 0.0);
-                            _skeleton.SetBonePosePosition(boneIdx, pos);
-                        }
-                        else if (trackType == Animation.TrackType.Rotation3D && anim.TrackGetKeyCount(i) > 0)
-                        {
-                            Quaternion rot = (Quaternion)anim.RotationTrackInterpolate(i, 0.0);
-                            _skeleton.SetBonePoseRotation(boneIdx, rot);
-                        }
-                    }
-                }
-            }
-        }
+        // Evaluate the pose at frame 0 using Godot's C++ native animation engine
+        // This guarantees 100% correct, undeformed bone matrices, retargeting, and hierarchy propagation
+        _animPlayer.Play(animName);
+        _animPlayer.Seek(0.0, update: true);
+        _animPlayer.Pause();
 
         _skeleton.ForceUpdateAllBoneTransforms();
         ProceduralClothSolver.Conform(_skeleton);
+
+        // Dynamically update context submeshes (e.g. Doorman parry_door vs reload_door)
+        Node3D heroRoot = _skeleton;
+        while (heroRoot != null && !heroRoot.Name.ToString().StartsWith("Hero_") && heroRoot.GetParent() is Node3D parent3D)
+        {
+            heroRoot = parent3D;
+        }
+        DeadlockMaterialResolver.OnPoseChanged(heroRoot, heroRoot?.Name.ToString() ?? "", animName);
     }
 
     public void ResetAllPoses()
     {
-        if (_skeleton == null) return;
+        _animPlayer?.Stop();
 
-        for (int i = 0; i < _skeleton.GetBoneCount(); i++)
+        if (_skeleton != null)
         {
-            _skeleton.ResetBonePose(i);
-        }
+            for (int i = 0; i < _skeleton.GetBoneCount(); i++)
+            {
+                _skeleton.ResetBonePose(i);
+            }
 
-        _skeleton.ForceUpdateAllBoneTransforms();
-        ProceduralClothSolver.Conform(_skeleton);
+            _skeleton.ForceUpdateAllBoneTransforms();
+            ProceduralClothSolver.Conform(_skeleton);
+        }
     }
 }
