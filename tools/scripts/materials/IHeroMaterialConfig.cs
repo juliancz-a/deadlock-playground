@@ -34,4 +34,20 @@ public interface IHeroMaterialConfig
     /// Returns null if no custom parameters are needed.
     /// </summary>
     Control BuildUI(Action<string, Variant> onParameterChanged);
+
+    /// <summary>
+    /// Signature glow color fallback for dynamic energy layers if VMAT attributes do not declare a chromatic tint.
+    /// </summary>
+    Color? SignatureGlowColor => null;
+
+    /// <summary>
+    /// Hook for hero-specific bespoke materials (e.g. Lash billboard sparkles, Wraith cards, Infernus hair plume).
+    /// Returns null if standard archetype builders should process the material.
+    /// </summary>
+    Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName) => null;
+
+    /// <summary>
+    /// Checks if a surface on this hero must strictly preserve its original material and bypass Toon swapping or outline NextPass.
+    /// </summary>
+    bool ShouldPreserveMaterial(string meshName, string vmatPath, Godot.Material material) => false;
 }

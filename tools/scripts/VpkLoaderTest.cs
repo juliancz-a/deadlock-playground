@@ -422,30 +422,7 @@ public partial class VpkLoaderTest : Node3D
 			// Godot convierte el "." a "_" en nombres de nodo, así que quitamos ambos
 			string meshName = meshInstance.Name.ToString().TrimStart('.', '_');
 
-			// Viscous's bodyoutline or generic outline submeshes: hide by default so they do not occlude the hero body
-			if (meshName.Equals("bodyoutline", StringComparison.OrdinalIgnoreCase) ||
-				meshName.Equals("outline", StringComparison.OrdinalIgnoreCase))
-			{
-				meshInstance.Visible = false;
-			}
-
-			// Billy / punkgoat: Ensure main model and primary jitter meshes are visible
-			if (heroName.Contains("punkgoat", StringComparison.OrdinalIgnoreCase) || heroName.Contains("billy", StringComparison.OrdinalIgnoreCase))
-			{
-				if (meshName.Contains("jitter02", StringComparison.OrdinalIgnoreCase))
-				{
-					meshInstance.Visible = false;
-				}
-				else if (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase) || meshName.Equals("punkgoat_model", StringComparison.OrdinalIgnoreCase))
-				{
-					meshInstance.Visible = true;
-				}
-			}
-			else if (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase))
-			{
-				meshInstance.Visible = true;
-			}
-
+			// Match mesh name against embedded draw call material map
 			if (!meshMaterialMap.TryGetValue(meshName, out var materialPaths))
 			{
 				foreach (var kvp in meshMaterialMap.OrderByDescending(k => k.Key.Length))
@@ -514,34 +491,76 @@ public partial class VpkLoaderTest : Node3D
 				GD.Print($"  [MaterialMap] Mapped card mesh '{meshName}' (parent: '{node.GetParent()?.Name}') to 'models/heroes_wip/wraith/materials/wraith_cards.vmat'");
 			}
 
+			// Lady Geist shawl fur shells (ghost_shawl_fur01-05, geist_fur, etc.): match mesh name, node parent hierarchy, or surface materials
+			bool isFurOrShawlMesh = meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) ||
+			                        meshName.Contains("shawl", StringComparison.OrdinalIgnoreCase) ||
+			                        node.Name.ToString().Contains("fur", StringComparison.OrdinalIgnoreCase) ||
+			                        node.Name.ToString().Contains("shawl", StringComparison.OrdinalIgnoreCase) ||
+			                        (node.GetParent() != null && (
+			                            node.GetParent().Name.ToString().Contains("fur", StringComparison.OrdinalIgnoreCase) ||
+			                            node.GetParent().Name.ToString().Contains("shawl", StringComparison.OrdinalIgnoreCase)
+			                        )) ||
+			                        (node.GetParent()?.GetParent() != null && (
+			                            node.GetParent().GetParent().Name.ToString().Contains("fur", StringComparison.OrdinalIgnoreCase) ||
+			                            node.GetParent().GetParent().Name.ToString().Contains("shawl", StringComparison.OrdinalIgnoreCase)
+			                        ));
+
+			bool isFurShellSubmesh = isFurOrShawlMesh && meshName.Contains("fur", StringComparison.OrdinalIgnoreCase);
+
+			bool hasAuthenticFurMaterial = materialPaths != null && materialPaths.Any(p => p.Contains("fur", StringComparison.OrdinalIgnoreCase) && !IsDummyMaterialPath(p));
+
+			// If materialPaths is missing, empty, or consists exclusively of dev dummy materials (e.g. primary_white.vmat),
+			// or if this is a fur shell submesh that matched a non-fur base cloth (e.g. ghost_shawl_fur01 matched ghost_shawl.vmat):
+			if (isFurOrShawlMesh && (materialPaths == null || materialPaths.Count == 0 || (isFurShellSubmesh && !hasAuthenticFurMaterial)))
+			{
+				materialPaths = null;
+				// First check for dedicated non-dummy fur materials in meshMaterialMap
+				foreach (var kvp in meshMaterialMap)
+				{
+					if (kvp.Key.Contains("fur", StringComparison.OrdinalIgnoreCase) &&
+					    kvp.Value != null && kvp.Value.Any(p => !IsDummyMaterialPath(p)))
+					{
+						materialPaths = kvp.Value.Where(p => !IsDummyMaterialPath(p)).ToList();
+						GD.Print($"  [MaterialMap] Mapped fur mesh '{meshName}' to '{kvp.Key}' ({string.Join(", ", materialPaths.Select(Path.GetFileNameWithoutExtension))})");
+						break;
+					}
+				}
+				// Next check for authentic shawl materials in meshMaterialMap ONLY IF this is a base shawl mesh (NOT a fur shell)
+				if (materialPaths == null && !isFurShellSubmesh)
+				{
+					foreach (var kvp in meshMaterialMap)
+					{
+						if (kvp.Key.Contains("shawl", StringComparison.OrdinalIgnoreCase) &&
+						    kvp.Value != null && kvp.Value.Any(p => !IsDummyMaterialPath(p)))
+						{
+							materialPaths = kvp.Value.Where(p => !IsDummyMaterialPath(p)).ToList();
+							GD.Print($"  [MaterialMap] Mapped fur/shawl mesh '{meshName}' to '{kvp.Key}' ({string.Join(", ", materialPaths.Select(Path.GetFileNameWithoutExtension))})");
+							break;
+						}
+					}
+				}
+				// Cross-model authentic fallback: fur shells prioritize ghost_shawl_fur.vmat / geist_fur.vmat; base shawl prioritizes ghost_shawl.vmat
+				if (materialPaths == null || materialPaths.Count == 0)
+				{
+					string fallbackVmat = isFurShellSubmesh
+						? (heroName.Contains("ghost", StringComparison.OrdinalIgnoreCase)
+							? "models/heroes_staging/ghost/materials/ghost_shawl_fur.vmat"
+							: "models/heroes_wip/geist/materials/geist_fur.vmat")
+						: (heroName.Contains("ghost", StringComparison.OrdinalIgnoreCase)
+							? "models/heroes_staging/ghost/materials/ghost_shawl.vmat"
+							: "models/heroes_wip/geist/materials/geist_fur.vmat");
+					materialPaths = new List<string> { fallbackVmat };
+					GD.Print($"  [MaterialMap] Fallback fur/shawl mesh '{meshName}' to '{fallbackVmat}'");
+				}
+			}
+
 			if (materialPaths != null)
 			{
 				var mesh = meshInstance.Mesh;
 				int surfaceCount = mesh.GetSurfaceCount();
 
-				// If this submesh is a single-surface shell/fin (e.g. ghost_shawl_fur01 to fur05)
-				// matched against a multi-draw-call parent mesh (e.g. ghost_shawl with 6 draw calls),
-				// resolve the specific shell index so fur01 receives materialPaths[1], fur02 receives materialPaths[2], etc.
-				int targetMaterialIndex = 0;
-				if (surfaceCount == 1 && materialPaths.Count > 1)
-				{
-					var match = System.Text.RegularExpressions.Regex.Match(meshName, @"(?:fur|layer|shell|sub|part)?0*(\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-					if (match.Success && int.TryParse(match.Groups[1].Value, out int shellNum))
-					{
-						if (shellNum < materialPaths.Count)
-						{
-							targetMaterialIndex = shellNum;
-						}
-						else if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase))
-						{
-							targetMaterialIndex = Math.Min(1, materialPaths.Count - 1);
-						}
-					}
-					else if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase))
-					{
-						targetMaterialIndex = Math.Min(1, materialPaths.Count - 1);
-					}
-				}
+				// Resolve numeric shell index for single-surface layered shells (e.g. ghost_shawl_fur01 to fur05)
+				int targetMaterialIndex = DeadlockMaterialResolver.ResolveFurShellIndex(meshName, surfaceCount, materialPaths.Count);
 
 				for (int i = 0; i < surfaceCount; i++)
 				{
@@ -549,30 +568,93 @@ public partial class VpkLoaderTest : Node3D
 					if (matIdx >= materialPaths.Count) matIdx = materialPaths.Count - 1;
 					string vmatPath = materialPaths[matIdx];
 
-					Godot.Material mat = null;
-
-					// Fallback: If this is a fur submesh but resolved material is still the base cloth (e.g. ghost_shawl.vmat),
-					// automatically check for the corresponding fur material (e.g. ghost_shawl_fur.vmat).
-					if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))
+					// If fur shell draw call points to a dummy, replace with non-dummy candidate in materialPaths
+					if (isFurShellSubmesh && IsDummyMaterialPath(vmatPath))
 					{
-						string furCandidate = vmatPath.Replace("ghost_shawl", "ghost_shawl_fur")
-						                              .Replace("geist_shawl", "geist_shawl_fur");
-						if (!furCandidate.Contains("fur"))
+						var nonDummy = materialPaths.FirstOrDefault(p => !IsDummyMaterialPath(p));
+						if (!string.IsNullOrEmpty(nonDummy))
 						{
-							string dir = Path.GetDirectoryName(vmatPath)?.Replace('\\', '/');
-							furCandidate = string.IsNullOrEmpty(dir) ? "ghost_shawl_fur.vmat" : $"{dir}/ghost_shawl_fur.vmat";
-						}
-
-						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, furCandidate, meshName);
-						if (mat != null)
-						{
-							vmatPath = furCandidate;
+							vmatPath = nonDummy;
 						}
 					}
 
-					if (mat == null)
+					// If fur shell draw call points to base cloth instead of fur, resolve fur fallback candidate
+					if (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))
 					{
-						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName);
+						string submeshFb = DeadlockMaterialResolver.ResolveSubmeshMaterialFallback(meshName, vmatPath);
+						if (!string.IsNullOrEmpty(submeshFb))
+						{
+							vmatPath = submeshFb;
+						}
+					}
+
+					Godot.Material mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName);
+
+					// If material is a dummy, null, or untextured on a fur/shawl mesh, cascade through authentic hero fur materials
+					if (isFurOrShawlMesh && (IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))))
+					{
+						// Cascade 1: Any non-dummy candidate from meshMaterialMap matching fur
+						foreach (var kvp in meshMaterialMap)
+						{
+							if (kvp.Key.Contains("fur", StringComparison.OrdinalIgnoreCase) && kvp.Value != null)
+							{
+								foreach (var cand in kvp.Value)
+								{
+									if (!IsDummyMaterialPath(cand))
+									{
+										var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, cand, meshName);
+										if (!IsDummyMaterial(fbMat, cand))
+										{
+											mat = fbMat;
+											vmatPath = cand;
+											break;
+										}
+									}
+								}
+								if (mat != null && !IsDummyMaterial(mat, vmatPath)) break;
+							}
+						}
+
+						// Cascade 2: ghost_shawl_fur.vmat
+						if (mat == null || IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase)))
+						{
+							string ghostFurFallback = "models/heroes_staging/ghost/materials/ghost_shawl_fur.vmat";
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFurFallback, meshName);
+							if (fbMat != null && !IsDummyMaterial(fbMat, ghostFurFallback))
+							{
+								mat = fbMat;
+								vmatPath = ghostFurFallback;
+							}
+						}
+
+						// Cascade 3: geist_fur.vmat (authentic Lady Geist fur card material)
+						if (mat == null || IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase)))
+						{
+							string geistFallback = "models/heroes_wip/geist/materials/geist_fur.vmat";
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, geistFallback, meshName);
+							if (fbMat != null && !IsDummyMaterial(fbMat, geistFallback))
+							{
+								mat = fbMat;
+								vmatPath = geistFallback;
+							}
+						}
+
+						// Cascade 4: ghost_shawl.vmat (strictly for base cloth shawl, NOT for fur shell submeshes!)
+						if (!isFurShellSubmesh && (mat == null || IsDummyMaterial(mat, vmatPath)))
+						{
+							string ghostFallback = "models/heroes_staging/ghost/materials/ghost_shawl.vmat";
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFallback, meshName);
+							if (fbMat != null && !IsDummyMaterial(fbMat, ghostFallback))
+							{
+								mat = fbMat;
+								vmatPath = ghostFallback;
+							}
+						}
+					}
+
+					if (isFurShellSubmesh && !IsDummyMaterial(mat, vmatPath))
+					{
+						GD.Print($"  [FurShell] Resolved authentic fur material '{vmatPath}' for mesh '{meshName}'");
 					}
 
 					if (mat == null && (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase) || vmatPath.Contains("jitter", StringComparison.OrdinalIgnoreCase)))
@@ -613,7 +695,6 @@ public partial class VpkLoaderTest : Node3D
 				{
 					GD.Print($"  ⚠ Desajuste: mesh '{meshName}' tiene {surfaceCount} superficies pero el VMDL declara {materialPaths.Count} draw calls.");
 				}
-
 			}
 			else
 			{
@@ -625,6 +706,33 @@ public partial class VpkLoaderTest : Node3D
 		{
 			ApplyMaterialsRecursively(child, heroName, package, meshMaterialMap);
 		}
+	}
+
+	private static bool IsDummyMaterialPath(string path)
+	{
+		if (string.IsNullOrWhiteSpace(path)) return true;
+		string p = path.ToLowerInvariant();
+		return p.Contains("dev/") ||
+		       p.Contains("default") ||
+		       p.Contains("primary_white") ||
+		       p.Contains("vertcolor_pbr_basic") ||
+		       p.Contains("498635a");
+	}
+
+	private static bool IsDummyMaterial(Godot.Material mat, string vmatPath)
+	{
+		if (mat == null) return true;
+		if (IsDummyMaterialPath(vmatPath)) return true;
+		if (mat is StandardMaterial3D sm)
+		{
+			if (sm.AlbedoTexture == null) return true;
+			string texName = (sm.AlbedoTexture.ResourceName + " " + sm.AlbedoTexture.ResourcePath).ToLowerInvariant();
+			if (texName.Contains("primary_white") || texName.Contains("498635a") || texName.Contains("dev/"))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private Skeleton3D SearchSkeleton(Node node)

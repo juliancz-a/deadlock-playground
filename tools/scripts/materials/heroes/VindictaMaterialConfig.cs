@@ -8,6 +8,8 @@ public class VindictaMaterialConfig : IHeroMaterialConfig
     public string HeroKey => "vindicta";
     public string DisplayName => "Vindicta";
 
+    public Color? SignatureGlowColor => new Color(0.392157f, 0.709804f, 0.964706f, 1.0f); // #64B5F6 cyan
+
     private Shader _auraShader;
 
     public VindictaMaterialConfig()

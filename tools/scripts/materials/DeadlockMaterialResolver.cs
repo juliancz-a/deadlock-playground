@@ -56,8 +56,10 @@ public static class DeadlockMaterialResolver
         if (mLower.Contains("glass") || mLower.Contains("lens") || mLower.Contains("spectacle") ||
             matLower.Contains("glass") || matLower.Contains("lens") || matLower.Contains("spectacle")) return false;
 
-        // 6. Hair and fur layers (Lady Geist shawl fur01-fur05, etc.)
-        if (mLower.Contains("fur") || matLower.Contains("fur") || mLower.Contains("shawl_fur")) return false;
+        // 6. Hair and fur layers (Lady Geist shawl fur01-fur05, geist_fur cards, etc.)
+        bool isBaseShawlCloth = mLower.Equals("ghost_shawl") || mLower.Equals("shawl") || mLower.Equals("geist_shawl") ||
+                                mLower.EndsWith("_ghost_shawl") || mLower.EndsWith("_geist_shawl") || mLower.EndsWith("_shawl");
+        if ((mLower.Contains("fur") || matLower.Contains("fur")) && !isBaseShawlCloth) return false;
 
         // 7. Flame, fire, volumetric particle VFX, sparkles and hero outline shells (Infernus armglow/flames, Lash sparkles, Celeste hornglow, etc.)
         if (mLower.Contains("flame") || matLower.Contains("flame") ||
@@ -218,6 +220,116 @@ public static class DeadlockMaterialResolver
         {
             SetMeshVisibilityByName(child, partialName, visible);
         }
+    }
+
+    /// <summary>
+    /// Evaluates whether a surface must strictly preserve its original material
+    /// without being replaced by ToonMaterial or receiving an inverted-hull outline NextPass.
+    /// </summary>
+    public static bool ShouldPreserveOriginalMaterial(string meshName, string vmatPath, Godot.Material material)
+    {
+        if (material == null) return false;
+        if (material.HasMeta("PreserveShading") && (bool)material.GetMeta("PreserveShading")) return true;
+
+        string mLower = meshName?.ToLowerInvariant() ?? "";
+        string matLower = vmatPath?.ToLowerInvariant() ?? "";
+        string rName = material.ResourceName?.ToLowerInvariant() ?? "";
+
+        // Built-in outline geometry and dev materials
+        if (mLower.Contains("outline") || matLower.Contains("outline") ||
+            matLower.Contains("vertcolor_pbr_basic") || matLower.Contains("materials/dev/"))
+        {
+            return true;
+        }
+
+        // Dedicated VFX: Sparkles, playing cards
+        if (mLower.Contains("sparkle") || matLower.Contains("sparkle") ||
+            mLower.Contains("card") || matLower.Contains("card") || rName.Contains("card"))
+        {
+            return true;
+        }
+
+        // Fur shells (Lady Geist shawl fur01-fur05, geist_fur, etc.) preserve AlphaScissor two-sided card material
+        bool isBaseShawlClothMat = mLower.Equals("ghost_shawl") || mLower.Equals("shawl") || mLower.Equals("geist_shawl") ||
+                                   mLower.EndsWith("_ghost_shawl") || mLower.EndsWith("_geist_shawl") || mLower.EndsWith("_shawl");
+        if ((mLower.Contains("fur") || matLower.Contains("fur")) && !isBaseShawlClothMat)
+        {
+            return true;
+        }
+
+        if (material is ShaderMaterial sm && sm.Shader != null)
+        {
+            string sPath = sm.Shader.ResourcePath?.ToLowerInvariant() ?? "";
+            if (sPath.Contains("lash_sparkles") || sPath.Contains("cards") || sPath.Contains("wraith_card"))
+            {
+                return true;
+            }
+        }
+
+        return HeroMaterialManager.ShouldPreserveMaterial(null, meshName, vmatPath, material);
+    }
+
+    /// <summary>
+    /// Resolves target material index for multi-draw-call shells (e.g. ghost_shawl_fur01 to fur05).
+    /// </summary>
+    public static int ResolveFurShellIndex(string meshName, int surfaceCount, int materialPathCount)
+    {
+        if (surfaceCount == 1 && materialPathCount > 1 && !string.IsNullOrEmpty(meshName))
+        {
+            // Match numeric suffix preceded by fur/layer/shell/sub/part anywhere in meshName
+            var match = System.Text.RegularExpressions.Regex.Match(
+                meshName,
+                @"(?:fur|layer|shell|sub|part)[_\s]*0*(\d+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+
+            if (!match.Success)
+            {
+                // Fallback: match trailing digits e.g. "ghost_shawl_01" or "shawl01"
+                match = System.Text.RegularExpressions.Regex.Match(
+                    meshName,
+                    @"[_\s]?0*(\d+)$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+            }
+
+            if (match.Success && int.TryParse(match.Groups[1].Value, out int shellNum))
+            {
+                if (shellNum < materialPathCount)
+                {
+                    return shellNum;
+                }
+                if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Math.Min(1, materialPathCount - 1);
+                }
+            }
+            else if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase))
+            {
+                return Math.Min(1, materialPathCount - 1);
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Checks for hero-specific submesh candidate replacements when the extracted VMDL draw call
+    /// points to a base cloth instead of the layered shell material.
+    /// </summary>
+    public static string ResolveSubmeshMaterialFallback(string meshName, string vmatPath)
+    {
+        if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))
+        {
+            string furCandidate = vmatPath.Replace("ghost_shawl", "ghost_shawl_fur")
+                                          .Replace("geist_shawl", "geist_shawl_fur");
+            if (!furCandidate.Contains("fur"))
+            {
+                string dir = Path.GetDirectoryName(vmatPath)?.Replace('\\', '/');
+                furCandidate = string.IsNullOrEmpty(dir) ? "ghost_shawl_fur.vmat" : $"{dir}/ghost_shawl_fur.vmat";
+            }
+            return furCandidate;
+        }
+        return null;
     }
 
     /// <summary>

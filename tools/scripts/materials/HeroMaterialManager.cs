@@ -8,7 +8,7 @@ namespace DeadlockPlayground.Materials;
 
 /// <summary>
 /// Central registry and coordinator for hero-specific material configurations and signature shaders.
-/// Keeps Source2MaterialHelper and UI components fully decoupled and modular.
+/// Keeps Source2MaterialHelper, loaders, and UI components fully decoupled and modular.
 /// </summary>
 public static class HeroMaterialManager
 {
@@ -16,15 +16,14 @@ public static class HeroMaterialManager
 
     static HeroMaterialManager()
     {
-        // Core heroes with interactive signature shaders
+        // Core heroes with interactive signature shaders and custom material hooks
+        RegisterConfig(new InfernusMaterialConfig());
         RegisterConfig(new ViscousMaterialConfig());
         RegisterConfig(new VindictaMaterialConfig());
         RegisterConfig(new LadyGeistMaterialConfig());
         RegisterConfig(new IvyMaterialConfig());
         RegisterConfig(new LashMaterialConfig());
-        // Heroes with runtime-palette colour overrides (colour not baked in VMAT)
         RegisterConfig(new MirageMaterialConfig());
-        // Wraith: head NPR shader (source2_pbr.gdshader) wired via Source2MaterialHelper
         RegisterConfig(new WraithMaterialConfig());
     }
 
@@ -36,7 +35,7 @@ public static class HeroMaterialManager
 
     /// <summary>
     /// Resolves the matching hero config based on the hero name or internal model identifier.
-    /// Supports aliases (e.g. "hornet" -> Vindicta, "ghost" -> Lady Geist, "tengu" -> Ivy).
+    /// Supports aliases (e.g. "hornet" -> Vindicta, "ghost" -> Lady Geist, "tengu" -> Ivy, "inferno" -> Infernus).
     /// </summary>
     public static IHeroMaterialConfig GetConfigForHero(string heroName)
     {
@@ -45,6 +44,7 @@ public static class HeroMaterialManager
 
         if (_configs.TryGetValue(lower, out var exact)) return exact;
 
+        if (lower.Contains("inferno") || lower.Contains("infernus")) return _configs.GetValueOrDefault("inferno");
         if (lower.Contains("viscous")) return _configs.GetValueOrDefault("viscous");
         if (lower.Contains("hornet") || lower.Contains("vindicta")) return _configs.GetValueOrDefault("vindicta");
         if (lower.Contains("ghost") || lower.Contains("lady") || lower.Contains("geist")) return _configs.GetValueOrDefault("ghost");
@@ -57,30 +57,110 @@ public static class HeroMaterialManager
     }
 
     /// <summary>
-    /// Configures the base StandardMaterial3D during VPK model loading using the appropriate hero configuration.
-    /// Safely ignores non-PBR materials (e.g. dynamic glow ShaderMaterial).
+    /// Attempts to create a hero-specific bespoke material (e.g. Lash sparkles, Wraith cards).
+    /// Returns null if standard archetype builders should process the material.
     /// </summary>
-    public static void ConfigureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, Material material, Package package = null)
+    public static Godot.Material TryCreateCustomMaterial(string heroName, Package package, string vmatPath, string meshName)
+    {
+        var config = GetConfigForHero(heroName);
+        if (config != null)
+        {
+            var customMat = config.TryCreateCustomMaterial(package, vmatPath, meshName);
+            if (customMat != null) return customMat;
+        }
+
+        // If heroName is unspecified, check if any registered hero matches vmatPath or meshName
+        string vLower = vmatPath?.ToLowerInvariant() ?? "";
+        string mLower = meshName?.ToLowerInvariant() ?? "";
+
+        foreach (var kvp in _configs)
+        {
+            string key = kvp.Key;
+            if (vLower.Contains(key) || mLower.Contains(key))
+            {
+                var customMat = kvp.Value.TryCreateCustomMaterial(package, vmatPath, meshName);
+                if (customMat != null) return customMat;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the signature glow color for a hero layer.
+    /// </summary>
+    public static Color? GetSignatureGlowColor(string heroName, string vmatPath)
+    {
+        var config = GetConfigForHero(heroName);
+        if (config?.SignatureGlowColor != null) return config.SignatureGlowColor;
+
+        string vLower = vmatPath?.ToLowerInvariant() ?? "";
+        if (vLower.Contains("ghost") || vLower.Contains("geist"))
+        {
+            var ghostConfig = _configs.GetValueOrDefault("ghost");
+            if (ghostConfig?.SignatureGlowColor != null) return ghostConfig.SignatureGlowColor;
+        }
+
+        foreach (var kvp in _configs)
+        {
+            if (vLower.Contains(kvp.Key) && kvp.Value.SignatureGlowColor.HasValue)
+            {
+                return kvp.Value.SignatureGlowColor;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Checks if a surface must strictly preserve its original material and avoid Toon swapping.
+    /// </summary>
+    public static bool ShouldPreserveMaterial(string heroName, string meshName, string vmatPath, Godot.Material material)
+    {
+        if (material != null && material.HasMeta("PreserveShading") && (bool)material.GetMeta("PreserveShading"))
+        {
+            return true;
+        }
+
+        var config = GetConfigForHero(heroName);
+        if (config != null && config.ShouldPreserveMaterial(meshName, vmatPath, material))
+        {
+            return true;
+        }
+
+        string vLower = vmatPath?.ToLowerInvariant() ?? "";
+        string mLower = meshName?.ToLowerInvariant() ?? "";
+
+        if (vLower.Contains("ghost") || vLower.Contains("geist") || mLower.Contains("ghost") || mLower.Contains("geist") || vLower.Contains("shawl") || mLower.Contains("shawl"))
+        {
+            var ghostConfig = _configs.GetValueOrDefault("ghost");
+            if (ghostConfig != null && ghostConfig.ShouldPreserveMaterial(meshName, vmatPath, material))
+            {
+                return true;
+            }
+        }
+
+        foreach (var kvp in _configs)
+        {
+            if ((vLower.Contains(kvp.Key) || mLower.Contains(kvp.Key)) &&
+                kvp.Value.ShouldPreserveMaterial(meshName, vmatPath, material))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Configures the base StandardMaterial3D during VPK model loading using the appropriate hero configuration.
+    /// </summary>
+    public static void ConfigureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, Godot.Material material, Package package = null)
     {
         if (material is StandardMaterial3D stdMat)
         {
             var config = GetConfigForHero(heroName);
             config?.ConfigureBaseMaterial(meshName, surfaceIndex, vmatPath, stdMat);
-
-            // Wraith diagnostic fallback: VRF's glTF exporter may strip vertex color arrays from the head
-            // mesh, leaving F_VERTEX_COLOR surfaces entirely white (all vertices = 1,1,1,1).
-            // If her head material has VertexColorUseAsAlbedo enabled but only the generic white dummy
-            // texture bound (498635a), apply a canonical warm pale skin tone so she does not render
-            // as a porcelain mannequin.  This fires only when vertex color data is provably absent.
-        //     if (heroName.Contains("wraith", StringComparison.OrdinalIgnoreCase) &&
-        //         vmatPath.Contains("wraith_head", StringComparison.OrdinalIgnoreCase) &&
-        //         stdMat.VertexColorUseAsAlbedo &&
-        //         (stdMat.AlbedoTexture == null ||
-        //          (stdMat.AlbedoTexture.ResourcePath?.Contains("498635a") == true)))
-        //     {
-        //         // Warm pale skin tone — matches Wraith's canonical face/hair tone from Valve reference art.
-        //         stdMat.AlbedoColor = new Color(0.82f, 0.72f, 0.68f, 1.0f);
-        //     }
         }
     }
 
@@ -90,6 +170,15 @@ public static class HeroMaterialManager
     public static ShaderMaterial GetSignatureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D baseMat)
     {
         var config = GetConfigForHero(heroName);
+        if (config == null)
+        {
+            string vLower = vmatPath?.ToLowerInvariant() ?? "";
+            string mLower = meshName?.ToLowerInvariant() ?? "";
+            if (vLower.Contains("ghost") || vLower.Contains("geist") || mLower.Contains("ghost") || mLower.Contains("geist") || vLower.Contains("shawl") || mLower.Contains("shawl"))
+            {
+                config = _configs.GetValueOrDefault("ghost");
+            }
+        }
         return config?.GetSignatureMaterial(meshName, surfaceIndex, vmatPath, baseMat);
     }
 }

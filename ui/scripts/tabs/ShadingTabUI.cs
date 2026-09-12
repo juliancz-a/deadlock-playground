@@ -545,28 +545,9 @@ public partial class ShadingTabUI : VBoxContainer
         {
             if (!GodotObject.IsInstanceValid(record.Mesh)) continue;
 
-            // Built-in outline meshes (like Viscous's bodyoutline) maintain their original material
+            // Built-in outlines, sparkles, cards, and protected hero surfaces maintain their original material
             if (record.IsBuiltinOutline ||
-                record.MaterialPath.Contains("vertcolor_pbr_basic", StringComparison.OrdinalIgnoreCase) ||
-                record.MaterialPath.Contains("materials/dev/", StringComparison.OrdinalIgnoreCase))
-            {
-                record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
-                continue;
-            }
-
-            // Lash sparkles and Wraith playing cards: strictly preserve original material, never overwrite with Toon or NextPass
-            if (record.MaterialPath.Contains("lash_sparkles", StringComparison.OrdinalIgnoreCase) ||
-                record.MaterialPath.Contains("wraith_cards", StringComparison.OrdinalIgnoreCase) ||
-                record.MaterialPath.Contains("wraith_hat_card", StringComparison.OrdinalIgnoreCase) ||
-                record.MaterialPath.Contains("handcards", StringComparison.OrdinalIgnoreCase) ||
-                record.MaterialPath.Contains("card", StringComparison.OrdinalIgnoreCase) ||
-                record.Mesh.Name.ToString().Contains("sparkle", StringComparison.OrdinalIgnoreCase) ||
-                record.Mesh.Name.ToString().Contains("card", StringComparison.OrdinalIgnoreCase) ||
-                record.OriginalMaterial?.ResourceName?.Contains("card", StringComparison.OrdinalIgnoreCase) == true ||
-                (record.OriginalMaterial is ShaderMaterial smSpecial && (
-                    smSpecial.Shader?.ResourcePath?.Contains("lash_sparkles") == true ||
-                    smSpecial.Shader?.ResourcePath?.Contains("source2_cards") == true ||
-                    smSpecial.Shader?.ResourcePath?.Contains("wraith_card") == true)))
+                DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(record.Mesh.Name.ToString(), record.MaterialPath, record.OriginalMaterial))
             {
                 record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
                 continue;
@@ -581,10 +562,11 @@ public partial class ShadingTabUI : VBoxContainer
             else if (enableToon)
             {
                 // Preserve additive VFX, dynamic glow shaders, and translucent glass surfaces.
-                // EXCEPTION: source2_pbr.gdshader is a structural NPR head shader — preserve it
+                // EXCEPTION: source2_vertcolor_pbr.gdshader is a structural vertex-color head shader — preserve it
                 // as-is (it already has NPR wrapped N·L) but do NOT swap it for toon_shader.
                 bool isPbrHead = record.OriginalMaterial is ShaderMaterial smPbr &&
-                                 smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true;
+                                 (smPbr.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                                  smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true);
                 if (record.IsAdditive || record.IsTranslucent || (record.OriginalMaterial is ShaderMaterial && !isPbrHead))
                 {
                     baseMat = record.OriginalMaterial;
@@ -605,8 +587,9 @@ public partial class ShadingTabUI : VBoxContainer
             {
                 string meshCleanName = record.Mesh.Name.ToString().TrimStart('.', '_');
 
-                // source2_pbr head shader: treat as structural (not additive) for outline eligibility.
-                bool isNprHead = shMat.Shader?.ResourcePath?.Contains("source2_pbr") == true;
+                // source2_vertcolor_pbr head shader: treat as structural (not additive) for outline eligibility.
+                bool isNprHead = shMat.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                                 shMat.Shader?.ResourcePath?.Contains("source2_pbr") == true;
                 bool isAdditiveForOutline = !isNprHead && (record.IsAdditive || record.OriginalMaterial is ShaderMaterial);
 
                 bool isEligibleForOutline = DeadlockMaterialResolver.ShouldApplyOutline(
@@ -733,11 +716,12 @@ public partial class ShadingTabUI : VBoxContainer
             }
 
             // ── NPR head shader sync ─────────────────────────────────────────
-            // source2_pbr.gdshader is always-on (never swapped for toon_shader),
+            // source2_vertcolor_pbr.gdshader is always-on (never swapped for toon_shader),
             // but it shares the same stepped-diffuse + shadow-tint + rim uniforms.
             // Push the slider values here so the head stays visually in sync.
             if (record.OriginalMaterial is ShaderMaterial smPbr &&
-                smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true)
+                (smPbr.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                 smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true))
             {
                 smPbr.SetShaderParameter("toon_intensity",    intensity);
                 smPbr.SetShaderParameter("steps",             steps);

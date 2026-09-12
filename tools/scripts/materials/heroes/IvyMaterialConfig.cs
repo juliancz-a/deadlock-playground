@@ -1,51 +1,55 @@
 using System;
 using Godot;
+using SteamDatabase.ValvePak;
 
 namespace DeadlockPlayground.Materials.Heroes;
 
 /// <summary>
 /// Hero material configuration for Ivy (Tengu).
-/// Her entire body, head, face, and eyes are embedded into a single unified 4096x4096 atlas (ivy_bodyv3).
-/// Ensures vertex color multiplication is disabled on ivy_bodyv3 so face/eye socket baked AO doesn't black out the eyes/face.
+/// Coordinates the unified 4096x4096 body atlas (ivy_bodyv3), eye socket two-sided culling,
+/// facial AO protection (VertexColorUseAsAlbedo = false), and pupil alpha-card decal cutout.
 /// </summary>
 public class IvyMaterialConfig : IHeroMaterialConfig
 {
     public string HeroKey => "ivy";
-    public string DisplayName => "Ivy (Tengu)";
+    public string DisplayName => "Ivy / Tengu";
+
+    public Color? SignatureGlowColor => new Color(0.2f, 0.8f, 0.4f, 1.0f);
 
     public void ConfigureBaseMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
     {
         string vLower = vmatPath?.ToLowerInvariant() ?? "";
         string mLower = meshName?.ToLowerInvariant() ?? "";
 
-        if (vLower.Contains("ivy_bodyv3") || ((vLower.Contains("ivy") || vLower.Contains("tengu")) && !vLower.Contains("vertcolor")))
-        {
-            // Disable vertex color multiplication so face/socket baked AO does not black out eyes and facial skin
-            material.VertexColorUseAsAlbedo = false;
-            // ivy_bodyv3 has F_RENDER_BACKFACES = 1 to render eyeball cavity geometry without backface culling
-            material.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
-        }
+        bool isVertColor = vLower.Contains("vertcolor");
+        bool isPupilSurface = isVertColor && (surfaceIndex == 3 || mLower.Contains("eye") || mLower.Contains("pupil"));
 
-        if (vLower.Contains("vertcolor") || vLower.Contains("vertcolor_pbr_basic"))
+        if (isPupilSurface)
         {
+            // Ivy Surface 3: Flat pupil alpha-card decal sitting directly in front of golden sclera
             material.Transparency = BaseMaterial3D.TransparencyEnum.AlphaScissor;
             material.AlphaScissorThreshold = 0.1f;
-            material.VertexColorUseAsAlbedo = true;
-            material.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
             material.DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Always;
+            material.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
+            material.VertexColorUseAsAlbedo = true;
             material.AlbedoColor = Colors.White;
         }
-
-        if (vLower.Contains("eyelash") || vLower.Contains("lashes") || vLower.Contains("eyeshadow") ||
-            mLower.Contains("eyelash") || mLower.Contains("lashes") || mLower.Contains("eyeshadow"))
+        else if (vLower.Contains("ivy_bodyv3") || vLower.Contains("tengu"))
         {
-            material.Transparency = BaseMaterial3D.TransparencyEnum.AlphaScissor;
-            material.AlphaScissorThreshold = 0.5f;
+            // Body, face, and eyes unified atlas:
+            // Disable vertex color so facial socket cavity AO does not multiply the eyes into black voids.
+            material.VertexColorUseAsAlbedo = false;
+            // Two-sided rendering so eyeball cavity backfaces render without being culled
             material.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
         }
     }
 
     public ShaderMaterial GetSignatureMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D baseMat)
+    {
+        return null;
+    }
+
+    public Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName)
     {
         return null;
     }

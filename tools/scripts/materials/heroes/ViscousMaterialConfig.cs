@@ -8,6 +8,8 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
     public string HeroKey => "viscous";
     public string DisplayName => "Viscous";
 
+    public Color? SignatureGlowColor => new Color(0.12f, 0.72f, 0.32f, 1.0f); // Viscous slime green
+
     private Shader _slimeShader;
 
     public ViscousMaterialConfig()
