@@ -46,7 +46,7 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
     public event Action<int> OnBoneSelectedFromUI;
 
     public bool IsXRayEnabled => _toggleXRayButton != null && _toggleXRayButton.ButtonPressed;
-    public bool IsLinesEnabled => _toggleLinesButton == null || _toggleLinesButton.ButtonPressed;
+    public bool IsLinesEnabled => _toggleLinesButton != null && _toggleLinesButton.ButtonPressed;
 
     public void SetXRay(bool enabled)
     {

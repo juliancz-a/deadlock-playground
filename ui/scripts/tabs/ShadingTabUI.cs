@@ -450,12 +450,18 @@ public partial class ShadingTabUI : VBoxContainer
 
                 if (matPath.Contains("outline")) isBuiltinOutline = true;
 
+                bool isGlass = matPath.Contains("glass") || matPath.Contains("lens") || matPath.Contains("specs") || matPath.Contains("spectacle");
                 bool isAdditive = false;
-                bool isTranslucent = false;
+                bool isTranslucent = isGlass;
                 if (origMat is StandardMaterial3D sm)
                 {
                     isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add;
-                    isTranslucent = sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+                    isTranslucent = isTranslucent || sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+                }
+                else if (origMat is ShaderMaterial)
+                {
+                    // Procedural dynamic glow or energy layer or glass: treat as VFX
+                    isAdditive = true;
                 }
 
                 // 1. Signature material from HeroMaterialManager
@@ -464,6 +470,8 @@ public partial class ShadingTabUI : VBoxContainer
                 // 2. Toon material
                 var toonMat = new ShaderMaterial { Shader = _toonShader };
                 var outlineMat = new ShaderMaterial { Shader = _toonOutlineShader };
+                outlineMat.SetShaderParameter("outline_width", _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.0f);
+                outlineMat.SetShaderParameter("outline_color", _colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f));
 
                 // Transfer properties from original StandardMaterial3D
                 if (origMat is StandardMaterial3D stdMat)
@@ -538,7 +546,27 @@ public partial class ShadingTabUI : VBoxContainer
             if (!GodotObject.IsInstanceValid(record.Mesh)) continue;
 
             // Built-in outline meshes (like Viscous's bodyoutline) maintain their original material
-            if (record.IsBuiltinOutline)
+            if (record.IsBuiltinOutline ||
+                record.MaterialPath.Contains("vertcolor_pbr_basic", StringComparison.OrdinalIgnoreCase) ||
+                record.MaterialPath.Contains("materials/dev/", StringComparison.OrdinalIgnoreCase))
+            {
+                record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
+                continue;
+            }
+
+            // Lash sparkles and Wraith playing cards: strictly preserve original material, never overwrite with Toon or NextPass
+            if (record.MaterialPath.Contains("lash_sparkles", StringComparison.OrdinalIgnoreCase) ||
+                record.MaterialPath.Contains("wraith_cards", StringComparison.OrdinalIgnoreCase) ||
+                record.MaterialPath.Contains("wraith_hat_card", StringComparison.OrdinalIgnoreCase) ||
+                record.MaterialPath.Contains("handcards", StringComparison.OrdinalIgnoreCase) ||
+                record.MaterialPath.Contains("card", StringComparison.OrdinalIgnoreCase) ||
+                record.Mesh.Name.ToString().Contains("sparkle", StringComparison.OrdinalIgnoreCase) ||
+                record.Mesh.Name.ToString().Contains("card", StringComparison.OrdinalIgnoreCase) ||
+                record.OriginalMaterial?.ResourceName?.Contains("card", StringComparison.OrdinalIgnoreCase) == true ||
+                (record.OriginalMaterial is ShaderMaterial smSpecial && (
+                    smSpecial.Shader?.ResourcePath?.Contains("lash_sparkles") == true ||
+                    smSpecial.Shader?.ResourcePath?.Contains("source2_cards") == true ||
+                    smSpecial.Shader?.ResourcePath?.Contains("wraith_card") == true)))
             {
                 record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
                 continue;
@@ -552,14 +580,18 @@ public partial class ShadingTabUI : VBoxContainer
             }
             else if (enableToon)
             {
-                // Preserve additive VFX and translucent glass surfaces so they do not become opaque toon blocks
-                if (record.IsAdditive || record.IsTranslucent)
+                // Preserve additive VFX, dynamic glow shaders, and translucent glass surfaces.
+                // EXCEPTION: source2_pbr.gdshader is a structural NPR head shader — preserve it
+                // as-is (it already has NPR wrapped N·L) but do NOT swap it for toon_shader.
+                bool isPbrHead = record.OriginalMaterial is ShaderMaterial smPbr &&
+                                 smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true;
+                if (record.IsAdditive || record.IsTranslucent || (record.OriginalMaterial is ShaderMaterial && !isPbrHead))
                 {
                     baseMat = record.OriginalMaterial;
                 }
                 else
                 {
-                    baseMat = record.ToonMaterial;
+                    baseMat = isPbrHead ? record.OriginalMaterial : record.ToonMaterial;
                 }
             }
             else
@@ -572,14 +604,24 @@ public partial class ShadingTabUI : VBoxContainer
             if (baseMat is ShaderMaterial shMat)
             {
                 string meshCleanName = record.Mesh.Name.ToString().TrimStart('.', '_');
+
+                // source2_pbr head shader: treat as structural (not additive) for outline eligibility.
+                bool isNprHead = shMat.Shader?.ResourcePath?.Contains("source2_pbr") == true;
+                bool isAdditiveForOutline = !isNprHead && (record.IsAdditive || record.OriginalMaterial is ShaderMaterial);
+
                 bool isEligibleForOutline = DeadlockMaterialResolver.ShouldApplyOutline(
                     meshCleanName,
                     record.MaterialPath,
-                    record.IsAdditive,
+                    isAdditiveForOutline,
                     record.IsTranslucent
                 );
 
-                if (enableOutline && baseMat == record.ToonMaterial && isEligibleForOutline)
+                // Allow outline on: toon material, signature material, OR the NPR head shader itself
+                bool canHaveOutline = baseMat == record.ToonMaterial
+                                   || baseMat == record.SignatureMaterial
+                                   || isNprHead;
+
+                if (enableOutline && canHaveOutline && isEligibleForOutline)
                 {
                     shMat.NextPass = record.OutlineMaterial;
                 }
@@ -595,9 +637,54 @@ public partial class ShadingTabUI : VBoxContainer
 
     private void SetSignatureParam(string paramName, Variant value)
     {
+        GD.Print($"[ShadingTabUI] SetSignatureParam called: {paramName} = {value}");
         foreach (var record in _characterSurfaces)
         {
             record.SignatureMaterial?.SetShaderParameter(paramName, value);
+
+            var activeMat = record.Mesh?.GetSurfaceOverrideMaterial(record.SurfaceIndex) ?? record.OriginalMaterial;
+            if (activeMat is ShaderMaterial shMat)
+            {
+                shMat.SetShaderParameter(paramName, value);
+
+                if (paramName == "g_flSelfIllumScale" || paramName == "emission_scale")
+                {
+                    shMat.SetShaderParameter("g_flSelfIllumScale", value);
+                    shMat.SetShaderParameter("emission_scale", value);
+                }
+                else if (paramName == "aura_color" || paramName == "arm_color" || paramName == "glow_color" || paramName == "g_vSelfIllumTint")
+                {
+                    shMat.SetShaderParameter("color_tint", value);
+                    shMat.SetShaderParameter("self_illum_tint", value);
+                    shMat.SetShaderParameter("glow_color", value);
+                    shMat.SetShaderParameter("g_vSelfIllumTint", value);
+                }
+                else if (paramName == "emission_energy")
+                {
+                    shMat.SetShaderParameter("opacity_scale", (float)value / 2.4f);
+                    shMat.SetShaderParameter("self_illum_scale", value);
+                }
+                else if (paramName == "noise_speed")
+                {
+                    shMat.SetShaderParameter("self_illum_scroll_speed", new Vector2(0.0f, -(float)value * 0.3f));
+                    shMat.SetShaderParameter("albedo_scroll_speed", new Vector2(0.0f, -(float)value * 0.3f));
+                    shMat.SetShaderParameter("scroll_speed", new Vector2(0.0f, -(float)value * 0.3f));
+                }
+            }
+            else if (activeMat is StandardMaterial3D stdMat &&
+                     (record.MaterialPath.Contains("card", StringComparison.OrdinalIgnoreCase) ||
+                      record.Mesh?.Name.ToString().Contains("card", StringComparison.OrdinalIgnoreCase) == true ||
+                      stdMat.ResourceName.Contains("card", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (paramName == "g_vSelfIllumTint" || paramName == "glow_color")
+                {
+                    stdMat.Emission = (Color)value;
+                }
+                else if (paramName == "g_flSelfIllumScale" || paramName == "emission_scale")
+                {
+                    stdMat.EmissionEnergyMultiplier = (float)value * 0.6f;
+                }
+            }
         }
     }
 
@@ -643,6 +730,25 @@ public partial class ShadingTabUI : VBoxContainer
             {
                 record.OutlineMaterial.SetShaderParameter("outline_width", outWidth);
                 record.OutlineMaterial.SetShaderParameter("outline_color", outCol);
+            }
+
+            // ── NPR head shader sync ─────────────────────────────────────────
+            // source2_pbr.gdshader is always-on (never swapped for toon_shader),
+            // but it shares the same stepped-diffuse + shadow-tint + rim uniforms.
+            // Push the slider values here so the head stays visually in sync.
+            if (record.OriginalMaterial is ShaderMaterial smPbr &&
+                smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true)
+            {
+                smPbr.SetShaderParameter("toon_intensity",    intensity);
+                smPbr.SetShaderParameter("steps",             steps);
+                smPbr.SetShaderParameter("step_smoothness",   smooth);
+                smPbr.SetShaderParameter("shadow_tint",       shadowCol);
+                smPbr.SetShaderParameter("shadow_tint_amount", shadowAmt);
+                smPbr.SetShaderParameter("use_rim",           true);
+                smPbr.SetShaderParameter("rim_color",         new Color(1.0f, 1.0f, 1.0f, 1.0f));
+                smPbr.SetShaderParameter("rim_amount",        2.0f);
+                smPbr.SetShaderParameter("rim_smoothness",    0.2f);
+                smPbr.SetShaderParameter("rim_blend",         1.0f);
             }
         }
     }

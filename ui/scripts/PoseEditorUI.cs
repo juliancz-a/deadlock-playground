@@ -38,7 +38,7 @@ public partial class PoseEditorUI : CanvasLayer, IBoneUIController
     public bool IsXRayEnabled => _toggleXRayButton != null && _toggleXRayButton.ButtonPressed;
 
     public event Action<bool> OnLinesToggled;
-    public bool IsLinesEnabled => _toggleLinesButton == null || _toggleLinesButton.ButtonPressed;
+    public bool IsLinesEnabled => _toggleLinesButton != null && _toggleLinesButton.ButtonPressed;
 
     // An event to notify other scripts that a bone was selected via UI
     public event Action<int> OnBoneSelectedFromUI;

@@ -30,7 +30,6 @@ public partial class VpkLoaderTest : Node3D
 	[Export]
 	public string VpkPath = @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk";
 
-
 	[Export]
 	public string HeroName = "viper";
 	public string HeroModelName = "viper";
@@ -257,6 +256,9 @@ public partial class VpkLoaderTest : Node3D
             _currentHeroNode = null;
         }
 
+        // Clean texture cache so reloading a hero or switching heroes never accesses disposed texture objects
+        Source2MaterialHelper.cleanCache();
+
         // Force Garbage Collection to clean up VRF memory dumps
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -268,13 +270,9 @@ public partial class VpkLoaderTest : Node3D
         {
             for (int i = 0; i < mi.Mesh.GetSurfaceCount(); i++)
             {
-                var mat = mi.Mesh.SurfaceGetMaterial(i);
+                var mat = mi.GetSurfaceOverrideMaterial(i) ?? mi.Mesh.SurfaceGetMaterial(i);
                 if (mat != null)
                 {
-                    if (mat is StandardMaterial3D stMat && stMat.AlbedoTexture != null)
-                    {
-                        stMat.AlbedoTexture.Dispose();
-                    }
                     mat.Dispose();
                 }
             }
@@ -291,7 +289,7 @@ public partial class VpkLoaderTest : Node3D
 	/// </summary>
 	private Dictionary<string, List<string>> BuildMeshMaterialMap(ValveResourceFormat.Resource modelResource)
 	{
-		var map = new Dictionary<string, List<string>>();
+		var map = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
 		if (modelResource.DataBlock is not Model model)
 		{
@@ -431,17 +429,161 @@ public partial class VpkLoaderTest : Node3D
 				meshInstance.Visible = false;
 			}
 
-			if (meshMaterialMap.TryGetValue(meshName, out var materialPaths))
+			// Billy / punkgoat: Ensure main model and primary jitter meshes are visible
+			if (heroName.Contains("punkgoat", StringComparison.OrdinalIgnoreCase) || heroName.Contains("billy", StringComparison.OrdinalIgnoreCase))
+			{
+				if (meshName.Contains("jitter02", StringComparison.OrdinalIgnoreCase))
+				{
+					meshInstance.Visible = false;
+				}
+				else if (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase) || meshName.Equals("punkgoat_model", StringComparison.OrdinalIgnoreCase))
+				{
+					meshInstance.Visible = true;
+				}
+			}
+			else if (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase))
+			{
+				meshInstance.Visible = true;
+			}
+
+			if (!meshMaterialMap.TryGetValue(meshName, out var materialPaths))
+			{
+				foreach (var kvp in meshMaterialMap.OrderByDescending(k => k.Key.Length))
+				{
+					if (meshName.Equals(kvp.Key, StringComparison.OrdinalIgnoreCase) ||
+						meshName.EndsWith(kvp.Key, StringComparison.OrdinalIgnoreCase) ||
+						kvp.Key.EndsWith(meshName, StringComparison.OrdinalIgnoreCase) ||
+						meshName.Contains(kvp.Key, StringComparison.OrdinalIgnoreCase) ||
+						kvp.Key.Contains(meshName, StringComparison.OrdinalIgnoreCase))
+					{
+						materialPaths = kvp.Value;
+						break;
+					}
+				}
+			}
+
+			if (materialPaths == null && meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase))
+			{
+				foreach (var kvp in meshMaterialMap)
+				{
+					if (kvp.Key.Contains("jitter", StringComparison.OrdinalIgnoreCase) && kvp.Value != null && kvp.Value.Count > 0)
+					{
+						materialPaths = kvp.Value;
+						break;
+					}
+				}
+				if (materialPaths == null)
+				{
+					materialPaths = new List<string> { "models/heroes_wip/punkgoat/materials/punkgoat_border_jitter01.vmat" };
+				}
+			}
+
+			// Wraith hand card: match mesh name, node parent hierarchy, or surface material names
+			bool isCardMesh = meshName.Contains("card", StringComparison.OrdinalIgnoreCase) ||
+			                  meshName.Contains("deck", StringComparison.OrdinalIgnoreCase) ||
+			                  node.Name.ToString().Contains("card", StringComparison.OrdinalIgnoreCase) ||
+			                  (node.GetParent() != null && (
+			                      node.GetParent().Name.ToString().Contains("card", StringComparison.OrdinalIgnoreCase) ||
+			                      node.GetParent().Name.ToString().Contains("wraith_card", StringComparison.OrdinalIgnoreCase)
+			                  )) ||
+			                  (node.GetParent()?.GetParent() != null && (
+			                      node.GetParent().GetParent().Name.ToString().Contains("card", StringComparison.OrdinalIgnoreCase) ||
+			                      node.GetParent().GetParent().Name.ToString().Contains("wraith_card", StringComparison.OrdinalIgnoreCase)
+			                  ));
+
+			if (!isCardMesh && meshInstance.Mesh != null)
+			{
+				for (int s = 0; s < meshInstance.Mesh.GetSurfaceCount(); s++)
+				{
+					var sm = meshInstance.Mesh.SurfaceGetMaterial(s) ?? meshInstance.GetSurfaceOverrideMaterial(s);
+					if (sm != null)
+					{
+						string sName = (sm.ResourceName + " " + sm.ResourcePath).ToLowerInvariant();
+						if (sName.Contains("card") || sName.Contains("deck"))
+						{
+							isCardMesh = true;
+							break;
+						}
+					}
+				}
+			}
+
+			if (materialPaths == null && isCardMesh)
+			{
+				materialPaths = new List<string> { "models/heroes_wip/wraith/materials/wraith_cards.vmat" };
+				GD.Print($"  [MaterialMap] Mapped card mesh '{meshName}' (parent: '{node.GetParent()?.Name}') to 'models/heroes_wip/wraith/materials/wraith_cards.vmat'");
+			}
+
+			if (materialPaths != null)
 			{
 				var mesh = meshInstance.Mesh;
 				int surfaceCount = mesh.GetSurfaceCount();
 
-				for (int i = 0; i < surfaceCount && i < materialPaths.Count; i++)
+				// If this submesh is a single-surface shell/fin (e.g. ghost_shawl_fur01 to fur05)
+				// matched against a multi-draw-call parent mesh (e.g. ghost_shawl with 6 draw calls),
+				// resolve the specific shell index so fur01 receives materialPaths[1], fur02 receives materialPaths[2], etc.
+				int targetMaterialIndex = 0;
+				if (surfaceCount == 1 && materialPaths.Count > 1)
 				{
-					// La ruta viene como "models/.../material.vmat", necesitamos buscar "material.vmat_c"
-					string vmatPath = materialPaths[i];
+					var match = System.Text.RegularExpressions.Regex.Match(meshName, @"(?:fur|layer|shell|sub|part)?0*(\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+					if (match.Success && int.TryParse(match.Groups[1].Value, out int shellNum))
+					{
+						if (shellNum < materialPaths.Count)
+						{
+							targetMaterialIndex = shellNum;
+						}
+						else if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase))
+						{
+							targetMaterialIndex = Math.Min(1, materialPaths.Count - 1);
+						}
+					}
+					else if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase))
+					{
+						targetMaterialIndex = Math.Min(1, materialPaths.Count - 1);
+					}
+				}
 
-					var mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath);
+				for (int i = 0; i < surfaceCount; i++)
+				{
+					int matIdx = targetMaterialIndex + i;
+					if (matIdx >= materialPaths.Count) matIdx = materialPaths.Count - 1;
+					string vmatPath = materialPaths[matIdx];
+
+					Godot.Material mat = null;
+
+					// Fallback: If this is a fur submesh but resolved material is still the base cloth (e.g. ghost_shawl.vmat),
+					// automatically check for the corresponding fur material (e.g. ghost_shawl_fur.vmat).
+					if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))
+					{
+						string furCandidate = vmatPath.Replace("ghost_shawl", "ghost_shawl_fur")
+						                              .Replace("geist_shawl", "geist_shawl_fur");
+						if (!furCandidate.Contains("fur"))
+						{
+							string dir = Path.GetDirectoryName(vmatPath)?.Replace('\\', '/');
+							furCandidate = string.IsNullOrEmpty(dir) ? "ghost_shawl_fur.vmat" : $"{dir}/ghost_shawl_fur.vmat";
+						}
+
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, furCandidate, meshName);
+						if (mat != null)
+						{
+							vmatPath = furCandidate;
+						}
+					}
+
+					if (mat == null)
+					{
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName);
+					}
+
+					if (mat == null && (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase) || vmatPath.Contains("jitter", StringComparison.OrdinalIgnoreCase)))
+					{
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/punkgoat/materials/punkgoat_border_jitter01.vmat", meshName);
+					}
+					if (mat == null && isCardMesh)
+					{
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/wraith/materials/wraith_cards.vmat", meshName);
+					}
+
 					if (mat != null)
 					{
 						mat.ResourceName = vmatPath;
@@ -455,10 +597,23 @@ public partial class VpkLoaderTest : Node3D
 					}
 				}
 
-				if (surfaceCount != materialPaths.Count)
+				if (surfaceCount > materialPaths.Count)
+				{
+					var fallbackMat = meshInstance.GetSurfaceOverrideMaterial(0);
+					if (fallbackMat != null)
+					{
+						for (int extra = materialPaths.Count; extra < surfaceCount; extra++)
+						{
+							meshInstance.SetSurfaceOverrideMaterial(extra, fallbackMat);
+						}
+					}
+				}
+
+				if (surfaceCount != materialPaths.Count && targetMaterialIndex == 0)
 				{
 					GD.Print($"  ⚠ Desajuste: mesh '{meshName}' tiene {surfaceCount} superficies pero el VMDL declara {materialPaths.Count} draw calls.");
 				}
+
 			}
 			else
 			{

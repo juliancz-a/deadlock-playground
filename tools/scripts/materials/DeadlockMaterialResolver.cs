@@ -27,15 +27,25 @@ public static class DeadlockMaterialResolver
         string mLower = meshName?.ToLowerInvariant() ?? "";
         string matLower = materialPath?.ToLowerInvariant() ?? "";
 
+        // 0. Sparkles and billboard quads (Lash sparkles)
+        if (mLower.Contains("sparkle") || matLower.Contains("sparkle") ||
+            mLower.Contains("lash_sparkles") || matLower.Contains("lash_sparkles")) return false;
+
         // 1. Existing built-in outline meshes
         if (mLower.Contains("outline") || matLower.Contains("outline")) return false;
 
-        // 2. Jitter and boundary layers (Billy / punkgoat, etc.)
-        if (mLower.Contains("jitter") || matLower.Contains("jitter")) return false;
+        // 2. Jitter and boundary layers (Billy / punkgoat, etc. F_DISABLE_NPR_OUTLINE = 1)
+        if (mLower.Contains("punkgoat") || matLower.Contains("punkgoat") ||
+            mLower.Contains("jitter") || matLower.Contains("jitter")) return false;
 
-        // 3. Eyes, pupils, corneas
+        // 3. Eyes, pupils, corneas, irises, sclera
         if (mLower.Contains("eye") || mLower.Contains("pupil") || mLower.Contains("cornea") ||
-            matLower.Contains("eye") || matLower.Contains("cornea")) return false;
+            mLower.Contains("iris") || mLower.Contains("sclera") ||
+            mLower.Contains("ivy_eyes") || matLower.Contains("ivy_eyes") ||
+            matLower.Contains("eye") || matLower.Contains("cornea") ||
+            matLower.Contains("iris") || matLower.Contains("sclera") ||
+            matLower.Contains("tengu_eye") || matLower.Contains("gargoyle_eye") ||
+            (matLower.Contains("ivy_head") && (mLower.Contains("eye") || mLower.Contains("pupil")))) return false;
 
         // 4. Mouth interior, teeth, tongue, facial decals
         if (mLower.Contains("teeth") || mLower.Contains("mouth") || mLower.Contains("tongue") ||
@@ -49,11 +59,18 @@ public static class DeadlockMaterialResolver
         // 6. Hair and fur layers (Lady Geist shawl fur01-fur05, etc.)
         if (mLower.Contains("fur") || matLower.Contains("fur") || mLower.Contains("shawl_fur")) return false;
 
-        // 7. Flame, fire, volumetric particle VFX (Infernus flames, Lash sparkles, Celeste hornglow, etc.)
+        // 7. Flame, fire, volumetric particle VFX, sparkles and hero outline shells (Infernus armglow/flames, Lash sparkles, Celeste hornglow, etc.)
         if (mLower.Contains("flame") || matLower.Contains("flame") ||
             mLower.Contains("sparkle") || matLower.Contains("sparkle") ||
-            mLower.Contains("armglow") || matLower.Contains("hornglow") ||
-            mLower.Contains("keyglow") || matLower.Contains("glow")) return false;
+            mLower.Contains("sparkles") || matLower.Contains("sparkles") ||
+            mLower.Contains("lash_sparkles") || matLower.Contains("lash_sparkles") ||
+            mLower.Contains("billboard") || matLower.Contains("billboard") ||
+            mLower.Contains("particle") || matLower.Contains("particle") ||
+            mLower.Contains("quad") || matLower.Contains("quad") ||
+            mLower.Contains("armglow") || matLower.Contains("armglow") ||
+            mLower.Contains("hornglow") || matLower.Contains("keyglow") ||
+            matLower.Contains("armglow") || matLower.Contains("headglow") || matLower.Contains("keyglow") || matLower.Contains("hornglow") ||
+            (matLower.Contains("glow") && (matLower.Contains("inferno") || matLower.Contains("vindicta") || matLower.Contains("fx") || matLower.Contains("vfx")))) return false;
 
         // 8. Glowing internal cores & hourglass (Paradox headhourglass, etc.) matching Valve's F_DISABLE_NPR_OUTLINE=1
         if (mLower.Contains("hourglass") || matLower.Contains("hourglass")) return false;
@@ -62,7 +79,11 @@ public static class DeadlockMaterialResolver
         if (matLower.Contains("viscous_swatches") || matLower.Contains("viscous_glass")) return false;
 
         // 10. Static UI / debug / expression meshes
-        if (mLower.Contains("static_ui") || mLower.Contains("ui_") || mLower.Contains("head_ui")) return false;
+        if (mLower.Contains("static_ui") || mLower.Contains("ui_") || mLower.Contains("head_ui") ||
+            matLower.Contains("vertcolor_pbr_basic") || matLower.Contains("materials/dev/")) return false;
+
+        // 11. Cards / psychic energy playing cards (Wraith cards)
+        if (mLower.Contains("card") || matLower.Contains("card")) return false;
 
         return true;
     }
@@ -90,6 +111,19 @@ public static class DeadlockMaterialResolver
                 mi.Visible = false;
             }
 
+            // Billy / punkgoat: Ensure main model and primary jitter meshes are visible
+            if (heroLower.Contains("punkgoat") || heroLower.Contains("billy"))
+            {
+                if (mName.Contains("jitter02"))
+                {
+                    mi.Visible = false;
+                }
+                else if (mName.Contains("jitter") || mName.Equals("punkgoat_model"))
+                {
+                    mi.Visible = true;
+                }
+            }
+
             // Rem: hide static UI/debug meshes by default
             if (heroLower.Contains("familiar") || heroLower.Contains("rem"))
             {
@@ -109,8 +143,34 @@ public static class DeadlockMaterialResolver
                 }
             }
 
-            // Generic: hide secondary holstered/hip weapons when a primary weapon in hand exists
-            if (mName.Contains("_on_hip") || mName.Contains("_holster") || mName.EndsWith("_hip") || mName.Contains("sheath_sword"))
+            // Infernus: ensure flame hair and flask on hip are visible, hide ability flame bursts and hand-held flasks
+            if (heroLower.Contains("inferno"))
+            {
+                if (mName.Contains("flame_hair") || mName.Contains("headglow") || (mName.Contains("hair") && !mName.Contains("base")))
+                {
+                    mi.Visible = true;
+                }
+                else if (mName.Contains("flask_on_hip"))
+                {
+                    mi.Visible = true;
+                }
+                else if (mName.Contains("flask_in_hand"))
+                {
+                    mi.Visible = false;
+                }
+                else if (mName.Contains("inferno_flames"))
+                {
+                    mi.Visible = false;
+                }
+            }
+
+            // Generic: hide secondary holstered/hip weapons when a primary weapon in hand exists (do not hide body parts like hips/legs)
+            bool isHipWeapon = (mName.Contains("weapon") || mName.Contains("gun") || mName.Contains("sword") ||
+                                mName.Contains("pistol") || mName.Contains("dagger") || mName.Contains("bow") ||
+                                mName.Contains("sheath") || mName.Contains("revolver")) &&
+                               (mName.Contains("hip") || mName.Contains("holster"));
+
+            if ((!heroLower.Contains("inferno") && (isHipWeapon || mName.Contains("_on_hip"))) || mName.Contains("sheath_sword"))
             {
                 mi.Visible = false;
             }
@@ -164,10 +224,12 @@ public static class DeadlockMaterialResolver
     /// Applies hero-specific material overrides and VRF parameter corrections.
     /// Delegates directly to the modular IHeroMaterialConfig registry in HeroMaterialManager.
     /// </summary>
-    public static void ResolveHeroMaterial(Package package, string heroName, string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
+    public static void ResolveHeroMaterial(Package package, string heroName, string meshName, int surfaceIndex, string vmatPath, Godot.Material material)
     {
-        if (material == null) return;
-        var config = HeroMaterialManager.GetConfigForHero(heroName);
-        config?.ConfigureBaseMaterial(meshName, surfaceIndex, vmatPath, material);
+        if (material is StandardMaterial3D stdMat)
+        {
+            var config = HeroMaterialManager.GetConfigForHero(heroName);
+            config?.ConfigureBaseMaterial(meshName, surfaceIndex, vmatPath, stdMat);
+        }
     }
 }

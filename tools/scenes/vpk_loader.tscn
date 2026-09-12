@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://5gylk5m307o0"]
 
-[ext_resource type="Script" path="res://tools/scripts/VpkLoaderTest.cs" id="1_1eey3"]
+[ext_resource type="Script" uid="uid://fv02xl8slpur" path="res://tools/scripts/VpkLoaderTest.cs" id="1_1eey3"]
 
-[node name="VpkLoaderTest" type="Node3D"]
+[node name="VpkLoaderTest" type="Node3D" unique_id=1594001064]
 script = ExtResource("1_1eey3")

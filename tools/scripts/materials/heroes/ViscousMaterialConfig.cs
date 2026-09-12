@@ -12,10 +12,10 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
 
     public ViscousMaterialConfig()
     {
-        if (ResourceLoader.Exists("res://assets/shaders/viscous.gdshader"))
-        {
+        if (ResourceLoader.Exists("res://assets/shaders/valve/viscous.gdshader"))
+            _slimeShader = GD.Load<Shader>("res://assets/shaders/valve/viscous.gdshader");
+        else if (ResourceLoader.Exists("res://assets/shaders/viscous.gdshader"))
             _slimeShader = GD.Load<Shader>("res://assets/shaders/viscous.gdshader");
-        }
     }
 
     public void ConfigureBaseMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
