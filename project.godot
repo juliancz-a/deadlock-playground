@@ -32,7 +32,7 @@ project/assembly_name="Deadlock_Playground"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg")
+enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
 
 [file_customization]
 

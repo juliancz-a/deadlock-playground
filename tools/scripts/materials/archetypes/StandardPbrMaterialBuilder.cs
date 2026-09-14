@@ -76,7 +76,7 @@ public static class StandardPbrMaterialBuilder
         if (!string.IsNullOrEmpty(diffusePath))
         {
             godotMat.AlbedoTexture = Source2TextureLoader.GetOrLoadTexture(package, diffusePath, forceOpaqueColor);
-            godotMat.VertexColorUseAsAlbedo = false;
+            godotMat.VertexColorUseAsAlbedo = isVertColorMat;
             godotMat.AlbedoColor = Colors.White;
         }
         else

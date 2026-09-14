@@ -108,7 +108,7 @@ text = "Toggle X-Ray"
 
 [node name="CheckLines" type="CheckBox" parent="XRayGroup/HBoxContainer" unique_id=963887857]
 layout_mode = 2
-button_pressed = true
+button_pressed = false
 text = "Wireframe Lines"
 
 [node name="HSeparatorIK" type="HSeparator" parent="." unique_id=1982736450]

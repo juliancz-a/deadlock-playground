@@ -18,6 +18,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnTabEffects;
     [Export] private Button _btnTabLighting;
     [Export] private Button _btnTabShading;
+    [Export] private Button _btnTabPaint;
 
     [ExportCategory("Tab Sub-Scene Instances (in Editor)")]
     [Export] private Container _tabContentContainer;
@@ -29,12 +30,16 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private EffectsTabUI _tabEffects;
     [Export] private LightingTabUI _tabLighting;
     [Export] private ShadingTabUI _tabShading;
+    [Export] private PaintTabUI _tabPaint;
 
     [ExportCategory("Floating & Overlay Panels")]
     [Export] private ExportPanelUI _exportPanel;
+    [Export] private PaintModExportPanelUI _paintModExportPanel;
     [Export] private Control _navBadge;
     [Export] private Button _btnQuickXRay;
     [Export] private Button _btnQuickFullscreen;
+
+    private SkeletonGizmoManager _currentSkeletonGizmoManager;
 
     [ExportCategory("Modals & Dialogs")]
     [Export] private Control _modalsLayer;
@@ -68,6 +73,11 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private HSlider _ikHandlesOpacitySlider;
     [Export] private Label _ikHandlesOpacityLabel;
     [Export] private Button _btnResetDisplaySettings;
+    [Export] private ColorPickerButton _painterOutlineColorPicker;
+    [Export] private HSlider _painterOutlineOpacitySlider;
+    [Export] private Label _painterOutlineOpacityLabel;
+    [Export] private HSlider _painterOutlineWidthSlider;
+    [Export] private Label _painterOutlineWidthLabel;
 
     private CharacterIKManager _currentIKManager;
 
@@ -205,6 +215,8 @@ public partial class StudioUIManager : CanvasLayer
                          ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/LightButton");
         _btnTabShading ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
                         ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/ShadingButton");
+        _btnTabPaint ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PaintButton")
+                      ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/PaintButton");
 
         // Tab Content
         _tabContentContainer ??= GetNodeOrNull<Container>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
@@ -217,10 +229,13 @@ public partial class StudioUIManager : CanvasLayer
         _tabEffects ??= _tabContentContainer?.GetNodeOrNull<EffectsTabUI>("EffectsTab");
         _tabLighting ??= _tabContentContainer?.GetNodeOrNull<LightingTabUI>("LightingTab");
         _tabShading ??= _tabContentContainer?.GetNodeOrNull<ShadingTabUI>("ShadingTab");
+        _tabPaint ??= _tabContentContainer?.GetNodeOrNull<PaintTabUI>("PaintTab");
 
         // Floating Panels & Quick Actions
         _exportPanel ??= GetNodeOrNull<ExportPanelUI>("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
                       ?? GetNodeOrNull<ExportPanelUI>("MainHUD/ExportPanel");
+        _paintModExportPanel ??= GetNodeOrNull<PaintModExportPanelUI>("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
+                              ?? GetTree().Root.FindChild("PaintModExportPanel", true, false) as PaintModExportPanelUI;
         _navBadge ??= GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge")
                    ?? GetNodeOrNull<Control>("MainHUD/NavBadge");
 
@@ -265,6 +280,11 @@ public partial class StudioUIManager : CanvasLayer
         _ikHandlesOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity/HSlider");
         _ikHandlesOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity/LabelCurrOpacity");
         _btnResetDisplaySettings ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/ResetButton");
+        _painterOutlineColorPicker ??= GetNodeOrNull<ColorPickerButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterColor/ColorPickerButton");
+        _painterOutlineOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity/HSlider");
+        _painterOutlineOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity/LabelCurrOpacity");
+        _painterOutlineWidthSlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth/HSlider");
+        _painterOutlineWidthLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth/LabelCurrWidth");
     }
 
     private void InitTabs()
@@ -278,7 +298,8 @@ public partial class StudioUIManager : CanvasLayer
             _tabScene,
             _tabEffects,
             _tabLighting,
-            _tabShading
+            _tabShading,
+            _tabPaint
         };
 
         _tabButtons = new Button[]
@@ -290,7 +311,8 @@ public partial class StudioUIManager : CanvasLayer
             _btnTabScene,
             _btnTabEffects,
             _btnTabLighting,
-            _btnTabShading
+            _btnTabShading,
+            _btnTabPaint
         };
 
         for (int i = 0; i < _tabButtons.Length; i++)
@@ -306,6 +328,7 @@ public partial class StudioUIManager : CanvasLayer
 
     public void SwitchTab(int tabIndex)
     {
+        int prevTab = _currentTabIndex;
         _currentTabIndex = tabIndex;
 
         for (int i = 0; i < _tabScenes.Length; i++)
@@ -320,6 +343,31 @@ public partial class StudioUIManager : CanvasLayer
                 bool active = (i == tabIndex);
                 PlaygroundThemeHelper.UpdateTabButtonState(_tabButtons[i], active);
             }
+        }
+
+        if (prevTab == 8 && tabIndex != 8)
+        {
+            _tabPaint?.OnTabDeactivated();
+            if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
+            if (_exportPanel != null) _exportPanel.Visible = true;
+            _currentSkeletonGizmoManager?.SetGizmoEnabled(true);
+        }
+        else if (tabIndex == 8)
+        {
+            var hero = GetVpkLoader()?.CurrentHeroNode;
+            if (hero != null && _tabPaint?.CurrentHero == null)
+            {
+                _tabPaint?.SetCurrentHero(hero);
+            }
+            _tabPaint?.OnTabActivated();
+
+            if (_exportPanel != null) _exportPanel.Visible = false;
+            if (_paintModExportPanel != null)
+            {
+                _paintModExportPanel.Visible = true;
+                _paintModExportPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.MeshHierarchy, _tabPaint?.CurrentHero);
+            }
+            _currentSkeletonGizmoManager?.SetGizmoEnabled(false);
         }
     }
 
@@ -448,9 +496,16 @@ public partial class StudioUIManager : CanvasLayer
             _btnTabPose.TooltipText = hasCharacter ? "" : "Requires an active character model";
         }
 
+        if (_btnTabPaint != null)
+        {
+            _btnTabPaint.Disabled = !hasCharacter;
+            _btnTabPaint.Modulate = hasCharacter ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            _btnTabPaint.TooltipText = hasCharacter ? "" : "Requires an active character model";
+        }
+
         _tabCharacter?.SetControlsEnabled(hasCharacter);
 
-        if (!hasCharacter && (_currentTabIndex == 1 || _currentTabIndex == 3))
+        if (!hasCharacter && (_currentTabIndex == 1 || _currentTabIndex == 3 || _currentTabIndex == 8))
         {
             SwitchTab(0);
         }
@@ -472,6 +527,7 @@ public partial class StudioUIManager : CanvasLayer
         // Populate Character Tab
         _tabCharacter?.SetHero(heroNode);
         _tabShading?.SetHero(heroNode);
+        _tabPaint?.SetCurrentHero(heroNode);
 
         // Find Skeleton & Animation Player
         var skeleton = SearchSkeleton(heroNode);
@@ -491,6 +547,11 @@ public partial class StudioUIManager : CanvasLayer
                 TargetSkeleton = skeleton
             };
             skeleton.AddChild(gizmoManager);
+            _currentSkeletonGizmoManager = gizmoManager;
+            if (_currentTabIndex == 8)
+            {
+                gizmoManager.SetGizmoEnabled(false);
+            }
 
             if (_tabBones != null)
             {
@@ -520,6 +581,7 @@ public partial class StudioUIManager : CanvasLayer
         _currentIKManager = null;
         _tabCharacter?.ClearSubmeshes();
         _tabShading?.ClearHero();
+        _tabPaint?.ClearHero();
         _tabBones?.SetSkeleton(null);
         _tabBones?.SetIKManager(null);
         _tabPose?.SetSkeleton(null);
@@ -763,6 +825,34 @@ public partial class StudioUIManager : CanvasLayer
                 GizmoDisplaySettings.IKHandlesOpacity = (float)v;
                 if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{v:P0}";
                 _currentIKManager?.SetHandlesOpacity((float)v);
+            };
+        }
+
+        if (_painterOutlineColorPicker != null)
+        {
+            _painterOutlineColorPicker.Color = GizmoDisplaySettings.PainterOutlineColor;
+            _painterOutlineColorPicker.ColorChanged += (c) => GizmoDisplaySettings.PainterOutlineColor = c;
+        }
+
+        if (_painterOutlineOpacitySlider != null)
+        {
+            _painterOutlineOpacitySlider.Value = GizmoDisplaySettings.PainterOutlineOpacity;
+            if (_painterOutlineOpacityLabel != null) _painterOutlineOpacityLabel.Text = $"{GizmoDisplaySettings.PainterOutlineOpacity:P0}";
+            _painterOutlineOpacitySlider.ValueChanged += (v) =>
+            {
+                GizmoDisplaySettings.PainterOutlineOpacity = (float)v;
+                if (_painterOutlineOpacityLabel != null) _painterOutlineOpacityLabel.Text = $"{v:P0}";
+            };
+        }
+
+        if (_painterOutlineWidthSlider != null)
+        {
+            _painterOutlineWidthSlider.Value = GizmoDisplaySettings.PainterOutlineWidth;
+            if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{GizmoDisplaySettings.PainterOutlineWidth:F1}px";
+            _painterOutlineWidthSlider.ValueChanged += (v) =>
+            {
+                GizmoDisplaySettings.PainterOutlineWidth = (float)v;
+                if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{v:F1}px";
             };
         }
 

@@ -1,0 +1,750 @@
+[gd_scene format=3 uid="uid://bpxn82lam7x10"]
+
+[ext_resource type="Script" uid="uid://cf67x1y8w9z01" path="res://ui/scripts/FloatingBrushPaletteUI.cs" id="1_brush_hud"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_root"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_strip"]
+bg_color = Color(0.08, 0.09, 0.11, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.33, 0.4, 0.7)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.4)
+shadow_size = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_flyout"]
+bg_color = Color(0.08, 0.09, 0.11, 0.96)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.38, 0.46, 0.7)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.45)
+shadow_size = 8
+
+[node name="FloatingBrushPalette" type="PanelContainer" unique_id=2089182341]
+anchors_preset = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 320.0
+offset_bottom = 400.0
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_root")
+script = ExtResource("1_brush_hud")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="." unique_id=2089182342]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ToolStripPanel" type="PanelContainer" parent="HBoxContainer" unique_id=2089182343]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_strip")
+
+[node name="Margin" type="MarginContainer" parent="HBoxContainer/ToolStripPanel" unique_id=2089182344]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 6
+
+[node name="ToolButtons" type="VBoxContainer" parent="HBoxContainer/ToolStripPanel/Margin" unique_id=2089182345]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="DragHandle" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182346]
+custom_minimum_size = Vector2(32, 18)
+layout_mode = 2
+tooltip_text = "Drag Toolbar"
+flat = true
+text = "⋮⋮"
+
+[node name="BtnSelect" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291029]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Select Submesh [V] - Click any submesh in 3D viewport to select"
+toggle_mode = true
+text = "↖"
+
+[node name="BtnBrush" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291030]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Paint Brush [B]"
+toggle_mode = true
+button_pressed = true
+text = "B"
+
+[node name="BtnErase" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291031]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Eraser [E]"
+toggle_mode = true
+text = "E"
+
+[node name="BtnFill" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291052]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Bucket Fill Submesh [G]"
+toggle_mode = true
+text = "G"
+
+[node name="BtnDecal" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291033]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Decal Stamper [T]"
+toggle_mode = true
+text = "T"
+
+[node name="BtnText" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291034]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Text Projector [X]"
+toggle_mode = true
+text = "A"
+
+[node name="BtnColor" type="ColorPickerButton" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291035]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Brush & Fill Color"
+color = Color(0.85, 0.15, 0.2, 1)
+edit_alpha = false
+
+[node name="BtnMirror" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418291036]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Mirror Symmetry [M]"
+toggle_mode = true
+text = "↔"
+
+[node name="HSeparator1" type="HSeparator" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182347]
+layout_mode = 2
+
+[node name="BtnUndo" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182348]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Undo [Ctrl+Z]"
+text = "↶"
+
+[node name="BtnRedo" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182349]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Redo [Ctrl+Y]"
+text = "↷"
+
+[node name="HSeparator2" type="HSeparator" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182350]
+layout_mode = 2
+
+[node name="BtnClear" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182351]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Clear Active Layer"
+text = "🗑"
+
+[node name="BtnToggleFlyout" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182352]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Toggle Tool Options"
+text = "⚙"
+
+[node name="BtnPin" type="Button" parent="HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=2089182353]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Pin Options Panel"
+toggle_mode = true
+button_pressed = true
+text = "📌"
+
+[node name="FlyoutPanel" type="PanelContainer" parent="HBoxContainer" unique_id=2089182354]
+custom_minimum_size = Vector2(250, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_flyout")
+
+[node name="Margin" type="MarginContainer" parent="HBoxContainer/FlyoutPanel" unique_id=2089182355]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin" unique_id=2089182356]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HeaderBar" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1418291025]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/HeaderBar" unique_id=1418291026]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 12
+text = "BRUSH OPTIONS"
+
+[node name="BtnCloseFlyout" type="Button" parent="HBoxContainer/FlyoutPanel/Margin/VBox/HeaderBar" unique_id=2089182357]
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+tooltip_text = "Close Options Panel"
+flat = true
+text = "✕"
+
+[node name="HSeparator" type="HSeparator" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1418291028]
+layout_mode = 2
+
+[node name="SelectOptions" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2089182357]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LblInstructions" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/SelectOptions" unique_id=2089182390]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
+theme_override_font_sizes/font_size = 11
+autowrap_mode = 2
+text = "Click any submesh in the 3D viewport to select it as the active paint target."
+
+[node name="CurrentTargetLabel" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/SelectOptions" unique_id=2089182391]
+layout_mode = 2
+theme_override_colors/font_color = Color(1.0, 0.85, 0.35, 1)
+theme_override_font_sizes/font_size = 11
+text = "Target: None"
+
+[node name="LblTip" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/SelectOptions" unique_id=2089182392]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
+theme_override_font_sizes/font_size = 10
+autowrap_mode = 2
+text = "Tip: You can also hold Alt + Click while using any other paint tool to select a submesh quickly."
+
+[node name="BrushOptions" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2089182358]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BlendRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=2089182359]
+layout_mode = 2
+
+[node name="LblBlend" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/BlendRow" unique_id=2089182360]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Blend:"
+
+[node name="OptBlendMode" type="OptionButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/BlendRow" unique_id=2089182361]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ColorRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=1418291034]
+layout_mode = 2
+
+[node name="LblColor" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ColorRow" unique_id=1418291035]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Color:"
+
+[node name="ColorPickerButton" type="ColorPickerButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ColorRow" unique_id=1418291036]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+color = Color(0.85, 0.15, 0.2, 1)
+edit_alpha = false
+
+[node name="ShapeRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=1418291037]
+layout_mode = 2
+
+[node name="LblShape" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ShapeRow" unique_id=1418291038]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Shape:"
+
+[node name="OptShape" type="OptionButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ShapeRow" unique_id=1418291039]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SizeRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=1418291040]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/SizeRow" unique_id=1418291041]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Size:"
+
+[node name="SliderSize" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/SizeRow" unique_id=1418291042]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 256.0
+value = 32.0
+
+[node name="LblSize" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/SizeRow" unique_id=1418291043]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "32 px"
+horizontal_alignment = 2
+
+[node name="FlowRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=1418291048]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/FlowRow" unique_id=1418291049]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Flow:"
+
+[node name="SliderFlow" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/FlowRow" unique_id=1418291050]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 1.0
+
+[node name="LblFlow" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/FlowRow" unique_id=1418291051]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "100%"
+horizontal_alignment = 2
+
+[node name="HardnessRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=1418291044]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/HardnessRow" unique_id=1418291045]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Hardness:"
+
+[node name="SliderHardness" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/HardnessRow" unique_id=1418291046]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 0.5
+
+[node name="LblHardness" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/HardnessRow" unique_id=1418291047]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "50%"
+horizontal_alignment = 2
+
+[node name="EraserOptions" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2089182362]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="EraseShapeRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions" unique_id=2089182390]
+layout_mode = 2
+
+[node name="LblShape" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseShapeRow" unique_id=2089182391]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Shape:"
+
+[node name="OptEraseShape" type="OptionButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseShapeRow" unique_id=2089182392]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="EraseSizeRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions" unique_id=2089182363]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseSizeRow" unique_id=2089182364]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Size:"
+
+[node name="SliderEraseSize" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseSizeRow" unique_id=2089182365]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 256.0
+value = 32.0
+
+[node name="LblEraseSize" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseSizeRow" unique_id=2089182366]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "32 px"
+horizontal_alignment = 2
+
+[node name="EraseHardnessRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions" unique_id=2089182367]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseHardnessRow" unique_id=2089182368]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Hardness:"
+
+[node name="SliderEraseHardness" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseHardnessRow" unique_id=2089182369]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 0.5
+
+[node name="LblEraseHardness" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseHardnessRow" unique_id=2089182370]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "50%"
+horizontal_alignment = 2
+
+[node name="EraseFlowRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions" unique_id=2089182371]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseFlowRow" unique_id=2089182372]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Flow:"
+
+[node name="SliderEraseFlow" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseFlowRow" unique_id=2089182373]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 1.0
+
+[node name="LblEraseFlow" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseFlowRow" unique_id=2089182374]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "100%"
+horizontal_alignment = 2
+
+[node name="BucketFillOptions" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2089182375]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FillColorRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=2089182376]
+layout_mode = 2
+
+[node name="LblColor" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/FillColorRow" unique_id=2089182377]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Color:"
+
+[node name="FillColorPicker" type="ColorPickerButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/FillColorRow" unique_id=2089182378]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+color = Color(0.85, 0.15, 0.2, 1)
+edit_alpha = false
+
+[node name="LblHint" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=2089182379]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.68, 0.72, 1)
+theme_override_font_sizes/font_size = 10
+text = "Click a 3D submesh to fill its entire atlas UV region, or click the button below."
+autowrap_mode = 2
+
+[node name="BtnFillActiveSubmesh" type="Button" parent="HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=2089182380]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+text = "Fill Active Submesh"
+
+[node name="DecalOptions" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2089182381]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TopRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2089182382]
+layout_mode = 2
+
+[node name="BtnImportDecal" type="Button" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/TopRow" unique_id=2089182383]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Load Image..."
+
+[node name="DecalPreview" type="TextureRect" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/TopRow" unique_id=2089182384]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ScaleRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2089182385]
+layout_mode = 2
+
+[node name="LblScale" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/ScaleRow" unique_id=2089182386]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Scale:"
+
+[node name="SliderDecalScale" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/ScaleRow" unique_id=2089182387]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.05
+max_value = 2.0
+step = 0.01
+value = 0.25
+
+[node name="LblDecalScale" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/ScaleRow" unique_id=2089182388]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0.25x"
+horizontal_alignment = 2
+
+[node name="RotRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2089182389]
+layout_mode = 2
+
+[node name="LblRot" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/RotRow" unique_id=2089182390]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Rotation:"
+
+[node name="SliderDecalRot" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/RotRow" unique_id=2089182391]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 1.0
+value = 0.0
+
+[node name="LblDecalRot" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/RotRow" unique_id=2089182392]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0°"
+horizontal_alignment = 2
+
+[node name="BtnBakeDecal" type="Button" parent="HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2089182393]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Bake Decal to Layer"
+
+[node name="TextOptions" type="VBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2089182395]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TextStringRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182396]
+layout_mode = 2
+
+[node name="LblText" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextStringRow" unique_id=2089182397]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Text:"
+
+[node name="EditText" type="LineEdit" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextStringRow" unique_id=2089182398]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "DEADLOCK"
+max_length = 64
+
+[node name="FontRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182399]
+layout_mode = 2
+
+[node name="OptSystemFont" type="OptionButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontRow" unique_id=2089182422]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnLoadFont" type="Button" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontRow" unique_id=2089182400]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+tooltip_text = "Load custom font file (.ttf, .otf)..."
+text = "📁"
+
+[node name="FontSizeRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182401]
+layout_mode = 2
+
+[node name="LblSize" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontSizeRow" unique_id=2089182402]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Size:"
+
+[node name="SliderFontSize" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontSizeRow" unique_id=2089182403]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 16.0
+max_value = 128.0
+value = 64.0
+
+[node name="LblFontSize" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontSizeRow" unique_id=2089182404]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "64 px"
+horizontal_alignment = 2
+
+[node name="TextColorRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182405]
+layout_mode = 2
+
+[node name="LblCol" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextColorRow" unique_id=2089182406]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Color:"
+
+[node name="PickerTextColor" type="ColorPickerButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextColorRow" unique_id=2089182407]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+color = Color(1, 1, 1, 1)
+edit_alpha = false
+
+[node name="OutlineSizeRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182408]
+layout_mode = 2
+
+[node name="LblOutl" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineSizeRow" unique_id=2089182409]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Outline:"
+
+[node name="SliderOutlineSize" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineSizeRow" unique_id=2089182410]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.0
+max_value = 16.0
+value = 4.0
+
+[node name="LblOutlineSize" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineSizeRow" unique_id=2089182411]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "4 px"
+horizontal_alignment = 2
+
+[node name="OutlineColorRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182412]
+layout_mode = 2
+
+[node name="LblOutlCol" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineColorRow" unique_id=2089182413]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Outl Col:"
+
+[node name="PickerOutlineColor" type="ColorPickerButton" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineColorRow" unique_id=2089182414]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+color = Color(0, 0, 0, 1)
+edit_alpha = false
+
+[node name="TextScaleRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182415]
+layout_mode = 2
+
+[node name="LblScale" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextScaleRow" unique_id=2089182416]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Scale:"
+
+[node name="SliderTextScale" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextScaleRow" unique_id=2089182417]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.05
+max_value = 1.5
+step = 0.01
+value = 0.25
+
+[node name="LblTextScale" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextScaleRow" unique_id=2089182418]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0.25x"
+horizontal_alignment = 2
+
+[node name="TextRotRow" type="HBoxContainer" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182419]
+layout_mode = 2
+
+[node name="LblRot" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextRotRow" unique_id=2089182420]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Rotation:"
+
+[node name="SliderTextRot" type="HSlider" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextRotRow" unique_id=2089182421]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+step = 1.0
+value = 0.0
+
+[node name="LblTextRot" type="Label" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextRotRow" unique_id=2089182422]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0°"
+horizontal_alignment = 2
+
+[node name="BtnBakeText" type="Button" parent="HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=2089182423]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Bake Text to Layer"
+
+[node name="DecalFileDialog" type="FileDialog" parent="." unique_id=2089182394]
+title = "Open a File"
+size = Vector2i(500, 400)
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.png, *.jpg, *.jpeg, *.webp ; Image Files")
+
+[node name="TextFileDialog" type="FileDialog" parent="." unique_id=2089182424]
+title = "Open Font File"
+size = Vector2i(500, 400)
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.ttf, *.otf ; Font Files")

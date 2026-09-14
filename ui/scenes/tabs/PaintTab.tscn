@@ -1,0 +1,212 @@
+[gd_scene format=3 uid="uid://csvusgj1vik1u"]
+
+[ext_resource type="Script" uid="uid://c8iqg3e0fyesi" path="res://ui/scripts/tabs/PaintTabUI.cs" id="1_paint"]
+
+[node name="PaintTab" type="VBoxContainer" unique_id=1849204999]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+script = ExtResource("1_paint")
+
+[node name="HeaderCard" type="PanelContainer" parent="." unique_id=1010101001]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="HeaderCard" unique_id=1010101002]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HBoxHeader" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101003]
+layout_mode = 2
+
+[node name="HeroNameLabel" type="Label" parent="HeaderCard/VBox/HBoxHeader" unique_id=1010101004]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TitleLabel"
+theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
+text = "HERO: NONE"
+
+[node name="BtnResetPose" type="Button" parent="HeaderCard/VBox/HBoxHeader" unique_id=1010101005]
+layout_mode = 2
+tooltip_text = "Snap character to Bind Pose for painting"
+text = "Reset Pose"
+
+[node name="HBoxTarget" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101006]
+layout_mode = 2
+
+[node name="TargetLabel" type="Label" parent="HeaderCard/VBox/HBoxTarget" unique_id=1010101007]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Target Mesh:"
+
+[node name="OptTargetMesh" type="OptionButton" parent="HeaderCard/VBox/HBoxTarget" unique_id=1010101008]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HBoxRes" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101009]
+layout_mode = 2
+
+[node name="ResLabel" type="Label" parent="HeaderCard/VBox/HBoxRes" unique_id=1010101010]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Canvas Res:"
+
+[node name="ResolutionOption" type="OptionButton" parent="HeaderCard/VBox/HBoxRes" unique_id=1010101011]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ActiveMeshLabel" type="Label" parent="HeaderCard/VBox" unique_id=1010101012]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Target: None"
+
+[node name="HSeparator1" type="HSeparator" parent="." unique_id=1010101013]
+layout_mode = 2
+
+[node name="SubmeshCard" type="PanelContainer" parent="." unique_id=1010101014]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="SubmeshCard" unique_id=1010101015]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="SubmeshCard/VBox" unique_id=1010101016]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Submesh Hierarchy & Soloing"
+
+[node name="HBoxActions" type="HBoxContainer" parent="SubmeshCard/VBox" unique_id=1010101017]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnShowAll" type="Button" parent="SubmeshCard/VBox/HBoxActions" unique_id=1010101018]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Show All"
+
+[node name="BtnHideAcc" type="Button" parent="SubmeshCard/VBox/HBoxActions" unique_id=1010101019]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hide Accessories"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="SubmeshCard/VBox" unique_id=1010101020]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="SubmeshListContainer" type="VBoxContainer" parent="SubmeshCard/VBox/ScrollContainer" unique_id=1010101021]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="HSeparator2" type="HSeparator" parent="." unique_id=1010101022]
+layout_mode = 2
+
+[node name="LayersCard" type="PanelContainer" parent="." unique_id=1010101023]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="LayersCard" unique_id=1010101024]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="LayersCard/VBox" unique_id=1010101025]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Texture Layers"
+
+[node name="HBoxToolbar" type="HBoxContainer" parent="LayersCard/VBox" unique_id=1010101026]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BtnAddLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101027]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+ LAYER"
+
+[node name="BtnDeleteLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101028]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "- DEL"
+
+[node name="BtnClearLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101029]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "CLEAR"
+
+[node name="BtnMoveUp" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101030]
+custom_minimum_size = Vector2(28, 0)
+layout_mode = 2
+text = "▲"
+
+[node name="BtnMoveDown" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101031]
+custom_minimum_size = Vector2(28, 0)
+layout_mode = 2
+text = "▼"
+
+[node name="ScrollContainer" type="ScrollContainer" parent="LayersCard/VBox" unique_id=1010101032]
+custom_minimum_size = Vector2(0, 90)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="LayersListContainer" type="VBoxContainer" parent="LayersCard/VBox/ScrollContainer" unique_id=1010101033]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="HBoxBlend" type="HBoxContainer" parent="LayersCard/VBox" unique_id=1010101034]
+layout_mode = 2
+
+[node name="BlendLabel" type="Label" parent="LayersCard/VBox/HBoxBlend" unique_id=1010101035]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Blend Mode:"
+
+[node name="OptLayerBlend" type="OptionButton" parent="LayersCard/VBox/HBoxBlend" unique_id=1010101036]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HBoxOpacity" type="HBoxContainer" parent="LayersCard/VBox" unique_id=1010101037]
+layout_mode = 2
+
+[node name="OpacityLabel" type="Label" parent="LayersCard/VBox/HBoxOpacity" unique_id=1010101038]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Opacity:"
+
+[node name="SliderLayerOpacity" type="HSlider" parent="LayersCard/VBox/HBoxOpacity" unique_id=1010101039]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.01
+value = 1.0
+
+[node name="LblLayerOpacity" type="Label" parent="LayersCard/VBox/HBoxOpacity" unique_id=1010101040]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "100%"
+horizontal_alignment = 2
+
+
+
+
+
+[node name="DecalFileDialog" type="FileDialog" parent="." unique_id=1010101066]
+oversampling_override = 1.0
+title = "Open a File"
+size = Vector2i(700, 500)
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.png, *.jpg, *.jpeg, *.webp ; Image Files")
+
+[node name="ExportFileDialog" type="FileDialog" parent="." unique_id=1010101067]
+oversampling_override = 1.0
+size = Vector2i(700, 500)
+access = 2
+filters = PackedStringArray("*.png ; PNG Image", "*.vmat ; Valve Material")

@@ -97,8 +97,9 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
 
         if (_toggleLinesButton != null)
         {
-            _toggleLinesButton.ButtonPressed = true;
+            _toggleLinesButton.ButtonPressed = false;
             _toggleLinesButton.Toggled += (pressed) => OnLinesToggled?.Invoke(pressed);
+            OnLinesToggled?.Invoke(false);
         }
 
         if (_allBonesOptionButton != null)

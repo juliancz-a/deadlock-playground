@@ -37,6 +37,34 @@ public partial class SkeletonGizmoManager : Node3D
     private Node3D _dummyTarget;
     private bool _isGizmoDragging = false;
     private bool _areDotsGloballyEnabled = true;
+    private bool _isGizmoEnabled = true;
+
+    public bool IsGizmoEnabled
+    {
+        get => _isGizmoEnabled;
+        set => SetGizmoEnabled(value);
+    }
+
+    public void SetGizmoEnabled(bool enabled)
+    {
+        _isGizmoEnabled = enabled;
+        if (!_isGizmoEnabled)
+        {
+            if (_gizmo != null)
+            {
+                _gizmo.ClearSelection();
+                _gizmo.Visible = false;
+            }
+            SetupDots(false);
+            SetupLines(false);
+        }
+        else
+        {
+            SetupDots(_uiManager?.IsXRayEnabled ?? true);
+            SetupLines(_uiManager?.IsLinesEnabled ?? true);
+            SpawnOrMoveGizmo();
+        }
+    }
 
     public void SetUIManager(IBoneUIController uiManager)
     {
@@ -152,6 +180,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void OnBonePicked(int boneIdx)
     {
+        if (!_isGizmoEnabled) return;
         SelectBone(boneIdx);
         if (UIManager != null)
         {
@@ -161,6 +190,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (!_isGizmoEnabled) return;
         if (@event is InputEventMouseButton mouseBtn && mouseBtn.Pressed && mouseBtn.ButtonIndex == MouseButton.Left)
         {
             // If user clicked in empty space, deselect current bone

@@ -13,12 +13,15 @@
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/EffectsTab.tscn" id="11_fx_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/LightingTab.tscn" id="12_light_tab"]
 [ext_resource type="PackedScene" uid="uid://c600l2pc2ya3d" path="res://ui/scenes/tabs/ShadingTab.tscn" id="13_shading_tab"]
+[ext_resource type="PackedScene" path="res://ui/scenes/tabs/PaintTab.tscn" id="15_paint_tab"]
 [ext_resource type="PackedScene" uid="uid://bmnaxn7uec4qy" path="res://ui/scenes/ExportPanel.tscn" id="14_export"]
 [ext_resource type="Shader" uid="uid://bh86e204ret45" path="res://assets/shaders/crt_shader.gdshader" id="16_crt_shader"]
 [ext_resource type="Shader" uid="uid://82snm4ouah2f" path="res://assets/shaders/glitch_shader.gdshader" id="17_glitch_shader"]
 [ext_resource type="Script" uid="uid://c7d8ndr06lxge" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
 [ext_resource type="Texture2D" uid="uid://djdwwfcdcwicj" path="res://assets/backgrounds/background_00.jpg" id="19_bg0"]
 [ext_resource type="Script" path="res://ui/scripts/CameraControlPadUI.cs" id="20_cam_pad"]
+[ext_resource type="PackedScene" path="res://ui/scenes/FloatingBrushPalette.tscn" id="21_brush_palette"]
+[ext_resource type="PackedScene" path="res://ui/scenes/components/PaintModExportPanel.tscn" id="22_paint_mod_export"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -117,7 +120,7 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_exportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_fpsLimitOption", "_vsyncCheck", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_tabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_fpsLimitOption", "_vsyncCheck", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
@@ -131,6 +134,7 @@ _btnTabScene = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer
 _btnTabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/EffectsButton")
 _btnTabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/LightButton")
 _btnTabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
+_btnTabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PaintButton")
 _tabContentContainer = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
 _tabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CharacterTab")
 _tabBones = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/BonesTab")
@@ -140,7 +144,9 @@ _tabScene = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/Ta
 _tabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/EffectsTab")
 _tabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/LightingTab")
 _tabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/ShadingTab")
+_tabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/PaintTab")
 _exportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
+_paintModExportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
 _navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge")
 _btnQuickXRay = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickXRay")
 _btnQuickFullscreen = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickFullscreen")
@@ -258,7 +264,7 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_constants/h_separation = 4
 theme_override_constants/v_separation = 4
-columns = 4
+columns = 3
 
 [node name="CharacterButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1933551885]
 custom_minimum_size = Vector2(0, 30)
@@ -317,6 +323,13 @@ size_flags_horizontal = 3
 toggle_mode = true
 text = "Shading"
 
+[node name="PaintButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1988451234]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Paint"
+
 [node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer" unique_id=333301085]
 layout_mode = 2
 
@@ -371,6 +384,10 @@ visible = false
 layout_mode = 2
 
 [node name="ShadingTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1642219470 instance=ExtResource("13_shading_tab")]
+visible = false
+layout_mode = 2
+
+[node name="PaintTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1849204999 instance=ExtResource("15_paint_tab")]
 visible = false
 layout_mode = 2
 
@@ -562,6 +579,22 @@ offset_left = -242.0
 offset_top = 12.0
 offset_right = -12.0
 offset_bottom = 234.0
+
+[node name="PaintModExportPanel" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=714186499 instance=ExtResource("22_paint_mod_export")]
+visible = false
+layout_mode = 1
+offset_left = -242.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 234.0
+
+[node name="FloatingBrushPalette" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=2089182341 instance=ExtResource("21_brush_palette")]
+visible = false
+layout_mode = 1
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 320.0
+offset_bottom = 400.0
 
 [node name="QuickActionsStrip" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=420354827]
 layout_mode = 1
@@ -928,6 +961,68 @@ value = 0.7
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 text = "70%"
+
+[node name="HSeparatorPainter" type="HSeparator" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=741852963]
+layout_mode = 2
+
+[node name="PainterHighlightLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=852963741]
+layout_mode = 2
+text = "3D Mesh Painter Outline Highlight"
+horizontal_alignment = 1
+
+[node name="HBoxContainerPainterColor" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=963741852]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterColor" unique_id=147258369]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Highlight Color"
+
+[node name="ColorPickerButton" type="ColorPickerButton" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterColor" unique_id=258369147]
+custom_minimum_size = Vector2(64, 20)
+layout_mode = 2
+
+[node name="HBoxContainerPainterOpacity" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=369147258]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity" unique_id=456789123]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Highlight Opacity"
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity" unique_id=789123456]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+min_value = 0.05
+max_value = 1.0
+step = 0.05
+value = 0.4
+
+[node name="LabelCurrOpacity" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity" unique_id=123456789]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "40%"
+
+[node name="HBoxContainerPainterWidth" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=654987321]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth" unique_id=987321654]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Highlight Thickness"
+
+[node name="HSlider" type="HSlider" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth" unique_id=321654987]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+min_value = 0.1
+max_value = 3.0
+step = 0.1
+value = 0.7
+
+[node name="LabelCurrWidth" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth" unique_id=159357486]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+text = "0.7px"
 
 [node name="HSeparator2" type="HSeparator" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer" unique_id=1089709324]
 layout_mode = 2

@@ -89,6 +89,39 @@ public static class GizmoDisplaySettings
         }
     }
 
+    private static Color _painterOutlineColor = new Color(1.0f, 0.85f, 0.35f, 1.0f);
+    public static Color PainterOutlineColor
+    {
+        get => _painterOutlineColor;
+        set
+        {
+            _painterOutlineColor = value;
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static float _painterOutlineOpacity = 0.40f;
+    public static float PainterOutlineOpacity
+    {
+        get => _painterOutlineOpacity;
+        set
+        {
+            _painterOutlineOpacity = Mathf.Clamp(value, 0.05f, 1.0f);
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
+    private static float _painterOutlineWidth = 0.7f;
+    public static float PainterOutlineWidth
+    {
+        get => _painterOutlineWidth;
+        set
+        {
+            _painterOutlineWidth = Mathf.Clamp(value, 0.1f, 3.0f);
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
     public static event Action OnSettingsChanged;
 
     public static void NotifyChanged()
@@ -107,6 +140,9 @@ public static class GizmoDisplaySettings
         BoneMarkerOpacity = 0.75f;
         BoneMarkerScale = 1.0f;
         IKHandlesOpacity = 0.70f;
+        PainterOutlineColor = new Color(1.0f, 0.85f, 0.35f, 1.0f);
+        PainterOutlineOpacity = 0.40f;
+        PainterOutlineWidth = 0.7f;
         _isLoading = false;
 
         NotifyChanged();
@@ -138,6 +174,15 @@ public static class GizmoDisplaySettings
 
             if (config.HasSectionKey(SectionName, "IKHandlesOpacity"))
                 IKHandlesOpacity = (float)config.GetValue(SectionName, "IKHandlesOpacity", IKHandlesOpacity);
+
+            if (config.HasSectionKey(SectionName, "PainterOutlineColor"))
+                PainterOutlineColor = (Color)config.GetValue(SectionName, "PainterOutlineColor", PainterOutlineColor);
+
+            if (config.HasSectionKey(SectionName, "PainterOutlineOpacity"))
+                PainterOutlineOpacity = (float)config.GetValue(SectionName, "PainterOutlineOpacity", PainterOutlineOpacity);
+
+            if (config.HasSectionKey(SectionName, "PainterOutlineWidth"))
+                PainterOutlineWidth = (float)config.GetValue(SectionName, "PainterOutlineWidth", PainterOutlineWidth);
             _isLoading = false;
         }
     }
@@ -154,6 +199,9 @@ public static class GizmoDisplaySettings
         config.SetValue(SectionName, "BoneMarkerOpacity", BoneMarkerOpacity);
         config.SetValue(SectionName, "BoneMarkerScale", BoneMarkerScale);
         config.SetValue(SectionName, "IKHandlesOpacity", IKHandlesOpacity);
+        config.SetValue(SectionName, "PainterOutlineColor", PainterOutlineColor);
+        config.SetValue(SectionName, "PainterOutlineOpacity", PainterOutlineOpacity);
+        config.SetValue(SectionName, "PainterOutlineWidth", PainterOutlineWidth);
 
         config.Save(ConfigPath);
     }
