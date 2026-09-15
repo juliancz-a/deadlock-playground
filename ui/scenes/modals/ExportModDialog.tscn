@@ -1,0 +1,261 @@
+[gd_scene format=3 uid="uid://b23k10mpx8yw0"]
+
+[ext_resource type="Script" uid="uid://dw734kx9n8p31" path="res://ui/scripts/modals/ExportModDialog.cs" id="1_dialog"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal"]
+bg_color = Color(0.0784314, 0.0862745, 0.117647, 0.980392)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.4, 0.45, 0.58, 0.8)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+shadow_color = Color(0, 0, 0, 0.6)
+shadow_size = 20
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_confirm"]
+bg_color = Color(0.235294, 0.352941, 0.235294, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.4, 0.7, 0.4, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="ExportModDialog" type="CanvasLayer" unique_id=987123401]
+layer = 100
+script = ExtResource("1_dialog")
+
+[node name="Backdrop" type="ColorRect" parent="." unique_id=987123400]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.65)
+
+[node name="DialogPanel" type="PanelContainer" parent="." unique_id=987123440]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -340.0
+offset_right = 320.0
+offset_bottom = 340.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
+
+[node name="Margin" type="MarginContainer" parent="DialogPanel" unique_id=987123402]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 16
+
+[node name="VBox" type="VBoxContainer" parent="DialogPanel/Margin" unique_id=987123403]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123404]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 15
+text = "EXPORT DEADLOCK MOD (.VPK)"
+
+[node name="HSeparator1" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987123405]
+layout_mode = 2
+
+[node name="HBoxHero" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123406]
+layout_mode = 2
+
+[node name="LblHero" type="Label" parent="DialogPanel/Margin/VBox/HBoxHero" unique_id=987123407]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "Target Hero:"
+
+[node name="LblHeroValue" type="Label" parent="DialogPanel/Margin/VBox/HBoxHero" unique_id=987123408]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
+text = "Hero"
+
+[node name="GridMeta" type="GridContainer" parent="DialogPanel/Margin/VBox" unique_id=987123409]
+layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 5
+columns = 2
+
+[node name="LblModName" type="Label" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123410]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "Mod Name:"
+
+[node name="TxtModName" type="LineEdit" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123411]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "CustomSkin"
+placeholder_text = "Mod name (e.g. Dynamo_MechaSkin)"
+
+[node name="LblAuthor" type="Label" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123412]
+layout_mode = 2
+text = "Author:"
+
+[node name="TxtAuthor" type="LineEdit" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123413]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Author name (optional)"
+
+[node name="LblDesc" type="Label" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123414]
+layout_mode = 2
+text = "Description:"
+
+[node name="TxtDescription" type="LineEdit" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123415]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Mod notes / details (optional)"
+
+[node name="LblSubmeshes" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123416]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_font_sizes/font_size = 12
+text = "Target Submeshes to Compile & Package:"
+
+[node name="ScrollSubmeshes" type="ScrollContainer" parent="DialogPanel/Margin/VBox" unique_id=987123417]
+custom_minimum_size = Vector2(0, 75)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="SubmeshChecklist" type="VBoxContainer" parent="DialogPanel/Margin/VBox/ScrollSubmeshes" unique_id=987123418]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="HBoxRes" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123419]
+layout_mode = 2
+
+[node name="LblRes" type="Label" parent="DialogPanel/Margin/VBox/HBoxRes" unique_id=987123420]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "Resolution:"
+
+[node name="OptResolution" type="OptionButton" parent="DialogPanel/Margin/VBox/HBoxRes" unique_id=987123421]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VBoxCompiler" type="VBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123450]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="HBoxCompiler" type="HBoxContainer" parent="DialogPanel/Margin/VBox/VBoxCompiler" unique_id=987123451]
+layout_mode = 2
+
+[node name="LblCompiler" type="Label" parent="DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler" unique_id=987123452]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "Compiler (.exe):"
+
+[node name="TxtCompilerPath" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler" unique_id=987123453]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Path to resourcecompiler.exe"
+
+[node name="BtnBrowseCompilerPath" type="Button" parent="DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler" unique_id=987123454]
+layout_mode = 2
+text = "Browse..."
+
+[node name="LblCompilerStatus" type="Label" parent="DialogPanel/Margin/VBox/VBoxCompiler" unique_id=987123455]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.75, 0.4, 1)
+theme_override_font_sizes/font_size = 11
+text = "Checking resourcecompiler.exe..."
+
+[node name="HBoxCsdk" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123422]
+layout_mode = 2
+
+[node name="LblCsdk" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123423]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+text = "CSDK Root (Opt):"
+
+[node name="TxtCsdkPath" type="LineEdit" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123424]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Optional root folder (auto-derived if empty)"
+
+[node name="BtnBrowseCsdkPath" type="Button" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123425]
+layout_mode = 2
+text = "Browse..."
+
+[node name="HSeparator2" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987123426]
+layout_mode = 2
+
+[node name="VBoxInstall" type="VBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123427]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ChkInstallCitadel" type="CheckBox" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123428]
+layout_mode = 2
+button_pressed = true
+text = "Install directly to Deadlock (game/citadel/addons)"
+
+[node name="ChkCustomFolder" type="CheckBox" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123429]
+layout_mode = 2
+text = "Export .vpk to custom directory..."
+
+[node name="CustomFolderContainer" type="HBoxContainer" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123430]
+visible = false
+layout_mode = 2
+
+[node name="TxtCustomFolder" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer" unique_id=987123431]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Select custom output folder..."
+
+[node name="BtnBrowseCustomFolder" type="Button" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer" unique_id=987123432]
+layout_mode = 2
+text = "Browse..."
+
+[node name="LblTargetVpkInfo" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123433]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.9, 0.5, 1)
+theme_override_font_sizes/font_size = 12
+text = "Will be installed as: pak01_dir.vpk"
+
+[node name="HBoxButtons" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123434]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="BtnCancel" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987123435]
+custom_minimum_size = Vector2(90, 32)
+layout_mode = 2
+text = "Cancel"
+
+[node name="BtnConfirmExport" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987123436]
+custom_minimum_size = Vector2(160, 32)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_confirm")
+text = "Confirm & Export"
+
+[node name="FolderDialog" type="FileDialog" parent="." unique_id=987123437]
+title = "Select Folder"
+size = Vector2i(750, 500)
+file_mode = 2
+access = 2
+
+[node name="CompilerFileDialog" type="FileDialog" parent="." unique_id=987123460]
+title = "Select resourcecompiler.exe"
+size = Vector2i(750, 500)
+file_mode = 0
+access = 2
+filters = PackedStringArray("resourcecompiler.exe, *.exe ; Resource Compiler Executable (*.exe)", "*.* ; All Files")

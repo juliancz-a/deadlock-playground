@@ -116,6 +116,7 @@ public partial class PaintTabUI : VBoxContainer
 
         _painter.Setup(_camera, _worldViewport, _layerManager, _viewportContainer);
         _painter.MeshHierarchy = _meshHierarchy;
+        _layerManager.MeshHierarchy = _meshHierarchy;
         _painter.DecalStamper = _decalStamper;
         _painter.TextProjector = _textProjector;
         _painter.IsPaintingActive = false; // Off by default until Paint tab is activated
@@ -360,19 +361,7 @@ public partial class PaintTabUI : VBoxContainer
         {
             _btnInstallCitadel.Pressed += () =>
             {
-                string heroName = _currentHero?.Name.ToString().Replace("Hero_", "") ?? "hero";
-                string meshName = _meshHierarchy?.ActiveTarget?.RawName ?? "body";
-                var pathManager = new GamePathManager();
-                var res = _exporter?.InstallModToCitadel(pathManager.CurrentGamePath, heroName, meshName);
-                if (res != null)
-                {
-                    if (_lblExportStatus != null)
-                    {
-                        _lblExportStatus.Text = res.Success
-                            ? $"Staged to Addons: {Path.GetFileName(res.ModDirectory)}"
-                            : $"Failed: {res.ErrorMessage}";
-                    }
-                }
+                OpenExportModDialog();
             };
         }
 
@@ -422,6 +411,15 @@ public partial class PaintTabUI : VBoxContainer
 
         // 1. Scan submesh hierarchy (generates UV2 unwraps)
         _meshHierarchy?.ScanHero(heroNode);
+
+        if (_painter != null && _painter.IsPaintingActive)
+        {
+            if (_meshHierarchy != null)
+            {
+                _meshHierarchy.IsPaintingModeActive = true;
+            }
+            _meshHierarchy?.ApplyToonShading(false);
+        }
 
         // Reset character pose to rest pose so rest-pose mesh raycaster aligns with 3D screen space geometry
         ResetCharacterPose();
@@ -781,6 +779,11 @@ public partial class PaintTabUI : VBoxContainer
     public void OnTabActivated()
     {
         ResetCharacterPose();
+        if (_meshHierarchy != null)
+        {
+            _meshHierarchy.IsPaintingModeActive = true;
+            _meshHierarchy.ApplyToonShading(false);
+        }
         if (_painter != null)
         {
             _painter.IsPaintingActive = true;
@@ -794,6 +797,10 @@ public partial class PaintTabUI : VBoxContainer
 
     public void OnTabDeactivated()
     {
+        if (_meshHierarchy != null)
+        {
+            _meshHierarchy.IsPaintingModeActive = false;
+        }
         if (_painter != null)
         {
             _painter.IsPaintingActive = false;
@@ -829,5 +836,99 @@ public partial class PaintTabUI : VBoxContainer
             if (res != null) return res;
         }
         return null;
+    }
+
+    private ExportModDialog _modDialogInstance;
+    private ExportProgressDialog _progressDialogInstance;
+
+    public void OpenExportModDialog()
+    {
+        if (_layerManager == null) return;
+        var preBaked = _layerManager.BakeCompositeImage();
+
+        string heroCodename = _currentHero != null && _currentHero.HasMeta("HeroCodename")
+            ? _currentHero.GetMeta("HeroCodename").AsString()
+            : _currentHero?.Name.ToString().Replace("Hero_", "").ToLowerInvariant() ?? "hero";
+
+        string heroDisplayName = _currentHero != null && _currentHero.HasMeta("HeroDisplayName")
+            ? _currentHero.GetMeta("HeroDisplayName").AsString()
+            : char.ToUpperInvariant(heroCodename[0]) + heroCodename.Substring(1);
+
+        var pathManager = new GamePathManager();
+        pathManager.LoadConfig();
+
+        if (_modDialogInstance == null || !GodotObject.IsInstanceValid(_modDialogInstance))
+        {
+            var dialogScene = GD.Load<PackedScene>("res://ui/scenes/modals/ExportModDialog.tscn");
+            if (dialogScene != null)
+            {
+                _modDialogInstance = dialogScene.Instantiate<ExportModDialog>();
+                GetTree().Root.AddChild(_modDialogInstance);
+                _modDialogInstance.ExportConfirmed += (config) =>
+                {
+                    ExecuteExportModPipeline(config);
+                };
+            }
+        }
+
+        if (_modDialogInstance != null)
+        {
+            _modDialogInstance.Setup(heroCodename, heroDisplayName, _meshHierarchy?.Submeshes, preBaked, pathManager);
+            _modDialogInstance.Visible = true;
+        }
+    }
+
+    private async void ExecuteExportModPipeline(ModExportConfig config)
+    {
+        if (config == null) return;
+
+        if (_progressDialogInstance == null || !GodotObject.IsInstanceValid(_progressDialogInstance))
+        {
+            var progressScene = GD.Load<PackedScene>("res://ui/scenes/modals/ExportProgressDialog.tscn");
+            if (progressScene != null)
+            {
+                _progressDialogInstance = progressScene.Instantiate<ExportProgressDialog>();
+                GetTree().Root.AddChild(_progressDialogInstance);
+            }
+        }
+
+        if (_progressDialogInstance == null) return;
+
+        var cts = new System.Threading.CancellationTokenSource();
+        string targetDir = config.InstallDirectlyToGame
+            ? Path.Combine(config.DeadlockGamePath, "game", "citadel", "addons")
+            : config.CustomExportFolder;
+
+        _progressDialogInstance.StartExport(cts, targetDir);
+
+        try
+        {
+            _exporter ??= new SkinExporter(_layerManager);
+            var res = await _exporter.ExportModAsync(config, _progressDialogInstance, cts.Token);
+            _progressDialogInstance.OnExportFinished(res);
+
+            if (_lblExportStatus != null && res != null)
+            {
+                _lblExportStatus.Text = res.Success
+                    ? $"Exported: {Path.GetFileName(res.VpkPath)}"
+                    : $"Export Failed: {res.ErrorMessage}";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _progressDialogInstance.OnExportFinished(new SkinExportResult
+            {
+                Success = false,
+                ErrorMessage = "Operation was canceled by user."
+            });
+        }
+        catch (Exception ex)
+        {
+            _progressDialogInstance.OnExportFinished(new SkinExportResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            });
+        }
     }
 }

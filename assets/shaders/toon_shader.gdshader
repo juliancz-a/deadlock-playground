@@ -23,6 +23,7 @@ uniform float shadow_tint_amount : hint_range(0.0, 1.0, 0.05) = 0.4;
 
 group_uniforms Shader.Specular;
 uniform float metallic : hint_range(0.0, 1.0, 0.05) = 0.0;
+uniform float roughness : hint_range(0.0, 1.0, 0.05) = 0.65;
 uniform float specular : hint_range(0.0, 1.0, 0.05) = 0.3;
 
 group_uniforms Shader.Normal;
@@ -87,7 +88,7 @@ void fragment() {
 	ALBEDO = albedo.rgb;
 	NORMAL_MAP = mix(vec3(0.5, 0.5, 1.0), normal_map.rgb, normal_strength);
 	SPECULAR = specular;
-	ROUGHNESS = 0.35;
+	ROUGHNESS = roughness;
 
 	if (emission_energy > 0.0) {
 		vec4 em_tex = texture(emission_texture, uv);
@@ -96,40 +97,63 @@ void fragment() {
 }
 
 void light() {
-	float ndotl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION;
-	float light = ndotl;
+	vec3 safe_norm = normalize(NORMAL);
+	vec3 safe_view = normalize(VIEW);
+	vec3 safe_light = normalize(LIGHT);
+	float atten = clamp(ATTENUATION, 0.0, 1.0);
+
+	// 1. Half-Lambert Stylized Diffuse (Deadlock Style Shading)
+	// Half-Lambert wrap to soften transitions on curved surfaces
+	float NdotL = dot(safe_norm, safe_light);
+	float half_lambert = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
+
+	// Two-tone soft step (illuminated vs ambient shadow)
+	float shadow_threshold = 0.45;
+	float shadow_feather = mix(0.04, 0.12, step_smoothness);
+	float light_intensity = smoothstep(shadow_threshold - shadow_feather, shadow_threshold + shadow_feather, half_lambert);
 
 	if (use_stepped) {
-		float light_mult = light * steps;
-		float step_base = floor(light_mult);
-		float light_factor = light_mult - step_base;
-
-		light_factor = smoothstep(0.5 - step_smoothness, 0.5 + step_smoothness, light_factor);
-		float stepped_light = (step_base + light_factor) / steps;
-		light = mix(ndotl, stepped_light, toon_intensity);
+		light_intensity = mix(half_lambert, light_intensity, toon_intensity);
 	}
 
 	if (use_pattern) {
 		vec2 p_uv = pattern_uv(UV, SCREEN_UV);
-		light = mix(light, shape_value(light, p_uv, VIEWPORT_SIZE), pattern_blend);
+		light_intensity = mix(light_intensity, shape_value(light_intensity, p_uv, VIEWPORT_SIZE), pattern_blend);
+		light_intensity = clamp(light_intensity, 0.0, 1.0);
 	}
 
-	vec3 diffuse = vec3(light) * (LIGHT_COLOR / PI);
-	diffuse = (shadow_tint.rgb * (1.0 - light) * shadow_tint_amount) + diffuse * light;
+	// Ambient shadow floor so shaded areas retain detail and warmth:
+	vec3 cool_ambient = vec3(0.75, 0.75, 0.85);
+	vec3 shadow_ambient = ALBEDO * 0.4 * mix(cool_ambient, shadow_tint.rgb, shadow_tint_amount);
+	vec3 lit_color = ALBEDO * LIGHT_COLOR;
 
+	vec3 diffuse_result = mix(shadow_ambient, lit_color, light_intensity);
+
+	// 2. Restrict Rim Light to Grazing Edges Only (Subtle edge catch without white halos)
 	if (use_rim) {
-		float rim_value = fresnel(rim_amount, NORMAL, VIEW);
-		rim_value = smoothstep(0.5 - (rim_smoothness / 2.0), 0.5 + (rim_smoothness / 2.0), rim_value);
-		rim_value = mix(rim_value, rim_value * light, rim_mask_shadow);
-		diffuse += rim_color.rgb * rim_value * rim_blend;
+		float NdotV = clamp(dot(safe_norm, safe_view), 0.0, 1.0);
+		float rim = pow(1.0 - NdotV, 4.0) * clamp(NdotL, 0.0, 1.0);
+		rim = smoothstep(0.4, 0.7, rim) * 0.25 * rim_blend;
+		diffuse_result += rim_color.rgb * LIGHT_COLOR * rim;
 	}
 
-	DIFFUSE_LIGHT += ALBEDO * diffuse;
+	DIFFUSE_LIGHT += clamp(diffuse_result * atten, vec3(0.0), vec3(1.0));
 
-	// Specular reflection highlights (preserves form and depth on blacks and greys)
-	vec3 half_vec = normalize(VIEW + LIGHT);
-	float NdotH = max(dot(normalize(NORMAL), half_vec), 0.0);
-	float spec_term = pow(max(light, 0.0), 50.0) * 0.7 + pow(NdotH, 32.0) * 0.3;
-	vec3 spec_tint = mix(vec3(1.0), ALBEDO, metallic);
-	SPECULAR_LIGHT += (LIGHT_COLOR / PI) * spec_term * specular * spec_tint;
+	// 3. Respect Material Roughness & Kill Cloth Specular
+	// Suppress specular on matte surfaces (cloth, leather, skin):
+	float roughness_factor = clamp(1.0 - ROUGHNESS, 0.0, 1.0);
+	roughness_factor = pow(roughness_factor, 2.0); // Harsh falloff for non-metals
+
+	// Smooth, subtle specular rather than a harsh binary cut:
+	vec3 half_vec = normalize(safe_view + safe_light);
+	float NdotH = clamp(dot(safe_norm, half_vec), 0.0, 1.0);
+	float spec_power = mix(8.0, 128.0, 1.0 - ROUGHNESS);
+	float raw_spec = pow(NdotH, spec_power);
+
+	// Soft threshold modulated by roughness:
+	float toon_spec = smoothstep(0.7, 0.85, raw_spec) * roughness_factor * 0.35 * (specular / 0.3);
+
+	// 4. Color-Modulated Specular (No Blown-Out White Highlights)
+	vec3 spec_tint = mix(LIGHT_COLOR, ALBEDO, 0.3) * METALLIC + LIGHT_COLOR * (1.0 - METALLIC) * 0.2;
+	SPECULAR_LIGHT += clamp(spec_tint * toon_spec * atten, vec3(0.0), vec3(1.0));
 }

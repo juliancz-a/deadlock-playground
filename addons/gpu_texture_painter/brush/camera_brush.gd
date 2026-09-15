@@ -138,7 +138,7 @@ func _ready() -> void:
 	if not camera.has_node("BrushSet3OmniLight"):
 		var dummy_omni := OmniLight3D.new()
 		dummy_omni.name = "BrushSet3OmniLight"
-		dummy_omni.light_cull_mask = int(1) << int(20)
+		dummy_omni.light_cull_mask = int(1) << int(1) # Layer 2 (Gizmos only)
 		dummy_omni.light_energy = 0.01
 		dummy_omni.omni_range = 10000.0
 		dummy_omni.omni_attenuation = 1.0
@@ -148,7 +148,7 @@ func _ready() -> void:
 	if not viewport.has_node("BrushSet3DummyLight"):
 		var dummy_light := DirectionalLight3D.new()
 		dummy_light.name = "BrushSet3DummyLight"
-		dummy_light.light_cull_mask = int(1) << int(20)
+		dummy_light.light_cull_mask = int(1) << int(1) # Layer 2 (Gizmos only)
 		dummy_light.light_energy = 0.01
 		dummy_light.shadow_enabled = false
 		viewport.add_child(dummy_light)

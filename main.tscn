@@ -120,7 +120,7 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_tabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_texQualityOption", "_fpsLimitOption", "_vsyncCheck", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_tabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnSettingsClose", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_langOption", "_gamePathInput", "_btnBrowseGamePath", "_savePathInput", "_btnBrowseSavePath", "_compilerPathInput", "_btnBrowseCompilerPath", "_texQualityOption", "_fpsLimitOption", "_vsyncCheck", "_xrayLineColorPicker", "_xrayLineOpacitySlider", "_xrayLineOpacityLabel", "_bonePrimaryColorPicker", "_boneClothingColorPicker", "_boneMarkerOpacitySlider", "_boneMarkerOpacityLabel", "_boneMarkerSizeSlider", "_boneMarkerSizeLabel", "_btnResetDisplaySettings")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
@@ -164,6 +164,8 @@ _gamePathInput = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabCo
 _btnBrowseGamePath = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer/BrowseGamePathButton")
 _savePathInput = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/SavesPathLine")
 _btnBrowseSavePath = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton")
+_compilerPathInput = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer/CompilerPathLine")
+_btnBrowseCompilerPath = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer/BrowseCompilerPathButton")
 _texQualityOption = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/TexQualityButton")
 _fpsLimitOption = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/FpsLimitButton")
 _vsyncCheck = NodePath("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/VsyncCheck")
@@ -746,6 +748,22 @@ layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="BrowseSavePathButton" type="Button" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer" unique_id=1576624365]
+layout_mode = 2
+text = "Search..."
+
+[node name="CompilerPathLabel" type="Label" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=1973357220]
+layout_mode = 2
+text = "Resource Compiler (resourcecompiler.exe)"
+
+[node name="CompilerPathSearchContainer" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer" unique_id=556657850]
+layout_mode = 2
+
+[node name="CompilerPathLine" type="LineEdit" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer" unique_id=923150800]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Path to resourcecompiler.exe"
+
+[node name="BrowseCompilerPathButton" type="Button" parent="UIRoot/MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer" unique_id=1576624370]
 layout_mode = 2
 text = "Search..."
 

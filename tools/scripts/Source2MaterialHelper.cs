@@ -107,29 +107,69 @@ public static class Source2MaterialHelper
         var matResource = (VrfMaterial)resource.DataBlock;
         string vmatLower = vmatPath.ToLowerInvariant();
 
+        Godot.Material createdMat = null;
+
         // 3. Archetype A: Translucent glass, domes, and lenses (Dynamo, Paradox, Paige, generic glass)
         var glassParams = VmatColorExtractor.ExtractGlass(matResource, vmatPath);
         if (GlassMaterialBuilder.IsApplicable(matResource, vmatPath, glassParams))
         {
-            return GlassMaterialBuilder.Build(package, matResource, vmatPath, glassParams);
+            createdMat = GlassMaterialBuilder.Build(package, matResource, vmatPath, glassParams);
         }
-
         // 4. Archetype B: Dynamic procedural FX (Billy jitter, Infernus flame ribbons, Vindicta aura, scrolling UVs)
-        if (DynamicFxMaterialBuilder.IsApplicable(matResource, vmatPath))
+        else if (DynamicFxMaterialBuilder.IsApplicable(matResource, vmatPath))
         {
-            return DynamicFxMaterialBuilder.Build(package, matResource, vmatPath);
+            createdMat = DynamicFxMaterialBuilder.Build(package, matResource, vmatPath);
         }
-
         // 5. Archetype C: Vertex-colored head & hair PBR (Wraith head, Mirage turban/hair)
-        var albedoParams = VmatColorExtractor.ExtractAlbedo(matResource, vmatPath, glassParams.IsGlass, glassParams.Opacity);
-        bool isFur = vmatLower.Contains("fur") || vmatLower.Contains("shawl") || (meshName != null && (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) || meshName.Contains("shawl", StringComparison.OrdinalIgnoreCase)));
-        if (VertexColorPbrMaterialBuilder.IsApplicable(matResource, vmatPath, albedoParams.ColorTexturePath, isFur))
+        else
         {
-            return VertexColorPbrMaterialBuilder.Build(package, matResource, vmatPath);
+            var albedoParams = VmatColorExtractor.ExtractAlbedo(matResource, vmatPath, glassParams.IsGlass, glassParams.Opacity);
+            bool isFur = vmatLower.Contains("fur") || vmatLower.Contains("shawl") || (meshName != null && (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) || meshName.Contains("shawl", StringComparison.OrdinalIgnoreCase)));
+            if (VertexColorPbrMaterialBuilder.IsApplicable(matResource, vmatPath, albedoParams.ColorTexturePath, isFur))
+            {
+                createdMat = VertexColorPbrMaterialBuilder.Build(package, matResource, vmatPath);
+            }
+            else
+            {
+                // 6. Archetype D: Standard PBR surface (character clothing, body, skin, weapons)
+                createdMat = StandardPbrMaterialBuilder.Build(package, matResource, vmatPath, meshName, glassParams);
+            }
         }
 
-        // 6. Archetype D: Standard PBR surface (character clothing, body, skin, weapons)
-        return StandardPbrMaterialBuilder.Build(package, matResource, vmatPath, meshName, glassParams);
+        if (createdMat != null)
+        {
+            createdMat.SetMeta("OriginalVmatPath", vmatPath);
+            if (!string.IsNullOrEmpty(matResource.ShaderName))
+            {
+                createdMat.SetMeta("OriginalShader", matResource.ShaderName);
+            }
+            if (matResource.TextureParams != null)
+            {
+                foreach (var kvp in matResource.TextureParams)
+                {
+                    createdMat.SetMeta($"TextureParam_{kvp.Key}", kvp.Value);
+                }
+            }
+
+            string colorTex = Source2TextureLoader.GetTextureParam(matResource, "g_tColor")
+                           ?? Source2TextureLoader.GetTextureParam(matResource, "TextureColor")
+                           ?? Source2TextureLoader.GetTextureParam(matResource, "g_tColor1");
+            if (!string.IsNullOrEmpty(colorTex))
+            {
+                string norm = colorTex.Replace('\\', '/').Trim().TrimStart('/');
+                if (norm.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase))
+                {
+                    norm += "_c";
+                }
+                else if (!norm.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase))
+                {
+                    norm += ".vtex_c";
+                }
+                createdMat.SetMeta("OriginalColorVtexCPath", norm);
+            }
+        }
+
+        return createdMat;
     }
 
     /// <summary>

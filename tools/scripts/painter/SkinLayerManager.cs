@@ -34,6 +34,7 @@ namespace DeadlockPlayground.Painter
 
         private MeshInstance3D _targetMesh;
         public MeshInstance3D TargetMesh => _targetMesh;
+        public HeroMeshHierarchy MeshHierarchy { get; set; }
 
         public override void _Ready()
         {
@@ -714,6 +715,8 @@ namespace DeadlockPlayground.Painter
 
             RecompositeGpuLayers();
 
+            MeshHierarchy?.MarkSubmeshDirty(mesh);
+
             GD.Print($"[SkinLayerManager] Bucket filled submesh '{mesh.Name}' at ({startX},{startY}) {width}x{height} with {color.ToHtml()}");
         }
 
@@ -832,6 +835,11 @@ namespace DeadlockPlayground.Painter
 
             RecompositeGpuLayers();
 
+            if (_targetMesh != null && MeshHierarchy != null)
+            {
+                MeshHierarchy.MarkSubmeshDirty(_targetMesh);
+            }
+
             GD.Print($"[SkinLayerManager] Decal successfully stamped to atlas at ({centerPx.X:F0}, {centerPx.Y:F0})");
             return true;
         }
@@ -848,6 +856,15 @@ namespace DeadlockPlayground.Painter
             }
 
             int pixelCount = len / 8;
+            int atlasWidth = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            if (_atlasManager != null && GodotObject.IsInstanceValid(_atlasManager))
+            {
+                int amSize = (int)_atlasManager.Get("atlas_size");
+                if (amSize > 0) atlasWidth = amSize;
+            }
+
+            int minX = int.MaxValue, maxX = -1, minY = int.MaxValue, maxY = -1;
+
             fixed (byte* pPre = preStrokeData, pPost = postStrokeData, pLayer = layer.GpuData)
             {
                 ulong* uPre = (ulong*)pPre;
@@ -861,6 +878,13 @@ namespace DeadlockPlayground.Painter
                 for (int i = 0; i < pixelCount; i++)
                 {
                     if (preStrokeData != null && preStrokeData.Length == len && uPost[i] == uPre[i]) continue;
+
+                    int px = i % atlasWidth;
+                    int py = i / atlasWidth;
+                    if (px < minX) minX = px;
+                    if (px > maxX) maxX = px;
+                    if (py < minY) minY = py;
+                    if (py > maxY) maxY = py;
 
                     int hOffset = i * 4;
 
@@ -917,6 +941,41 @@ namespace DeadlockPlayground.Painter
                         hLayer[hOffset + 3] = (Half)unscaledA;
                     }
                 }
+            }
+
+            // Mark affected submeshes dirty based on modified pixel bounding box
+            if (maxX >= 0 && MeshHierarchy != null)
+            {
+                float normMinX = (float)minX / atlasWidth;
+                float normMaxX = (float)maxX / atlasWidth;
+                float normMinY = (float)minY / atlasWidth;
+                float normMaxY = (float)maxY / atlasWidth;
+                Rect2 strokeRect = new Rect2(normMinX, normMinY, Mathf.Max(normMaxX - normMinX, 0.001f), Mathf.Max(normMaxY - normMinY, 0.001f));
+
+                foreach (var submesh in MeshHierarchy.Submeshes)
+                {
+                    if (submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
+                    {
+                        var posVar = sm.GetShaderParameter("position_in_atlas");
+                        var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                        {
+                            Vector2 pos = posVar.AsVector2();
+                            Vector2 size = sizeVar.AsVector2();
+                            Rect2 submeshRect = new Rect2(pos, size);
+                            if (strokeRect.Intersects(submeshRect))
+                            {
+                                submesh.IsDirty = true;
+                                submesh.IsSelected = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (_targetMesh != null && MeshHierarchy != null)
+            {
+                MeshHierarchy.MarkSubmeshDirty(_targetMesh);
             }
         }
 

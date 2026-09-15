@@ -671,6 +671,11 @@ public partial class VpkLoaderTest : Node3D
 						mat.ResourceName = vmatPath;
 						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat, package);
 						meshInstance.SetSurfaceOverrideMaterial(i, mat);
+						if (meshInstance.Mesh is ArrayMesh arrMesh)
+						{
+							arrMesh.SurfaceSetMaterial(i, mat);
+						}
+						meshInstance.SetMeta($"OriginalMaterial_{i}", mat);
 						GD.Print($"  ✓ Material aplicado: '{Path.GetFileNameWithoutExtension(vmatPath)}' → {meshName}[{i}]");
 					}
 					else
@@ -687,6 +692,11 @@ public partial class VpkLoaderTest : Node3D
 						for (int extra = materialPaths.Count; extra < surfaceCount; extra++)
 						{
 							meshInstance.SetSurfaceOverrideMaterial(extra, fallbackMat);
+							if (meshInstance.Mesh is ArrayMesh arrMesh)
+							{
+								arrMesh.SurfaceSetMaterial(extra, fallbackMat);
+							}
+							meshInstance.SetMeta($"OriginalMaterial_{extra}", fallbackMat);
 						}
 					}
 				}

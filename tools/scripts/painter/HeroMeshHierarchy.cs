@@ -1,6 +1,8 @@
 using Godot;
 using System;
+using System.IO;
 using System.Collections.Generic;
+using DeadlockPlayground.Materials;
 
 namespace DeadlockPlayground.Painter
 {
@@ -13,6 +15,29 @@ namespace DeadlockPlayground.Painter
         public bool IsAccessory { get; set; }
         public bool IsSoloed { get; set; }
         public MeshRaycaster Raycaster { get; set; }
+        public string OriginalVmatPath { get; set; }
+        public string MaterialName { get; set; }
+
+        // Dirty tracking & export selection
+        public bool IsDirty { get; set; } = false;
+        public bool IsSelected { get; set; } = false;
+
+        // Exact compiled color texture path for direct in-place VPK replacement
+        public string OriginalColorVtexCPath { get; set; }
+
+        // Original Source 2 material texture parameters
+        public string OriginalNormalVtex { get; set; }
+        public string OriginalAoVtex { get; set; }
+        public string OriginalNprOutlineVtex { get; set; }
+        public string OriginalMaskVtex { get; set; }
+        public string OriginalShader { get; set; }
+        public Dictionary<string, string> OriginalTextureParams { get; set; } = new();
+
+        // Shading materials
+        public Material OriginalMaterial { get; set; }
+        public ShaderMaterial ToonMaterial { get; set; }
+        public ShaderMaterial OutlineMaterial { get; set; }
+        public bool PreserveOriginal { get; set; } = false;
     }
 
     public partial class HeroMeshHierarchy : Node
@@ -25,6 +50,8 @@ namespace DeadlockPlayground.Painter
 
         private SubmeshNodeInfo _activeTarget;
         public SubmeshNodeInfo ActiveTarget => _activeTarget;
+
+        public bool IsPaintingModeActive { get; set; } = false;
 
         private bool _isAnySoloed = false;
         private readonly Dictionary<MeshInstance3D, bool> _preSoloVisibility = new();
@@ -63,21 +90,43 @@ namespace DeadlockPlayground.Painter
 
                 if (surfaceCount == 1)
                 {
-                    _submeshes.Add(new SubmeshNodeInfo
+                    string matPath = ResolveSurfaceMaterialName(mi, 0);
+                    string cleanMat = !string.IsNullOrEmpty(matPath) ? Path.GetFileNameWithoutExtension(matPath) : "";
+                    mi.SetMeta("OriginalVmatPath", matPath ?? "");
+
+                    Material origMat = GetAuthenticMaterial(mi, 0);
+                    if (origMat != null)
+                    {
+                        mi.SetMeta("OriginalMaterial_0", origMat);
+                    }
+                    var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, rawName, matPath);
+
+                    var info = new SubmeshNodeInfo
                     {
                         Mesh = mi,
                         RawName = rawName,
                         DisplayName = CleanName(rawName),
                         SurfaceIndex = 0,
                         IsAccessory = isAcc,
-                        IsSoloed = false
-                    });
+                        IsSoloed = false,
+                        OriginalVmatPath = matPath,
+                        MaterialName = cleanMat,
+                        IsDirty = false,
+                        IsSelected = false,
+                        OriginalMaterial = origMat,
+                        ToonMaterial = toonMat,
+                        OutlineMaterial = outlineMat,
+                        PreserveOriginal = preserve
+                    };
+                    ExtractMaterialMetadata(info, mi, 0);
+                    _submeshes.Add(info);
                 }
                 else
                 {
                     // Hide original composite multi-surface mesh while painter operates on separated surface meshes
                     mi.Visible = false;
                     mi.Layers &= ~(uint)(1 << 20);
+                    mi.SetMeta("IsHiddenComposite", true);
                     _hiddenOriginalNodes.Add(mi);
 
                     for (int s = 0; s < surfaceCount; s++)
@@ -86,17 +135,18 @@ namespace DeadlockPlayground.Painter
                         string clean = CleanName(rawName);
 
                         string matName = ResolveSurfaceMaterialName(mi, s);
+                        string cleanMat = !string.IsNullOrEmpty(matName) ? Path.GetFileNameWithoutExtension(matName) : "";
                         string display;
                         if (!string.IsNullOrEmpty(matName))
                         {
-                            string cleanMat = CleanName(matName);
-                            if (string.Equals(clean, cleanMat, StringComparison.OrdinalIgnoreCase))
+                            string formattedMat = CleanName(matName);
+                            if (string.Equals(clean, formattedMat, StringComparison.OrdinalIgnoreCase))
                             {
                                 display = (s == 0) ? clean : $"{clean} [{s}]";
                             }
                             else
                             {
-                                display = $"{clean} ({cleanMat})";
+                                display = $"{clean} ({formattedMat})";
                             }
                         }
                         else
@@ -105,13 +155,13 @@ namespace DeadlockPlayground.Painter
                         }
 
                         // Extract surface geometry into an isolated MeshInstance3D sharing skin & skeleton
+                        var origMat = GetAuthenticMaterial(mi, s);
                         var newMesh = new ArrayMesh();
                         var arrays = mi.Mesh.SurfaceGetArrays(s);
                         newMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-                        var mat = mi.GetSurfaceOverrideMaterial(s) ?? mi.Mesh.SurfaceGetMaterial(s);
-                        if (mat != null)
+                        if (origMat != null)
                         {
-                            newMesh.SurfaceSetMaterial(0, mat);
+                            newMesh.SurfaceSetMaterial(0, origMat);
                         }
                         newMesh.LightmapSizeHint = mi.Mesh.LightmapSizeHint != Vector2I.Zero ? mi.Mesh.LightmapSizeHint : new Vector2I(256, 256);
 
@@ -125,19 +175,36 @@ namespace DeadlockPlayground.Painter
                             Layers = mi.Layers,
                             Visible = true
                         };
+                        newMi.SetMeta("OriginalVmatPath", matName ?? "");
+                        if (origMat != null)
+                        {
+                            newMi.SetMeta("OriginalMaterial_0", origMat);
+                        }
 
                         mi.GetParent()?.AddChild(newMi);
                         _generatedSubmeshNodes.Add(newMi);
 
-                        _submeshes.Add(new SubmeshNodeInfo
+                        var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, surfaceRawName, matName);
+
+                        var info = new SubmeshNodeInfo
                         {
                             Mesh = newMi,
                             RawName = surfaceRawName,
                             DisplayName = display,
                             SurfaceIndex = 0,
                             IsAccessory = isAcc,
-                            IsSoloed = false
-                        });
+                            IsSoloed = false,
+                            OriginalVmatPath = matName,
+                            MaterialName = cleanMat,
+                            IsDirty = false,
+                            IsSelected = false,
+                            OriginalMaterial = origMat,
+                            ToonMaterial = toonMat,
+                            OutlineMaterial = outlineMat,
+                            PreserveOriginal = preserve
+                        };
+                        ExtractMaterialMetadata(info, mi, s);
+                        _submeshes.Add(info);
                     }
                 }
             }
@@ -152,7 +219,224 @@ namespace DeadlockPlayground.Painter
                 SelectTarget(bodySubmesh, bodySubmesh.SurfaceIndex);
             }
 
+            // 5. Automatically inherit global UserSettings.ToonEnabled (unless painting mode is active)
+            if (UserSettings.ToonEnabled && !IsPaintingModeActive)
+            {
+                ApplyToonShading(true);
+            }
+            else
+            {
+                ApplyToonShading(false);
+            }
+
             NotifyHierarchyChanged();
+        }
+
+        public static bool IsToonMaterial(Material mat)
+        {
+            if (mat is ShaderMaterial sm)
+            {
+                string path = sm.Shader?.ResourcePath ?? "";
+                return path.Contains("toon_shader") || path.Contains("toon_outline");
+            }
+            return false;
+        }
+
+        public static Material GetAuthenticMaterial(MeshInstance3D mi, int surfaceIndex)
+        {
+            if (mi == null) return null;
+
+            if (mi.HasMeta($"OriginalMaterial_{surfaceIndex}"))
+            {
+                var metaMat = mi.GetMeta($"OriginalMaterial_{surfaceIndex}").As<Material>();
+                if (metaMat != null && !IsToonMaterial(metaMat))
+                {
+                    return metaMat;
+                }
+            }
+
+            var baseMat = mi.Mesh?.SurfaceGetMaterial(surfaceIndex);
+            if (baseMat != null && !IsToonMaterial(baseMat))
+            {
+                return baseMat;
+            }
+
+            var overrideMat = mi.GetSurfaceOverrideMaterial(surfaceIndex);
+            if (overrideMat != null && !IsToonMaterial(overrideMat))
+            {
+                return overrideMat;
+            }
+
+            return baseMat ?? overrideMat;
+        }
+
+        private static Shader _toonShader;
+        private static Shader _toonOutlineShader;
+
+        private static Shader GetToonShader()
+        {
+            _toonShader ??= GD.Load<Shader>("res://assets/shaders/toon_shader.gdshader");
+            return _toonShader;
+        }
+
+        private static Shader GetToonOutlineShader()
+        {
+            _toonOutlineShader ??= GD.Load<Shader>("res://assets/shaders/toon_outline.gdshader");
+            return _toonOutlineShader;
+        }
+
+        private static (ShaderMaterial ToonMat, ShaderMaterial OutlineMat, bool Preserve) CreateToonMaterials(Material origMat, string meshName, string vmatPath)
+        {
+            if (origMat == null || IsToonMaterial(origMat)) return (null, null, true);
+
+            bool shouldPreserve = DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(meshName, vmatPath, origMat);
+            if (shouldPreserve)
+            {
+                return (null, null, true);
+            }
+
+            bool isAdditive = false;
+            bool isTranslucent = false;
+            if (origMat is StandardMaterial3D sm)
+            {
+                isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add;
+                isTranslucent = sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+            }
+            else if (origMat is ShaderMaterial smPbr &&
+                     (smPbr.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                      smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true))
+            {
+                return (null, null, true);
+            }
+            else if (origMat is ShaderMaterial)
+            {
+                isAdditive = true;
+            }
+
+            if (isAdditive || isTranslucent)
+            {
+                return (null, null, true);
+            }
+
+            var toonShader = GetToonShader();
+            var outlineShader = GetToonOutlineShader();
+            if (toonShader == null || outlineShader == null)
+            {
+                return (null, null, true);
+            }
+
+            var toonMat = new ShaderMaterial { Shader = toonShader };
+            var outlineMat = new ShaderMaterial { Shader = outlineShader };
+
+            outlineMat.SetShaderParameter("outline_width", 1.0f);
+            outlineMat.SetShaderParameter("outline_color", new Color(0.08f, 0.08f, 0.08f, 1.0f));
+
+            if (origMat is StandardMaterial3D stdMat)
+            {
+                toonMat.SetShaderParameter("albedo_color", stdMat.AlbedoColor);
+                if (stdMat.AlbedoTexture != null)
+                {
+                    toonMat.SetShaderParameter("albedo_texture", stdMat.AlbedoTexture);
+                }
+                if (stdMat.NormalTexture != null)
+                {
+                    toonMat.SetShaderParameter("normal_texture", stdMat.NormalTexture);
+                    toonMat.SetShaderParameter("normal_strength", stdMat.NormalEnabled ? 1.0f : 0.0f);
+                }
+                toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                toonMat.SetShaderParameter("roughness", stdMat.Roughness > 0.01f ? stdMat.Roughness : 0.65f);
+                toonMat.SetShaderParameter("specular", stdMat.Metallic > 0.5f ? 0.45f : 0.30f);
+                toonMat.SetShaderParameter("uv1_scale", stdMat.Uv1Scale);
+                toonMat.SetShaderParameter("uv1_offset", stdMat.Uv1Offset);
+
+                if (stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor)
+                {
+                    toonMat.SetShaderParameter("alpha_scissor_threshold", stdMat.AlphaScissorThreshold > 0.01f ? stdMat.AlphaScissorThreshold : 0.5f);
+                }
+
+                if (stdMat.EmissionEnabled)
+                {
+                    toonMat.SetShaderParameter("emission_color", stdMat.Emission);
+                    toonMat.SetShaderParameter("emission_energy", stdMat.EmissionEnergyMultiplier);
+                    if (stdMat.EmissionTexture != null)
+                    {
+                        toonMat.SetShaderParameter("emission_texture", stdMat.EmissionTexture);
+                    }
+                }
+            }
+
+            toonMat.SetShaderParameter("toon_intensity", 1.0f);
+            toonMat.SetShaderParameter("use_stepped", true);
+            toonMat.SetShaderParameter("steps", 3.0f);
+            toonMat.SetShaderParameter("step_smoothness", 0.30f);
+            toonMat.SetShaderParameter("shadow_tint", new Color(0.18f, 0.16f, 0.26f, 1.0f));
+            toonMat.SetShaderParameter("shadow_tint_amount", 0.40f);
+            toonMat.SetShaderParameter("use_rim", true);
+            toonMat.SetShaderParameter("rim_color", new Color(1.0f, 1.0f, 1.0f, 1.0f));
+            toonMat.SetShaderParameter("rim_amount", 2.0f);
+            toonMat.SetShaderParameter("rim_smoothness", 0.2f);
+            toonMat.SetShaderParameter("rim_blend", 1.0f);
+            toonMat.SetShaderParameter("rim_mask_shadow", 1.0f);
+
+            return (toonMat, outlineMat, false);
+        }
+
+        public void ApplyToonShading(bool enabled, bool enableOutline = true)
+        {
+            if (enabled && IsPaintingModeActive)
+            {
+                enabled = false;
+            }
+
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh)) continue;
+
+                if (enabled && !sm.PreserveOriginal && sm.ToonMaterial != null)
+                {
+                    if (enableOutline && sm.OutlineMaterial != null)
+                    {
+                        sm.ToonMaterial.NextPass = sm.OutlineMaterial;
+                    }
+                    else
+                    {
+                        sm.ToonMaterial.NextPass = null;
+                    }
+                    sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, sm.ToonMaterial);
+                }
+                else
+                {
+                    sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, sm.OriginalMaterial);
+                }
+            }
+        }
+
+        public void UpdateToonUniforms(float intensity, float steps, float smoothness, float shadowAmt, Color shadowColor, float outlineWidth, Color outlineColor)
+        {
+            foreach (var sm in _submeshes)
+            {
+                if (sm.ToonMaterial != null)
+                {
+                    sm.ToonMaterial.SetShaderParameter("toon_intensity", intensity);
+                    sm.ToonMaterial.SetShaderParameter("steps", steps);
+                    sm.ToonMaterial.SetShaderParameter("step_smoothness", smoothness);
+                    sm.ToonMaterial.SetShaderParameter("shadow_tint", shadowColor);
+                    sm.ToonMaterial.SetShaderParameter("shadow_tint_amount", shadowAmt);
+                }
+                if (sm.OutlineMaterial != null)
+                {
+                    sm.OutlineMaterial.SetShaderParameter("outline_width", outlineWidth);
+                    sm.OutlineMaterial.SetShaderParameter("outline_color", outlineColor);
+                }
+            }
+        }
+
+        public void SetOutlineParam(string paramName, Variant value)
+        {
+            foreach (var sm in _submeshes)
+            {
+                sm.OutlineMaterial?.SetShaderParameter(paramName, value);
+            }
         }
 
         private void EnsureLightmapUv2Coordinates()
@@ -250,7 +534,7 @@ namespace DeadlockPlayground.Painter
         private static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
         {
             if (mi == null) return null;
-            var mat = mi.GetSurfaceOverrideMaterial(s) ?? mi.Mesh?.SurfaceGetMaterial(s);
+            var mat = GetAuthenticMaterial(mi, s);
             if (mat == null) return null;
 
             string name = mat.ResourceName;
@@ -274,6 +558,74 @@ namespace DeadlockPlayground.Painter
                 return name;
             }
             return null;
+        }
+
+        private static void ExtractMaterialMetadata(SubmeshNodeInfo info, MeshInstance3D mi, int surfaceIndex)
+        {
+            if (info == null || mi == null) return;
+            var mat = mi.GetSurfaceOverrideMaterial(surfaceIndex) ?? mi.Mesh?.SurfaceGetMaterial(surfaceIndex);
+            if (mat == null) return;
+
+            if (mat.HasMeta("OriginalShader")) info.OriginalShader = mat.GetMeta("OriginalShader").AsString();
+            if (mat.HasMeta("OriginalColorVtexCPath"))
+            {
+                info.OriginalColorVtexCPath = mat.GetMeta("OriginalColorVtexCPath").AsString();
+            }
+            else if (mat.HasMeta("TextureParam_g_tColor"))
+            {
+                string raw = mat.GetMeta("TextureParam_g_tColor").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                info.OriginalColorVtexCPath = raw;
+            }
+            else if (mat.HasMeta("TextureParam_TextureColor"))
+            {
+                string raw = mat.GetMeta("TextureParam_TextureColor").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                info.OriginalColorVtexCPath = raw;
+            }
+
+            if (mat.HasMeta("TextureParam_g_tNormalRoughness")) info.OriginalNormalVtex = mat.GetMeta("TextureParam_g_tNormalRoughness").AsString();
+            else if (mat.HasMeta("TextureParam_g_tNormal")) info.OriginalNormalVtex = mat.GetMeta("TextureParam_g_tNormal").AsString();
+
+            if (mat.HasMeta("TextureParam_g_tAmbientOcclusion")) info.OriginalAoVtex = mat.GetMeta("TextureParam_g_tAmbientOcclusion").AsString();
+            else if (mat.HasMeta("TextureParam_g_tAO")) info.OriginalAoVtex = mat.GetMeta("TextureParam_g_tAO").AsString();
+
+            if (mat.HasMeta("TextureParam_g_tNPROutlineMask")) info.OriginalNprOutlineVtex = mat.GetMeta("TextureParam_g_tNPROutlineMask").AsString();
+            if (mat.HasMeta("TextureParam_g_tSelfIllumMask")) info.OriginalMaskVtex = mat.GetMeta("TextureParam_g_tSelfIllumMask").AsString();
+        }
+
+        public void MarkSubmeshDirty(MeshInstance3D mesh)
+        {
+            if (mesh == null) return;
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == mesh)
+                {
+                    sm.IsDirty = true;
+                    sm.IsSelected = true;
+                }
+            }
+        }
+
+        public void MarkSubmeshDirty(string rawOrMaterialName)
+        {
+            if (string.IsNullOrEmpty(rawOrMaterialName)) return;
+            foreach (var sm in _submeshes)
+            {
+                if (string.Equals(sm.RawName, rawOrMaterialName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sm.MaterialName, rawOrMaterialName, StringComparison.OrdinalIgnoreCase))
+                {
+                    sm.IsDirty = true;
+                    sm.IsSelected = true;
+                }
+            }
+        }
+
+        public List<SubmeshNodeInfo> GetDirtySubmeshes()
+        {
+            return _submeshes.FindAll(s => s.IsDirty);
         }
 
         public void SelectTarget(SubmeshNodeInfo info, int surfaceIndex = -1)
@@ -389,6 +741,10 @@ namespace DeadlockPlayground.Painter
                 if (orig != null && GodotObject.IsInstanceValid(orig))
                 {
                     orig.Visible = true;
+                    if (orig.HasMeta("IsHiddenComposite"))
+                    {
+                        orig.RemoveMeta("IsHiddenComposite");
+                    }
                 }
             }
             _hiddenOriginalNodes.Clear();

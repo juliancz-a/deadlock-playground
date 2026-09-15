@@ -579,7 +579,7 @@ namespace DeadlockPlayground.Painter
                     Name = "BrushCursorRingGizmo",
                     Mesh = _cursorTorusMesh,
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                    Layers = 1,
+                    Layers = 1 | 2,
                     Visible = false
                 };
 
@@ -601,6 +601,7 @@ namespace DeadlockPlayground.Painter
                     NoDepthTest = true,
                     RenderPriority = 127,
                     PixelSize = 0.002f,
+                    Layers = 1 | 2,
                     Visible = false
                 };
                 _cursorGizmo.AddChild(_eyedropperSprite);
@@ -612,7 +613,7 @@ namespace DeadlockPlayground.Painter
                     Mesh = new QuadMesh { Size = new Vector2(2.0f, 2.0f), Orientation = PlaneMesh.OrientationEnum.Y },
                     Position = new Vector3(0, 0.005f, 0),
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                    Layers = 1,
+                    Layers = 1 | 2,
                     Visible = false
                 };
                 _decalMaterial = new StandardMaterial3D
@@ -626,6 +627,19 @@ namespace DeadlockPlayground.Painter
                 };
                 _decalPreviewQuad.MaterialOverride = _decalMaterial;
                 _cursorGizmo.AddChild(_decalPreviewQuad);
+            }
+
+            // Ensure any light source attached to the cursor gizmo or camera illuminates strictly Layer 2 (Gizmos only)
+            foreach (Node child in _cursorGizmo.GetChildren())
+            {
+                if (child is Light3D l) l.LightCullMask = 2;
+            }
+            if (_camera != null)
+            {
+                foreach (Node child in _camera.GetChildren())
+                {
+                    if (child is Light3D l) l.LightCullMask = 2;
+                }
             }
 
             if (!_cursorGizmo.IsInsideTree())

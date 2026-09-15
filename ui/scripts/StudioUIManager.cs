@@ -58,6 +58,9 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnBrowseGamePath;
     [Export] private LineEdit _savePathInput;
     [Export] private Button _btnBrowseSavePath;
+    [Export] private LineEdit _compilerPathInput;
+    [Export] private Button _btnBrowseCompilerPath;
+    [Export] private FileDialog _compilerFileDialog;
     [Export] private OptionButton _texQualityOption;
     [Export] private OptionButton _fpsLimitOption;
     [Export] private CheckBox _vsyncCheck;
@@ -263,6 +266,9 @@ public partial class StudioUIManager : CanvasLayer
         _btnBrowseGamePath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer/BrowseGamePathButton");
         _savePathInput ??= GetNodeOrNull<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/SavesPathLine");
         _btnBrowseSavePath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton");
+        _compilerPathInput ??= GetNodeOrNull<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer/CompilerPathLine");
+        _btnBrowseCompilerPath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer/BrowseCompilerPathButton");
+        _compilerFileDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/CompilerFileDialog");
         _texQualityOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/TexQualityButton");
         _fpsLimitOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/FpsLimitButton");
         _vsyncCheck ??= GetNodeOrNull<CheckBox>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/VsyncCheck");
@@ -351,6 +357,7 @@ public partial class StudioUIManager : CanvasLayer
             if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
             if (_exportPanel != null) _exportPanel.Visible = true;
             _currentSkeletonGizmoManager?.SetGizmoEnabled(true);
+            _tabShading?.SetPaintingModeActive(false);
         }
         else if (tabIndex == 8)
         {
@@ -368,6 +375,7 @@ public partial class StudioUIManager : CanvasLayer
                 _paintModExportPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.MeshHierarchy, _tabPaint?.CurrentHero);
             }
             _currentSkeletonGizmoManager?.SetGizmoEnabled(false);
+            _tabShading?.SetPaintingModeActive(true);
         }
     }
 
@@ -432,9 +440,24 @@ public partial class StudioUIManager : CanvasLayer
         // Settings Browsing
         if (_btnBrowseGamePath != null) _btnBrowseGamePath.Pressed += () => _gameFolderDialog?.PopupCentered();
         if (_btnBrowseSavePath != null) _btnBrowseSavePath.Pressed += () => _saveFolderDialog?.PopupCentered();
+        if (_btnBrowseCompilerPath != null) _btnBrowseCompilerPath.Pressed += () =>
+        {
+            EnsureCompilerFileDialog();
+            _compilerFileDialog?.PopupCentered();
+        };
 
         if (_gameFolderDialog != null) _gameFolderDialog.DirSelected += OnGameDirSelected;
         if (_saveFolderDialog != null) _saveFolderDialog.DirSelected += OnSaveDirSelected;
+        if (_compilerPathInput != null)
+        {
+            _compilerPathInput.TextChanged += (text) =>
+            {
+                if (File.Exists(text))
+                {
+                    _pathManager.SaveResourceCompilerPath(text);
+                }
+            };
+        }
 
         // Quick Action Buttons
         if (_btnQuickXRay != null)
@@ -524,10 +547,15 @@ public partial class StudioUIManager : CanvasLayer
 
         UpdateCharacterDependencyState(true);
 
-        // Populate Character Tab
+        // Populate Character & Feature Tabs
         _tabCharacter?.SetHero(heroNode);
-        _tabShading?.SetHero(heroNode);
         _tabPaint?.SetCurrentHero(heroNode);
+        _tabShading?.SetHero(heroNode);
+
+        if (_currentTabIndex == 8)
+        {
+            _tabShading?.SetPaintingModeActive(true);
+        }
 
         // Find Skeleton & Animation Player
         var skeleton = SearchSkeleton(heroNode);
@@ -722,6 +750,8 @@ public partial class StudioUIManager : CanvasLayer
         UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
         if (_gamePathInput != null) _gamePathInput.Text = _pathManager.CurrentGamePath;
         if (_savePathInput != null) _savePathInput.Text = _pathManager.CurrentSavePath;
+        string compPath = _pathManager.ResolveResourceCompilerExe();
+        if (_compilerPathInput != null) _compilerPathInput.Text = compPath ?? "";
 
         ShowLoading(false);
     }
@@ -761,6 +791,31 @@ public partial class StudioUIManager : CanvasLayer
         _pathManager.SaveConfig(_pathManager.CurrentGamePath, dir);
         if (_savePathInput != null) _savePathInput.Text = dir;
         ShowToast("Screenshots path updated!");
+    }
+
+    private void EnsureCompilerFileDialog()
+    {
+        if (_compilerFileDialog == null)
+        {
+            _compilerFileDialog = new FileDialog
+            {
+                Title = "Select resourcecompiler.exe",
+                FileMode = FileDialog.FileModeEnum.OpenFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new[] { "resourcecompiler.exe, *.exe ; Resource Compiler Executable (*.exe)", "*.* ; All Files" },
+                Size = new Vector2I(750, 500)
+            };
+            _compilerFileDialog.FileSelected += OnCompilerFileSelected;
+            var modals = GetNodeOrNull("MainHUD/ModalsLayer") ?? this;
+            modals.AddChild(_compilerFileDialog);
+        }
+    }
+
+    private void OnCompilerFileSelected(string file)
+    {
+        _pathManager.SaveResourceCompilerPath(file);
+        if (_compilerPathInput != null) _compilerPathInput.Text = file;
+        ShowToast("Resource compiler path updated!");
     }
 
     private void InitializeDisplaySettingsUI()

@@ -15,21 +15,33 @@ corner_radius_top_right = 10
 corner_radius_bottom_right = 10
 corner_radius_bottom_left = 10
 
-[node name="PaintModExportPanel" type="PanelContainer" unique_id=714186499 node_paths=PackedStringArray("_btnExportPng", "_btnExportVmat", "_btnInstallCitadel", "_lblStatus", "_exportFileDialog")]
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_mod"]
+bg_color = Color(0.188235, 0.313726, 0.235294, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.4, 0.75, 0.45, 0.9)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="PaintModExportPanel" type="PanelContainer" unique_id=714186499 node_paths=PackedStringArray("_btnExportMod", "_btnExportPng", "_btnExportVmat", "_lblStatus", "_exportFileDialog")]
 custom_minimum_size = Vector2(230, 0)
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -246.0
+offset_left = -256.0
 offset_top = 46.0
 offset_right = -16.0
-offset_bottom = 230.0
+offset_bottom = 250.0
 grow_horizontal = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 script = ExtResource("1_mod_export")
+_btnExportMod = NodePath("MarginContainer/VBoxContainer/BtnExportMod")
 _btnExportPng = NodePath("MarginContainer/VBoxContainer/BtnExportPng")
 _btnExportVmat = NodePath("MarginContainer/VBoxContainer/BtnExportVmat")
-_btnInstallCitadel = NodePath("MarginContainer/VBoxContainer/BtnInstallCitadel")
 _lblStatus = NodePath("MarginContainer/VBoxContainer/LblStatus")
 _exportFileDialog = NodePath("ExportFileDialog")
 
@@ -49,22 +61,30 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
 theme_override_fonts/font = ExtResource("2_colus")
 theme_override_font_sizes/font_size = 12
-text = "MOD EXPORT (TEXTURES & VMAT)"
+text = "SOURCE 2 MOD EXPORT"
+
+[node name="BtnExportMod" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1982736451]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 11
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_mod")
+text = "EXPORT MOD (.VPK)..."
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1982736452]
+layout_mode = 2
 
 [node name="BtnExportPng" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1685181799]
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-text = "Export Flattened PNG..."
+theme_override_font_sizes/font_size = 11
+text = "Export PNG Only..."
 
 [node name="BtnExportVmat" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1722466599]
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-text = "Generate Valve .vmat KV3..."
-
-[node name="BtnInstallCitadel" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1876303599]
-custom_minimum_size = Vector2(0, 28)
-layout_mode = 2
-text = "Stage to Deadlock Addons"
+theme_override_font_sizes/font_size = 11
+text = "Generate .vmat KV3..."
 
 [node name="LblStatus" type="Label" parent="MarginContainer/VBoxContainer" unique_id=88028999]
 layout_mode = 2

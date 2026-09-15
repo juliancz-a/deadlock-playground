@@ -2,6 +2,7 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using DeadlockPlayground.Materials;
+using DeadlockPlayground.Painter;
 
 public partial class ShadingTabUI : VBoxContainer
 {
@@ -103,7 +104,8 @@ public partial class ShadingTabUI : VBoxContainer
         ResetToDefaults();
 
         var loader = GetVpkLoader();
-        if (loader != null)
+        // If hosted inside StudioUIManager, StudioUIManager.OnHeroLoaded coordinates SetHero in the correct tab sequence
+        if (loader != null && GetStudioUIManager() == null)
         {
             loader.HeroLoaded += SetHero;
             loader.HeroUnloaded += ClearHero;
@@ -122,6 +124,12 @@ public partial class ShadingTabUI : VBoxContainer
             loader.HeroLoaded -= SetHero;
             loader.HeroUnloaded -= ClearHero;
         }
+    }
+
+    private StudioUIManager GetStudioUIManager()
+    {
+        return GetNodeOrNull<StudioUIManager>("/root/Main/UIRoot")
+            ?? GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager;
     }
 
     private VpkLoaderTest GetVpkLoader()
@@ -163,6 +171,7 @@ public partial class ShadingTabUI : VBoxContainer
         {
             _checkToonEnable.Toggled += (pressed) =>
             {
+                UserSettings.ToonEnabled = pressed;
                 _toonEnabled = pressed;
                 UpdateShaderVisibility();
             };
@@ -203,14 +212,14 @@ public partial class ShadingTabUI : VBoxContainer
             _sliderToonOutlineWidth.ValueChanged += (v) =>
             {
                 if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = $"{v:F1}px";
-                if (!_isSyncing) SetOutlineParam("outline_width", (float)v);
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
         if (_colorToonOutline != null)
         {
             _colorToonOutline.ColorChanged += (c) =>
             {
-                if (!_isSyncing) SetOutlineParam("outline_color", c);
+                if (!_isSyncing) UpdateToonMaterialsUniforms();
             };
         }
         if (_sliderToonShadowAmount != null)
@@ -435,6 +444,10 @@ public partial class ShadingTabUI : VBoxContainer
 
         if (node is MeshInstance3D mi && mi.Mesh != null)
         {
+            // Skip hidden composite multi-surface meshes that were separated by HeroMeshHierarchy
+            if (mi.HasMeta("IsHiddenComposite") && mi.GetMeta("IsHiddenComposite").AsBool())
+                return;
+
             string meshNameLower = mi.Name.ToString().ToLowerInvariant();
             bool isWeapon = meshNameLower.Contains("gun") || meshNameLower.Contains("weapon") ||
                             meshNameLower.Contains("sword") || meshNameLower.Contains("katana") ||
@@ -445,7 +458,7 @@ public partial class ShadingTabUI : VBoxContainer
             int surfaceCount = mi.Mesh.GetSurfaceCount();
             for (int i = 0; i < surfaceCount; i++)
             {
-                Material origMat = mi.GetSurfaceOverrideMaterial(i) ?? mi.Mesh.SurfaceGetMaterial(i);
+                Material origMat = HeroMeshHierarchy.GetAuthenticMaterial(mi, i);
                 string matPath = origMat?.ResourceName?.ToLowerInvariant() ?? "";
 
                 if (matPath.Contains("outline")) isBuiltinOutline = true;
@@ -490,6 +503,7 @@ public partial class ShadingTabUI : VBoxContainer
                     }
 
                     toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                    toonMat.SetShaderParameter("roughness", stdMat.Roughness > 0.01f ? stdMat.Roughness : 0.65f);
                     float spec = stdMat.Metallic > 0.5f ? 0.45f : 0.30f;
                     toonMat.SetShaderParameter("specular", spec);
                     toonMat.SetShaderParameter("uv1_scale", stdMat.Uv1Scale);
@@ -534,8 +548,16 @@ public partial class ShadingTabUI : VBoxContainer
         }
     }
 
+    private HeroMeshHierarchy GetHeroMeshHierarchy()
+    {
+        return GetNodeOrNull<HeroMeshHierarchy>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/Sidebar/TabContent/PaintTab/HeroMeshHierarchy")
+            ?? GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+    }
+
     private void ApplyToonState()
     {
+        if (_isPaintingActive) return;
+
         bool master = _masterEnabled;
         bool enableToon = master && _toonEnabled;
         bool enableSignature = master && _heroSignatureEnabled;
@@ -555,11 +577,7 @@ public partial class ShadingTabUI : VBoxContainer
 
             Material baseMat = record.OriginalMaterial;
 
-            if (enableSignature && record.SignatureMaterial != null)
-            {
-                baseMat = record.SignatureMaterial;
-            }
-            else if (enableToon)
+            if (enableToon)
             {
                 // Preserve additive VFX, dynamic glow shaders, and translucent glass surfaces.
                 // EXCEPTION: source2_vertcolor_pbr.gdshader is a structural vertex-color head shader — preserve it
@@ -575,6 +593,10 @@ public partial class ShadingTabUI : VBoxContainer
                 {
                     baseMat = isPbrHead ? record.OriginalMaterial : record.ToonMaterial;
                 }
+            }
+            else if (enableSignature && record.SignatureMaterial != null)
+            {
+                baseMat = record.SignatureMaterial;
             }
             else
             {
@@ -616,6 +638,10 @@ public partial class ShadingTabUI : VBoxContainer
 
             record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, baseMat);
         }
+
+        // Propagate real-time dynamic toggle to active submeshes in HeroMeshHierarchy
+        var hierarchy = GetHeroMeshHierarchy();
+        hierarchy?.ApplyToonShading(enableToon, enableOutline);
     }
 
     private void SetSignatureParam(string paramName, Variant value)
@@ -677,6 +703,9 @@ public partial class ShadingTabUI : VBoxContainer
         {
             record.OutlineMaterial?.SetShaderParameter(paramName, value);
         }
+
+        var hierarchy = GetHeroMeshHierarchy();
+        hierarchy?.SetOutlineParam(paramName, value);
     }
 
     private void UpdateToonMaterialsUniforms()
@@ -735,12 +764,52 @@ public partial class ShadingTabUI : VBoxContainer
                 smPbr.SetShaderParameter("rim_blend",         1.0f);
             }
         }
+
+        // Forward to HeroMeshHierarchy submeshes
+        var hierarchy = GetHeroMeshHierarchy();
+        hierarchy?.UpdateToonUniforms(intensity, steps, smooth, shadowAmt, shadowCol, outWidth, outCol);
     }
 
     #endregion
 
+    private bool _isPaintingActive = false;
+
+    public void SetPaintingModeActive(bool active)
+    {
+        _isPaintingActive = active;
+        var hierarchy = GetHeroMeshHierarchy();
+        if (hierarchy != null)
+        {
+            hierarchy.IsPaintingModeActive = active;
+        }
+
+        if (active)
+        {
+            LinkRects();
+            if (_crtRect != null) _crtRect.Visible = false;
+            if (_glitchRect != null) _glitchRect.Visible = false;
+
+            // Revert all submeshes to clean original materials so the artist can paint on raw textures
+            foreach (var record in _characterSurfaces)
+            {
+                if (GodotObject.IsInstanceValid(record.Mesh))
+                {
+                    record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
+                }
+            }
+
+            hierarchy?.ApplyToonShading(false);
+        }
+        else
+        {
+            UpdateShaderVisibility();
+        }
+    }
+
     private void UpdateShaderVisibility()
     {
+        if (_isPaintingActive) return;
+
         LinkRects();
 
         if (_crtRect != null)
@@ -765,8 +834,8 @@ public partial class ShadingTabUI : VBoxContainer
         if (_masterToggle != null) _masterToggle.ButtonPressed = true;
 
         // Toon Defaults
-        _toonEnabled = false;
-        if (_checkToonEnable != null) _checkToonEnable.ButtonPressed = false;
+        _toonEnabled = UserSettings.ToonEnabled;
+        if (_checkToonEnable != null) _checkToonEnable.ButtonPressed = _toonEnabled;
         if (_sliderToonIntensity != null) _sliderToonIntensity.Value = 1.0;
         if (_lblToonIntensity != null) _lblToonIntensity.Text = "1.00";
         if (_sliderToonSteps != null) _sliderToonSteps.Value = 3.0;

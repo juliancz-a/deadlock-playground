@@ -1,0 +1,134 @@
+[gd_scene format=3 uid="uid://d1g0mpx8k9q42"]
+
+[ext_resource type="Script" uid="uid://b1m98px7y3c84" path="res://ui/scripts/modals/ExportProgressDialog.cs" id="1_progress"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal"]
+bg_color = Color(0.0784314, 0.0862745, 0.117647, 0.980392)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.4, 0.45, 0.58, 0.8)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+shadow_color = Color(0, 0, 0, 0.6)
+shadow_size = 20
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_console"]
+bg_color = Color(0.04, 0.045, 0.06, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.23, 0.3, 0.6)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_folder"]
+bg_color = Color(0.18, 0.28, 0.38, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.55, 0.75, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="ExportProgressDialog" type="CanvasLayer" unique_id=987234501]
+layer = 101
+script = ExtResource("1_progress")
+
+[node name="Backdrop" type="ColorRect" parent="." unique_id=987234500]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.65)
+
+[node name="DialogPanel" type="PanelContainer" parent="." unique_id=987234540]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -260.0
+offset_right = 320.0
+offset_bottom = 260.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
+
+[node name="Margin" type="MarginContainer" parent="DialogPanel" unique_id=987234502]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 16
+
+[node name="VBox" type="VBoxContainer" parent="DialogPanel/Margin" unique_id=987234503]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987234504]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 15
+text = "COMPILING & EXPORTING MOD"
+
+[node name="HSeparator1" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987234505]
+layout_mode = 2
+
+[node name="LblStepStatus" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987234506]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.82, 0.95, 1)
+theme_override_font_sizes/font_size = 12
+text = "Initializing export pipeline..."
+
+[node name="ProgressBar" type="ProgressBar" parent="DialogPanel/Margin/VBox" unique_id=987234507]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+max_value = 100.0
+step = 0.1
+
+[node name="LogConsole" type="RichTextLabel" parent="DialogPanel/Margin/VBox" unique_id=987234508]
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/normal = SubResource("StyleBoxFlat_console")
+theme_override_font_sizes/normal_font_size = 11
+theme_override_font_sizes/bold_font_size = 11
+bbcode_enabled = true
+scroll_following = true
+
+[node name="HBoxButtons" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987234509]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="BtnOpenFolder" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987234510]
+visible = false
+custom_minimum_size = Vector2(160, 32)
+layout_mode = 2
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_folder")
+text = "Open Addons Folder"
+
+[node name="BtnCopyLog" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987234512]
+custom_minimum_size = Vector2(100, 32)
+layout_mode = 2
+text = "Copy Log"
+
+[node name="BtnCancel" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987234511]
+custom_minimum_size = Vector2(90, 32)
+layout_mode = 2
+text = "Cancel"
+

@@ -11,6 +11,8 @@ public partial class GamePathManager : Node
     
     public string CurrentGamePath { get; private set; }
     public string CurrentSavePath { get; private set; }
+    public string CurrentCsdkPath { get; private set; }
+    public string CurrentResourceCompilerPath { get; private set; }
 
     public override void _Ready()
     {
@@ -25,6 +27,8 @@ public partial class GamePathManager : Node
         {
             CurrentGamePath = (string)config.GetValue("Paths", "GamePath", "");
             CurrentSavePath = (string)config.GetValue("Paths", "SavePath", "");
+            CurrentCsdkPath = (string)config.GetValue("Paths", "CsdkPath", "");
+            CurrentResourceCompilerPath = (string)config.GetValue("Paths", "ResourceCompilerPath", "");
         }
     }
 
@@ -38,6 +42,91 @@ public partial class GamePathManager : Node
         config.SetValue("Paths", "GamePath", gamePath);
         config.SetValue("Paths", "SavePath", savePath);
         config.Save(ConfigPath);
+    }
+
+    public void SaveCsdkPath(string csdkPath)
+    {
+        CurrentCsdkPath = csdkPath;
+        var config = new ConfigFile();
+        config.Load(ConfigPath);
+        config.SetValue("Paths", "CsdkPath", csdkPath);
+        config.Save(ConfigPath);
+    }
+
+    public void SaveResourceCompilerPath(string compilerPath)
+    {
+        CurrentResourceCompilerPath = compilerPath;
+        var config = new ConfigFile();
+        config.Load(ConfigPath);
+        config.SetValue("Paths", "ResourceCompilerPath", compilerPath);
+        config.Save(ConfigPath);
+    }
+
+    public string ResolveResourceCompilerExe()
+    {
+        // 0. Direct configured compiler executable path
+        if (!string.IsNullOrEmpty(CurrentResourceCompilerPath) && File.Exists(CurrentResourceCompilerPath))
+        {
+            string norm = CurrentResourceCompilerPath.Replace('\\', '/');
+            if (norm.Contains("/game/bin/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                string binCs2Sibling = norm.Replace("/game/bin/win64/resourcecompiler.exe", "/game/bin_cs2/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase);
+                if (File.Exists(binCs2Sibling)) return binCs2Sibling;
+            }
+            return CurrentResourceCompilerPath;
+        }
+
+        // 1. Configured CSDK path (prioritize isolated bin_cs2 to prevent schema mismatch)
+        if (!string.IsNullOrEmpty(CurrentCsdkPath))
+        {
+            string p1 = Path.Combine(CurrentCsdkPath, "game", "bin_cs2", "win64", "resourcecompiler.exe");
+            if (File.Exists(p1)) return p1;
+
+            string p2 = Path.Combine(CurrentCsdkPath, "Reduced_CSDK_12", "game", "bin_cs2", "win64", "resourcecompiler.exe");
+            if (File.Exists(p2)) return p2;
+
+            string p3 = Path.Combine(CurrentCsdkPath, "game", "bin", "win64", "resourcecompiler.exe");
+            if (File.Exists(p3)) return p3;
+
+            string p4 = Path.Combine(CurrentCsdkPath, "resourcecompiler.exe");
+            if (File.Exists(p4)) return p4;
+        }
+
+        // 2. Deadlock game path siblings / Reduced_CSDK_12
+        if (!string.IsNullOrEmpty(CurrentGamePath))
+        {
+            string[] relativeCandidates = {
+                Path.GetFullPath(Path.Combine(CurrentGamePath, "..", "CSDK12", "game", "bin_cs2", "win64", "resourcecompiler.exe")),
+                Path.GetFullPath(Path.Combine(CurrentGamePath, "..", "CSDK12", "Reduced_CSDK_12", "game", "bin_cs2", "win64", "resourcecompiler.exe")),
+                Path.GetFullPath(Path.Combine(CurrentGamePath, "..", "Reduced_CSDK_12", "game", "bin_cs2", "win64", "resourcecompiler.exe")),
+                Path.GetFullPath(Path.Combine(CurrentGamePath, "..", "CSDK12", "game", "bin", "win64", "resourcecompiler.exe")),
+                Path.Combine(CurrentGamePath, "game", "bin", "win64", "resourcecompiler.exe")
+            };
+            foreach (var rc in relativeCandidates)
+            {
+                if (File.Exists(rc)) return rc;
+            }
+        }
+
+        // 3. Common drive root locations
+        string[] candidates = {
+            @"C:\CSDK12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"C:\CSDK12\Reduced_CSDK_12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"D:\CSDK12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"D:\CSDK12\Reduced_CSDK_12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"E:\CSDK12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"E:\CSDK12\Reduced_CSDK_12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"E:\SteamLibrary\steamapps\common\CSDK12\game\bin_cs2\win64\resourcecompiler.exe",
+            @"C:\CSDK12\game\bin\win64\resourcecompiler.exe",
+            @"D:\CSDK12\game\bin\win64\resourcecompiler.exe",
+            @"E:\CSDK12\game\bin\win64\resourcecompiler.exe"
+        };
+        foreach (var c in candidates)
+        {
+            if (File.Exists(c)) return c;
+        }
+
+        return null;
     }
 
     public async Task<string> AutoDetectDeadlockPathAsync()
