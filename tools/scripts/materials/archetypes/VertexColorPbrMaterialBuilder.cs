@@ -17,7 +17,10 @@ public static class VertexColorPbrMaterialBuilder
     public static bool IsApplicable(VrfMaterial matResource, string vmatPath, string diffusePath, bool isFur)
     {
         if (matResource == null || isFur) return false;
+        if (matResource.IntParams.GetValueOrDefault("F_ADDITIVE_BLEND", 0) == 1) return false;
+
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
+        if (vmatLower.Contains("glow") || vmatLower.Contains("flame") || vmatLower.Contains("sparkle")) return false;
 
         bool isVertColorMat = matResource.IntParams.GetValueOrDefault("F_VERTEX_COLOR", 0) == 1 || vmatLower.Contains("vertcolor");
         bool isPaintVertexColors = matResource.IntParams.GetValueOrDefault("F_PAINT_VERTEX_COLORS", 0) == 1;
@@ -134,6 +137,61 @@ public static class VertexColorPbrMaterialBuilder
                 }
             }
 
+            // 5. Self-Illumination / Emissive (e.g. Vindicta spectral limbs)
+            bool hasSelfIllum = matResource.IntParams.GetValueOrDefault("F_SELF_ILLUM", 0) == 1;
+            pbrMat.SetShaderParameter("enable_self_illum", hasSelfIllum);
+
+            if (hasSelfIllum)
+            {
+                Color selfIllumTint = Colors.White;
+                System.Numerics.Vector4 siTintVec = default;
+                if (matResource.VectorParams.TryGetValue("g_vSelfIllumTint1", out siTintVec)
+                    || matResource.VectorParams.TryGetValue("g_vSelfIllumTint", out siTintVec))
+                {
+                    selfIllumTint = new Color(siTintVec.X, siTintVec.Y, siTintVec.Z, 1.0f);
+                }
+                pbrMat.SetShaderParameter("self_illum_tint", selfIllumTint);
+
+                float siScale = 1.0f;
+                if (matResource.FloatParams.TryGetValue("g_flSelfIllumScale1", out var flScale1))
+                    siScale = flScale1;
+                else if (matResource.FloatParams.TryGetValue("g_flSelfIllumScale", out var flScale))
+                    siScale = flScale;
+                pbrMat.SetShaderParameter("self_illum_scale", siScale);
+
+                Vector2 scrollSpeed = Vector2.Zero;
+                System.Numerics.Vector4 scrollVec = default;
+                if (matResource.VectorParams.TryGetValue("g_vSelfIllumScrollSpeed1", out scrollVec)
+                    || matResource.VectorParams.TryGetValue("g_vSelfIllumScrollSpeed", out scrollVec))
+                {
+                    scrollSpeed = new Vector2(scrollVec.X, scrollVec.Y);
+                }
+                pbrMat.SetShaderParameter("self_illum_scroll_speed", scrollSpeed);
+
+                float siFresnel = 0.0f;
+                if (matResource.FloatParams.TryGetValue("g_flSelfIllumFresnelMaskExponent", out var flFresnel))
+                    siFresnel = flFresnel;
+                pbrMat.SetShaderParameter("self_illum_fresnel_exponent", siFresnel);
+
+                float siAlbedoFactor = 0.0f;
+                if (matResource.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor1", out var flAlbedo1))
+                    siAlbedoFactor = flAlbedo1;
+                else if (matResource.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor", out var flAlbedo))
+                    siAlbedoFactor = flAlbedo;
+                pbrMat.SetShaderParameter("self_illum_albedo_factor", siAlbedoFactor);
+
+                string siMaskPath = Source2TextureLoader.GetTextureParam(matResource, "g_tSelfIllumMask")
+                                 ?? Source2TextureLoader.GetTextureParam(matResource, "TextureSelfIllumMask");
+                if (!string.IsNullOrEmpty(siMaskPath))
+                {
+                    var siMaskTex = Source2TextureLoader.GetOrLoadTexture(package, siMaskPath, forceOpaque: true);
+                    if (siMaskTex != null)
+                    {
+                        pbrMat.SetShaderParameter("texture_self_illum_mask", siMaskTex);
+                    }
+                }
+            }
+
             return pbrMat;
         }
 
@@ -155,6 +213,21 @@ public static class VertexColorPbrMaterialBuilder
                 godotMat.AOTexture = aoTex;
                 godotMat.AOLightAffect = 0.7f;
             }
+        }
+
+        if (matResource.IntParams.GetValueOrDefault("F_SELF_ILLUM", 0) == 1)
+        {
+            godotMat.EmissionEnabled = true;
+            System.Numerics.Vector4 siTintVec = default;
+            if (matResource.VectorParams.TryGetValue("g_vSelfIllumTint1", out siTintVec)
+                || matResource.VectorParams.TryGetValue("g_vSelfIllumTint", out siTintVec))
+            {
+                godotMat.Emission = new Color(siTintVec.X, siTintVec.Y, siTintVec.Z, 1.0f);
+            }
+            if (matResource.FloatParams.TryGetValue("g_flSelfIllumScale1", out var flScale1))
+                godotMat.EmissionEnergyMultiplier = flScale1;
+            else if (matResource.FloatParams.TryGetValue("g_flSelfIllumScale", out var flScale))
+                godotMat.EmissionEnergyMultiplier = flScale;
         }
 
         godotMat.Roughness = 0.94f;

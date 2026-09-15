@@ -18,6 +18,15 @@ public static class DynamicFxMaterialBuilder
         if (matResource == null) return false;
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
 
+        // Never hijack solid NPR vertex-colored character surfaces (e.g. vindicta_head arms/legs, wraith_head).
+        // Additive FX layers (vindicta_glow) declare F_ADDITIVE_BLEND = 1 and will still be processed.
+        if (matResource.IntParams.GetValueOrDefault("F_VERTEX_COLOR", 0) == 1 &&
+            matResource.IntParams.GetValueOrDefault("F_ADDITIVE_BLEND", 0) == 0 &&
+            !vmatLower.Contains("jitter") && !vmatLower.Contains("glow") && !vmatLower.Contains("flame") && !vmatLower.Contains("sparkle"))
+        {
+            return false;
+        }
+
         bool hasJitter = matResource.IntParams.GetValueOrDefault("F_JITTER_VERTICES", 0) == 1;
         bool hasTexTransform = matResource.IntParams.GetValueOrDefault("F_ENABLE_TEXTURE_TRANSFORMS", 0) == 1;
         bool isFxAdditive = matResource.IntParams.GetValueOrDefault("F_ADDITIVE_BLEND", 0) == 1;
@@ -51,7 +60,7 @@ public static class DynamicFxMaterialBuilder
         bool isFxAlphaTest = matResource.IntParams.GetValueOrDefault("F_ALPHA_TEST", 0) == 1;
 
         bool isHeadGlow = vmatLower.Contains("headglow") || vmatLower.Contains("flame_hair");
-        bool isArmGlow = vmatLower.Contains("armglow") || (vmatLower.Contains("inferno_flames") && !isHeadGlow);
+        bool isArmGlow = vmatLower.Contains("armglow") || vmatLower.Contains("flame_arm") || (vmatLower.Contains("inferno_flames") && !isHeadGlow);
         bool isSparkle = vmatLower.Contains("sparkle") || vmatLower.Contains("lash_sparkles");
 
         Shader fxShader;
@@ -80,6 +89,7 @@ public static class DynamicFxMaterialBuilder
         shaderMat.SetShaderParameter("is_additive", isArmGlow || isFxAdditive || isSparkle);
         shaderMat.SetShaderParameter("is_sparkle", isSparkle);
         shaderMat.SetShaderParameter("is_alpha_test", isFxAlphaTest);
+        shaderMat.SetShaderParameter("is_arm_glow", isArmGlow);
         bool isTranslucent = matResource.IntParams.GetValueOrDefault("F_TRANSLUCENT", 0) == 1;
         shaderMat.SetShaderParameter("is_translucent", isTranslucent);
 
@@ -117,16 +127,37 @@ public static class DynamicFxMaterialBuilder
             else if (matResource.VectorParams.TryGetValue("g_vJitterExpression", out var je0))
                 shaderMat.SetShaderParameter("jitter_expression", new Vector3(je0.X, je0.Y, je0.Z));
 
-            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesXA1", out var jxa1)) shaderMat.SetShaderParameter("jitter_amp_x_a", new Vector3(jxa1.X, jxa1.Y, jxa1.Z));
-            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesYA1", out var jya1)) shaderMat.SetShaderParameter("jitter_amp_y_a", new Vector3(jya1.X, jya1.Y, jya1.Z));
-            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesZA1", out var jza1)) shaderMat.SetShaderParameter("jitter_amp_z_a", new Vector3(jza1.X, jza1.Y, jza1.Z));
+            System.Numerics.Vector4 jxa = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesXA1", out jxa) || matResource.VectorParams.TryGetValue("g_vJitterAmplitudesXA", out jxa))
+                shaderMat.SetShaderParameter("jitter_amp_x_a", new Vector3(jxa.X, jxa.Y, jxa.Z));
+            System.Numerics.Vector4 jya = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesYA1", out jya) || matResource.VectorParams.TryGetValue("g_vJitterAmplitudesYA", out jya))
+                shaderMat.SetShaderParameter("jitter_amp_y_a", new Vector3(jya.X, jya.Y, jya.Z));
+            System.Numerics.Vector4 jza = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesZA1", out jza) || matResource.VectorParams.TryGetValue("g_vJitterAmplitudesZA", out jza))
+                shaderMat.SetShaderParameter("jitter_amp_z_a", new Vector3(jza.X, jza.Y, jza.Z));
 
-            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesXB1", out var jxb1)) shaderMat.SetShaderParameter("jitter_amp_x_b", new Vector3(jxb1.X, jxb1.Y, jxb1.Z));
-            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesYB1", out var jyb1)) shaderMat.SetShaderParameter("jitter_amp_y_b", new Vector3(jyb1.X, jyb1.Y, jyb1.Z));
-            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesZB1", out var jzb1)) shaderMat.SetShaderParameter("jitter_amp_z_b", new Vector3(jzb1.X, jzb1.Y, jzb1.Z));
+            System.Numerics.Vector4 jxb = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesXB1", out jxb) || matResource.VectorParams.TryGetValue("g_vJitterAmplitudesXB", out jxb))
+                shaderMat.SetShaderParameter("jitter_amp_x_b", new Vector3(jxb.X, jxb.Y, jxb.Z));
+            System.Numerics.Vector4 jyb = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesYB1", out jyb) || matResource.VectorParams.TryGetValue("g_vJitterAmplitudesYB", out jyb))
+                shaderMat.SetShaderParameter("jitter_amp_y_b", new Vector3(jyb.X, jyb.Y, jyb.Z));
+            System.Numerics.Vector4 jzb = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterAmplitudesZB1", out jzb) || matResource.VectorParams.TryGetValue("g_vJitterAmplitudesZB", out jzb))
+                shaderMat.SetShaderParameter("jitter_amp_z_b", new Vector3(jzb.X, jzb.Y, jzb.Z));
 
-            if (matResource.VectorParams.TryGetValue("g_vJitterFrequenciesA1", out var jfa1)) shaderMat.SetShaderParameter("jitter_freq_a", new Vector3(jfa1.X, jfa1.Y, jfa1.Z));
-            if (matResource.VectorParams.TryGetValue("g_vJitterFrequenciesB1", out var jfb1)) shaderMat.SetShaderParameter("jitter_freq_b", new Vector3(jfb1.X, jfb1.Y, jfb1.Z));
+            System.Numerics.Vector4 jfa = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterFrequenciesA1", out jfa) || matResource.VectorParams.TryGetValue("g_vJitterFrequenciesA", out jfa))
+                shaderMat.SetShaderParameter("jitter_freq_a", new Vector3(jfa.X, jfa.Y, jfa.Z));
+            System.Numerics.Vector4 jfb = default;
+            if (matResource.VectorParams.TryGetValue("g_vJitterFrequenciesB1", out jfb) || matResource.VectorParams.TryGetValue("g_vJitterFrequenciesB", out jfb))
+                shaderMat.SetShaderParameter("jitter_freq_b", new Vector3(jfb.X, jfb.Y, jfb.Z));
+
+            // Legacy fallbacks
+            shaderMat.SetShaderParameter("jitter_amp_x", new Vector3(jxa.X, jxa.Y, jxb.Z));
+            shaderMat.SetShaderParameter("jitter_amp_y", new Vector3(jya.X, jya.Y, jyb.Z));
+            shaderMat.SetShaderParameter("jitter_amp_z", new Vector3(jza.X, jza.Y, jzb.Z));
         }
 
         // 3. Pass UV Scrolling & Transforms
@@ -168,6 +199,7 @@ public static class DynamicFxMaterialBuilder
         Color glowColor = Source2MaterialHelper.ExtractDynamicGlowColor(matResource, vmatPath, package);
 
         shaderMat.SetShaderParameter("self_illum_tint", glowColor);
+        shaderMat.SetShaderParameter("glow_color", glowColor);
 
         float siScaleVal = 1.0f;
         if (matResource.FloatParams.TryGetValue("g_flSelfIllumScale1", out var sis1)) siScaleVal = sis1;
@@ -180,6 +212,21 @@ public static class DynamicFxMaterialBuilder
             siScaleVal = 7.154f;
 
         shaderMat.SetShaderParameter("self_illum_scale", siScaleVal);
+
+        float opacityScale = 1.0f;
+        if (matResource.FloatParams.TryGetValue("g_flOpacityScale1", out var op1)) opacityScale = op1;
+        else if (matResource.FloatParams.TryGetValue("g_flOpacityScale", out var op0)) opacityScale = op0;
+        shaderMat.SetShaderParameter("opacity_scale", opacityScale);
+
+        float fresnelExp = 0.0f;
+        if (matResource.FloatParams.TryGetValue("g_flSelfIllumFresnelMaskExponent", out var fe1)) fresnelExp = fe1;
+        else if (matResource.FloatParams.TryGetValue("g_flFresnelExponent", out var fe0)) fresnelExp = fe0;
+        shaderMat.SetShaderParameter("self_illum_fresnel_exponent", fresnelExp);
+
+        float alphaAnglePower = 0.0f;
+        if (matResource.FloatParams.TryGetValue("g_flAlphaAnglePower1", out var aap1)) alphaAnglePower = aap1;
+        else if (matResource.FloatParams.TryGetValue("g_flAlphaAnglePower", out var aap0)) alphaAnglePower = aap0;
+        shaderMat.SetShaderParameter("alpha_angle_power", alphaAnglePower);
 
         float emissionBoost = isArmGlow ? 1.6f : (isHeadGlow ? 1.0f : (isSparkle ? 2.5f : 1.0f));
         shaderMat.SetShaderParameter("emission_boost", emissionBoost);
@@ -217,6 +264,7 @@ public static class DynamicFxMaterialBuilder
         }
 
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "self_illum_mask", forceOpaque: true);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "texture_self_illum_mask", forceOpaque: true);
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tJitterMask", shaderMat, "jitter_mask", forceOpaque: true);
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tTintMaskRimLightMask", shaderMat, "tint_mask_rim_mask", forceOpaque: true);
 

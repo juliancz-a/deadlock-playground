@@ -32,6 +32,7 @@ text = "HERO: NONE"
 
 [node name="BtnResetPose" type="Button" parent="HeaderCard/VBox/HBoxHeader" unique_id=1010101005]
 layout_mode = 2
+theme_override_font_sizes/font_size = 11
 tooltip_text = "Snap character to Bind Pose for painting"
 text = "Reset Pose"
 
@@ -46,6 +47,9 @@ text = "Target Mesh:"
 [node name="OptTargetMesh" type="OptionButton" parent="HeaderCard/VBox/HBoxTarget" unique_id=1010101008]
 layout_mode = 2
 size_flags_horizontal = 3
+fit_to_longest_item = false
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="HBoxRes" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101009]
 layout_mode = 2
@@ -70,6 +74,7 @@ layout_mode = 2
 
 [node name="SubmeshCard" type="PanelContainer" parent="." unique_id=1010101014]
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="VBox" type="VBoxContainer" parent="SubmeshCard" unique_id=1010101015]
 layout_mode = 2
@@ -87,21 +92,27 @@ theme_override_constants/separation = 6
 [node name="BtnShowAll" type="Button" parent="SubmeshCard/VBox/HBoxActions" unique_id=1010101018]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
 text = "Show All"
 
 [node name="BtnHideAcc" type="Button" parent="SubmeshCard/VBox/HBoxActions" unique_id=1010101019]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+clip_text = true
+text_overrun_behavior = 3
 text = "Hide Accessories"
 
 [node name="ScrollContainer" type="ScrollContainer" parent="SubmeshCard/VBox" unique_id=1010101020]
 custom_minimum_size = Vector2(0, 180)
 layout_mode = 2
+size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
 [node name="SubmeshListContainer" type="VBoxContainer" parent="SubmeshCard/VBox/ScrollContainer" unique_id=1010101021]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_constants/separation = 4
 
 [node name="HSeparator2" type="HSeparator" parent="." unique_id=1010101022]
@@ -126,16 +137,19 @@ theme_override_constants/separation = 4
 [node name="BtnAddLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101027]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
 text = "+ LAYER"
 
 [node name="BtnDeleteLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101028]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
 text = "- DEL"
 
 [node name="BtnClearLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101029]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
 text = "CLEAR"
 
 [node name="BtnMoveUp" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101030]
@@ -191,10 +205,6 @@ custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 text = "100%"
 horizontal_alignment = 2
-
-
-
-
 
 [node name="DecalFileDialog" type="FileDialog" parent="." unique_id=1010101066]
 oversampling_override = 1.0

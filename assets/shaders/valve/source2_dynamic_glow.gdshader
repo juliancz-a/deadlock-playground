@@ -5,7 +5,7 @@ render_mode blend_add, depth_draw_never, cull_disabled, unshaded;
 // Replicates Deadlock's animated flow, ectoplasm, and energy layers
 // (Vindicta aura, Geist arm shimmer, Infernus arm flame, Mirage cyclonewrap)
 
-uniform vec4 glow_color : source_color = vec4(0.835294, 0.431373, 0.0, 1.0);
+uniform vec4 glow_color : source_color = vec4(1.0);
 uniform vec2 scroll_speed = vec2(0.0, 0.0);
 uniform float fresnel_exponent = 2.0;
 uniform float opacity_scale = 1.0;
@@ -45,9 +45,4 @@ void fragment() {
 
 	ALBEDO = final_glow * (mask * rim * 2.5);
 	ALPHA = clamp(rim * mask * opacity_scale, 0.0, 1.0);
-
-	// DEBUG: If this shows solid orange in the viewport, the C# extraction and uniform binding WORKED,
-	// and the issue was previous math/texture multiplications washing it out.
-	ALBEDO = glow_color.rgb * 2.0;
-	ALPHA = 1.0;
 }

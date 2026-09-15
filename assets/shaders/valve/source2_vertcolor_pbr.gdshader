@@ -18,6 +18,15 @@ uniform float roughness         : hint_range(0.0, 1.0) = 1.0;
 uniform float metallic          : hint_range(0.0, 1.0) = 0.0;
 uniform float normal_map_depth  : hint_range(0.0, 2.0) = 1.0;
 
+// Self-illumination / Emissive parameters (e.g. Vindicta spectral limbs)
+uniform bool enable_self_illum = false;
+uniform vec4 self_illum_tint : source_color = vec4(1.0);
+uniform float self_illum_scale = 1.0;
+uniform sampler2D texture_self_illum_mask : hint_default_white, filter_linear_mipmap;
+uniform vec2 self_illum_scroll_speed = vec2(0.0);
+uniform float self_illum_fresnel_exponent = 0.0;
+uniform float self_illum_albedo_factor = 0.0;
+
 vec3 DecodeHemiOctahedron(vec2 e) {
     vec2 temp = e * 2.0 - 1.0;
     vec3 n = vec3(temp.x + temp.y, temp.x - temp.y, 1.0 - abs(temp.x) - abs(temp.y));
@@ -59,4 +68,21 @@ void fragment() {
     METALLIC = metallic;
     SPECULAR = 0.5;
     AO = texture(g_tAmbientOcclusion, UV).r;
+
+    // 6. Self-illumination & Emissive spectral pulse
+    if (enable_self_illum) {
+        vec2 si_uv = UV + self_illum_scroll_speed * TIME;
+        vec4 si_mask = texture(texture_self_illum_mask, si_uv);
+        float si_val = max(si_mask.r, max(si_mask.g, si_mask.b));
+
+        vec3 illum_color = mix(self_illum_tint.rgb, finalAlbedo * self_illum_tint.rgb, self_illum_albedo_factor);
+
+        if (self_illum_fresnel_exponent > 0.01) {
+            float ndotv = clamp(abs(dot(normalize(NORMAL), normalize(VIEW))), 0.0, 1.0);
+            float fresnel = pow(clamp(1.0 - ndotv, 0.0, 1.0), self_illum_fresnel_exponent);
+            illum_color *= mix(1.0, 2.0, fresnel);
+        }
+
+        EMISSION = illum_color * (si_val * self_illum_scale);
+    }
 }

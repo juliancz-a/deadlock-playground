@@ -19,8 +19,16 @@ uniform float jitter_quantize_disp = 0.0;
 uniform vec3 jitter_amp_x = vec3(0.0);
 uniform vec3 jitter_amp_y = vec3(0.0);
 uniform vec3 jitter_amp_z = vec3(0.0);
+uniform vec3 jitter_amp_x_a = vec3(0.0);
+uniform vec3 jitter_amp_y_a = vec3(0.0);
+uniform vec3 jitter_amp_z_a = vec3(0.0);
+uniform vec3 jitter_amp_x_b = vec3(0.0);
+uniform vec3 jitter_amp_y_b = vec3(0.0);
+uniform vec3 jitter_amp_z_b = vec3(0.0);
 uniform vec3 jitter_freq_a = vec3(0.0);
 uniform vec3 jitter_freq_b = vec3(0.0);
+uniform vec3 jitter_expression = vec3(0.0);
+uniform sampler2D jitter_mask : hint_default_white, filter_linear_mipmap;
 
 // UV Transforms & Scrolling
 uniform vec2 albedo_scroll_speed = vec2(0.0, -0.12);
@@ -38,8 +46,8 @@ uniform vec2 translucent_uv_offset = vec2(0.0);
 
 // Colors & Emission
 uniform vec4 color_tint : source_color = vec4(1.0);
-uniform vec4 self_illum_tint : source_color = vec4(0.835294, 0.431373, 0.0, 1.0);
-uniform vec4 glow_color : source_color = vec4(0.835294, 0.431373, 0.0, 1.0);
+uniform vec4 self_illum_tint : source_color = vec4(1.0);
+uniform vec4 glow_color : source_color = vec4(1.0);
 uniform float self_illum_scale = 1.8;
 uniform float self_illum_fresnel_exponent = 0.0;
 uniform float self_illum_albedo_factor = 0.0;
@@ -67,6 +75,12 @@ vec2 quantize_vec2(vec2 val, float step_size) {
     return step_size > 0.0 ? floor(val / step_size) * step_size : val;
 }
 
+vec3 GetJitterWave(vec3 position, vec3 frequencies, float speed, float time) {
+    vec3 phase = fract(position * abs(frequencies)) + sign(frequencies) * (time * speed);
+    vec3 triangleWave = abs(fract(phase) * 2.0 - 1.0);
+    return triangleWave * triangleWave * (3.0 - 2.0 * triangleWave) - 0.5;
+}
+
 void vertex() {
     if (normal_offset > 0.0) {
         VERTEX += NORMAL * normal_offset;
@@ -79,23 +93,36 @@ void vertex() {
         }
 
         vec3 v_src2 = VERTEX * 50.0;
-
         vec3 disp = vec3(0.0);
-        // Harmonic A
-        disp.x += sin(t * jitter_speed_a * 10.0 + v_src2.y * jitter_freq_a.x) * jitter_amp_x.x;
-        disp.y += sin(t * jitter_speed_a * 10.0 + v_src2.z * jitter_freq_a.y) * (jitter_amp_y.y > 0.0001 ? jitter_amp_y.y : jitter_amp_y.x);
-        disp.z += cos(t * jitter_speed_a * 10.0 + v_src2.x * jitter_freq_a.z) * (jitter_amp_z.z > 0.0001 ? jitter_amp_z.z : jitter_amp_z.x);
 
-        // Harmonic B
-        if (jitter_speed_b > 0.0) {
-            disp.x += sin(t * jitter_speed_b * 10.0 + v_src2.y * jitter_freq_b.x) * jitter_amp_x.z;
-            disp.y += sin(t * jitter_speed_b * 10.0 + v_src2.z * jitter_freq_b.y) * (jitter_amp_y.z > 0.0001 ? jitter_amp_y.z : jitter_amp_y.y);
-            disp.z += cos(t * jitter_speed_b * 10.0 + v_src2.x * jitter_freq_b.z) * (jitter_amp_z.z > 0.0001 ? jitter_amp_z.z : jitter_amp_z.x);
+        bool hasHarmonicA = length(jitter_amp_x_a) > 0.0001 || length(jitter_amp_y_a) > 0.0001 || length(jitter_amp_z_a) > 0.0001;
+        bool hasHarmonicB = length(jitter_amp_x_b) > 0.0001 || length(jitter_amp_y_b) > 0.0001 || length(jitter_amp_z_b) > 0.0001;
+
+        if (hasHarmonicA || hasHarmonicB) {
+            vec3 waveA = GetJitterWave(v_src2, jitter_freq_a, jitter_speed_a, t);
+            vec3 waveB = GetJitterWave(v_src2, jitter_freq_b, jitter_speed_b, t);
+
+            disp = vec3(dot(jitter_amp_x_a, waveA), dot(jitter_amp_y_a, waveA), dot(jitter_amp_z_a, waveA))
+                 + vec3(dot(jitter_amp_x_b, waveB), dot(jitter_amp_y_b, waveB), dot(jitter_amp_z_b, waveB))
+                 + jitter_expression;
+        } else {
+            // Legacy harmonic fallback
+            disp.x += sin(t * jitter_speed_a * 10.0 + v_src2.y * jitter_freq_a.x) * jitter_amp_x.x;
+            disp.y += sin(t * jitter_speed_a * 10.0 + v_src2.z * jitter_freq_a.y) * (jitter_amp_y.y > 0.0001 ? jitter_amp_y.y : jitter_amp_y.x);
+            disp.z += cos(t * jitter_speed_a * 10.0 + v_src2.x * jitter_freq_a.z) * (jitter_amp_z.z > 0.0001 ? jitter_amp_z.z : jitter_amp_z.x);
+
+            if (jitter_speed_b > 0.0) {
+                disp.x += sin(t * jitter_speed_b * 10.0 + v_src2.y * jitter_freq_b.x) * jitter_amp_x.z;
+                disp.y += sin(t * jitter_speed_b * 10.0 + v_src2.z * jitter_freq_b.y) * (jitter_amp_y.z > 0.0001 ? jitter_amp_y.z : jitter_amp_y.y);
+                disp.z += cos(t * jitter_speed_b * 10.0 + v_src2.x * jitter_freq_b.z) * (jitter_amp_z.z > 0.0001 ? jitter_amp_z.z : jitter_amp_z.x);
+            }
         }
 
         if (jitter_quantize_disp > 0.0) {
             disp = floor(disp / jitter_quantize_disp) * jitter_quantize_disp;
         }
+
+        disp *= texture(jitter_mask, UV).r;
 
         VERTEX += disp * 0.02;
     }
@@ -172,16 +199,26 @@ void fragment() {
             }
         }
 
-        // 4. View Angle (Fresnel)
+        // 4. View Angle (Fresnel) & Alpha Angle Power
         float ndotv = clamp(abs(dot(normalize(NORMAL), normalize(VIEW))), 0.0, 1.0);
+        float edge = 1.0 - ndotv;
+        float angle_falloff = 1.0;
+        if (abs(alpha_angle_power) > 0.01) {
+            angle_falloff = (alpha_angle_power < 0.0) 
+                ? pow(clamp(edge, 0.0, 1.0), -alpha_angle_power) 
+                : pow(clamp(ndotv, 0.0, 1.0), alpha_angle_power);
+            angle_falloff = clamp(angle_falloff, 0.0, 1.0);
+        }
 
         // 5. Authentic Chroma & Emission
-        vec3 final_glow = vec3(0.835294, 0.431373, 0.0);
-        if (length(glow_color.rgb) > 0.01 && glow_color.rgb != vec3(1.0)) {
-            final_glow = glow_color.rgb;
-        } else if (length(self_illum_tint.rgb) > 0.01 && self_illum_tint.rgb != vec3(1.0)) {
+        vec3 final_glow = vec3(1.0);
+        if (length(self_illum_tint.rgb) > 0.001 && self_illum_tint.rgb != vec3(1.0)) {
             final_glow = self_illum_tint.rgb;
-        } else if (length(glow_color.rgb) > 0.01) {
+        } else if (length(glow_color.rgb) > 0.001 && glow_color.rgb != vec3(1.0)) {
+            final_glow = glow_color.rgb;
+        } else if (length(self_illum_tint.rgb) > 0.001) {
+            final_glow = self_illum_tint.rgb;
+        } else if (length(glow_color.rgb) > 0.001) {
             final_glow = glow_color.rgb;
         }
 
@@ -191,26 +228,25 @@ void fragment() {
 
         float emission_boost = clamp(self_illum_scale, 1.0, 6.0);
         if (self_illum_fresnel_exponent > 0.01) {
-            float fe = pow(clamp(1.0 - ndotv, 0.0, 1.0), self_illum_fresnel_exponent);
+            float fe = pow(clamp(edge, 0.0, 1.0), self_illum_fresnel_exponent);
             emission_boost *= mix(1.0, 1.8, fe);
         }
 
         // 6. Opacity & Silhouette Falloff
-               // 6. Opacity & Silhouette Falloff
         if (is_arm_glow) {
-            float edge = 1.0 - ndotv;
+            float edge_val = 1.0 - ndotv;
             // Clean rim: center is 0.0 (unobscured dark arm), silhouette edge is 1.0
-            float rim_mask = smoothstep(0.45, 0.92, edge);
+            float rim_mask = smoothstep(0.45, 0.92, edge_val);
 
             float rim = mix(0.12, 1.0, rim_mask);
 
             float mask = flame_mask;
             if (mask < 0.001) mask = 1.0;
 
-            ALBEDO = final_glow * (mask * rim * 3.2);
-            ALPHA = clamp(rim * mask * opacity_scale, 0.0, 1.0);
+            ALBEDO = final_glow * (mask * rim * 2.2);
+            ALPHA = clamp(rim * mask * opacity_scale * angle_falloff, 0.0, 1.0);
         } else {
-            // Volumetric plumes (e.g. hair)
+            // Volumetric plumes (e.g. hair, Vindicta aura)
             float plume_rim = pow(clamp(1.0 - ndotv, 0.0, 1.0), 0.8);
             float plume_density = mix(0.75, 1.0, plume_rim);
 
@@ -218,7 +254,7 @@ void fragment() {
             if (mask < 0.001) mask = 1.0;
 
             ALBEDO = final_glow * (mask * emission_boost);
-            ALPHA = clamp(mask * plume_density * opacity_scale, 0.0, 1.0);
+            ALPHA = clamp(mask * plume_density * opacity_scale * angle_falloff, 0.0, 1.0);
         }
     }
 }

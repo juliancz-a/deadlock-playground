@@ -164,8 +164,11 @@ public partial class StudioUIManager : CanvasLayer
 
         if (isFs)
         {
+            DisplayServer.WindowSetMaxSize(new Vector2I(1152,648));
             DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
             win.Mode = Window.ModeEnum.Windowed;
+ 
+            DisplayServer.WindowSetMaxSize(new Vector2I(1920,1080));
             if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Fullscreen";
         }
         else

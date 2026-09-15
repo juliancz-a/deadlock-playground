@@ -101,11 +101,20 @@ namespace DeadlockPlayground.Painter
                     }
                     var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, rawName, matPath);
 
+                    string singleDisplay = CleanName(rawName);
+                    if (!string.IsNullOrEmpty(matPath))
+                    {
+                        if (matPath.Contains("vindicta_headv2", StringComparison.OrdinalIgnoreCase))
+                            singleDisplay = "Head (vindicta_headv2)";
+                        else if (matPath.Contains("vindicta_head", StringComparison.OrdinalIgnoreCase))
+                            singleDisplay = "Limbs / Hands & Legs (vindicta_head)";
+                    }
+
                     var info = new SubmeshNodeInfo
                     {
                         Mesh = mi,
                         RawName = rawName,
-                        DisplayName = CleanName(rawName),
+                        DisplayName = singleDisplay,
                         SurfaceIndex = 0,
                         IsAccessory = isAcc,
                         IsSoloed = false,
@@ -124,10 +133,19 @@ namespace DeadlockPlayground.Painter
                 else
                 {
                     // Hide original composite multi-surface mesh while painter operates on separated surface meshes
+                    bool isCompositeVisible = mi.Visible;
+                    if (mi.HasMeta("UserVisibility"))
+                    {
+                        isCompositeVisible = mi.GetMeta("UserVisibility").AsBool();
+                    }
+
                     mi.Visible = false;
                     mi.Layers &= ~(uint)(1 << 20);
                     mi.SetMeta("IsHiddenComposite", true);
                     _hiddenOriginalNodes.Add(mi);
+
+                    var genArray = new Godot.Collections.Array<MeshInstance3D>();
+                    mi.SetMeta("GeneratedSubmeshes", genArray);
 
                     for (int s = 0; s < surfaceCount; s++)
                     {
@@ -140,7 +158,15 @@ namespace DeadlockPlayground.Painter
                         if (!string.IsNullOrEmpty(matName))
                         {
                             string formattedMat = CleanName(matName);
-                            if (string.Equals(clean, formattedMat, StringComparison.OrdinalIgnoreCase))
+                            if (matName.Contains("vindicta_headv2", StringComparison.OrdinalIgnoreCase))
+                            {
+                                display = "Head (vindicta_headv2)";
+                            }
+                            else if (matName.Contains("vindicta_head", StringComparison.OrdinalIgnoreCase))
+                            {
+                                display = "Limbs / Hands & Legs (vindicta_head)";
+                            }
+                            else if (string.Equals(clean, formattedMat, StringComparison.OrdinalIgnoreCase))
                             {
                                 display = (s == 0) ? clean : $"{clean} [{s}]";
                             }
@@ -173,9 +199,10 @@ namespace DeadlockPlayground.Painter
                             Skeleton = mi.Skeleton,
                             Transform = mi.Transform,
                             Layers = mi.Layers,
-                            Visible = true
+                            Visible = isCompositeVisible
                         };
                         newMi.SetMeta("OriginalVmatPath", matName ?? "");
+                        newMi.SetMeta("ParentCompositeMesh", mi);
                         if (origMat != null)
                         {
                             newMi.SetMeta("OriginalMaterial_0", origMat);
@@ -183,6 +210,7 @@ namespace DeadlockPlayground.Painter
 
                         mi.GetParent()?.AddChild(newMi);
                         _generatedSubmeshNodes.Add(newMi);
+                        genArray.Add(newMi);
 
                         var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, surfaceRawName, matName);
 
@@ -744,6 +772,10 @@ namespace DeadlockPlayground.Painter
                     if (orig.HasMeta("IsHiddenComposite"))
                     {
                         orig.RemoveMeta("IsHiddenComposite");
+                    }
+                    if (orig.HasMeta("GeneratedSubmeshes"))
+                    {
+                        orig.RemoveMeta("GeneratedSubmeshes");
                     }
                 }
             }

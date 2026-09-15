@@ -145,6 +145,12 @@ public partial class PaintTabUI : VBoxContainer
         _lblHeroName = GetNodeOrNull<Label>("HeaderCard/VBox/HBoxHeader/HeroNameLabel");
         _btnResetPose = GetNodeOrNull<Button>("HeaderCard/VBox/HBoxHeader/BtnResetPose");
         _optTargetMesh = GetNodeOrNull<OptionButton>("HeaderCard/VBox/HBoxTarget/OptTargetMesh");
+        if (_optTargetMesh != null)
+        {
+            _optTargetMesh.FitToLongestItem = false;
+            _optTargetMesh.ClipText = true;
+            _optTargetMesh.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        }
         _optResolution = GetNodeOrNull<OptionButton>("HeaderCard/VBox/HBoxRes/ResolutionOption");
         _lblActiveMesh = GetNodeOrNull<Label>("HeaderCard/VBox/ActiveMeshLabel");
 
@@ -573,20 +579,31 @@ public partial class PaintTabUI : VBoxContainer
             soloBtn.Pressed += () => _meshHierarchy.ToggleSolo(localSub);
 
             int charLen = submesh.DisplayName?.Length ?? 0;
-            float minHeight = charLen > 42 ? 58f : (charLen > 20 ? 42f : 30f);
+            float minHeight = charLen > 40 ? 52f : (charLen > 22 ? 38f : 28f);
+
+            var btnWrapper = new Control
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.Fill,
+                CustomMinimumSize = new Vector2(0, minHeight),
+                ClipContents = true
+            };
 
             var selectBtn = new Button
             {
                 Text = submesh.DisplayName,
-                SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                SizeFlagsVertical = SizeFlags.Fill,
                 Alignment = HorizontalAlignment.Left,
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
-                ClipText = false,
-                CustomMinimumSize = new Vector2(1, minHeight),
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 TooltipText = submesh.DisplayName
             };
-            selectBtn.AddThemeFontSizeOverride("font_size", 12);
+            selectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            selectBtn.OffsetLeft = 0;
+            selectBtn.OffsetTop = 0;
+            selectBtn.OffsetRight = 0;
+            selectBtn.OffsetBottom = 0;
+            selectBtn.AddThemeFontSizeOverride("font_size", 11);
             if (_meshHierarchy.ActiveTarget == submesh)
             {
                 selectBtn.Modulate = new Color(1.0f, 0.85f, 0.4f, 1.0f);
@@ -597,10 +614,12 @@ public partial class PaintTabUI : VBoxContainer
                 RefreshSubmeshListUI();
             };
 
+            btnWrapper.AddChild(selectBtn);
+
             row.AddChild(visCheck);
             row.AddChild(soloBtn);
-            row.AddChild(selectBtn);
-
+            row.AddChild(btnWrapper);
+            
             _submeshListContainer.AddChild(row);
         }
     }
@@ -629,13 +648,27 @@ public partial class PaintTabUI : VBoxContainer
             };
             visCheck.Toggled += (vis) => _layerManager.SetLayerVisibility(layerIndex, vis);
 
+            var btnWrapper = new Control
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.Fill,
+                CustomMinimumSize = new Vector2(0, 26),
+                ClipContents = true
+            };
+
             var selectBtn = new Button
             {
                 Text = layer.IsLocked ? $"🔒 {layer.Name}" : layer.Name,
-                SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 Alignment = HorizontalAlignment.Left,
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 TooltipText = layer.Name
             };
+            selectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            selectBtn.OffsetLeft = 0;
+            selectBtn.OffsetTop = 0;
+            selectBtn.OffsetRight = 0;
+            selectBtn.OffsetBottom = 0;
 
             if (_layerManager.ActiveLayerIndex == layerIndex)
             {
@@ -643,6 +676,7 @@ public partial class PaintTabUI : VBoxContainer
             }
 
             selectBtn.Pressed += () => _layerManager.SelectLayer(layerIndex);
+            btnWrapper.AddChild(selectBtn);
 
             var renameBtn = new Button
             {
@@ -656,7 +690,7 @@ public partial class PaintTabUI : VBoxContainer
             renameBtn.Pressed += () => ShowRenameLayerDialog(capturedIdx);
 
             row.AddChild(visCheck);
-            row.AddChild(selectBtn);
+            row.AddChild(btnWrapper);
             row.AddChild(renameBtn);
 
             _layersListContainer.AddChild(row);

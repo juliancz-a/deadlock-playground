@@ -171,8 +171,14 @@ public partial class CharacterTabUI : VBoxContainer
             string rawName = mi.Name.ToString();
             string lowerName = rawName.ToLowerInvariant();
 
+            // Skip internal split surfaces created by HeroMeshHierarchy so only high-level submeshes appear
+            if (mi.HasMeta("ParentCompositeMesh") || lowerName.Contains("_surf_"))
+            {
+                return;
+            }
+
             // Skip bone markers and gizmos
-            if (!lowerName.Contains("marker") && !lowerName.Contains("gizmo"))
+            if (!lowerName.Contains("marker") && !lowerName.Contains("gizmo") && !lowerName.Contains("preview"))
             {
                 bool isAcc = lowerName.Contains("acc") ||
                              lowerName.Contains("prop") ||
@@ -215,10 +221,24 @@ public partial class CharacterTabUI : VBoxContainer
 
         foreach (var item in _submeshes)
         {
+            bool isInitiallyVisible = item.Mesh.Visible;
+            if (item.Mesh.HasMeta("UserVisibility"))
+            {
+                isInitiallyVisible = item.Mesh.GetMeta("UserVisibility").AsBool();
+            }
+            else if (item.Mesh.HasMeta("GeneratedSubmeshes"))
+            {
+                var gen = item.Mesh.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                if (gen.Count > 0 && gen[0] != null && GodotObject.IsInstanceValid(gen[0]))
+                {
+                    isInitiallyVisible = gen[0].Visible;
+                }
+            }
+
             var cb = new CheckBox
             {
                 Text = item.DisplayName,
-                ButtonPressed = item.Mesh.Visible,
+                ButtonPressed = isInitiallyVisible,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
 
@@ -228,6 +248,19 @@ public partial class CharacterTabUI : VBoxContainer
                 if (localItem.Mesh != null && GodotObject.IsInstanceValid(localItem.Mesh))
                 {
                     localItem.Mesh.Visible = pressed;
+                    localItem.Mesh.SetMeta("UserVisibility", pressed);
+
+                    if (localItem.Mesh.HasMeta("GeneratedSubmeshes"))
+                    {
+                        var genList = localItem.Mesh.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                        foreach (var sub in genList)
+                        {
+                            if (sub != null && GodotObject.IsInstanceValid(sub))
+                            {
+                                sub.Visible = pressed;
+                            }
+                        }
+                    }
                 }
             };
 
@@ -243,6 +276,20 @@ public partial class CharacterTabUI : VBoxContainer
             if (item.Mesh != null && GodotObject.IsInstanceValid(item.Mesh))
             {
                 item.Mesh.Visible = true;
+                item.Mesh.SetMeta("UserVisibility", true);
+
+                if (item.Mesh.HasMeta("GeneratedSubmeshes"))
+                {
+                    var genList = item.Mesh.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                    foreach (var sub in genList)
+                    {
+                        if (sub != null && GodotObject.IsInstanceValid(sub))
+                        {
+                            sub.Visible = true;
+                        }
+                    }
+                }
+
                 if (item.CheckBoxWidget != null) item.CheckBoxWidget.ButtonPressed = true;
             }
         }
@@ -256,6 +303,20 @@ public partial class CharacterTabUI : VBoxContainer
             {
                 bool shouldBeVisible = !item.IsAccessory;
                 item.Mesh.Visible = shouldBeVisible;
+                item.Mesh.SetMeta("UserVisibility", shouldBeVisible);
+
+                if (item.Mesh.HasMeta("GeneratedSubmeshes"))
+                {
+                    var genList = item.Mesh.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                    foreach (var sub in genList)
+                    {
+                        if (sub != null && GodotObject.IsInstanceValid(sub))
+                        {
+                            sub.Visible = shouldBeVisible;
+                        }
+                    }
+                }
+
                 if (item.CheckBoxWidget != null) item.CheckBoxWidget.ButtonPressed = shouldBeVisible;
             }
         }

@@ -115,19 +115,20 @@ public static class Source2MaterialHelper
         {
             createdMat = GlassMaterialBuilder.Build(package, matResource, vmatPath, glassParams);
         }
-        // 4. Archetype B: Dynamic procedural FX (Billy jitter, Infernus flame ribbons, Vindicta aura, scrolling UVs)
-        else if (DynamicFxMaterialBuilder.IsApplicable(matResource, vmatPath))
-        {
-            createdMat = DynamicFxMaterialBuilder.Build(package, matResource, vmatPath);
-        }
-        // 5. Archetype C: Vertex-colored head & hair PBR (Wraith head, Mirage turban/hair)
         else
         {
             var albedoParams = VmatColorExtractor.ExtractAlbedo(matResource, vmatPath, glassParams.IsGlass, glassParams.Opacity);
             bool isFur = vmatLower.Contains("fur") || vmatLower.Contains("shawl") || (meshName != null && (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) || meshName.Contains("shawl", StringComparison.OrdinalIgnoreCase)));
+
+            // 4. Archetype B: Vertex-colored head & hair PBR (Wraith head, Mirage turban/hair, Vindicta limbs)
             if (VertexColorPbrMaterialBuilder.IsApplicable(matResource, vmatPath, albedoParams.ColorTexturePath, isFur))
             {
                 createdMat = VertexColorPbrMaterialBuilder.Build(package, matResource, vmatPath);
+            }
+            // 5. Archetype C: Dynamic procedural FX (Billy jitter, Infernus flame ribbons, Vindicta aura, scrolling UVs)
+            else if (DynamicFxMaterialBuilder.IsApplicable(matResource, vmatPath))
+            {
+                createdMat = DynamicFxMaterialBuilder.Build(package, matResource, vmatPath);
             }
             else
             {
