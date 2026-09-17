@@ -12,7 +12,8 @@ namespace DeadlockPlayground.Painter
         BucketFill = 3,
         Decal = 4,
         Text = 5,
-        SelectSubmesh = 6
+        SelectSubmesh = 6,
+        MagicWand = 7
     }
 
     public enum BrushShapeType
@@ -89,6 +90,9 @@ namespace DeadlockPlayground.Painter
             get => _decalStamper;
             set => _decalStamper = value;
         }
+
+        private MagicWandTool _magicWandTool = new();
+        public MagicWandTool MagicWandTool => _magicWandTool;
 
         private TextProjector _textProjector;
         public TextProjector TextProjector
@@ -191,6 +195,11 @@ namespace DeadlockPlayground.Painter
             EnsureCameraBrush();
             GizmoDisplaySettings.OnSettingsChanged += ApplyOutlineSettings;
             ApplyOutlineSettings();
+
+            if (_magicWandTool != null)
+            {
+                _magicWandTool.MaskUpdated += (hasMask) => SyncSelectionMaskState();
+            }
         }
 
         public void EnsureCameraBrush()
@@ -375,11 +384,24 @@ namespace DeadlockPlayground.Painter
             _cameraBrush.Set("min_bleed", minBleed);
             _cameraBrush.Set("max_bleed", maxBleed);
             _cameraBrush.Set("resolution", brushRes);
+
+            bool useMask = _magicWandTool != null && _magicWandTool.HasSelection && _magicWandTool.UseSelectionMask;
+            _cameraBrush.Set("use_selection_mask", useMask);
+            if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
+            {
+                _cameraBrush.Set("selection_mask_rid", _magicWandTool.SelectionMaskRid);
+            }
+
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
                 _mirrorCameraBrush.Set("min_bleed", minBleed);
                 _mirrorCameraBrush.Set("max_bleed", maxBleed);
                 _mirrorCameraBrush.Set("resolution", brushRes);
+                _mirrorCameraBrush.Set("use_selection_mask", useMask);
+                if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
+                {
+                    _mirrorCameraBrush.Set("selection_mask_rid", _magicWandTool.SelectionMaskRid);
+                }
             }
         }
 
@@ -402,7 +424,13 @@ namespace DeadlockPlayground.Painter
             bool isLeftDown = Input.IsMouseButtonPressed(MouseButton.Left);
 
             bool canPaintLayer = _layerManager?.ActiveLayer != null && !_layerManager.ActiveLayer.IsLocked && _layerManager.ActiveLayer.IsVisible;
-            bool isPainting = IsPaintingActive && canPaintLayer && isLeftDown && _lastHit.Hit && ToolMode != BrushToolMode.Eyedropper && ToolMode != BrushToolMode.BucketFill && ToolMode != BrushToolMode.Decal && ToolMode != BrushToolMode.Text && ToolMode != BrushToolMode.SelectSubmesh;
+            bool isPainting = IsPaintingActive && canPaintLayer && isLeftDown && _lastHit.Hit 
+                && ToolMode != BrushToolMode.Eyedropper 
+                && ToolMode != BrushToolMode.BucketFill 
+                && ToolMode != BrushToolMode.Decal 
+                && ToolMode != BrushToolMode.Text 
+                && ToolMode != BrushToolMode.SelectSubmesh
+                && ToolMode != BrushToolMode.MagicWand;
 
             if (isLeftDown)
             {
@@ -428,19 +456,63 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.BucketFill)
                 {
-                    if (_lastHit.Hit)
-                    {
-                        _layerManager?.FillSubmesh(_currentMesh, BrushColor);
-                    }
-                    else if (camera != null)
+                    if (camera != null)
                     {
                         Vector2 mousePos = GetViewportMousePosition();
                         Vector3 origin = camera.ProjectRayOrigin(mousePos);
                         Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
-                        if (RaycastAllSubmeshes(origin, dir, out var clickedSub, out _))
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        if (hit.Hit)
                         {
-                            MeshHierarchy?.SelectTarget(clickedSub, clickedSub.SurfaceIndex);
-                            _layerManager?.FillSubmesh(clickedSub.Mesh, BrushColor);
+                            _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool);
+                        }
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        {
+                            MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool);
+                        }
+                    }
+                }
+                else if (ToolMode == BrushToolMode.MagicWand)
+                {
+                    if (camera != null)
+                    {
+                        Vector2 mousePos = GetViewportMousePosition();
+                        Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                        Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+
+                        MagicWandCombineMode combineMode = MagicWandCombineMode.Replace;
+                        if (Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
+                        else if (Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
+
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        if (hit.Hit)
+                        {
+                            ExecuteMagicWandSelection(hit, combineMode);
+                        }
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        {
+                            MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                            ExecuteMagicWandSelection(otherHit, combineMode);
+                        }
+                    }
+                }
+                else if (ToolMode == BrushToolMode.Eyedropper)
+                {
+                    if (camera != null)
+                    {
+                        Vector2 mousePos = GetViewportMousePosition();
+                        Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                        Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        if (hit.Hit)
+                        {
+                            SampleColorAtUV(hit.HitUV, hit.HitSurfaceIndex);
+                        }
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        {
+                            MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                            SampleColorAtUV(otherHit.HitUV, otherHit.HitSurfaceIndex);
                         }
                     }
                 }
@@ -863,9 +935,16 @@ namespace DeadlockPlayground.Painter
             Vector3 rayOrigin = camera.ProjectRayOrigin(localMouse);
             Vector3 rayDir = camera.ProjectRayNormal(localMouse);
 
-            if (ToolMode == BrushToolMode.SelectSubmesh)
+            if (ToolMode == BrushToolMode.SelectSubmesh || ToolMode == BrushToolMode.MagicWand || ToolMode == BrushToolMode.BucketFill || ToolMode == BrushToolMode.Eyedropper)
             {
-                if (RaycastAllSubmeshes(rayOrigin, rayDir, out var hoverSub, out var allHit))
+                var curHit = (_currentMesh != null)
+                    ? _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: false)
+                    : default;
+                if (curHit.Hit)
+                {
+                    _lastHit = curHit;
+                }
+                else if (RaycastAllSubmeshes(rayOrigin, rayDir, out var hoverSub, out var allHit))
                 {
                     _lastHit = allHit;
                 }
@@ -954,6 +1033,14 @@ namespace DeadlockPlayground.Painter
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
                     if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.3f, 0.8f, 1.0f, 0.95f);
+                }
+                else if (ToolMode == BrushToolMode.MagicWand)
+                {
+                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
+                    if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
+                    if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                    if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.85f, 0.4f, 1.0f, 0.95f);
                 }
                 else if (ToolMode == BrushToolMode.Decal)
                 {
@@ -1156,7 +1243,10 @@ namespace DeadlockPlayground.Painter
 
             if (@event is InputEventMouseButton mouseBtn && mouseBtn.ButtonIndex == MouseButton.Left && mouseBtn.Pressed)
             {
-                if (mouseBtn.AltPressed || ToolMode == BrushToolMode.SelectSubmesh)
+                if (_isActionClickDown) return;
+                _isActionClickDown = true;
+
+                if ((mouseBtn.AltPressed && ToolMode != BrushToolMode.MagicWand) || ToolMode == BrushToolMode.SelectSubmesh)
                 {
                     Vector2 pos = GetViewportMousePosition();
                     var camera = _worldViewport?.GetCamera3D() ?? _camera;
@@ -1194,16 +1284,43 @@ namespace DeadlockPlayground.Painter
                     {
                         Vector3 origin = camera.ProjectRayOrigin(pos);
                         Vector3 dir = camera.ProjectRayNormal(pos).Normalized();
+                        var hit = _currentMesh != null ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        if (hit.Hit)
+                        {
+                            _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool);
+                            GetViewport()?.SetInputAsHandled();
+                        }
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        {
+                            MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool);
+                            GetViewport()?.SetInputAsHandled();
+                        }
+                    }
+                }
+                else if (ToolMode == BrushToolMode.MagicWand)
+                {
+                    Vector2 pos = GetViewportMousePosition();
+                    var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                    if (camera != null)
+                    {
+                        Vector3 origin = camera.ProjectRayOrigin(pos);
+                        Vector3 dir = camera.ProjectRayNormal(pos).Normalized();
+
+                        MagicWandCombineMode combineMode = MagicWandCombineMode.Replace;
+                        if (mouseBtn.ShiftPressed || Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
+                        else if (mouseBtn.AltPressed || Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
+
                         var hit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false);
                         if (hit.Hit)
                         {
-                            _layerManager?.FillSubmesh(_currentMesh, BrushColor);
+                            ExecuteMagicWandSelection(hit, combineMode);
                             GetViewport()?.SetInputAsHandled();
                         }
-                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out _))
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
                         {
                             MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
-                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor);
+                            ExecuteMagicWandSelection(otherHit, combineMode);
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
@@ -1246,6 +1363,115 @@ namespace DeadlockPlayground.Painter
         public bool ProcessStrokeAtScreenPosition(Vector2 localPos)
         {
             return true;
+        }
+
+        public void ExecuteMagicWandSelection(RaycastHitResult hit, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
+        {
+            if (_currentMesh == null || _layerManager == null || _magicWandTool == null) return;
+
+            // Ensure base atlas buffer is populated with submesh textures
+            _layerManager.RebuildBaseAtlasBuffer();
+
+            Texture2D baseTex = null;
+            int sCount = _currentMesh.Mesh != null ? _currentMesh.Mesh.GetSurfaceCount() : 1;
+            int surfaceIdx = Mathf.Clamp(hit.HitSurfaceIndex, 0, sCount - 1);
+
+            var origMat = _currentMesh.GetSurfaceOverrideMaterial(surfaceIdx)
+                       ?? (_currentMesh.Mesh != null ? _currentMesh.Mesh.SurfaceGetMaterial(surfaceIdx) : null)
+                       ?? _currentMesh.MaterialOverride;
+
+            if (origMat != null)
+            {
+                baseTex = SkinLayerManager.ExtractBaseTexture(origMat);
+            }
+
+            Rect2 submeshRect = new Rect2(0, 0, 1, 1);
+            var overlayMat = _currentMesh.MaterialOverlay as ShaderMaterial;
+            if (overlayMat != null)
+            {
+                var posVal = overlayMat.GetShaderParameter("position_in_atlas");
+                var szVal = overlayMat.GetShaderParameter("size_in_atlas");
+                if (posVal.VariantType == Variant.Type.Vector2 && szVal.VariantType == Variant.Type.Vector2)
+                {
+                    submeshRect = new Rect2(posVal.AsVector2(), szVal.AsVector2());
+                }
+            }
+
+            Image img = null;
+            if (baseTex != null)
+            {
+                img = baseTex.GetImage();
+                if (img != null && img.IsCompressed()) img.Decompress();
+            }
+            if (img == null)
+            {
+                var fullAtlas = _layerManager.BakeCompositeImage(surfaceIdx);
+                if (fullAtlas != null)
+                {
+                    int rX = Mathf.Clamp((int)(submeshRect.Position.X * fullAtlas.GetWidth()), 0, fullAtlas.GetWidth() - 1);
+                    int rY = Mathf.Clamp((int)(submeshRect.Position.Y * fullAtlas.GetHeight()), 0, fullAtlas.GetHeight() - 1);
+                    int rW = Mathf.Clamp((int)(submeshRect.Size.X * fullAtlas.GetWidth()), 1, fullAtlas.GetWidth() - rX);
+                    int rH = Mathf.Clamp((int)(submeshRect.Size.Y * fullAtlas.GetHeight()), 1, fullAtlas.GetHeight() - rY);
+                    img = fullAtlas.GetRegion(new Rect2I(rX, rY, rW, rH));
+                }
+            }
+
+            Color sampledColor = Colors.White;
+            if (img != null)
+            {
+                int px = Mathf.Clamp((int)(hit.HitUV.X * img.GetWidth()), 0, img.GetWidth() - 1);
+                int py = Mathf.Clamp((int)(hit.HitUV.Y * img.GetHeight()), 0, img.GetHeight() - 1);
+                sampledColor = img.GetPixel(px, py);
+            }
+
+            Rid baseTextureRid = new();
+            int atlasSize = _layerManager.CanvasSize.X;
+            if (_layerManager.AtlasManager != null && GodotObject.IsInstanceValid(_layerManager.AtlasManager))
+            {
+                var ridVal = _layerManager.AtlasManager.Get("base_texture_rid");
+                if (ridVal.VariantType == Variant.Type.Rid)
+                {
+                    baseTextureRid = ridVal.AsRid();
+                }
+                var sizeVal = _layerManager.AtlasManager.Get("atlas_size");
+                if (sizeVal.VariantType == Variant.Type.Int)
+                {
+                    atlasSize = (int)sizeVal;
+                }
+            }
+
+            if (_magicWandTool.GenerateMask(sampledColor, hit.HitUV, img, submeshRect, baseTextureRid, atlasSize, combineMode))
+            {
+                SyncSelectionMaskState();
+            }
+        }
+
+        public void SyncSelectionMaskState()
+        {
+            if (_magicWandTool == null) return;
+
+            bool hasMask = _magicWandTool.HasSelection && _magicWandTool.UseSelectionMask;
+            Rid maskRid = hasMask ? _magicWandTool.SelectionMaskRid : new Rid();
+
+            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+            {
+                _cameraBrush.Set("selection_mask_rid", maskRid);
+                _cameraBrush.Set("use_selection_mask", hasMask);
+                _cameraBrush.Call("get_atlas_textures");
+            }
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            {
+                _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
+                _mirrorCameraBrush.Set("use_selection_mask", hasMask);
+                _mirrorCameraBrush.Call("get_atlas_textures");
+            }
+
+            if (_layerManager != null)
+            {
+                _layerManager.SetSelectionMaskOverlay(hasMask ? _magicWandTool.MaskTextureResource : null, hasMask);
+            }
+
+            _brushPalette?.UpdateWandUI();
         }
 
         private void SampleColorAtUV(Vector2 uv, int surfaceIndex)

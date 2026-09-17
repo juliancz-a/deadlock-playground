@@ -229,6 +229,14 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 	base_uniform.add_id(valid_base_rid)
 	uniforms.append(base_uniform)
 
+	# Binding 9: selection mask image for stencil masking
+	var mask_uniform = RDUniform.new()
+	mask_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	mask_uniform.binding = 9
+	var valid_mask_rid: RID = camera_brush.selection_mask_rid if (camera_brush and camera_brush.selection_mask_rid.is_valid() and rd.texture_is_valid(camera_brush.selection_mask_rid)) else fallback_rid
+	mask_uniform.add_id(valid_mask_rid)
+	uniforms.append(mask_uniform)
+
 	atlas_texture_uniform_set = RID()
 
 	# Create uniform set using UniformSetCacheRD to manage lifecycle across canvas resizes
@@ -285,7 +293,7 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 			float(camera_brush.max_bleed),
 			float(1.0 if (camera_brush.is_erase or camera_brush.color.a < 0.0) else 0.0),
 			float(camera_brush.blend_mode),
-			float(0)
+			float(1.0 if camera_brush.use_selection_mask else 0.0)
 		])
 
 

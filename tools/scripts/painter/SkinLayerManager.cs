@@ -86,7 +86,10 @@ namespace DeadlockPlayground.Painter
                 return;
             }
 
-            if (_currentHero == null || !GodotObject.IsInstanceValid(_currentHero)) return;
+            if (_currentHero == null || !GodotObject.IsInstanceValid(_currentHero))
+            {
+                return;
+            }
 
             var atlasScript = GD.Load<GDScript>("res://addons/gpu_texture_painter/manager/overlay_atlas_manager.gd");
             if (atlasScript == null)
@@ -98,7 +101,18 @@ namespace DeadlockPlayground.Painter
             var shader = GD.Load<Shader>("res://shaders/hero_painter_overlay.gdshader")
                       ?? GD.Load<Shader>("res://assets/shaders/painter/hero_painter_overlay.gdshader");
 
+            if (shader == null)
+            {
+                GD.PrintErr("[SkinLayerManager] Critical Error: hero_painter_overlay.gdshader not found!");
+            }
+
             _atlasManager = (Node)atlasScript.New();
+            if (_atlasManager == null)
+            {
+                GD.PrintErr("[SkinLayerManager] Failed to instantiate OverlayAtlasManager.");
+                return;
+            }
+
             _atlasManager.Name = "ActiveOverlayAtlasManager";
             _atlasManager.Set("atlas_size", (int)CanvasSize.X);
             if (shader != null)
@@ -110,9 +124,16 @@ namespace DeadlockPlayground.Painter
             _currentHero.AddChild(_atlasManager);
 
             // Execute atlas packing and material_overlay application
-            _atlasManager.Call("apply");
-            ApplyOverlayParametersToMeshes();
-            GD.Print($"[SkinLayerManager] Initialized and applied OverlayAtlasManager on {_currentHero.Name}!");
+            try
+            {
+                _atlasManager.Call("apply");
+                ApplyOverlayParametersToMeshes();
+                GD.Print($"[SkinLayerManager] Initialized and applied OverlayAtlasManager on {_currentHero.Name}!");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[SkinLayerManager] Exception executing apply on OverlayAtlasManager: {ex.Message}");
+            }
         }
 
         public void ClearAtlasManager()
@@ -144,7 +165,7 @@ namespace DeadlockPlayground.Painter
                 layer.GpuData = new byte[newBufferLen];
             }
 
-            // Immediately purge previous resolution undo/redo snapshots to free 100s of MBs of RAM
+            // Purge previous undo/redo snapshots
             _undoStack.Clear();
             _redoStack.Clear();
             _compositeBuffer = null;
@@ -191,7 +212,6 @@ namespace DeadlockPlayground.Painter
                 InitializeOverlayAtlas();
             }
 
-            // Ensure at least one layer exists
             if (_layers.Count == 0)
             {
                 AddNewLayer("Paint Layer 1");
@@ -201,8 +221,6 @@ namespace DeadlockPlayground.Painter
             NotifyStackChanged();
             NotifyLayerSelected(_activeLayerIndex);
         }
-
-
 
         public void EnsureMaterialBinding(MeshInstance3D activeTargetMesh, int surfaceIndex = 0)
         {
@@ -216,6 +234,8 @@ namespace DeadlockPlayground.Painter
 
         private static void ConfigurePbrParameters(ShaderMaterial paintMat, Material origMat)
         {
+            if (paintMat == null || origMat == null) return;
+
             if (origMat is StandardMaterial3D stdMat)
             {
                 if (stdMat.NormalTexture != null)
@@ -255,15 +275,20 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        private static Texture2D ExtractBaseTexture(Material mat)
+        public static Texture2D ExtractBaseTexture(Material mat)
         {
+            if (mat == null) return null;
+
             if (mat is StandardMaterial3D stdMat)
             {
                 return stdMat.AlbedoTexture;
             }
             if (mat is ShaderMaterial sm)
             {
-                string[] candidateParams = { "g_tColor", "g_tColor1", "g_tColorA", "g_tColor0", "g_tColor2", "g_tColorB", "u_texture_color", "texture_albedo", "albedo_texture", "g_tNprTransmissiveColor" };
+                string[] candidateParams = { 
+                    "g_tColor", "g_tColor1", "g_tColorA", "g_tColor0", "g_tColor2", "g_tColorB", 
+                    "u_texture_color", "texture_albedo", "albedo_texture", "color_map", "g_tNprTransmissiveColor" 
+                };
                 foreach (var param in candidateParams)
                 {
                     var paramTex = sm.GetShaderParameter(param);
@@ -435,7 +460,6 @@ namespace DeadlockPlayground.Painter
             byte[] data = rd.TextureGetData(rid, 0);
             if (data == null || data.Length == 0) return;
 
-            // TextureGetData already returns a brand new managed byte array; avoid cloning to prevent duplicate LOH memory
             _undoStack.Add(data);
             if (_undoStack.Count > MaxUndoSnapshots + 1)
             {
@@ -562,6 +586,16 @@ namespace DeadlockPlayground.Painter
             NotifyStackChanged();
         }
 
+        private Texture2D _selectionMaskTexture;
+        private bool _showSelectionMask = false;
+
+        public void SetSelectionMaskOverlay(Texture2D maskTexture, bool show)
+        {
+            _selectionMaskTexture = maskTexture;
+            _showSelectionMask = show;
+            ApplyOverlayParametersToMeshes();
+        }
+
         public void ApplyOverlayParametersToMeshes()
         {
             void ConfigureMeshOverlay(MeshInstance3D mesh)
@@ -570,10 +604,21 @@ namespace DeadlockPlayground.Painter
                 var mat = mesh.MaterialOverlay as ShaderMaterial;
                 if (mat != null)
                 {
-                    mat.SetShaderParameter("layer_opacity", 1.0f);
+                    mat.SetShaderParameter("layer_opacity", ActiveLayer?.Opacity ?? 1.0f);
                     if (_targetMesh != null)
                     {
                         mat.SetShaderParameter("is_paint_target", mesh == _targetMesh);
+                    }
+
+                    if (_showSelectionMask && _selectionMaskTexture != null)
+                    {
+                        mat.SetShaderParameter("selection_mask", _selectionMaskTexture);
+                        mat.SetShaderParameter("show_selection_mask", true);
+                    }
+                    else
+                    {
+                        mat.SetShaderParameter("show_selection_mask", false);
+                        mat.SetShaderParameter("selection_mask", (Texture2D)null);
                     }
 
                     Texture2D baseTex = null;
@@ -633,13 +678,19 @@ namespace DeadlockPlayground.Painter
         }
 
         // --- Submesh Bucket Fill ---
-        public void FillCurrentSubmesh(Color color)
+        public void FillCurrentSubmesh(Color color, Vector2? hitUv = null, MagicWandTool wandTool = null)
         {
-            FillSubmesh(_targetMesh, color);
+            FillSubmesh(_targetMesh, color, hitUv, wandTool);
         }
 
-        public void FillSubmesh(MeshInstance3D mesh, Color color)
+        public void FillSubmesh(MeshInstance3D mesh, Color color, Vector2? hitUv = null, MagicWandTool wandTool = null)
         {
+            if (_targetMesh != null && mesh != _targetMesh)
+            {
+                GD.Print("[SkinLayerManager] Ignoring fill: mesh is not the currently selected target mesh.");
+                return;
+            }
+
             if (mesh == null || !GodotObject.IsInstanceValid(mesh) || _atlasManager == null || !GodotObject.IsInstanceValid(_atlasManager))
             {
                 GD.PrintErr("[SkinLayerManager] Cannot fill submesh: invalid mesh or atlas manager.");
@@ -685,6 +736,8 @@ namespace DeadlockPlayground.Painter
             Half hB = (Half)linearCol.B;
             Half hA = (Half)1.0f;
 
+            bool useMask = wandTool != null && wandTool.HasSelection && wandTool.UseSelectionMask;
+
             if (ActiveLayer != null)
             {
                 int bufferLen = atlasSize * atlasSize * 8;
@@ -692,21 +745,48 @@ namespace DeadlockPlayground.Painter
                 {
                     ActiveLayer.GpuData = new byte[bufferLen];
                 }
-                unsafe
+
+                if (useMask)
                 {
-                    fixed (byte* pDst = ActiveLayer.GpuData)
+                    unsafe
                     {
-                        Half* hLayer = (Half*)pDst;
-                        for (int y = startY; y < startY + height; y++)
+                        fixed (byte* pDst = ActiveLayer.GpuData)
                         {
-                            int rowOffset = y * atlasSize * 4;
-                            for (int x = startX; x < startX + width; x++)
+                            Half* hLayer = (Half*)pDst;
+                            for (int y = startY; y < startY + height; y++)
                             {
-                                int idx = rowOffset + x * 4;
-                                hLayer[idx] = hR;
-                                hLayer[idx + 1] = hG;
-                                hLayer[idx + 2] = hB;
-                                hLayer[idx + 3] = hA;
+                                int rowOffset = y * atlasSize * 4;
+                                for (int x = startX; x < startX + width; x++)
+                                {
+                                    if (!wandTool.IsPixelSelected(x, y)) continue;
+                                    int idx = rowOffset + x * 4;
+                                    hLayer[idx] = hR;
+                                    hLayer[idx + 1] = hG;
+                                    hLayer[idx + 2] = hB;
+                                    hLayer[idx + 3] = hA;
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    unsafe
+                    {
+                        fixed (byte* pDst = ActiveLayer.GpuData)
+                        {
+                            Half* hLayer = (Half*)pDst;
+                            for (int y = startY; y < startY + height; y++)
+                            {
+                                int rowOffset = y * atlasSize * 4;
+                                for (int x = startX; x < startX + width; x++)
+                                {
+                                    int idx = rowOffset + x * 4;
+                                    hLayer[idx] = hR;
+                                    hLayer[idx + 1] = hG;
+                                    hLayer[idx + 2] = hB;
+                                    hLayer[idx + 3] = hA;
+                                }
                             }
                         }
                     }
@@ -717,7 +797,7 @@ namespace DeadlockPlayground.Painter
 
             MeshHierarchy?.MarkSubmeshDirty(mesh);
 
-            GD.Print($"[SkinLayerManager] Bucket filled submesh '{mesh.Name}' at ({startX},{startY}) {width}x{height} with {color.ToHtml()}");
+            GD.Print($"[SkinLayerManager] Bucket filled submesh '{mesh.Name}' with {color.ToHtml()} (UseMask={useMask}, HitUV={hitUv})");
         }
 
         public bool StampDecalToAtlas(Vector2 hitUv, Texture2D decalTexture, float rotationDeg, float scale)
@@ -943,7 +1023,6 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // Mark affected submeshes dirty based on modified pixel bounding box
             if (maxX >= 0 && MeshHierarchy != null)
             {
                 float normMinX = (float)minX / atlasWidth;
@@ -999,7 +1078,6 @@ namespace DeadlockPlayground.Painter
                 _baseAtlasBuffer = new byte[bufferLen];
             }
 
-            // Default to solid white (1.0f in Half floats) so areas without textures multiply to original color
             unsafe
             {
                 fixed (byte* pBase = _baseAtlasBuffer)
@@ -1090,7 +1168,6 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // Upload base buffer to GPU base_texture_rid for live compute stroke blending
             var rd = RenderingServer.GetRenderingDevice();
             if (_atlasManager != null && GodotObject.IsInstanceValid(_atlasManager) && rd != null)
             {
@@ -1164,7 +1241,6 @@ namespace DeadlockPlayground.Painter
 
                 for (int i = 0; i < pixelCount; i++)
                 {
-                    // Fast skip if source pixel is completely empty
                     if (uSrc[i] == 0) continue;
 
                     int hOffset = i * 4;
@@ -1177,7 +1253,6 @@ namespace DeadlockPlayground.Painter
 
                     if (uDst[i] == 0)
                     {
-                        // First layer at this pixel: blend with the base mesh
                         float bR = hBase != null ? (float)hBase[hOffset] : 1.0f;
                         float bG = hBase != null ? (float)hBase[hOffset + 1] : 1.0f;
                         float bB = hBase != null ? (float)hBase[hOffset + 2] : 1.0f;
@@ -1202,6 +1277,24 @@ namespace DeadlockPlayground.Painter
                             outG = bG < 0.5f ? (2.0f * bG * srcG) : (1.0f - 2.0f * (1.0f - bG) * (1.0f - srcG));
                             outB = bB < 0.5f ? (2.0f * bB * srcB) : (1.0f - 2.0f * (1.0f - bB) * (1.0f - srcB));
                         }
+                        else if (mode == LayerBlendMode.Darken)
+                        {
+                            outR = Mathf.Min(bR, srcR);
+                            outG = Mathf.Min(bG, srcG);
+                            outB = Mathf.Min(bB, srcB);
+                        }
+                        else if (mode == LayerBlendMode.Lighten)
+                        {
+                            outR = Mathf.Max(bR, srcR);
+                            outG = Mathf.Max(bG, srcG);
+                            outB = Mathf.Max(bB, srcB);
+                        }
+                        else if (mode == LayerBlendMode.ColorDodge)
+                        {
+                            outR = bR / Mathf.Max(1.0f - srcR, 0.001f);
+                            outG = bG / Mathf.Max(1.0f - srcG, 0.001f);
+                            outB = bB / Mathf.Max(1.0f - srcB, 0.001f);
+                        }
                         else
                         {
                             outR = srcR;
@@ -1216,7 +1309,6 @@ namespace DeadlockPlayground.Painter
                     }
                     else
                     {
-                        // Higher layer at this pixel: blend with underlying layers
                         float dstR = (float)hDst[hOffset];
                         float dstG = (float)hDst[hOffset + 1];
                         float dstB = (float)hDst[hOffset + 2];
@@ -1248,6 +1340,33 @@ namespace DeadlockPlayground.Painter
                             float blendR = dstR < 0.5f ? (2.0f * dstR * srcR) : (1.0f - 2.0f * (1.0f - dstR) * (1.0f - srcR));
                             float blendG = dstG < 0.5f ? (2.0f * dstG * srcG) : (1.0f - 2.0f * (1.0f - dstG) * (1.0f - srcG));
                             float blendB = dstB < 0.5f ? (2.0f * dstB * srcB) : (1.0f - 2.0f * (1.0f - dstB) * (1.0f - srcB));
+                            outR = Mathf.Lerp(dstR, blendR, srcA);
+                            outG = Mathf.Lerp(dstG, blendG, srcA);
+                            outB = Mathf.Lerp(dstB, blendB, srcA);
+                        }
+                        else if (mode == LayerBlendMode.Darken)
+                        {
+                            float blendR = Mathf.Min(dstR, srcR);
+                            float blendG = Mathf.Min(dstG, srcG);
+                            float blendB = Mathf.Min(dstB, srcB);
+                            outR = Mathf.Lerp(dstR, blendR, srcA);
+                            outG = Mathf.Lerp(dstG, blendG, srcA);
+                            outB = Mathf.Lerp(dstB, blendB, srcA);
+                        }
+                        else if (mode == LayerBlendMode.Lighten)
+                        {
+                            float blendR = Mathf.Max(dstR, srcR);
+                            float blendG = Mathf.Max(dstG, srcG);
+                            float blendB = Mathf.Max(dstB, srcB);
+                            outR = Mathf.Lerp(dstR, blendR, srcA);
+                            outG = Mathf.Lerp(dstG, blendG, srcA);
+                            outB = Mathf.Lerp(dstB, blendB, srcA);
+                        }
+                        else if (mode == LayerBlendMode.ColorDodge)
+                        {
+                            float blendR = dstR / Mathf.Max(1.0f - srcR, 0.001f);
+                            float blendG = dstG / Mathf.Max(1.0f - srcG, 0.001f);
+                            float blendB = dstB / Mathf.Max(1.0f - srcB, 0.001f);
                             outR = Mathf.Lerp(dstR, blendR, srcA);
                             outG = Mathf.Lerp(dstG, blendG, srcA);
                             outB = Mathf.Lerp(dstB, blendB, srcA);

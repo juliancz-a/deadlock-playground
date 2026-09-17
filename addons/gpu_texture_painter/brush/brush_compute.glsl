@@ -17,7 +17,7 @@ layout(push_constant, std430) uniform Params {
     float max_bleed;
     float is_erase;
     float blend_mode;
-    float pad3;
+    float use_selection_mask;
 } params;
 
 layout(rgba16f, set = 2, binding = 0) uniform restrict image2D overlay_texture_0;
@@ -29,6 +29,7 @@ layout(rgba16f, set = 2, binding = 5) uniform restrict image2D overlay_texture_5
 layout(rgba16f, set = 2, binding = 6) uniform restrict image2D overlay_texture_6;
 layout(rgba16f, set = 2, binding = 7) uniform restrict image2D overlay_texture_7;
 layout(rgba16f, set = 2, binding = 8) uniform restrict readonly image2D base_texture_0;
+layout(rgba16f, set = 2, binding = 9) uniform restrict readonly image2D selection_mask_image;
 
 
 // The code we want to execute in each invocation
@@ -77,10 +78,15 @@ void main() {
         for (int x = -bleed; x <= bleed; x++) { \
             ivec2 bleed_coords = overlay_texture_coords + ivec2(x, y); \
             if (bleed_coords.x < 0 || bleed_coords.y < 0 || bleed_coords.x >= tex_size.x || bleed_coords.y >= tex_size.y) continue; \
+            float mask_val = 1.0f; \
+            if (params.use_selection_mask > 0.5f) { \
+                mask_val = imageLoad(selection_mask_image, bleed_coords).r; \
+            } \
+            if (mask_val <= 0.001f) continue; \
             vec4 existing_color = imageLoad(tex, bleed_coords); \
             float exist_a = existing_color.a; \
             if (params.is_erase > 0.5f || params.brush_color.a < 0.0f) { \
-                float erase_amount = brush_shape_val * params.delta * abs(params.brush_color.a); \
+                float erase_amount = brush_shape_val * params.delta * abs(params.brush_color.a) * mask_val; \
                 float new_alpha = clamp(exist_a - erase_amount, 0.0f, 1.0f); \
                 imageStore(tex, bleed_coords, vec4(existing_color.rgb, new_alpha)); \
             } else { \
@@ -99,12 +105,19 @@ void main() {
                         vec3(1.0f) - 2.0f * (vec3(1.0f) - under_col) * (vec3(1.0f) - brush_color.rgb), \
                         step(vec3(0.5f), under_col) \
                     ); \
+                } else if (mode == 4) { \
+                    blended_brush_rgb = min(under_col, brush_color.rgb); \
+                } else if (mode == 5) { \
+                    blended_brush_rgb = max(under_col, brush_color.rgb); \
+                } else if (mode == 6) { \
+                    blended_brush_rgb = under_col / max(vec3(1.0f) - brush_color.rgb, vec3(0.001f)); \
                 } else { \
                     blended_brush_rgb = brush_color.rgb; \
                 } \
-                float out_alpha = clamp(brush_color.a + exist_a * (1.0f - brush_color.a), 0.0f, 1.0f); \
+                float stroke_alpha = brush_color.a * mask_val; \
+                float out_alpha = clamp(stroke_alpha + exist_a * (1.0f - stroke_alpha), 0.0f, 1.0f); \
                 vec3 out_color = (out_alpha > 0.0001f) ? \
-                    (blended_brush_rgb * brush_color.a + existing_color.rgb * exist_a * (1.0f - brush_color.a)) / out_alpha : \
+                    (blended_brush_rgb * stroke_alpha + existing_color.rgb * exist_a * (1.0f - stroke_alpha)) / out_alpha : \
                     vec3(blended_brush_rgb); \
                 imageStore(tex, bleed_coords, vec4(out_color, out_alpha)); \
             } \

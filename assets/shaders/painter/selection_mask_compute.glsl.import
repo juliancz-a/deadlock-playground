@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cc22hux4rpvni"
+path="res://.godot/imported/selection_mask_compute.glsl-405ec384cfcea0c51e3d89b9a6571983.res"
+
+[deps]
+
+source_file="res://assets/shaders/painter/selection_mask_compute.glsl"
+dest_files=["res://.godot/imported/selection_mask_compute.glsl-405ec384cfcea0c51e3d89b9a6571983.res"]
+
+[params]
+

@@ -2,7 +2,7 @@ shader_type canvas_item;
 render_mode blend_mix;
 
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
-uniform int u_blend_mode = 0; // 0: Normal, 1: Multiply, 2: Screen, 3: Overlay
+uniform int u_blend_mode = 0; // 0: Normal, 1: Multiply, 2: Screen, 3: Overlay, 4: Darken, 5: Lighten, 6: Color Dodge
 uniform float u_layer_opacity : hint_range(0.0, 1.0) = 1.0;
 
 void fragment() {
@@ -20,6 +20,12 @@ void fragment() {
             bottom.g < 0.5 ? (2.0 * bottom.g * top.g) : (1.0 - 2.0 * (1.0 - bottom.g) * (1.0 - top.g)),
             bottom.b < 0.5 ? (2.0 * bottom.b * top.b) : (1.0 - 2.0 * (1.0 - bottom.b) * (1.0 - top.b))
         );
+    } else if (u_blend_mode == 4) { // Darken
+        blended = min(bottom.rgb, top.rgb);
+    } else if (u_blend_mode == 5) { // Lighten
+        blended = max(bottom.rgb, top.rgb);
+    } else if (u_blend_mode == 6) { // Color Dodge
+        blended = bottom.rgb / max(vec3(1.0) - top.rgb, vec3(0.001));
     }
 
     float effective_alpha = top.a * u_layer_opacity;

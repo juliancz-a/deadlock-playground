@@ -167,6 +167,16 @@ public partial class ShadingTabUI : VBoxContainer
         }
 
         // Toon Events
+        UserSettings.ToonEnabledChanged += (enabled) =>
+        {
+            if (_checkToonEnable != null && _checkToonEnable.ButtonPressed != enabled)
+            {
+                _checkToonEnable.ButtonPressed = enabled;
+            }
+            _toonEnabled = enabled;
+            UpdateShaderVisibility();
+        };
+
         if (_checkToonEnable != null)
         {
             _checkToonEnable.Toggled += (pressed) =>

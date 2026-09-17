@@ -1,0 +1,14 @@
+[gd_scene format=3 uid="uid://c5t5q1s8k2p7y"]
+
+[ext_resource type="Script" uid="uid://dmh9r6pxv2y10" path="res://ui/scripts/components/KeybindsSettingsTabUI.cs" id="1_kb"]
+
+[node name="KeybindsSettingsTab" type="VBoxContainer" unique_id=198273641]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+script = ExtResource("1_kb")

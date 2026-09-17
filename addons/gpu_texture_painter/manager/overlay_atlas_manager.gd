@@ -268,7 +268,7 @@ func save_atlas_texture_to_file() -> void:
 		push_warning("OverlayAtlasManager: Texture saving is only available in the editor.")
 		return
 
-	# get image form RenderingDevice
+	# get image from RenderingDevice
 	var image := Image.create_from_data(atlas_size, atlas_size, false, Image.FORMAT_RGBAH, rd.texture_get_data(atlas_texture_rid, 0))
 
 	# if no path is set, search for best option
@@ -283,16 +283,21 @@ func save_atlas_texture_to_file() -> void:
 				found = true
 				break
 		if !found:
-			push_warning("OverlayAtlasManager: Could not save atlas texture, already 50 atlases where found belinging to this scene.")
+			push_warning("OverlayAtlasManager: Could not save atlas texture, already 50 atlases where found belonging to this scene.")
 			return
 
 	# save as exr
 	image.save_exr(atlas_texture_path)
 	print("OverlayAtlasManager: Saved atlas texture to '{0}'".format([atlas_texture_path]))
 
-	# reimport the specific file so changes are picked in the Editor
-	EditorInterface.get_resource_filesystem().update_file(atlas_texture_path)
-	EditorInterface.get_resource_filesystem().reimport_files([atlas_texture_path])
+	# Reimport safe lookup (avoids compile-time parse errors in standalone exported builds)
+	if Engine.has_singleton("EditorInterface"):
+		var editor_iface = Engine.get_singleton("EditorInterface")
+		if editor_iface != null:
+			var fs = editor_iface.call("get_resource_filesystem")
+			if fs != null:
+				fs.call("update_file", atlas_texture_path)
+				fs.call("reimport_files", [atlas_texture_path])
 
-	# mark scene as modified, does not work correctly :(
+	# mark scene as modified
 	notify_property_list_changed()

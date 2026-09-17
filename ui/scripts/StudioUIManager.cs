@@ -43,44 +43,13 @@ public partial class StudioUIManager : CanvasLayer
 
     [ExportCategory("Modals & Dialogs")]
     [Export] private Control _modalsLayer;
-    [Export] private PanelContainer _settingsModal;
+    [Export] private SettingsDialog _settingsModal;
     [Export] private PanelContainer _aboutModal;
     [Export] private PanelContainer _loadingOverlay;
     [Export] private Label _loadingLabel;
-    [Export] private Button _btnSettingsClose;
     [Export] private Button _btnAboutClose;
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
-
-    [ExportCategory("Settings Modal Controls")]
-    [Export] private OptionButton _langOption;
-    [Export] private LineEdit _gamePathInput;
-    [Export] private Button _btnBrowseGamePath;
-    [Export] private LineEdit _savePathInput;
-    [Export] private Button _btnBrowseSavePath;
-    [Export] private LineEdit _compilerPathInput;
-    [Export] private Button _btnBrowseCompilerPath;
-    [Export] private FileDialog _compilerFileDialog;
-    [Export] private OptionButton _texQualityOption;
-    [Export] private OptionButton _fpsLimitOption;
-    [Export] private CheckBox _vsyncCheck;
-    [Export] private ColorPickerButton _xrayLineColorPicker;
-    [Export] private HSlider _xrayLineOpacitySlider;
-    [Export] private Label _xrayLineOpacityLabel;
-    [Export] private ColorPickerButton _bonePrimaryColorPicker;
-    [Export] private ColorPickerButton _boneClothingColorPicker;
-    [Export] private HSlider _boneMarkerOpacitySlider;
-    [Export] private Label _boneMarkerOpacityLabel;
-    [Export] private HSlider _boneMarkerSizeSlider;
-    [Export] private Label _boneMarkerSizeLabel;
-    [Export] private HSlider _ikHandlesOpacitySlider;
-    [Export] private Label _ikHandlesOpacityLabel;
-    [Export] private Button _btnResetDisplaySettings;
-    [Export] private ColorPickerButton _painterOutlineColorPicker;
-    [Export] private HSlider _painterOutlineOpacitySlider;
-    [Export] private Label _painterOutlineOpacityLabel;
-    [Export] private HSlider _painterOutlineWidthSlider;
-    [Export] private Label _painterOutlineWidthLabel;
 
     private CharacterIKManager _currentIKManager;
 
@@ -101,22 +70,7 @@ public partial class StudioUIManager : CanvasLayer
 
     public override void _Ready()
     {
-        GetViewport().TransparentBg = true;
-        
-        var envNode = GetNodeOrNull<WorldEnvironment>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/WorldEnvironment")
-                   ?? GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment")
-                   ?? GetTree().Root.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
-
-        if (envNode != null && envNode.Environment != null)
-        {
-            envNode.Environment.BackgroundMode = Godot.Environment.BGMode.Canvas;
-            envNode.Environment.BackgroundCanvasMaxLayer = -1;
-
-            envNode.Environment.AmbientLightSource = Godot.Environment.AmbientSource.Color;
-            envNode.Environment.AmbientLightColor = new Color(0.28f, 0.29f, 0.32f, 1f);
-            envNode.Environment.AmbientLightEnergy = 1.0f;
-            envNode.Environment.ReflectedLightSource = Godot.Environment.ReflectionSource.Sky;
-        }
+        GetViewport().TransparentBg = false;
 
         _pathManager = new GamePathManager();
         AddChild(_pathManager);
@@ -126,13 +80,8 @@ public partial class StudioUIManager : CanvasLayer
         CreateFallbackDialog();
         InitTabs();
         ConnectEvents();
-        InitializeDisplaySettingsUI();
-        InitializeGraphicsSettingsUI();
         InitializePaths();
-
-        // Enforce Performance & Frame Limiting
-        Engine.MaxFps = 60;
-        DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Enabled);
+        ApplyCurrentGraphicsSettings();
         ApplySubViewportOptimizations();
 
         UpdateCharacterDependencyState(false);
@@ -184,6 +133,20 @@ public partial class StudioUIManager : CanvasLayer
         if (@event is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.F11)
         {
             ToggleFullscreen();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("view_xray"))
+        {
+            if (_btnQuickXRay != null)
+            {
+                _btnQuickXRay.ButtonPressed = !_btnQuickXRay.ButtonPressed;
+            }
+            else
+            {
+                _tabBones?.ToggleXRay();
+            }
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -252,48 +215,21 @@ public partial class StudioUIManager : CanvasLayer
 
         // Modals
         _modalsLayer ??= GetNodeOrNull<Control>("MainHUD/ModalsLayer");
-        _settingsModal ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/SettingsModal");
+        _settingsModal ??= GetNodeOrNull<SettingsDialog>("MainHUD/ModalsLayer/SettingsModal")
+                        ?? GetTree().Root.FindChild("SettingsModal", true, false) as SettingsDialog;
+        if (_settingsModal != null)
+        {
+            _settingsModal.Setup(_pathManager);
+        }
+
         _aboutModal ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/AboutModal");
         _loadingOverlay ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/LoadingOverlay");
         _loadingLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/Label");
 
-        _btnSettingsClose ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/CloseButton");
         _btnAboutClose ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/Button");
 
         _gameFolderDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/GameFolderDialog");
         _saveFolderDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/ScreenshotFolderDialog");
-
-        // Settings Controls
-        _langOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/LanguageButton");
-        _gamePathInput ??= GetNodeOrNull<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer/GamePathLine");
-        _btnBrowseGamePath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/GamePathSearchContainer/BrowseGamePathButton");
-        _savePathInput ??= GetNodeOrNull<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/SavesPathLine");
-        _btnBrowseSavePath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/SavesPathSearchContainer/BrowseSavePathButton");
-        _compilerPathInput ??= GetNodeOrNull<LineEdit>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer/CompilerPathLine");
-        _btnBrowseCompilerPath ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/General/VBoxContainer/CompilerPathSearchContainer/BrowseCompilerPathButton");
-        _compilerFileDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/CompilerFileDialog");
-        _texQualityOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/TexQualityButton");
-        _fpsLimitOption ??= GetNodeOrNull<OptionButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/FpsLimitButton");
-        _vsyncCheck ??= GetNodeOrNull<CheckBox>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/Graphics/VBoxContainer/VsyncCheck");
-
-        _xrayLineColorPicker ??= GetNodeOrNull<ColorPickerButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineColor/ColorPickerButton");
-        _xrayLineOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineOpacity/HSlider");
-        _xrayLineOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerLineOpacity/LabelCurrOpacity");
-
-        _bonePrimaryColorPicker ??= GetNodeOrNull<ColorPickerButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPrimary/ColorPickerButton");
-        _boneClothingColorPicker ??= GetNodeOrNull<ColorPickerButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerClothing/ColorPickerButton");
-        _boneMarkerOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneOpacity/HSlider");
-        _boneMarkerOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneOpacity/LabelCurrOpacity");
-        _boneMarkerSizeSlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneSize/HSlider");
-        _boneMarkerSizeLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerBoneSize/LabelCurrSize");
-        _ikHandlesOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity/HSlider");
-        _ikHandlesOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerIKOpacity/LabelCurrOpacity");
-        _btnResetDisplaySettings ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/ResetButton");
-        _painterOutlineColorPicker ??= GetNodeOrNull<ColorPickerButton>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterColor/ColorPickerButton");
-        _painterOutlineOpacitySlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity/HSlider");
-        _painterOutlineOpacityLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterOpacity/LabelCurrOpacity");
-        _painterOutlineWidthSlider ??= GetNodeOrNull<HSlider>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth/HSlider");
-        _painterOutlineWidthLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/SettingsModal/VBoxContainer/TabContainer/UI/VBoxContainer/HBoxContainerPainterWidth/LabelCurrWidth");
     }
 
     private void InitTabs()
@@ -390,11 +326,19 @@ public partial class StudioUIManager : CanvasLayer
             _btnSettings.Pressed += () =>
             {
                 if (_modalsLayer != null) _modalsLayer.Visible = true;
-                if (_settingsModal != null)
+                _settingsModal?.Open();
+            };
+        }
+
+        if (_settingsModal != null)
+        {
+            _settingsModal.DialogClosed += () =>
+            {
+                if (_modalsLayer != null && (_aboutModal == null || !_aboutModal.Visible))
                 {
-                    _settingsModal.Visible = true;
-                    _settingsModal.MoveToFront();
+                    _modalsLayer.Visible = false;
                 }
+                UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
             };
         }
 
@@ -416,18 +360,6 @@ public partial class StudioUIManager : CanvasLayer
             _btnQuit.Pressed += () => GetTree().Quit();
         }
 
-        if (_btnSettingsClose != null)
-        {
-            _btnSettingsClose.Pressed += () =>
-            {
-                if (_settingsModal != null) _settingsModal.Visible = false;
-                if (_modalsLayer != null && (_aboutModal == null || !_aboutModal.Visible))
-                {
-                    _modalsLayer.Visible = false;
-                }
-            };
-        }
-
         if (_btnAboutClose != null)
         {
             _btnAboutClose.Pressed += () =>
@@ -440,27 +372,16 @@ public partial class StudioUIManager : CanvasLayer
             };
         }
 
-        // Settings Browsing
-        if (_btnBrowseGamePath != null) _btnBrowseGamePath.Pressed += () => _gameFolderDialog?.PopupCentered();
-        if (_btnBrowseSavePath != null) _btnBrowseSavePath.Pressed += () => _saveFolderDialog?.PopupCentered();
-        if (_btnBrowseCompilerPath != null) _btnBrowseCompilerPath.Pressed += () =>
-        {
-            EnsureCompilerFileDialog();
-            _compilerFileDialog?.PopupCentered();
-        };
-
         if (_gameFolderDialog != null) _gameFolderDialog.DirSelected += OnGameDirSelected;
         if (_saveFolderDialog != null) _saveFolderDialog.DirSelected += OnSaveDirSelected;
-        if (_compilerPathInput != null)
-        {
-            _compilerPathInput.TextChanged += (text) =>
-            {
-                if (File.Exists(text))
-                {
-                    _pathManager.SaveResourceCompilerPath(text);
-                }
-            };
-        }
+
+        // UserSettings & Gizmo Display event bindings
+        UserSettings.Msaa3DChanged += (v) => ApplyCurrentGraphicsSettings();
+        UserSettings.ShadowQualityChanged += (v) => ApplyCurrentGraphicsSettings();
+        UserSettings.StudioEnvironmentChanged += (v) => ApplyCurrentGraphicsSettings();
+        UserSettings.ShowStudioBackgroundChanged += (v) => ApplyCurrentGraphicsSettings();
+        UserSettings.PerformanceSettingsChanged += () => UserSettings.ApplyPerformanceSettings();
+        GizmoDisplaySettings.OnSettingsChanged += () => _currentIKManager?.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
 
         // Quick Action Buttons
         if (_btnQuickXRay != null)
@@ -751,11 +672,6 @@ public partial class StudioUIManager : CanvasLayer
         }
 
         UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
-        if (_gamePathInput != null) _gamePathInput.Text = _pathManager.CurrentGamePath;
-        if (_savePathInput != null) _savePathInput.Text = _pathManager.CurrentSavePath;
-        string compPath = _pathManager.ResolveResourceCompilerExe();
-        if (_compilerPathInput != null) _compilerPathInput.Text = compPath ?? "";
-
         ShowLoading(false);
     }
 
@@ -773,7 +689,6 @@ public partial class StudioUIManager : CanvasLayer
         if (_pathManager.ValidateDeadlockPath(dir))
         {
             _pathManager.SaveConfig(dir, _pathManager.CurrentSavePath);
-            if (_gamePathInput != null) _gamePathInput.Text = dir;
             UpdateVpkLoaderPath(dir);
             ShowToast("Game path updated!");
         }
@@ -792,137 +707,25 @@ public partial class StudioUIManager : CanvasLayer
     private void OnSaveDirSelected(string dir)
     {
         _pathManager.SaveConfig(_pathManager.CurrentGamePath, dir);
-        if (_savePathInput != null) _savePathInput.Text = dir;
         ShowToast("Screenshots path updated!");
     }
 
-    private void EnsureCompilerFileDialog()
+    private void ApplyCurrentGraphicsSettings()
     {
-        if (_compilerFileDialog == null)
-        {
-            _compilerFileDialog = new FileDialog
-            {
-                Title = "Select resourcecompiler.exe",
-                FileMode = FileDialog.FileModeEnum.OpenFile,
-                Access = FileDialog.AccessEnum.Filesystem,
-                Filters = new[] { "resourcecompiler.exe, *.exe ; Resource Compiler Executable (*.exe)", "*.* ; All Files" },
-                Size = new Vector2I(750, 500)
-            };
-            _compilerFileDialog.FileSelected += OnCompilerFileSelected;
-            var modals = GetNodeOrNull("MainHUD/ModalsLayer") ?? this;
-            modals.AddChild(_compilerFileDialog);
-        }
-    }
+        var worldVp = GetNodeOrNull<SubViewport>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
+                   ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
+        var dirLight = GetTree().Root.FindChild("DirectionalLight3D", true, false) as DirectionalLight3D;
+        var bgRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/ColorRect")
+                  ?? GetTree().Root.FindChild("ColorRect", true, false) as ColorRect;
+        var envNode = GetNodeOrNull<WorldEnvironment>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/WorldEnvironment")
+                   ?? GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment")
+                   ?? GetTree().Root.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
+        var bgTex = GetNodeOrNull<TextureRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/BackgroundRect")
+                 ?? GetTree().Root.FindChild("BackgroundRect", true, false) as TextureRect;
+        var stagePlatform = GetNodeOrNull<Node3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/StagePlatform")
+                         ?? GetTree().Root.FindChild("StagePlatform", true, false) as Node3D;
 
-    private void OnCompilerFileSelected(string file)
-    {
-        _pathManager.SaveResourceCompilerPath(file);
-        if (_compilerPathInput != null) _compilerPathInput.Text = file;
-        ShowToast("Resource compiler path updated!");
-    }
-
-    private void InitializeDisplaySettingsUI()
-    {
-        if (_xrayLineColorPicker != null)
-        {
-            _xrayLineColorPicker.Color = GizmoDisplaySettings.XRayLineColor;
-            _xrayLineColorPicker.ColorChanged += (c) => GizmoDisplaySettings.XRayLineColor = c;
-        }
-
-        if (_xrayLineOpacitySlider != null)
-        {
-            _xrayLineOpacitySlider.Value = GizmoDisplaySettings.XRayLineOpacity;
-            if (_xrayLineOpacityLabel != null) _xrayLineOpacityLabel.Text = $"{GizmoDisplaySettings.XRayLineOpacity:P0}";
-            _xrayLineOpacitySlider.ValueChanged += (v) =>
-            {
-                GizmoDisplaySettings.XRayLineOpacity = (float)v;
-                if (_xrayLineOpacityLabel != null) _xrayLineOpacityLabel.Text = $"{v:P0}";
-            };
-        }
-
-        if (_bonePrimaryColorPicker != null)
-        {
-            _bonePrimaryColorPicker.Color = GizmoDisplaySettings.BonePrimaryColor;
-            _bonePrimaryColorPicker.ColorChanged += (c) => GizmoDisplaySettings.BonePrimaryColor = c;
-        }
-
-        if (_boneClothingColorPicker != null)
-        {
-            _boneClothingColorPicker.Color = GizmoDisplaySettings.BoneClothingColor;
-            _boneClothingColorPicker.ColorChanged += (c) => GizmoDisplaySettings.BoneClothingColor = c;
-        }
-
-        if (_boneMarkerOpacitySlider != null)
-        {
-            _boneMarkerOpacitySlider.Value = GizmoDisplaySettings.BoneMarkerOpacity;
-            if (_boneMarkerOpacityLabel != null) _boneMarkerOpacityLabel.Text = $"{GizmoDisplaySettings.BoneMarkerOpacity:P0}";
-            _boneMarkerOpacitySlider.ValueChanged += (v) =>
-            {
-                GizmoDisplaySettings.BoneMarkerOpacity = (float)v;
-                if (_boneMarkerOpacityLabel != null) _boneMarkerOpacityLabel.Text = $"{v:P0}";
-            };
-        }
-
-        if (_boneMarkerSizeSlider != null)
-        {
-            _boneMarkerSizeSlider.Value = GizmoDisplaySettings.BoneMarkerScale;
-            if (_boneMarkerSizeLabel != null) _boneMarkerSizeLabel.Text = $"{GizmoDisplaySettings.BoneMarkerScale:F1}x";
-            _boneMarkerSizeSlider.ValueChanged += (v) =>
-            {
-                GizmoDisplaySettings.BoneMarkerScale = (float)v;
-                if (_boneMarkerSizeLabel != null) _boneMarkerSizeLabel.Text = $"{v:F1}x";
-            };
-        }
-
-        if (_ikHandlesOpacitySlider != null)
-        {
-            _ikHandlesOpacitySlider.Value = GizmoDisplaySettings.IKHandlesOpacity;
-            if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{GizmoDisplaySettings.IKHandlesOpacity:P0}";
-            _ikHandlesOpacitySlider.ValueChanged += (v) =>
-            {
-                GizmoDisplaySettings.IKHandlesOpacity = (float)v;
-                if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{v:P0}";
-                _currentIKManager?.SetHandlesOpacity((float)v);
-            };
-        }
-
-        if (_painterOutlineColorPicker != null)
-        {
-            _painterOutlineColorPicker.Color = GizmoDisplaySettings.PainterOutlineColor;
-            _painterOutlineColorPicker.ColorChanged += (c) => GizmoDisplaySettings.PainterOutlineColor = c;
-        }
-
-        if (_painterOutlineOpacitySlider != null)
-        {
-            _painterOutlineOpacitySlider.Value = GizmoDisplaySettings.PainterOutlineOpacity;
-            if (_painterOutlineOpacityLabel != null) _painterOutlineOpacityLabel.Text = $"{GizmoDisplaySettings.PainterOutlineOpacity:P0}";
-            _painterOutlineOpacitySlider.ValueChanged += (v) =>
-            {
-                GizmoDisplaySettings.PainterOutlineOpacity = (float)v;
-                if (_painterOutlineOpacityLabel != null) _painterOutlineOpacityLabel.Text = $"{v:P0}";
-            };
-        }
-
-        if (_painterOutlineWidthSlider != null)
-        {
-            _painterOutlineWidthSlider.Value = GizmoDisplaySettings.PainterOutlineWidth;
-            if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{GizmoDisplaySettings.PainterOutlineWidth:F1}px";
-            _painterOutlineWidthSlider.ValueChanged += (v) =>
-            {
-                GizmoDisplaySettings.PainterOutlineWidth = (float)v;
-                if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{v:F1}px";
-            };
-        }
-
-        if (_btnResetDisplaySettings != null)
-        {
-            _btnResetDisplaySettings.Pressed += () =>
-            {
-                GizmoDisplaySettings.ResetToDefaults();
-                _currentIKManager?.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
-                InitializeDisplaySettingsUI();
-            };
-        }
+        UserSettings.ApplyGraphicsSettings(GetViewport(), worldVp, dirLight, bgRect, envNode, bgTex, stagePlatform);
     }
 
     private void ApplySubViewportOptimizations()
@@ -944,39 +747,6 @@ public partial class StudioUIManager : CanvasLayer
         {
             // Gizmo viewport only renders line wireframes & markers on Layer 2, so zero shadow allocation needed
             gizmoViewport.PositionalShadowAtlasSize = 0;
-        }
-    }
-
-    private void InitializeGraphicsSettingsUI()
-    {
-        if (_fpsLimitOption != null)
-        {
-            _fpsLimitOption.Clear();
-            _fpsLimitOption.AddItem("30 FPS", 30);
-            _fpsLimitOption.AddItem("60 FPS (Default)", 60);
-            _fpsLimitOption.AddItem("120 FPS", 120);
-            _fpsLimitOption.AddItem("144 FPS", 144);
-            _fpsLimitOption.AddItem("Uncapped", 0);
-
-            // Select 60 FPS by default
-            _fpsLimitOption.Select(1);
-            _fpsLimitOption.ItemSelected += (idx) =>
-            {
-                int maxFps = _fpsLimitOption.GetItemId((int)idx);
-                Engine.MaxFps = maxFps;
-                GD.Print($"[Performance] Max FPS set to: {(maxFps > 0 ? maxFps.ToString() : "Uncapped")}");
-            };
-        }
-
-        if (_vsyncCheck != null)
-        {
-            _vsyncCheck.ButtonPressed = true;
-            _vsyncCheck.Toggled += (enabled) =>
-            {
-                var mode = enabled ? DisplayServer.VSyncMode.Enabled : DisplayServer.VSyncMode.Disabled;
-                DisplayServer.WindowSetVsyncMode(mode);
-                GD.Print($"[Performance] VSync set to: {mode}");
-            };
         }
     }
     #endregion

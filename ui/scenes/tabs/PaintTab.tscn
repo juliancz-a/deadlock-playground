@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://csvusgj1vik1u"]
 
 [ext_resource type="Script" uid="uid://c8iqg3e0fyesi" path="res://ui/scripts/tabs/PaintTabUI.cs" id="1_paint"]
+[ext_resource type="Texture2D" uid="uid://at_icon_trash" path="res://assets/at-icons/trash.svg" id="2_trash"]
 
 [node name="PaintTab" type="VBoxContainer" unique_id=1849204999]
 anchors_preset = 15
@@ -147,10 +148,11 @@ theme_override_font_sizes/font_size = 11
 text = "- DEL"
 
 [node name="BtnClearLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101029]
+custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
-text = "CLEAR"
+tooltip_text = "Clear Active Texture Layer"
+icon = ExtResource("2_trash")
+expand_icon = true
 
 [node name="BtnMoveUp" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101030]
 custom_minimum_size = Vector2(28, 0)

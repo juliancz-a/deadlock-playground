@@ -88,8 +88,12 @@ extends Node3D
 ## Whether the brush is in eraser mode.
 @export var is_erase: bool = false
 
-## Brush stroke blend mode (0: Normal, 1: Multiply, 2: Screen)
+## Brush stroke blend mode (0: Normal, 1: Multiply, 2: Screen, 3: Overlay, 4: Darken, 5: Lighten, 6: Color Dodge)
 @export var blend_mode: int = 0
+
+## Whether to modulate strokes with selection mask.
+@export var use_selection_mask: bool = false
+@export var selection_mask_rid: RID = RID()
 
 ## Whether the brush is currently drawing.
 @export var drawing: bool = false:
