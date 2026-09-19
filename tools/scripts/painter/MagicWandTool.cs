@@ -56,12 +56,19 @@ namespace DeadlockPlayground.Painter
         private byte[] _activeAtlasMask;
         public byte[] ActiveAtlasMask => _activeAtlasMask;
 
-        // Cached dispatch parameters for live tolerance slider adjustments
-        private Image _lastSubmeshImage;
-        private Vector2 _lastHitUV = Vector2.Zero;
-        private Rect2 _lastSubmeshRect = new(0, 0, 1, 1);
-        private Rid _lastBaseTextureRid = new();
-        private MagicWandCombineMode _lastCombineMode = MagicWandCombineMode.Replace;
+        public class MagicWandSeedPoint
+        {
+            public Vector2 HitUV;
+            public Image SubmeshImage;
+            public Rect2 SubmeshRect;
+            public Color TargetColor;
+            public MagicWandCombineMode CombineMode;
+            public bool Contiguous;
+            public bool IsolateSubmesh;
+        }
+
+        private readonly List<MagicWandSeedPoint> _seedPoints = new();
+        public IReadOnlyList<MagicWandSeedPoint> SeedPoints => _seedPoints;
 
         public MagicWandTool()
         {
@@ -153,17 +160,9 @@ namespace DeadlockPlayground.Painter
                 _activeAtlasMask = new byte[atlasSize * atlasSize];
             }
 
-            // Cache for live recomputation
-            TargetColor = sampledColor;
-            _lastSubmeshImage = submeshImg;
-            _lastHitUV = hitUV;
-            _lastSubmeshRect = submeshRect;
-            _lastBaseTextureRid = baseTextureRid;
-            _lastCombineMode = combineMode;
-
             if (combineMode == MagicWandCombineMode.Replace)
             {
-                Array.Clear(_activeAtlasMask, 0, _activeAtlasMask.Length);
+                _seedPoints.Clear();
             }
 
             if (submeshImg != null)
@@ -175,16 +174,58 @@ namespace DeadlockPlayground.Painter
                 Color seedColor = submeshImg.GetPixel(seedX, seedY);
                 TargetColor = seedColor;
 
-                int rectX = Mathf.Clamp((int)(submeshRect.Position.X * atlasSize), 0, atlasSize - 1);
-                int rectY = Mathf.Clamp((int)(submeshRect.Position.Y * atlasSize), 0, atlasSize - 1);
-                int rectW = Mathf.Clamp((int)(submeshRect.Size.X * atlasSize), 1, atlasSize - rectX);
-                int rectH = Mathf.Clamp((int)(submeshRect.Size.Y * atlasSize), 1, atlasSize - rectY);
-
-                if (Contiguous)
+                _seedPoints.Add(new MagicWandSeedPoint
                 {
-                    // Contiguous BFS flood fill starting from clicked seed pixel
+                    HitUV = hitUV,
+                    SubmeshImage = submeshImg,
+                    SubmeshRect = submeshRect,
+                    TargetColor = seedColor,
+                    CombineMode = combineMode,
+                    Contiguous = Contiguous,
+                    IsolateSubmesh = IsolateSubmesh
+                });
+            }
+
+            RebuildMaskFromSeedPoints(rd, atlasSize);
+
+            HasSelection = _seedPoints.Count > 0;
+            UseSelectionMask = true;
+
+            EmitSignal(SignalName.ColorSampled, TargetColor);
+            EmitSignal(SignalName.MaskUpdated, true);
+
+            GD.Print($"[MagicWandTool] Generated selection mask: Color=#{TargetColor.ToHtml(false)} Mode={combineMode} Contiguous={Contiguous} Tol={_tolerance:F2} Seeds={_seedPoints.Count}");
+            return true;
+        }
+
+        private void RebuildMaskFromSeedPoints(RenderingDevice rd, int atlasSize)
+        {
+            if (_activeAtlasMask == null || _activeAtlasMask.Length != atlasSize * atlasSize)
+            {
+                _activeAtlasMask = new byte[atlasSize * atlasSize];
+            }
+            Array.Clear(_activeAtlasMask, 0, _activeAtlasMask.Length);
+
+            foreach (var seed in _seedPoints)
+            {
+                if (seed.SubmeshImage == null) continue;
+
+                var img = seed.SubmeshImage;
+                int imgW = img.GetWidth();
+                int imgH = img.GetHeight();
+                int seedX = Mathf.Clamp((int)(seed.HitUV.X * imgW), 0, imgW - 1);
+                int seedY = Mathf.Clamp((int)(seed.HitUV.Y * imgH), 0, imgH - 1);
+
+                int rectX = Mathf.Clamp((int)(seed.SubmeshRect.Position.X * atlasSize), 0, atlasSize - 1);
+                int rectY = Mathf.Clamp((int)(seed.SubmeshRect.Position.Y * atlasSize), 0, atlasSize - 1);
+                int rectW = Mathf.Clamp((int)(seed.SubmeshRect.Size.X * atlasSize), 1, atlasSize - rectX);
+                int rectH = Mathf.Clamp((int)(seed.SubmeshRect.Size.Y * atlasSize), 1, atlasSize - rectY);
+
+                bool[] submeshMask = new bool[imgW * imgH];
+
+                if (seed.Contiguous)
+                {
                     bool[] visited = new bool[imgW * imgH];
-                    bool[] submeshMask = new bool[imgW * imgH];
                     Queue<int> q = new Queue<int>();
 
                     int seedIdx = seedY * imgW + seedX;
@@ -209,8 +250,8 @@ namespace DeadlockPlayground.Painter
                             if (!visited[nIdx])
                             {
                                 visited[nIdx] = true;
-                                Color col = submeshImg.GetPixel(nx, ny);
-                                if ((seedColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seedColor, _tolerance))
+                                Color col = img.GetPixel(nx, ny);
+                                if ((seed.TargetColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seed.TargetColor, _tolerance))
                                 {
                                     submeshMask[nIdx] = true;
                                     q.Enqueue(nIdx);
@@ -226,8 +267,8 @@ namespace DeadlockPlayground.Painter
                             if (!visited[nIdx])
                             {
                                 visited[nIdx] = true;
-                                Color col = submeshImg.GetPixel(nx, ny);
-                                if ((seedColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seedColor, _tolerance))
+                                Color col = img.GetPixel(nx, ny);
+                                if ((seed.TargetColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seed.TargetColor, _tolerance))
                                 {
                                     submeshMask[nIdx] = true;
                                     q.Enqueue(nIdx);
@@ -243,8 +284,8 @@ namespace DeadlockPlayground.Painter
                             if (!visited[nIdx])
                             {
                                 visited[nIdx] = true;
-                                Color col = submeshImg.GetPixel(nx, ny);
-                                if ((seedColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seedColor, _tolerance))
+                                Color col = img.GetPixel(nx, ny);
+                                if ((seed.TargetColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seed.TargetColor, _tolerance))
                                 {
                                     submeshMask[nIdx] = true;
                                     q.Enqueue(nIdx);
@@ -260,8 +301,8 @@ namespace DeadlockPlayground.Painter
                             if (!visited[nIdx])
                             {
                                 visited[nIdx] = true;
-                                Color col = submeshImg.GetPixel(nx, ny);
-                                if ((seedColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seedColor, _tolerance))
+                                Color col = img.GetPixel(nx, ny);
+                                if ((seed.TargetColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seed.TargetColor, _tolerance))
                                 {
                                     submeshMask[nIdx] = true;
                                     q.Enqueue(nIdx);
@@ -269,67 +310,49 @@ namespace DeadlockPlayground.Painter
                             }
                         }
                     }
-
-                    // Map submeshMask into _activeAtlasMask
-                    for (int y = 0; y < rectH; y++)
+                }
+                else
+                {
+                    for (int py = 0; py < imgH; py++)
                     {
-                        int subY = Mathf.Clamp((int)((float)y / rectH * imgH), 0, imgH - 1);
-                        int atlasRow = (rectY + y) * atlasSize;
-                        for (int x = 0; x < rectW; x++)
+                        for (int px = 0; px < imgW; px++)
                         {
-                            int subX = Mathf.Clamp((int)((float)x / rectW * imgW), 0, imgW - 1);
-                            bool isMatch = submeshMask[subY * imgW + subX];
-                            int atlasIdx = atlasRow + (rectX + x);
-
-                            if (combineMode == MagicWandCombineMode.Subtract)
+                            Color col = img.GetPixel(px, py);
+                            if ((seed.TargetColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seed.TargetColor, _tolerance))
                             {
-                                if (isMatch) _activeAtlasMask[atlasIdx] = 0;
-                            }
-                            else
-                            {
-                                if (isMatch) _activeAtlasMask[atlasIdx] = 255;
+                                submeshMask[py * imgW + px] = true;
                             }
                         }
                     }
                 }
-                else
-                {
-                    // Non-contiguous (Global color range across target submesh)
-                    for (int y = 0; y < rectH; y++)
-                    {
-                        int subY = Mathf.Clamp((int)((float)y / rectH * imgH), 0, imgH - 1);
-                        int atlasRow = (rectY + y) * atlasSize;
-                        for (int x = 0; x < rectW; x++)
-                        {
-                            int subX = Mathf.Clamp((int)((float)x / rectW * imgW), 0, imgW - 1);
-                            Color col = submeshImg.GetPixel(subX, subY);
-                            bool isMatch = (seedColor.A <= 0.001f || col.A > 0.001f) && IsColorMatch(col, seedColor, _tolerance);
-                            int atlasIdx = atlasRow + (rectX + x);
 
-                            if (combineMode == MagicWandCombineMode.Subtract)
-                            {
-                                if (isMatch) _activeAtlasMask[atlasIdx] = 0;
-                            }
-                            else
-                            {
-                                if (isMatch) _activeAtlasMask[atlasIdx] = 255;
-                            }
+                // Map submeshMask into _activeAtlasMask with boolean combining
+                for (int y = 0; y < rectH; y++)
+                {
+                    int subY = Mathf.Clamp((int)((float)y / rectH * imgH), 0, imgH - 1);
+                    int atlasRow = (rectY + y) * atlasSize;
+                    for (int x = 0; x < rectW; x++)
+                    {
+                        int subX = Mathf.Clamp((int)((float)x / rectW * imgW), 0, imgW - 1);
+                        bool isMatch = submeshMask[subY * imgW + subX];
+                        if (!isMatch) continue;
+
+                        int atlasIdx = atlasRow + (rectX + x);
+                        if (seed.CombineMode == MagicWandCombineMode.Subtract)
+                        {
+                            // Subtraction: OldMask AND NOT(CurrentSelection)
+                            _activeAtlasMask[atlasIdx] = 0;
+                        }
+                        else
+                        {
+                            // Replace / Add: OldMask OR CurrentSelection
+                            _activeAtlasMask[atlasIdx] = 255;
                         }
                     }
                 }
             }
 
-            // Upload CPU mask to GPU texture (_maskTextureRid)
             UploadMaskToGpu(rd, atlasSize);
-
-            HasSelection = true;
-            UseSelectionMask = true;
-
-            EmitSignal(SignalName.ColorSampled, TargetColor);
-            EmitSignal(SignalName.MaskUpdated, true);
-
-            GD.Print($"[MagicWandTool] Generated selection mask: Color=#{TargetColor.ToHtml(false)} Mode={combineMode} Contiguous={Contiguous} Tol={_tolerance:F2}");
-            return true;
         }
 
         private void UploadMaskToGpu(RenderingDevice rd, int atlasSize)
@@ -364,17 +387,15 @@ namespace DeadlockPlayground.Painter
         public void RecomputeWithTolerance(float newTolerance)
         {
             Tolerance = newTolerance;
-            if (HasSelection && _lastSubmeshImage != null)
+            if (_seedPoints.Count > 0)
             {
-                GenerateMask(
-                    TargetColor,
-                    _lastHitUV,
-                    _lastSubmeshImage,
-                    _lastSubmeshRect,
-                    _lastBaseTextureRid,
-                    _currentAtlasSize,
-                    _lastCombineMode
-                );
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null)
+                {
+                    int size = _currentAtlasSize > 0 ? _currentAtlasSize : 2048;
+                    RebuildMaskFromSeedPoints(rd, size);
+                    EmitSignal(SignalName.MaskUpdated, true);
+                }
             }
         }
 
@@ -382,7 +403,7 @@ namespace DeadlockPlayground.Painter
         {
             HasSelection = false;
             UseSelectionMask = false;
-            _lastSubmeshImage = null;
+            _seedPoints.Clear();
 
             if (_activeAtlasMask != null)
             {
@@ -408,8 +429,8 @@ namespace DeadlockPlayground.Painter
 
         public void Cleanup()
         {
+            _seedPoints.Clear();
             _activeAtlasMask = null;
-            _lastSubmeshImage = null;
 
             if (_maskTextureResource != null)
             {

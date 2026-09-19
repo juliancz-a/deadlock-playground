@@ -484,6 +484,8 @@ public partial class CharacterTabUI : VBoxContainer
                 }
             }
 
+            item.Mesh.SetMeta("UserVisibility", isInitiallyVisible);
+
             var cb = new CheckBox
             {
                 Text = item.DisplayName,
@@ -496,7 +498,14 @@ public partial class CharacterTabUI : VBoxContainer
             {
                 if (localItem.Mesh != null && GodotObject.IsInstanceValid(localItem.Mesh))
                 {
-                    localItem.Mesh.Visible = pressed;
+                    if (!localItem.Mesh.HasMeta("IsHiddenComposite"))
+                    {
+                        localItem.Mesh.Visible = pressed;
+                    }
+                    else
+                    {
+                        localItem.Mesh.Visible = false;
+                    }
                     localItem.Mesh.SetMeta("UserVisibility", pressed);
 
                     if (localItem.Mesh.HasMeta("GeneratedSubmeshes"))
@@ -524,7 +533,14 @@ public partial class CharacterTabUI : VBoxContainer
         {
             if (item.Mesh != null && GodotObject.IsInstanceValid(item.Mesh))
             {
-                item.Mesh.Visible = true;
+                if (!item.Mesh.HasMeta("IsHiddenComposite"))
+                {
+                    item.Mesh.Visible = true;
+                }
+                else
+                {
+                    item.Mesh.Visible = false;
+                }
                 item.Mesh.SetMeta("UserVisibility", true);
 
                 if (item.Mesh.HasMeta("GeneratedSubmeshes"))
@@ -551,7 +567,14 @@ public partial class CharacterTabUI : VBoxContainer
             if (item.Mesh != null && GodotObject.IsInstanceValid(item.Mesh))
             {
                 bool shouldBeVisible = !item.IsAccessory;
-                item.Mesh.Visible = shouldBeVisible;
+                if (!item.Mesh.HasMeta("IsHiddenComposite"))
+                {
+                    item.Mesh.Visible = shouldBeVisible;
+                }
+                else
+                {
+                    item.Mesh.Visible = false;
+                }
                 item.Mesh.SetMeta("UserVisibility", shouldBeVisible);
 
                 if (item.Mesh.HasMeta("GeneratedSubmeshes"))

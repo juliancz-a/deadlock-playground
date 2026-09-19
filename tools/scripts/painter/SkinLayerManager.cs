@@ -415,7 +415,7 @@ namespace DeadlockPlayground.Painter
 
         public void ClearCurrentLayer()
         {
-            RecordUndoSnapshot();
+            RecordInitialSnapshot();
             var layer = ActiveLayer;
             if (layer != null)
             {
@@ -423,6 +423,7 @@ namespace DeadlockPlayground.Painter
                 layer.Clear();
             }
             RecompositeGpuLayers();
+            RecordUndoSnapshot();
             NotifyStackChanged();
             GD.Print("[SkinLayerManager] Cleared active layer paint.");
         }
@@ -433,9 +434,15 @@ namespace DeadlockPlayground.Painter
         }
 
         // --- Undo / Redo Pipeline ---
-        private readonly List<byte[]> _undoStack = new();
-        private readonly List<byte[]> _redoStack = new();
-        private const int MaxUndoSnapshots = 5;
+        public class LayerPaintSnapshot
+        {
+            public int ActiveLayerIndex;
+            public Dictionary<int, byte[]> LayerData = new();
+        }
+
+        private readonly List<LayerPaintSnapshot> _undoStack = new();
+        private readonly List<LayerPaintSnapshot> _redoStack = new();
+        private const int MaxUndoSnapshots = 10;
 
         public bool CanUndo => _undoStack.Count > 1;
         public bool CanRedo => _redoStack.Count > 0;
@@ -450,17 +457,22 @@ namespace DeadlockPlayground.Painter
 
         public void RecordUndoSnapshot()
         {
-            if (_atlasManager == null || !GodotObject.IsInstanceValid(_atlasManager)) return;
-            var rd = RenderingServer.GetRenderingDevice();
-            var ridVal = _atlasManager.Get("atlas_texture_rid");
-            if (ridVal.VariantType != Variant.Type.Rid) return;
-            Rid rid = ridVal.AsRid();
-            if (!rid.IsValid || rd == null) return;
+            if (_layers.Count == 0) return;
 
-            byte[] data = rd.TextureGetData(rid, 0);
-            if (data == null || data.Length == 0) return;
+            var snap = new LayerPaintSnapshot
+            {
+                ActiveLayerIndex = _activeLayerIndex
+            };
 
-            _undoStack.Add(data);
+            for (int i = 0; i < _layers.Count; i++)
+            {
+                if (_layers[i].GpuData != null && _layers[i].GpuData.Length > 0)
+                {
+                    snap.LayerData[i] = (byte[])_layers[i].GpuData.Clone();
+                }
+            }
+
+            _undoStack.Add(snap);
             if (_undoStack.Count > MaxUndoSnapshots + 1)
             {
                 _undoStack.RemoveAt(0);
@@ -486,27 +498,15 @@ namespace DeadlockPlayground.Painter
                 GD.Print("[SkinLayerManager] No undo states available.");
                 return;
             }
-            if (_atlasManager == null || !GodotObject.IsInstanceValid(_atlasManager)) return;
-            var rd = RenderingServer.GetRenderingDevice();
-            var ridVal = _atlasManager.Get("atlas_texture_rid");
-            if (ridVal.VariantType != Variant.Type.Rid) return;
-            Rid rid = ridVal.AsRid();
-            if (!rid.IsValid || rd == null) return;
 
-            byte[] current = _undoStack[^1];
+            var current = _undoStack[^1];
             _undoStack.RemoveAt(_undoStack.Count - 1);
             _redoStack.Add(current);
 
-            byte[] previous = _undoStack[^1];
-            var error = rd.TextureUpdate(rid, 0, previous);
-            if (error != Error.Ok)
-            {
-                GD.PushError($"[PainterUndo] TextureUpdate failed: {error}");
-            }
-            if (ActiveLayer != null && previous != null)
-            {
-                ActiveLayer.GpuData = (byte[])previous.Clone();
-            }
+            var previous = _undoStack[^1];
+            RestoreSnapshot(previous);
+            RecompositeGpuLayers();
+            NotifyStackChanged();
             GD.Print($"[SkinLayerManager] Undo performed. Remaining undo steps: {_undoStack.Count - 1}");
         }
 
@@ -517,27 +517,36 @@ namespace DeadlockPlayground.Painter
                 GD.Print("[SkinLayerManager] No redo states available.");
                 return;
             }
-            if (_atlasManager == null || !GodotObject.IsInstanceValid(_atlasManager)) return;
-            var rd = RenderingServer.GetRenderingDevice();
-            var ridVal = _atlasManager.Get("atlas_texture_rid");
-            if (ridVal.VariantType != Variant.Type.Rid) return;
-            Rid rid = ridVal.AsRid();
-            if (!rid.IsValid || rd == null) return;
 
-            byte[] next = _redoStack[^1];
+            var next = _redoStack[^1];
             _redoStack.RemoveAt(_redoStack.Count - 1);
             _undoStack.Add(next);
 
-            var error = rd.TextureUpdate(rid, 0, next);
-            if (error != Error.Ok)
-            {
-                GD.PushError($"[PainterRedo] TextureUpdate failed: {error}");
-            }
-            if (ActiveLayer != null && next != null)
-            {
-                ActiveLayer.GpuData = (byte[])next.Clone();
-            }
+            RestoreSnapshot(next);
+            RecompositeGpuLayers();
+            NotifyStackChanged();
             GD.Print($"[SkinLayerManager] Redo performed. Remaining redo steps: {_redoStack.Count}");
+        }
+
+        private void RestoreSnapshot(LayerPaintSnapshot snapshot)
+        {
+            if (snapshot == null) return;
+            if (snapshot.ActiveLayerIndex >= 0 && snapshot.ActiveLayerIndex < _layers.Count)
+            {
+                _activeLayerIndex = snapshot.ActiveLayerIndex;
+            }
+
+            for (int i = 0; i < _layers.Count; i++)
+            {
+                if (snapshot.LayerData.TryGetValue(i, out var rawData))
+                {
+                    _layers[i].GpuData = (byte[])rawData.Clone();
+                }
+                else if (_layers[i].GpuData != null)
+                {
+                    Array.Clear(_layers[i].GpuData, 0, _layers[i].GpuData.Length);
+                }
+            }
         }
 
         // --- Overlay Shading & Blend Modes ---
@@ -601,6 +610,11 @@ namespace DeadlockPlayground.Painter
             void ConfigureMeshOverlay(MeshInstance3D mesh)
             {
                 if (mesh == null || !GodotObject.IsInstanceValid(mesh)) return;
+                if (mesh.HasMeta("IsHiddenComposite") || !mesh.Visible)
+                {
+                    mesh.Layers &= ~(uint)(1 << 20);
+                    return;
+                }
                 var mat = mesh.MaterialOverlay as ShaderMaterial;
                 if (mat != null)
                 {
@@ -723,7 +737,7 @@ namespace DeadlockPlayground.Painter
             int atlasSize = (int)_atlasManager.Get("atlas_size");
             if (atlasSize <= 0) atlasSize = 2048;
 
-            RecordUndoSnapshot();
+            RecordInitialSnapshot();
 
             int startX = Mathf.Clamp((int)(pos.X * atlasSize), 0, atlasSize - 1);
             int startY = Mathf.Clamp((int)(pos.Y * atlasSize), 0, atlasSize - 1);
@@ -794,6 +808,7 @@ namespace DeadlockPlayground.Painter
             }
 
             RecompositeGpuLayers();
+            RecordUndoSnapshot();
 
             MeshHierarchy?.MarkSubmeshDirty(mesh);
 
@@ -833,7 +848,7 @@ namespace DeadlockPlayground.Painter
             int dH = decalImg.GetHeight();
             if (dW <= 0 || dH <= 0) return false;
 
-            RecordUndoSnapshot();
+            RecordInitialSnapshot();
 
             Vector2 atlasUv = hitUv * size + pos;
             Vector2 centerPx = atlasUv * atlasSize;
@@ -914,6 +929,7 @@ namespace DeadlockPlayground.Painter
             }
 
             RecompositeGpuLayers();
+            RecordUndoSnapshot();
 
             if (_targetMesh != null && MeshHierarchy != null)
             {

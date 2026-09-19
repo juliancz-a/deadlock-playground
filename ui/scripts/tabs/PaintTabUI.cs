@@ -1,7 +1,9 @@
 using Godot;
 using System;
 using System.IO;
+using System.Collections.Generic;
 using DeadlockPlayground.Painter;
+using DeadlockPlayground.Materials;
 
 public partial class PaintTabUI : VBoxContainer
 {
@@ -21,6 +23,35 @@ public partial class PaintTabUI : VBoxContainer
 
     private Node3D _currentHero;
     private StudioUIManager _studioUI;
+
+    private struct CachedBoneTransform
+    {
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public Vector3 Scale;
+    }
+
+    private readonly Dictionary<int, CachedBoneTransform> _cachedBonePoses = new();
+    private string _cachedAnimationName = null;
+    private double _cachedAnimationPosition = 0.0;
+    private bool _cachedAnimationPlaying = false;
+    private bool _hasCachedPose = false;
+
+    private Dictionary<string, bool> _cachedPaintSubmeshVisibility = null;
+    private Dictionary<string, bool> _cachedPaintPreSoloVisibility = null;
+    private string _cachedPaintSoloedSubmesh = null;
+    private bool _hasCachedPaintVisibility = false;
+
+    private class SubmeshRowUI
+    {
+        public SubmeshNodeInfo Submesh;
+        public HBoxContainer RowContainer;
+        public CheckBox VisCheck;
+        public Button SoloBtn;
+        public Button SelectBtn;
+    }
+
+    private readonly List<SubmeshRowUI> _submeshRows = new();
 
     public SkinLayerManager LayerManager => _layerManager;
     public HeroMeshHierarchy MeshHierarchy => _meshHierarchy;
@@ -409,6 +440,11 @@ public partial class PaintTabUI : VBoxContainer
     public void SetHero(Node3D heroNode)
     {
         _currentHero = heroNode;
+        _hasCachedPaintVisibility = false;
+        _cachedPaintSubmeshVisibility = null;
+        _cachedPaintPreSoloVisibility = null;
+        _cachedPaintSoloedSubmesh = null;
+
         if (heroNode == null)
         {
             ClearHero();
@@ -423,6 +459,8 @@ public partial class PaintTabUI : VBoxContainer
 
         if (_painter != null && _painter.IsPaintingActive)
         {
+            CacheCharacterPose();
+            ResetCharacterPose();
             if (_meshHierarchy != null)
             {
                 _meshHierarchy.IsPaintingModeActive = true;
@@ -430,18 +468,32 @@ public partial class PaintTabUI : VBoxContainer
             _meshHierarchy?.ApplyToonShading(false);
         }
 
-        // Reset character pose to rest pose so rest-pose mesh raycaster aligns with 3D screen space geometry
-        ResetCharacterPose();
-
         // 2. Setup GPU Texture Painter OverlayAtlasManager on the hero
         _layerManager?.SetupForHero(heroNode);
 
-        // 3. Populate target dropdown and select default
+        // 3. Register submeshes and apply overlay parameters to meshes
+        if (_layerManager != null && _meshHierarchy != null)
+        {
+            _layerManager.ClearRegisteredSubmeshes();
+            foreach (var submesh in _meshHierarchy.Submeshes)
+            {
+                if (submesh.Mesh != null)
+                {
+                    _layerManager.RegisterSubmesh(submesh.Mesh);
+                }
+            }
+            _layerManager.ApplyOverlayParametersToMeshes();
+        }
+
+        // 4. Populate target dropdown and select default
         PopulateTargetDropdown();
 
-        // 4. Populate resolution dropdown (default 2048) and allocate canvas
+        // 5. Populate resolution dropdown (default 2048) and allocate canvas
         PopulateResolutionDropdown();
         _layerManager?.SetCanvasResolution(new Vector2I(2048, 2048));
+
+        // 6. Refresh submesh list UI
+        RefreshSubmeshListUI();
 
         UpdateControlsState(true);
 
@@ -485,6 +537,16 @@ public partial class PaintTabUI : VBoxContainer
     public void ClearHero()
     {
         _currentHero = null;
+        _hasCachedPose = false;
+        _cachedBonePoses.Clear();
+        _cachedAnimationName = null;
+        _cachedAnimationPlaying = false;
+        _hasCachedPaintVisibility = false;
+        _cachedPaintSubmeshVisibility = null;
+        _cachedPaintPreSoloVisibility = null;
+        _cachedPaintSoloedSubmesh = null;
+        _submeshRows.Clear();
+
         if (_lblHeroName != null) _lblHeroName.Text = "HERO: NONE";
         if (_lblActiveMesh != null) _lblActiveMesh.Text = "Target: None";
         if (_optTargetMesh != null) _optTargetMesh.Clear();
@@ -503,6 +565,7 @@ public partial class PaintTabUI : VBoxContainer
         {
             if (_lblActiveMesh != null) _lblActiveMesh.Text = "Target: None";
             _painter?.SetTargetMesh(null);
+            UpdateSubmeshRowHighlights();
             return;
         }
 
@@ -526,14 +589,30 @@ public partial class PaintTabUI : VBoxContainer
             }
         }
 
+        UpdateSubmeshRowHighlights();
         _painter?.SetTargetMesh(mesh, surfaceIndex);
+    }
+
+    private void UpdateSubmeshRowHighlights()
+    {
+        if (_meshHierarchy == null) return;
+        var active = _meshHierarchy.ActiveTarget;
+        foreach (var row in _submeshRows)
+        {
+            if (row.SelectBtn != null && GodotObject.IsInstanceValid(row.SelectBtn))
+            {
+                row.SelectBtn.Modulate = (row.Submesh == active)
+                    ? new Color(1.0f, 0.85f, 0.4f, 1.0f)
+                    : Colors.White;
+            }
+        }
     }
 
     private void RefreshSubmeshListUI()
     {
         if (_submeshListContainer == null || _meshHierarchy == null) return;
 
-        if (_layerManager != null)
+        if (_layerManager != null && _layerManager.AtlasManager != null)
         {
             _layerManager.ClearRegisteredSubmeshes();
             foreach (var submesh in _meshHierarchy.Submeshes)
@@ -546,21 +625,58 @@ public partial class PaintTabUI : VBoxContainer
             _layerManager.ApplyOverlayParametersToMeshes();
         }
 
+        var submeshes = _meshHierarchy.Submeshes;
+
+        // Check if existing rows can be updated in-place
+        bool canUpdateInPlace = (_submeshRows.Count == submeshes.Count);
+        if (canUpdateInPlace)
+        {
+            for (int i = 0; i < submeshes.Count; i++)
+            {
+                if (_submeshRows[i].Submesh != submeshes[i] ||
+                    !GodotObject.IsInstanceValid(_submeshRows[i].RowContainer))
+                {
+                    canUpdateInPlace = false;
+                    break;
+                }
+            }
+        }
+
+        if (canUpdateInPlace)
+        {
+            for (int i = 0; i < submeshes.Count; i++)
+            {
+                var row = _submeshRows[i];
+                var sub = submeshes[i];
+                bool isVis = sub.Mesh != null && GodotObject.IsInstanceValid(sub.Mesh) && sub.Mesh.Visible;
+                row.VisCheck.SetPressedNoSignal(isVis);
+                row.SoloBtn.SetPressedNoSignal(sub.IsSoloed);
+                row.SoloBtn.Text = sub.IsSoloed ? "[Solo]" : "Solo";
+                row.SelectBtn.Modulate = (_meshHierarchy.ActiveTarget == sub)
+                    ? new Color(1.0f, 0.85f, 0.4f, 1.0f)
+                    : Colors.White;
+            }
+            return;
+        }
+
+        // Full rebuild needed
         foreach (Node child in _submeshListContainer.GetChildren())
         {
             child.QueueFree();
         }
+        _submeshRows.Clear();
 
-        foreach (var submesh in _meshHierarchy.Submeshes)
+        foreach (var submesh in submeshes)
         {
             var row = new HBoxContainer
             {
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
 
+            bool isVis = submesh.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh) && submesh.Mesh.Visible;
             var visCheck = new CheckBox
             {
-                ButtonPressed = submesh.Mesh != null && submesh.Mesh.Visible,
+                ButtonPressed = isVis,
                 TooltipText = "Toggle submesh visibility",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
@@ -614,7 +730,6 @@ public partial class PaintTabUI : VBoxContainer
             selectBtn.Pressed += () =>
             {
                 _meshHierarchy.SelectTarget(localSub, localSub.SurfaceIndex);
-                RefreshSubmeshListUI();
             };
 
             btnWrapper.AddChild(selectBtn);
@@ -622,8 +737,17 @@ public partial class PaintTabUI : VBoxContainer
             row.AddChild(visCheck);
             row.AddChild(soloBtn);
             row.AddChild(btnWrapper);
-            
+
             _submeshListContainer.AddChild(row);
+
+            _submeshRows.Add(new SubmeshRowUI
+            {
+                Submesh = submesh,
+                RowContainer = row,
+                VisCheck = visCheck,
+                SoloBtn = soloBtn,
+                SelectBtn = selectBtn
+            });
         }
     }
 
@@ -815,11 +939,17 @@ public partial class PaintTabUI : VBoxContainer
 
     public void OnTabActivated()
     {
+        CacheCharacterPose();
         ResetCharacterPose();
         if (_meshHierarchy != null)
         {
             _meshHierarchy.IsPaintingModeActive = true;
             _meshHierarchy.ApplyToonShading(false);
+
+            if (_hasCachedPaintVisibility && _cachedPaintSubmeshVisibility != null)
+            {
+                _meshHierarchy.RestoreVisibilityState(_cachedPaintSubmeshVisibility, _cachedPaintPreSoloVisibility, _cachedPaintSoloedSubmesh);
+            }
         }
         if (_painter != null)
         {
@@ -837,16 +967,166 @@ public partial class PaintTabUI : VBoxContainer
         if (_meshHierarchy != null)
         {
             _meshHierarchy.IsPaintingModeActive = false;
+            if (UserSettings.ToonEnabled)
+            {
+                _meshHierarchy.ApplyToonShading(true);
+            }
+
+            // 1. Cache paint tab submesh visibility and solo state
+            _meshHierarchy.CacheVisibilityState(out _cachedPaintSubmeshVisibility, out _cachedPaintPreSoloVisibility, out _cachedPaintSoloedSubmesh);
+            _hasCachedPaintVisibility = true;
         }
         if (_painter != null)
         {
-            _painter.IsPaintingActive = false;
+            _painter.OnTabDeactivated();
         }
         if (_brushPalette != null)
         {
             _brushPalette.Visible = false;
         }
         _decalStamper?.HidePreview();
+
+        // 2. Restore character tab mesh visibility onto the character model
+        if (_currentHero != null && GodotObject.IsInstanceValid(_currentHero))
+        {
+            RestoreCharacterTabMeshVisibility(_currentHero);
+        }
+
+        RestoreCharacterPose();
+    }
+
+    private void RestoreCharacterTabMeshVisibility(Node node)
+    {
+        if (node == null) return;
+
+        if (node is MeshInstance3D mi && mi.Mesh != null)
+        {
+            if (mi.HasMeta("ParentCompositeMesh"))
+            {
+                var parent = mi.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                if (parent != null && GodotObject.IsInstanceValid(parent))
+                {
+                    bool parentVis = parent.HasMeta("UserVisibility") ? parent.GetMeta("UserVisibility").AsBool() : parent.Visible;
+                    mi.Visible = parentVis;
+                }
+            }
+            else if (mi.HasMeta("IsHiddenComposite"))
+            {
+                // Composite original mesh MUST remain hidden to prevent duplicate rendering with split submeshes
+                mi.Visible = false;
+                bool compositeUserVis = mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : true;
+
+                if (mi.HasMeta("GeneratedSubmeshes"))
+                {
+                    var genList = mi.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                    foreach (var sub in genList)
+                    {
+                        if (sub != null && GodotObject.IsInstanceValid(sub))
+                        {
+                            sub.Visible = compositeUserVis;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                bool userVis = mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : mi.Visible;
+                mi.Visible = userVis;
+            }
+        }
+
+        foreach (Node child in node.GetChildren())
+        {
+            RestoreCharacterTabMeshVisibility(child);
+        }
+    }
+
+    private void CacheCharacterPose()
+    {
+        if (_currentHero == null) return;
+
+        _cachedBonePoses.Clear();
+        _cachedAnimationName = null;
+        _cachedAnimationPosition = 0.0;
+        _cachedAnimationPlaying = false;
+        _hasCachedPose = false;
+
+        var animPlayer = SearchAnimationPlayer(_currentHero);
+        if (animPlayer != null && animPlayer.IsPlaying())
+        {
+            _cachedAnimationName = animPlayer.CurrentAnimation;
+            _cachedAnimationPosition = animPlayer.CurrentAnimationPosition;
+            _cachedAnimationPlaying = true;
+            animPlayer.Pause();
+        }
+        else if (animPlayer != null && !string.IsNullOrEmpty(animPlayer.AssignedAnimation))
+        {
+            _cachedAnimationName = animPlayer.AssignedAnimation;
+            _cachedAnimationPosition = animPlayer.CurrentAnimationPosition;
+            _cachedAnimationPlaying = false;
+        }
+
+        var skeleton = SearchSkeleton(_currentHero);
+        if (skeleton != null)
+        {
+            int count = skeleton.GetBoneCount();
+            for (int i = 0; i < count; i++)
+            {
+                _cachedBonePoses[i] = new CachedBoneTransform
+                {
+                    Position = skeleton.GetBonePosePosition(i),
+                    Rotation = skeleton.GetBonePoseRotation(i),
+                    Scale = skeleton.GetBonePoseScale(i)
+                };
+            }
+            _hasCachedPose = true;
+        }
+    }
+
+    private void RestoreCharacterPose()
+    {
+        if (_currentHero == null || !_hasCachedPose) return;
+
+        var animPlayer = SearchAnimationPlayer(_currentHero);
+        if (animPlayer != null && !string.IsNullOrEmpty(_cachedAnimationName) && animPlayer.HasAnimation(_cachedAnimationName))
+        {
+            animPlayer.Play(_cachedAnimationName);
+            animPlayer.Seek(_cachedAnimationPosition, update: true);
+            if (!_cachedAnimationPlaying)
+            {
+                animPlayer.Pause();
+            }
+        }
+
+        var skeleton = SearchSkeleton(_currentHero);
+        if (skeleton != null)
+        {
+            foreach (var kvp in _cachedBonePoses)
+            {
+                int boneIdx = kvp.Key;
+                if (boneIdx < skeleton.GetBoneCount())
+                {
+                    skeleton.SetBonePosePosition(boneIdx, kvp.Value.Position);
+                    skeleton.SetBonePoseRotation(boneIdx, kvp.Value.Rotation);
+                    skeleton.SetBonePoseScale(boneIdx, kvp.Value.Scale);
+                }
+            }
+            skeleton.ForceUpdateAllBoneTransforms();
+            ProceduralClothSolver.Conform(skeleton);
+
+            Node3D heroRoot = skeleton;
+            while (heroRoot != null && !heroRoot.Name.ToString().StartsWith("Hero_") && heroRoot.GetParent() is Node3D parent3D)
+            {
+                heroRoot = parent3D;
+            }
+            if (!string.IsNullOrEmpty(_cachedAnimationName))
+            {
+                DeadlockMaterialResolver.OnPoseChanged(heroRoot, heroRoot?.Name.ToString() ?? "", _cachedAnimationName);
+            }
+        }
+
+        _hasCachedPose = false;
+        _cachedBonePoses.Clear();
     }
 
     private void ResetCharacterPose()
@@ -870,6 +1150,17 @@ public partial class PaintTabUI : VBoxContainer
         foreach (Node child in node.GetChildren())
         {
             var res = SearchSkeleton(child);
+            if (res != null) return res;
+        }
+        return null;
+    }
+
+    private AnimationPlayer SearchAnimationPlayer(Node node)
+    {
+        if (node is AnimationPlayer ap) return ap;
+        foreach (Node child in node.GetChildren())
+        {
+            var res = SearchAnimationPlayer(child);
             if (res != null) return res;
         }
         return null;

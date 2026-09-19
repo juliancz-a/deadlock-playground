@@ -131,6 +131,7 @@ namespace DeadlockPlayground.Painter
                     };
                     ExtractMaterialMetadata(info, mi, 0);
                     _submeshes.Add(info);
+                    _preSoloVisibility[mi] = mi.Visible;
                 }
                 else
                 {
@@ -235,6 +236,7 @@ namespace DeadlockPlayground.Painter
                         };
                         ExtractMaterialMetadata(info, mi, s);
                         _submeshes.Add(info);
+                        _preSoloVisibility[newMi] = isCompositeVisible;
                     }
                 }
             }
@@ -748,6 +750,7 @@ namespace DeadlockPlayground.Painter
         {
             if (info == null || info.Mesh == null || !GodotObject.IsInstanceValid(info.Mesh)) return;
             info.Mesh.Visible = visible;
+            _preSoloVisibility[info.Mesh] = visible;
             NotifyHierarchyChanged();
         }
 
@@ -766,6 +769,10 @@ namespace DeadlockPlayground.Painter
                         if (_preSoloVisibility.TryGetValue(s.Mesh, out bool prevVis))
                         {
                             s.Mesh.Visible = prevVis;
+                        }
+                        else
+                        {
+                            s.Mesh.Visible = true;
                         }
                     }
                 }
@@ -812,6 +819,7 @@ namespace DeadlockPlayground.Painter
                 if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                 {
                     s.Mesh.Visible = true;
+                    _preSoloVisibility[s.Mesh] = true;
                 }
             }
             NotifyHierarchyChanged();
@@ -828,8 +836,63 @@ namespace DeadlockPlayground.Painter
                 if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                 {
                     s.Mesh.Visible = !s.IsAccessory;
+                    _preSoloVisibility[s.Mesh] = !s.IsAccessory;
                 }
             }
+            NotifyHierarchyChanged();
+        }
+
+        public void CacheVisibilityState(out Dictionary<string, bool> visMap, out Dictionary<string, bool> preSoloMap, out string soloedRawName)
+        {
+            visMap = new Dictionary<string, bool>();
+            preSoloMap = new Dictionary<string, bool>();
+            soloedRawName = null;
+
+            foreach (var s in _submeshes)
+            {
+                if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
+                {
+                    visMap[s.RawName] = s.Mesh.Visible;
+                    if (s.IsSoloed)
+                    {
+                        soloedRawName = s.RawName;
+                    }
+                    if (_preSoloVisibility.TryGetValue(s.Mesh, out bool preVis))
+                    {
+                        preSoloMap[s.RawName] = preVis;
+                    }
+                }
+            }
+        }
+
+        public void RestoreVisibilityState(Dictionary<string, bool> visMap, Dictionary<string, bool> preSoloMap, string soloedRawName)
+        {
+            if (visMap == null) return;
+
+            _isAnySoloed = !string.IsNullOrEmpty(soloedRawName);
+            _preSoloVisibility.Clear();
+
+            foreach (var s in _submeshes)
+            {
+                if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
+                {
+                    if (visMap.TryGetValue(s.RawName, out bool vis))
+                    {
+                        s.Mesh.Visible = vis;
+                    }
+                    s.IsSoloed = (_isAnySoloed && s.RawName == soloedRawName);
+
+                    if (preSoloMap != null && preSoloMap.TryGetValue(s.RawName, out bool preVis))
+                    {
+                        _preSoloVisibility[s.Mesh] = preVis;
+                    }
+                    else if (!_isAnySoloed)
+                    {
+                        _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
+                    }
+                }
+            }
+
             NotifyHierarchyChanged();
         }
 

@@ -71,6 +71,7 @@ namespace DeadlockPlayground.Painter
         public Node3D CameraBrush => _cameraBrush;
 
         private bool _isMouseDown = false;
+        private bool _strokeInProgress = false;
         private int _debugFrameCount = 0;
 
         // 3D Oriented Ring Cursor Gizmo
@@ -377,8 +378,8 @@ namespace DeadlockPlayground.Painter
                 BlendMode = activeBlendMode;
             }
 
-            int minBleed = 0;
-            int maxBleed = 0;
+            int minBleed = 1;
+            int maxBleed = 1;
             Vector2I brushRes = (atlasRes >= 2048) ? new Vector2I(512, 512) : new Vector2I(256, 256);
 
             _cameraBrush.Set("min_bleed", minBleed);
@@ -407,6 +408,14 @@ namespace DeadlockPlayground.Painter
 
         public override void _Process(double delta)
         {
+            if (!IsPaintingActive)
+            {
+                if (_cursorGizmo != null && _cursorGizmo.Visible) _cursorGizmo.Visible = false;
+                if (_selectionOutlineMesh != null && _selectionOutlineMesh.Visible) _selectionOutlineMesh.Visible = false;
+                if (_previewDecalNode != null && _previewDecalNode.Visible) _previewDecalNode.Visible = false;
+                return;
+            }
+
             EnsureCameraBrush();
 
             if (IsMouseOverUI())
@@ -612,8 +621,9 @@ namespace DeadlockPlayground.Painter
                 if (!_isMouseDown)
                 {
                     _isMouseDown = true;
-                    _preStrokeAtlasData = _layerManager?.GetAtlasDataSnapshot();
+                    _strokeInProgress = true;
                     _layerManager?.RecordInitialSnapshot();
+                    _preStrokeAtlasData = _layerManager?.GetAtlasDataSnapshot();
                     _cameraBrush?.Call("get_atlas_textures");
                     EmitSignal(SignalName.StrokeStarted);
                 }
@@ -969,7 +979,15 @@ namespace DeadlockPlayground.Painter
 
             if (hit.Hit)
             {
-                _cursorGizmo.Visible = true;
+                if (ToolMode == BrushToolMode.MagicWand)
+                {
+                    _cursorGizmo.Visible = false;
+                    _cursorGizmo.Mesh = null;
+                }
+                else
+                {
+                    _cursorGizmo.Visible = true;
+                }
 
                 // Scale ring diameter to match CameraBrush size in world units
                 float radius;
@@ -1036,11 +1054,11 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    _cursorGizmo.Mesh = null;
+                    _cursorGizmo.Visible = false;
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
-                    if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.85f, 0.4f, 1.0f, 0.95f);
                 }
                 else if (ToolMode == BrushToolMode.Decal)
                 {
@@ -1330,6 +1348,7 @@ namespace DeadlockPlayground.Painter
 
         public override void _Input(InputEvent @event)
         {
+            if (!IsPaintingActive) return;
             if (@event is InputEventMouseButton mouseBtn && mouseBtn.ButtonIndex == MouseButton.Left && !mouseBtn.Pressed)
             {
                 FinishStroke();
@@ -1338,14 +1357,51 @@ namespace DeadlockPlayground.Painter
 
         public void FinishStroke()
         {
-            if (!_isMouseDown) return;
+            if (!_isMouseDown && !_strokeInProgress) return;
             _isMouseDown = false;
+            _strokeInProgress = false;
+            _isActionClickDown = false;
             byte[] postData = _layerManager?.GetAtlasDataSnapshot();
             bool isErase = ToolMode == BrushToolMode.Erase;
             _layerManager?.CommitStrokeToActiveLayer(_preStrokeAtlasData, postData, BrushColor, isErase);
             _layerManager?.RecompositeGpuLayers();
             _layerManager?.RecordUndoSnapshot();
             EmitSignal(SignalName.StrokeFinished);
+        }
+
+        public void OnTabDeactivated()
+        {
+            IsPaintingActive = false;
+            if (_isMouseDown || _strokeInProgress)
+            {
+                FinishStroke();
+            }
+            _isMouseDown = false;
+            _strokeInProgress = false;
+            _isActionClickDown = false;
+
+            if (_cursorGizmo != null)
+            {
+                _cursorGizmo.Visible = false;
+            }
+            if (_selectionOutlineMesh != null)
+            {
+                _selectionOutlineMesh.Visible = false;
+            }
+            if (_previewDecalNode != null)
+            {
+                _previewDecalNode.Visible = false;
+            }
+            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+            {
+                _cameraBrush.Set("drawing", false);
+            }
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            {
+                _mirrorCameraBrush.Set("drawing", false);
+            }
+
+            _magicWandTool?.ClearMask();
         }
 
         [Obsolete("CPU raycasting paint strokes have been deprecated in favor of CameraBrush GPU compute projection.")]
@@ -1376,7 +1432,8 @@ namespace DeadlockPlayground.Painter
             int sCount = _currentMesh.Mesh != null ? _currentMesh.Mesh.GetSurfaceCount() : 1;
             int surfaceIdx = Mathf.Clamp(hit.HitSurfaceIndex, 0, sCount - 1);
 
-            var origMat = _currentMesh.GetSurfaceOverrideMaterial(surfaceIdx)
+            var origMat = HeroMeshHierarchy.GetAuthenticMaterial(_currentMesh, surfaceIdx)
+                       ?? _currentMesh.GetSurfaceOverrideMaterial(surfaceIdx)
                        ?? (_currentMesh.Mesh != null ? _currentMesh.Mesh.SurfaceGetMaterial(surfaceIdx) : null)
                        ?? _currentMesh.MaterialOverride;
 
@@ -1395,15 +1452,35 @@ namespace DeadlockPlayground.Painter
                 {
                     submeshRect = new Rect2(posVal.AsVector2(), szVal.AsVector2());
                 }
+                if (baseTex == null)
+                {
+                    var gCol = overlayMat.GetShaderParameter("g_tColor");
+                    if (gCol.VariantType == Variant.Type.Object && gCol.AsGodotObject() is Texture2D t2d)
+                    {
+                        baseTex = t2d;
+                    }
+                }
             }
 
             Image img = null;
             if (baseTex != null)
             {
                 img = baseTex.GetImage();
-                if (img != null && img.IsCompressed()) img.Decompress();
+                if (img != null)
+                {
+                    if (img.IsCompressed()) img.Decompress();
+                    if (img.GetFormat() != Image.Format.Rgba8) img.Convert(Image.Format.Rgba8);
+                }
             }
+
             if (img == null)
+            {
+                img = Image.CreateEmpty(512, 512, false, Image.Format.Rgba8);
+                img.Fill(Colors.White);
+            }
+
+            // Composite live painted layers over the submesh base texture so wand samples the true visible surface
+            if (_layerManager != null)
             {
                 var fullAtlas = _layerManager.BakeCompositeImage(surfaceIdx);
                 if (fullAtlas != null)
@@ -1412,17 +1489,41 @@ namespace DeadlockPlayground.Painter
                     int rY = Mathf.Clamp((int)(submeshRect.Position.Y * fullAtlas.GetHeight()), 0, fullAtlas.GetHeight() - 1);
                     int rW = Mathf.Clamp((int)(submeshRect.Size.X * fullAtlas.GetWidth()), 1, fullAtlas.GetWidth() - rX);
                     int rH = Mathf.Clamp((int)(submeshRect.Size.Y * fullAtlas.GetHeight()), 1, fullAtlas.GetHeight() - rY);
-                    img = fullAtlas.GetRegion(new Rect2I(rX, rY, rW, rH));
+                    var paintRegion = fullAtlas.GetRegion(new Rect2I(rX, rY, rW, rH));
+                    if (paintRegion != null)
+                    {
+                        if (paintRegion.GetWidth() != img.GetWidth() || paintRegion.GetHeight() != img.GetHeight())
+                        {
+                            paintRegion.Resize(img.GetWidth(), img.GetHeight());
+                        }
+                        int w = img.GetWidth();
+                        int h = img.GetHeight();
+                        for (int y = 0; y < h; y++)
+                        {
+                            for (int x = 0; x < w; x++)
+                            {
+                                Color pCol = paintRegion.GetPixel(x, y);
+                                if (pCol.A > 0.001f)
+                                {
+                                    Color bCol = img.GetPixel(x, y);
+                                    float a = pCol.A;
+                                    Color comp = new Color(
+                                        pCol.R * a + bCol.R * (1.0f - a),
+                                        pCol.G * a + bCol.G * (1.0f - a),
+                                        pCol.B * a + bCol.B * (1.0f - a),
+                                        1.0f
+                                    );
+                                    img.SetPixel(x, y, comp);
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            Color sampledColor = Colors.White;
-            if (img != null)
-            {
-                int px = Mathf.Clamp((int)(hit.HitUV.X * img.GetWidth()), 0, img.GetWidth() - 1);
-                int py = Mathf.Clamp((int)(hit.HitUV.Y * img.GetHeight()), 0, img.GetHeight() - 1);
-                sampledColor = img.GetPixel(px, py);
-            }
+            int px = Mathf.Clamp((int)(hit.HitUV.X * img.GetWidth()), 0, img.GetWidth() - 1);
+            int py = Mathf.Clamp((int)(hit.HitUV.Y * img.GetHeight()), 0, img.GetHeight() - 1);
+            Color sampledColor = img.GetPixel(px, py);
 
             Rid baseTextureRid = new();
             int atlasSize = _layerManager.CanvasSize.X;

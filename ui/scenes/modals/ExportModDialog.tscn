@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://b23k10mpx8yw0"]
 
-[ext_resource type="Script" uid="uid://dw734kx9n8p31" path="res://ui/scripts/modals/ExportModDialog.cs" id="1_dialog"]
+[ext_resource type="Script" uid="uid://tl6boi5u0fxc" path="res://ui/scripts/modals/ExportModDialog.cs" id="1_dialog"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal"]
@@ -14,7 +14,6 @@ corner_radius_top_left = 12
 corner_radius_top_right = 12
 corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
-shadow_color = Color(0, 0, 0, 0.6)
 shadow_size = 20
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_confirm"]
@@ -206,7 +205,7 @@ theme_override_constants/separation = 4
 [node name="ChkInstallCitadel" type="CheckBox" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123428]
 layout_mode = 2
 button_pressed = true
-text = "Install directly to Deadlock (game/citadel/addons)"
+text = "Install directly to Deadlock "
 
 [node name="ChkCustomFolder" type="CheckBox" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123429]
 layout_mode = 2
@@ -248,13 +247,13 @@ theme_override_styles/normal = SubResource("StyleBoxFlat_btn_confirm")
 text = "Confirm & Export"
 
 [node name="FolderDialog" type="FileDialog" parent="." unique_id=987123437]
-title = "Select Folder"
+title = "Open a Directory"
 size = Vector2i(750, 500)
 file_mode = 2
 access = 2
 
 [node name="CompilerFileDialog" type="FileDialog" parent="." unique_id=987123460]
-title = "Select resourcecompiler.exe"
+title = "Open a File"
 size = Vector2i(750, 500)
 file_mode = 0
 access = 2
