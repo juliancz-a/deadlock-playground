@@ -44,7 +44,7 @@ public static class VertexColorPbrMaterialBuilder
             || ((isVertColorMat || isPaintVertexColors) && (!string.IsNullOrEmpty(nprTransTexturePath) || hasNprTransmissiveVector));
     }
 
-    public static Godot.Material Build(Package package, VrfMaterial matResource, string vmatPath)
+    public static Godot.Material Build(Package package, VrfMaterial matResource, string vmatPath, Package addonPackage = null)
     {
         var vertColorShader = Source2ShaderRegistry.GetVertexColorPbrShader();
         if (vertColorShader != null)
@@ -60,7 +60,7 @@ public static class VertexColorPbrMaterialBuilder
             ImageTexture transTex = null;
             if (!string.IsNullOrEmpty(nprTransTexturePath))
             {
-                transTex = Source2TextureLoader.GetOrLoadTexture(package, nprTransTexturePath, forceOpaque: true);
+                transTex = Source2TextureLoader.GetOrLoadTexture(package, nprTransTexturePath, forceOpaque: true, addonPackage);
             }
 
             if (transTex != null)
@@ -112,7 +112,7 @@ public static class VertexColorPbrMaterialBuilder
             bool hasNormal = false;
             if (!string.IsNullOrEmpty(nrPath))
             {
-                var nrTex = Source2TextureLoader.GetOrLoadTexture(package, nrPath, forceOpaque: true);
+                var nrTex = Source2TextureLoader.GetOrLoadTexture(package, nrPath, forceOpaque: true, addonPackage);
                 if (nrTex != null)
                 {
                     pbrMat.SetShaderParameter("g_tNormalRoughness", nrTex);
@@ -130,7 +130,7 @@ public static class VertexColorPbrMaterialBuilder
                             ?? Source2TextureLoader.GetTextureParam(matResource, "TextureAmbientOcclusion");
             if (!string.IsNullOrEmpty(aoPbrPath))
             {
-                var aoTex = Source2TextureLoader.GetOrLoadTexture(package, aoPbrPath, forceOpaque: false);
+                var aoTex = Source2TextureLoader.GetOrLoadTexture(package, aoPbrPath, forceOpaque: false, addonPackage);
                 if (aoTex != null)
                 {
                     pbrMat.SetShaderParameter("g_tAmbientOcclusion", aoTex);
@@ -184,7 +184,7 @@ public static class VertexColorPbrMaterialBuilder
                                  ?? Source2TextureLoader.GetTextureParam(matResource, "TextureSelfIllumMask");
                 if (!string.IsNullOrEmpty(siMaskPath))
                 {
-                    var siMaskTex = Source2TextureLoader.GetOrLoadTexture(package, siMaskPath, forceOpaque: true);
+                    var siMaskTex = Source2TextureLoader.GetOrLoadTexture(package, siMaskPath, forceOpaque: true, addonPackage);
                     if (siMaskTex != null)
                     {
                         pbrMat.SetShaderParameter("texture_self_illum_mask", siMaskTex);
@@ -206,7 +206,7 @@ public static class VertexColorPbrMaterialBuilder
                        ?? Source2TextureLoader.GetTextureParam(matResource, "TextureAmbientOcclusion");
         if (!string.IsNullOrEmpty(aoFbPath))
         {
-            var aoTex = Source2TextureLoader.GetOrLoadTexture(package, aoFbPath, forceOpaque: false);
+            var aoTex = Source2TextureLoader.GetOrLoadTexture(package, aoFbPath, forceOpaque: false, addonPackage);
             if (aoTex != null)
             {
                 godotMat.AOEnabled = true;

@@ -18,7 +18,8 @@ public static class StandardPbrMaterialBuilder
         VrfMaterial matResource,
         string vmatPath,
         string meshName,
-        GlassParams glassParams)
+        GlassParams glassParams,
+        Package addonPackage = null)
     {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
         var godotMat = new StandardMaterial3D();
@@ -75,7 +76,7 @@ public static class StandardPbrMaterialBuilder
 
         if (!string.IsNullOrEmpty(diffusePath))
         {
-            godotMat.AlbedoTexture = Source2TextureLoader.GetOrLoadTexture(package, diffusePath, forceOpaqueColor);
+            godotMat.AlbedoTexture = Source2TextureLoader.GetOrLoadTexture(package, diffusePath, forceOpaqueColor, addonPackage);
             godotMat.VertexColorUseAsAlbedo = isVertColorMat;
             godotMat.AlbedoColor = Colors.White;
         }
@@ -93,9 +94,23 @@ public static class StandardPbrMaterialBuilder
             godotMat.AlbedoColor = new Color(addTint.X, addTint.Y, addTint.Z, 1.0f);
         }
 
+        bool isDefaultDummyDiffuse = !string.IsNullOrEmpty(diffusePath) && (
+            diffusePath.Contains("default_color", StringComparison.OrdinalIgnoreCase) ||
+            diffusePath.Contains("498635a", StringComparison.OrdinalIgnoreCase) ||
+            diffusePath.Contains("materials/dev/", StringComparison.OrdinalIgnoreCase) ||
+            diffusePath.Contains("primary_white", StringComparison.OrdinalIgnoreCase)
+        );
+
         if (godotMat.AlbedoTexture != null && !isAdditive)
         {
-            godotMat.AlbedoColor = Colors.White;
+            if (isDefaultDummyDiffuse && albedoParams.BaseColor != Colors.White)
+            {
+                godotMat.AlbedoColor = albedoParams.BaseColor;
+            }
+            else
+            {
+                godotMat.AlbedoColor = Colors.White;
+            }
         }
 
         // Normal Map
@@ -104,7 +119,7 @@ public static class StandardPbrMaterialBuilder
         if (!string.IsNullOrEmpty(normalPath))
         {
             godotMat.NormalEnabled = true;
-            godotMat.NormalTexture = Source2TextureLoader.GetOrLoadTexture(package, normalPath, forceOpaque: true);
+            godotMat.NormalTexture = Source2TextureLoader.GetOrLoadTexture(package, normalPath, forceOpaque: true, addonPackage);
         }
 
         // Ambient Occlusion
@@ -113,7 +128,7 @@ public static class StandardPbrMaterialBuilder
         if (!string.IsNullOrEmpty(aoPath))
         {
             godotMat.AOEnabled = true;
-            godotMat.AOTexture = Source2TextureLoader.GetOrLoadTexture(package, aoPath, forceOpaque: true);
+            godotMat.AOTexture = Source2TextureLoader.GetOrLoadTexture(package, aoPath, forceOpaque: true, addonPackage);
         }
 
         // Emissive / Self-illumination
@@ -123,14 +138,19 @@ public static class StandardPbrMaterialBuilder
             ImageTexture maskTex = null;
             if (!string.IsNullOrEmpty(selfIllumParams.MaskTexturePath))
             {
-                maskTex = Source2TextureLoader.GetOrLoadTexture(package, selfIllumParams.MaskTexturePath, forceOpaque: true);
+                maskTex = Source2TextureLoader.GetOrLoadTexture(package, selfIllumParams.MaskTexturePath, forceOpaque: true, addonPackage);
             }
 
             if (string.IsNullOrEmpty(selfIllumParams.MaskTexturePath) || maskTex != null)
             {
                 godotMat.EmissionEnabled = true;
                 godotMat.EmissionOperator = BaseMaterial3D.EmissionOperatorEnum.Multiply;
-                godotMat.EmissionEnergyMultiplier = Math.Clamp(selfIllumParams.EnergyMultiplier * 0.25f, 1.0f, 2.5f);
+                float emMultiplier = Math.Clamp(selfIllumParams.EnergyMultiplier * 0.25f, 0.0f, 2.5f);
+                if (vmatLower.Contains("hair"))
+                {
+                    emMultiplier = Math.Min(emMultiplier, 0.35f);
+                }
+                godotMat.EmissionEnergyMultiplier = emMultiplier;
                 godotMat.Emission = selfIllumParams.EmissionColor;
 
                 if (maskTex != null)
@@ -143,12 +163,13 @@ public static class StandardPbrMaterialBuilder
         // Roughness & Metallic
         bool isWeapon = vmatLower.Contains("weapon") || vmatLower.Contains("gun") ||
                         vmatLower.Contains("sword") || vmatLower.Contains("katana") ||
-                        vmatLower.Contains("bow") || vmatLower.Contains("shortsword");
+                        vmatLower.Contains("bow") || vmatLower.Contains("shortsword") ||
+                        (meshName != null && (meshName.Contains("weapon", StringComparison.OrdinalIgnoreCase) || meshName.Contains("gun", StringComparison.OrdinalIgnoreCase)));
         bool isDedicatedGlow = vmatLower.Contains("glow") || vmatLower.Contains("hourglass") ||
                                vmatLower.Contains("portal") || vmatLower.Contains("flame") ||
                                vmatLower.Contains("light") || vmatLower.Contains("beam") || isAdditive;
 
-        if (isDedicatedGlow)
+        if (isDedicatedGlow || isWeapon)
         {
             godotMat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
         }

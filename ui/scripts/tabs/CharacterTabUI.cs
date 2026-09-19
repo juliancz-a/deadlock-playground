@@ -1,13 +1,18 @@
 using Godot;
 using System;
+using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Addons;
 
 public partial class CharacterTabUI : VBoxContainer
 {
     [Signal] public delegate void CharacterRequestedEventHandler(string internalId);
 
     [Export] private OptionButton _heroOptionButton;
+    [Export] private OptionButton _optAddonMods;
+    [Export] private RichTextLabel _lblAddonDetails;
     [Export] private Container _submeshContainer;
     [Export] private Button _btnShowAll;
     [Export] private Button _btnHideAccessories;
@@ -23,11 +28,11 @@ public partial class CharacterTabUI : VBoxContainer
     }
 
     private readonly List<SubmeshItem> _submeshes = new();
-    private readonly List<DeadlockHeroEntry> _selectableEntries = new();
+    private readonly List<DeadlockHeroEntry> _selectableHeroes = new();
+    private readonly List<AddonModInfo> _addonMods = new();
 
     public override void _Ready()
     {
-        PopulateHeroDropdown();
         ConnectEvents();
 
         if (_vpkLoader == null)
@@ -36,6 +41,9 @@ public partial class CharacterTabUI : VBoxContainer
                       ?? GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest")
                       ?? GetTree().Root.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
         }
+
+        PopulateAddonDropdown();
+        PopulateHeroDropdown();
 
         if (_vpkLoader != null)
         {
@@ -71,7 +79,7 @@ public partial class CharacterTabUI : VBoxContainer
         if (_heroOptionButton == null) return;
 
         _heroOptionButton.Clear();
-        _selectableEntries.Clear();
+        _selectableHeroes.Clear();
 
         _heroOptionButton.AddItem("Select a Hero...", -1);
         _heroOptionButton.SetItemDisabled(0, true);
@@ -83,8 +91,8 @@ public partial class CharacterTabUI : VBoxContainer
 
         foreach (var hero in DeadlockHeroCatalog.UpdatedHeroes)
         {
-            int currentId = _selectableEntries.Count;
-            _selectableEntries.Add(hero);
+            int currentId = _selectableHeroes.Count;
+            _selectableHeroes.Add(hero);
             _heroOptionButton.AddItem($"  {hero.DisplayName}", currentId);
         }
 
@@ -95,12 +103,19 @@ public partial class CharacterTabUI : VBoxContainer
 
         foreach (var hero in DeadlockHeroCatalog.LegacyHeroes)
         {
-            int currentId = _selectableEntries.Count;
-            _selectableEntries.Add(hero);
+            int currentId = _selectableHeroes.Count;
+            _selectableHeroes.Add(hero);
             _heroOptionButton.AddItem($"  {hero.DisplayName}", currentId);
         }
 
-        _heroOptionButton.Select(0);
+        if (_vpkLoader?.LastLoadedHeroEntry != null)
+        {
+            SyncHeroDropdownToHero(_vpkLoader.LastLoadedHeroEntry);
+        }
+        else
+        {
+            _heroOptionButton.Select(0);
+        }
     }
 
     private void ConnectEvents()
@@ -108,6 +123,11 @@ public partial class CharacterTabUI : VBoxContainer
         if (_heroOptionButton != null)
         {
             _heroOptionButton.ItemSelected += OnHeroSelected;
+        }
+
+        if (_optAddonMods != null)
+        {
+            _optAddonMods.ItemSelected += OnAddonSelected;
         }
 
         if (_btnShowAll != null)
@@ -121,19 +141,247 @@ public partial class CharacterTabUI : VBoxContainer
         }
     }
 
-    private void OnHeroSelected(long index)
+    public void PopulateAddonDropdown()
+    {
+        if (_optAddonMods == null) return;
+
+        _optAddonMods.Clear();
+        _addonMods.Clear();
+
+        string addonsDir = null;
+        if (_vpkLoader != null && !string.IsNullOrEmpty(_vpkLoader.VpkPath))
+        {
+            string citadelDir = Path.GetDirectoryName(_vpkLoader.VpkPath);
+            if (!string.IsNullOrEmpty(citadelDir))
+            {
+                addonsDir = Path.Combine(citadelDir, "addons");
+            }
+        }
+
+        if (string.IsNullOrEmpty(addonsDir) || !Directory.Exists(addonsDir))
+        {
+            var pathManager = new GamePathManager();
+            pathManager.LoadConfig();
+            if (!string.IsNullOrEmpty(pathManager.CurrentGamePath))
+            {
+                addonsDir = Path.Combine(pathManager.CurrentGamePath, "game", "citadel", "addons");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(addonsDir))
+        {
+            ScanAndPopulateAddons(addonsDir);
+        }
+        else
+        {
+            SetNoAddonsAvailableUI();
+        }
+    }
+
+    private void SetNoAddonsAvailableUI()
+    {
+        if (_optAddonMods == null) return;
+
+        _optAddonMods.Clear();
+        _addonMods.Clear();
+        _optAddonMods.AddItem("No modded character models available", -1);
+        _optAddonMods.SetItemDisabled(0, true);
+        _optAddonMods.Disabled = true;
+
+        if (_lblAddonDetails != null)
+        {
+            _lblAddonDetails.Text = "[color=#777777]No modded character packages found in citadel/addons/[/color]";
+        }
+    }
+
+    private void ScanAndPopulateAddons(string addonsDir)
+    {
+        var detected = DeadlockAddonScanner.ScanAddons(addonsDir);
+
+        if (detected.Count == 0)
+        {
+            SetNoAddonsAvailableUI();
+            GD.Print($"[CharacterTab] Scanned addons in '{addonsDir}': no modded character models found.");
+            return;
+        }
+
+        _optAddonMods.Disabled = false;
+        _optAddonMods.Clear();
+        _addonMods.Clear();
+
+        // Default entry: "None (Vanilla)" (Index 0)
+        _optAddonMods.AddItem("None (Vanilla)", 0);
+
+        foreach (var mod in detected)
+        {
+            int currentId = _addonMods.Count + 1;
+            _addonMods.Add(mod);
+            _optAddonMods.AddItem(mod.DisplayTitle, currentId);
+        }
+
+        _optAddonMods.Select(0);
+        if (_lblAddonDetails != null)
+        {
+            _lblAddonDetails.Text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]";
+        }
+
+        GD.Print($"[CharacterTab] Scanned addons in '{addonsDir}': {detected.Count} modded character models found.");
+    }
+
+    private async void OnAddonSelected(long index)
+    {
+        if (_optAddonMods == null) return;
+        int id = _optAddonMods.GetItemId((int)index);
+
+        if (id <= 0 || id - 1 >= _addonMods.Count)
+        {
+            GD.Print("[CharacterTab] Addon selected: None (Vanilla)");
+            _vpkLoader?.SetActiveAddon(null, null);
+
+            if (_lblAddonDetails != null)
+            {
+                _lblAddonDetails.Text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]";
+            }
+
+            // If a character was loaded, restore its vanilla model/textures
+            if (_vpkLoader != null)
+            {
+                GD.Print("[CharacterTab] Restoring vanilla model/textures...");
+                await _vpkLoader.ReloadCurrentHeroAsync();
+            }
+
+            SyncHeroDropdownToCurrent();
+            return;
+        }
+
+        var mod = _addonMods[id - 1];
+        GD.Print($"[CharacterTab] Addon selected: {mod.DisplayTitle} ({mod.FilePath})");
+        _vpkLoader?.SetActiveAddon(mod.FilePath, mod);
+
+        // Update details label with subtle grey VPK filename
+        string heroName = !string.IsNullOrEmpty(mod.DetectedHeroDisplayName) ? mod.DetectedHeroDisplayName : "Custom Character";
+        string typeText = mod.ModType == AddonModType.FullModel ? $"{heroName} Model" : $"{heroName} Texture Mod";
+        if (_lblAddonDetails != null)
+        {
+            _lblAddonDetails.Text = $"[color=#dcdcdc]{typeText}[/color]  [color=#777777]—[/color]  [color=#8a8a8a]{mod.FileName}[/color]";
+        }
+
+        // Case 1: Full Model Mod -> Load addon model directly without needing prior vanilla model
+        if (mod.ModType == AddonModType.FullModel || mod.ModelEntries.Count > 0)
+        {
+            GD.Print($"[CharacterTab] Loading Full Model addon directly: {mod.DisplayTitle}...");
+            if (!string.IsNullOrEmpty(mod.DetectedHeroCodename))
+            {
+                SyncHeroDropdownToHeroCodename(mod.DetectedHeroCodename);
+            }
+
+            if (_vpkLoader != null)
+            {
+                await _vpkLoader.LoadAddonModelAsync(mod);
+            }
+            return;
+        }
+
+        // Case 2: Texture-Only Mod -> Load base hero model with injected addon textures
+        if (mod.ModType == AddonModType.TextureOnly)
+        {
+            if (!string.IsNullOrEmpty(mod.DetectedHeroCodename))
+            {
+                var catalogEntry = DeadlockHeroCatalog.ResolveHero(mod.DetectedHeroCodename);
+                if (catalogEntry != null)
+                {
+                    GD.Print($"[CharacterTab] Loading target hero '{catalogEntry.DisplayName}' with textures from '{mod.FileName}'...");
+                    SyncHeroDropdownToHero(catalogEntry);
+
+                    if (_vpkLoader != null)
+                    {
+                        await _vpkLoader.LoadHeroModelAsync(catalogEntry);
+                    }
+                    return;
+                }
+            }
+
+            // Fallback: If a character is currently loaded, reload it with updated textures
+            if (_vpkLoader != null && (_vpkLoader.LastLoadedHeroEntry != null || !string.IsNullOrEmpty(_vpkLoader.LastLoadedVmdlPath)))
+            {
+                GD.Print("[CharacterTab] Reloading current character with texture mod...");
+                await _vpkLoader.ReloadCurrentHeroAsync();
+            }
+        }
+    }
+
+    private async void OnHeroSelected(long index)
     {
         if (_heroOptionButton == null) return;
         int id = _heroOptionButton.GetItemId((int)index);
-        if (id < 0 || id >= _selectableEntries.Count) return;
+        if (id < 0 || id >= _selectableHeroes.Count) return;
 
-        var entry = _selectableEntries[id];
-        GD.Print($"[CharacterTab] Loading hero: {entry.DisplayName} ({entry.InternalCodename}) from {entry.VmdlRelativePath}");
+        var entry = _selectableHeroes[id];
+        GD.Print($"[CharacterTab] Loading vanilla hero: {entry.DisplayName} ({entry.InternalCodename}) from {entry.VmdlRelativePath}");
         EmitSignal(SignalName.CharacterRequested, entry.InternalCodename);
+
+        // If active addon is a full model replacement, reset addon selector to Vanilla so it doesn't conflict
+        if (_vpkLoader != null && _vpkLoader.ActiveAddonInfo != null && _vpkLoader.ActiveAddonInfo.ModType == AddonModType.FullModel)
+        {
+            _vpkLoader.SetActiveAddon(null, null);
+            if (_optAddonMods != null && !_optAddonMods.Disabled)
+            {
+                _optAddonMods.Select(0);
+            }
+            if (_lblAddonDetails != null)
+            {
+                _lblAddonDetails.Text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]";
+            }
+        }
 
         if (_vpkLoader != null)
         {
-            _ = _vpkLoader.LoadHeroModelAsync(entry);
+            await _vpkLoader.LoadHeroModelAsync(entry);
+        }
+    }
+
+    private void SelectOptionByItemId(OptionButton optionButton, int targetId)
+    {
+        if (optionButton == null) return;
+        for (int i = 0; i < optionButton.ItemCount; i++)
+        {
+            if (optionButton.GetItemId(i) == targetId)
+            {
+                optionButton.Select(i);
+                return;
+            }
+        }
+    }
+
+    private void SyncHeroDropdownToHero(DeadlockHeroEntry hero)
+    {
+        if (_heroOptionButton == null || hero == null) return;
+        for (int i = 0; i < _selectableHeroes.Count; i++)
+        {
+            var entry = _selectableHeroes[i];
+            if (entry.InternalCodename.Equals(hero.InternalCodename, StringComparison.OrdinalIgnoreCase))
+            {
+                SelectOptionByItemId(_heroOptionButton, i);
+                return;
+            }
+        }
+    }
+
+    private void SyncHeroDropdownToHeroCodename(string codename)
+    {
+        if (string.IsNullOrEmpty(codename)) return;
+        var hero = DeadlockHeroCatalog.ResolveHero(codename);
+        if (hero != null)
+        {
+            SyncHeroDropdownToHero(hero);
+        }
+    }
+
+    private void SyncHeroDropdownToCurrent()
+    {
+        if (_vpkLoader?.LastLoadedHeroEntry != null)
+        {
+            SyncHeroDropdownToHero(_vpkLoader.LastLoadedHeroEntry);
         }
     }
 
@@ -183,6 +431,7 @@ public partial class CharacterTabUI : VBoxContainer
                 bool isAcc = lowerName.Contains("acc") ||
                              lowerName.Contains("prop") ||
                              lowerName.Contains("weapon") ||
+                             lowerName.Contains("gun") ||
                              lowerName.Contains("hat") ||
                              lowerName.Contains("gear") ||
                              lowerName.Contains("glass") ||

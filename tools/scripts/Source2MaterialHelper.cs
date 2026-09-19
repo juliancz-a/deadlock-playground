@@ -36,14 +36,14 @@ public static class Source2MaterialHelper
 
     #region Texture Accessors (Delegated to Source2TextureLoader)
 
-    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 1024, bool forceOpaque = true)
-        => Source2TextureLoader.ExtractVtexToGodot(package, vtexInternalPath, maxDimension, forceOpaque);
+    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 1024, bool forceOpaque = true, Package addonPackage = null)
+        => Source2TextureLoader.ExtractVtexToGodot(package, vtexInternalPath, maxDimension, forceOpaque, addonPackage);
 
-    public static ImageTexture LoadVtexTexture(Package package, VrfMaterial mat, string paramName, bool forceOpaque = false)
-        => Source2TextureLoader.LoadVtexTexture(package, mat, paramName, forceOpaque);
+    public static ImageTexture LoadVtexTexture(Package package, VrfMaterial mat, string paramName, bool forceOpaque = false, Package addonPackage = null)
+        => Source2TextureLoader.LoadVtexTexture(package, mat, paramName, forceOpaque, addonPackage);
 
-    public static ImageTexture LoadVtexTexture(Package package, string texPath, bool forceOpaque = false)
-        => Source2TextureLoader.LoadVtexTexture(package, texPath, forceOpaque);
+    public static ImageTexture LoadVtexTexture(Package package, string texPath, bool forceOpaque = false, Package addonPackage = null)
+        => Source2TextureLoader.LoadVtexTexture(package, texPath, forceOpaque, addonPackage);
 
     public static void cleanCache()
     {
@@ -63,38 +63,60 @@ public static class Source2MaterialHelper
     #endregion
 
     /// <summary>
-    /// Reads a .vmat_c file from the VPK and constructs the corresponding Godot Material.
+    /// Reads a .vmat_c file from the active Addon VPK (Priority 1) or Base Game VPK (Priority 2)
+    /// and constructs the corresponding Godot Material.
     /// Checks HeroMaterialManager for bespoke hero overrides before falling back to generic
     /// Source 2 archetype builders (Glass, DynamicFX, VertexColorPbr, StandardPbr).
     /// </summary>
-    public static Godot.Material CreateMaterialFromVmat(Package package, string vmatPath, string meshName = null)
+    public static Godot.Material CreateMaterialFromVmat(Package package, string vmatPath, string meshName = null, Package addonPackage = null)
     {
-        if (package == null || string.IsNullOrWhiteSpace(vmatPath)) return null;
+        if ((package == null && addonPackage == null) || string.IsNullOrWhiteSpace(vmatPath)) return null;
         if (!vmatPath.EndsWith("_c")) vmatPath += "_c";
 
         // 1. Check for bespoke hero material overrides (e.g. Lash sparkles, Wraith cards)
-        var customHeroMat = HeroMaterialManager.TryCreateCustomMaterial(null, package, vmatPath, meshName);
+        var customHeroMat = HeroMaterialManager.TryCreateCustomMaterial(null, package, vmatPath, meshName, addonPackage);
         if (customHeroMat != null)
         {
             return customHeroMat;
         }
 
-        // 2. Locate VMAT resource inside VPK
-        var entry = FindVmatEntry(package, vmatPath);
-        if (entry == null)
+        // 3. Locate VMAT resource: Priority 1 = Active Addon VPK, Priority 2 = Base Game VPK
+        PackageEntry entry = null;
+        Package targetPackage = null;
+
+        if (addonPackage != null)
+        {
+            entry = FindVmatEntry(addonPackage, vmatPath);
+            if (entry != null)
+            {
+                targetPackage = addonPackage;
+                GD.Print($"  [AddonMaterial] Injected custom material from addon: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName}");
+            }
+        }
+
+        if (entry == null && package != null)
+        {
+            entry = FindVmatEntry(package, vmatPath);
+            if (entry != null)
+            {
+                targetPackage = package;
+            }
+        }
+
+        if (entry == null || targetPackage == null)
         {
             if (vmatPath.Contains("jitter02", StringComparison.OrdinalIgnoreCase))
             {
                 string fallbackPath = vmatPath.Replace("jitter02", "jitter01", StringComparison.OrdinalIgnoreCase)
                                               .Replace("Jitter02", "Jitter01", StringComparison.OrdinalIgnoreCase);
-                return CreateMaterialFromVmat(package, fallbackPath, meshName);
+                return CreateMaterialFromVmat(package, fallbackPath, meshName, addonPackage);
             }
 
-            GD.PrintErr($"[Source2MaterialHelper] VMAT file not found: {vmatPath}");
+            GD.PrintErr($"[Source2MaterialHelper] VMAT file not found in Addon or Base VPK: {vmatPath}");
             return null;
         }
 
-        package.ReadEntry(entry, out byte[] data);
+        targetPackage.ReadEntry(entry, out byte[] data);
         using var resource = new ValveResourceFormat.Resource();
         using var ms = new MemoryStream(data);
         resource.Read(ms);
@@ -108,12 +130,49 @@ public static class Source2MaterialHelper
         string vmatLower = vmatPath.ToLowerInvariant();
 
         Godot.Material createdMat = null;
-
-        // 3. Archetype A: Translucent glass, domes, and lenses (Dynamo, Paradox, Paige, generic glass)
         var glassParams = VmatColorExtractor.ExtractGlass(matResource, vmatPath);
-        if (GlassMaterialBuilder.IsApplicable(matResource, vmatPath, glassParams))
+
+        // 3. Archetype 0: Inverted-hull solid outline meshes (Viscous bodyoutline)
+        bool isSolidOutline = vmatLower.Contains("viscous_outline")
+                           || (meshName != null && (meshName.Contains("body_outline", StringComparison.OrdinalIgnoreCase) || meshName.Contains("bodyoutline", StringComparison.OrdinalIgnoreCase)));
+        if (isSolidOutline)
         {
-            createdMat = GlassMaterialBuilder.Build(package, matResource, vmatPath, glassParams);
+            var outlineShader = Source2ShaderRegistry.GetViscousOutlineShader();
+            if (outlineShader != null)
+            {
+                var outlineMat = new ShaderMaterial { Shader = outlineShader };
+                Color tint = new Color(0.407843f, 0.94902f, 0.415686f, 1.0f);
+                if (matResource.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc1))
+                    tint = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
+                else if (matResource.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc0))
+                    tint = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
+                else if (matResource.VectorParams.TryGetValue("g_vColorTint1", out var ct1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct1))
+                    tint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
+                else if (matResource.VectorParams.TryGetValue("g_vColorTint", out var ct0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct0))
+                    tint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
+                else if (matResource.VectorParams.TryGetValue("g_vSolidOutlineTint1", out var ot1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot1))
+                    tint = new Color(ot1.X, ot1.Y, ot1.Z, 1.0f);
+                else if (matResource.VectorParams.TryGetValue("g_vSolidOutlineTint", out var ot0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot0))
+                    tint = new Color(ot0.X, ot0.Y, ot0.Z, 1.0f);
+
+                float thickness = 0.004f;
+                if (matResource.FloatParams.TryGetValue("g_flOutlineThickness1", out var th1)) thickness = th1;
+                else if (matResource.FloatParams.TryGetValue("g_flOutlineThickness", out var th0)) thickness = th0;
+                else if (matResource.FloatParams.TryGetValue("g_flOutlineWidth1", out var ow1)) thickness = ow1;
+                else if (matResource.FloatParams.TryGetValue("g_flOutlineWidth", out var ow0)) thickness = ow0;
+
+                outlineMat.SetShaderParameter("g_vSolidOutlineTint", tint);
+                outlineMat.SetShaderParameter("outline_color", tint);
+                outlineMat.SetShaderParameter("outline_thickness", thickness);
+                outlineMat.RenderPriority = 0;
+                outlineMat.SetMeta("PreserveShading", true);
+                createdMat = outlineMat;
+            }
+        }
+        // 4. Archetype A: Translucent glass, domes, and lenses (Dynamo, Paradox, Paige, generic glass)
+        else if (GlassMaterialBuilder.IsApplicable(matResource, vmatPath, glassParams))
+        {
+            createdMat = GlassMaterialBuilder.Build(package, matResource, vmatPath, glassParams, addonPackage);
         }
         else
         {
@@ -123,17 +182,17 @@ public static class Source2MaterialHelper
             // 4. Archetype B: Vertex-colored head & hair PBR (Wraith head, Mirage turban/hair, Vindicta limbs)
             if (VertexColorPbrMaterialBuilder.IsApplicable(matResource, vmatPath, albedoParams.ColorTexturePath, isFur))
             {
-                createdMat = VertexColorPbrMaterialBuilder.Build(package, matResource, vmatPath);
+                createdMat = VertexColorPbrMaterialBuilder.Build(package, matResource, vmatPath, addonPackage);
             }
             // 5. Archetype C: Dynamic procedural FX (Billy jitter, Infernus flame ribbons, Vindicta aura, scrolling UVs)
             else if (DynamicFxMaterialBuilder.IsApplicable(matResource, vmatPath))
             {
-                createdMat = DynamicFxMaterialBuilder.Build(package, matResource, vmatPath);
+                createdMat = DynamicFxMaterialBuilder.Build(package, matResource, vmatPath, addonPackage);
             }
             else
             {
                 // 6. Archetype D: Standard PBR surface (character clothing, body, skin, weapons)
-                createdMat = StandardPbrMaterialBuilder.Build(package, matResource, vmatPath, meshName, glassParams);
+                createdMat = StandardPbrMaterialBuilder.Build(package, matResource, vmatPath, meshName, glassParams, addonPackage);
             }
         }
 
@@ -253,7 +312,7 @@ public static class Source2MaterialHelper
         return color;
     }
 
-    private static PackageEntry FindVmatEntry(Package package, string vmatPath)
+    public static PackageEntry FindVmatEntry(Package package, string vmatPath)
     {
         var entry = package.FindEntry(vmatPath);
         if (entry != null) return entry;

@@ -59,11 +59,13 @@ namespace DeadlockPlayground.Painter
         // Track dynamically created submesh nodes and hidden multi-surface nodes for clean teardown
         private readonly List<MeshInstance3D> _generatedSubmeshNodes = new();
         private readonly List<MeshInstance3D> _hiddenOriginalNodes = new();
+        private static string _currentHeroName = string.Empty;
 
         public void ScanHero(Node3D heroNode)
         {
             CleanupGeneratedSubmeshes();
 
+            _currentHeroName = heroNode?.Name.ToString().ToLowerInvariant() ?? string.Empty;
             _submeshes.Clear();
             _preSoloVisibility.Clear();
             _isAnySoloed = false;
@@ -315,25 +317,60 @@ namespace DeadlockPlayground.Painter
 
         private static (ShaderMaterial ToonMat, ShaderMaterial OutlineMat, bool Preserve) CreateToonMaterials(Material origMat, string meshName, string vmatPath)
         {
-            if (origMat == null || IsToonMaterial(origMat)) return (null, null, true);
+            var toonShader = GetToonShader();
+            var outlineShader = GetToonOutlineShader();
 
-            bool shouldPreserve = DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(meshName, vmatPath, origMat);
+            bool isWeapon = meshName.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
+                            meshName.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                            meshName.Contains("blaster", StringComparison.OrdinalIgnoreCase) ||
+                            (!string.IsNullOrEmpty(vmatPath) && (vmatPath.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
+                                                                  vmatPath.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                                                                  vmatPath.Contains("blaster", StringComparison.OrdinalIgnoreCase)));
+
+            bool isGlass = meshName.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
+                           meshName.Contains("lens", StringComparison.OrdinalIgnoreCase) ||
+                           meshName.Contains("specs", StringComparison.OrdinalIgnoreCase) ||
+                           meshName.Contains("spectacle", StringComparison.OrdinalIgnoreCase) ||
+                           (!string.IsNullOrEmpty(vmatPath) && (vmatPath.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
+                                                                vmatPath.Contains("lens", StringComparison.OrdinalIgnoreCase) ||
+                                                                vmatPath.Contains("specs", StringComparison.OrdinalIgnoreCase) ||
+                                                                vmatPath.Contains("spectacle", StringComparison.OrdinalIgnoreCase))) ||
+                           (origMat is ShaderMaterial smGl && smGl.Shader?.ResourcePath?.Contains("source2_glass") == true);
+
+            bool shouldPreserve = isGlass || DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(meshName, vmatPath, origMat);
             if (shouldPreserve)
             {
+                if (!isGlass && isWeapon && outlineShader != null)
+                {
+                    Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
+                    var weaponOutline = new ShaderMaterial { Shader = outlineShader };
+                    weaponOutline.SetShaderParameter("outline_width", 1.0f);
+                    weaponOutline.SetShaderParameter("outline_color", sigColor);
+                    return (null, weaponOutline, true);
+                }
                 return (null, null, true);
             }
 
             bool isAdditive = false;
-            bool isTranslucent = false;
+            bool isTranslucent = isGlass;
             if (origMat is StandardMaterial3D sm)
             {
                 isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add;
-                isTranslucent = sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+                isTranslucent = isTranslucent || sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
             }
             else if (origMat is ShaderMaterial smPbr &&
                      (smPbr.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
-                      smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true))
+                      smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true ||
+                      smPbr.Shader?.ResourcePath?.Contains("unicorn_hair") == true))
             {
+                if (outlineShader != null)
+                {
+                    Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
+                    var outline = new ShaderMaterial { Shader = outlineShader };
+                    outline.SetShaderParameter("outline_width", 1.0f);
+                    outline.SetShaderParameter("outline_color", sigColor);
+                    return (null, outline, true);
+                }
                 return (null, null, true);
             }
             else if (origMat is ShaderMaterial)
@@ -341,23 +378,31 @@ namespace DeadlockPlayground.Painter
                 isAdditive = true;
             }
 
-            if (isAdditive || isTranslucent)
+            if (isGlass || isAdditive || isTranslucent)
             {
+                // NEVER create outline for glass or translucent surfaces (even on weapons)
+                if (!isGlass && !isTranslucent && isWeapon && outlineShader != null)
+                {
+                    Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
+                    var weaponOutline = new ShaderMaterial { Shader = outlineShader };
+                    weaponOutline.SetShaderParameter("outline_width", 1.0f);
+                    weaponOutline.SetShaderParameter("outline_color", sigColor);
+                    return (null, weaponOutline, true);
+                }
                 return (null, null, true);
             }
 
-            var toonShader = GetToonShader();
-            var outlineShader = GetToonOutlineShader();
             if (toonShader == null || outlineShader == null)
             {
                 return (null, null, true);
             }
 
+            Color outlineCol = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
             var toonMat = new ShaderMaterial { Shader = toonShader };
             var outlineMat = new ShaderMaterial { Shader = outlineShader };
 
             outlineMat.SetShaderParameter("outline_width", 1.0f);
-            outlineMat.SetShaderParameter("outline_color", new Color(0.08f, 0.08f, 0.08f, 1.0f));
+            outlineMat.SetShaderParameter("outline_color", outlineCol);
 
             if (origMat is StandardMaterial3D stdMat)
             {
@@ -420,6 +465,30 @@ namespace DeadlockPlayground.Painter
             {
                 if (sm.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh)) continue;
 
+                bool isWeapon = sm.RawName.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
+                                sm.RawName.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                                sm.RawName.Contains("blaster", StringComparison.OrdinalIgnoreCase) ||
+                                (!string.IsNullOrEmpty(sm.OriginalVmatPath) && (sm.OriginalVmatPath.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
+                                                                               sm.OriginalVmatPath.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                                                                               sm.OriginalVmatPath.Contains("blaster", StringComparison.OrdinalIgnoreCase)));
+
+                bool isGlass = sm.RawName.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
+                               sm.RawName.Contains("lens", StringComparison.OrdinalIgnoreCase) ||
+                               sm.RawName.Contains("specs", StringComparison.OrdinalIgnoreCase) ||
+                               sm.RawName.Contains("spectacle", StringComparison.OrdinalIgnoreCase) ||
+                               (!string.IsNullOrEmpty(sm.OriginalVmatPath) && (sm.OriginalVmatPath.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
+                                                                               sm.OriginalVmatPath.Contains("lens", StringComparison.OrdinalIgnoreCase) ||
+                                                                               sm.OriginalVmatPath.Contains("specs", StringComparison.OrdinalIgnoreCase) ||
+                                                                               sm.OriginalVmatPath.Contains("spectacle", StringComparison.OrdinalIgnoreCase))) ||
+                               (sm.OriginalMaterial is ShaderMaterial smGl && smGl.Shader?.ResourcePath?.Contains("source2_glass") == true);
+
+                if (isGlass)
+                {
+                    if (sm.OriginalMaterial != null) sm.OriginalMaterial.NextPass = null;
+                    sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, sm.OriginalMaterial);
+                    continue;
+                }
+
                 if (enabled && !sm.PreserveOriginal && sm.ToonMaterial != null)
                 {
                     if (enableOutline && sm.OutlineMaterial != null)
@@ -434,7 +503,16 @@ namespace DeadlockPlayground.Painter
                 }
                 else
                 {
-                    sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, sm.OriginalMaterial);
+                    var activeMat = sm.OriginalMaterial;
+                    if (enabled && enableOutline && (isWeapon || (sm.PreserveOriginal && sm.OutlineMaterial != null)) && activeMat != null)
+                    {
+                        activeMat.NextPass = sm.OutlineMaterial;
+                    }
+                    else if (activeMat != null)
+                    {
+                        activeMat.NextPass = null;
+                    }
+                    sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, activeMat);
                 }
             }
         }
@@ -505,6 +583,8 @@ namespace DeadlockPlayground.Painter
             return lower.Contains("acc") ||
                    lower.Contains("prop") ||
                    lower.Contains("weapon") ||
+                   lower.Contains("gun") ||
+                   lower.Contains("blaster") ||
                    lower.Contains("hat") ||
                    lower.Contains("gear") ||
                    lower.Contains("glass") ||

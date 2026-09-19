@@ -18,7 +18,7 @@ public static class GlassMaterialBuilder
         return glassParams != null && glassParams.IsGlass;
     }
 
-    public static ShaderMaterial Build(Package package, VrfMaterial matResource, string vmatPath, GlassParams glassParams)
+    public static ShaderMaterial Build(Package package, VrfMaterial matResource, string vmatPath, GlassParams glassParams, Package addonPackage = null)
     {
         var glassShader = Source2ShaderRegistry.GetGlassShader();
         if (glassShader == null) return null;
@@ -27,6 +27,7 @@ public static class GlassMaterialBuilder
         // Always render glass at priority 1 so internal geometry (reactor core, gears, neck)
         // depth-writes before the glass surface samples the screen texture.
         shaderMat.RenderPriority = 1;
+        shaderMat.SetMeta("PreserveShading", true);
 
         // 1. Generic base color from TextureColor1 or g_vColorTint
         Vector3 baseColor = new Vector3(0.06f, 0.07f, 0.09f); // Dark smoked glass base
@@ -79,8 +80,8 @@ public static class GlassMaterialBuilder
             else if (matResource.VectorParams.TryGetValue("g_vAlbedoScrollSpeed", out var as0)) glassAlbScroll = new Vector2(as0.X, as0.Y);
             shaderMat.SetShaderParameter("albedo_scroll_speed", glassAlbScroll);
 
-            bool hasSiMask = Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "self_illum_mask", true)
-                          || Source2TextureLoader.BindTextureIfPresent(package, matResource, "TextureSelfIllumMask", shaderMat, "self_illum_mask", true);
+            bool hasSiMask = Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "self_illum_mask", true, addonPackage)
+                          || Source2TextureLoader.BindTextureIfPresent(package, matResource, "TextureSelfIllumMask", shaderMat, "self_illum_mask", true, addonPackage);
             shaderMat.SetShaderParameter("use_self_illum_mask", hasSiMask);
         }
 
@@ -88,7 +89,7 @@ public static class GlassMaterialBuilder
                         ?? Source2TextureLoader.GetTextureParam(matResource, "TextureColor");
         if (!string.IsNullOrEmpty(colorPath))
         {
-            var colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorPath, forceOpaque: true);
+            var colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorPath, forceOpaque: true, addonPackage);
             if (colorTex != null) shaderMat.SetShaderParameter("albedo_texture", colorTex);
         }
 
@@ -98,7 +99,7 @@ public static class GlassMaterialBuilder
                               ?? Source2TextureLoader.GetTextureParam(matResource, "TextureNormal");
         if (!string.IsNullOrEmpty(glassNormalPath))
         {
-            var normalTex = Source2TextureLoader.GetOrLoadTexture(package, glassNormalPath, forceOpaque: true);
+            var normalTex = Source2TextureLoader.GetOrLoadTexture(package, glassNormalPath, forceOpaque: true, addonPackage);
             if (normalTex != null) shaderMat.SetShaderParameter("normal_texture", normalTex);
         }
 

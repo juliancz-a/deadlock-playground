@@ -20,9 +20,10 @@ public static class DeadlockMaterialResolver
     /// Excludes eyes, mouth interior, teeth, decals, glasses/lenses, fur layers, flames,
     /// sparkles, jitter meshes, and additive VFX to prevent facial collapse and visual artifacts.
     /// </summary>
-    public static bool ShouldApplyOutline(string meshName, string materialPath, bool isAdditive, bool isTranslucent)
+    public static bool ShouldApplyOutline(string meshName, string materialPath, bool isAdditive, bool isTranslucent, Godot.Material material = null)
     {
         if (isAdditive || isTranslucent) return false;
+        if (material is ShaderMaterial smGl && smGl.Shader?.ResourcePath?.Contains("source2_glass") == true) return false;
 
         string mLower = meshName?.ToLowerInvariant() ?? "";
         string matLower = materialPath?.ToLowerInvariant() ?? "";
@@ -53,8 +54,8 @@ public static class DeadlockMaterialResolver
             matLower.Contains("decal") || mLower.Contains("decal") || mLower.Contains("patch")) return false;
 
         // 5. Glasses, lenses, spectacles, translucent glass
-        if (mLower.Contains("glass") || mLower.Contains("lens") || mLower.Contains("spectacle") ||
-            matLower.Contains("glass") || matLower.Contains("lens") || matLower.Contains("spectacle")) return false;
+        if (mLower.Contains("glass") || mLower.Contains("lens") || mLower.Contains("specs") || mLower.Contains("spectacle") ||
+            matLower.Contains("glass") || matLower.Contains("lens") || matLower.Contains("specs") || matLower.Contains("spectacle")) return false;
 
         // 6. Hair and fur layers (Lady Geist shawl fur01-fur05, geist_fur cards, etc.)
         bool isBaseShawlCloth = mLower.Equals("ghost_shawl") || mLower.Equals("shawl") || mLower.Equals("geist_shawl") ||
@@ -77,8 +78,10 @@ public static class DeadlockMaterialResolver
         // 8. Glowing internal cores & hourglass (Paradox headhourglass, etc.) matching Valve's F_DISABLE_NPR_OUTLINE=1
         if (mLower.Contains("hourglass") || matLower.Contains("hourglass")) return false;
 
-        // 9. Viscous interior organs and core
-        if (matLower.Contains("viscous_swatches") || matLower.Contains("viscous_glass")) return false;
+        // 9. Viscous interior organs and core (do NOT exclude Viscous weapon)
+        bool isWeaponMesh = mLower.Contains("weapon") || mLower.Contains("gun") || mLower.Contains("blaster") ||
+                            matLower.Contains("weapon") || matLower.Contains("gun") || matLower.Contains("blaster");
+        if (!isWeaponMesh && (matLower.Contains("viscous_swatches") || matLower.Contains("viscous_glass"))) return false;
 
         // 10. Static UI / debug / expression meshes
         if (mLower.Contains("static_ui") || mLower.Contains("ui_") || mLower.Contains("head_ui") ||
@@ -107,8 +110,8 @@ public static class DeadlockMaterialResolver
         {
             string mName = mi.Name.ToString().TrimStart('.', '_').ToLowerInvariant();
 
-            // Built-in inverted hulls (e.g. Viscous bodyoutline): hidden by default
-            if (mName.Equals("bodyoutline") || mName.Equals("outline"))
+            // Built-in inverted hulls (Viscous bodyoutline must remain hidden by default so translucent gel body and internal skeleton are visible)
+            if (mName.Contains("bodyoutline") || mName.Contains("body_outline") || mName.Equals("outline"))
             {
                 mi.Visible = false;
             }
@@ -260,7 +263,9 @@ public static class DeadlockMaterialResolver
         if (material is ShaderMaterial sm && sm.Shader != null)
         {
             string sPath = sm.Shader.ResourcePath?.ToLowerInvariant() ?? "";
-            if (sPath.Contains("lash_sparkles") || sPath.Contains("cards") || sPath.Contains("wraith_card"))
+            if (sPath.Contains("lash_sparkles") || sPath.Contains("cards") || sPath.Contains("wraith_card") ||
+                sPath.Contains("unicorn_hornglow") || sPath.Contains("viscous_outline") || sPath.Contains("viscous.gdshader") ||
+                sPath.Contains("source2_glass"))
             {
                 return true;
             }
@@ -314,10 +319,13 @@ public static class DeadlockMaterialResolver
 
     /// <summary>
     /// Checks for hero-specific submesh candidate replacements when the extracted VMDL draw call
-    /// points to a base cloth instead of the layered shell material.
+    /// points to a base cloth, staging placeholder, or untextured material instead of the authentic hero material.
     /// </summary>
     public static string ResolveSubmeshMaterialFallback(string meshName, string vmatPath)
     {
+        if (string.IsNullOrEmpty(vmatPath)) return null;
+
+        // 1. Fur shell fallback (Lady Geist shawl fur01-05)
         if (meshName.Contains("fur", StringComparison.OrdinalIgnoreCase) && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))
         {
             string furCandidate = vmatPath.Replace("ghost_shawl", "ghost_shawl_fur")
@@ -329,6 +337,7 @@ public static class DeadlockMaterialResolver
             }
             return furCandidate;
         }
+
         return null;
     }
 

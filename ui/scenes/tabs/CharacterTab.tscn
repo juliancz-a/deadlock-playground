@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://ui/scripts/tabs/CharacterTabUI.cs" id="1_char"]
 
-[node name="CharacterTab" type="VBoxContainer" node_paths=PackedStringArray("_heroOptionButton", "_submeshContainer", "_btnShowAll", "_btnHideAccessories")]
+[node name="CharacterTab" type="VBoxContainer" node_paths=PackedStringArray("_heroOptionButton", "_submeshContainer", "_btnShowAll", "_btnHideAccessories", "_optAddonMods", "_lblAddonDetails")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -13,6 +13,8 @@ size_flags_vertical = 3
 theme_override_constants/separation = 12
 script = ExtResource("1_char")
 _heroOptionButton = NodePath("HeroSelectGroup/HeroOptionButton")
+_optAddonMods = NodePath("HeroSelectGroup/AddonOptionButton")
+_lblAddonDetails = NodePath("HeroSelectGroup/AddonDetailsLabel")
 _submeshContainer = NodePath("SubmeshPanel/ScrollContainer/SubmeshContainer")
 _btnShowAll = NodePath("SubmeshHeader/HBoxButtons/BtnShowAll")
 _btnHideAccessories = NodePath("SubmeshHeader/HBoxButtons/BtnHideAccessories")
@@ -31,6 +33,25 @@ custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
 search_bar_enabled = true
+
+[node name="AddonLabel" type="Label" parent="HeroSelectGroup"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Modded Character Models"
+
+[node name="AddonOptionButton" type="OptionButton" parent="HeroSelectGroup"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AddonDetailsLabel" type="RichTextLabel" parent="HeroSelectGroup"]
+layout_mode = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+autowrap_mode = 2
+theme_override_font_sizes/normal_font_size = 11
+text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]"
 
 [node name="HSeparator1" type="HSeparator" parent="."]
 layout_mode = 2

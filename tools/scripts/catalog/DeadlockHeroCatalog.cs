@@ -86,10 +86,123 @@ public static class DeadlockHeroCatalog
 
     public static DeadlockHeroEntry GetByCodename(string codename)
     {
-        if (string.IsNullOrEmpty(codename)) return null;
-        string lower = codename.ToLowerInvariant();
-        return Entries.FirstOrDefault(e => e.InternalCodename.Equals(lower, StringComparison.OrdinalIgnoreCase) ||
-                                           e.DisplayName.Equals(lower, StringComparison.OrdinalIgnoreCase));
+        return ResolveHero(codename);
+    }
+
+    /// <summary>
+    /// Resolves any directory name, internal codename, or model folder (e.g. "hornet_v3", "inferno_v4")
+    /// to its authentic in-game hero display name and catalog entry.
+    /// </summary>
+    public static DeadlockHeroEntry ResolveHero(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return null;
+
+        string clean = candidate.Trim().ToLowerInvariant();
+
+        // 1. Direct match on InternalCodename or DisplayName
+        var match = Entries.FirstOrDefault(e =>
+            e.InternalCodename.Equals(clean, StringComparison.OrdinalIgnoreCase) ||
+            e.DisplayName.Equals(clean, StringComparison.OrdinalIgnoreCase));
+        if (match != null) return match;
+
+        // 2. Check if any hero's VmdlRelativePath contains this directory (e.g. "/hornet_v3/", "/inferno_v4/")
+        match = Entries.FirstOrDefault(e =>
+            e.VmdlRelativePath.IndexOf($"/{clean}/", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            e.VmdlRelativePath.IndexOf($"/{clean}.", StringComparison.OrdinalIgnoreCase) >= 0);
+        if (match != null) return match;
+
+        // 3. Strip version suffixes like _v2, _v3, _v4
+        string stripped = System.Text.RegularExpressions.Regex.Replace(clean, @"_v\d+$", "");
+        if (!stripped.Equals(clean, StringComparison.OrdinalIgnoreCase))
+        {
+            match = ResolveHero(stripped);
+            if (match != null) return match;
+        }
+
+        // 4. Strip _wip, _staging, _old suffixes
+        string strippedExtra = System.Text.RegularExpressions.Regex.Replace(clean, @"_(?:wip|staging|old)$", "");
+        if (!strippedExtra.Equals(clean, StringComparison.OrdinalIgnoreCase))
+        {
+            match = ResolveHero(strippedExtra);
+            if (match != null) return match;
+        }
+
+        // 5. Special aliases dictionary for known Deadlock internal dev names
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "hornet", "hornet" },
+            { "hornet_v3", "hornet" },
+            { "inferno", "inferno" },
+            { "inferno_v4", "inferno" },
+            { "gigawatt", "gigawatt_prisoner" },
+            { "gigawatt_prisoner", "gigawatt_prisoner" },
+            { "seven", "gigawatt_prisoner" },
+            { "fencer", "fencer" },
+            { "apollo", "fencer" },
+            { "punkgoat", "punkgoat" },
+            { "billy", "punkgoat" },
+            { "nano", "nano" },
+            { "nano_v2", "nano" },
+            { "calico", "nano" },
+            { "unicorn", "unicorn" },
+            { "celeste", "unicorn" },
+            { "doorman", "doorman" },
+            { "doorman_v2", "doorman" },
+            { "necro", "necro" },
+            { "graves", "necro" },
+            { "archer", "archer" },
+            { "archer_v2", "archer_v2" },
+            { "grey talon", "archer" },
+            { "astro", "astro" },
+            { "holliday", "astro" },
+            { "ghost", "ghost" },
+            { "geist", "geist" },
+            { "lady geist", "geist" },
+            { "engineer", "engineer" },
+            { "mcginnis", "mcginnis" },
+            { "vampirebat", "vampirebat" },
+            { "mina", "vampirebat" },
+            { "digger", "digger" },
+            { "mo & krill", "digger" },
+            { "bookworm", "bookworm" },
+            { "paige", "bookworm" },
+            { "chrono", "chrono" },
+            { "paradox", "chrono" },
+            { "synth", "synth" },
+            { "pocket", "pocket" },
+            { "familiar", "familiar" },
+            { "familiar_wip", "familiar" },
+            { "rem", "familiar" },
+            { "werewolf", "werewolf" },
+            { "silver", "werewolf" },
+            { "magician", "magician" },
+            { "magician_v2", "magician" },
+            { "sinclair", "magician" },
+            { "priest", "priest" },
+            { "venator", "priest" },
+            { "frank", "frank" },
+            { "victor", "frank" },
+            { "vindicta", "hornet" },
+            { "viper", "viper" },
+            { "vyper", "viper" },
+            { "atlas_detective", "atlas_detective" },
+            { "atlas_detective_v2", "atlas_detective" },
+            { "prof_dynamo", "prof_dynamo" }
+        };
+
+        if (aliases.TryGetValue(clean, out var aliasCode))
+        {
+            match = Entries.FirstOrDefault(e => e.InternalCodename.Equals(aliasCode, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
+
+        // 6. Substring check
+        match = Entries.FirstOrDefault(e =>
+            clean.Contains(e.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
+            clean.Contains(e.DisplayName.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase));
+        if (match != null) return match;
+
+        return null;
     }
 
     public static DeadlockHeroEntry GetByPath(string path)

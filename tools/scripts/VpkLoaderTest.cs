@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Addons;
 
 public partial class VpkLoaderTest : Node3D
 {
@@ -31,12 +32,98 @@ public partial class VpkLoaderTest : Node3D
 	public string VpkPath = @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk";
 
 	[Export]
+	public string AddonVpkPath { get; set; } = "";
+
+	public string ActiveAddonVpkPath => AddonVpkPath;
+	public DeadlockHeroEntry LastLoadedHeroEntry { get; private set; }
+	public string LastLoadedVmdlPath { get; private set; }
+	public string LastLoadedHeroKey { get; private set; }
+	public string LastLoadedDisplayName { get; private set; }
+	public AddonModInfo ActiveAddonInfo { get; set; }
+
+	[Export]
 	public string HeroName = "viper";
 	public string HeroModelName = "viper";
 
     private Node3D _currentHeroNode;
     public Node3D CurrentHeroNode => _currentHeroNode;
     private PoseEditorUI _currentPoseEditor;
+
+	public void SetActiveAddon(string addonVpkPath, AddonModInfo modInfo = null)
+	{
+		AddonVpkPath = addonVpkPath ?? "";
+		ActiveAddonInfo = modInfo;
+		GD.Print($"[VpkLoader] Active Addon set to: {(string.IsNullOrEmpty(AddonVpkPath) ? "None (Vanilla)" : Path.GetFileName(AddonVpkPath))}");
+	}
+
+	public async Task ReloadCurrentHeroAsync()
+	{
+		if (LastLoadedHeroEntry != null)
+		{
+			await LoadHeroModelAsync(LastLoadedHeroEntry);
+		}
+		else if (!string.IsNullOrEmpty(LastLoadedVmdlPath))
+		{
+			await LoadModelInternalAsync(LastLoadedVmdlPath, LastLoadedHeroKey ?? HeroName, LastLoadedDisplayName ?? HeroName);
+		}
+	}
+
+	/// <summary>
+	/// Directly loads an addon model or texture-only mod without requiring prior vanilla hero selection.
+	/// </summary>
+	public async Task<Node3D> LoadAddonModelAsync(AddonModInfo modInfo, string explicitVmdlPath = null)
+	{
+		if (modInfo == null) return null;
+
+		SetActiveAddon(modInfo.FilePath, modInfo);
+
+		// If texture-only mod with detected hero, load the corresponding hero from catalog
+		if (modInfo.ModType == AddonModType.TextureOnly && !string.IsNullOrEmpty(modInfo.DetectedHeroCodename))
+		{
+			var catalogEntry = DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename);
+			if (catalogEntry != null)
+			{
+				GD.Print($"[VpkLoader] Loading base hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
+				return await LoadHeroModelAsync(catalogEntry);
+			}
+		}
+
+		// Full model mod or explicit model route
+		string targetRoute = explicitVmdlPath;
+		if (string.IsNullOrEmpty(targetRoute))
+		{
+			targetRoute = modInfo.ModelEntries.FirstOrDefault();
+		}
+
+		if (string.IsNullOrEmpty(targetRoute))
+		{
+			GD.PrintErr($"[VpkLoader] No .vmdl_c found in addon '{modInfo.FileName}' to load.");
+			return null;
+		}
+
+		string heroKey = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
+			? modInfo.DetectedHeroCodename
+			: Path.GetFileNameWithoutExtension(targetRoute);
+
+		string displayName = !string.IsNullOrEmpty(modInfo.DetectedHeroDisplayName)
+			? $"{modInfo.DetectedHeroDisplayName} (Addon)"
+			: (modInfo.DisplayTitle ?? Path.GetFileNameWithoutExtension(targetRoute));
+
+		if (!string.IsNullOrEmpty(modInfo.DetectedHeroCodename))
+		{
+			LastLoadedHeroEntry = DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename);
+		}
+		else
+		{
+			LastLoadedHeroEntry = null;
+		}
+
+		LastLoadedVmdlPath = targetRoute;
+		LastLoadedHeroKey = heroKey;
+		LastLoadedDisplayName = displayName;
+
+		return await LoadModelInternalAsync(targetRoute, heroKey, displayName);
+	}
 
 	public override void _Ready()
 	{
@@ -50,6 +137,10 @@ public partial class VpkLoaderTest : Node3D
 	public async Task<Node3D> LoadHeroModelAsync(DeadlockHeroEntry entry)
 	{
 		if (entry == null) return null;
+		LastLoadedHeroEntry = entry;
+		LastLoadedVmdlPath = entry.VmdlRelativePath;
+		LastLoadedHeroKey = entry.InternalCodename;
+		LastLoadedDisplayName = entry.DisplayName;
 		HeroName = entry.InternalCodename;
 		HeroModelName = Path.GetFileNameWithoutExtension(entry.VmdlRelativePath);
 		return await LoadModelInternalAsync(entry.VmdlRelativePath, entry.InternalCodename, entry.DisplayName);
@@ -85,62 +176,103 @@ public partial class VpkLoaderTest : Node3D
 			return null;
 		}
 
-		GD.Print($"[VpkLoader] Abriendo VPK para cargar '{displayName}' ({internalRoute})...");
-		using var package = new Package();
-		package.Read(VpkPath);
-
-		string searchRoute = internalRoute.Replace('\\', '/');
-		if (!searchRoute.EndsWith("_c")) searchRoute += "_c";
-
-		var entry = package.FindEntry(searchRoute);
-
-		// Fallback por si la convención de nombres difiere levemente
-		if (entry == null)
+		Package addonPackage = null;
+		if (!string.IsNullOrWhiteSpace(AddonVpkPath) && File.Exists(AddonVpkPath))
 		{
-			string fileNameOnly = Path.GetFileNameWithoutExtension(internalRoute);
-			GD.Print($"Ruta exacta no encontrada ({searchRoute}), buscando archivo '{fileNameOnly}'...");
-			if (package.Entries.TryGetValue("vmdl_c", out var modelEntries))
+			try
 			{
-				entry = modelEntries.Find(e => e.FileName.Equals(fileNameOnly, StringComparison.OrdinalIgnoreCase));
+				addonPackage = new Package();
+				addonPackage.Read(AddonVpkPath);
+				GD.Print($"[VpkLoader] Active Addon VPK opened: {Path.GetFileName(AddonVpkPath)}");
+			}
+			catch (Exception ex)
+			{
+				GD.PrintErr($"[VpkLoader] Failed to open Addon VPK '{AddonVpkPath}': {ex.Message}");
+				addonPackage?.Dispose();
+				addonPackage = null;
 			}
 		}
 
-		if (entry == null)
+		try
 		{
-			GD.PrintErr($"No se encontró el modelo para '{internalRoute}' dentro del VPK.");
-			EmitSignal(SignalName.LoadFinished);
-			return null;
-		}
+			GD.Print($"[VpkLoader] Abriendo VPK para cargar '{displayName}' ({internalRoute})...");
+			using var basePackage = new Package();
+			basePackage.Read(VpkPath);
 
-		GD.Print($"Modelo encontrado: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName}");
+			string searchRoute = internalRoute.Replace('\\', '/');
+			if (!searchRoute.EndsWith("_c")) searchRoute += "_c";
 
-		byte[] glbBytes = null;
-		Dictionary<string, List<string>> meshMaterialMap = null;
+			PackageEntry entry = null;
+			Package modelOwnerPackage = null;
 
-		// Run heavy extraction and GLTF export in background thread
-		await Task.Run(() => 
-		{
-			// 1. Extraemos y parseamos el recurso de Source 2
-			package.ReadEntry(entry, out byte[] resourceData);
-			using var resource = new ValveResourceFormat.Resource();
-			using var stream = new MemoryStream(resourceData);
-			resource.Read(stream);
-
-			// 2. Extraemos el mapa mesh → materiales desde los draw calls del VMDL
-			meshMaterialMap = BuildMeshMaterialMap(resource);
-
-			// 3. Exportamos a glTF 2.0 (GLB binario) sin pistas continuas pesadas (Zero-RAM Pose Mode)
-			GD.Print("Generando GLB con VRF (Zero-RAM Pose Mode)...");
-
-			var fileLoader = new GameFileLoader(package, entry.DirectoryName);
-			var exporter = new GltfModelExporter(fileLoader)
+			// Priority 1: Active Addon VPK
+			if (addonPackage != null)
 			{
-				ExportAnimations = true,
-				AdaptTextures = true,
-				ExportMaterials = false,
-				ExportExtras = false,
-				ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
-			};
+				entry = FindModelEntry(addonPackage, searchRoute, heroKey, isAddon: true);
+				if (entry != null)
+				{
+					modelOwnerPackage = addonPackage;
+					GD.Print($"[VpkLoader] Injected model override from Addon VPK: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName}");
+				}
+			}
+
+			// Priority 2: Base Game VPK
+			if (entry == null)
+			{
+				entry = FindModelEntry(basePackage, searchRoute, heroKey, isAddon: false);
+				if (entry != null)
+				{
+					modelOwnerPackage = basePackage;
+				}
+			}
+
+			if (entry == null)
+			{
+				GD.PrintErr($"No se encontró el modelo para '{internalRoute}' dentro del VPK.");
+				EmitSignal(SignalName.LoadFinished);
+				return null;
+			}
+
+			GD.Print($"Modelo encontrado: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName} (Origen: {(modelOwnerPackage == addonPackage ? "Addon" : "Base")})");
+
+			byte[] glbBytes = null;
+			Dictionary<string, List<string>> meshMaterialMap = null;
+
+			// Run heavy extraction and GLTF export in background thread
+			await Task.Run(() => 
+			{
+				// 1. Extraemos y parseamos el recurso de Source 2
+				modelOwnerPackage.ReadEntry(entry, out byte[] resourceData);
+				using var resource = new ValveResourceFormat.Resource();
+				using var stream = new MemoryStream(resourceData);
+				resource.Read(stream);
+
+				// 2. Extraemos el mapa mesh → materiales desde los draw calls del VMDL
+				meshMaterialMap = BuildMeshMaterialMap(resource);
+
+				// 3. Exportamos a glTF 2.0 (GLB binario) sin pistas continuas pesadas (Zero-RAM Pose Mode)
+				GD.Print("Generando GLB con VRF (Zero-RAM Pose Mode)...");
+
+				IFileLoader fileLoader;
+				if (addonPackage != null)
+				{
+					var primaryLoader = new GameFileLoader(addonPackage, entry.DirectoryName);
+					var secondaryLoader = new GameFileLoader(basePackage, entry.DirectoryName);
+					fileLoader = new DualLayerGameFileLoader(primaryLoader, secondaryLoader);
+				}
+				else
+				{
+					fileLoader = new GameFileLoader(basePackage, entry.DirectoryName);
+				}
+
+				var exporter = new GltfModelExporter(fileLoader)
+				{
+					ExportAnimations = true,
+					AdaptTextures = true,
+					ExportMaterials = false,
+					ExportExtras = false,
+					ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
+				};
 
 			// Curated high-value posing animation filter to keep GLB lightweight while exporting undeformed, retargeted animations
 			if (resource.DataBlock is Model vModel)
@@ -224,17 +356,22 @@ public partial class VpkLoaderTest : Node3D
 		if (glbBytes != null)
 		{
 			GD.Print($"GLB generado con éxito ({glbBytes.Length / (1024 * 1024)} MB). Importando a Godot...");
-			package.ReadEntry(entry, out byte[] modelData);
+			modelOwnerPackage.ReadEntry(entry, out byte[] modelData);
 			using var modelRes = new ValveResourceFormat.Resource();
 			using var ms = new MemoryStream(modelData);
 			modelRes.Read(ms);
 			var vrfModel = modelRes.DataBlock as Model;
 
-			InstantiateInScene(glbBytes, heroKey, package, meshMaterialMap, vrfModel, entry.DirectoryName);
+			InstantiateInScene(glbBytes, heroKey, basePackage, meshMaterialMap, vrfModel, entry.DirectoryName, addonPackage);
 		}
 
 		EmitSignal(SignalName.LoadFinished);
 		return _currentHeroNode;
+		}
+		finally
+		{
+			addonPackage?.Dispose();
+		}
 	}
 
     private void CleanupCurrentHero()
@@ -325,7 +462,7 @@ public partial class VpkLoaderTest : Node3D
 		return map;
 	}
 
-	private void InstantiateInScene(byte[] glbBytes, string hero, Package package, Dictionary<string, List<string>> meshMaterialMap, Model vrfModel, string vmdlDirectory)
+	private void InstantiateInScene(byte[] glbBytes, string hero, Package package, Dictionary<string, List<string>> meshMaterialMap, Model vrfModel, string vmdlDirectory, Package addonPackage = null)
 	{
 		try
 		{
@@ -350,7 +487,7 @@ public partial class VpkLoaderTest : Node3D
 			GD.Print($"¡Héroe '{hero}' instanciado en el Viewport con éxito!");
 
 			GD.Print("Malla instanciada. Enlazando materiales por submalla...");
-			ApplyMaterialsRecursively(modelScene, hero, package, meshMaterialMap);
+			ApplyMaterialsRecursively(modelScene, hero, package, meshMaterialMap, addonPackage);
 
 			// Apply initial submesh visibility rules (e.g. Viscous core/body, hair, weapons)
 			DeadlockMaterialResolver.ApplyInitialSubmeshVisibility(modelScene, hero);
@@ -411,10 +548,9 @@ public partial class VpkLoaderTest : Node3D
 	/// <summary>
 	/// Recorre recursivamente los nodos buscando MeshInstance3D y les aplica
 	/// los materiales según el mapa extraído del VMDL (draw calls).
-	/// VRF prefija los nombres de malla con "." al generar el GLB,
-	/// por lo que quitamos ese punto para buscar en el mapa.
+	/// Prioriza addonPackage (Priority 1) sobre package base (Priority 2).
 	/// </summary>
-	private void ApplyMaterialsRecursively(Node node, string heroName, Package package, Dictionary<string, List<string>> meshMaterialMap)
+	private void ApplyMaterialsRecursively(Node node, string heroName, Package package, Dictionary<string, List<string>> meshMaterialMap, Package addonPackage = null)
 	{
 		if (node is MeshInstance3D meshInstance && meshInstance.Mesh != null)
 		{
@@ -578,17 +714,14 @@ public partial class VpkLoaderTest : Node3D
 						}
 					}
 
-					// If fur shell draw call points to base cloth instead of fur, resolve fur fallback candidate
-					if (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))
+					// Resolve submesh material fallbacks (e.g. fur shells pointing to base cloth, weapon staging placeholders like tengu_gun.vmat)
+					string submeshFb = DeadlockMaterialResolver.ResolveSubmeshMaterialFallback(meshName, vmatPath);
+					if (!string.IsNullOrEmpty(submeshFb))
 					{
-						string submeshFb = DeadlockMaterialResolver.ResolveSubmeshMaterialFallback(meshName, vmatPath);
-						if (!string.IsNullOrEmpty(submeshFb))
-						{
-							vmatPath = submeshFb;
-						}
+						vmatPath = submeshFb;
 					}
 
-					Godot.Material mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName);
+					Godot.Material mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName, addonPackage);
 
 					// If material is a dummy, null, or untextured on a fur/shawl mesh, cascade through authentic hero fur materials
 					if (isFurOrShawlMesh && (IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))))
@@ -602,7 +735,7 @@ public partial class VpkLoaderTest : Node3D
 								{
 									if (!IsDummyMaterialPath(cand))
 									{
-										var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, cand, meshName);
+										var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, cand, meshName, addonPackage);
 										if (!IsDummyMaterial(fbMat, cand))
 										{
 											mat = fbMat;
@@ -619,7 +752,7 @@ public partial class VpkLoaderTest : Node3D
 						if (mat == null || IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase)))
 						{
 							string ghostFurFallback = "models/heroes_staging/ghost/materials/ghost_shawl_fur.vmat";
-							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFurFallback, meshName);
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFurFallback, meshName, addonPackage);
 							if (fbMat != null && !IsDummyMaterial(fbMat, ghostFurFallback))
 							{
 								mat = fbMat;
@@ -631,7 +764,7 @@ public partial class VpkLoaderTest : Node3D
 						if (mat == null || IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase)))
 						{
 							string geistFallback = "models/heroes_wip/geist/materials/geist_fur.vmat";
-							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, geistFallback, meshName);
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, geistFallback, meshName, addonPackage);
 							if (fbMat != null && !IsDummyMaterial(fbMat, geistFallback))
 							{
 								mat = fbMat;
@@ -643,7 +776,7 @@ public partial class VpkLoaderTest : Node3D
 						if (!isFurShellSubmesh && (mat == null || IsDummyMaterial(mat, vmatPath)))
 						{
 							string ghostFallback = "models/heroes_staging/ghost/materials/ghost_shawl.vmat";
-							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFallback, meshName);
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFallback, meshName, addonPackage);
 							if (fbMat != null && !IsDummyMaterial(fbMat, ghostFallback))
 							{
 								mat = fbMat;
@@ -659,17 +792,17 @@ public partial class VpkLoaderTest : Node3D
 
 					if (mat == null && (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase) || vmatPath.Contains("jitter", StringComparison.OrdinalIgnoreCase)))
 					{
-						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/punkgoat/materials/punkgoat_border_jitter01.vmat", meshName);
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/punkgoat/materials/punkgoat_border_jitter01.vmat", meshName, addonPackage);
 					}
 					if (mat == null && isCardMesh)
 					{
-						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/wraith/materials/wraith_cards.vmat", meshName);
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/wraith/materials/wraith_cards.vmat", meshName, addonPackage);
 					}
 
 					if (mat != null)
 					{
 						mat.ResourceName = vmatPath;
-						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat, package);
+						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat, package, addonPackage);
 						meshInstance.SetSurfaceOverrideMaterial(i, mat);
 						if (meshInstance.Mesh is ArrayMesh arrMesh)
 						{
@@ -714,8 +847,73 @@ public partial class VpkLoaderTest : Node3D
 
 		foreach (Node child in node.GetChildren())
 		{
-			ApplyMaterialsRecursively(child, heroName, package, meshMaterialMap);
+			ApplyMaterialsRecursively(child, heroName, package, meshMaterialMap, addonPackage);
 		}
+	}
+
+	private static PackageEntry FindModelEntry(Package package, string searchRoute, string heroKey, bool isAddon = false)
+	{
+		if (package == null) return null;
+
+		string normRoute = searchRoute.Replace('\\', '/').TrimStart('/');
+		var entry = package.FindEntry(normRoute);
+		if (entry != null) return entry;
+
+		if (normRoute.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+		{
+			entry = package.FindEntry(normRoute.Substring(0, normRoute.Length - 2));
+			if (entry != null) return entry;
+		}
+		else
+		{
+			entry = package.FindEntry(normRoute + "_c");
+			if (entry != null) return entry;
+		}
+
+		string fileNameOnly = Path.GetFileNameWithoutExtension(searchRoute);
+		if (fileNameOnly.EndsWith(".vmdl", StringComparison.OrdinalIgnoreCase))
+		{
+			fileNameOnly = Path.GetFileNameWithoutExtension(fileNameOnly);
+		}
+
+		foreach (var ext in new[] { "vmdl_c", "vmdl" })
+		{
+			if (package.Entries.TryGetValue(ext, out var modelEntries) && modelEntries.Count > 0)
+			{
+				// 1. Match exact filename
+				entry = modelEntries.Find(e => e.FileName.Equals(fileNameOnly, StringComparison.OrdinalIgnoreCase));
+				if (entry != null) return entry;
+
+				// 2. Match hero key if hero-specific
+				if (!string.IsNullOrEmpty(heroKey))
+				{
+					entry = modelEntries.Find(e =>
+						!e.FileName.Contains("_physics", StringComparison.OrdinalIgnoreCase) &&
+						!e.FileName.Contains("_agdoll", StringComparison.OrdinalIgnoreCase) &&
+						(e.FileName.Equals(heroKey, StringComparison.OrdinalIgnoreCase)
+						 || e.DirectoryName.Contains($"/{heroKey}", StringComparison.OrdinalIgnoreCase)
+						 || e.DirectoryName.EndsWith($"/{heroKey}", StringComparison.OrdinalIgnoreCase)));
+					if (entry != null) return entry;
+				}
+
+				// 3. For addon packages: fallback to primary character model (exclude physics/ragdoll/hitbox/weapons)
+				if (isAddon)
+				{
+					var candidates = modelEntries.Where(e =>
+						!e.FileName.Contains("_physics", StringComparison.OrdinalIgnoreCase) &&
+						!e.FileName.Contains("_agdoll", StringComparison.OrdinalIgnoreCase) &&
+						!e.FileName.Contains("_hitbox", StringComparison.OrdinalIgnoreCase)).ToList();
+
+					if (candidates.Count > 0)
+					{
+						var nonWeapon = candidates.Find(e => !e.FileName.Contains("_weapon", StringComparison.OrdinalIgnoreCase));
+						return nonWeapon ?? candidates[0];
+					}
+				}
+			}
+		}
+
+		return null;
 	}
 
 	private static bool IsDummyMaterialPath(string path)

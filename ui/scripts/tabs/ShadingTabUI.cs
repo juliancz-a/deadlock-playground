@@ -393,6 +393,11 @@ public partial class ShadingTabUI : VBoxContainer
         var heroConfig = HeroMaterialManager.GetConfigForHero(_currentHeroName);
         if (heroConfig != null)
         {
+            if (heroConfig.SignatureOutlineColor.HasValue && _colorToonOutline != null)
+            {
+                _colorToonOutline.Color = heroConfig.SignatureOutlineColor.Value;
+            }
+
             if (_lblHeroSignature != null) _lblHeroSignature.Text = heroConfig.DisplayName;
             if (_checkHeroSignature != null)
             {
@@ -460,6 +465,7 @@ public partial class ShadingTabUI : VBoxContainer
 
             string meshNameLower = mi.Name.ToString().ToLowerInvariant();
             bool isWeapon = meshNameLower.Contains("gun") || meshNameLower.Contains("weapon") ||
+                            meshNameLower.Contains("blaster") ||
                             meshNameLower.Contains("sword") || meshNameLower.Contains("katana") ||
                             meshNameLower.Contains("bow") || meshNameLower.Contains("shortsword") ||
                             meshNameLower.Contains("longhilt") || meshNameLower.Contains("beltscabbard");
@@ -471,9 +477,16 @@ public partial class ShadingTabUI : VBoxContainer
                 Material origMat = HeroMeshHierarchy.GetAuthenticMaterial(mi, i);
                 string matPath = origMat?.ResourceName?.ToLowerInvariant() ?? "";
 
+                if (matPath.Contains("gun") || matPath.Contains("weapon") || matPath.Contains("blaster"))
+                {
+                    isWeapon = true;
+                }
+
                 if (matPath.Contains("outline")) isBuiltinOutline = true;
 
-                bool isGlass = matPath.Contains("glass") || matPath.Contains("lens") || matPath.Contains("specs") || matPath.Contains("spectacle");
+                bool isGlass = matPath.Contains("glass") || matPath.Contains("lens") || matPath.Contains("specs") || matPath.Contains("spectacle")
+                    || meshNameLower.Contains("glass") || meshNameLower.Contains("lens")
+                    || (origMat is ShaderMaterial smGl && smGl.Shader?.ResourcePath?.Contains("source2_glass") == true);
                 bool isAdditive = false;
                 bool isTranslucent = isGlass;
                 if (origMat is StandardMaterial3D sm)
@@ -491,10 +504,12 @@ public partial class ShadingTabUI : VBoxContainer
                 ShaderMaterial sigMat = HeroMaterialManager.GetSignatureMaterial(_currentHeroName, meshNameLower, i, matPath, origMat as StandardMaterial3D);
 
                 // 2. Toon material
+                Color defaultOutlineCol = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, matPath)
+                    ?? (_colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f));
                 var toonMat = new ShaderMaterial { Shader = _toonShader };
                 var outlineMat = new ShaderMaterial { Shader = _toonOutlineShader };
                 outlineMat.SetShaderParameter("outline_width", _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.0f);
-                outlineMat.SetShaderParameter("outline_color", _colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f));
+                outlineMat.SetShaderParameter("outline_color", defaultOutlineCol);
 
                 // Transfer properties from original StandardMaterial3D
                 if (origMat is StandardMaterial3D stdMat)
@@ -577,10 +592,18 @@ public partial class ShadingTabUI : VBoxContainer
         {
             if (!GodotObject.IsInstanceValid(record.Mesh)) continue;
 
-            // Built-in outlines, sparkles, cards, and protected hero surfaces maintain their original material
-            if (record.IsBuiltinOutline ||
-                DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(record.Mesh.Name.ToString(), record.MaterialPath, record.OriginalMaterial))
+            string mName = record.Mesh.Name.ToString();
+            bool isGlass = record.MaterialPath.Contains("glass") || record.MaterialPath.Contains("lens") ||
+                           record.MaterialPath.Contains("specs") || record.MaterialPath.Contains("spectacle") ||
+                           mName.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
+                           mName.Contains("lens", StringComparison.OrdinalIgnoreCase) ||
+                           (record.OriginalMaterial is ShaderMaterial smGl && smGl.Shader?.ResourcePath?.Contains("source2_glass") == true);
+
+            // Built-in outlines, sparkles, cards, glass, and protected hero surfaces maintain their original material
+            if (isGlass || record.IsBuiltinOutline ||
+                DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(mName, record.MaterialPath, record.OriginalMaterial))
             {
+                if (record.OriginalMaterial != null) record.OriginalMaterial.NextPass = null;
                 record.Mesh.SetSurfaceOverrideMaterial(record.SurfaceIndex, record.OriginalMaterial);
                 continue;
             }
@@ -615,34 +638,39 @@ public partial class ShadingTabUI : VBoxContainer
 
             // Outline NextPass for Toon: ONLY on structural body/clothing meshes using DeadlockMaterialResolver selective filter
             // Automatically excludes eyes, mouth interior, teeth, decals, glasses/lenses, fur layers, and particle/fire meshes.
-            if (baseMat is ShaderMaterial shMat)
+            if (baseMat != null)
             {
                 string meshCleanName = record.Mesh.Name.ToString().TrimStart('.', '_');
 
-                // source2_vertcolor_pbr head shader: treat as structural (not additive) for outline eligibility.
-                bool isNprHead = shMat.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
-                                 shMat.Shader?.ResourcePath?.Contains("source2_pbr") == true;
-                bool isAdditiveForOutline = !isNprHead && (record.IsAdditive || record.OriginalMaterial is ShaderMaterial);
+                // source2_vertcolor_pbr / unicorn_hair / viscous: treat as structural (not additive) for outline eligibility.
+                bool isNprStructural = baseMat is ShaderMaterial shMat &&
+                                 (shMat.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                                  shMat.Shader?.ResourcePath?.Contains("source2_pbr") == true ||
+                                  shMat.Shader?.ResourcePath?.Contains("unicorn_hair") == true ||
+                                  shMat.Shader?.ResourcePath?.Contains("viscous") == true);
+                bool isAdditiveForOutline = !isNprStructural && (record.IsAdditive || (record.OriginalMaterial is ShaderMaterial && !record.IsWeapon));
 
                 bool isEligibleForOutline = DeadlockMaterialResolver.ShouldApplyOutline(
                     meshCleanName,
                     record.MaterialPath,
                     isAdditiveForOutline,
-                    record.IsTranslucent
+                    record.IsTranslucent,
+                    baseMat
                 );
 
-                // Allow outline on: toon material, signature material, OR the NPR head shader itself
+                // Allow outline on: toon material, signature material, NPR head/hair/slime shader, OR weapon submeshes
                 bool canHaveOutline = baseMat == record.ToonMaterial
                                    || baseMat == record.SignatureMaterial
-                                   || isNprHead;
+                                   || isNprStructural
+                                   || record.IsWeapon;
 
                 if (enableOutline && canHaveOutline && isEligibleForOutline)
                 {
-                    shMat.NextPass = record.OutlineMaterial;
+                    baseMat.NextPass = record.OutlineMaterial;
                 }
                 else
                 {
-                    shMat.NextPass = null;
+                    baseMat.NextPass = null;
                 }
             }
 
@@ -666,10 +694,25 @@ public partial class ShadingTabUI : VBoxContainer
             {
                 shMat.SetShaderParameter(paramName, value);
 
-                if (paramName == "g_flSelfIllumScale" || paramName == "emission_scale")
+                if (paramName == "g_flSelfIllumScale" || paramName == "emission_scale" || paramName == "g_flSelfIllumScale1")
                 {
                     shMat.SetShaderParameter("g_flSelfIllumScale", value);
+                    shMat.SetShaderParameter("g_flSelfIllumScale1", value);
                     shMat.SetShaderParameter("emission_scale", value);
+                }
+                else if (paramName == "u_slime_base_color" || paramName == "slime_color")
+                {
+                    shMat.SetShaderParameter("u_slime_base_color", value);
+                    shMat.SetShaderParameter("slime_color", value);
+                }
+                else if (paramName == "u_slime_opacity")
+                {
+                    shMat.SetShaderParameter("u_slime_opacity", value);
+                }
+                else if (paramName == "u_rim_glow_color" || paramName == "rim_glow_color")
+                {
+                    shMat.SetShaderParameter("u_rim_glow_color", value);
+                    shMat.SetShaderParameter("rim_glow_color", value);
                 }
                 else if (paramName == "aura_color" || paramName == "arm_color" || paramName == "glow_color" || paramName == "g_vSelfIllumTint")
                 {
@@ -677,6 +720,19 @@ public partial class ShadingTabUI : VBoxContainer
                     shMat.SetShaderParameter("self_illum_tint", value);
                     shMat.SetShaderParameter("glow_color", value);
                     shMat.SetShaderParameter("g_vSelfIllumTint", value);
+                }
+                else if (paramName == "g_vSolidOutlineTint" || paramName == "outline_color")
+                {
+                    shMat.SetShaderParameter("g_vSolidOutlineTint", value);
+                    shMat.SetShaderParameter("outline_color", value);
+                    if (record.OutlineMaterial != null)
+                    {
+                        record.OutlineMaterial.SetShaderParameter("outline_color", value);
+                    }
+                    if (_colorToonOutline != null && value.VariantType == Variant.Type.Color)
+                    {
+                        _colorToonOutline.Color = (Color)value;
+                    }
                 }
                 else if (paramName == "emission_energy")
                 {
@@ -702,6 +758,45 @@ public partial class ShadingTabUI : VBoxContainer
                 else if (paramName == "g_flSelfIllumScale" || paramName == "emission_scale")
                 {
                     stdMat.EmissionEnergyMultiplier = (float)value * 0.6f;
+                }
+            }
+        }
+
+        // Forward signature parameters to HeroMeshHierarchy submeshes (e.g. Viscous separated bodies)
+        var hierarchy = GetHeroMeshHierarchy();
+        if (hierarchy != null)
+        {
+            foreach (var sm in hierarchy.Submeshes)
+            {
+                var mat = sm.Mesh?.GetSurfaceOverrideMaterial(sm.SurfaceIndex) ?? sm.OriginalMaterial;
+                if (mat is ShaderMaterial sh)
+                {
+                    sh.SetShaderParameter(paramName, value);
+                    if (paramName == "u_slime_base_color" || paramName == "slime_color")
+                    {
+                        sh.SetShaderParameter("u_slime_base_color", value);
+                        sh.SetShaderParameter("slime_color", value);
+                    }
+                    else if (paramName == "u_slime_opacity")
+                    {
+                        sh.SetShaderParameter("u_slime_opacity", value);
+                    }
+                    else if (paramName == "u_rim_glow_color" || paramName == "rim_glow_color")
+                    {
+                        sh.SetShaderParameter("u_rim_glow_color", value);
+                        sh.SetShaderParameter("rim_glow_color", value);
+                    }
+                    else if (paramName == "g_flSelfIllumScale" || paramName == "emission_scale" || paramName == "g_flSelfIllumScale1")
+                    {
+                        sh.SetShaderParameter("g_flSelfIllumScale", value);
+                        sh.SetShaderParameter("g_flSelfIllumScale1", value);
+                        sh.SetShaderParameter("emission_scale", value);
+                    }
+                    else if (paramName == "g_vSolidOutlineTint" || paramName == "outline_color")
+                    {
+                        sh.SetShaderParameter("g_vSolidOutlineTint", value);
+                        sh.SetShaderParameter("outline_color", value);
+                    }
                 }
             }
         }

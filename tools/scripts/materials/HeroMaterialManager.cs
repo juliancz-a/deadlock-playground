@@ -25,6 +25,7 @@ public static class HeroMaterialManager
         RegisterConfig(new LashMaterialConfig());
         RegisterConfig(new MirageMaterialConfig());
         RegisterConfig(new WraithMaterialConfig());
+        RegisterConfig(new CelesteMaterialConfig());
     }
 
     public static void RegisterConfig(IHeroMaterialConfig config)
@@ -52,6 +53,7 @@ public static class HeroMaterialManager
         if (lower.Contains("lash")) return _configs.GetValueOrDefault("lash");
         if (lower.Contains("mirage")) return _configs.GetValueOrDefault("mirage");
         if (lower.Contains("wraith")) return _configs.GetValueOrDefault("wraith");
+        if (lower.Contains("unicorn") || lower.Contains("celeste")) return _configs.GetValueOrDefault("unicorn");
 
         return null;
     }
@@ -60,12 +62,12 @@ public static class HeroMaterialManager
     /// Attempts to create a hero-specific bespoke material (e.g. Lash sparkles, Wraith cards).
     /// Returns null if standard archetype builders should process the material.
     /// </summary>
-    public static Godot.Material TryCreateCustomMaterial(string heroName, Package package, string vmatPath, string meshName)
+    public static Godot.Material TryCreateCustomMaterial(string heroName, Package package, string vmatPath, string meshName, Package addonPackage = null)
     {
         var config = GetConfigForHero(heroName);
         if (config != null)
         {
-            var customMat = config.TryCreateCustomMaterial(package, vmatPath, meshName);
+            var customMat = config.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
             if (customMat != null) return customMat;
         }
 
@@ -78,7 +80,7 @@ public static class HeroMaterialManager
             string key = kvp.Key;
             if (vLower.Contains(key) || mLower.Contains(key))
             {
-                var customMat = kvp.Value.TryCreateCustomMaterial(package, vmatPath, meshName);
+                var customMat = kvp.Value.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
                 if (customMat != null) return customMat;
             }
         }
@@ -106,6 +108,26 @@ public static class HeroMaterialManager
             if (vLower.Contains(kvp.Key) && kvp.Value.SignatureGlowColor.HasValue)
             {
                 return kvp.Value.SignatureGlowColor;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the signature outline color for a hero (e.g. Viscous light slime green from TextureColor1).
+    /// </summary>
+    public static Color? GetSignatureOutlineColor(string heroName, string vmatPath)
+    {
+        var config = GetConfigForHero(heroName);
+        if (config?.SignatureOutlineColor != null) return config.SignatureOutlineColor;
+
+        string vLower = vmatPath?.ToLowerInvariant() ?? "";
+        foreach (var kvp in _configs)
+        {
+            if (vLower.Contains(kvp.Key) && kvp.Value.SignatureOutlineColor.HasValue)
+            {
+                return kvp.Value.SignatureOutlineColor;
             }
         }
 
@@ -155,7 +177,7 @@ public static class HeroMaterialManager
     /// <summary>
     /// Configures the base StandardMaterial3D during VPK model loading using the appropriate hero configuration.
     /// </summary>
-    public static void ConfigureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, Godot.Material material, Package package = null)
+    public static void ConfigureMaterial(string heroName, string meshName, int surfaceIndex, string vmatPath, Godot.Material material, Package package = null, Package addonPackage = null)
     {
         if (material is StandardMaterial3D stdMat)
         {

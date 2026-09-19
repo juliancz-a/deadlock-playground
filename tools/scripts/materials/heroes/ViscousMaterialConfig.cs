@@ -10,6 +10,9 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
 
     public Color? SignatureGlowColor => new Color(0.12f, 0.72f, 0.32f, 1.0f); // Viscous slime green
 
+    private Color? _dynamicOutlineColor;
+    public Color? SignatureOutlineColor => _dynamicOutlineColor ?? new Color(0.407843f, 0.94902f, 0.415686f, 1.0f);
+
     private Shader _slimeShader;
 
     public ViscousMaterialConfig()
@@ -23,6 +26,159 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
     public void ConfigureBaseMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D material)
     {
         // Base materials are accurately parsed and configured directly from VPK attributes by Source2MaterialHelper
+    }
+
+    public bool ShouldPreserveMaterial(string meshName, string vmatPath, Godot.Material material)
+    {
+        string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
+        string meshLower = meshName?.ToLowerInvariant() ?? "";
+
+        // Preserve viscous slime body, ball, and inverted-hull outline
+        if (vmatLower.Contains("viscous_body") || vmatLower.Contains("viscous_ball") ||
+            vmatLower.Contains("viscous_outline") ||
+            meshLower.Contains("body_outline") || meshLower.Contains("bodyoutline"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName)
+    {
+        string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
+        string meshLower = meshName?.ToLowerInvariant() ?? "";
+
+        // 1. Viscous Inverted-Hull Outline
+        if (vmatLower.Contains("viscous_outline") || meshLower.Contains("body_outline") || meshLower.Contains("bodyoutline"))
+        {
+            var outlineShader = Source2ShaderRegistry.GetViscousOutlineShader();
+            if (outlineShader == null) return null;
+
+            var mat = new ShaderMaterial { Shader = outlineShader };
+            Color tint = new Color(0.407843f, 0.94902f, 0.415686f, 1.0f);
+            float thickness = 0.004f;
+
+            if (package != null)
+            {
+                var entry = Source2MaterialHelper.FindVmatEntry(package, vmatPath);
+                if (entry != null)
+                {
+                    package.ReadEntry(entry, out byte[] data);
+                    using var res = new ValveResourceFormat.Resource();
+                    using var ms = new System.IO.MemoryStream(data);
+                    res.Read(ms);
+                    if (res.DataBlock is ValveResourceFormat.ResourceTypes.Material vrfMat)
+                    {
+                        if (vrfMat.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc1))
+                            tint = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc0))
+                            tint = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var ct1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct1))
+                            tint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var ct0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct0))
+                            tint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vSolidOutlineTint1", out var ot1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot1))
+                            tint = new Color(ot1.X, ot1.Y, ot1.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vSolidOutlineTint", out var ot0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot0))
+                            tint = new Color(ot0.X, ot0.Y, ot0.Z, 1.0f);
+
+                        if (vrfMat.FloatParams.TryGetValue("g_flOutlineThickness1", out var th1)) thickness = th1;
+                        else if (vrfMat.FloatParams.TryGetValue("g_flOutlineThickness", out var th0)) thickness = th0;
+                    }
+                }
+            }
+
+            _dynamicOutlineColor = tint;
+            mat.SetShaderParameter("g_vSolidOutlineTint", tint);
+            mat.SetShaderParameter("outline_color", tint);
+            mat.SetShaderParameter("outline_thickness", thickness);
+            mat.RenderPriority = 0;
+            mat.SetMeta("PreserveShading", true);
+            return mat;
+        }
+
+        // 2. Viscous Slime Body / Ball
+        if (vmatLower.Contains("viscous_body") || vmatLower.Contains("viscous_ball"))
+        {
+            if (_slimeShader == null) return null;
+
+            var mat = new ShaderMaterial { Shader = _slimeShader };
+            mat.RenderPriority = 1;
+
+            // Extract dynamic properties from VPK VMAT data without hardcoding
+            Color slimeBase = new Color(0.37f, 0.75f, 0.39f, 1.0f); // Default #5FBE64
+            Color rimGlow = new Color(0.40f, 1.0f, 0.55f, 1.0f);
+            float opacity = 0.55f;
+            ImageTexture colorTex = null;
+
+            if (package != null)
+            {
+                var entry = Source2MaterialHelper.FindVmatEntry(package, vmatPath);
+                if (entry != null)
+                {
+                    package.ReadEntry(entry, out byte[] data);
+                    using var res = new ValveResourceFormat.Resource();
+                    using var ms = new System.IO.MemoryStream(data);
+                    res.Read(ms);
+                    if (res.DataBlock is ValveResourceFormat.ResourceTypes.Material vrfMat)
+                    {
+                        if (vrfMat.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f))
+                            slimeBase = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f))
+                            slimeBase = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var vt1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(vt1))
+                            slimeBase = new Color(vt1.X, vt1.Y, vt1.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var vt0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(vt0))
+                            slimeBase = new Color(vt0.X, vt0.Y, vt0.Z, 1.0f);
+
+                        if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint1", out var si1) && (si1.X > 0.001f || si1.Y > 0.001f || si1.Z > 0.001f))
+                            rimGlow = new Color(si1.X, si1.Y, si1.Z, 1.0f);
+                        else if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint", out var si0) && (si0.X > 0.001f || si0.Y > 0.001f || si0.Z > 0.001f))
+                            rimGlow = new Color(si0.X, si0.Y, si0.Z, 1.0f);
+
+                        if (vrfMat.FloatParams.TryGetValue("g_flCloakFactor1", out var cf1) && cf1 > 0.01f)
+                            opacity = Mathf.Clamp(cf1 * 0.55f, 0.35f, 0.85f);
+                        else if (vrfMat.FloatParams.TryGetValue("g_flOpacityScale1", out var os1) && os1 > 0.01f)
+                            opacity = Mathf.Clamp(os1, 0.35f, 0.85f);
+
+                        string colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
+                                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
+                                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
+                        if (!string.IsNullOrEmpty(colorTexPath))
+                        {
+                            colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: false);
+                        }
+                    }
+                }
+            }
+
+            mat.SetShaderParameter("u_slime_base_color", slimeBase);
+            mat.SetShaderParameter("u_slime_opacity", opacity);
+            mat.SetShaderParameter("u_rim_glow_color", rimGlow);
+            mat.SetShaderParameter("roughness", 0.08f);
+            mat.SetShaderParameter("specular", 0.6f);
+            mat.SetShaderParameter("rim_intensity", 1.0f);
+
+            // Legacy uniform aliases
+            mat.SetShaderParameter("slime_color", slimeBase);
+            mat.SetShaderParameter("rim_glow_color", rimGlow);
+
+            if (colorTex != null)
+            {
+                mat.SetShaderParameter("g_tColor", colorTex);
+                mat.SetShaderParameter("has_texture", true);
+            }
+            else
+            {
+                mat.SetShaderParameter("has_texture", false);
+            }
+
+            mat.SetMeta("PreserveShading", true);
+            return mat;
+        }
+
+        return null;
     }
 
     public ShaderMaterial GetSignatureMaterial(string meshName, int surfaceIndex, string vmatPath, StandardMaterial3D baseMat)
@@ -45,13 +201,32 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
             if (_slimeShader == null) return null;
 
             var mat = new ShaderMaterial { Shader = _slimeShader };
-            mat.SetShaderParameter("slime_color", new Color(0.12f, 0.72f, 0.32f, 0.70f));
-            mat.SetShaderParameter("core_color", new Color(0.04f, 0.35f, 0.14f, 1.0f));
-            mat.SetShaderParameter("rim_glow_color", new Color(0.40f, 1.0f, 0.55f, 1.0f));
-            mat.SetShaderParameter("subsurface_color", new Color(0.15f, 0.85f, 0.40f, 1.0f));
-            mat.SetShaderParameter("roughness", 0.06f);
-            mat.SetShaderParameter("rim_power", 2.8f);
-            mat.SetShaderParameter("rim_intensity", 1.2f);
+            Color slimeBase = baseMat?.AlbedoColor ?? new Color(0.37f, 0.75f, 0.39f, 1.0f);
+            Color rimGlow = new Color(0.40f, 1.0f, 0.55f, 1.0f);
+
+            mat.SetShaderParameter("u_slime_base_color", slimeBase);
+            mat.SetShaderParameter("u_slime_opacity", 0.55f);
+            mat.SetShaderParameter("u_rim_glow_color", rimGlow);
+            mat.SetShaderParameter("roughness", 0.08f);
+            mat.SetShaderParameter("specular", 0.6f);
+            mat.SetShaderParameter("rim_intensity", 1.0f);
+
+            // Legacy aliases
+            mat.SetShaderParameter("slime_color", slimeBase);
+            mat.SetShaderParameter("rim_glow_color", rimGlow);
+
+            if (baseMat?.AlbedoTexture != null)
+            {
+                mat.SetShaderParameter("g_tColor", baseMat.AlbedoTexture);
+                mat.SetShaderParameter("has_texture", true);
+            }
+            else
+            {
+                mat.SetShaderParameter("has_texture", false);
+            }
+
+            mat.RenderPriority = 1;
+            mat.SetMeta("PreserveShading", true);
             return mat;
         }
 
@@ -109,10 +284,19 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
         rowRimInt.AddChild(valRimInt);
         vbox.AddChild(rowRimInt);
 
+        // Slime Outline Tint
+        var rowOutCol = new HBoxContainer();
+        var lblOutCol = new Label { Text = "Outline Tint:", CustomMinimumSize = new Vector2(130, 0) };
+        var cpOutCol = new ColorPickerButton { Color = SignatureOutlineColor ?? new Color(0.407843f, 0.94902f, 0.415686f, 1.0f), CustomMinimumSize = new Vector2(60, 26) };
+        rowOutCol.AddChild(lblOutCol);
+        rowOutCol.AddChild(cpOutCol);
+        vbox.AddChild(rowOutCol);
+
         // Wire events
         cpColor.ColorChanged += col =>
         {
             float op = (float)sliderOp.Value;
+            onParameterChanged?.Invoke("u_slime_base_color", new Color(col.R, col.G, col.B, 1.0f));
             onParameterChanged?.Invoke("slime_color", new Color(col.R, col.G, col.B, op));
         };
 
@@ -120,6 +304,7 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
         {
             valOp.Text = v.ToString("F2");
             Color col = cpColor.Color;
+            onParameterChanged?.Invoke("u_slime_opacity", (float)v);
             onParameterChanged?.Invoke("slime_color", new Color(col.R, col.G, col.B, (float)v));
         };
 
@@ -131,6 +316,7 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
 
         cpRimCol.ColorChanged += col =>
         {
+            onParameterChanged?.Invoke("u_rim_glow_color", col);
             onParameterChanged?.Invoke("rim_glow_color", col);
         };
 
@@ -138,6 +324,13 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
         {
             valRimInt.Text = v.ToString("F2");
             onParameterChanged?.Invoke("rim_intensity", (float)v);
+        };
+
+        cpOutCol.ColorChanged += col =>
+        {
+            _dynamicOutlineColor = col;
+            onParameterChanged?.Invoke("g_vSolidOutlineTint", col);
+            onParameterChanged?.Invoke("outline_color", col);
         };
 
         return vbox;

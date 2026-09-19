@@ -20,6 +20,9 @@ public static class Source2ShaderRegistry
     private static Shader _cardsShader;
     private static Shader _lashSparklesShader;
     private static Shader _viscousShader;
+    private static Shader _viscousOutlineShader;
+    private static Shader _unicornHairShader;
+    private static Shader _unicornHornGlowShader;
     private static Shader _ladyGeistShader;
     private static Shader _vindictaShader;
 
@@ -107,6 +110,24 @@ public static class Source2ShaderRegistry
     {
         _viscousShader ??= LoadValveShader("viscous.gdshader");
         return _viscousShader;
+    }
+
+    public static Shader GetViscousOutlineShader()
+    {
+        _viscousOutlineShader ??= LoadValveShader("viscous_outline.gdshader");
+        return _viscousOutlineShader;
+    }
+
+    public static Shader GetUnicornHairShader()
+    {
+        _unicornHairShader ??= LoadValveShader("unicorn_hair.gdshader");
+        return _unicornHairShader;
+    }
+
+    public static Shader GetUnicornHornGlowShader()
+    {
+        _unicornHornGlowShader ??= LoadValveShader("unicorn_hornglow.gdshader");
+        return _unicornHornGlowShader;
     }
 
     public static Shader GetLadyGeistShader()

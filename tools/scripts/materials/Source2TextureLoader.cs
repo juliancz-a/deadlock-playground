@@ -28,9 +28,9 @@ public static class Source2TextureLoader
     }
 
     /// <summary>
-    /// Retrieves a cached texture or extracts it from the VPK.
+    /// Retrieves a cached texture or extracts it from the VPK (checking active addon first, then base game).
     /// </summary>
-    public static ImageTexture GetOrLoadTexture(Package package, string internalPath, bool forceOpaque)
+    public static ImageTexture GetOrLoadTexture(Package package, string internalPath, bool forceOpaque, Package addonPackage = null)
     {
         if (string.IsNullOrWhiteSpace(internalPath)) return null;
 
@@ -40,7 +40,8 @@ public static class Source2TextureLoader
         }
         internalPath = internalPath.Trim('"', '\'', ' ');
 
-        string cacheKey = internalPath + (forceOpaque ? "_opq" : "");
+        string addonTag = addonPackage != null ? $"_addon_{addonPackage.FileName.GetHashCode():X}" : "";
+        string cacheKey = internalPath + (forceOpaque ? "_opq" : "") + addonTag;
         if (_textureCache.TryGetValue(cacheKey, out var cached))
         {
             if (GodotObject.IsInstanceValid(cached))
@@ -50,7 +51,7 @@ public static class Source2TextureLoader
             _textureCache.Remove(cacheKey);
         }
 
-        var tex = ExtractVtexToGodot(package, internalPath, maxDimension: 1024, forceOpaque: forceOpaque);
+        var tex = ExtractVtexToGodot(package, internalPath, maxDimension: 1024, forceOpaque: forceOpaque, addonPackage: addonPackage);
         if (tex != null)
         {
             tex.ResourceName = internalPath;
@@ -62,12 +63,12 @@ public static class Source2TextureLoader
     /// <summary>
     /// Loads a texture defined by parameter name from a VMAT resource.
     /// </summary>
-    public static ImageTexture LoadVtexTexture(Package package, VrfMaterial mat, string paramName, bool forceOpaque = false)
+    public static ImageTexture LoadVtexTexture(Package package, VrfMaterial mat, string paramName, bool forceOpaque = false, Package addonPackage = null)
     {
         string texPath = GetTextureParam(mat, paramName);
         if (!string.IsNullOrEmpty(texPath))
         {
-            return GetOrLoadTexture(package, texPath, forceOpaque: forceOpaque);
+            return GetOrLoadTexture(package, texPath, forceOpaque: forceOpaque, addonPackage: addonPackage);
         }
         return null;
     }
@@ -75,21 +76,21 @@ public static class Source2TextureLoader
     /// <summary>
     /// Loads a texture directly by path.
     /// </summary>
-    public static ImageTexture LoadVtexTexture(Package package, string texPath, bool forceOpaque = false)
+    public static ImageTexture LoadVtexTexture(Package package, string texPath, bool forceOpaque = false, Package addonPackage = null)
     {
         if (string.IsNullOrEmpty(texPath)) return null;
-        return GetOrLoadTexture(package, texPath, forceOpaque: forceOpaque);
+        return GetOrLoadTexture(package, texPath, forceOpaque: forceOpaque, addonPackage: addonPackage);
     }
 
     /// <summary>
     /// Helper to bind a texture uniform on a ShaderMaterial if the parameter exists in the VMAT.
     /// </summary>
-    public static bool BindTextureIfPresent(Package package, VrfMaterial mat, string paramName, ShaderMaterial shaderMat, string uniformName, bool forceOpaque = false)
+    public static bool BindTextureIfPresent(Package package, VrfMaterial mat, string paramName, ShaderMaterial shaderMat, string uniformName, bool forceOpaque = false, Package addonPackage = null)
     {
         string texPath = GetTextureParam(mat, paramName);
         if (!string.IsNullOrEmpty(texPath))
         {
-            var tex = GetOrLoadTexture(package, texPath, forceOpaque: forceOpaque);
+            var tex = GetOrLoadTexture(package, texPath, forceOpaque: forceOpaque, addonPackage: addonPackage);
             if (tex != null)
             {
                 shaderMat.SetShaderParameter(uniformName, tex);
@@ -140,11 +141,14 @@ public static class Source2TextureLoader
 
     /// <summary>
     /// Extracts a .vtex_c file from the VPK into a Godot ImageTexture.
+    /// Priority 1: Active Addon VPK (if provided).
+    /// Priority 2: Base Game VPK.
     /// Converts Skia Bgra8888 -> Rgba8888 and handles forceOpaque vs alpha cutout preservation.
     /// </summary>
-    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 1024, bool forceOpaque = true)
+    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 1024, bool forceOpaque = true, Package addonPackage = null)
     {
-        if (package == null || string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
+        if (package == null && addonPackage == null) return null;
+        if (string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
 
         if (vtexInternalPath.StartsWith("resource:", StringComparison.OrdinalIgnoreCase))
         {
@@ -152,14 +156,37 @@ public static class Source2TextureLoader
         }
         vtexInternalPath = vtexInternalPath.Trim('"', '\'', ' ');
 
-        var entry = FindVtexEntry(package, vtexInternalPath);
-        if (entry == null)
+        PackageEntry entry = null;
+        Package targetPackage = null;
+
+        // Priority 1: Check active Addon VPK
+        if (addonPackage != null)
         {
-            GD.PrintErr($"[TextureLoader] Texture not found in VPK: {vtexInternalPath}");
+            entry = FindVtexEntry(addonPackage, vtexInternalPath);
+            if (entry != null)
+            {
+                targetPackage = addonPackage;
+                GD.Print($"  [AddonTexture] Injected custom texture from addon: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName}");
+            }
+        }
+
+        // Priority 2: Fallback to Base Game VPK
+        if (entry == null && package != null)
+        {
+            entry = FindVtexEntry(package, vtexInternalPath);
+            if (entry != null)
+            {
+                targetPackage = package;
+            }
+        }
+
+        if (entry == null || targetPackage == null)
+        {
+            GD.PrintErr($"[TextureLoader] Texture not found in VPK (Addon or Base): {vtexInternalPath}");
             return null;
         }
 
-        package.ReadEntry(entry, out byte[] data);
+        targetPackage.ReadEntry(entry, out byte[] data);
         using var resource = new ValveResourceFormat.Resource();
         using var ms = new MemoryStream(data);
         resource.Read(ms);
@@ -273,9 +300,10 @@ public static class Source2TextureLoader
     /// Extracts a representative dominant color from a texture by sampling its 1x1 mip level from the VPK.
     /// Returns null if the texture cannot be loaded or is neutral white/black/grey.
     /// </summary>
-    public static Color? ExtractRepresentativeColor(Package package, string vtexInternalPath)
+    public static Color? ExtractRepresentativeColor(Package package, string vtexInternalPath, Package addonPackage = null)
     {
-        if (package == null || string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
+        if (package == null && addonPackage == null) return null;
+        if (string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
 
         if (vtexInternalPath.StartsWith("resource:", StringComparison.OrdinalIgnoreCase))
         {
@@ -283,12 +311,26 @@ public static class Source2TextureLoader
         }
         vtexInternalPath = vtexInternalPath.Trim('"', '\'', ' ');
 
-        var entry = FindVtexEntry(package, vtexInternalPath);
-        if (entry == null) return null;
+        PackageEntry entry = null;
+        Package targetPackage = null;
+
+        if (addonPackage != null)
+        {
+            entry = FindVtexEntry(addonPackage, vtexInternalPath);
+            if (entry != null) targetPackage = addonPackage;
+        }
+
+        if (entry == null && package != null)
+        {
+            entry = FindVtexEntry(package, vtexInternalPath);
+            if (entry != null) targetPackage = package;
+        }
+
+        if (entry == null || targetPackage == null) return null;
 
         try
         {
-            package.ReadEntry(entry, out byte[] data);
+            targetPackage.ReadEntry(entry, out byte[] data);
             using var resource = new ValveResourceFormat.Resource();
             using var ms = new MemoryStream(data);
             resource.Read(ms);

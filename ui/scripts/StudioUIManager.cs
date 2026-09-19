@@ -682,6 +682,10 @@ public partial class StudioUIManager : CanvasLayer
         {
             loader.VpkPath = Path.Combine(basePath, "game", "citadel", "pak01_dir.vpk");
         }
+
+        var charTab = GetNodeOrNull<CharacterTabUI>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CharacterTab")
+                   ?? GetTree().Root.FindChild("CharacterTab", true, false) as CharacterTabUI;
+        charTab?.PopulateAddonDropdown();
     }
 
     private void OnGameDirSelected(string dir)

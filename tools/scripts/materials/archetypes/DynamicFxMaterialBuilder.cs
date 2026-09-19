@@ -51,7 +51,7 @@ public static class DynamicFxMaterialBuilder
                isDedicatedFxName || VmatColorExtractor.IsDynamicGlow(matResource, vmatPath);
     }
 
-    public static ShaderMaterial Build(Package package, VrfMaterial matResource, string vmatPath)
+    public static ShaderMaterial Build(Package package, VrfMaterial matResource, string vmatPath, Package addonPackage = null)
     {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
 
@@ -255,7 +255,7 @@ public static class DynamicFxMaterialBuilder
         bool forceOpaque = !isArmGlow && !isFxAdditive && !isSparkle;
         if (!string.IsNullOrEmpty(colorTexPath))
         {
-            var colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: forceOpaque);
+            var colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: forceOpaque, addonPackage: addonPackage);
             if (colorTex != null)
             {
                 shaderMat.SetShaderParameter("albedo_texture", colorTex);
@@ -263,10 +263,10 @@ public static class DynamicFxMaterialBuilder
             }
         }
 
-        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "self_illum_mask", forceOpaque: true);
-        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "texture_self_illum_mask", forceOpaque: true);
-        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tJitterMask", shaderMat, "jitter_mask", forceOpaque: true);
-        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tTintMaskRimLightMask", shaderMat, "tint_mask_rim_mask", forceOpaque: true);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "self_illum_mask", forceOpaque: true, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "texture_self_illum_mask", forceOpaque: true, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tJitterMask", shaderMat, "jitter_mask", forceOpaque: true, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tTintMaskRimLightMask", shaderMat, "tint_mask_rim_mask", forceOpaque: true, addonPackage: addonPackage);
 
         // 7. Render Priorities
         if (isSparkle)
