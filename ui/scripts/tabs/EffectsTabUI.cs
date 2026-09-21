@@ -125,7 +125,10 @@ public partial class EffectsTabUI : VBoxContainer
             {
                 var attrs = EnsureCameraAttributes();
                 if (!_isSyncing && attrs != null)
+                {
                     attrs.DofBlurFarEnabled = enabled;
+                    StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
+                }
             };
         }
 
@@ -170,7 +173,10 @@ public partial class EffectsTabUI : VBoxContainer
                 if (_dofBlurAmountLabel != null) _dofBlurAmountLabel.Text = $"{v:F2}";
                 var attrs = EnsureCameraAttributes();
                 if (!_isSyncing && attrs != null)
+                {
                     attrs.DofBlurAmount = (float)v;
+                    StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
+                }
             };
         }
 

@@ -20,6 +20,7 @@ public partial class SettingsDialog : PanelContainer
     private Button _btnBrowseSavePath;
     private LineEdit _compilerPathInput;
     private Button _btnBrowseCompilerPath;
+    private Button _btnResetGeneral;
 
     // FileDialogs for General Paths
     private FileDialog _gameFolderDialog;
@@ -27,14 +28,13 @@ public partial class SettingsDialog : PanelContainer
     private FileDialog _compilerFileDialog;
 
     // Graphics Tab Controls
-    private CheckBox _chkToonShading;
     private OptionButton _optMsaa;
     private OptionButton _optShadowQuality;
-    private OptionButton _optStudioEnv;
     private CheckBox _chkShowStudioBg;
     private HSlider _sliderFpsLimit;
     private Label _lblFpsLimit;
     private CheckBox _chkVsync;
+    private Button _btnResetGraphics;
 
     // UI Tab Controls
     private ColorPickerButton _xrayLineColorPicker;
@@ -54,6 +54,10 @@ public partial class SettingsDialog : PanelContainer
     private HSlider _painterOutlineWidthSlider;
     private Label _painterOutlineWidthLabel;
     private Button _btnResetDisplaySettings;
+
+    // Single reusable confirmation dialog for all resets
+    private ConfirmationDialog _confirmDialog;
+    private Action _pendingConfirmAction;
 
     // Dependencies
     private GamePathManager _pathManager;
@@ -86,16 +90,16 @@ public partial class SettingsDialog : PanelContainer
         _btnBrowseSavePath = GetNodeOrNull<Button>("VBoxContainer/TabContainer/General/VBox/SavePathRow/HBox/BrowseSavePathButton");
         _compilerPathInput = GetNodeOrNull<LineEdit>("VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox/CompilerPathLine");
         _btnBrowseCompilerPath = GetNodeOrNull<Button>("VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox/BrowseCompilerPathButton");
+        _btnResetGeneral = GetNodeOrNull<Button>("VBoxContainer/TabContainer/General/VBox/BtnResetGeneral");
 
         // Graphics
-        _chkToonShading = GetNodeOrNull<CheckBox>("VBoxContainer/TabContainer/Graphics/VBox/RendererRow/ChkToonShading");
         _optMsaa = GetNodeOrNull<OptionButton>("VBoxContainer/TabContainer/Graphics/VBox/MsaaRow/OptMsaa");
         _optShadowQuality = GetNodeOrNull<OptionButton>("VBoxContainer/TabContainer/Graphics/VBox/ShadowRow/OptShadowQuality");
-        _optStudioEnv = GetNodeOrNull<OptionButton>("VBoxContainer/TabContainer/Graphics/VBox/StudioEnvRow/OptStudioEnv");
         _chkShowStudioBg = GetNodeOrNull<CheckBox>("VBoxContainer/TabContainer/Graphics/VBox/ShowBgRow/ChkShowStudioBg");
         _sliderFpsLimit = GetNodeOrNull<HSlider>("VBoxContainer/TabContainer/Graphics/VBox/FpsRow/HBox/SliderFpsLimit");
         _lblFpsLimit = GetNodeOrNull<Label>("VBoxContainer/TabContainer/Graphics/VBox/FpsRow/HBox/LblFpsLimit");
         _chkVsync = GetNodeOrNull<CheckBox>("VBoxContainer/TabContainer/Graphics/VBox/VsyncRow/ChkVsync");
+        _btnResetGraphics = GetNodeOrNull<Button>("VBoxContainer/TabContainer/Graphics/VBox/BtnResetGraphics");
 
         // UI
         _xrayLineColorPicker = GetNodeOrNull<ColorPickerButton>("VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineColor/ColorPickerButton");
@@ -173,12 +177,23 @@ public partial class SettingsDialog : PanelContainer
             };
         }
 
-        // Graphics
-        if (_chkToonShading != null)
+        if (_btnResetGeneral != null)
         {
-            _chkToonShading.Toggled += (enabled) => UserSettings.ToonEnabled = enabled;
+            _btnResetGeneral.Pressed += () =>
+            {
+                ShowConfirmDialog(
+                    "Reset General Settings?",
+                    "Reset configured Deadlock game directory and export paths back to default?",
+                    () =>
+                    {
+                        _pathManager?.SaveConfig("", "");
+                        _pathManager?.SaveResourceCompilerPath("");
+                        UpdatePathFields();
+                    });
+            };
         }
 
+        // Graphics
         if (_optMsaa != null)
         {
             _optMsaa.Clear();
@@ -196,15 +211,6 @@ public partial class SettingsDialog : PanelContainer
             _optShadowQuality.AddItem("Low (Soft)", 1);
             _optShadowQuality.AddItem("High (Detailed)", 2);
             _optShadowQuality.ItemSelected += (idx) => UserSettings.ShadowQuality = (int)idx;
-        }
-
-        if (_optStudioEnv != null)
-        {
-            _optStudioEnv.Clear();
-            _optStudioEnv.AddItem("Dark Studio", 0);
-            _optStudioEnv.AddItem("Grey Backdrop", 1);
-            _optStudioEnv.AddItem("Transparent Viewport", 2);
-            _optStudioEnv.ItemSelected += (idx) => UserSettings.StudioEnvironment = (UserSettings.StudioEnvMode)idx;
         }
 
         if (_chkShowStudioBg != null)
@@ -227,8 +233,50 @@ public partial class SettingsDialog : PanelContainer
             _chkVsync.Toggled += (enabled) => UserSettings.VSync = enabled;
         }
 
+        if (_btnResetGraphics != null)
+        {
+            _btnResetGraphics.Pressed += () =>
+            {
+                ShowConfirmDialog(
+                    "Reset Graphics Settings?",
+                    "Reset MSAA, shadow quality, background, and performance settings to default values?",
+                    () =>
+                    {
+                        UserSettings.ResetGraphicsDefaults();
+                        SyncFromSettings();
+                    });
+            };
+        }
+
         // UI Tab
         InitDisplaySettingsEvents();
+    }
+
+    private void ShowConfirmDialog(string title, string message, Action onConfirm)
+    {
+        if (_confirmDialog == null)
+        {
+            _confirmDialog = new ConfirmationDialog
+            {
+                Title = title,
+                DialogText = message,
+                OkButtonText = "Reset",
+                CancelButtonText = "Cancel"
+            };
+            _confirmDialog.Confirmed += () =>
+            {
+                _pendingConfirmAction?.Invoke();
+                _pendingConfirmAction = null;
+            };
+            AddChild(_confirmDialog);
+        }
+        else
+        {
+            _confirmDialog.Title = title;
+            _confirmDialog.DialogText = message;
+        }
+        _pendingConfirmAction = onConfirm;
+        _confirmDialog.PopupCentered();
     }
 
     private void UpdateFpsLabel(int fps)
@@ -242,10 +290,8 @@ public partial class SettingsDialog : PanelContainer
     private void SyncFromSettings()
     {
         // Graphics
-        if (_chkToonShading != null) _chkToonShading.ButtonPressed = UserSettings.ToonEnabled;
         if (_optMsaa != null) _optMsaa.Select(Math.Clamp(UserSettings.Msaa3D, 0, 3));
         if (_optShadowQuality != null) _optShadowQuality.Select(Math.Clamp(UserSettings.ShadowQuality, 0, 2));
-        if (_optStudioEnv != null) _optStudioEnv.Select(Math.Clamp((int)UserSettings.StudioEnvironment, 0, 2));
         if (_chkShowStudioBg != null) _chkShowStudioBg.ButtonPressed = UserSettings.ShowStudioBackground;
 
         int fps = UserSettings.MaxFps;
@@ -368,8 +414,14 @@ public partial class SettingsDialog : PanelContainer
         {
             _btnResetDisplaySettings.Pressed += () =>
             {
-                GizmoDisplaySettings.ResetToDefaults();
-                SyncDisplaySettingsUI();
+                ShowConfirmDialog(
+                    "Reset Display Settings?",
+                    "Reset all bone marker colors, line opacities, and painter highlight settings to default values?",
+                    () =>
+                    {
+                        GizmoDisplaySettings.ResetToDefaults();
+                        SyncDisplaySettingsUI();
+                    });
             };
         }
     }

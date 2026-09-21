@@ -10,17 +10,9 @@ public static class UserSettings
     private const string ConfigPath = "user://settings.cfg";
     private const string SectionName = "UserSettings";
 
-    public enum StudioEnvMode
-    {
-        DarkStudio = 0,
-        GreyBackdrop = 1,
-        TransparentViewport = 2
-    }
-
     private static bool _toonEnabled = false;
     private static int _msaa3D = 1; // 0=Disabled, 1=2x, 2=4x, 3=8x
     private static int _shadowQuality = 2; // 0=Off, 1=Low, 2=High
-    private static StudioEnvMode _studioEnv = StudioEnvMode.DarkStudio;
     private static bool _showStudioBackground = true;
     private static int _maxFps = 60; // 0 = uncapped
     private static bool _vsync = true;
@@ -63,20 +55,6 @@ public static class UserSettings
                 _shadowQuality = value;
                 SaveSettings();
                 ShadowQualityChanged?.Invoke(value);
-            }
-        }
-    }
-
-    public static StudioEnvMode StudioEnvironment
-    {
-        get => _studioEnv;
-        set
-        {
-            if (_studioEnv != value)
-            {
-                _studioEnv = value;
-                SaveSettings();
-                StudioEnvironmentChanged?.Invoke(value);
             }
         }
     }
@@ -126,7 +104,6 @@ public static class UserSettings
     public static event Action<bool> ToonEnabledChanged;
     public static event Action<int> Msaa3DChanged;
     public static event Action<int> ShadowQualityChanged;
-    public static event Action<StudioEnvMode> StudioEnvironmentChanged;
     public static event Action<bool> ShowStudioBackgroundChanged;
     public static event Action PerformanceSettingsChanged;
 
@@ -143,7 +120,6 @@ public static class UserSettings
             _toonEnabled = (bool)config.GetValue(SectionName, "ToonEnabled", false);
             _msaa3D = (int)config.GetValue(SectionName, "Msaa3D", 1);
             _shadowQuality = (int)config.GetValue(SectionName, "ShadowQuality", 2);
-            _studioEnv = (StudioEnvMode)(int)config.GetValue(SectionName, "StudioEnvironment", 0);
             _showStudioBackground = (bool)config.GetValue(SectionName, "ShowStudioBackground", true);
             _maxFps = (int)config.GetValue(SectionName, "MaxFps", 60);
             _vsync = (bool)config.GetValue(SectionName, "VSync", true);
@@ -157,11 +133,27 @@ public static class UserSettings
         config.SetValue(SectionName, "ToonEnabled", _toonEnabled);
         config.SetValue(SectionName, "Msaa3D", _msaa3D);
         config.SetValue(SectionName, "ShadowQuality", _shadowQuality);
-        config.SetValue(SectionName, "StudioEnvironment", (int)_studioEnv);
         config.SetValue(SectionName, "ShowStudioBackground", _showStudioBackground);
         config.SetValue(SectionName, "MaxFps", _maxFps);
         config.SetValue(SectionName, "VSync", _vsync);
+
+        // Limpiar clave obsoleta si existía de versiones previas
+        if (config.HasSectionKey(SectionName, "StudioEnvironment"))
+        {
+            config.EraseSectionKey(SectionName, "StudioEnvironment");
+        }
+
         config.Save(ConfigPath);
+    }
+
+    public static void ResetGraphicsDefaults()
+    {
+        Msaa3D = 1;
+        ShadowQuality = 2;
+        ShowStudioBackground = true;
+        MaxFps = 60;
+        VSync = true;
+        SaveSettings();
     }
 
     public static void ApplyPerformanceSettings()

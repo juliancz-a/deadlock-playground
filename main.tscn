@@ -25,6 +25,11 @@
 [ext_resource type="PackedScene" uid="uid://c8k8f2y0x1m4p" path="res://ui/scenes/modals/SettingsDialog.tscn" id="23_settings_dialog"]
 [ext_resource type="PackedScene" uid="uid://wjfypfotgq0w" path="res://ui/scenes/components/UVCanvasPanel.tscn" id="24_uv_canvas"]
 [ext_resource type="Texture2D" uid="uid://b407xjf02tgde" path="res://assets/at-icons/uv_layer.svg" id="25_uv_icon"]
+[ext_resource type="Shader" uid="uid://px44p7nn6kk8" path="res://shaders/modal_backdrop_blur.gdshader" id="26_backdrop_shader"]
+[ext_resource type="PackedScene" uid="uid://b7l2p8q4m5oax" path="res://ui/scenes/modals/FeedbackDialog.tscn" id="27_feedback_dialog"]
+[ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="28_modal_theme"]
+[ext_resource type="Script" uid="uid://diun3p2kyu2cy" path="res://ui/scripts/modals/AboutDialog.cs" id="29_qsp4k"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="30_kq58d"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -74,21 +79,15 @@ roughness = 0.85
 material = SubResource("StandardMaterial3D_stage")
 size = Vector2(20, 20)
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1bvp3"]
-sky_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
-ground_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_seu75"]
 
-[sub_resource type="Sky" id="Sky_0xm2m"]
-sky_material = SubResource("ProceduralSkyMaterial_1bvp3")
+[sub_resource type="Sky" id="Sky_kq58d"]
+sky_material = SubResource("ProceduralSkyMaterial_seu75")
 
-[sub_resource type="Environment" id="Environment_lquwl"]
-background_mode = 2
-sky = SubResource("Sky_0xm2m")
+[sub_resource type="Environment" id="Environment_kq58d"]
+sky = SubResource("Sky_kq58d")
 ambient_light_source = 2
-ambient_light_color = Color(0.28, 0.29, 0.32, 1)
-glow_enabled = true
-glow_bloom = 0.35
-glow_hdr_threshold = 0.85
+ambient_light_color = Color(0.54, 0.54, 0.54, 1)
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_dof"]
 dof_blur_far_distance = 5.0
@@ -117,15 +116,21 @@ shader_parameter/double_vision_split = 0.008
 [sub_resource type="CanvasItemMaterial" id="CanvasItemMaterial_premult"]
 blend_mode = 4
 
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_modal_backdrop"]
+shader = ExtResource("26_backdrop_shader")
+shader_parameter/blur_amount = 2.5
+shader_parameter/bg_color = Color(0, 0, 0, 0.6)
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pgrle"]
 bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_tabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_settingsModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_tabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
+_btnFeedback = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/FeedbackButton")
 _btnAbout = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
 _btnQuit = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
 _btnTabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
@@ -137,30 +142,20 @@ _btnTabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContain
 _btnTabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/LightButton")
 _btnTabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
 _btnTabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PaintButton")
-_tabContentContainer = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
-_tabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CharacterTab")
-_tabBones = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/BonesTab")
-_tabCamera = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/CameraTab")
-_tabPose = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/PoseTab")
-_tabScene = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/SceneTab")
-_tabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/EffectsTab")
-_tabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/LightingTab")
-_tabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/ShadingTab")
 _tabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/PaintTab")
 _exportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
 _paintModExportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
-_uvCanvasPanel = NodePath("MainHUD/VBoxContainer/MainSplit/UVCanvasPanel")
 _navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge")
-_painterKeymapBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge")
 _btnQuickXRay = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickXRay")
 _btnQuickFullscreen = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickFullscreen")
-_btnOpenUVCanvas = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BtnOpenUVCanvas")
 _modalsLayer = NodePath("MainHUD/ModalsLayer")
+_modalBackdrop = NodePath("MainHUD/ModalsLayer/ModalBackdrop")
 _settingsModal = NodePath("MainHUD/ModalsLayer/SettingsModal")
+_feedbackModal = NodePath("MainHUD/ModalsLayer/FeedbackModal")
 _aboutModal = NodePath("MainHUD/ModalsLayer/AboutModal")
 _loadingOverlay = NodePath("MainHUD/ModalsLayer/LoadingOverlay")
 _loadingLabel = NodePath("MainHUD/ModalsLayer/LoadingOverlay/Label")
-_btnAboutClose = NodePath("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/Button")
+_btnAboutClose = NodePath("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/HeaderBar/BtnClose")
 _gameFolderDialog = NodePath("MainHUD/ModalsLayer/GameFolderDialog")
 _saveFolderDialog = NodePath("MainHUD/ModalsLayer/ScreenshotFolderDialog")
 
@@ -216,6 +211,10 @@ size_flags_horizontal = 3
 [node name="SettingsButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=578225235]
 layout_mode = 2
 text = "Settings"
+
+[node name="FeedbackButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=148392184]
+layout_mode = 2
+text = "Feedback & Help"
 
 [node name="AboutButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=63876577]
 layout_mode = 2
@@ -433,6 +432,7 @@ mouse_filter = 0
 stretch = true
 
 [node name="WorldViewport" type="SubViewport" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer" unique_id=688636459]
+transparent_bg = true
 handle_input_locally = false
 physics_object_picking = true
 size = Vector2i(1552, 1028)
@@ -445,7 +445,7 @@ visible = false
 mesh = SubResource("PlaneMesh_stage")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=494643305]
-environment = SubResource("Environment_lquwl")
+environment = SubResource("Environment_kq58d")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=219564876]
 transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
@@ -688,7 +688,20 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
+
+[node name="ModalBackdrop" type="ColorRect" parent="UIRoot/MainHUD/ModalsLayer" unique_id=987162534]
+visible = false
+material = SubResource("ShaderMaterial_modal_backdrop")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.6)
 
 [node name="ScreenshotFolderDialog" type="FileDialog" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1336641846]
 title = "Open a Directory"
@@ -704,59 +717,121 @@ access = 2
 visible = false
 layout_mode = 0
 anchors_preset = 0
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 720.0
+offset_bottom = 540.0
+grow_horizontal = 1
+grow_vertical = 1
+
+[node name="FeedbackModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=892347102 instance=ExtResource("27_feedback_dialog")]
+visible = false
+layout_mode = 1
 
 [node name="AboutModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1871805012]
 visible = false
-layout_mode = 0
+custom_minimum_size = Vector2(620, 500)
+layout_mode = 1
+anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -320.0
-offset_top = -240.0
-offset_right = 320.0
-offset_bottom = 240.0
+offset_left = -310.0
+offset_top = -250.0
+offset_right = 310.0
+offset_bottom = 250.0
 grow_horizontal = 2
 grow_vertical = 2
+theme = ExtResource("28_modal_theme")
+script = ExtResource("29_qsp4k")
 
 [node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal" unique_id=1392513976]
 layout_mode = 2
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 16
-theme_override_constants/margin_right = 16
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 18
 theme_override_constants/margin_bottom = 16
 
 [node name="VBoxContainer" type="VBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer" unique_id=1836691237]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 12
 
-[node name="Button" type="Button" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=2084910002]
+[node name="HeaderBar" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=1682914101]
 layout_mode = 2
-size_flags_horizontal = 8
-size_flags_vertical = 0
-text = "Close"
 
-[node name="RichTextLabel" type="RichTextLabel" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=1988160098]
+[node name="Title" type="Label" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/HeaderBar" unique_id=1682914102]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TitleLabel"
+text = "About Deadlock Playground"
+
+[node name="BtnClose" type="Button" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/HeaderBar" unique_id=2084910002]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Close"
+text = "✕"
+flat = true
+
+[node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=1682914103]
+layout_mode = 2
+
+[node name="ContentCard" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=1682914104]
 layout_mode = 2
 size_flags_vertical = 3
+theme_type_variation = &"CardPanel"
+
+[node name="Margin" type="MarginContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/ContentCard" unique_id=1682914105]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="ScrollContainer" type="ScrollContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/ContentCard/Margin" unique_id=1682914106]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="RichTextLabel" type="RichTextLabel" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/ContentCard/Margin/ScrollContainer" unique_id=1988160098]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_fonts/normal_font = ExtResource("30_kq58d")
+theme_override_fonts/bold_font = ExtResource("30_kq58d")
 bbcode_enabled = true
-text = "[b]Deadlock 3D Playground[/b] | [color=#8A8A8A]by Julián Caceres[/color]
-[color=#A35A4E]Version 0.1.0-beta[/color]
+text = "[font_size=24][b]Deadlock Playground[/b][/font_size]
+[color=#A35A4E]v1.0.0[/color]
 
-An open-source, community-driven tool designed to view, inspect, and pose 3D character models from Valve's Deadlock for art reference, virtual photography, and content creation.
+An open-source, community-driven tool designed to view, inspect, pose, and paint 3D character models from Valve's Deadlock for art reference, virtual photography, skin creation, and modding.
 
-[b]Built With & Open Source Credits[/b]
-• [b]Engine:[/b] Powered by [url=https://godotengine.org/]Godot Engine 4[/url] (.NET / C#).
-• [b]Asset Pipeline:[/b] Powered by [url=https://github.com/ValveResourceFormat/ValveResourceFormat]ValveResourceFormat (Source 2 Viewer)[/url], maintained by the Steam Database community.
-• [b]Assets & Tools: [/b] 
-		[color=#A35A4E]Intro Background[/color] by [url=https://ayeaka.itch.io/ayeaka]ayeaka[/url]
-		[color=#A35A4E]Gizmo3D Plugin[/color] by [url=https://github.com/chrisizeful/Gizmo3D]chrisizeful[/url]
-• [b]Project Source:[/b] Check out the code and contribute on [url=https://github.com/juliancz-a/deadlock-3d-playground]GitHub[/url].
+[font_size=20][b]Built With & Open Source Credits[/b][/font_size]
+• [b]Engine:[/b] Powered by [color=#4DA3FF][url=https://godotengine.org/]Godot Engine 4[/url][/color] (.NET / C#).
+• [b]Asset Pipeline:[/b] Powered by [color=#4DA3FF][url=https://github.com/ValveResourceFormat/ValveResourceFormat]ValveResourceFormat (Source 2 Viewer)[/url][/color], maintained by the Steam Database community.
+• [b]SVG Icons:[/b] [color=#4DA3FF][url=https://github.com/Voxybunsl/at-icons]at-icons (MIT License)[/url][/color] by Voxybuns.
+• [b]GPU Texture Painter plugin:[/b] [color=#4DA3FF][url=https://github.com/maantho/gpu-texture-painter]GPU Texture Painter (MIT License)[/url][/color] by maantho.
+• [b]Gizmo3D plugin:[/b] [color=#4DA3FF][url=https://github.com/chrisizeful/Gizmo3D]Gizmo3D (MIT License)[/url][/color] by chrisizeful.
+• [b]Intro Background image:[/b] Artwork by [color=#4DA3FF][url=https://ayeaka.itch.io/ayeaka]ayeaka[/url][/color].
+• [b]Project Source:[/b] Check out the code and contribute on [color=#4DA3FF][url=https://github.com/juliancz-a/deadlock-playground]GitHub[/url][/color].
 
-[b]Legal Disclaimer & Intellectual Property[/b]
-Deadlock, Source 2, the Source 2 logo, Valve, and the Valve logo are trademarks and/or registered trademarks of [b]Valve Corporation[/b]. All character models, textures, animations, and related assets extracted or rendered by this application are the copyrighted property of Valve Corporation.
+[font_size=20][b]Legal Disclaimer & Intellectual Property[/b][/font_size]
+[i]Deadlock, Source 2, the Source 2 logo, Valve, and the Valve logo are trademarks and/or registered trademarks of [b]Valve Corporation[/b]. All character models, textures, animations, and related assets extracted or rendered by this application are the copyrighted property of Valve Corporation.
 
-This project is an unofficial, non-commercial fan creation. It is neither affiliated with, endorsed by, nor sponsored by Valve Corporation. No proprietary game files are bundled, redistributed, or sold with this software; assets are parsed locally from the user's personal installation of Deadlock."
+This project is an unofficial, non-commercial fan creation. It is neither affiliated with, endorsed by, nor sponsored by Valve Corporation. No proprietary game files are bundled, redistributed, or sold with this software; assets are parsed locally from the user's personal installation of Deadlock.[/i]"
+fit_content = true
+
+[node name="BottomBar" type="HBoxContainer" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer" unique_id=1682914107]
+layout_mode = 2
+alignment = 2
+
+[node name="BtnBottomClose" type="Button" parent="UIRoot/MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/BottomBar" unique_id=1682914108]
+custom_minimum_size = Vector2(100, 28)
+layout_mode = 2
+text = "Close"
 
 [node name="LoadingOverlay" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1396713404]
 visible = false

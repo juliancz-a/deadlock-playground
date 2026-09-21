@@ -14,9 +14,6 @@ public static class SceneEnvironmentManager
         set => _activeStudioSky = value;
     }
 
-    /// <summary>
-    /// Ensures active sky is initialized from existing environment sky or creates a default studio sky.
-    /// </summary>
     public static Sky EnsureStudioSky(WorldEnvironment worldEnv = null)
     {
         if (_activeStudioSky != null) return _activeStudioSky;
@@ -40,9 +37,6 @@ public static class SceneEnvironmentManager
         return _activeStudioSky;
     }
 
-    /// <summary>
-    /// Applies studio background and viewport settings based on UserSettings preferences.
-    /// </summary>
     public static void ApplyEnvironment(
         Viewport mainViewport,
         SubViewport worldViewport,
@@ -51,96 +45,74 @@ public static class SceneEnvironmentManager
         TextureRect bgTextureRect = null,
         Node3D stagePlatform = null)
     {
-        // Root window viewport must NEVER have transparent_bg enabled
         if (mainViewport != null)
         {
             mainViewport.TransparentBg = false;
         }
 
-        bool isTransparentMode = UserSettings.StudioEnvironment == UserSettings.StudioEnvMode.TransparentViewport;
-        bool hasCustom2dBg = bgTextureRect != null && bgTextureRect.Texture != null && bgTextureRect.Visible;
+        bool showBg = UserSettings.ShowStudioBackground;
+        bool hasTexture = bgTextureRect != null && bgTextureRect.Texture != null;
+        bool is3DStage = stagePlatform != null && stagePlatform.Visible;
 
-        // If the user wants 2D background images visible, or transparent export mode,
-        // the 3D SubViewport MUST be transparent so the layers underneath show through.
-        bool need3dViewportTransparency = isTransparentMode || (UserSettings.ShowStudioBackground && (bgTextureRect != null && bgTextureRect.Visible));
-
-        if (worldViewport != null)
+        // Si el usuario quiere ver el fondo (2D canvas con imagen o color)
+        if (showBg && !is3DStage)
         {
-            worldViewport.TransparentBg = need3dViewportTransparency;
-        }
-
-        if (worldEnv?.Environment != null)
-        {
-            EnsureStudioSky(worldEnv);
-
-            if (isTransparentMode)
+            // El SubViewport 3D debe ser transparente para mostrar el canvas detrás
+            if (worldViewport != null)
             {
-                worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.ClearColor;
-                worldEnv.Environment.BackgroundColor = new Color(0f, 0f, 0f, 0f);
+                worldViewport.TransparentBg = true;
             }
-            else if (need3dViewportTransparency)
+
+            if (worldEnv?.Environment != null)
             {
-                // When showing a 2D Background texture/color behind the 3D viewport,
-                // the 3D environment clear color must be transparent.
                 worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.ClearColor;
                 worldEnv.Environment.BackgroundColor = new Color(0f, 0f, 0f, 0f);
                 worldEnv.Environment.AmbientLightSource = Godot.Environment.AmbientSource.Color;
                 worldEnv.Environment.AmbientLightColor = new Color(0.35f, 0.36f, 0.38f, 1.0f);
                 worldEnv.Environment.AmbientLightEnergy = 1.0f;
             }
-            else if (UserSettings.ShowStudioBackground)
+
+            if (bgTextureRect != null) bgTextureRect.Visible = hasTexture;
+            if (bgRect != null) bgRect.Visible = true;
+            if (stagePlatform != null) stagePlatform.Visible = false;
+        }
+        else if (showBg && is3DStage)
+        {
+            // Modo estudio 3D completo con piso
+            if (worldViewport != null)
             {
-                if (UserSettings.StudioEnvironment == UserSettings.StudioEnvMode.DarkStudio)
-                {
-                    worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.Sky;
-                    worldEnv.Environment.Sky = _activeStudioSky;
-                    worldEnv.Environment.AmbientLightSource = Godot.Environment.AmbientSource.Color;
-                    worldEnv.Environment.AmbientLightColor = new Color(0.28f, 0.29f, 0.32f, 1.0f);
-                    worldEnv.Environment.AmbientLightEnergy = 1.0f;
-                }
-                else // GreyBackdrop
-                {
-                    worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.ClearColor;
-                    worldEnv.Environment.BackgroundColor = new Color(0.35f, 0.36f, 0.38f, 1.0f);
-                    worldEnv.Environment.AmbientLightSource = Godot.Environment.AmbientSource.Color;
-                    worldEnv.Environment.AmbientLightColor = new Color(0.35f, 0.35f, 0.38f, 1.0f);
-                    worldEnv.Environment.AmbientLightEnergy = 1.0f;
-                }
+                worldViewport.TransparentBg = false;
             }
-            else
+
+            if (worldEnv?.Environment != null)
             {
-                // Studio background disabled: neutral dark viewport
+                worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.Sky;
+                worldEnv.Environment.Sky = EnsureStudioSky(worldEnv);
+                worldEnv.Environment.AmbientLightSource = Godot.Environment.AmbientSource.Color;
+                worldEnv.Environment.AmbientLightColor = new Color(0.28f, 0.29f, 0.32f, 1.0f);
+                worldEnv.Environment.AmbientLightEnergy = 1.0f;
+            }
+
+            if (bgTextureRect != null) bgTextureRect.Visible = false;
+            if (bgRect != null) bgRect.Visible = false;
+        }
+        else
+        {
+            // Fondo desactivado: viewport oscuro neutral
+            if (worldViewport != null)
+            {
+                worldViewport.TransparentBg = false;
+            }
+
+            if (worldEnv?.Environment != null)
+            {
                 worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.ClearColor;
-                worldEnv.Environment.BackgroundColor = new Color(0.12f, 0.12f, 0.14f, 1.0f);
+                worldEnv.Environment.BackgroundColor = new Color(0.08f, 0.09f, 0.11f, 1.0f);
             }
-        }
 
-        // 2D Background Controls
-        if (bgRect != null)
-        {
-            bool show2dBg = !isTransparentMode && UserSettings.ShowStudioBackground;
-            bgRect.Visible = show2dBg;
-            if (show2dBg)
-            {
-                bgRect.Color = UserSettings.StudioEnvironment switch
-                {
-                    UserSettings.StudioEnvMode.GreyBackdrop => new Color(0.35f, 0.36f, 0.38f, 1.0f),
-                    _ => new Color(0.08f, 0.09f, 0.11f, 1.0f) // Dark Studio
-                };
-            }
-        }
-
-        // Texture and 2D background visibility
-        if (bgTextureRect != null)
-        {
-            bgTextureRect.Visible = !isTransparentMode && UserSettings.ShowStudioBackground;
-        }
-
-        // 3D Floor/Stage Platform:
-        if (stagePlatform != null)
-        {
-            bool hasActive2dTexture = bgTextureRect != null && bgTextureRect.Visible && bgTextureRect.Texture != null;
-            stagePlatform.Visible = !isTransparentMode && UserSettings.ShowStudioBackground && !hasActive2dTexture;
+            if (bgTextureRect != null) bgTextureRect.Visible = false;
+            if (bgRect != null) bgRect.Visible = false;
+            if (stagePlatform != null) stagePlatform.Visible = false;
         }
     }
 }

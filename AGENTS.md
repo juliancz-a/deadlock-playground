@@ -1,6 +1,6 @@
 # Deadlock Playground - Agent Engineering Guide & Technical Architecture
 
-Welcome, agent! This document serves as your **primary onboarding guide, architectural reference, and operational playbook** for working within the **Deadlock Playground** codebase.
+This document serves as your **primary onboarding guide, architectural reference, and operational playbook** for working within the **Deadlock Playground** codebase.
 
 Always consult this guide before implementing new features, modifying shaders, altering UI containers, or refactoring the painting/rendering subsystems.
 

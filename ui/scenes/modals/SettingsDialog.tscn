@@ -94,11 +94,9 @@ text = "Language"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-item_count = 2
+item_count = 1
 popup/item_0/text = "English (US)"
 popup/item_0/id = 0
-popup/item_1/text = "Russian (RU)"
-popup/item_1/id = 1
 
 [node name="GamePathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox"]
 layout_mode = 2
@@ -172,6 +170,13 @@ custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "Browse..."
 
+[node name="BtnResetGeneral" type="Button" parent="VBoxContainer/TabContainer/General/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 30)
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Reset to Defaults"
+
 [node name="Graphics" type="MarginContainer" parent="VBoxContainer/TabContainer"]
 visible = false
 layout_mode = 2
@@ -184,19 +189,6 @@ metadata/_tab_index = 1
 [node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/Graphics"]
 layout_mode = 2
 theme_override_constants/separation = 12
-
-[node name="RendererRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/RendererRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Shading Mode"
-
-[node name="ChkToonShading" type="CheckBox" parent="VBoxContainer/TabContainer/Graphics/VBox/RendererRow"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "NPR Toon Shading (Unchecked: PBR Standard)"
 
 [node name="MsaaRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
 layout_mode = 2
@@ -220,19 +212,6 @@ size_flags_horizontal = 3
 text = "Shadow Filter Quality"
 
 [node name="OptShadowQuality" type="OptionButton" parent="VBoxContainer/TabContainer/Graphics/VBox/ShadowRow"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(180, 28)
-layout_mode = 2
-
-[node name="StudioEnvRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/StudioEnvRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Studio Environment Preset"
-
-[node name="OptStudioEnv" type="OptionButton" parent="VBoxContainer/TabContainer/Graphics/VBox/StudioEnvRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 28)
 layout_mode = 2
@@ -292,6 +271,13 @@ unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Enabled"
+
+[node name="BtnResetGraphics" type="Button" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 30)
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Reset to Defaults"
 
 [node name="UI" type="MarginContainer" parent="VBoxContainer/TabContainer"]
 visible = false

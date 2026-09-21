@@ -32,9 +32,11 @@ public partial class CharacterIKManager : Node3D
         public int RootBoneIndex = -1;
         public int MidBoneIndex = -1;
         public int TipBoneIndex = -1;
+        public int IKTargetBoneIndex = -1;
         public string RootBoneName = string.Empty;
         public string MidBoneName = string.Empty;
         public string TipBoneName = string.Empty;
+        public string IKTargetBoneName = string.Empty;
 
         public SkeletonIK3D SkeletonIK;
         public Node3D TargetHandle;
@@ -51,6 +53,7 @@ public partial class CharacterIKManager : Node3D
     }
 
     [Export] public Skeleton3D TargetSkeleton { get; set; }
+    [Export] public BoneLayerManager LayerManager { get; set; }
     [Export(PropertyHint.Layers3DPhysics)] public uint PickingCollisionLayer { get; set; } = 2147483648; // Layer 32
 
     private readonly Dictionary<LimbChainType, IKChainInfo> _chains = new();
@@ -129,43 +132,60 @@ public partial class CharacterIKManager : Node3D
         _ikGizmo.Visible = false;
     }
 
+    private BoneLayerManager GetLayerManager()
+    {
+        return LayerManager ??= TargetSkeleton?.GetNodeOrNull<SkeletonGizmoManager>("SkeletonGizmoManager")?.LayerManager
+                             ?? TargetSkeleton?.GetParent()?.GetNodeOrNull<SkeletonGizmoManager>("SkeletonGizmoManager")?.LayerManager;
+    }
+
     public void Setup(Skeleton3D skeleton)
     {
         ClearChains();
         TargetSkeleton = skeleton;
         if (TargetSkeleton == null) return;
 
-        // Build 4 primary limb chains
+        // Build 4 primary limb chains with Source 2 native IK target helpers
         BuildChain(LimbChainType.LeftArm, "Left Arm",
             new[] { "arm_upper_L", "arm_upper_l", "upperarm_l", "bip_upperarm_l", "arm_l" },
             new[] { "elbow_L", "elbow_l", "arm_lower_L", "arm_lower_l", "bip_lowerarm_l", "forearm_l" },
-            new[] { "hand_L", "hand_l", "bip_hand_l", "wrist_l" });
+            new[] { "hand_L", "hand_l", "bip_hand_l", "wrist_l" },
+            new[] { "arm_L_IKTARGET", "arm_l_iktarget", "hand_L_IKTARGET", "hand_l_iktarget" });
 
         BuildChain(LimbChainType.RightArm, "Right Arm",
             new[] { "arm_upper_R", "arm_upper_r", "upperarm_r", "bip_upperarm_r", "arm_r" },
             new[] { "elbow_R", "elbow_r", "arm_lower_R", "arm_lower_r", "bip_lowerarm_r", "forearm_r" },
-            new[] { "hand_R", "hand_r", "bip_hand_r", "wrist_r" });
+            new[] { "hand_R", "hand_r", "bip_hand_r", "wrist_r" },
+            new[] { "arm_R_IKTARGET", "arm_r_iktarget", "hand_R_IKTARGET", "hand_r_iktarget" });
 
         BuildChain(LimbChainType.LeftLeg, "Left Leg",
             new[] { "leg_upper_L", "leg_upper_l", "thigh_L", "thigh_l", "bip_thigh_l", "leg_l" },
             new[] { "leg_lower_L", "leg_lower_l", "knee_L", "knee_l", "bip_lowerleg_l", "calf_l" },
-            new[] { "ankle_L", "ankle_l", "foot_L", "foot_l", "bip_foot_l" });
+            new[] { "ankle_L", "ankle_l", "foot_L", "foot_l", "bip_foot_l" },
+            new[] { "leg_L_IKTARGET", "leg_l_iktarget", "foot_L_IKTARGET", "foot_l_iktarget" });
 
         BuildChain(LimbChainType.RightLeg, "Right Leg",
             new[] { "leg_upper_R", "leg_upper_r", "thigh_R", "thigh_r", "bip_thigh_r", "leg_r" },
             new[] { "leg_lower_R", "leg_lower_r", "knee_R", "knee_r", "bip_lowerleg_r", "calf_r" },
-            new[] { "ankle_R", "ankle_r", "foot_R", "foot_r", "bip_foot_r" });
+            new[] { "ankle_R", "ankle_r", "foot_R", "foot_r", "bip_foot_r" },
+            new[] { "leg_R_IKTARGET", "leg_r_iktarget", "foot_R_IKTARGET", "foot_r_iktarget" });
 
         UpdateActiveChains();
     }
 
-    private void BuildChain(LimbChainType type, string displayName, string[] rootCandidates, string[] midCandidates, string[] tipCandidates)
+    private void BuildChain(
+        LimbChainType type, 
+        string displayName, 
+        string[] rootCandidates, 
+        string[] midCandidates, 
+        string[] tipCandidates,
+        string[] ikTargetCandidates = null)
     {
         if (TargetSkeleton == null) return;
 
         int rootIdx = FindFirstBone(TargetSkeleton, rootCandidates);
         int midIdx = FindFirstBone(TargetSkeleton, midCandidates);
         int tipIdx = FindFirstBone(TargetSkeleton, tipCandidates);
+        int ikTargetIdx = (ikTargetCandidates != null) ? FindFirstBone(TargetSkeleton, ikTargetCandidates) : -1;
 
         if (rootIdx == -1 || tipIdx == -1)
         {
@@ -176,6 +196,7 @@ public partial class CharacterIKManager : Node3D
         string rootName = TargetSkeleton.GetBoneName(rootIdx);
         string midName = midIdx != -1 ? TargetSkeleton.GetBoneName(midIdx) : string.Empty;
         string tipName = TargetSkeleton.GetBoneName(tipIdx);
+        string ikTargetName = ikTargetIdx != -1 ? TargetSkeleton.GetBoneName(ikTargetIdx) : string.Empty;
 
         // 1. Create Tip Target Handle Node3D in World Space
         var tipHandleNode = new Node3D { Name = $"IKTarget_{type}" };
@@ -192,9 +213,10 @@ public partial class CharacterIKManager : Node3D
             ? PlaygroundThemeHelper.SageGreen
             : PlaygroundThemeHelper.Parchment;
 
+        float curvedAlpha = GizmoDisplaySettings.ToCurvedAlpha(_handlesOpacity);
         var tipMat = new StandardMaterial3D
         {
-            AlbedoColor = new Color(tipBaseColor.R, tipBaseColor.G, tipBaseColor.B, _handlesOpacity),
+            AlbedoColor = new Color(tipBaseColor.R, tipBaseColor.G, tipBaseColor.B, curvedAlpha),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             NoDepthTest = true
@@ -234,7 +256,7 @@ public partial class CharacterIKManager : Node3D
         Color poleBaseColor = new Color(0.92f, 0.72f, 0.28f); // Warm amber gold for poles
         var poleMat = new StandardMaterial3D
         {
-            AlbedoColor = new Color(poleBaseColor.R, poleBaseColor.G, poleBaseColor.B, _handlesOpacity),
+            AlbedoColor = new Color(poleBaseColor.R, poleBaseColor.G, poleBaseColor.B, curvedAlpha),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             NoDepthTest = true
@@ -267,6 +289,7 @@ public partial class CharacterIKManager : Node3D
             RootBone = rootName,
             TipBone = tipName,
             TargetNode = tipHandleNode.GetPath(),
+            OverrideTipBasis = true,
             UseMagnet = true,
             Interpolation = _ikBlendWeight
         };
@@ -280,9 +303,11 @@ public partial class CharacterIKManager : Node3D
             RootBoneIndex = rootIdx,
             MidBoneIndex = midIdx,
             TipBoneIndex = tipIdx,
+            IKTargetBoneIndex = ikTargetIdx,
             RootBoneName = rootName,
             MidBoneName = midName,
             TipBoneName = tipName,
+            IKTargetBoneName = ikTargetName,
             SkeletonIK = skeletonIK,
             TargetHandle = tipHandleNode,
             HandleMesh = tipMesh,
@@ -351,17 +376,18 @@ public partial class CharacterIKManager : Node3D
     public void SetHandlesOpacity(float alpha)
     {
         _handlesOpacity = Mathf.Clamp(alpha, 0.0f, 1.0f);
+        float curvedAlpha = GizmoDisplaySettings.ToCurvedAlpha(_handlesOpacity);
         foreach (var chain in _chains.Values)
         {
             if (chain.TipMaterial != null)
             {
                 Color c = chain.TipMaterial.AlbedoColor;
-                chain.TipMaterial.AlbedoColor = new Color(c.R, c.G, c.B, _handlesOpacity);
+                chain.TipMaterial.AlbedoColor = new Color(c.R, c.G, c.B, curvedAlpha);
             }
             if (chain.PoleMaterial != null)
             {
                 Color c = chain.PoleMaterial.AlbedoColor;
-                chain.PoleMaterial.AlbedoColor = new Color(c.R, c.G, c.B, _handlesOpacity);
+                chain.PoleMaterial.AlbedoColor = new Color(c.R, c.G, c.B, curvedAlpha);
             }
 
             bool visible = chain.IsActive && _handlesOpacity > 0.01f;
@@ -386,6 +412,14 @@ public partial class CharacterIKManager : Node3D
         if (chain == null || chain.SkeletonIK == null || !GodotObject.IsInstanceValid(chain.SkeletonIK)) return;
 
         chain.IsActive = active;
+
+        // IK & Bone Gizmo Conflict Resolution: Suppress FK picking and markers on affected limb bones
+        var affectedBones = new List<int>();
+        if (chain.RootBoneIndex != -1) affectedBones.Add(chain.RootBoneIndex);
+        if (chain.MidBoneIndex != -1) affectedBones.Add(chain.MidBoneIndex);
+        if (chain.TipBoneIndex != -1) affectedBones.Add(chain.TipBoneIndex);
+        GetLayerManager()?.SetBonesInteractionSuppressed(affectedBones, active);
+
         if (active)
         {
             SnapChainToFK(chain);
@@ -425,6 +459,10 @@ public partial class CharacterIKManager : Node3D
     {
         if (chain == null || TargetSkeleton == null || chain.TipBoneIndex == -1 || chain.TargetHandle == null) return;
 
+        // Force skeleton bone hierarchy evaluation so FK pose is fresh
+        TargetSkeleton.ForceUpdateAllBoneTransforms();
+
+        // Sample current global transform of the target tip bone (hand_L, hand_R, foot_L, foot_R)
         Transform3D boneGlobal = TargetSkeleton.GlobalTransform * TargetSkeleton.GetBoneGlobalPose(chain.TipBoneIndex);
         chain.TargetHandle.GlobalTransform = boneGlobal;
 
@@ -507,6 +545,9 @@ public partial class CharacterIKManager : Node3D
         {
             _dummyGizmoTarget.GlobalTransform = targetNode.GlobalTransform;
             _ikGizmo.ClearSelection();
+            _ikGizmo.Mode = (handleType == IKHandleType.TipTarget)
+                ? (Gizmo3D.ToolMode.Move | Gizmo3D.ToolMode.Rotate)
+                : Gizmo3D.ToolMode.Move;
             _ikGizmo.Select(_dummyGizmoTarget);
             _ikGizmo.Visible = true;
         }
@@ -531,6 +572,7 @@ public partial class CharacterIKManager : Node3D
             chain.SkeletonIK.Target = chain.TargetHandle.Transform;
         }
 
+        TargetSkeleton.ForceUpdateAllBoneTransforms();
         ProceduralClothSolver.Conform(TargetSkeleton);
     }
 
@@ -543,7 +585,92 @@ public partial class CharacterIKManager : Node3D
             chain.SkeletonIK.Magnet = TargetSkeleton.ToLocal(chain.PoleHandle.GlobalPosition);
         }
 
+        TargetSkeleton.ForceUpdateAllBoneTransforms();
         ProceduralClothSolver.Conform(TargetSkeleton);
+    }
+
+    private readonly HashSet<IKChainInfo> _pausedChains = new();
+
+    /// <summary>
+    /// Temporarily pauses IK solver for any chain containing the specified bone during FK editing.
+    /// </summary>
+    public void PauseIKForBone(int boneIdx)
+    {
+        if (TargetSkeleton == null || boneIdx == -1) return;
+
+        foreach (var chain in _chains.Values)
+        {
+            if (!chain.IsActive || chain.SkeletonIK == null || !chain.SkeletonIK.IsRunning()) continue;
+
+            if (IsBoneInChain(chain, boneIdx))
+            {
+                chain.SkeletonIK.Stop();
+                _pausedChains.Add(chain);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resumes any paused IK chains after FK editing finishes, re-snapping the IK target to the new FK pose.
+    /// </summary>
+    public void ResumeIKForBone(int boneIdx)
+    {
+        if (_pausedChains.Count == 0) return;
+
+        if (TargetSkeleton != null)
+        {
+            TargetSkeleton.ForceUpdateAllBoneTransforms();
+        }
+
+        foreach (var chain in _pausedChains)
+        {
+            if (chain != null && chain.IsActive && chain.SkeletonIK != null)
+            {
+                SnapChainToFK(chain);
+                if (!chain.SkeletonIK.IsRunning())
+                {
+                    chain.SkeletonIK.Start();
+                }
+            }
+        }
+        _pausedChains.Clear();
+    }
+
+    private bool IsBoneInChain(IKChainInfo chain, int boneIdx)
+    {
+        if (chain.RootBoneIndex == boneIdx || chain.MidBoneIndex == boneIdx || chain.TipBoneIndex == boneIdx)
+            return true;
+
+        if (TargetSkeleton != null)
+        {
+            int curr = boneIdx;
+            while (curr != -1)
+            {
+                if (curr == chain.RootBoneIndex) return true;
+                curr = TargetSkeleton.GetBoneParent(curr);
+            }
+        }
+        return false;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_masterIKEnabled && TargetSkeleton != null)
+        {
+            bool anyRunning = false;
+            foreach (var chain in _chains.Values)
+            {
+                if (chain.IsActive && chain.SkeletonIK != null && chain.SkeletonIK.IsRunning())
+                {
+                    anyRunning = true;
+                    break;
+                }
+            }
+            if (anyRunning)
+            {
+                TargetSkeleton.ForceUpdateAllBoneTransforms();
+            }
+        }
     }
 
     private void ClearChains()

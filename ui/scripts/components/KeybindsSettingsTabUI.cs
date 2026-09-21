@@ -5,9 +5,10 @@ using DeadlockPlayground.Tools;
 
 public partial class KeybindsSettingsTabUI : VBoxContainer
 {
-    private VBoxContainer _bindingsContainer;
+    private readonly Dictionary<string, VBoxContainer> _categoryContainers = new();
     private Label _lblConflictWarning;
     private Button _btnResetDefaults;
+    private ConfirmationDialog _confirmResetDialog;
 
     private string _listeningAction = null;
     private Button _listeningButton = null;
@@ -57,24 +58,50 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         _lblConflictWarning.AddThemeFontSizeOverride("font_size", 12);
         AddChild(_lblConflictWarning);
 
-        // 3. Scrollable List of Actions
-        var scroll = new ScrollContainer
-        {
-            SizeFlagsVertical = SizeFlags.ExpandFill,
-            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
-            CustomMinimumSize = new Vector2(0, 260)
-        };
-
-        _bindingsContainer = new VBoxContainer
+        // 3. Category TabContainer
+        var tabContainer = new TabContainer
         {
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            SizeFlagsVertical = SizeFlags.ExpandFill
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 270)
         };
-        _bindingsContainer.AddThemeConstantOverride("separation", 6);
 
-        scroll.AddChild(_bindingsContainer);
-        AddChild(scroll);
+        string[] categories = { "Texture Paint", "Camera", "Bones / Rigging" };
+        foreach (var cat in categories)
+        {
+            var margin = new MarginContainer
+            {
+                Name = cat,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.ExpandFill
+            };
+            margin.AddThemeConstantOverride("margin_left", 6);
+            margin.AddThemeConstantOverride("margin_top", 8);
+            margin.AddThemeConstantOverride("margin_right", 6);
+            margin.AddThemeConstantOverride("margin_bottom", 6);
 
+            var scroll = new ScrollContainer
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.ExpandFill,
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+
+            var vbox = new VBoxContainer
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.ExpandFill
+            };
+            vbox.AddThemeConstantOverride("separation", 6);
+
+            scroll.AddChild(vbox);
+            margin.AddChild(scroll);
+            tabContainer.AddChild(margin);
+
+            _categoryContainers[cat] = vbox;
+        }
+
+        AddChild(tabContainer);
         PopulateActionRows();
 
         // 4. Bottom action bar
@@ -90,13 +117,32 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         bottomBar.AddChild(_btnResetDefaults);
 
         AddChild(bottomBar);
+
+        // Confirmation Dialog
+        _confirmResetDialog = new ConfirmationDialog
+        {
+            Title = "Reset Keybinds to Defaults?",
+            DialogText = "Reset all keybind mappings across all categories back to their default shortcuts?",
+            OkButtonText = "Reset",
+            CancelButtonText = "Cancel"
+        };
+        _confirmResetDialog.Confirmed += () =>
+        {
+            KeybindsManager.ResetToDefaults();
+            StopListening();
+            RefreshAllButtons();
+        };
+        AddChild(_confirmResetDialog);
     }
 
     private void PopulateActionRows()
     {
-        foreach (Node child in _bindingsContainer.GetChildren())
+        foreach (var vbox in _categoryContainers.Values)
         {
-            child.QueueFree();
+            foreach (Node child in vbox.GetChildren())
+            {
+                child.QueueFree();
+            }
         }
         _actionButtons.Clear();
 
@@ -104,6 +150,13 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         {
             string action = kvp.Key;
             var binding = kvp.Value;
+            string category = string.IsNullOrEmpty(binding.Category) ? "Texture Paint" : binding.Category;
+
+            if (!_categoryContainers.TryGetValue(category, out var targetContainer))
+            {
+                if (!_categoryContainers.TryGetValue("Texture Paint", out targetContainer))
+                    continue;
+            }
 
             var row = new PanelContainer();
             var rowStyle = new StyleBoxFlat
@@ -159,7 +212,7 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
 
             margin.AddChild(hbox);
             row.AddChild(margin);
-            _bindingsContainer.AddChild(row);
+            targetContainer.AddChild(row);
         }
     }
 
@@ -263,8 +316,6 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
 
     private void OnResetDefaultsPressed()
     {
-        KeybindsManager.ResetToDefaults();
-        StopListening();
-        RefreshAllButtons();
+        _confirmResetDialog?.PopupCentered();
     }
 }

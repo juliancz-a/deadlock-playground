@@ -17,6 +17,8 @@ public partial class SkeletonGizmoManager : Node3D
         get => _uiManager;
         set => SetUIManager(value);
     }
+
+    public CharacterIKManager IKManager { get; set; }
     
     /// <summary>
     /// Physics layer for Area3D bone picking colliders (Default: Layer 32 = 2147483648).
@@ -154,7 +156,7 @@ public partial class SkeletonGizmoManager : Node3D
         if (XRayMaterial is StandardMaterial3D stdMat)
         {
             Color col = GizmoDisplaySettings.XRayLineColor;
-            col.A = GizmoDisplaySettings.XRayLineOpacity;
+            col.A = GizmoDisplaySettings.XRayLineAlpha;
             stdMat.AlbedoColor = col;
         }
     }
@@ -170,11 +172,16 @@ public partial class SkeletonGizmoManager : Node3D
         AddChild(_dummyTarget);
 
         _gizmo.TransformChanged += (mode, value) => {
-            _isGizmoDragging = true;
+            if (!_isGizmoDragging)
+            {
+                _isGizmoDragging = true;
+                IKManager?.PauseIKForBone(_selectedBoneIdx);
+            }
             HandleGizmoTransformChanged(_dummyTarget.GlobalTransform);
         };
         _gizmo.TransformEnd += (mode) => {
             _isGizmoDragging = false;
+            IKManager?.ResumeIKForBone(_selectedBoneIdx);
         };
     }
 
@@ -350,15 +357,7 @@ public partial class SkeletonGizmoManager : Node3D
         _areDotsGloballyEnabled = enabled;
         if (_boneLayerManager == null || !GodotObject.IsInstanceValid(_boneLayerManager)) return;
 
-        // If dots are globally disabled, hide all markers without altering layer configuration
-        foreach (var item in _boneLayerManager.BoneControls.Values)
-        {
-            if (item != null && GodotObject.IsInstanceValid(item.MarkerMesh))
-            {
-                bool isLayerActive = _boneLayerManager.IsLayerEnabled(item.Category);
-                item.MarkerMesh.Visible = enabled && isLayerActive;
-            }
-        }
+        _boneLayerManager.SetXRayActive(enabled);
     }
 
     public override void _Process(double delta)

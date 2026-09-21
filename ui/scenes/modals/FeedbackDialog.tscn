@@ -1,0 +1,178 @@
+[gd_scene format=3 uid="uid://b7l2p8q4m5oax"]
+
+[ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="1_theme"]
+[ext_resource type="Script" uid="uid://32lmsjhiujbl" path="res://ui/scripts/modals/FeedbackDialog.cs" id="2_dialog"]
+[ext_resource type="Texture2D" uid="uid://bhky71em470du" path="res://assets/icons/github.svg" id="3_github"]
+[ext_resource type="Texture2D" uid="uid://cx76yxkrqaobj" path="res://assets/icons/discord.svg" id="4_discord"]
+
+[node name="FeedbackDialog" type="PanelContainer" unique_id=1396289943]
+custom_minimum_size = Vector2(560, 380)
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -280.0
+offset_top = -190.0
+offset_right = 280.0
+offset_bottom = 190.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+script = ExtResource("2_dialog")
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=633573223]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 16
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer" unique_id=1107984790]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="HeaderBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1651296764]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1030111918]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TitleLabel"
+text = "Feedback & Support"
+
+[node name="BtnClose" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1382346590]
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Close"
+text = "✕"
+flat = true
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1776500648]
+layout_mode = 2
+
+[node name="DescLabel" type="Label" parent="MarginContainer/VBoxContainer" unique_id=864404638]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.86, 0.9, 1)
+theme_override_font_sizes/font_size = 13
+text = "Do you want to contribute to the project or need help with something?"
+autowrap_mode = 2
+
+[node name="ContentBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=906346999]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="GithubCard" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentBox" unique_id=2088031866]
+layout_mode = 2
+theme_type_variation = &"CardPanel"
+
+[node name="HBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard" unique_id=803548336]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Margin" type="MarginContainer" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox" unique_id=1981770204]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 10
+
+[node name="TextureRect" type="TextureRect" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/Margin" unique_id=1136741614]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+texture = ExtResource("3_github")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox" unique_id=1573749084]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/VBox" unique_id=2054632920]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+theme_override_font_sizes/font_size = 13
+text = "Source Code & Contributions"
+
+[node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/VBox" unique_id=1823734923]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.63, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = "Report issues, propose features, or view pull requests on GitHub"
+
+[node name="BtnGithub" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox" unique_id=627695329]
+custom_minimum_size = Vector2(140, 32)
+layout_mode = 2
+size_flags_vertical = 4
+text = "GitHub Repository"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox" unique_id=1511568449]
+custom_minimum_size = Vector2(6, 0)
+layout_mode = 2
+
+[node name="DiscordCard" type="PanelContainer" parent="MarginContainer/VBoxContainer/ContentBox" unique_id=758431247]
+layout_mode = 2
+theme_type_variation = &"CardPanel"
+
+[node name="HBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard" unique_id=1270713806]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Margin" type="MarginContainer" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=1104212094]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 10
+
+[node name="TextureRect" type="TextureRect" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/Margin" unique_id=1251490805]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+texture = ExtResource("4_discord")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=290925641]
+layout_mode = 2
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1527859074]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
+theme_override_font_sizes/font_size = 13
+text = "My Discord"
+
+[node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=808491072]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.63, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = "Username: juliancz_"
+
+[node name="LblDiscordCopied" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1080933265]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 0.5, 1)
+theme_override_font_sizes/font_size = 10
+text = "Username copied to clipboard!"
+
+[node name="BtnCopyDiscord" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=457214055]
+custom_minimum_size = Vector2(140, 32)
+layout_mode = 2
+size_flags_vertical = 4
+text = "Copy Username"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=138434628]
+custom_minimum_size = Vector2(6, 0)
+layout_mode = 2
+
+[node name="BottomBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=270596429]
+layout_mode = 2
+alignment = 2
+
+[node name="BtnBottomClose" type="Button" parent="MarginContainer/VBoxContainer/BottomBar" unique_id=329625260]
+custom_minimum_size = Vector2(100, 28)
+layout_mode = 2
+text = "Close"

@@ -215,6 +215,11 @@ public partial class SceneTabUI : VBoxContainer
 
     private void ConnectEvents()
     {
+        UserSettings.ShowStudioBackgroundChanged += (show) =>
+        {
+            if (show) SetMode(_currentMode);
+        };
+
         if (_modeOption != null)
         {
             _modeOption.ItemSelected += (idx) =>
@@ -229,6 +234,7 @@ public partial class SceneTabUI : VBoxContainer
             _solidColorPicker.ColorChanged += (c) =>
             {
                 if (_bgColorRect != null) _bgColorRect.Color = c;
+                StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
             };
         }
 
@@ -238,6 +244,7 @@ public partial class SceneTabUI : VBoxContainer
             _gradTopPicker.ColorChanged += (c) =>
             {
                 _gradientTex?.Gradient?.SetColor(0, c);
+                StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
             };
         }
 
@@ -246,6 +253,7 @@ public partial class SceneTabUI : VBoxContainer
             _gradBottomPicker.ColorChanged += (c) =>
             {
                 _gradientTex?.Gradient?.SetColor(1, c);
+                StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
             };
         }
 
@@ -336,6 +344,7 @@ public partial class SceneTabUI : VBoxContainer
 
     public void SetMode(BgMode mode)
     {
+        LinkReferences();
         _currentMode = mode;
 
         if (_panelColor != null) _panelColor.Visible = (mode == BgMode.SolidColor);
@@ -358,7 +367,11 @@ public partial class SceneTabUI : VBoxContainer
                     _bgColorRect.Visible = true;
                     _bgColorRect.Color = _solidColorPicker?.Color ?? new Color(0.08f, 0.08f, 0.1f);
                 }
-                if (_bgTextureRect != null) _bgTextureRect.Visible = false;
+                if (_bgTextureRect != null)
+                {
+                    _bgTextureRect.Visible = false;
+                    _bgTextureRect.Texture = null;
+                }
                 if (_stagePlatform != null) _stagePlatform.Visible = false;
                 break;
 
@@ -406,6 +419,8 @@ public partial class SceneTabUI : VBoxContainer
                 }
                 break;
         }
+
+        StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
     }
 
     private void UpdatePatternTexture()
@@ -496,6 +511,7 @@ public partial class SceneTabUI : VBoxContainer
         _bgTextureRect.Visible = true;
         _bgTextureRect.Texture = _patternTexture;
         _bgTextureRect.StretchMode = TextureRect.StretchModeEnum.Tile;
+        StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
     }
 
     private void ApplyImagePreset(int presetIdx)
@@ -512,6 +528,7 @@ public partial class SceneTabUI : VBoxContainer
                 _bgTextureRect.Texture = tex;
                 if (_lblImagePath != null) _lblImagePath.Text = name;
             }
+            StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
             return;
         }
 
@@ -537,6 +554,8 @@ public partial class SceneTabUI : VBoxContainer
                 if (_lblImagePath != null) _lblImagePath.Text = "Cyberpunk Neon Studio";
                 break;
         }
+
+        StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
     }
 
     private ImageTexture CreateRadialBackdrop(Color centerColor, Color edgeColor)
@@ -579,6 +598,7 @@ public partial class SceneTabUI : VBoxContainer
             {
                 _lblImagePath.Text = Path.GetFileName(path);
             }
+            StudioUIManager.Instance?.ApplyCurrentGraphicsSettings();
         }
     }
 

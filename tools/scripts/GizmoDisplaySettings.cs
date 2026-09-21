@@ -122,6 +122,20 @@ public static class GizmoDisplaySettings
         }
     }
 
+    /// <summary>
+    /// Converts linear opacity [0.0, 1.0] to a perceptual quadratic/cubic curve alpha = pow(x, 1.8).
+    /// Ensures 5% setting renders as a faint hairline, and 50% remains translucent.
+    /// </summary>
+    public static float ToCurvedAlpha(float opacityValue)
+    {
+        return Mathf.Pow(Mathf.Clamp(opacityValue, 0.0f, 1.0f), 1.8f);
+    }
+
+    public static float XRayLineAlpha => ToCurvedAlpha(_xRayLineOpacity);
+    public static float BoneMarkerAlpha => ToCurvedAlpha(_boneMarkerOpacity);
+    public static float IKHandlesAlpha => ToCurvedAlpha(_ikHandlesOpacity);
+    public static float PainterOutlineAlpha => ToCurvedAlpha(_painterOutlineOpacity);
+
     public static event Action OnSettingsChanged;
 
     public static void NotifyChanged()

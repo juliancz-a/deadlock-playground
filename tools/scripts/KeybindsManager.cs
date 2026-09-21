@@ -29,6 +29,9 @@ namespace DeadlockPlayground.Tools
         [JsonPropertyName("alt")]
         public bool Alt { get; set; }
 
+        [JsonPropertyName("category")]
+        public string Category { get; set; } = "Texture Paint";
+
         [JsonPropertyName("secondary_key")]
         public Key SecondaryKeycode { get; set; } = Key.None;
 
@@ -79,34 +82,43 @@ namespace DeadlockPlayground.Tools
         {
             _bindings.Clear();
 
-            AddDefault("paint_brush", "Paint Brush", "Switch to standard Brush painting tool", Key.B);
-            AddDefault("paint_eraser", "Eraser", "Switch to Eraser tool", Key.E);
-            AddDefault("paint_bucket", "Bucket Fill", "Switch to Submesh / Island Bucket Fill tool", Key.G);
-            AddDefault("paint_wand", "Magic Wand", "Switch to Magic Wand color-range mask tool", Key.M);
-            AddDefault("paint_decal", "Decal Stamper", "Switch to Decal projection stamper", Key.L);
-            AddDefault("paint_text", "Text Projector", "Toggle 3D Text Projector panel", Key.T);
-            AddDefault("paint_mirror", "Mirror Symmetry", "Toggle 3D Axis Symmetry painting", Key.N);
-
-            // History
-            AddDefault("paint_undo", "Undo", "Undo painter stroke", Key.Z, ctrl: true);
-            AddDefault("paint_redo", "Redo", "Redo painter stroke", Key.Y, ctrl: true, 
+            // 1. Texture Paint
+            AddDefault("Texture Paint", "paint_brush", "Brush", "Switch to standard Brush painting tool", Key.B);
+            AddDefault("Texture Paint", "paint_eraser", "Eraser", "Switch to Eraser tool", Key.E);
+            AddDefault("Texture Paint", "paint_bucket", "Bucket Fill", "Switch to Submesh / Island Bucket Fill tool", Key.G);
+            AddDefault("Texture Paint", "paint_wand", "Magic Wand", "Switch to Magic Wand color-range mask tool", Key.M);
+            AddDefault("Texture Paint", "paint_decal", "Decal Stamper", "Switch to Decal projection stamper", Key.L);
+            AddDefault("Texture Paint", "paint_text", "Text Projector", "Toggle 3D Text Projector panel", Key.T);
+            AddDefault("Texture Paint", "paint_mirror", "Mirror Symmetry", "Toggle 3D Axis Symmetry painting", Key.N);
+            AddDefault("Texture Paint", "paint_undo", "Undo", "Undo painter stroke", Key.Z, ctrl: true);
+            AddDefault("Texture Paint", "paint_redo", "Redo", "Redo painter stroke", Key.Y, ctrl: true, 
                 secKey: Key.Z, secCtrl: true, secShift: true);
-
-            // Viewport & Brush Size
-            AddDefault("view_xray", "Submesh X-Ray", "Toggle Submesh Wireframe X-Ray mode", Key.X);
-            AddDefault("paint_uv_toggle", "Toggle 2D UV Canvas", "Toggle docked 2D UV Texture Canvas", Key.U);
-            AddDefault("brush_size_up", "Brush Size Up", "Increase brush radius (+)", Key.Equal, 
+            AddDefault("Texture Paint", "brush_size_up", "Brush Size Up", "Increase brush radius (+)", Key.Equal, 
                 secKey: Key.KpAdd);
-            AddDefault("brush_size_down", "Brush Size Down", "Decrease brush radius (-)", Key.Minus, 
+            AddDefault("Texture Paint", "brush_size_down", "Brush Size Down", "Decrease brush radius (-)", Key.Minus, 
                 secKey: Key.KpSubtract);
+            AddDefault("Texture Paint", "paint_uv_toggle", "Toggle 2D UV Canvas", "Toggle docked 2D UV Texture Canvas", Key.U);
+
+            // 2. Camera
+            AddDefault("Camera", "camera_freecam", "Freecam Toggle", "Toggle between Orbit and Freecam navigation", Key.F);
+            AddDefault("Camera", "camera_reset", "Reset View", "Reset camera angle, zoom, and orientation", Key.Home, 
+                secKey: Key.R, secCtrl: true);
+            AddDefault("Camera", "camera_orbit", "Orbit Controls", "Orbit / Rotate viewport camera (Hold RMB or MMB)", Key.None);
+            AddDefault("Camera", "camera_focus", "Focus Model", "Recenter and focus camera on character model", Key.F, ctrl: true);
+
+            // 3. Bones / Rigging
+            AddDefault("Bones / Rigging", "view_xray", "Toggle X-Ray", "Toggle Submesh Bone & Wireframe X-Ray mode", Key.X);
+            AddDefault("Bones / Rigging", "bones_ik_toggle", "Toggle IK Handles", "Toggle Inverse Kinematics limb handles", Key.I);
+            AddDefault("Bones / Rigging", "bones_reset_pose", "Reset Skeleton Pose", "Reset character skeleton to default bind pose", Key.P, ctrl: true);
         }
 
-        private static void AddDefault(string action, string name, string desc, Key key, 
+        private static void AddDefault(string category, string action, string name, string desc, Key key, 
             bool ctrl = false, bool shift = false, bool alt = false,
             Key secKey = Key.None, bool secCtrl = false, bool secShift = false, bool secAlt = false)
         {
             _bindings[action] = new ActionBinding
             {
+                Category = category,
                 ActionName = action,
                 DisplayName = name,
                 Description = desc,
@@ -143,6 +155,10 @@ namespace DeadlockPlayground.Tools
                             b.Ctrl = kvp.Value.Ctrl;
                             b.Shift = kvp.Value.Shift;
                             b.Alt = kvp.Value.Alt;
+                            if (!string.IsNullOrEmpty(kvp.Value.Category))
+                            {
+                                b.Category = kvp.Value.Category;
+                            }
                             if (kvp.Value.SecondaryKeycode != Key.None)
                             {
                                 b.SecondaryKeycode = kvp.Value.SecondaryKeycode;

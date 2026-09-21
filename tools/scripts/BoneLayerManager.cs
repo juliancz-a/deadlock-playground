@@ -59,6 +59,9 @@ public partial class BoneLayerManager : Node3D
 
     private readonly Dictionary<int, BoneControlItem> _boneControls = new();
     private readonly Dictionary<BoneCategory, List<int>> _categoryIndices = new();
+    private readonly HashSet<int> _suppressedBoneIndices = new();
+
+    public bool IsXRayActive { get; set; } = false;
 
     // Shared unshaded materials for control markers
     private StandardMaterial3D _matPrimary;
@@ -328,24 +331,57 @@ public partial class BoneLayerManager : Node3D
         }
     }
 
+    public void SetXRayActive(bool active)
+    {
+        IsXRayActive = active;
+        foreach (var item in _boneControls.Values)
+        {
+            if (item == null) continue;
+            bool isLayerActive = IsLayerEnabled(item.Category);
+            ApplyControlState(item, isLayerActive);
+        }
+    }
+
+    public void SetBonesInteractionSuppressed(IEnumerable<int> boneIndices, bool suppressed)
+    {
+        if (boneIndices == null) return;
+        foreach (int idx in boneIndices)
+        {
+            if (suppressed)
+                _suppressedBoneIndices.Add(idx);
+            else
+                _suppressedBoneIndices.Remove(idx);
+
+            if (_boneControls.TryGetValue(idx, out var item) && item != null)
+            {
+                bool isLayerActive = IsLayerEnabled(item.Category);
+                ApplyControlState(item, isLayerActive);
+            }
+        }
+    }
+
     private void ApplyControlState(BoneControlItem item, bool enabled)
     {
         if (item == null) return;
 
+        bool isSuppressed = _suppressedBoneIndices.Contains(item.BoneIndex);
+        bool shouldShow = enabled && IsXRayActive && !isSuppressed;
+
         if (GodotObject.IsInstanceValid(item.MarkerMesh))
         {
-            item.MarkerMesh.Visible = enabled;
+            item.MarkerMesh.Visible = shouldShow;
         }
 
+        bool canPick = enabled && !isSuppressed;
         if (GodotObject.IsInstanceValid(item.Area))
         {
-            item.Area.CollisionLayer = enabled ? PickingCollisionLayer : 0;
-            item.Area.Monitorable = enabled;
+            item.Area.CollisionLayer = canPick ? PickingCollisionLayer : 0;
+            item.Area.Monitorable = canPick;
         }
 
         if (GodotObject.IsInstanceValid(item.Shape))
         {
-            item.Shape.Disabled = !enabled;
+            item.Shape.Disabled = !canPick;
         }
     }
 
@@ -369,57 +405,62 @@ public partial class BoneLayerManager : Node3D
         }
         _boneControls.Clear();
         _categoryIndices.Clear();
+        _suppressedBoneIndices.Clear();
         _selectedBoneIdx = -1;
     }
 
     private void InitializeMaterials()
     {
+        float alpha = GizmoDisplaySettings.BoneMarkerAlpha;
+
         Color primaryCol = GizmoDisplaySettings.BonePrimaryColor;
-        primaryCol.A = GizmoDisplaySettings.BoneMarkerOpacity;
+        primaryCol.A = alpha;
         _matPrimary = CreateMarkerMaterial(primaryCol);
 
         Color clothCol = GizmoDisplaySettings.BoneClothingColor;
-        clothCol.A = GizmoDisplaySettings.BoneMarkerOpacity;
+        clothCol.A = alpha;
         _matClothing = CreateMarkerMaterial(clothCol);
 
-        _matFingers = CreateMarkerMaterial(new Color(1.0f, 0.8f, 0.2f, GizmoDisplaySettings.BoneMarkerOpacity));
-        _matFace = CreateMarkerMaterial(new Color(0.7f, 0.4f, 1.0f, GizmoDisplaySettings.BoneMarkerOpacity));
-        _matProps = CreateMarkerMaterial(new Color(0.2f, 1.0f, 0.4f, GizmoDisplaySettings.BoneMarkerOpacity));
-        _matHelpers = CreateMarkerMaterial(new Color(0.5f, 0.5f, 0.5f, 0.4f));
+        _matFingers = CreateMarkerMaterial(new Color(1.0f, 0.8f, 0.2f, alpha));
+        _matFace = CreateMarkerMaterial(new Color(0.7f, 0.4f, 1.0f, alpha));
+        _matProps = CreateMarkerMaterial(new Color(0.2f, 1.0f, 0.4f, alpha));
+        _matHelpers = CreateMarkerMaterial(new Color(0.5f, 0.5f, 0.5f, alpha * 0.5f));
         _matSelected = CreateMarkerMaterial(new Color(1.0f, 1.0f, 0.0f, 1.0f));
     }
 
     public void ApplyDisplaySettings()
     {
+        float alpha = GizmoDisplaySettings.BoneMarkerAlpha;
+
         if (_matPrimary != null)
         {
             Color primaryCol = GizmoDisplaySettings.BonePrimaryColor;
-            primaryCol.A = GizmoDisplaySettings.BoneMarkerOpacity;
+            primaryCol.A = alpha;
             _matPrimary.AlbedoColor = primaryCol;
         }
 
         if (_matClothing != null)
         {
             Color clothCol = GizmoDisplaySettings.BoneClothingColor;
-            clothCol.A = GizmoDisplaySettings.BoneMarkerOpacity;
+            clothCol.A = alpha;
             _matClothing.AlbedoColor = clothCol;
         }
 
         if (_matFingers != null)
         {
-            Color col = new Color(1.0f, 0.8f, 0.2f, GizmoDisplaySettings.BoneMarkerOpacity);
+            Color col = new Color(1.0f, 0.8f, 0.2f, alpha);
             _matFingers.AlbedoColor = col;
         }
 
         if (_matFace != null)
         {
-            Color col = new Color(0.7f, 0.4f, 1.0f, GizmoDisplaySettings.BoneMarkerOpacity);
+            Color col = new Color(0.7f, 0.4f, 1.0f, alpha);
             _matFace.AlbedoColor = col;
         }
 
         if (_matProps != null)
         {
-            Color col = new Color(0.2f, 1.0f, 0.4f, GizmoDisplaySettings.BoneMarkerOpacity);
+            Color col = new Color(0.2f, 1.0f, 0.4f, alpha);
             _matProps.AlbedoColor = col;
         }
 

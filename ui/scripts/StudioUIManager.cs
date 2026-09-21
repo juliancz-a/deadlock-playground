@@ -8,6 +8,7 @@ public partial class StudioUIManager : CanvasLayer
 {
     [ExportCategory("Top Bar Controls")]
     [Export] private Button _btnSettings;
+    [Export] private Button _btnFeedback;
     [Export] private Button _btnAbout;
     [Export] private Button _btnQuit;
 
@@ -50,7 +51,9 @@ public partial class StudioUIManager : CanvasLayer
 
     [ExportCategory("Modals & Dialogs")]
     [Export] private Control _modalsLayer;
+    [Export] private ColorRect _modalBackdrop;
     [Export] private SettingsDialog _settingsModal;
+    [Export] private FeedbackDialog _feedbackModal;
     [Export] private PanelContainer _aboutModal;
     [Export] private PanelContainer _loadingOverlay;
     [Export] private Label _loadingLabel;
@@ -69,6 +72,7 @@ public partial class StudioUIManager : CanvasLayer
     private Godot.Timer _toastTimer;
     private string _lastExportedFilePath = "";
 
+    public static StudioUIManager Instance { get; private set; }
     public string SavePath => _pathManager?.CurrentSavePath ?? OS.GetSystemDir(OS.SystemDir.Pictures);
 
     private Control[] _tabScenes;
@@ -77,6 +81,7 @@ public partial class StudioUIManager : CanvasLayer
 
     public override void _Ready()
     {
+        Instance = this;
         GetViewport().TransparentBg = false;
 
         _pathManager = new GamePathManager();
@@ -100,6 +105,7 @@ public partial class StudioUIManager : CanvasLayer
     }
 
     private SubViewport _worldViewport;
+    private bool _isFullscreen = true;
 
     public void ToggleFullscreen()
     {
@@ -112,25 +118,58 @@ public partial class StudioUIManager : CanvasLayer
             return;
         }
 
-        var currentMode = DisplayServer.WindowGetMode();
-        bool isFs = currentMode == DisplayServer.WindowMode.Fullscreen ||
-                    currentMode == DisplayServer.WindowMode.ExclusiveFullscreen ||
+        int screen = DisplayServer.WindowGetCurrentScreen();
+        Vector2I screenSize = DisplayServer.ScreenGetSize(screen);
+        Vector2I winSize = win.Size;
+        var currentDsMode = DisplayServer.WindowGetMode();
+
+        bool isSpanningScreen = (winSize.X >= screenSize.X - 60 && winSize.Y >= screenSize.Y - 60);
+
+        bool isFs = _isFullscreen ||
                     win.Mode == Window.ModeEnum.Fullscreen ||
-                    win.Mode == Window.ModeEnum.ExclusiveFullscreen;
+                    win.Mode == Window.ModeEnum.ExclusiveFullscreen ||
+                    win.Mode == Window.ModeEnum.Maximized ||
+                    currentDsMode == DisplayServer.WindowMode.Fullscreen ||
+                    currentDsMode == DisplayServer.WindowMode.ExclusiveFullscreen ||
+                    currentDsMode == DisplayServer.WindowMode.Maximized ||
+                    (win.Borderless && isSpanningScreen);
 
         if (isFs)
         {
-            DisplayServer.WindowSetMaxSize(new Vector2I(1152,648));
+            // Switch to Windowed mode
+            _isFullscreen = false;
+
+            // 1. Remove borderless and fullscreen mode
+            DisplayServer.WindowSetMaxSize(new Vector2I(1600, 900));
             DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
             win.Mode = Window.ModeEnum.Windowed;
- 
-            DisplayServer.WindowSetMaxSize(new Vector2I(1920,1080));
+            win.Borderless = false;
+            DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.Borderless, false);
+
+            Vector2I targetSize = new Vector2I(1600, 900);
+            DisplayServer.WindowSetSize(targetSize);
+            win.Size = targetSize;
+
+            Rect2I screenRect = DisplayServer.ScreenGetUsableRect(screen);
+            Vector2I centerPos = screenRect.Position + (screenRect.Size - targetSize) / 2;
+            DisplayServer.WindowSetPosition(centerPos);
+            win.Position = centerPos;
+
+            DisplayServer.WindowSetMaxSize(new Vector2I(1920, 1080));
+
             if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Fullscreen";
         }
         else
         {
-            DisplayServer.WindowSetMode(DisplayServer.WindowMode.ExclusiveFullscreen);
-            win.Mode = Window.ModeEnum.ExclusiveFullscreen;
+            // Switch to Fullscreen mode
+            _isFullscreen = true;
+
+            // Unclamp MaxSize so it can expand to full monitor resolution
+            DisplayServer.WindowSetMaxSize(Vector2I.Zero);
+
+            win.Mode = Window.ModeEnum.Fullscreen;
+            DisplayServer.WindowSetMode(DisplayServer.WindowMode.Fullscreen);
+
             if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Windowed";
         }
     }
@@ -179,6 +218,8 @@ public partial class StudioUIManager : CanvasLayer
         // Top Bar
         _btnSettings ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
                       ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/SettingsButton");
+        _btnFeedback ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/FeedbackButton")
+                      ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/FeedbackButton");
         _btnAbout ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
                    ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/AboutButton");
         _btnQuit ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
@@ -280,6 +321,7 @@ public partial class StudioUIManager : CanvasLayer
 
         // Modals
         _modalsLayer ??= GetNodeOrNull<Control>("MainHUD/ModalsLayer");
+        _modalBackdrop ??= GetNodeOrNull<ColorRect>("MainHUD/ModalsLayer/ModalBackdrop");
         _settingsModal ??= GetNodeOrNull<SettingsDialog>("MainHUD/ModalsLayer/SettingsModal")
                         ?? GetTree().Root.FindChild("SettingsModal", true, false) as SettingsDialog;
         if (_settingsModal != null)
@@ -287,11 +329,17 @@ public partial class StudioUIManager : CanvasLayer
             _settingsModal.Setup(_pathManager);
         }
 
+        _feedbackModal ??= GetNodeOrNull<FeedbackDialog>("MainHUD/ModalsLayer/FeedbackModal")
+                        ?? GetTree().Root.FindChild("FeedbackModal", true, false) as FeedbackDialog;
+
         _aboutModal ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/AboutModal");
         _loadingOverlay ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/LoadingOverlay");
         _loadingLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/Label");
 
-        _btnAboutClose ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/Button");
+        _btnAboutClose ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/HeaderBar/BtnClose")
+                         ?? GetNodeOrNull<Button>("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/Button")
+                         ?? _aboutModal?.FindChild("BtnClose", true, false) as Button
+                         ?? _aboutModal?.FindChild("Button", true, false) as Button;
 
         _gameFolderDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/GameFolderDialog");
         _saveFolderDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/ScreenshotFolderDialog");
@@ -427,8 +475,8 @@ public partial class StudioUIManager : CanvasLayer
         {
             _btnSettings.Pressed += () =>
             {
-                if (_modalsLayer != null) _modalsLayer.Visible = true;
                 _settingsModal?.Open();
+                UpdateModalsState();
             };
         }
 
@@ -436,24 +484,34 @@ public partial class StudioUIManager : CanvasLayer
         {
             _settingsModal.DialogClosed += () =>
             {
-                if (_modalsLayer != null && (_aboutModal == null || !_aboutModal.Visible))
-                {
-                    _modalsLayer.Visible = false;
-                }
+                UpdateModalsState();
                 UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
             };
+        }
+
+        if (_btnFeedback != null)
+        {
+            _btnFeedback.Pressed += () =>
+            {
+                _feedbackModal?.Open();
+                UpdateModalsState();
+            };
+        }
+
+        if (_feedbackModal != null)
+        {
+            _feedbackModal.DialogClosed += UpdateModalsState;
         }
 
         if (_btnAbout != null)
         {
             _btnAbout.Pressed += () =>
             {
-                if (_modalsLayer != null) _modalsLayer.Visible = true;
                 if (_aboutModal != null)
                 {
                     _aboutModal.Visible = true;
-                    _aboutModal.MoveToFront();
                 }
+                UpdateModalsState();
             };
         }
 
@@ -467,20 +525,46 @@ public partial class StudioUIManager : CanvasLayer
             _btnAboutClose.Pressed += () =>
             {
                 if (_aboutModal != null) _aboutModal.Visible = false;
-                if (_modalsLayer != null && (_settingsModal == null || !_settingsModal.Visible))
+                UpdateModalsState();
+            };
+        }
+        var btnAboutBottomClose = _aboutModal?.FindChild("BtnBottomClose", true, false) as Button;
+        if (btnAboutBottomClose != null && btnAboutBottomClose != _btnAboutClose)
+        {
+            btnAboutBottomClose.Pressed += () =>
+            {
+                if (_aboutModal != null) _aboutModal.Visible = false;
+                UpdateModalsState();
+            };
+        }
+
+        var aboutRtl = _aboutModal?.FindChild("RichTextLabel", true, false) as RichTextLabel;
+        if (aboutRtl != null)
+        {
+            aboutRtl.MetaClicked += (meta) =>
+            {
+                string url = meta.AsString();
+                if (!string.IsNullOrEmpty(url))
                 {
-                    _modalsLayer.Visible = false;
+                    OS.ShellOpen(url);
                 }
             };
         }
 
-        if (_gameFolderDialog != null) _gameFolderDialog.DirSelected += OnGameDirSelected;
-        if (_saveFolderDialog != null) _saveFolderDialog.DirSelected += OnSaveDirSelected;
+        if (_gameFolderDialog != null)
+        {
+            _gameFolderDialog.DirSelected += (d) => { OnGameDirSelected(d); UpdateModalsState(); };
+            _gameFolderDialog.Canceled += UpdateModalsState;
+        }
+        if (_saveFolderDialog != null)
+        {
+            _saveFolderDialog.DirSelected += (d) => { OnSaveDirSelected(d); UpdateModalsState(); };
+            _saveFolderDialog.Canceled += UpdateModalsState;
+        }
 
         // UserSettings & Gizmo Display event bindings
         UserSettings.Msaa3DChanged += (v) => ApplyCurrentGraphicsSettings();
         UserSettings.ShadowQualityChanged += (v) => ApplyCurrentGraphicsSettings();
-        UserSettings.StudioEnvironmentChanged += (v) => ApplyCurrentGraphicsSettings();
         UserSettings.ShowStudioBackgroundChanged += (v) => ApplyCurrentGraphicsSettings();
         UserSettings.PerformanceSettingsChanged += () => UserSettings.ApplyPerformanceSettings();
         GizmoDisplaySettings.OnSettingsChanged += () => _currentIKManager?.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
@@ -508,13 +592,7 @@ public partial class StudioUIManager : CanvasLayer
 
         if (_btnQuickFullscreen != null)
         {
-            var win = GetWindow();
-            if (win != null)
-            {
-                var mode = DisplayServer.WindowGetMode();
-                bool isFs = mode == DisplayServer.WindowMode.Fullscreen || mode == DisplayServer.WindowMode.ExclusiveFullscreen;
-                _btnQuickFullscreen.Text = isFs ? "Windowed" : "Fullscreen";
-            }
+            _btnQuickFullscreen.Text = _isFullscreen ? "Windowed" : "Fullscreen";
             _btnQuickFullscreen.Pressed += ToggleFullscreen;
         }
 
@@ -615,18 +693,127 @@ public partial class StudioUIManager : CanvasLayer
             // Configure CharacterIKManager
             var ikManager = new CharacterIKManager
             {
-                Name = "CharacterIKManager"
+                Name = "CharacterIKManager",
+                LayerManager = gizmoManager.LayerManager
             };
             skeleton.AddChild(ikManager);
             ikManager.Setup(skeleton);
             _currentIKManager = ikManager;
+            gizmoManager.IKManager = ikManager;
             _currentIKManager.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
             _tabBones?.SetIKManager(ikManager);
+
+            // Synchronize Weapon Bone Attachments
+            SyncWeaponBoneAttachments(heroNode, skeleton);
         }
 
         if (animPlayer != null)
         {
             _tabPose?.SetAnimationPlayer(animPlayer);
+        }
+    }
+
+    private void SyncWeaponBoneAttachments(Node3D heroNode, Skeleton3D skeleton)
+    {
+        if (heroNode == null || skeleton == null) return;
+
+        var weaponKeywords = new[] { "weapon", "gun", "blaster", "rifle", "pistol" };
+        var candidateMeshes = new System.Collections.Generic.List<MeshInstance3D>();
+        FindMeshesMatching(heroNode, weaponKeywords, candidateMeshes);
+
+        if (candidateMeshes.Count == 0) return;
+
+        string[] mountBoneCandidates = new[]
+        {
+            "weapon_hand_R", "weapon_hand_r", "hold_R", "hold_r", "hand_R", "hand_r",
+            "weapon_hand_L", "weapon_hand_l", "hold_L", "hold_l", "hand_L", "hand_l"
+        };
+
+        int mountBoneIdx = -1;
+        string mountBoneName = string.Empty;
+
+        foreach (var name in mountBoneCandidates)
+        {
+            int idx = skeleton.FindBone(name);
+            if (idx != -1)
+            {
+                mountBoneIdx = idx;
+                mountBoneName = skeleton.GetBoneName(idx);
+                break;
+            }
+        }
+
+        if (mountBoneIdx == -1)
+        {
+            int total = skeleton.GetBoneCount();
+            foreach (var name in mountBoneCandidates)
+            {
+                for (int i = 0; i < total; i++)
+                {
+                    if (string.Equals(skeleton.GetBoneName(i), name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        mountBoneIdx = i;
+                        mountBoneName = skeleton.GetBoneName(i);
+                        break;
+                    }
+                }
+                if (mountBoneIdx != -1) break;
+            }
+        }
+
+        if (mountBoneIdx == -1 || string.IsNullOrEmpty(mountBoneName)) return;
+
+        BoneAttachment3D attachment = null;
+        foreach (Node child in skeleton.GetChildren())
+        {
+            if (child is BoneAttachment3D ba && ba.BoneName == mountBoneName)
+            {
+                attachment = ba;
+                break;
+            }
+        }
+
+        if (attachment == null)
+        {
+            attachment = new BoneAttachment3D
+            {
+                Name = $"WeaponAttachment_{mountBoneName}",
+                BoneName = mountBoneName
+            };
+            skeleton.AddChild(attachment);
+        }
+
+        foreach (var mesh in candidateMeshes)
+        {
+            if (mesh.Skin != null) continue;
+            if (mesh.GetParent() == attachment) continue;
+
+            Transform3D globalXform = mesh.GlobalTransform;
+            mesh.GetParent()?.RemoveChild(mesh);
+            attachment.AddChild(mesh);
+            mesh.GlobalTransform = globalXform;
+            GD.Print($"[StudioUI] Attached unskinned weapon mesh '{mesh.Name}' to bone '{mountBoneName}'");
+        }
+    }
+
+    private void FindMeshesMatching(Node node, string[] keywords, System.Collections.Generic.List<MeshInstance3D> results)
+    {
+        if (node is MeshInstance3D mi)
+        {
+            string name = mi.Name.ToString().ToLowerInvariant();
+            foreach (var kw in keywords)
+            {
+                if (name.Contains(kw))
+                {
+                    results.Add(mi);
+                    break;
+                }
+            }
+        }
+
+        foreach (Node child in node.GetChildren())
+        {
+            FindMeshesMatching(child, keywords, results);
         }
     }
 
@@ -667,9 +854,30 @@ public partial class StudioUIManager : CanvasLayer
 
     public void ShowLoading(bool show, string message = "Loading character model...")
     {
-        if (_modalsLayer != null) _modalsLayer.Visible = show || (_settingsModal != null && _settingsModal.Visible) || (_aboutModal != null && _aboutModal.Visible);
         if (_loadingOverlay != null) _loadingOverlay.Visible = show;
         if (_loadingLabel != null && message != null) _loadingLabel.Text = message;
+        UpdateModalsState();
+    }
+
+    public void UpdateModalsState()
+    {
+        bool anyModalOpen = (_settingsModal != null && _settingsModal.Visible)
+                         || (_feedbackModal != null && _feedbackModal.Visible)
+                         || (_aboutModal != null && _aboutModal.Visible)
+                         || (_loadingOverlay != null && _loadingOverlay.Visible)
+                         || (_gameFolderDialog != null && _gameFolderDialog.Visible)
+                         || (_saveFolderDialog != null && _saveFolderDialog.Visible)
+                         || (_fallbackPathDialog != null && _fallbackPathDialog.Visible);
+
+        if (_modalsLayer != null)
+        {
+            _modalsLayer.Visible = anyModalOpen;
+        }
+
+        if (_modalBackdrop != null)
+        {
+            _modalBackdrop.Visible = anyModalOpen;
+        }
     }
 
     #region Toast Notification System
@@ -747,7 +955,12 @@ public partial class StudioUIManager : CanvasLayer
             DialogText = "Could not automatically detect the Deadlock installation path.\nPlease select the Deadlock game directory manually.",
             Exclusive = true
         };
-        _fallbackPathDialog.Confirmed += () => _gameFolderDialog?.PopupCentered();
+        _fallbackPathDialog.Confirmed += () =>
+        {
+            _gameFolderDialog?.PopupCentered();
+            UpdateModalsState();
+        };
+        _fallbackPathDialog.Canceled += UpdateModalsState;
 
         var modals = GetNodeOrNull("MainHUD/ModalsLayer") ?? this;
         modals.AddChild(_fallbackPathDialog);
@@ -769,6 +982,7 @@ public partial class StudioUIManager : CanvasLayer
             {
                 ShowLoading(false);
                 _fallbackPathDialog?.PopupCentered();
+                UpdateModalsState();
                 return;
             }
         }
@@ -816,23 +1030,27 @@ public partial class StudioUIManager : CanvasLayer
         ShowToast("Screenshots path updated!");
     }
 
-    private void ApplyCurrentGraphicsSettings()
-    {
-        var worldVp = GetNodeOrNull<SubViewport>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
-                   ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
-        var dirLight = GetTree().Root.FindChild("DirectionalLight3D", true, false) as DirectionalLight3D;
-        var bgRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/ColorRect")
-                  ?? GetTree().Root.FindChild("ColorRect", true, false) as ColorRect;
-        var envNode = GetNodeOrNull<WorldEnvironment>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/WorldEnvironment")
-                   ?? GetNodeOrNull<WorldEnvironment>("/root/Main/WorldEnvironment")
-                   ?? GetTree().Root.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
-        var bgTex = GetNodeOrNull<TextureRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas/BackgroundRect")
-                 ?? GetTree().Root.FindChild("BackgroundRect", true, false) as TextureRect;
-        var stagePlatform = GetNodeOrNull<Node3D>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/StagePlatform")
-                         ?? GetTree().Root.FindChild("StagePlatform", true, false) as Node3D;
+    public void ApplyCurrentGraphicsSettings()
+        {
+            var worldVp = GetNodeOrNull<SubViewport>("MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
+                    ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
+            var dirLight = GetTree().Root.FindChild("DirectionalLight3D", true, false) as DirectionalLight3D;
+            
+            var bgCanvas = GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/BGCanvas");
+            var bgRect = bgCanvas?.GetNodeOrNull<ColorRect>("ColorRect")
+                    ?? GetTree().Root.FindChild("ColorRect", true, false) as ColorRect;
+            var bgTex = bgCanvas?.GetNodeOrNull<TextureRect>("BackgroundRect")
+                    ?? GetTree().Root.FindChild("BackgroundRect", true, false) as TextureRect;
 
-        UserSettings.ApplyGraphicsSettings(GetViewport(), worldVp, dirLight, bgRect, envNode, bgTex, stagePlatform);
-    }
+            var envNode = worldVp?.GetNodeOrNull<WorldEnvironment>("WorldEnvironment")
+                    ?? GetTree().Root.FindChild("WorldEnvironment", true, false) as WorldEnvironment;
+            var stagePlatform = worldVp?.GetNodeOrNull<Node3D>("StagePlatform")
+                            ?? GetTree().Root.FindChild("StagePlatform", true, false) as Node3D;
+
+            UserSettings.ApplyGraphicsSettings(GetViewport(), worldVp, dirLight, bgRect, envNode, bgTex, stagePlatform);
+
+
+        }
 
     private void ApplySubViewportOptimizations()
     {
