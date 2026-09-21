@@ -243,8 +243,9 @@ text = "📌"
 
 [node name="FlyoutPanel" type="PanelContainer" parent="MainVBox/HBoxContainer" unique_id=1821101042]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(250, 0)
+custom_minimum_size = Vector2(260, 290)
 layout_mode = 2
+size_flags_vertical = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_flyout")
 
 [node name="Margin" type="MarginContainer" parent="MainVBox/HBoxContainer/FlyoutPanel" unique_id=716227215]
@@ -658,7 +659,10 @@ size_flags_horizontal = 3
 button_pressed = true
 text = "Stencil Mask"
 
-[node name="ChkIsolateSubmesh" type="CheckBox" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/MaskControlsRow" unique_id=2128334079]
+[node name="MaskControlsRow2" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions" unique_id=459942162]
+layout_mode = 2
+
+[node name="ChkIsolateSubmesh" type="CheckBox" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/MaskControlsRow2" unique_id=2128334079]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -943,29 +947,6 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 text = "Bake Text to Layer"
-
-[node name="KeymapHintContainer" type="PanelContainer" parent="MainVBox" unique_id=1011952381]
-unique_name_in_owner = true
-layout_mode = 2
-mouse_filter = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_hint")
-
-[node name="Margin" type="MarginContainer" parent="MainVBox/KeymapHintContainer" unique_id=1350086041]
-layout_mode = 2
-theme_override_constants/margin_left = 6
-theme_override_constants/margin_top = 4
-theme_override_constants/margin_right = 6
-theme_override_constants/margin_bottom = 4
-
-[node name="KeymapHintLabel" type="Label" parent="MainVBox/KeymapHintContainer/Margin" unique_id=948796215]
-unique_name_in_owner = true
-modulate = Color(1, 1, 1, 0.7)
-layout_mode = 2
-size_flags_horizontal = 3
-theme = ExtResource("14_5yohq")
-theme_override_font_sizes/font_size = 10
-horizontal_alignment = 1
-vertical_alignment = 1
 
 [node name="DecalFileDialog" type="FileDialog" parent="." unique_id=51934037]
 unique_name_in_owner = true

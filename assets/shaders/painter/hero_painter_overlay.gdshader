@@ -11,8 +11,50 @@ uniform float layer_opacity : hint_range(0.0, 1.0) = 1.0;
 uniform bool is_paint_target = true;
 uniform bool show_selection_mask = false;
 
+uniform bool smooth_bicubic = true;
+
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
+
+// High-fidelity Cubic B-spline smooth texture filtering (strictly non-negative weights, zero ringing or dark outlines)
+vec4 sample_bicubic_smooth(sampler2D tex, vec2 uv, vec2 min_bounds, vec2 max_bounds) {
+	ivec2 itex_size = textureSize(tex, 0);
+	if (itex_size.x <= 2 || itex_size.y <= 2) {
+		return texture(tex, clamp(uv, min_bounds, max_bounds));
+	}
+	vec2 tex_size = vec2(itex_size);
+	vec2 inv_size = 1.0 / tex_size;
+	vec2 tc = uv * tex_size - 0.5;
+	vec2 f = fract(tc);
+	vec2 f2 = f * f;
+	vec2 f3 = f2 * f;
+
+	// Cubic B-spline basis weights (strictly non-negative, sum to 1.0, monotonic continuous transitions)
+	vec2 w0 = (-f3 + 3.0 * f2 - 3.0 * f + 1.0) / 6.0;
+	vec2 w1 = ( 3.0 * f3 - 6.0 * f2 + 4.0) / 6.0;
+	vec2 w2 = (-3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0) / 6.0;
+	vec2 w3 = f3 / 6.0;
+
+	vec2 s0 = w0 + w1;
+	vec2 s1 = w2 + w3;
+
+	vec2 f0 = w1 / max(s0, vec2(1e-5));
+	vec2 f1 = w3 / max(s1, vec2(1e-5));
+
+	vec2 t0 = (floor(tc) - 0.5 + f0) * inv_size;
+	vec2 t1 = (floor(tc) + 1.5 + f1) * inv_size;
+
+	vec2 c0 = clamp(vec2(t0.x, t0.y), min_bounds, max_bounds);
+	vec2 c1 = clamp(vec2(t1.x, t0.y), min_bounds, max_bounds);
+	vec2 c2 = clamp(vec2(t0.x, t1.y), min_bounds, max_bounds);
+	vec2 c3 = clamp(vec2(t1.x, t1.y), min_bounds, max_bounds);
+
+	vec4 result = texture(tex, c0) * (s0.x * s0.y) +
+	              texture(tex, c1) * (s1.x * s0.y) +
+	              texture(tex, c2) * (s0.x * s1.y) +
+	              texture(tex, c3) * (s1.x * s1.y);
+	return clamp(result, vec4(0.0), vec4(1.0));
+}
 
 void vertex() {
 	// Source 2 models in Deadlock often lack a dedicated UV2 stream.
@@ -51,10 +93,15 @@ void fragment() {
 		vec2 max_atlas = position_in_atlas + size_in_atlas - half_texel;
 		vec2 clamped_uv = clamp(v_atlas_uv, min_atlas, max_atlas);
 
-		vec4 paint = texture(overlay_texture, clamped_uv);
+		vec4 paint = smooth_bicubic
+			? sample_bicubic_smooth(overlay_texture, v_atlas_uv, min_atlas, max_atlas)
+			: texture(overlay_texture, clamped_uv);
 
-		vec3 final_color = paint.rgb;
-		float final_alpha = paint.a;
+		float final_alpha = clamp(paint.a, 0.0, 1.0);
+		// Un-premultiply straight RGB safely to prevent edge darkening under blend_mix
+		vec3 final_color = (final_alpha > 0.001)
+			? clamp(paint.rgb / final_alpha, vec3(0.0), vec3(1.0))
+			: clamp(paint.rgb, vec3(0.0), vec3(1.0));
 
 		if (show_selection_mask) {
 			ivec2 mask_size = textureSize(selection_mask, 0);

@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://lp56exjo4yw8"]
 
 [ext_resource type="PackedScene" uid="uid://5gylk5m307o0" path="res://tools/scenes/vpk_loader.tscn" id="1_vpk"]
-[ext_resource type="Script" uid="uid://bd8nhtlxjpsn" path="res://tools/scripts/OrbitCamera.cs" id="2_orbit"]
+[ext_resource type="Script" uid="uid://dowrarttaq1ga" path="res://tools/scripts/OrbitCamera.cs" id="2_orbit"]
 [ext_resource type="Texture2D" uid="uid://cn4yq50qo3u8k" path="res://assets/logo/dl-playground-logo.svg" id="3_074og"]
 [ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="3_theme"]
 [ext_resource type="Script" uid="uid://ccjoj2llg5baq" path="res://ui/scripts/StudioUIManager.cs" id="5_studio_ui"]
@@ -13,16 +13,18 @@
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/EffectsTab.tscn" id="11_fx_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/LightingTab.tscn" id="12_light_tab"]
 [ext_resource type="PackedScene" uid="uid://c600l2pc2ya3d" path="res://ui/scenes/tabs/ShadingTab.tscn" id="13_shading_tab"]
-[ext_resource type="PackedScene" path="res://ui/scenes/tabs/PaintTab.tscn" id="15_paint_tab"]
 [ext_resource type="PackedScene" uid="uid://bmnaxn7uec4qy" path="res://ui/scenes/ExportPanel.tscn" id="14_export"]
+[ext_resource type="PackedScene" uid="uid://csvusgj1vik1u" path="res://ui/scenes/tabs/PaintTab.tscn" id="15_paint_tab"]
 [ext_resource type="Shader" uid="uid://bh86e204ret45" path="res://assets/shaders/crt_shader.gdshader" id="16_crt_shader"]
 [ext_resource type="Shader" uid="uid://82snm4ouah2f" path="res://assets/shaders/glitch_shader.gdshader" id="17_glitch_shader"]
-[ext_resource type="Script" uid="uid://c7d8ndr06lxge" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
+[ext_resource type="Script" uid="uid://cs3b1veljanln" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
 [ext_resource type="Texture2D" uid="uid://djdwwfcdcwicj" path="res://assets/backgrounds/background_00.jpg" id="19_bg0"]
-[ext_resource type="Script" path="res://ui/scripts/CameraControlPadUI.cs" id="20_cam_pad"]
-[ext_resource type="PackedScene" path="res://ui/scenes/FloatingBrushPalette.tscn" id="21_brush_palette"]
-[ext_resource type="PackedScene" path="res://ui/scenes/components/PaintModExportPanel.tscn" id="22_paint_mod_export"]
+[ext_resource type="Script" uid="uid://gx8t7tkvo5gi" path="res://ui/scripts/CameraControlPadUI.cs" id="20_cam_pad"]
+[ext_resource type="PackedScene" uid="uid://bpxn82lam7x10" path="res://ui/scenes/FloatingBrushPalette.tscn" id="21_brush_palette"]
+[ext_resource type="PackedScene" uid="uid://c7k2p8b1mx5yq" path="res://ui/scenes/components/PaintModExportPanel.tscn" id="22_paint_mod_export"]
 [ext_resource type="PackedScene" uid="uid://c8k8f2y0x1m4p" path="res://ui/scenes/modals/SettingsDialog.tscn" id="23_settings_dialog"]
+[ext_resource type="PackedScene" uid="uid://wjfypfotgq0w" path="res://ui/scenes/components/UVCanvasPanel.tscn" id="24_uv_canvas"]
+[ext_resource type="Texture2D" uid="uid://b407xjf02tgde" path="res://assets/at-icons/uv_layer.svg" id="25_uv_icon"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -147,9 +149,12 @@ _tabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/
 _tabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/PaintTab")
 _exportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
 _paintModExportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
-_navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge")
+_uvCanvasPanel = NodePath("MainHUD/VBoxContainer/MainSplit/UVCanvasPanel")
+_navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge")
+_painterKeymapBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge")
 _btnQuickXRay = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickXRay")
 _btnQuickFullscreen = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickFullscreen")
+_btnOpenUVCanvas = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BtnOpenUVCanvas")
 _modalsLayer = NodePath("MainHUD/ModalsLayer")
 _settingsModal = NodePath("MainHUD/ModalsLayer/SettingsModal")
 _aboutModal = NodePath("MainHUD/ModalsLayer/AboutModal")
@@ -228,7 +233,10 @@ autoplay = &"spin"
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-split_offsets = PackedInt32Array(360)
+theme_override_constants/separation = 4
+split_offsets = PackedInt32Array(360, 120)
+dragging_enabled = false
+dragger_visibility = 1
 split_offset = 360
 
 [node name="LeftPanel" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=2054274140]
@@ -372,6 +380,11 @@ layout_mode = 2
 visible = false
 layout_mode = 2
 
+[node name="UVCanvasPanel" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=1459821034 instance=ExtResource("24_uv_canvas")]
+visible = false
+layout_mode = 2
+MaxPanelWidth = 650.0
+
 [node name="ViewportArea" type="Control" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=994090960]
 clip_contents = true
 layout_mode = 2
@@ -420,10 +433,9 @@ mouse_filter = 0
 stretch = true
 
 [node name="WorldViewport" type="SubViewport" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer" unique_id=688636459]
-transparent_bg = false
 handle_input_locally = false
 physics_object_picking = true
-size = Vector2i(1532, 1028)
+size = Vector2i(1552, 1028)
 render_target_update_mode = 4
 
 [node name="StagePlatform" type="Node3D" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport" unique_id=1773132385]
@@ -502,7 +514,7 @@ stretch = true
 transparent_bg = true
 handle_input_locally = false
 gui_disable_input = true
-size = Vector2i(1532, 1028)
+size = Vector2i(1552, 1028)
 render_target_update_mode = 4
 script = ExtResource("18_gizmo_sync")
 
@@ -569,13 +581,23 @@ offset_top = 12.0
 offset_right = -12.0
 offset_bottom = 234.0
 
-[node name="FloatingBrushPalette" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=2089182341 instance=ExtResource("21_brush_palette")]
-visible = false
+[node name="BtnOpenUVCanvas" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=1627897799]
+custom_minimum_size = Vector2(64, 48)
 layout_mode = 1
 offset_left = 16.0
 offset_top = 16.0
-offset_right = 320.0
-offset_bottom = 400.0
+offset_right = 52.0
+offset_bottom = 52.0
+tooltip_text = "Open 2D UV Texture Canvas (U)"
+icon = ExtResource("25_uv_icon")
+icon_alignment = 1
+expand_icon = true
+
+[node name="FloatingBrushPalette" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=2089182341 instance=ExtResource("21_brush_palette")]
+visible = false
+layout_mode = 1
+offset_top = 56.0
+offset_bottom = 440.0
 
 [node name="QuickActionsStrip" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=420354827]
 layout_mode = 1
@@ -608,39 +630,64 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "Fullscreen"
 
-[node name="NavBadge" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=947025821]
+[node name="BottomBadgesContainer" type="HBoxContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=947025800]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -300.0
+offset_left = -1050.0
 offset_top = -42.0
 offset_right = -12.0
 offset_bottom = -12.0
 grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 2
+theme_override_constants/separation = 8
+alignment = 2
 
-[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge" unique_id=931196230]
+[node name="PainterKeymapBadge" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer" unique_id=947025899]
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge" unique_id=931196299]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 4
+
+[node name="PainterKeymapLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge/MarginContainer" unique_id=1268961499]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 0.95)
+theme_override_font_sizes/font_size = 11
+text = "[B] Brush  [E] Erase  [G] Fill  [M] Wand  [L] Decal  [T] Text  [N] Mirror  [-/+] Size  [U] 2D UV"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NavBadge" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer" unique_id=947025821]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge" unique_id=931196230]
 layout_mode = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 4
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 4
 
-[node name="NavLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge/MarginContainer" unique_id=1268961489]
+[node name="NavLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge/MarginContainer" unique_id=1268961489]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.75, 0.8, 0.9)
 text = "Move: WASD | Rotate: RMB | Zoom: Scroll"
 
 [node name="ModalsLayer" type="Control" parent="UIRoot/MainHUD" unique_id=1736869492]
-anchors_preset = 0
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
 mouse_filter = 2
 
 [node name="ScreenshotFolderDialog" type="FileDialog" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1336641846]
@@ -655,6 +702,8 @@ access = 2
 
 [node name="SettingsModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=184693709 instance=ExtResource("23_settings_dialog")]
 visible = false
+layout_mode = 0
+anchors_preset = 0
 
 [node name="AboutModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1871805012]
 visible = false

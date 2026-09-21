@@ -554,11 +554,16 @@ namespace DeadlockPlayground.Painter
                 var mi = submesh.Mesh;
                 if (mi == null || mi.Mesh == null) continue;
 
-                // Ensure non-zero lightmap size hint so OverlayAtlasManager packs the mesh into the atlas
-                if (mi.Mesh.LightmapSizeHint == Vector2I.Zero)
-                {
-                    mi.Mesh.LightmapSizeHint = new Vector2I(256, 256);
-                }
+                string name = (submesh.DisplayName ?? submesh.RawName ?? "").ToLowerInvariant();
+                bool isMinor = name.Contains("teeth") || name.Contains("tooth") || name.Contains("tongue") ||
+                               name.Contains("eye") || name.Contains("pupil") || name.Contains("cornea") || name.Contains("eyelash");
+                bool isMajor = !isMinor && (name.Contains("head") || name.Contains("face") || name.Contains("body") ||
+                                           name.Contains("torso") || name.Contains("skin") || name.Contains("lower") ||
+                                           name.Contains("upper") || name.Contains("cloth") || name.Contains("coat") ||
+                                           name.Contains("jacket") || name.Contains("pants") || name.Contains("dress"));
+
+                int dim = isMajor ? 512 : (isMinor ? 128 : 256);
+                mi.Mesh.LightmapSizeHint = new Vector2I(dim, dim);
             }
         }
 
@@ -803,6 +808,7 @@ namespace DeadlockPlayground.Painter
                     }
                 }
                 _isAnySoloed = true;
+                SelectTarget(info, info.SurfaceIndex);
             }
 
             NotifyHierarchyChanged();

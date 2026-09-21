@@ -235,7 +235,7 @@ namespace DeadlockPlayground.Painter
             _cameraBrush.Set("projection", 1); // 1 = PROJECTION_ORTHOGONAL (constant radius pencil)
             _cameraBrush.Set("resolution", new Vector2I(2048, 2048));
             _cameraBrush.Set("max_distance", 0.35f);
-            _cameraBrush.Set("draw_speed", 100.0f);
+            _cameraBrush.Set("draw_speed", 35.0f);
             _cameraBrush.Set("drawing", false);
 
             var targetParent = _worldViewport as Node ?? _camera as Node ?? this;
@@ -249,7 +249,7 @@ namespace DeadlockPlayground.Painter
                 _mirrorCameraBrush.Set("projection", 1);
                 _mirrorCameraBrush.Set("resolution", new Vector2I(2048, 2048));
                 _mirrorCameraBrush.Set("max_distance", 0.35f);
-                _mirrorCameraBrush.Set("draw_speed", 100.0f);
+                _mirrorCameraBrush.Set("draw_speed", 35.0f);
                 _mirrorCameraBrush.Set("drawing", false);
                 targetParent.AddChild(_mirrorCameraBrush);
                 AttachMirrorCameraBrushWorld();
@@ -339,7 +339,7 @@ namespace DeadlockPlayground.Painter
 
             if (force || Math.Abs(_lastBrushFlow - BrushFlow) > 0.01f)
             {
-                float speed = Mathf.Max(10.0f, BrushFlow * 100.0f);
+                float speed = Mathf.Max(5.0f, BrushFlow * 35.0f);
                 _cameraBrush.Set("draw_speed", speed);
                 if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
                 {
@@ -378,8 +378,8 @@ namespace DeadlockPlayground.Painter
                 BlendMode = activeBlendMode;
             }
 
-            int minBleed = 1;
-            int maxBleed = 1;
+            int minBleed = 0;
+            int maxBleed = 0;
             Vector2I brushRes = (atlasRes >= 2048) ? new Vector2I(512, 512) : new Vector2I(256, 256);
 
             _cameraBrush.Set("min_bleed", minBleed);

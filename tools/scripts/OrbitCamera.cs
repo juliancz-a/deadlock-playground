@@ -165,14 +165,52 @@ public partial class OrbitCamera : Node3D
         HandleCameraInput(@event);
     }
 
-    public override void _Input(InputEvent @event)
-    {
-        HandleCameraInput(@event);
-    }
-
     private void HandleCameraInput(InputEvent @event)
     {
-        // Orbit (Middle Mouse Button / Right Mouse Button)
+        // 1. Unconditional release of orbit if RMB or MMB was released
+        if (@event is InputEventMouseButton mouseBtnRelease && !mouseBtnRelease.Pressed)
+        {
+            if (mouseBtnRelease.ButtonIndex == MouseButton.Middle || mouseBtnRelease.ButtonIndex == MouseButton.Right)
+            {
+                if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
+                {
+                    _isOrbiting = false;
+                    Input.MouseMode = Input.MouseModeEnum.Visible;
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
+            }
+        }
+
+        // 2. Unconditional mouse motion handling while orbiting
+        if (@event is InputEventMouseMotion mouseMotionEvent && _isOrbiting)
+        {
+            bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
+            if (isOrtho && LockOrbitInOrtho)
+            {
+                return;
+            }
+
+            _yaw -= mouseMotionEvent.Relative.X * OrbitSensitivity;
+            _pitch -= mouseMotionEvent.Relative.Y * OrbitSensitivity;
+            _pitch = Mathf.Clamp(_pitch, PitchMin, PitchMax);
+            OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        // 3. Block initiating camera zoom/orbit if mouse is hovering over any UI element (sidebar, UV canvas, floating panels, dialogs)
+        var hovered = GetTree()?.Root?.GuiGetHoveredControl();
+        if (hovered != null)
+        {
+            bool isMainViewport = (hovered.Name == "SubViewportContainer" && hovered.GetParent()?.Name == "ViewportArea");
+            if (!isMainViewport)
+            {
+                return;
+            }
+        }
+
+        // Orbit (Middle Mouse Button / Right Mouse Button) press
         if (@event is InputEventMouseButton mouseBtnEvent)
         {
             if (mouseBtnEvent.ButtonIndex == MouseButton.Middle || mouseBtnEvent.ButtonIndex == MouseButton.Right)
@@ -222,25 +260,9 @@ public partial class OrbitCamera : Node3D
                 }
             }
         }
-        else if (@event is InputEventMouseMotion mouseMotionEvent && _isOrbiting)
-        {
-            bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
-            if (isOrtho && LockOrbitInOrtho)
-            {
-                // Lock 3D orbit rotation in Orthographic mode
-                return;
-            }
-
-            _yaw -= mouseMotionEvent.Relative.X * OrbitSensitivity;
-            _pitch -= mouseMotionEvent.Relative.Y * OrbitSensitivity;
-            _pitch = Mathf.Clamp(_pitch, PitchMin, PitchMax);
-            OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
-            GetViewport()?.SetInputAsHandled();
-            return;
-        }
         else if (@event is InputEventKey keyEvent && keyEvent.Pressed && keyEvent.Keycode == Key.Escape)
         {
-            if (_isOrbiting)
+            if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
             {
                 _isOrbiting = false;
                 Input.MouseMode = Input.MouseModeEnum.Visible;
@@ -252,9 +274,9 @@ public partial class OrbitCamera : Node3D
 
     public override void _Notification(int what)
     {
-        if (what == NotificationApplicationFocusOut)
+        if (what == NotificationApplicationFocusOut || what == 1004 /* NotificationWindowFocusOut */)
         {
-            if (_isOrbiting)
+            if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
             {
                 _isOrbiting = false;
                 Input.MouseMode = Input.MouseModeEnum.Visible;
@@ -264,6 +286,19 @@ public partial class OrbitCamera : Node3D
 
     public override void _Process(double delta)
     {
+        // Fail-safe: If physically neither RMB nor MMB is held, restore Visible cursor
+        if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            if (!Input.IsMouseButtonPressed(MouseButton.Right) && !Input.IsMouseButtonPressed(MouseButton.Middle))
+            {
+                _isOrbiting = false;
+                if (Input.MouseMode == Input.MouseModeEnum.Captured)
+                {
+                    Input.MouseMode = Input.MouseModeEnum.Visible;
+                }
+            }
+        }
+
         float fDelta = (float)delta;
 
         // Apply rotation

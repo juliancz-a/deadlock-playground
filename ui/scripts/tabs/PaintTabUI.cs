@@ -55,6 +55,8 @@ public partial class PaintTabUI : VBoxContainer
 
     public SkinLayerManager LayerManager => _layerManager;
     public HeroMeshHierarchy MeshHierarchy => _meshHierarchy;
+    public MeshPainter3D Painter => _painter;
+    public FloatingBrushPaletteUI BrushPalette => _brushPalette;
 
     // --- UI Controls ---
     // Header
@@ -483,6 +485,7 @@ public partial class PaintTabUI : VBoxContainer
                 }
             }
             _layerManager.ApplyOverlayParametersToMeshes();
+            _layerManager.RebuildBaseAtlasBuffer();
         }
 
         // 4. Populate target dropdown and select default
@@ -623,6 +626,7 @@ public partial class PaintTabUI : VBoxContainer
                 }
             }
             _layerManager.ApplyOverlayParametersToMeshes();
+            _layerManager.RebuildBaseAtlasBuffer();
         }
 
         var submeshes = _meshHierarchy.Submeshes;
@@ -960,6 +964,7 @@ public partial class PaintTabUI : VBoxContainer
             _brushPalette.Visible = true;
             _brushPalette.SyncFromPainter();
         }
+        _layerManager?.RebuildBaseAtlasBuffer();
     }
 
     public void OnTabDeactivated()

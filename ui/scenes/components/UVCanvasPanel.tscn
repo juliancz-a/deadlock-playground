@@ -1,0 +1,163 @@
+[gd_scene format=3 uid="uid://wjfypfotgq0w"]
+
+[ext_resource type="Script" uid="uid://cpp7fqu0ylfye" path="res://ui/scripts/components/UVCanvas2DUI.cs" id="1_uv_canvas"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.08, 0.09, 0.11, 0.96)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.25, 0.28, 0.35, 0.7)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_header"]
+bg_color = Color(0.12, 0.13, 0.16, 0.98)
+border_width_bottom = 1
+border_color = Color(0.22, 0.25, 0.32, 0.8)
+corner_radius_top_left = 7
+corner_radius_top_right = 7
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_badge"]
+bg_color = Color(0.16, 0.18, 0.22, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.34, 0.42, 0.6)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="UVCanvasPanel" type="PanelContainer" unique_id=1190318218]
+custom_minimum_size = Vector2(380, 0)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+script = ExtResource("1_uv_canvas")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=1562698859]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="Header" type="PanelContainer" parent="VBoxContainer" unique_id=1002358664]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_header")
+
+[node name="Margin" type="MarginContainer" parent="VBoxContainer/Header" unique_id=955878535]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 2
+
+[node name="HBox" type="HBoxContainer" parent="VBoxContainer/Header/Margin" unique_id=494384572]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="VBoxContainer/Header/Margin/HBox" unique_id=432685272]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 11
+text = "UV ATLAS"
+vertical_alignment = 1
+
+[node name="ResolutionBadge" type="Label" parent="VBoxContainer/Header/Margin/HBox" unique_id=75934178]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 18)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 0.9)
+theme_override_font_sizes/font_size = 9
+theme_override_styles/normal = SubResource("StyleBoxFlat_badge")
+text = "2048x2048"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="VBoxContainer/Header/Margin/HBox" unique_id=175677731]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnResetZoom" type="Button" parent="VBoxContainer/Header/Margin/HBox" unique_id=1132800385]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 22)
+layout_mode = 2
+tooltip_text = "Reset Zoom & Fit to Canvas View"
+theme_override_font_sizes/font_size = 10
+text = "Fit"
+
+[node name="BtnBaseTex" type="Button" parent="VBoxContainer/Header/Margin/HBox" unique_id=1943322707]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 22)
+layout_mode = 2
+tooltip_text = "Toggle Base Diffuse Texture"
+theme_override_font_sizes/font_size = 10
+toggle_mode = true
+button_pressed = true
+text = "Base"
+
+[node name="BtnMesh" type="Button" parent="VBoxContainer/Header/Margin/HBox" unique_id=1600420444]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 22)
+layout_mode = 2
+tooltip_text = "Toggle Full Mesh UV Wireframe"
+theme_override_font_sizes/font_size = 10
+toggle_mode = true
+button_pressed = true
+text = "Mesh"
+
+[node name="BtnOutline" type="Button" parent="VBoxContainer/Header/Margin/HBox" unique_id=1044005890]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 22)
+layout_mode = 2
+tooltip_text = "Toggle Submesh Island UV Outlines"
+theme_override_font_sizes/font_size = 10
+toggle_mode = true
+text = "Wire"
+
+[node name="BtnWireOpacity" type="Button" parent="VBoxContainer/Header/Margin/HBox" unique_id=1729772203]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 22)
+layout_mode = 2
+tooltip_text = "Cycle Wireframe Opacity (30% / 60% / 100%)"
+theme_override_font_sizes/font_size = 10
+text = "50%"
+
+[node name="BtnClose" type="Button" parent="VBoxContainer/Header/Margin/HBox" unique_id=505272014]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(22, 22)
+layout_mode = 2
+tooltip_text = "Hide 2D UV Texture Canvas"
+theme_override_font_sizes/font_size = 10
+text = "✕"
+
+[node name="ViewportContainer" type="SubViewportContainer" parent="VBoxContainer" unique_id=278469670]
+unique_name_in_owner = true
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+stretch = true
+
+[node name="UVCanvasViewport" type="SubViewport" parent="VBoxContainer/ViewportContainer" unique_id=206054193]
+unique_name_in_owner = true
+transparent_bg = true
+handle_input_locally = false
+size = Vector2i(423, 2)
+render_target_update_mode = 4
+
+[node name="UVCanvasControl" type="Control" parent="VBoxContainer/ViewportContainer/UVCanvasViewport" unique_id=1556937023]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+focus_mode = 1

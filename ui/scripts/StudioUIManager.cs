@@ -1,6 +1,8 @@
 using Godot;
 using System;
 using System.IO;
+using DeadlockPlayground.UI;
+using DeadlockPlayground.Tools;
 
 public partial class StudioUIManager : CanvasLayer
 {
@@ -35,9 +37,14 @@ public partial class StudioUIManager : CanvasLayer
     [ExportCategory("Floating & Overlay Panels")]
     [Export] private ExportPanelUI _exportPanel;
     [Export] private PaintModExportPanelUI _paintModExportPanel;
+    [Export] private UVCanvas2DUI _uvCanvasPanel;
     [Export] private Control _navBadge;
+    [Export] private Control _painterKeymapBadge;
     [Export] private Button _btnQuickXRay;
     [Export] private Button _btnQuickFullscreen;
+    [Export] private Button _btnOpenUVCanvas;
+    private Label _painterKeymapLabel;
+    private bool _uvCanvasUserWantsOpen = true;
 
     private SkeletonGizmoManager _currentSkeletonGizmoManager;
 
@@ -151,6 +158,16 @@ public partial class StudioUIManager : CanvasLayer
             return;
         }
 
+        if (@event.IsActionPressed("paint_uv_toggle"))
+        {
+            if (_tabPaint != null && _tabPaint.Visible && _uvCanvasPanel != null)
+            {
+                _uvCanvasPanel.ToggleVisibility();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
+
         _worldViewport ??= GetNodeOrNull<SubViewport>("MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
                         ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
 
@@ -205,13 +222,61 @@ public partial class StudioUIManager : CanvasLayer
                       ?? GetNodeOrNull<ExportPanelUI>("MainHUD/ExportPanel");
         _paintModExportPanel ??= GetNodeOrNull<PaintModExportPanelUI>("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
                               ?? GetTree().Root.FindChild("PaintModExportPanel", true, false) as PaintModExportPanelUI;
-        _navBadge ??= GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/NavBadge")
-                   ?? GetNodeOrNull<Control>("MainHUD/NavBadge");
+        _navBadge ??= GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge")
+                   ?? GetTree().Root.FindChild("NavBadge", true, false) as Control;
+
+        _uvCanvasPanel ??= GetNodeOrNull<UVCanvas2DUI>("MainHUD/VBoxContainer/MainSplit/UVCanvasPanel")
+                        ?? GetTree().Root.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+
+        _painterKeymapBadge ??= GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge")
+                             ?? GetTree().Root.FindChild("PainterKeymapBadge", true, false) as Control;
+        _painterKeymapLabel ??= _painterKeymapBadge?.FindChild("PainterKeymapLabel", true, false) as Label;
+        if (_painterKeymapLabel != null)
+        {
+            _painterKeymapLabel.Text = KeybindsManager.GetFullPainterCheatsheet();
+        }
 
         _btnQuickXRay ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/BtnQuickXRay")
                        ?? GetTree().Root.FindChild("BtnQuickXRay", true, false) as Button;
         _btnQuickFullscreen ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/BtnQuickFullscreen")
                              ?? GetTree().Root.FindChild("BtnQuickFullscreen", true, false) as Button;
+        _btnOpenUVCanvas ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/ViewportArea/BtnOpenUVCanvas")
+                          ?? GetTree().Root.FindChild("BtnOpenUVCanvas", true, false) as Button;
+        if (_btnOpenUVCanvas != null)
+        {
+            if (_btnOpenUVCanvas.Icon == null)
+            {
+                var uvIcon = GD.Load<Texture2D>("res://assets/at-icons/uv_layer.svg");
+                if (uvIcon != null)
+                {
+                    _btnOpenUVCanvas.Icon = uvIcon;
+                    _btnOpenUVCanvas.ExpandIcon = true;
+                    _btnOpenUVCanvas.IconAlignment = HorizontalAlignment.Center;
+                    _btnOpenUVCanvas.Text = string.Empty;
+                }
+            }
+            _btnOpenUVCanvas.Visible = false;
+            _btnOpenUVCanvas.Pressed += () =>
+            {
+                _uvCanvasUserWantsOpen = true;
+                if (_uvCanvasPanel != null)
+                {
+                    _uvCanvasPanel.SetVisibleState(true);
+                }
+            };
+        }
+
+        if (_uvCanvasPanel != null)
+        {
+            _uvCanvasPanel.VisibilityToggled += (isVisible) =>
+            {
+                _uvCanvasUserWantsOpen = isVisible;
+                if (_btnOpenUVCanvas != null)
+                {
+                    _btnOpenUVCanvas.Visible = (_currentTabIndex == 8 && !isVisible);
+                }
+            };
+        }
 
         // Modals
         _modalsLayer ??= GetNodeOrNull<Control>("MainHUD/ModalsLayer");
@@ -294,9 +359,18 @@ public partial class StudioUIManager : CanvasLayer
         {
             _tabPaint?.OnTabDeactivated();
             if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
-            if (_exportPanel != null) _exportPanel.Visible = true;
+            if (_exportPanel != null)
+            {
+                _exportPanel.Visible = true;
+                _exportPanel.SetFramingOverlayVisible(true);
+            }
             _currentSkeletonGizmoManager?.SetGizmoEnabled(true);
             _tabShading?.SetPaintingModeActive(false);
+
+            if (_uvCanvasPanel != null) _uvCanvasPanel.Visible = false;
+            if (_painterKeymapBadge != null) _painterKeymapBadge.Visible = false;
+            if (_btnOpenUVCanvas != null) _btnOpenUVCanvas.Visible = false;
+            if (_navBadge != null) _navBadge.Visible = true;
         }
         else if (tabIndex == 8)
         {
@@ -307,7 +381,16 @@ public partial class StudioUIManager : CanvasLayer
             }
             _tabPaint?.OnTabActivated();
 
-            if (_exportPanel != null) _exportPanel.Visible = false;
+            if (_exportPanel != null)
+            {
+                _exportPanel.Visible = false;
+                _exportPanel.SetFramingOverlayVisible(false);
+            }
+            else
+            {
+                var overlay = GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/FramingOverlay");
+                if (overlay != null) overlay.Visible = false;
+            }
             if (_paintModExportPanel != null)
             {
                 _paintModExportPanel.Visible = true;
@@ -315,6 +398,25 @@ public partial class StudioUIManager : CanvasLayer
             }
             _currentSkeletonGizmoManager?.SetGizmoEnabled(false);
             _tabShading?.SetPaintingModeActive(true);
+
+            if (_uvCanvasPanel != null)
+            {
+                _uvCanvasPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.Painter, _tabPaint?.MeshHierarchy, _tabPaint?.BrushPalette);
+                _uvCanvasPanel.SetPaintActive(_uvCanvasUserWantsOpen);
+            }
+            if (_painterKeymapBadge != null)
+            {
+                _painterKeymapBadge.Visible = true;
+                if (_painterKeymapLabel != null)
+                {
+                    _painterKeymapLabel.Text = KeybindsManager.GetFullPainterCheatsheet();
+                }
+            }
+            if (_btnOpenUVCanvas != null)
+            {
+                _btnOpenUVCanvas.Visible = (_uvCanvasPanel == null || !_uvCanvasPanel.Visible);
+            }
+            if (_navBadge != null) _navBadge.Visible = true;
         }
     }
 

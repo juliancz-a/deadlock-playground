@@ -23,9 +23,41 @@ vec3 DecodeHemiOctahedron(vec2 e) {
     return normalize(n);
 }
 
+vec4 sample_bicubic_smooth(sampler2D tex, vec2 uv) {
+    ivec2 itex_size = textureSize(tex, 0);
+    if (itex_size.x <= 2 || itex_size.y <= 2) {
+        return texture(tex, uv);
+    }
+    vec2 tex_size = vec2(itex_size);
+    vec2 inv_size = 1.0 / tex_size;
+    vec2 tc = uv * tex_size - 0.5;
+    vec2 f = fract(tc);
+    vec2 f2 = f * f;
+    vec2 f3 = f2 * f;
+
+    vec2 w0 = (-f3 + 3.0 * f2 - 3.0 * f + 1.0) / 6.0;
+    vec2 w1 = ( 3.0 * f3 - 6.0 * f2 + 4.0) / 6.0;
+    vec2 w2 = (-3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0) / 6.0;
+    vec2 w3 = f3 / 6.0;
+
+    vec2 s0 = w0 + w1;
+    vec2 s1 = w2 + w3;
+
+    vec2 f0 = w1 / s0;
+    vec2 f1 = w3 / s1;
+
+    vec2 t0 = (floor(tc) - 0.5 + f0) * inv_size;
+    vec2 t1 = (floor(tc) + 1.5 + f1) * inv_size;
+
+    return texture(tex, vec2(t0.x, t0.y)) * (s0.x * s0.y) +
+           texture(tex, vec2(t1.x, t0.y)) * (s1.x * s0.y) +
+           texture(tex, vec2(t0.x, t1.y)) * (s0.x * s1.y) +
+           texture(tex, vec2(t1.x, t1.y)) * (s1.x * s1.y);
+}
+
 void fragment() {
     vec4 baseColor = texture(g_tColor, UV);
-    vec4 paintLayer = texture(u_paint_composite, UV);
+    vec4 paintLayer = sample_bicubic_smooth(u_paint_composite, UV);
 
     // True alpha-over blend: retain original diffuse texture completely where paint canvas is transparent
     vec3 compositeAlbedo = mix(baseColor.rgb, paintLayer.rgb, paintLayer.a * u_paint_layer_opacity);

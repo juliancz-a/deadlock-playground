@@ -81,18 +81,24 @@ void main() {
             float mask_val = 1.0f; \
             if (params.use_selection_mask > 0.5f) { \
                 mask_val = imageLoad(selection_mask_image, bleed_coords).r; \
+                if (mask_val < 0.5f) continue; \
+                mask_val = clamp((mask_val - 0.5f) / 0.5f, 0.0f, 1.0f); \
             } \
             if (mask_val <= 0.001f) continue; \
             vec4 existing_color = imageLoad(tex, bleed_coords); \
+            if (isnan(existing_color.a) || isnan(existing_color.r) || isnan(existing_color.g) || isnan(existing_color.b)) { \
+                existing_color = vec4(0.0f); \
+            } \
+            existing_color = clamp(existing_color, vec4(0.0f), vec4(1.0f)); \
             float exist_a = existing_color.a; \
             if (params.is_erase > 0.5f || params.brush_color.a < 0.0f) { \
-                float erase_amount = brush_shape_val * params.delta * abs(params.brush_color.a) * mask_val; \
+                float erase_amount = clamp(brush_shape_val * params.delta * abs(params.brush_color.a) * mask_val, 0.0f, 1.0f); \
                 float new_alpha = clamp(exist_a - erase_amount, 0.0f, 1.0f); \
                 imageStore(tex, bleed_coords, vec4(existing_color.rgb, new_alpha)); \
             } else { \
                 vec4 base_val = imageLoad(base_texture_0, bleed_coords); \
                 vec3 base_col = (base_val.a > 0.001f) ? base_val.rgb : vec3(1.0f); \
-                vec3 under_col = (exist_a > 0.001f) ? existing_color.rgb : base_col; \
+                vec3 under_col = base_col; \
                 vec3 blended_brush_rgb; \
                 int mode = int(params.blend_mode + 0.5f); \
                 if (mode == 1) { \
@@ -114,11 +120,11 @@ void main() {
                 } else { \
                     blended_brush_rgb = brush_color.rgb; \
                 } \
-                float stroke_alpha = brush_color.a * mask_val; \
+                float stroke_alpha = clamp(brush_color.a * mask_val, 0.0f, 1.0f); \
                 float out_alpha = clamp(stroke_alpha + exist_a * (1.0f - stroke_alpha), 0.0f, 1.0f); \
                 vec3 out_color = (out_alpha > 0.0001f) ? \
-                    (blended_brush_rgb * stroke_alpha + existing_color.rgb * exist_a * (1.0f - stroke_alpha)) / out_alpha : \
-                    vec3(blended_brush_rgb); \
+                    clamp((blended_brush_rgb * stroke_alpha + existing_color.rgb * exist_a * (1.0f - stroke_alpha)) / out_alpha, vec3(0.0f), vec3(1.0f)) : \
+                    clamp(blended_brush_rgb, vec3(0.0f), vec3(1.0f)); \
                 imageStore(tex, bleed_coords, vec4(out_color, out_alpha)); \
             } \
         } \

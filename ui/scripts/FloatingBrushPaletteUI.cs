@@ -283,6 +283,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         // Flyout container & title
         _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel");
+        if (_flyoutPanel != null)
+        {
+            _flyoutPanel.CustomMinimumSize = new Vector2(260, 290);
+            _flyoutPanel.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
+        }
         _lblFlyoutTitle = ResolveNode<Label>("Title", "Title");
         _btnCloseFlyout = ResolveNode<Button>("BtnCloseFlyout", "BtnCloseFlyout");
 

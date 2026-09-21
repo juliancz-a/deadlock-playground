@@ -94,6 +94,7 @@ namespace DeadlockPlayground.Tools
 
             // Viewport & Brush Size
             AddDefault("view_xray", "Submesh X-Ray", "Toggle Submesh Wireframe X-Ray mode", Key.X);
+            AddDefault("paint_uv_toggle", "Toggle 2D UV Canvas", "Toggle docked 2D UV Texture Canvas", Key.U);
             AddDefault("brush_size_up", "Brush Size Up", "Increase brush radius (+)", Key.Equal, 
                 secKey: Key.KpAdd);
             AddDefault("brush_size_down", "Brush Size Down", "Decrease brush radius (-)", Key.Minus, 
@@ -341,7 +342,7 @@ namespace DeadlockPlayground.Tools
         public static string GetFullPainterCheatsheet()
         {
             EnsureInitialized();
-            return $"[{GetShortcutText("paint_brush")}] Brush  [{GetShortcutText("paint_eraser")}] Erase  [{GetShortcutText("paint_bucket")}] Fill  [{GetShortcutText("paint_wand")}] Wand  [{GetShortcutText("paint_decal")}] Decal  [{GetShortcutText("paint_text")}] Text  [{GetShortcutText("paint_mirror")}] Mirror  [{GetShortcutText("brush_size_down")}/{GetShortcutText("brush_size_up")}] Size";
+            return $"[{GetShortcutText("paint_brush")}] Brush  [{GetShortcutText("paint_eraser")}] Erase  [{GetShortcutText("paint_bucket")}] Fill  [{GetShortcutText("paint_wand")}] Wand  [{GetShortcutText("paint_decal")}] Decal  [{GetShortcutText("paint_text")}] Text  [{GetShortcutText("paint_mirror")}] Mirror  [{GetShortcutText("brush_size_down")}/{GetShortcutText("brush_size_up")}] Size  [{GetShortcutText("paint_uv_toggle")}] 2D UV";
         }
     }
 }

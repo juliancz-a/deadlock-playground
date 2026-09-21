@@ -182,10 +182,77 @@ func _apply_texture_to_texture_resource() -> void:
 	notify_property_list_changed()
 
 
+func _find_base_texture(mesh_instance: MeshInstance3D) -> Texture2D:
+	if not mesh_instance or not mesh_instance.mesh:
+		return null
+	var s_count: int = mesh_instance.mesh.get_surface_count()
+	for s in range(s_count):
+		var orig_mat = mesh_instance.get_surface_override_material(s)
+		if not orig_mat and mesh_instance.mesh:
+			orig_mat = mesh_instance.mesh.surface_get_material(s)
+		if not orig_mat:
+			orig_mat = mesh_instance.material_override
+		if orig_mat is StandardMaterial3D and orig_mat.albedo_texture:
+			return orig_mat.albedo_texture
+		elif orig_mat is ShaderMaterial:
+			for p in ["g_tColor", "g_tColor1", "g_tColorA", "g_tColor0", "g_tColor2", "g_tColorB", "u_texture_color", "texture_albedo", "albedo_texture", "g_tNprTransmissiveColor"]:
+				var t = orig_mat.get_shader_parameter(p)
+				if t is Texture2D:
+					return t
+	return null
+
+
+func _get_submesh_recommended_size(mesh_instance: MeshInstance3D, base_tex: Texture2D) -> Vector2i:
+	var name_lower := mesh_instance.name.to_lower()
+	var parent_name := mesh_instance.get_parent().name.to_lower() if mesh_instance.get_parent() else ""
+	var full_name := parent_name + " " + name_lower
+
+	# Minor / low-detail accessory parts
+	var is_minor := false
+	for kw in ["teeth", "tooth", "tongue", "eye", "eyeball", "cornea", "pupil", "eyelash"]:
+		if kw in full_name:
+			is_minor = true
+			break
+
+	# Major / high-detail primary parts
+	var is_major := false
+	if not is_minor:
+		for kw in ["head", "face", "body", "torso", "skin", "lower", "upper", "chest", "leg", "arm", "cloth", "coat", "jacket", "pants", "dress"]:
+			if kw in full_name:
+				is_major = true
+				break
+
+	if base_tex:
+		var bw := base_tex.get_width()
+		var bh := base_tex.get_height()
+		if bw > 0 and bh > 0:
+			var aspect := float(bw) / float(bh)
+			var base_dim := 256
+			if is_major:
+				base_dim = 512
+			elif is_minor:
+				base_dim = 128
+			else:
+				base_dim = 256
+
+			var target_w := base_dim
+			var target_h := int(round(float(base_dim) / aspect))
+			target_w = clampi(target_w, 64, 1024)
+			target_h = clampi(target_h, 64, 1024)
+			return Vector2i(target_w, target_h)
+
+	if is_major:
+		return Vector2i(512, 512)
+	elif is_minor:
+		return Vector2i(128, 128)
+	else:
+		return Vector2i(256, 256)
+
+
 func _construct_atlas_and_apply_materials() -> void:
 	var mesh_instances := _get_child_mesh_instances(get_parent())
 
-	# pack into atlas
+	# Pack into atlas with intelligent resolution weighting
 	var rects: Array[Vector2] = []
 	for i in range(mesh_instances.size() - 1, -1, -1):
 		var mesh_instance = mesh_instances[i]
@@ -194,11 +261,16 @@ func _construct_atlas_and_apply_materials() -> void:
 			if mesh_instance.mesh == null:
 				push_warning("MeshInstance3D '{0}' has no mesh assigned, skipping overlay material application.".format([mesh_instance.name]))
 		else:
-			if mesh_instance.mesh.lightmap_size_hint == Vector2i.ZERO:
-				mesh_instance.mesh.lightmap_size_hint = Vector2i(256, 256)
-			rects.push_back(Vector2(mesh_instance.mesh.lightmap_size_hint))
-	
+			var base_tex := _find_base_texture(mesh_instance)
+			var rec_size := _get_submesh_recommended_size(mesh_instance, base_tex)
+			mesh_instance.mesh.lightmap_size_hint = rec_size
+			rects.push_back(Vector2(rec_size))
+
 	rects.reverse()
+
+	var base_textures: Array[Texture2D] = []
+	for mi in mesh_instances:
+		base_textures.push_back(_find_base_texture(mi))
 
 	var packed_rects: Array[Rect2] = MaxRectsPacker.pack_into_square(rects)
 
@@ -214,32 +286,13 @@ func _construct_atlas_and_apply_materials() -> void:
 		mesh_instance.material_overlay.set_shader_parameter("position_in_atlas", packed_rects[i].position)
 		mesh_instance.material_overlay.set_shader_parameter("size_in_atlas", packed_rects[i].size)
 		mesh_instance.material_overlay.set_shader_parameter("atlas_index", atlas_index)
-		
-		# Find base color/AO texture from mesh material to preserve shadows and details
-		var base_tex: Texture2D = null
-		var s_count: int = mesh_instance.mesh.get_surface_count() if mesh_instance.mesh else 1
-		for s in range(s_count):
-			var orig_mat = mesh_instance.get_surface_override_material(s)
-			if not orig_mat and mesh_instance.mesh:
-				orig_mat = mesh_instance.mesh.surface_get_material(s)
-			if not orig_mat:
-				orig_mat = mesh_instance.material_override
-			if orig_mat is StandardMaterial3D and orig_mat.albedo_texture:
-				base_tex = orig_mat.albedo_texture
-				break
-			elif orig_mat is ShaderMaterial:
-				for p in ["g_tColor", "g_tColor1", "g_tColorA", "g_tColor0", "g_tColor2", "g_tColorB", "u_texture_color", "texture_albedo", "albedo_texture", "g_tNprTransmissiveColor"]:
-					var t = orig_mat.get_shader_parameter(p)
-					if t is Texture2D:
-						base_tex = t
-						break
-				if base_tex:
-					break
+
+		var base_tex: Texture2D = base_textures[i]
 		if base_tex:
 			mesh_instance.material_overlay.set_shader_parameter("g_tColor", base_tex)
 
 		mesh_instance.layers |= 1 << 20  # enable overlay layer 21
-	
+
 	print("OverlayAtlasManager: Applied overlay materials to mesh instances")
 
 

@@ -156,9 +156,21 @@ public partial class ExportPanelUI : PanelContainer
         };
     }
 
+    public void SetFramingOverlayVisible(bool visible)
+    {
+        if (_framingOverlay != null)
+        {
+            _framingOverlay.Visible = visible;
+            if (visible)
+            {
+                UpdateFramingOverlay();
+            }
+        }
+    }
+
     public void UpdateFramingOverlay()
     {
-        if (_framingOverlay == null) return;
+        if (_framingOverlay == null || !_framingOverlay.Visible) return;
 
         Vector2 viewportSize = (_framingOverlay != null && _framingOverlay.Size.X > 10 && _framingOverlay.Size.Y > 10) 
             ? _framingOverlay.Size 
