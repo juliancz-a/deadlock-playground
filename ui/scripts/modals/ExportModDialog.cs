@@ -29,6 +29,7 @@ public partial class ExportModDialog : CanvasLayer
     [Export] private Label _lblTargetVpkInfo;
     [Export] private Button _btnConfirmExport;
     [Export] private Button _btnCancel;
+    [Export] private Button _btnDownloadCsdk;
     [Export] private FileDialog _folderDialog;
     [Export] private FileDialog _compilerFileDialog;
 
@@ -71,6 +72,7 @@ public partial class ExportModDialog : CanvasLayer
         _lblTargetVpkInfo ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/LblTargetVpkInfo");
         _btnConfirmExport ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnConfirmExport");
         _btnCancel ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnCancel");
+        _btnDownloadCsdk ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxCsdkDownload/BtnDownloadCsdk");
 
         _folderDialog ??= GetNodeOrNull<FileDialog>("FolderDialog");
         _compilerFileDialog ??= GetNodeOrNull<FileDialog>("CompilerFileDialog");
@@ -230,6 +232,13 @@ public partial class ExportModDialog : CanvasLayer
                 Visible = false;
                 EmitSignal(SignalName.ExportCancelled);
             };
+        }
+
+        // Open the CSDK12 download page in the system default browser.
+        if (_btnDownloadCsdk != null)
+        {
+            _btnDownloadCsdk.Pressed += () =>
+                OS.ShellOpen("https://deadlockmodding.pages.dev/modding-tools/csdk-12");
         }
     }
 

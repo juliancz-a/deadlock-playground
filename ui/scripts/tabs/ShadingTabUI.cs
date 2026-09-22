@@ -103,6 +103,15 @@ public partial class ShadingTabUI : VBoxContainer
         ConnectEvents();
         ResetToDefaults();
 
+        // Deferred linkage ensures CRTRect and GlitchRect are found even if ViewportArea/ShaderOverlayStack
+        // enters the tree after LeftPanel/ShadingTab.
+        Callable.From(() =>
+        {
+            LinkRects();
+            UpdateShaderVisibility();
+            PushAllCrtGlitchShaderParams();
+        }).CallDeferred();
+
         var loader = GetVpkLoader();
         // If hosted inside StudioUIManager, StudioUIManager.OnHeroLoaded coordinates SetHero in the correct tab sequence
         if (loader != null && GetStudioUIManager() == null)
@@ -141,13 +150,17 @@ public partial class ShadingTabUI : VBoxContainer
 
     private void LinkRects()
     {
-        if (_crtRect == null)
-            _crtRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/OverlayShaders/CRT")
-                ?? GetTree().Root.FindChild("CRT", true, false) as ColorRect;
+        if (_crtRect == null || !GodotObject.IsInstanceValid(_crtRect))
+        {
+            _crtRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack/CRTRect")
+                ?? GetTree()?.Root?.FindChild("CRTRect", true, false) as ColorRect;
+        }
 
-        if (_glitchRect == null)
-            _glitchRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/OverlayShaders/Glitch")
-                ?? GetTree().Root.FindChild("Glitch", true, false) as ColorRect;
+        if (_glitchRect == null || !GodotObject.IsInstanceValid(_glitchRect))
+        {
+            _glitchRect = GetNodeOrNull<ColorRect>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/ShaderOverlayStack/GlitchRect")
+                ?? GetTree()?.Root?.FindChild("GlitchRect", true, false) as ColorRect;
+        }
     }
 
     private void ConnectEvents()
@@ -1010,10 +1023,36 @@ public partial class ShadingTabUI : VBoxContainer
 
     private void SetShaderParam(ColorRect rect, string paramName, Variant value)
     {
-        if (rect == null) return;
-        if (rect.Material is ShaderMaterial mat)
+        LinkRects();
+        ColorRect target = (rect != null && GodotObject.IsInstanceValid(rect))
+            ? rect
+            : (paramName.StartsWith("scan") || paramName.StartsWith("vinn") || paramName == "blur" || paramName == "diffusion" ? _crtRect : _glitchRect);
+
+        if (target != null && target.Material is ShaderMaterial mat)
         {
             mat.SetShaderParameter(paramName, value);
+        }
+    }
+
+    private void PushAllCrtGlitchShaderParams()
+    {
+        if (_crtRect != null)
+        {
+            SetShaderParam(_crtRect, "scanlines_1", (float)(_sliderCrtScan1?.Value ?? 500.0));
+            SetShaderParam(_crtRect, "scanlines_2", (float)(_sliderCrtScan2?.Value ?? 25.0));
+            SetShaderParam(_crtRect, "scan_reduction", (float)(_sliderCrtScanReduction?.Value ?? 0.1));
+            SetShaderParam(_crtRect, "blur", (float)(_sliderCrtBlur?.Value ?? 0.35));
+            SetShaderParam(_crtRect, "diffusion", (float)(_sliderCrtDiffusion?.Value ?? 0.1));
+            SetShaderParam(_crtRect, "vinnette_alpla", (float)(_sliderCrtVignetteAlpha?.Value ?? 0.8));
+            SetShaderParam(_crtRect, "vinnette_inner_radius", (float)(_sliderCrtVignetteRadius?.Value ?? 3.5));
+        }
+
+        if (_glitchRect != null)
+        {
+            SetShaderParam(_glitchRect, "vhs_intensity", (float)(_sliderGlitchIntensity?.Value ?? 3.0));
+            SetShaderParam(_glitchRect, "pixel_size", (float)(_sliderGlitchPixelSize?.Value ?? 3.0));
+            SetShaderParam(_glitchRect, "double_vision_split", (float)(_sliderGlitchSplit?.Value ?? 0.008));
+            SetShaderParam(_glitchRect, "opacity", (float)(_sliderGlitchOpacity?.Value ?? 0.5));
         }
     }
 }

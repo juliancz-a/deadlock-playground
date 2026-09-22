@@ -374,6 +374,8 @@ layout_mode = 2
 [node name="ShadingTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1642219470 instance=ExtResource("13_shading_tab")]
 visible = false
 layout_mode = 2
+_crtRect = NodePath("../../../../../../ViewportArea/ShaderOverlayStack/CRTRect")
+_glitchRect = NodePath("../../../../../../ViewportArea/ShaderOverlayStack/GlitchRect")
 
 [node name="PaintTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1849204999 instance=ExtResource("15_paint_tab")]
 visible = false

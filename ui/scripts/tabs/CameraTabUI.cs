@@ -9,10 +9,6 @@ public partial class CameraTabUI : VBoxContainer
 
     [ExportCategory("Projection Controls")]
     [Export] private OptionButton _projectionOption;
-    [Export] private Control _fovGroup;
-    [Export] private HSlider _fovSlider;
-    [Export] private Label _fovLabel;
-    [Export] private CheckBox _checkDollyZoom;
     [Export] private Control _sizeGroup;
     [Export] private HSlider _sizeSlider;
     [Export] private Label _sizeLabel;
@@ -36,16 +32,18 @@ public partial class CameraTabUI : VBoxContainer
     [Export] private Label _orbitSensLabel;
     [Export] private HSlider _panSpeedSlider;
     [Export] private Label _panSpeedLabel;
+    [Export] private HSlider _zoomSensSlider;
+    [Export] private Label _zoomSensLabel;
 
     [ExportCategory("Actions")]
     [Export] private Button _btnResetCamera;
     [Export] private Button _btnRecenterOnModel;
     [Export] private Button _btnResetCameraTransform;
 
-    private float _defaultFov = 75.0f;
     private float _defaultOrthoSize = 3.0f;
     private float _defaultOrbitSens = 0.005f;
     private float _defaultPanSpeed = 5.0f;
+    private float _defaultZoomSens = 0.25f;
     private bool _isSyncing = false;
 
     public override void _Ready()
@@ -84,13 +82,13 @@ public partial class CameraTabUI : VBoxContainer
     {
         if (_camera != null)
         {
-            _defaultFov = _camera.Fov;
             _defaultOrthoSize = _camera.Size > 0 ? _camera.Size : 3.0f;
         }
         if (_orbitCamera != null)
         {
             _defaultOrbitSens = _orbitCamera.OrbitSensitivity;
             _defaultPanSpeed = _orbitCamera.PanSpeed;
+            _defaultZoomSens = _orbitCamera.ZoomSensitivity;
         }
     }
 
@@ -102,31 +100,6 @@ public partial class CameraTabUI : VBoxContainer
             {
                 var mode = (idx == 1) ? Camera3D.ProjectionType.Orthogonal : Camera3D.ProjectionType.Perspective;
                 SetProjection(mode);
-            };
-        }
-
-        if (_fovSlider != null)
-        {
-            _fovSlider.ValueChanged += (v) =>
-            {
-                if (_fovLabel != null) _fovLabel.Text = $"{v:F0}°";
-                if (!_isSyncing && _camera != null)
-                {
-                    float oldFov = _camera.Fov;
-                    float newFov = (float)v;
-
-                    // Dolly Zoom distance compensation
-                    if (_checkDollyZoom != null && _checkDollyZoom.ButtonPressed && _orbitCamera != null && oldFov > 1f && newFov > 1f)
-                    {
-                        float oldHalfRad = Mathf.DegToRad(oldFov * 0.5f);
-                        float newHalfRad = Mathf.DegToRad(newFov * 0.5f);
-                        float currentDist = _orbitCamera.GetTargetZoom();
-                        float newDist = currentDist * (Mathf.Tan(oldHalfRad) / Mathf.Tan(newHalfRad));
-                        _orbitCamera.SetTargetZoom(newDist);
-                    }
-
-                    _camera.Fov = newFov;
-                }
             };
         }
 
@@ -204,6 +177,20 @@ public partial class CameraTabUI : VBoxContainer
             };
         }
 
+        if (_zoomSensSlider != null)
+        {
+            _zoomSensSlider.ValueChanged += (v) =>
+            {
+                if (_zoomSensLabel != null) _zoomSensLabel.Text = $"{v:F2}";
+                if (!_isSyncing && _orbitCamera != null)
+                {
+                    _orbitCamera.ZoomSensitivity = (float)v;
+                    _orbitCamera.OrthoSizeSensitivity = (float)v;
+                    UserSettings.CameraZoomSensitivity = (float)v;
+                }
+            };
+        }
+
         if (_btnPresetPortrait != null) _btnPresetPortrait.Pressed += ApplyPortraitPreset;
         if (_btnPresetFullBody != null) _btnPresetFullBody.Pressed += ApplyFullBodyPreset;
         if (_btnPresetCloseup != null) _btnPresetCloseup.Pressed += ApplyCloseupPreset;
@@ -222,7 +209,6 @@ public partial class CameraTabUI : VBoxContainer
         }
 
         bool isOrtho = (mode == Camera3D.ProjectionType.Orthogonal);
-        if (_fovGroup != null) _fovGroup.Visible = !isOrtho;
         if (_sizeGroup != null) _sizeGroup.Visible = isOrtho;
 
         if (_projectionOption != null)
@@ -230,9 +216,14 @@ public partial class CameraTabUI : VBoxContainer
             _projectionOption.Select(isOrtho ? 1 : 0);
         }
 
-        if (isOrtho && _orbitCamera != null && _camera != null)
+        if (isOrtho && _orbitCamera != null)
         {
-            _orbitCamera.SetOrthoSize(_camera.Size);
+            _orbitCamera.SetOrthoSize(_camera?.Size ?? _defaultOrthoSize);
+
+            // Snap to classic isometric view angles (pitch -30°, yaw 45°)
+            _orbitCamera.SetPitchDegrees(-30.0f);
+            _orbitCamera.SetYawDegrees(45.0f);
+            SyncAngles();
         }
     }
 
@@ -245,14 +236,7 @@ public partial class CameraTabUI : VBoxContainer
         {
             bool isOrtho = (_camera.Projection == Camera3D.ProjectionType.Orthogonal);
             if (_projectionOption != null) _projectionOption.Select(isOrtho ? 1 : 0);
-            if (_fovGroup != null) _fovGroup.Visible = !isOrtho;
             if (_sizeGroup != null) _sizeGroup.Visible = isOrtho;
-
-            if (_fovSlider != null)
-            {
-                _fovSlider.Value = _camera.Fov;
-                if (_fovLabel != null) _fovLabel.Text = $"{_camera.Fov:F0}°";
-            }
 
             if (_sizeSlider != null)
             {
@@ -274,6 +258,12 @@ public partial class CameraTabUI : VBoxContainer
             {
                 _panSpeedSlider.Value = _orbitCamera.PanSpeed;
                 if (_panSpeedLabel != null) _panSpeedLabel.Text = $"{_orbitCamera.PanSpeed:F1}";
+            }
+
+            if (_zoomSensSlider != null)
+            {
+                _zoomSensSlider.Value = _orbitCamera.ZoomSensitivity;
+                if (_zoomSensLabel != null) _zoomSensLabel.Text = $"{_orbitCamera.ZoomSensitivity:F2}";
             }
 
             SyncAngles();
@@ -312,11 +302,6 @@ public partial class CameraTabUI : VBoxContainer
     public void ApplyPortraitPreset()
     {
         SetProjection(Camera3D.ProjectionType.Perspective);
-        if (_camera != null)
-        {
-            _camera.Fov = 35.0f;
-            if (_fovSlider != null) _fovSlider.Value = 35.0f;
-        }
 
         if (_orbitCamera != null)
         {
@@ -330,11 +315,6 @@ public partial class CameraTabUI : VBoxContainer
     public void ApplyFullBodyPreset()
     {
         SetProjection(Camera3D.ProjectionType.Perspective);
-        if (_camera != null)
-        {
-            _camera.Fov = 45.0f;
-            if (_fovSlider != null) _fovSlider.Value = 45.0f;
-        }
 
         if (_orbitCamera != null)
         {
@@ -348,11 +328,6 @@ public partial class CameraTabUI : VBoxContainer
     public void ApplyCloseupPreset()
     {
         SetProjection(Camera3D.ProjectionType.Perspective);
-        if (_camera != null)
-        {
-            _camera.Fov = 25.0f;
-            if (_fovSlider != null) _fovSlider.Value = 25.0f;
-        }
 
         if (_orbitCamera != null)
         {
@@ -373,7 +348,6 @@ public partial class CameraTabUI : VBoxContainer
         SetProjection(Camera3D.ProjectionType.Perspective);
         if (_camera != null)
         {
-            _camera.Fov = _defaultFov;
             _camera.Size = _defaultOrthoSize;
         }
 
@@ -382,6 +356,9 @@ public partial class CameraTabUI : VBoxContainer
             _orbitCamera.ResetTransform();
             _orbitCamera.OrbitSensitivity = _defaultOrbitSens;
             _orbitCamera.PanSpeed = _defaultPanSpeed;
+            _orbitCamera.ZoomSensitivity = _defaultZoomSens;
+            _orbitCamera.OrthoSizeSensitivity = _defaultZoomSens;
+            UserSettings.CameraZoomSensitivity = _defaultZoomSens;
             _orbitCamera.SetOrthoSize(_defaultOrthoSize);
         }
 

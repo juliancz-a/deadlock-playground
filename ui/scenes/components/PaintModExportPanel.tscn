@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c7k2p8b1mx5yq"]
 
-[ext_resource type="Script" uid="uid://bg0gq0px7v8yw" path="res://ui/scripts/components/PaintModExportPanelUI.cs" id="1_mod_export"]
+[ext_resource type="Script" uid="uid://drupgrsii05x7" path="res://ui/scripts/components/PaintModExportPanelUI.cs" id="1_mod_export"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
@@ -95,6 +95,7 @@ autowrap_mode = 2
 
 [node name="ExportFileDialog" type="FileDialog" parent="." unique_id=1010101077]
 oversampling_override = 1.0
+position = Vector2i(0, 36)
 size = Vector2i(700, 500)
 access = 2
 filters = PackedStringArray("*.png ; PNG Image", "*.vmat ; Valve Material")

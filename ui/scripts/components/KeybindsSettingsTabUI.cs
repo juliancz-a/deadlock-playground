@@ -66,7 +66,7 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
             CustomMinimumSize = new Vector2(0, 270)
         };
 
-        string[] categories = { "Texture Paint", "Camera", "Bones / Rigging" };
+        string[] categories = { "Texture Paint", "Camera", "Bones & Rigging" };
         foreach (var cat in categories)
         {
             var margin = new MarginContainer

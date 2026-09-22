@@ -61,6 +61,7 @@ public partial class SettingsDialog : PanelContainer
 
     // Dependencies
     private GamePathManager _pathManager;
+    private bool _isSyncing = false;
 
     public override void _Ready()
     {
@@ -201,7 +202,7 @@ public partial class SettingsDialog : PanelContainer
             _optMsaa.AddItem("2x MSAA", 1);
             _optMsaa.AddItem("4x MSAA", 2);
             _optMsaa.AddItem("8x MSAA", 3);
-            _optMsaa.ItemSelected += (idx) => UserSettings.Msaa3D = (int)idx;
+            _optMsaa.ItemSelected += (idx) => { if (!_isSyncing) UserSettings.Msaa3D = (int)idx; };
         }
 
         if (_optShadowQuality != null)
@@ -210,12 +211,12 @@ public partial class SettingsDialog : PanelContainer
             _optShadowQuality.AddItem("Off", 0);
             _optShadowQuality.AddItem("Low (Soft)", 1);
             _optShadowQuality.AddItem("High (Detailed)", 2);
-            _optShadowQuality.ItemSelected += (idx) => UserSettings.ShadowQuality = (int)idx;
+            _optShadowQuality.ItemSelected += (idx) => { if (!_isSyncing) UserSettings.ShadowQuality = (int)idx; };
         }
 
         if (_chkShowStudioBg != null)
         {
-            _chkShowStudioBg.Toggled += (enabled) => UserSettings.ShowStudioBackground = enabled;
+            _chkShowStudioBg.Toggled += (enabled) => { if (!_isSyncing) UserSettings.ShowStudioBackground = enabled; };
         }
 
         if (_sliderFpsLimit != null)
@@ -223,14 +224,14 @@ public partial class SettingsDialog : PanelContainer
             _sliderFpsLimit.ValueChanged += (v) =>
             {
                 int fps = (int)v;
-                UserSettings.MaxFps = (fps >= 245) ? 0 : fps;
+                if (!_isSyncing) UserSettings.MaxFps = (fps >= 245) ? 0 : fps;
                 UpdateFpsLabel(fps);
             };
         }
 
         if (_chkVsync != null)
         {
-            _chkVsync.Toggled += (enabled) => UserSettings.VSync = enabled;
+            _chkVsync.Toggled += (enabled) => { if (!_isSyncing) UserSettings.VSync = enabled; };
         }
 
         if (_btnResetGraphics != null)
@@ -289,22 +290,30 @@ public partial class SettingsDialog : PanelContainer
 
     private void SyncFromSettings()
     {
-        // Graphics
-        if (_optMsaa != null) _optMsaa.Select(Math.Clamp(UserSettings.Msaa3D, 0, 3));
-        if (_optShadowQuality != null) _optShadowQuality.Select(Math.Clamp(UserSettings.ShadowQuality, 0, 2));
-        if (_chkShowStudioBg != null) _chkShowStudioBg.ButtonPressed = UserSettings.ShowStudioBackground;
-
-        int fps = UserSettings.MaxFps;
-        if (_sliderFpsLimit != null)
+        _isSyncing = true;
+        try
         {
-            _sliderFpsLimit.Value = (fps == 0) ? 245 : fps;
+            // Graphics
+            if (_optMsaa != null) _optMsaa.Select(Math.Clamp(UserSettings.Msaa3D, 0, 3));
+            if (_optShadowQuality != null) _optShadowQuality.Select(Math.Clamp(UserSettings.ShadowQuality, 0, 2));
+            if (_chkShowStudioBg != null) _chkShowStudioBg.ButtonPressed = UserSettings.ShowStudioBackground;
+
+            int fps = UserSettings.MaxFps;
+            if (_sliderFpsLimit != null)
+            {
+                _sliderFpsLimit.SetValueNoSignal((fps == 0) ? 245 : fps);
+            }
+            UpdateFpsLabel(fps);
+
+            if (_chkVsync != null) _chkVsync.ButtonPressed = UserSettings.VSync;
+
+            // UI
+            SyncDisplaySettingsUI();
         }
-        UpdateFpsLabel(fps);
-
-        if (_chkVsync != null) _chkVsync.ButtonPressed = UserSettings.VSync;
-
-        // UI
-        SyncDisplaySettingsUI();
+        finally
+        {
+            _isSyncing = false;
+        }
     }
 
     private void UpdatePathFields()
@@ -345,28 +354,28 @@ public partial class SettingsDialog : PanelContainer
     private void InitDisplaySettingsEvents()
     {
         if (_xrayLineColorPicker != null)
-            _xrayLineColorPicker.ColorChanged += (c) => GizmoDisplaySettings.XRayLineColor = c;
+            _xrayLineColorPicker.ColorChanged += (c) => { if (!_isSyncing) GizmoDisplaySettings.XRayLineColor = c; };
 
         if (_xrayLineOpacitySlider != null)
         {
             _xrayLineOpacitySlider.ValueChanged += (v) =>
             {
-                GizmoDisplaySettings.XRayLineOpacity = (float)v;
+                if (!_isSyncing) GizmoDisplaySettings.XRayLineOpacity = (float)v;
                 if (_xrayLineOpacityLabel != null) _xrayLineOpacityLabel.Text = $"{v:P0}";
             };
         }
 
         if (_bonePrimaryColorPicker != null)
-            _bonePrimaryColorPicker.ColorChanged += (c) => GizmoDisplaySettings.BonePrimaryColor = c;
+            _bonePrimaryColorPicker.ColorChanged += (c) => { if (!_isSyncing) GizmoDisplaySettings.BonePrimaryColor = c; };
 
         if (_boneClothingColorPicker != null)
-            _boneClothingColorPicker.ColorChanged += (c) => GizmoDisplaySettings.BoneClothingColor = c;
+            _boneClothingColorPicker.ColorChanged += (c) => { if (!_isSyncing) GizmoDisplaySettings.BoneClothingColor = c; };
 
         if (_boneMarkerOpacitySlider != null)
         {
             _boneMarkerOpacitySlider.ValueChanged += (v) =>
             {
-                GizmoDisplaySettings.BoneMarkerOpacity = (float)v;
+                if (!_isSyncing) GizmoDisplaySettings.BoneMarkerOpacity = (float)v;
                 if (_boneMarkerOpacityLabel != null) _boneMarkerOpacityLabel.Text = $"{v:P0}";
             };
         }
@@ -375,7 +384,7 @@ public partial class SettingsDialog : PanelContainer
         {
             _boneMarkerSizeSlider.ValueChanged += (v) =>
             {
-                GizmoDisplaySettings.BoneMarkerScale = (float)v;
+                if (!_isSyncing) GizmoDisplaySettings.BoneMarkerScale = (float)v;
                 if (_boneMarkerSizeLabel != null) _boneMarkerSizeLabel.Text = $"{v:F1}x";
             };
         }
@@ -384,19 +393,19 @@ public partial class SettingsDialog : PanelContainer
         {
             _ikHandlesOpacitySlider.ValueChanged += (v) =>
             {
-                GizmoDisplaySettings.IKHandlesOpacity = (float)v;
+                if (!_isSyncing) GizmoDisplaySettings.IKHandlesOpacity = (float)v;
                 if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{v:P0}";
             };
         }
 
         if (_painterOutlineColorPicker != null)
-            _painterOutlineColorPicker.ColorChanged += (c) => GizmoDisplaySettings.PainterOutlineColor = c;
+            _painterOutlineColorPicker.ColorChanged += (c) => { if (!_isSyncing) GizmoDisplaySettings.PainterOutlineColor = c; };
 
         if (_painterOutlineOpacitySlider != null)
         {
             _painterOutlineOpacitySlider.ValueChanged += (v) =>
             {
-                GizmoDisplaySettings.PainterOutlineOpacity = (float)v;
+                if (!_isSyncing) GizmoDisplaySettings.PainterOutlineOpacity = (float)v;
                 if (_painterOutlineOpacityLabel != null) _painterOutlineOpacityLabel.Text = $"{v:P0}";
             };
         }
@@ -405,7 +414,7 @@ public partial class SettingsDialog : PanelContainer
         {
             _painterOutlineWidthSlider.ValueChanged += (v) =>
             {
-                GizmoDisplaySettings.PainterOutlineWidth = (float)v;
+                if (!_isSyncing) GizmoDisplaySettings.PainterOutlineWidth = (float)v;
                 if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{v:F1}px";
             };
         }
@@ -429,25 +438,25 @@ public partial class SettingsDialog : PanelContainer
     private void SyncDisplaySettingsUI()
     {
         if (_xrayLineColorPicker != null) _xrayLineColorPicker.Color = GizmoDisplaySettings.XRayLineColor;
-        if (_xrayLineOpacitySlider != null) _xrayLineOpacitySlider.Value = GizmoDisplaySettings.XRayLineOpacity;
+        if (_xrayLineOpacitySlider != null) _xrayLineOpacitySlider.SetValueNoSignal(GizmoDisplaySettings.XRayLineOpacity);
         if (_xrayLineOpacityLabel != null) _xrayLineOpacityLabel.Text = $"{GizmoDisplaySettings.XRayLineOpacity:P0}";
 
         if (_bonePrimaryColorPicker != null) _bonePrimaryColorPicker.Color = GizmoDisplaySettings.BonePrimaryColor;
         if (_boneClothingColorPicker != null) _boneClothingColorPicker.Color = GizmoDisplaySettings.BoneClothingColor;
-        if (_boneMarkerOpacitySlider != null) _boneMarkerOpacitySlider.Value = GizmoDisplaySettings.BoneMarkerOpacity;
+        if (_boneMarkerOpacitySlider != null) _boneMarkerOpacitySlider.SetValueNoSignal(GizmoDisplaySettings.BoneMarkerOpacity);
         if (_boneMarkerOpacityLabel != null) _boneMarkerOpacityLabel.Text = $"{GizmoDisplaySettings.BoneMarkerOpacity:P0}";
 
-        if (_boneMarkerSizeSlider != null) _boneMarkerSizeSlider.Value = GizmoDisplaySettings.BoneMarkerScale;
+        if (_boneMarkerSizeSlider != null) _boneMarkerSizeSlider.SetValueNoSignal(GizmoDisplaySettings.BoneMarkerScale);
         if (_boneMarkerSizeLabel != null) _boneMarkerSizeLabel.Text = $"{GizmoDisplaySettings.BoneMarkerScale:F1}x";
 
-        if (_ikHandlesOpacitySlider != null) _ikHandlesOpacitySlider.Value = GizmoDisplaySettings.IKHandlesOpacity;
+        if (_ikHandlesOpacitySlider != null) _ikHandlesOpacitySlider.SetValueNoSignal(GizmoDisplaySettings.IKHandlesOpacity);
         if (_ikHandlesOpacityLabel != null) _ikHandlesOpacityLabel.Text = $"{GizmoDisplaySettings.IKHandlesOpacity:P0}";
 
         if (_painterOutlineColorPicker != null) _painterOutlineColorPicker.Color = GizmoDisplaySettings.PainterOutlineColor;
-        if (_painterOutlineOpacitySlider != null) _painterOutlineOpacitySlider.Value = GizmoDisplaySettings.PainterOutlineOpacity;
+        if (_painterOutlineOpacitySlider != null) _painterOutlineOpacitySlider.SetValueNoSignal(GizmoDisplaySettings.PainterOutlineOpacity);
         if (_painterOutlineOpacityLabel != null) _painterOutlineOpacityLabel.Text = $"{GizmoDisplaySettings.PainterOutlineOpacity:P0}";
 
-        if (_painterOutlineWidthSlider != null) _painterOutlineWidthSlider.Value = GizmoDisplaySettings.PainterOutlineWidth;
+        if (_painterOutlineWidthSlider != null) _painterOutlineWidthSlider.SetValueNoSignal(GizmoDisplaySettings.PainterOutlineWidth);
         if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{GizmoDisplaySettings.PainterOutlineWidth:F1}px";
     }
 

@@ -162,42 +162,59 @@ public static class GizmoDisplaySettings
         NotifyChanged();
     }
 
+    static GizmoDisplaySettings()
+    {
+        LoadConfig();
+    }
+
     public static void LoadConfig()
     {
         var config = new ConfigFile();
         if (config.Load(ConfigPath) == Error.Ok)
         {
             _isLoading = true;
-            if (config.HasSectionKey(SectionName, "XRayLineColor"))
-                XRayLineColor = (Color)config.GetValue(SectionName, "XRayLineColor", XRayLineColor);
+            try
+            {
+                if (config.HasSectionKey(SectionName, "XRayLineColor"))
+                    _xRayLineColor = (Color)config.GetValue(SectionName, "XRayLineColor", _xRayLineColor);
 
-            if (config.HasSectionKey(SectionName, "XRayLineOpacity"))
-                XRayLineOpacity = (float)config.GetValue(SectionName, "XRayLineOpacity", XRayLineOpacity);
+                if (config.HasSectionKey(SectionName, "XRayLineOpacity"))
+                    _xRayLineOpacity = Mathf.Clamp((float)config.GetValue(SectionName, "XRayLineOpacity", _xRayLineOpacity), 0.05f, 1.0f);
 
-            if (config.HasSectionKey(SectionName, "BonePrimaryColor"))
-                BonePrimaryColor = (Color)config.GetValue(SectionName, "BonePrimaryColor", BonePrimaryColor);
+                if (config.HasSectionKey(SectionName, "BonePrimaryColor"))
+                    _bonePrimaryColor = (Color)config.GetValue(SectionName, "BonePrimaryColor", _bonePrimaryColor);
 
-            if (config.HasSectionKey(SectionName, "BoneClothingColor"))
-                BoneClothingColor = (Color)config.GetValue(SectionName, "BoneClothingColor", BoneClothingColor);
+                if (config.HasSectionKey(SectionName, "BoneClothingColor"))
+                    _boneClothingColor = (Color)config.GetValue(SectionName, "BoneClothingColor", _boneClothingColor);
 
-            if (config.HasSectionKey(SectionName, "BoneMarkerOpacity"))
-                BoneMarkerOpacity = (float)config.GetValue(SectionName, "BoneMarkerOpacity", BoneMarkerOpacity);
+                if (config.HasSectionKey(SectionName, "BoneMarkerOpacity"))
+                    _boneMarkerOpacity = Mathf.Clamp((float)config.GetValue(SectionName, "BoneMarkerOpacity", _boneMarkerOpacity), 0.05f, 1.0f);
 
-            if (config.HasSectionKey(SectionName, "BoneMarkerScale"))
-                BoneMarkerScale = (float)config.GetValue(SectionName, "BoneMarkerScale", BoneMarkerScale);
+                if (config.HasSectionKey(SectionName, "BoneMarkerScale"))
+                    _boneMarkerScale = Mathf.Clamp((float)config.GetValue(SectionName, "BoneMarkerScale", _boneMarkerScale), 0.2f, 3.0f);
 
-            if (config.HasSectionKey(SectionName, "IKHandlesOpacity"))
-                IKHandlesOpacity = (float)config.GetValue(SectionName, "IKHandlesOpacity", IKHandlesOpacity);
+                if (config.HasSectionKey(SectionName, "IKHandlesOpacity"))
+                    _ikHandlesOpacity = Mathf.Clamp((float)config.GetValue(SectionName, "IKHandlesOpacity", _ikHandlesOpacity), 0.05f, 1.0f);
 
-            if (config.HasSectionKey(SectionName, "PainterOutlineColor"))
-                PainterOutlineColor = (Color)config.GetValue(SectionName, "PainterOutlineColor", PainterOutlineColor);
+                if (config.HasSectionKey(SectionName, "PainterOutlineColor"))
+                    _painterOutlineColor = (Color)config.GetValue(SectionName, "PainterOutlineColor", _painterOutlineColor);
 
-            if (config.HasSectionKey(SectionName, "PainterOutlineOpacity"))
-                PainterOutlineOpacity = (float)config.GetValue(SectionName, "PainterOutlineOpacity", PainterOutlineOpacity);
+                if (config.HasSectionKey(SectionName, "PainterOutlineOpacity"))
+                    _painterOutlineOpacity = Mathf.Clamp((float)config.GetValue(SectionName, "PainterOutlineOpacity", _painterOutlineOpacity), 0.05f, 1.0f);
 
-            if (config.HasSectionKey(SectionName, "PainterOutlineWidth"))
-                PainterOutlineWidth = (float)config.GetValue(SectionName, "PainterOutlineWidth", PainterOutlineWidth);
-            _isLoading = false;
+                if (config.HasSectionKey(SectionName, "PainterOutlineWidth"))
+                    _painterOutlineWidth = Mathf.Clamp((float)config.GetValue(SectionName, "PainterOutlineWidth", _painterOutlineWidth), 0.1f, 3.0f);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[GizmoDisplaySettings] Error loading config from {ConfigPath}: {ex.Message}");
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+
+            OnSettingsChanged?.Invoke();
         }
     }
 
@@ -217,6 +234,10 @@ public static class GizmoDisplaySettings
         config.SetValue(SectionName, "PainterOutlineOpacity", PainterOutlineOpacity);
         config.SetValue(SectionName, "PainterOutlineWidth", PainterOutlineWidth);
 
-        config.Save(ConfigPath);
+        Error err = config.Save(ConfigPath);
+        if (err != Error.Ok)
+        {
+            GD.PrintErr($"[GizmoDisplaySettings] Failed to save config to {ConfigPath}: {err}");
+        }
     }
 }

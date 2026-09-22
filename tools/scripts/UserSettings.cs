@@ -87,6 +87,21 @@ public static class UserSettings
         }
     }
 
+    private static float _cameraZoomSensitivity = 0.25f;
+
+    public static float CameraZoomSensitivity
+    {
+        get => _cameraZoomSensitivity;
+        set
+        {
+            if (Math.Abs(_cameraZoomSensitivity - value) > 0.0001f)
+            {
+                _cameraZoomSensitivity = value;
+                SaveSettings();
+            }
+        }
+    }
+
     public static bool VSync
     {
         get => _vsync;
@@ -123,6 +138,7 @@ public static class UserSettings
             _showStudioBackground = (bool)config.GetValue(SectionName, "ShowStudioBackground", true);
             _maxFps = (int)config.GetValue(SectionName, "MaxFps", 60);
             _vsync = (bool)config.GetValue(SectionName, "VSync", true);
+            _cameraZoomSensitivity = (float)config.GetValue(SectionName, "CameraZoomSensitivity", 0.25f);
         }
     }
 
@@ -136,6 +152,7 @@ public static class UserSettings
         config.SetValue(SectionName, "ShowStudioBackground", _showStudioBackground);
         config.SetValue(SectionName, "MaxFps", _maxFps);
         config.SetValue(SectionName, "VSync", _vsync);
+        config.SetValue(SectionName, "CameraZoomSensitivity", _cameraZoomSensitivity);
 
         // Limpiar clave obsoleta si existía de versiones previas
         if (config.HasSectionKey(SectionName, "StudioEnvironment"))

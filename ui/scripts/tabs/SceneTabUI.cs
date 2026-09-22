@@ -217,7 +217,10 @@ public partial class SceneTabUI : VBoxContainer
     {
         UserSettings.ShowStudioBackgroundChanged += (show) =>
         {
-            if (show) SetMode(_currentMode);
+            // Don't re-apply if the user explicitly selected Transparent mode —
+            // toggling the studio background checkbox should not override it.
+            if (show && _currentMode != BgMode.Transparent)
+                SetMode(_currentMode);
         };
 
         if (_modeOption != null)
@@ -356,12 +359,17 @@ public partial class SceneTabUI : VBoxContainer
         switch (mode)
         {
             case BgMode.Transparent:
+                // Signal SceneEnvironmentManager to enforce true alpha transparency.
+                // ApplyEnvironment() will handle worldViewport.TransparentBg = true and
+                // hide both bgRect / bgTextureRect, overriding any previous 2D background.
+                SceneEnvironmentManager.IsTransparentMode = true;
                 if (_bgColorRect != null) _bgColorRect.Visible = false;
                 if (_bgTextureRect != null) _bgTextureRect.Visible = false;
                 if (_stagePlatform != null) _stagePlatform.Visible = false;
                 break;
 
             case BgMode.SolidColor:
+                SceneEnvironmentManager.IsTransparentMode = false;
                 if (_bgColorRect != null)
                 {
                     _bgColorRect.Visible = true;
@@ -376,6 +384,7 @@ public partial class SceneTabUI : VBoxContainer
                 break;
 
             case BgMode.Gradient:
+                SceneEnvironmentManager.IsTransparentMode = false;
                 if (_bgColorRect != null) _bgColorRect.Visible = false;
                 if (_bgTextureRect != null)
                 {
@@ -387,12 +396,14 @@ public partial class SceneTabUI : VBoxContainer
                 break;
 
             case BgMode.Pattern:
+                SceneEnvironmentManager.IsTransparentMode = false;
                 if (_bgColorRect != null) _bgColorRect.Visible = false;
                 UpdatePatternTexture();
                 if (_stagePlatform != null) _stagePlatform.Visible = false;
                 break;
 
             case BgMode.CustomImage:
+                SceneEnvironmentManager.IsTransparentMode = false;
                 if (_bgColorRect != null) _bgColorRect.Visible = false;
                 if (_bgTextureRect != null)
                 {
@@ -407,6 +418,7 @@ public partial class SceneTabUI : VBoxContainer
                 break;
 
             case BgMode.Stage3D:
+                SceneEnvironmentManager.IsTransparentMode = false;
                 if (_bgColorRect != null)
                 {
                     _bgColorRect.Visible = true;

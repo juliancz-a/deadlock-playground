@@ -16,6 +16,18 @@ corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 shadow_size = 20
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_csdk"]
+bg_color = Color(0.1, 0.22, 0.32, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.75, 1, 0.85)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_confirm"]
 bg_color = Color(0.235294, 0.352941, 0.235294, 0.9)
 border_width_left = 1
@@ -47,9 +59,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -320.0
-offset_top = -340.0
+offset_top = -380.0
 offset_right = 320.0
-offset_bottom = 340.0
+offset_bottom = 380.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
@@ -130,7 +142,7 @@ theme_override_font_sizes/font_size = 12
 text = "Target Submeshes to Compile & Package:"
 
 [node name="ScrollSubmeshes" type="ScrollContainer" parent="DialogPanel/Margin/VBox" unique_id=987123417]
-custom_minimum_size = Vector2(0, 75)
+custom_minimum_size = Vector2(0, 140)
 layout_mode = 2
 horizontal_scroll_mode = 0
 
@@ -195,6 +207,24 @@ placeholder_text = "Optional root folder (auto-derived if empty)"
 layout_mode = 2
 text = "Browse..."
 
+[node name="HBoxCsdkDownload" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123470]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblCsdkDownload" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123471]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.78, 0.35, 1)
+theme_override_font_sizes/font_size = 11
+text = "CSDK12 is needed to compile"
+
+[node name="BtnDownloadCsdk" type="Button" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123472]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.35, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 11
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_csdk")
+text = "  Download CSDK12  "
+
 [node name="HSeparator2" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987123426]
 layout_mode = 2
 
@@ -232,6 +262,7 @@ text = "Will be installed as: pak01_dir.vpk"
 
 [node name="HBoxButtons" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123434]
 layout_mode = 2
+size_flags_vertical = 10
 theme_override_constants/separation = 12
 alignment = 2
 

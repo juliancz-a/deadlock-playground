@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c8k8f2y0x1m4p"]
 
-[ext_resource type="Script" uid="uid://dh4h10q8r4m2p" path="res://ui/scripts/modals/SettingsDialog.cs" id="1_dialog"]
+[ext_resource type="Script" uid="uid://bl5la5nclnc1q" path="res://ui/scripts/modals/SettingsDialog.cs" id="1_dialog"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
 [ext_resource type="PackedScene" uid="uid://c5t5q1s8k2p7y" path="res://ui/scenes/components/KeybindsSettingsTab.tscn" id="3_kb"]
 
@@ -18,7 +18,7 @@ corner_radius_bottom_left = 8
 shadow_color = Color(0, 0, 0, 0.55)
 shadow_size = 12
 
-[node name="SettingsDialog" type="PanelContainer"]
+[node name="SettingsDialog" type="PanelContainer" unique_id=1760846762]
 custom_minimum_size = Vector2(720, 540)
 anchors_preset = 8
 anchor_left = 0.5
@@ -34,28 +34,28 @@ grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
 script = ExtResource("1_dialog")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=1714759267]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="HeaderBar" type="HBoxContainer" parent="VBoxContainer"]
+[node name="HeaderBar" type="HBoxContainer" parent="VBoxContainer" unique_id=401642199]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Margin" type="MarginContainer" parent="VBoxContainer/HeaderBar"]
+[node name="Margin" type="MarginContainer" parent="VBoxContainer/HeaderBar" unique_id=1764007758]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 8
 
-[node name="Title" type="Label" parent="VBoxContainer/HeaderBar/Margin"]
+[node name="Title" type="Label" parent="VBoxContainer/HeaderBar/Margin" unique_id=2074587282]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 theme_override_fonts/font = ExtResource("2_colus")
 theme_override_font_sizes/font_size = 14
 text = "APPLICATION SETTINGS"
 
-[node name="BtnClose" type="Button" parent="VBoxContainer/HeaderBar"]
+[node name="BtnClose" type="Button" parent="VBoxContainer/HeaderBar" unique_id=1760336910]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 28)
 layout_mode = 2
@@ -63,14 +63,14 @@ tooltip_text = "Close Settings"
 text = "✕"
 flat = true
 
-[node name="TabContainer" type="TabContainer" parent="VBoxContainer"]
+[node name="TabContainer" type="TabContainer" parent="VBoxContainer" unique_id=636380389]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
-current_tab = 0
-tabs_visible = true
+current_tab = 2
 
-[node name="General" type="MarginContainer" parent="VBoxContainer/TabContainer"]
+[node name="General" type="MarginContainer" parent="VBoxContainer/TabContainer" unique_id=1935988690]
+visible = false
 layout_mode = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 12
@@ -78,19 +78,19 @@ theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 metadata/_tab_index = 0
 
-[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/General"]
+[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/General" unique_id=58481696]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="LangRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox"]
+[node name="LangRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox" unique_id=1260365533]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="LanguageLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/LangRow"]
+[node name="LanguageLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/LangRow" unique_id=467103058]
 layout_mode = 2
 text = "Language"
 
-[node name="LanguageButton" type="OptionButton" parent="VBoxContainer/TabContainer/General/VBox/LangRow"]
+[node name="LanguageButton" type="OptionButton" parent="VBoxContainer/TabContainer/General/VBox/LangRow" unique_id=274428125]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
@@ -98,86 +98,86 @@ item_count = 1
 popup/item_0/text = "English (US)"
 popup/item_0/id = 0
 
-[node name="GamePathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox"]
+[node name="GamePathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox" unique_id=1718078592]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="GamePathLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow"]
+[node name="GamePathLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow" unique_id=772848752]
 layout_mode = 2
 text = "Deadlock Game Directory"
 
-[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow"]
+[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow" unique_id=801118580]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="GamePathLine" type="LineEdit" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow/HBox"]
+[node name="GamePathLine" type="LineEdit" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow/HBox" unique_id=30716588]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Path to Deadlock game directory (e.g. C:/Steam/steamapps/common/deadlock)"
 
-[node name="BrowseGamePathButton" type="Button" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow/HBox"]
+[node name="BrowseGamePathButton" type="Button" parent="VBoxContainer/TabContainer/General/VBox/GamePathRow/HBox" unique_id=1696111157]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "Browse..."
 
-[node name="SavePathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox"]
+[node name="SavePathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox" unique_id=359921532]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="SavesPathLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow"]
+[node name="SavesPathLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow" unique_id=1459607220]
 layout_mode = 2
 text = "Screenshots / Saves Directory"
 
-[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow"]
+[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow" unique_id=1690466888]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SavesPathLine" type="LineEdit" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow/HBox"]
+[node name="SavesPathLine" type="LineEdit" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow/HBox" unique_id=644080017]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Directory where exported screenshots will be stored"
 
-[node name="BrowseSavePathButton" type="Button" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow/HBox"]
+[node name="BrowseSavePathButton" type="Button" parent="VBoxContainer/TabContainer/General/VBox/SavePathRow/HBox" unique_id=423783101]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "Browse..."
 
-[node name="CompilerPathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox"]
+[node name="CompilerPathRow" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox" unique_id=1781323044]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="CompilerPathLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow"]
+[node name="CompilerPathLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow" unique_id=1012213152]
 layout_mode = 2
 text = "Source 2 Resource Compiler (resourcecompiler.exe)"
 
-[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow"]
+[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow" unique_id=1523979510]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="CompilerPathLine" type="LineEdit" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox"]
+[node name="CompilerPathLine" type="LineEdit" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox" unique_id=986770836]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Path to resourcecompiler.exe (inside game/bin_cs2/win64/)"
 
-[node name="BrowseCompilerPathButton" type="Button" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox"]
+[node name="BrowseCompilerPathButton" type="Button" parent="VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox" unique_id=92809688]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "Browse..."
 
-[node name="BtnResetGeneral" type="Button" parent="VBoxContainer/TabContainer/General/VBox"]
+[node name="BtnResetGeneral" type="Button" parent="VBoxContainer/TabContainer/General/VBox" unique_id=1171433277]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(160, 30)
 layout_mode = 2
 size_flags_horizontal = 0
 text = "Reset to Defaults"
 
-[node name="Graphics" type="MarginContainer" parent="VBoxContainer/TabContainer"]
+[node name="Graphics" type="MarginContainer" parent="VBoxContainer/TabContainer" unique_id=670581141]
 visible = false
 layout_mode = 2
 theme_override_constants/margin_left = 14
@@ -186,63 +186,63 @@ theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 metadata/_tab_index = 1
 
-[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/Graphics"]
+[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/Graphics" unique_id=966047490]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="MsaaRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+[node name="MsaaRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox" unique_id=1030984655]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/MsaaRow"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/MsaaRow" unique_id=610540379]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "MSAA 3D Anti-Aliasing"
 
-[node name="OptMsaa" type="OptionButton" parent="VBoxContainer/TabContainer/Graphics/VBox/MsaaRow"]
+[node name="OptMsaa" type="OptionButton" parent="VBoxContainer/TabContainer/Graphics/VBox/MsaaRow" unique_id=1437680735]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 28)
 layout_mode = 2
 
-[node name="ShadowRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+[node name="ShadowRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox" unique_id=252043522]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/ShadowRow"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/ShadowRow" unique_id=589866603]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Shadow Filter Quality"
 
-[node name="OptShadowQuality" type="OptionButton" parent="VBoxContainer/TabContainer/Graphics/VBox/ShadowRow"]
+[node name="OptShadowQuality" type="OptionButton" parent="VBoxContainer/TabContainer/Graphics/VBox/ShadowRow" unique_id=1445496276]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 28)
 layout_mode = 2
 
-[node name="ShowBgRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+[node name="ShowBgRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox" unique_id=1006914264]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/ShowBgRow"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/ShowBgRow" unique_id=1479311993]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Show Studio Background"
 
-[node name="ChkShowStudioBg" type="CheckBox" parent="VBoxContainer/TabContainer/Graphics/VBox/ShowBgRow"]
+[node name="ChkShowStudioBg" type="CheckBox" parent="VBoxContainer/TabContainer/Graphics/VBox/ShowBgRow" unique_id=1412729251]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Enabled"
 
-[node name="FpsRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+[node name="FpsRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox" unique_id=91275773]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow" unique_id=561798947]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Target Frame Rate (FPS Limit)"
 
-[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow"]
+[node name="HBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow" unique_id=241367609]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SliderFpsLimit" type="HSlider" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow/HBox"]
+[node name="SliderFpsLimit" type="HSlider" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow/HBox" unique_id=2047755341]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
@@ -252,35 +252,34 @@ max_value = 245.0
 step = 5.0
 value = 60.0
 
-[node name="LblFpsLimit" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow/HBox"]
+[node name="LblFpsLimit" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/FpsRow/HBox" unique_id=49621047]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
 text = "60 FPS"
 
-[node name="VsyncRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+[node name="VsyncRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/Graphics/VBox" unique_id=1941987076]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/VsyncRow"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/Graphics/VBox/VsyncRow" unique_id=556479315]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Vertical Sync (VSync)"
 
-[node name="ChkVsync" type="CheckBox" parent="VBoxContainer/TabContainer/Graphics/VBox/VsyncRow"]
+[node name="ChkVsync" type="CheckBox" parent="VBoxContainer/TabContainer/Graphics/VBox/VsyncRow" unique_id=1103380943]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Enabled"
 
-[node name="BtnResetGraphics" type="Button" parent="VBoxContainer/TabContainer/Graphics/VBox"]
+[node name="BtnResetGraphics" type="Button" parent="VBoxContainer/TabContainer/Graphics/VBox" unique_id=404880902]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(160, 30)
 layout_mode = 2
 size_flags_horizontal = 0
 text = "Reset to Defaults"
 
-[node name="UI" type="MarginContainer" parent="VBoxContainer/TabContainer"]
-visible = false
+[node name="UI" type="MarginContainer" parent="VBoxContainer/TabContainer" unique_id=965257978]
 layout_mode = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 12
@@ -288,42 +287,42 @@ theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 metadata/_tab_index = 2
 
-[node name="Scroll" type="ScrollContainer" parent="VBoxContainer/TabContainer/UI"]
+[node name="Scroll" type="ScrollContainer" parent="VBoxContainer/TabContainer/UI" unique_id=251350663]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll"]
+[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll" unique_id=1195845102]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="XRayWireframeLabel" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="XRayWireframeLabel" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1532381422]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 text = "X-Ray Wireframe Lines"
 
-[node name="HBoxContainerLineColor" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerLineColor" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1481441594]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineColor"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineColor" unique_id=98500673]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Line Color"
 
-[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineColor"]
+[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineColor" unique_id=1314074003]
 custom_minimum_size = Vector2(64, 24)
 layout_mode = 2
 
-[node name="HBoxContainerLineOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerLineOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1911977085]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineOpacity"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineOpacity" unique_id=493987365]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Line Opacity"
 
-[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineOpacity"]
+[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineOpacity" unique_id=104423413]
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
 size_flags_vertical = 4
@@ -332,51 +331,51 @@ max_value = 1.0
 step = 0.05
 value = 0.05
 
-[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineOpacity"]
+[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerLineOpacity" unique_id=2141532873]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
-[node name="HSeparator1" type="HSeparator" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HSeparator1" type="HSeparator" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=289161014]
 layout_mode = 2
 
-[node name="BoneControlLabel" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="BoneControlLabel" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1199458915]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 text = "Character Bone Controls"
 
-[node name="HBoxContainerPrimary" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerPrimary" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1970495600]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPrimary"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPrimary" unique_id=2100577344]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Primary Bones Color"
 
-[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPrimary"]
+[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPrimary" unique_id=52115476]
 custom_minimum_size = Vector2(64, 24)
 layout_mode = 2
 
-[node name="HBoxContainerClothing" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerClothing" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1649388068]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerClothing"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerClothing" unique_id=1403692057]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Secondary Bones Color"
 
-[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerClothing"]
+[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerClothing" unique_id=1751891093]
 custom_minimum_size = Vector2(64, 24)
 layout_mode = 2
 
-[node name="HBoxContainerBoneOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerBoneOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1827803525]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneOpacity"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneOpacity" unique_id=1909710061]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Marker Opacity"
 
-[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneOpacity"]
+[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneOpacity" unique_id=294310062]
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
 size_flags_vertical = 4
@@ -385,19 +384,19 @@ max_value = 1.0
 step = 0.05
 value = 0.05
 
-[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneOpacity"]
+[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneOpacity" unique_id=2064158291]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
-[node name="HBoxContainerBoneSize" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerBoneSize" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1036038854]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneSize"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneSize" unique_id=1591857067]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Marker Size Scale"
 
-[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneSize"]
+[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneSize" unique_id=921914802]
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
 size_flags_vertical = 4
@@ -406,19 +405,19 @@ max_value = 3.0
 step = 0.1
 value = 1.0
 
-[node name="LabelCurrSize" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneSize"]
+[node name="LabelCurrSize" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerBoneSize" unique_id=1446920164]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
-[node name="HBoxContainerIKOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerIKOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1033602459]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerIKOpacity"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerIKOpacity" unique_id=1809160207]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "IK Handles Opacity"
 
-[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerIKOpacity"]
+[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerIKOpacity" unique_id=922340744]
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
 size_flags_vertical = 4
@@ -427,60 +426,60 @@ max_value = 1.0
 step = 0.05
 value = 1.0
 
-[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerIKOpacity"]
+[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerIKOpacity" unique_id=2068573695]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
-[node name="HSeparator2" type="HSeparator" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HSeparator2" type="HSeparator" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=740426288]
 layout_mode = 2
 
-[node name="PainterOutlineLabel" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="PainterOutlineLabel" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=512346515]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 text = "Painter Submesh Highlight Outline"
 
-[node name="HBoxContainerPainterColor" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerPainterColor" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=407991534]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterColor"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterColor" unique_id=116757725]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Outline Color"
 
-[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterColor"]
+[node name="ColorPickerButton" type="ColorPickerButton" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterColor" unique_id=868767194]
 custom_minimum_size = Vector2(64, 24)
 layout_mode = 2
 
-[node name="HBoxContainerPainterOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerPainterOpacity" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1102307414]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterOpacity"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterOpacity" unique_id=2083837116]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Outline Opacity"
 
-[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterOpacity"]
+[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterOpacity" unique_id=1199887007]
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
 size_flags_vertical = 4
 min_value = 0.05
 max_value = 1.0
 step = 0.05
-value = 0.85
+value = 0.8500000000000001
 
-[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterOpacity"]
+[node name="LabelCurrOpacity" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterOpacity" unique_id=1152838321]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
-[node name="HBoxContainerPainterWidth" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="HBoxContainerPainterWidth" type="HBoxContainer" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=209050462]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterWidth"]
+[node name="Label" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterWidth" unique_id=948932044]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Outline Width"
 
-[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterWidth"]
+[node name="HSlider" type="HSlider" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterWidth" unique_id=710696666]
 custom_minimum_size = Vector2(140, 0)
 layout_mode = 2
 size_flags_vertical = 4
@@ -489,16 +488,16 @@ max_value = 8.0
 step = 0.5
 value = 2.0
 
-[node name="LabelCurrWidth" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterWidth"]
+[node name="LabelCurrWidth" type="Label" parent="VBoxContainer/TabContainer/UI/Scroll/VBox/HBoxContainerPainterWidth" unique_id=1319687525]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 
-[node name="ResetButton" type="Button" parent="VBoxContainer/TabContainer/UI/Scroll/VBox"]
+[node name="ResetButton" type="Button" parent="VBoxContainer/TabContainer/UI/Scroll/VBox" unique_id=1622856048]
 custom_minimum_size = Vector2(180, 30)
 layout_mode = 2
 text = "Reset UI Display Defaults"
 
-[node name="Keybinds" type="MarginContainer" parent="VBoxContainer/TabContainer"]
+[node name="Keybinds" type="MarginContainer" parent="VBoxContainer/TabContainer" unique_id=2055662935]
 visible = false
 layout_mode = 2
 theme_override_constants/margin_left = 14
@@ -507,5 +506,5 @@ theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 metadata/_tab_index = 3
 
-[node name="KeybindsSettingsTab" parent="VBoxContainer/TabContainer/Keybinds" instance=ExtResource("3_kb")]
+[node name="KeybindsSettingsTab" parent="VBoxContainer/TabContainer/Keybinds" unique_id=428026099 instance=ExtResource("3_kb")]
 layout_mode = 2

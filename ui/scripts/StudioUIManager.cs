@@ -87,6 +87,10 @@ public partial class StudioUIManager : CanvasLayer
         _pathManager = new GamePathManager();
         AddChild(_pathManager);
 
+        // Restore persisted gizmo display settings (bone opacity, wireframe opacity, etc.)
+        // before any tab or subsystem reads GizmoDisplaySettings values.
+        GizmoDisplaySettings.LoadConfig();
+
         LinkNodes();
         CreateToastUI();
         CreateFallbackDialog();
@@ -465,6 +469,10 @@ public partial class StudioUIManager : CanvasLayer
                 _btnOpenUVCanvas.Visible = (_uvCanvasPanel == null || !_uvCanvasPanel.Visible);
             }
             if (_navBadge != null) _navBadge.Visible = true;
+        }
+        else if (tabIndex == 6)
+        {
+            _tabLighting?.SyncUIToScene();
         }
     }
 

@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://ui/scripts/tabs/EffectsTabUI.cs" id="1_fx"]
 
-[node name="EffectsTab" type="VBoxContainer" node_paths=PackedStringArray("_dofFarToggle", "_dofFarDistanceSlider", "_dofFarDistanceLabel", "_dofNearToggle", "_dofNearDistanceSlider", "_dofNearDistanceLabel", "_dofBlurAmountSlider", "_dofBlurAmountLabel", "_tonemapOption", "_fogToggle", "_fogDensitySlider", "_fogDensityLabel", "_volumetricFogToggle", "_glowToggle", "_glowIntensitySlider", "_glowIntensityLabel", "_glowBloomSlider", "_glowBloomLabel", "_glowHdrSlider", "_glowHdrLabel", "_glowBlendOption", "_btnResetEffects")]
+[node name="EffectsTab" type="VBoxContainer" node_paths=PackedStringArray("_tonemapOption", "_fogToggle", "_fogDensitySlider", "_fogDensityLabel", "_volumetricFogToggle", "_glowToggle", "_glowIntensitySlider", "_glowIntensityLabel", "_glowBloomSlider", "_glowBloomLabel", "_glowHdrSlider", "_glowHdrLabel", "_glowBlendOption", "_btnResetEffects")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -12,14 +12,6 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 12
 script = ExtResource("1_fx")
-_dofFarToggle = NodePath("DoFGroup/DoFFarToggle")
-_dofFarDistanceSlider = NodePath("DoFGroup/FarDistanceBox/FarDistanceSlider")
-_dofFarDistanceLabel = NodePath("DoFGroup/FarDistanceBox/FarDistanceLabel")
-_dofNearToggle = NodePath("DoFGroup/DoFNearToggle")
-_dofNearDistanceSlider = NodePath("DoFGroup/NearDistanceBox/NearDistanceSlider")
-_dofNearDistanceLabel = NodePath("DoFGroup/NearDistanceBox/NearDistanceLabel")
-_dofBlurAmountSlider = NodePath("DoFGroup/BlurAmountBox/BlurAmountSlider")
-_dofBlurAmountLabel = NodePath("DoFGroup/BlurAmountBox/BlurAmountLabel")
 _tonemapOption = NodePath("TonemapGroup/TonemapOption")
 _fogToggle = NodePath("FogGroup/FogToggle")
 _fogDensitySlider = NodePath("FogGroup/FogDensityBox/FogDensitySlider")
@@ -35,98 +27,6 @@ _glowHdrLabel = NodePath("GlowGroup/HdrBox/HdrLabel")
 _glowBlendOption = NodePath("GlowGroup/BlendBox/BlendOption")
 _btnResetEffects = NodePath("BtnResetEffects")
 
-[node name="DoFGroup" type="VBoxContainer" parent="."]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="DoFLabel" type="Label" parent="DoFGroup"]
-layout_mode = 2
-theme_type_variation = &"TitleLabel"
-text = "Depth of Field (Portrait Blur)"
-
-[node name="BlurAmountBox" type="HBoxContainer" parent="DoFGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Label" type="Label" parent="DoFGroup/BlurAmountBox"]
-custom_minimum_size = Vector2(70, 0)
-layout_mode = 2
-text = "Strength"
-
-[node name="BlurAmountSlider" type="HSlider" parent="DoFGroup/BlurAmountBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = 0.05
-max_value = 1.0
-step = 0.05
-value = 0.35
-
-[node name="BlurAmountLabel" type="Label" parent="DoFGroup/BlurAmountBox"]
-custom_minimum_size = Vector2(50, 0)
-layout_mode = 2
-theme_type_variation = &"NumericLabel"
-text = "0.35"
-
-[node name="DoFFarToggle" type="CheckBox" parent="DoFGroup"]
-layout_mode = 2
-text = "Far Blur Enabled"
-
-[node name="FarDistanceBox" type="HBoxContainer" parent="DoFGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Label" type="Label" parent="DoFGroup/FarDistanceBox"]
-custom_minimum_size = Vector2(70, 0)
-layout_mode = 2
-text = "Distance"
-
-[node name="FarDistanceSlider" type="HSlider" parent="DoFGroup/FarDistanceBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = 0.5
-max_value = 25.0
-step = 0.1
-value = 5.0
-
-[node name="FarDistanceLabel" type="Label" parent="DoFGroup/FarDistanceBox"]
-custom_minimum_size = Vector2(50, 0)
-layout_mode = 2
-theme_type_variation = &"NumericLabel"
-text = "5.0m"
-
-[node name="DoFNearToggle" type="CheckBox" parent="DoFGroup"]
-layout_mode = 2
-text = "Near Blur Enabled"
-
-[node name="NearDistanceBox" type="HBoxContainer" parent="DoFGroup"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Label" type="Label" parent="DoFGroup/NearDistanceBox"]
-custom_minimum_size = Vector2(70, 0)
-layout_mode = 2
-text = "Distance"
-
-[node name="NearDistanceSlider" type="HSlider" parent="DoFGroup/NearDistanceBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = 0.5
-max_value = 25.0
-step = 0.1
-value = 3.5
-
-[node name="NearDistanceLabel" type="Label" parent="DoFGroup/NearDistanceBox"]
-custom_minimum_size = Vector2(50, 0)
-layout_mode = 2
-theme_type_variation = &"NumericLabel"
-text = "3.5m"
-
-[node name="HSeparator1" type="HSeparator" parent="."]
-layout_mode = 2
-
 [node name="TonemapGroup" type="VBoxContainer" parent="."]
 layout_mode = 2
 theme_override_constants/separation = 4
@@ -141,7 +41,7 @@ custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HSeparator2" type="HSeparator" parent="."]
+[node name="HSeparator1" type="HSeparator" parent="."]
 layout_mode = 2
 
 [node name="GlowGroup" type="VBoxContainer" parent="."]
@@ -163,7 +63,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="GlowGroup/GlowIntensityBox"]
-custom_minimum_size = Vector2(70, 0)
+custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Intensity"
 
@@ -186,7 +86,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="GlowGroup/BloomBox"]
-custom_minimum_size = Vector2(70, 0)
+custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Bloom"
 
@@ -209,7 +109,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="GlowGroup/HdrBox"]
-custom_minimum_size = Vector2(70, 0)
+custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Threshold"
 
@@ -232,7 +132,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="GlowGroup/BlendBox"]
-custom_minimum_size = Vector2(70, 0)
+custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Blend Mode"
 
@@ -241,7 +141,7 @@ custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="HSeparator3" type="HSeparator" parent="."]
+[node name="HSeparator2" type="HSeparator" parent="."]
 layout_mode = 2
 
 [node name="FogGroup" type="VBoxContainer" parent="."]
@@ -266,7 +166,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="FogGroup/FogDensityBox"]
-custom_minimum_size = Vector2(70, 0)
+custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Density"
 
@@ -284,7 +184,7 @@ layout_mode = 2
 theme_type_variation = &"NumericLabel"
 text = "0.005"
 
-[node name="HSeparator4" type="HSeparator" parent="."]
+[node name="HSeparator3" type="HSeparator" parent="."]
 layout_mode = 2
 
 [node name="BtnResetEffects" type="Button" parent="."]

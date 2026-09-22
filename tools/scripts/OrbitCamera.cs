@@ -9,8 +9,8 @@ public partial class OrbitCamera : Node3D
     [Export] public float PitchMax = Mathf.Pi / 2.5f;
 
     [ExportGroup("Zoom Settings")]
-    [Export] public float ZoomSensitivity = 1.0f;
-    [Export] public float ZoomMin = 1.0f;
+    [Export] public float ZoomSensitivity = 0.25f;
+    [Export] public float ZoomMin = 0.15f;
     [Export] public float ZoomMax = 20.0f;
     [Export] public float ZoomLerpSpeed = 10.0f;
 
@@ -24,7 +24,7 @@ public partial class OrbitCamera : Node3D
     [ExportGroup("Orthogonal Settings")]
     [Export] public float OrthoSizeMin = 0.5f;
     [Export] public float OrthoSizeMax = 20.0f;
-    [Export] public float OrthoSizeSensitivity = 0.3f;
+    [Export] public float OrthoSizeSensitivity = 0.25f;
     [Export] public bool LockOrbitInOrtho { get; set; } = true;
 
     private Camera3D _camera;
@@ -158,6 +158,9 @@ public partial class OrbitCamera : Node3D
         if (_currentZoom == 0) _currentZoom = 5f;
         _targetZoom = _currentZoom;
         _targetOrthoSize = _camera.Size > 0 ? _camera.Size : 3.0f;
+
+        ZoomSensitivity = UserSettings.CameraZoomSensitivity;
+        OrthoSizeSensitivity = UserSettings.CameraZoomSensitivity;
     }
 
     public override void _UnhandledInput(InputEvent @event)

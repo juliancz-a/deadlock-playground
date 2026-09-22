@@ -153,15 +153,18 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
         if (_sliderIKOpacity != null)
         {
             float initVal = GizmoDisplaySettings.IKHandlesOpacity * 100.0f;
-            _sliderIKOpacity.Value = initVal;
+            _sliderIKOpacity.SetValueNoSignal(initVal);
             if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{initVal:F0}%";
             _sliderIKOpacity.ValueChanged += (val) =>
             {
+                if (_updatingSliders) return;
                 if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{val:F0}%";
                 float op = (float)val / 100.0f;
                 GizmoDisplaySettings.IKHandlesOpacity = op;
                 _ikManager?.SetHandlesOpacity(op);
             };
+
+            GizmoDisplaySettings.OnSettingsChanged += OnGizmoDisplaySettingsChanged;
         }
 
         if (_btnSnapIKToFK != null)
@@ -172,13 +175,28 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
         UpdateIKUIState();
     }
 
+    public override void _ExitTree()
+    {
+        GizmoDisplaySettings.OnSettingsChanged -= OnGizmoDisplaySettingsChanged;
+    }
+
+    private void OnGizmoDisplaySettingsChanged()
+    {
+        if (_sliderIKOpacity != null && GodotObject.IsInstanceValid(_sliderIKOpacity))
+        {
+            float curVal = GizmoDisplaySettings.IKHandlesOpacity * 100.0f;
+            _sliderIKOpacity.SetValueNoSignal(curVal);
+            if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{curVal:F0}%";
+        }
+    }
+
     public void SetIKManager(CharacterIKManager ikManager)
     {
         _ikManager = ikManager;
         if (_sliderIKOpacity != null)
         {
             float curVal = GizmoDisplaySettings.IKHandlesOpacity * 100.0f;
-            _sliderIKOpacity.Value = curVal;
+            _sliderIKOpacity.SetValueNoSignal(curVal);
             if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{curVal:F0}%";
         }
         UpdateIKUIState();

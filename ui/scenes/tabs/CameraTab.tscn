@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bmejex7p20wei" path="res://ui/scripts/tabs/CameraTabUI.cs" id="1_cam"]
 
-[node name="CameraTab" type="VBoxContainer" unique_id=479136000 node_paths=PackedStringArray("_projectionOption", "_fovGroup", "_fovSlider", "_fovLabel", "_checkDollyZoom", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_btnResetCamera", "_btnRecenterOnModel", "_btnResetCameraTransform")]
+[node name="CameraTab" type="VBoxContainer" unique_id=479136000 node_paths=PackedStringArray("_projectionOption", "_sizeGroup", "_sizeSlider", "_sizeLabel", "_pitchSlider", "_pitchLabel", "_yawSlider", "_yawLabel", "_rollSlider", "_rollLabel", "_btnResetAngles", "_btnPresetPortrait", "_btnPresetFullBody", "_btnPresetCloseup", "_orbitSensSlider", "_orbitSensLabel", "_panSpeedSlider", "_panSpeedLabel", "_zoomSensSlider", "_zoomSensLabel", "_btnResetCamera", "_btnRecenterOnModel", "_btnResetCameraTransform")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -13,10 +13,6 @@ size_flags_vertical = 3
 theme_override_constants/separation = 12
 script = ExtResource("1_cam")
 _projectionOption = NodePath("ProjectionGroup/ProjectionOption")
-_fovGroup = NodePath("FovGroup")
-_fovSlider = NodePath("FovGroup/HBoxContainer/FovSlider")
-_fovLabel = NodePath("FovGroup/HBoxContainer/FovLabel")
-_checkDollyZoom = NodePath("FovGroup/CheckDollyZoom")
 _sizeGroup = NodePath("SizeGroup")
 _sizeSlider = NodePath("SizeGroup/HBoxContainer/SizeSlider")
 _sizeLabel = NodePath("SizeGroup/HBoxContainer/SizeLabel")
@@ -34,6 +30,8 @@ _orbitSensSlider = NodePath("SensGroup/OrbitBox/OrbitSensSlider")
 _orbitSensLabel = NodePath("SensGroup/OrbitBox/OrbitSensLabel")
 _panSpeedSlider = NodePath("SensGroup/PanBox/PanSpeedSlider")
 _panSpeedLabel = NodePath("SensGroup/PanBox/PanSpeedLabel")
+_zoomSensSlider = NodePath("SensGroup/ZoomBox/ZoomSensSlider")
+_zoomSensLabel = NodePath("SensGroup/ZoomBox/ZoomSensLabel")
 _btnResetCamera = NodePath("ActionsBox/BtnResetCameraTransform")
 _btnRecenterOnModel = NodePath("ActionsBox/BtnRecenterOnModel")
 _btnResetCameraTransform = NodePath("ActionsBox/BtnResetCameraTransform")
@@ -56,38 +54,6 @@ popup/item_0/text = "Perspective (3D Lens)"
 popup/item_0/id = 0
 popup/item_1/text = "Orthogonal (Isometric)"
 popup/item_1/id = 1
-
-[node name="FovGroup" type="VBoxContainer" parent="." unique_id=588630354]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="FovTitle" type="Label" parent="FovGroup" unique_id=1899186313]
-layout_mode = 2
-theme_type_variation = &"TitleLabel"
-text = "Field of View (FOV)"
-
-[node name="HBoxContainer" type="HBoxContainer" parent="FovGroup" unique_id=788459767]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="FovSlider" type="HSlider" parent="FovGroup/HBoxContainer" unique_id=1430451357]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 4
-min_value = 15.0
-max_value = 120.0
-value = 75.0
-
-[node name="FovLabel" type="Label" parent="FovGroup/HBoxContainer" unique_id=680126867]
-custom_minimum_size = Vector2(40, 0)
-layout_mode = 2
-theme_type_variation = &"NumericLabel"
-text = "75°"
-
-[node name="CheckDollyZoom" type="CheckBox" parent="FovGroup" unique_id=500298457]
-layout_mode = 2
-button_pressed = true
-text = "Dolly Zoom (Keep Subject Size)"
 
 [node name="SizeGroup" type="VBoxContainer" parent="." unique_id=1299454125]
 visible = false
@@ -220,17 +186,17 @@ theme_override_constants/separation = 8
 [node name="BtnPortrait" type="Button" parent="PresetsGroup/VBoxButtons" unique_id=1586148572]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-text = "Portrait Shot (Upper Body, FOV 35°)"
+text = "Portrait Shot (Upper Body)"
 
 [node name="BtnFullBody" type="Button" parent="PresetsGroup/VBoxButtons" unique_id=787778868]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-text = "Full Body Shot (Full Hero, FOV 45°)"
+text = "Full Body Shot (Full Hero)"
 
 [node name="BtnCloseup" type="Button" parent="PresetsGroup/VBoxButtons" unique_id=2023800790]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-text = "Close-up Detail (Face, FOV 25°)"
+text = "Close-up Detail (Face)"
 
 [node name="HSeparator3" type="HSeparator" parent="." unique_id=1689482392]
 layout_mode = 2
@@ -291,6 +257,30 @@ custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
 theme_type_variation = &"NumericLabel"
 text = "5.0"
+
+[node name="ZoomBox" type="HBoxContainer" parent="SensGroup" unique_id=918237461]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="SensGroup/ZoomBox" unique_id=918237462]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Zoom Step"
+
+[node name="ZoomSensSlider" type="HSlider" parent="SensGroup/ZoomBox" unique_id=918237463]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.05
+max_value = 1.0
+step = 0.05
+value = 0.25
+
+[node name="ZoomSensLabel" type="Label" parent="SensGroup/ZoomBox" unique_id=918237464]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_type_variation = &"NumericLabel"
+text = "0.25"
 
 [node name="HSeparator4" type="HSeparator" parent="." unique_id=2125820814]
 layout_mode = 2
