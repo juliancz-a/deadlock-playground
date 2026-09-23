@@ -32,6 +32,9 @@ text = "Character Model"
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
+fit_to_longest_item = false
+clip_text = true
+text_overrun_behavior = 3
 search_bar_enabled = true
 
 [node name="AddonLabel" type="Label" parent="HeroSelectGroup"]
@@ -43,6 +46,9 @@ text = "Modded Character Models"
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
+fit_to_longest_item = false
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="AddonDetailsLabel" type="RichTextLabel" parent="HeroSelectGroup"]
 layout_mode = 2

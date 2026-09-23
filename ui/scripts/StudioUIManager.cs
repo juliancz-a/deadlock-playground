@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.IO;
+using System.Collections.Generic;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Tools;
 
@@ -57,6 +58,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private PanelContainer _aboutModal;
     [Export] private PanelContainer _loadingOverlay;
     [Export] private Label _loadingLabel;
+    [Export] private Label _loadingLogLabel;
     [Export] private Button _btnAboutClose;
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
@@ -71,6 +73,7 @@ public partial class StudioUIManager : CanvasLayer
     private Button _toastBtn;
     private Godot.Timer _toastTimer;
     private string _lastExportedFilePath = "";
+    private readonly List<string> _loadingLogHistory = new();
 
     public static StudioUIManager Instance { get; private set; }
     public string SavePath => _pathManager?.CurrentSavePath ?? OS.GetSystemDir(OS.SystemDir.Pictures);
@@ -178,16 +181,54 @@ public partial class StudioUIManager : CanvasLayer
         }
     }
 
-    public override void _UnhandledInput(InputEvent @event)
+    public override void _UnhandledKeyInput(InputEvent @event)
     {
-        if (@event is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.F11)
+        if (@event is not InputEventKey key || !key.Pressed || key.Echo) return;
+
+        // Never intercept shortcuts while the user is typing into text inputs
+        var focusOwner = GetViewport()?.GuiGetFocusOwner();
+        if (focusOwner is LineEdit or TextEdit) return;
+
+        // Block shortcuts when modal dialogs are open
+        if ((_settingsModal != null && _settingsModal.Visible) ||
+            (_feedbackModal != null && _feedbackModal.Visible) ||
+            (_aboutModal != null && _aboutModal.Visible) ||
+            (_loadingOverlay != null && _loadingOverlay.Visible))
+        {
+            return;
+        }
+
+        if (key.Keycode == Key.F11)
         {
             ToggleFullscreen();
             GetViewport().SetInputAsHandled();
             return;
         }
 
-        if (@event.IsActionPressed("view_xray"))
+        // Camera Actions
+        if (@event.IsActionPressed("camera_reset", exactMatch: true))
+        {
+            _tabCamera?.ResetCameraTransform();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("camera_focus", exactMatch: true))
+        {
+            _tabCamera?.RecenterOnModel();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("camera_freecam", exactMatch: true))
+        {
+            _tabCamera?.ToggleProjection();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        // Bones Actions
+        if (@event.IsActionPressed("view_xray", exactMatch: true))
         {
             if (_btnQuickXRay != null)
             {
@@ -201,7 +242,22 @@ public partial class StudioUIManager : CanvasLayer
             return;
         }
 
-        if (@event.IsActionPressed("paint_uv_toggle"))
+        if (@event.IsActionPressed("bones_ik_toggle", exactMatch: true))
+        {
+            _tabBones?.ToggleIK();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("bones_reset_pose", exactMatch: true))
+        {
+            _tabPose?.ResetAllPoses();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        // Paint Actions
+        if (@event.IsActionPressed("paint_uv_toggle", exactMatch: true))
         {
             if (_tabPaint != null && _tabPaint.Visible && _uvCanvasPanel != null)
             {
@@ -210,7 +266,10 @@ public partial class StudioUIManager : CanvasLayer
                 return;
             }
         }
+    }
 
+    public override void _UnhandledInput(InputEvent @event)
+    {
         _worldViewport ??= GetNodeOrNull<SubViewport>("MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport")
                         ?? GetTree().Root.FindChild("WorldViewport", true, false) as SubViewport;
 
@@ -338,7 +397,10 @@ public partial class StudioUIManager : CanvasLayer
 
         _aboutModal ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/AboutModal");
         _loadingOverlay ??= GetNodeOrNull<PanelContainer>("MainHUD/ModalsLayer/LoadingOverlay");
-        _loadingLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/Label");
+        _loadingLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/VBox/Label")
+                       ?? GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/Label");
+        _loadingLogLabel ??= GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/VBox/LogLabel")
+                          ?? GetNodeOrNull<Label>("MainHUD/ModalsLayer/LoadingOverlay/LogLabel");
 
         _btnAboutClose ??= GetNodeOrNull<Button>("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/HeaderBar/BtnClose")
                          ?? GetNodeOrNull<Button>("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/Button")
@@ -609,6 +671,19 @@ public partial class StudioUIManager : CanvasLayer
         if (loader != null)
         {
             loader.LoadStarted += () => ShowLoading(true);
+            loader.LoadProgress += (msg) =>
+            {
+                if (string.IsNullOrWhiteSpace(msg)) return;
+                _loadingLogHistory.Add(msg);
+                if (_loadingLogHistory.Count > 4)
+                {
+                    _loadingLogHistory.RemoveAt(0);
+                }
+                if (_loadingLogLabel != null)
+                {
+                    _loadingLogLabel.Text = string.Join("\n", _loadingLogHistory);
+                }
+            };
             loader.LoadFinished += () => ShowLoading(false);
             loader.HeroLoaded += OnHeroLoaded;
             loader.HeroUnloaded += OnHeroUnloaded;
@@ -862,6 +937,11 @@ public partial class StudioUIManager : CanvasLayer
 
     public void ShowLoading(bool show, string message = "Loading character model...")
     {
+        if (show)
+        {
+            _loadingLogHistory.Clear();
+            if (_loadingLogLabel != null) _loadingLogLabel.Text = "Initializing load...";
+        }
         if (_loadingOverlay != null) _loadingOverlay.Visible = show;
         if (_loadingLabel != null && message != null) _loadingLabel.Text = message;
         UpdateModalsState();

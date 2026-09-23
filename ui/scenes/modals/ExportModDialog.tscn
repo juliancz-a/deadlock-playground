@@ -277,6 +277,14 @@ layout_mode = 2
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_confirm")
 text = "Confirm & Export"
 
+[node name="LblCommunityModWarning" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123438]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.72, 0.35, 1)
+theme_override_font_sizes/font_size = 11
+autowrap_mode = 3
+text = "⚠ This contains painted textures over a third-party community mod. Intended strictly for personal use. If you plan to share or redistribute this package, make sure to review and respect the original creator's license and permissions."
+
 [node name="FolderDialog" type="FileDialog" parent="." unique_id=987123437]
 title = "Open a Directory"
 size = Vector2i(750, 500)

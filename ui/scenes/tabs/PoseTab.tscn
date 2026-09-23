@@ -1,8 +1,11 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://ui/scripts/tabs/PoseTabUI.cs" id="1_pose"]
+[ext_resource type="Texture2D" path="res://assets/at-icons/play.svg" id="2_play"]
+[ext_resource type="Texture2D" path="res://assets/at-icons/stop.svg" id="3_stop"]
+[ext_resource type="Texture2D" path="res://assets/icons/loop.svg" id="4_loop"]
 
-[node name="PoseTab" type="VBoxContainer" node_paths=PackedStringArray("_animOptionButton", "_btnApplyPose", "_btnResetAllPoses")]
+[node name="PoseTab" type="VBoxContainer" node_paths=PackedStringArray("_animSearch", "_animTree", "_timelineSlider", "_timeLabel", "_btnPlayPause", "_btnStop", "_btnLoop", "_optSpeed", "_btnApplyPose", "_btnResetAllPoses")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -10,38 +13,128 @@ grow_horizontal = 2
 grow_vertical = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 script = ExtResource("1_pose")
-_animOptionButton = NodePath("AnimGroup/AnimOptionButton")
-_btnApplyPose = NodePath("AnimGroup/HBoxButtons/BtnApplyPose")
-_btnResetAllPoses = NodePath("AnimGroup/HBoxButtons/BtnResetAllPoses")
+_animSearch = NodePath("AnimGroup/AnimSearch")
+_animTree = NodePath("AnimGroup/AnimTree")
+_timelineSlider = NodePath("TransportGroup/TimelineContainer/TimelineSlider")
+_timeLabel = NodePath("TransportGroup/TimelineContainer/TimeLabel")
+_btnPlayPause = NodePath("TransportGroup/PlaybackControls/BtnPlayPause")
+_btnStop = NodePath("TransportGroup/PlaybackControls/BtnStop")
+_btnLoop = NodePath("TransportGroup/PlaybackControls/BtnLoop")
+_optSpeed = NodePath("TransportGroup/PlaybackControls/OptSpeed")
+_btnApplyPose = NodePath("TransportGroup/ActionButtons/BtnApplyPose")
+_btnResetAllPoses = NodePath("TransportGroup/ActionButtons/BtnResetAllPoses")
 
 [node name="AnimGroup" type="VBoxContainer" parent="."]
 layout_mode = 2
+size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="AnimLabel" type="Label" parent="AnimGroup"]
+[node name="AnimHeader" type="HBoxContainer" parent="AnimGroup"]
 layout_mode = 2
+
+[node name="AnimLabel" type="Label" parent="AnimGroup/AnimHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"TitleLabel"
 text = "Animation Sequences"
 
-[node name="AnimOptionButton" type="OptionButton" parent="AnimGroup"]
-custom_minimum_size = Vector2(0, 32)
+[node name="AnimSearch" type="LineEdit" parent="AnimGroup"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+placeholder_text = "Search animations..."
+clear_button_enabled = true
+
+[node name="AnimTree" type="Tree" parent="AnimGroup"]
+custom_minimum_size = Vector2(0, 220)
 layout_mode = 2
 size_flags_horizontal = 3
-search_bar_enabled = true
+size_flags_vertical = 3
+clip_contents = true
+hide_root = true
+select_mode = 1
 
-[node name="HBoxButtons" type="HBoxContainer" parent="AnimGroup"]
+[node name="TransportGroup" type="VBoxContainer" parent="."]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="BtnApplyPose" type="Button" parent="AnimGroup/HBoxButtons"]
+[node name="TimelineContainer" type="HBoxContainer" parent="TransportGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TimelineSlider" type="HSlider" parent="TransportGroup/TimelineContainer"]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+step = 0.01
+
+[node name="TimeLabel" type="Label" parent="TransportGroup/TimelineContainer"]
+custom_minimum_size = Vector2(95, 0)
+layout_mode = 2
+size_flags_vertical = 4
+text = "00.00s / 00.00s"
+horizontal_alignment = 2
+
+[node name="PlaybackControls" type="HBoxContainer" parent="TransportGroup"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnPlayPause" type="Button" parent="TransportGroup/PlaybackControls"]
+custom_minimum_size = Vector2(36, 32)
+layout_mode = 2
+tooltip_text = "Play / Pause Animation"
+toggle_mode = true
+icon = ExtResource("2_play")
+icon_alignment = 1
+expand_icon = true
+
+[node name="BtnStop" type="Button" parent="TransportGroup/PlaybackControls"]
+custom_minimum_size = Vector2(36, 32)
+layout_mode = 2
+tooltip_text = "Stop & Rewind to Frame 0"
+icon = ExtResource("3_stop")
+icon_alignment = 1
+expand_icon = true
+
+[node name="BtnLoop" type="Button" parent="TransportGroup/PlaybackControls"]
+custom_minimum_size = Vector2(36, 32)
+layout_mode = 2
+tooltip_text = "Toggle Looping"
+toggle_mode = true
+button_pressed = true
+icon = ExtResource("4_loop")
+icon_alignment = 1
+expand_icon = true
+
+[node name="OptSpeed" type="OptionButton" parent="TransportGroup/PlaybackControls"]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Apply Pose"
+tooltip_text = "Playback Speed"
+selected = 2
+item_count = 4
+popup/item_0/text = "0.25x"
+popup/item_0/id = 0
+popup/item_1/text = "0.5x"
+popup/item_1/id = 1
+popup/item_2/text = "1.0x"
+popup/item_2/id = 2
+popup/item_3/text = "2.0x"
+popup/item_3/id = 3
 
-[node name="BtnResetAllPoses" type="Button" parent="AnimGroup/HBoxButtons"]
+[node name="ActionButtons" type="HBoxContainer" parent="TransportGroup"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnApplyPose" type="Button" parent="TransportGroup/ActionButtons"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Apply as Pose"
+
+[node name="BtnResetAllPoses" type="Button" parent="TransportGroup/ActionButtons"]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3

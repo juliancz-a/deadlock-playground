@@ -107,9 +107,9 @@ namespace DeadlockPlayground.Tools
             AddDefault("Camera", "camera_focus", "Focus Model", "Recenter and focus camera on character model", Key.F, ctrl: true);
 
             // 3. Bones / Rigging
-            AddDefault("Bones / Rigging", "view_xray", "Toggle X-Ray", "Toggle Submesh Bone & Wireframe X-Ray mode", Key.X);
-            AddDefault("Bones / Rigging", "bones_ik_toggle", "Toggle IK Handles", "Toggle Inverse Kinematics limb handles", Key.I);
-            AddDefault("Bones / Rigging", "bones_reset_pose", "Reset Skeleton Pose", "Reset character skeleton to default bind pose", Key.P, ctrl: true);
+            AddDefault("Bones", "view_xray", "Toggle X-Ray", "Toggle Submesh Bone & Wireframe X-Ray mode", Key.X);
+            AddDefault("Bones", "bones_ik_toggle", "Toggle IK Handles", "Toggle Inverse Kinematics limb handles", Key.I);
+            AddDefault("Bones", "bones_reset_pose", "Reset Skeleton Pose", "Reset character skeleton to default bind pose", Key.P, ctrl: true);
         }
 
         private static void AddDefault(string category, string action, string name, string desc, Key key, 

@@ -29,6 +29,7 @@ public partial class ExportModDialog : CanvasLayer
     [Export] private Label _lblTargetVpkInfo;
     [Export] private Button _btnConfirmExport;
     [Export] private Button _btnCancel;
+    [Export] private Label _lblCommunityModWarning;
     [Export] private Button _btnDownloadCsdk;
     [Export] private FileDialog _folderDialog;
     [Export] private FileDialog _compilerFileDialog;
@@ -72,6 +73,7 @@ public partial class ExportModDialog : CanvasLayer
         _lblTargetVpkInfo ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/LblTargetVpkInfo");
         _btnConfirmExport ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnConfirmExport");
         _btnCancel ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnCancel");
+        _lblCommunityModWarning ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/LblCommunityModWarning");
         _btnDownloadCsdk ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxCsdkDownload/BtnDownloadCsdk");
 
         _folderDialog ??= GetNodeOrNull<FileDialog>("FolderDialog");
@@ -247,7 +249,8 @@ public partial class ExportModDialog : CanvasLayer
         string heroDisplayName,
         IReadOnlyList<SubmeshNodeInfo> submeshes,
         Image preBakedAtlas,
-        GamePathManager pathManager)
+        GamePathManager pathManager,
+        bool isCommunityMod = false)
     {
         FindNodes();
 
@@ -256,6 +259,11 @@ public partial class ExportModDialog : CanvasLayer
         _allSubmeshes = submeshes != null ? submeshes.ToList() : new List<SubmeshNodeInfo>();
         _preBakedAtlas = preBakedAtlas;
         _pathManager = pathManager;
+
+        if (_lblCommunityModWarning != null)
+        {
+            _lblCommunityModWarning.Visible = isCommunityMod;
+        }
 
         if (_txtModName != null)
         {

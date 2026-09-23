@@ -1,3 +1,4 @@
+#pragma warning disable CS0618
 using Godot;
 using SteamDatabase.ValvePak;
 using System;
@@ -18,6 +19,8 @@ public partial class VpkLoaderTest : Node3D
 {
     [Signal]
     public delegate void LoadStartedEventHandler();
+    [Signal]
+    public delegate void LoadProgressEventHandler(string message);
     [Signal]
     public delegate void LoadFinishedEventHandler();
     [Signal]
@@ -48,6 +51,22 @@ public partial class VpkLoaderTest : Node3D
     private Node3D _currentHeroNode;
     public Node3D CurrentHeroNode => _currentHeroNode;
     private PoseEditorUI _currentPoseEditor;
+
+    private ValveResourceFormat.Resource _currentVrfResource;
+    private Model _currentVrfModel;
+    private IFileLoader _currentFileLoader;
+    public List<DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo> CurrentHeroAnimations { get; private set; } = new();
+
+    public Godot.Animation DecodeAnimation(DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info, Skeleton3D skeleton, AnimationPlayer animPlayer)
+    {
+        if (_currentVrfModel == null || info == null || skeleton == null || animPlayer == null) return null;
+        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel);
+    }
+
+	private void EmitLoadProgress(string msg)
+	{
+		EmitSignal(SignalName.LoadProgress, msg);
+	}
 
 	public void SetActiveAddon(string addonVpkPath, AddonModInfo modInfo = null)
 	{
@@ -165,6 +184,7 @@ public partial class VpkLoaderTest : Node3D
 		HeroName = heroKey;
 		HeroModelName = Path.GetFileNameWithoutExtension(internalRoute);
 		EmitSignal(SignalName.LoadStarted);
+		EmitSignal(SignalName.LoadProgress, $"Reading archive for '{displayName}'...");
 
 		// 1. Cleanup old hero completely
 		CleanupCurrentHero();
@@ -234,9 +254,13 @@ public partial class VpkLoaderTest : Node3D
 			}
 
 			GD.Print($"Modelo encontrado: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName} (Origen: {(modelOwnerPackage == addonPackage ? "Addon" : "Base")})");
+			EmitSignal(SignalName.LoadProgress, $"Found model: {entry.FileName}.{entry.TypeName} ({(modelOwnerPackage == addonPackage ? "Addon" : "Base Game")})");
 
 			byte[] glbBytes = null;
 			Dictionary<string, List<string>> meshMaterialMap = null;
+			IFileLoader fileLoader = null;
+
+			EmitSignal(SignalName.LoadProgress, "Extracting Source 2 model and draw calls...");
 
 			// Run heavy extraction and GLTF export in background thread
 			await Task.Run(() => 
@@ -252,8 +276,8 @@ public partial class VpkLoaderTest : Node3D
 
 				// 3. Exportamos a glTF 2.0 (GLB binario) sin pistas continuas pesadas (Zero-RAM Pose Mode)
 				GD.Print("Generando GLB con VRF (Zero-RAM Pose Mode)...");
+				CallDeferred(nameof(EmitLoadProgress), "Compiling rigged glTF 2.0 geometry & bones...");
 
-				IFileLoader fileLoader;
 				if (addonPackage != null)
 				{
 					var primaryLoader = new GameFileLoader(addonPackage, entry.DirectoryName);
@@ -267,102 +291,165 @@ public partial class VpkLoaderTest : Node3D
 
 				var exporter = new GltfModelExporter(fileLoader)
 				{
-					ExportAnimations = true,
+					ExportAnimations = true, // REQUIRED: Generates Skeleton3D, joints, skins, and inverse bind matrices
 					AdaptTextures = true,
 					ExportMaterials = false,
 					ExportExtras = false,
-					ProgressReporter = new Progress<string>(msg => GD.Print($"[VRF] {msg}"))
+					ProgressReporter = new Progress<string>(msg =>
+					{
+						GD.Print($"[VRF] {msg}");
+						CallDeferred(nameof(EmitLoadProgress), msg);
+					})
 				};
 
-			// Curated high-value posing animation filter to keep GLB lightweight while exporting undeformed, retargeted animations
-			if (resource.DataBlock is Model vModel)
-			{
+				// Pre-Export Pruning: Keep ExportAnimations = true, but filter down registered sequences
+				// from ~80 to ~15-20 usable discrete action clips to keep GLB export under 1 second
+				if (resource.DataBlock is Model vModel)
+				{
+					try
+					{
+						var allAnims = vModel.GetAllAnimations(fileLoader).ToList();
+
+						var validAnims = allAnims.Where(a =>
+						{
+							if (DeadlockPlayground.Tools.DeadlockAnimLoader.IsBlacklisted(a.Name, a.IsAdditive)) return false;
+
+							string n = a.Name.ToLowerInvariant();
+							if (n.Contains("_nw") || n.Contains("_ne") || n.Contains("_sw") || n.Contains("_se") ||
+							    n.EndsWith("_w") || n.EndsWith("_e") || n.EndsWith("_s")) return false;
+
+							return true;
+						}).ToList();
+
+						var categorized = validAnims
+							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name)))
+							.ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
+
+						// Idle clips (take up to 4, prioritized)
+						if (categorized.TryGetValue("Idle", out var idles))
+						{
+							selectedAnims.AddRange(idles.OrderBy(a =>
+							{
+								string n = a.Name.ToLowerInvariant();
+								if (n.Contains("stand_idle") || n.Contains("primary_idle") || n.Contains("ui_hero_select")) return 1;
+								if (n.Contains("idle")) return 2;
+								return 3;
+							}).Take(4));
+						}
+
+						// Locomotion clips (walk, run, sprint, jump - take up to 4)
+						if (categorized.TryGetValue("Locomotion", out var locos))
+						{
+							selectedAnims.AddRange(locos.OrderBy(a =>
+							{
+								string n = a.Name.ToLowerInvariant();
+								if (n.Contains("run")) return 1;
+								if (n.Contains("walk")) return 2;
+								if (n.Contains("sprint")) return 3;
+								return 4;
+							}).Take(4));
+						}
+
+						// Combat clips (shoot, reload, melee, aim - take up to 4)
+						if (categorized.TryGetValue("Combat", out var combats))
+						{
+							selectedAnims.AddRange(combats.OrderBy(a =>
+							{
+								string n = a.Name.ToLowerInvariant();
+								if (n.Contains("shoot") || n.Contains("fire")) return 1;
+								if (n.Contains("reload")) return 2;
+								if (n.Contains("melee")) return 3;
+								return 4;
+							}).Take(4));
+						}
+
+						// Abilities clips (take up to 3)
+						if (categorized.TryGetValue("Abilities", out var abilities))
+						{
+							selectedAnims.AddRange(abilities.Take(3));
+						}
+
+						// Emotes & Expressions (take up to 3)
+						if (categorized.TryGetValue("Emotes & Expressions", out var emotes))
+						{
+							selectedAnims.AddRange(emotes.Take(3));
+						}
+
+						// Reactions (take up to 2)
+						if (categorized.TryGetValue("Reactions", out var reactions))
+						{
+							selectedAnims.AddRange(reactions.Take(2));
+						}
+
+						// Fallback if none matched
+						if (selectedAnims.Count == 0 && validAnims.Count > 0)
+						{
+							selectedAnims = validAnims.Take(10).ToList();
+						}
+
+						foreach (var a in selectedAnims)
+						{
+							string raw = a.Name;
+							string clean = raw.Replace('\\', '/');
+							string withoutExt = Path.ChangeExtension(clean, null);
+							exporter.AnimationFilter.Add(raw);
+							exporter.AnimationFilter.Add(clean);
+							exporter.AnimationFilter.Add("@" + clean);
+							exporter.AnimationFilter.Add(withoutExt);
+							exporter.AnimationFilter.Add(Path.GetFileName(clean));
+							exporter.AnimationFilter.Add(Path.GetFileName(withoutExt));
+						}
+
+						GD.Print($"[VRF] Pre-export pruning: registered {selectedAnims.Count} discrete high-value sequences in AnimationFilter.");
+					}
+					catch (Exception ex)
+					{
+						GD.PrintErr($"[VRF] Error populating animation filter: {ex.Message}");
+					}
+				}
+
+				string tempGlbPath = Path.Combine(Path.GetTempPath(), $"{heroKey}_{Guid.NewGuid():N}.glb");
 				try
 				{
-					var allAnims = vModel.GetAllAnimations(fileLoader).ToList();
-					string[] targetKeywords = new[]
-					{
-						"parry", "reload", "stand_idle", "primary_idle", "crouch_idle", "primary_crouch_idle",
-						"shoot_idle", "primary_shoot", "ui_hero_select", "ui_pose", "hero_pose",
-						"melee", "cast", "attack", "idle"
-					};
-
-					int GetPriority(string name)
-					{
-						if (name.Contains("parry")) return 1;
-						if (name.Contains("reload")) return 2;
-						if (name.Contains("stand_idle") || name.Contains("primary_idle") || name.Contains("ui_hero_select")) return 3;
-						return 4;
-					}
-
-					var matchedAnims = allAnims.Where(a =>
-					{
-						string n = a.Name.ToLowerInvariant();
-						bool matchesKeyword = targetKeywords.Any(k => n.Contains(k));
-						if (!matchesKeyword) return false;
-
-						if (n.Contains("_nw") || n.Contains("_ne") || n.Contains("_sw") || n.Contains("_se") ||
-						    n.EndsWith("_w") || n.EndsWith("_e") || n.EndsWith("_s")) return false;
-
-						if (n.Contains("ragdoll") || n.Contains("death") || n.Contains("knockdown") ||
-						    n.Contains("flinch") || n.Contains("drown") || n.Contains("hit_") || n.Contains("pain_")) return false;
-
-						return true;
-					})
-					.OrderBy(a => GetPriority(a.Name.ToLowerInvariant()))
-					.Take(40)
-					.ToList();
-
-					if (matchedAnims.Count == 0 && allAnims.Count > 0)
-					{
-						matchedAnims = allAnims.Take(10).ToList();
-					}
-
-					foreach (var a in matchedAnims)
-					{
-						string raw = a.Name;
-						string clean = raw.Replace('\\', '/');
-						string withoutExt = Path.ChangeExtension(clean, null);
-						exporter.AnimationFilter.Add(raw);
-						exporter.AnimationFilter.Add(clean);
-						exporter.AnimationFilter.Add("@" + clean);
-						exporter.AnimationFilter.Add(withoutExt);
-						exporter.AnimationFilter.Add(Path.GetFileName(clean));
-						exporter.AnimationFilter.Add(Path.GetFileName(withoutExt));
-					}
-					GD.Print($"[VRF] Exporting {matchedAnims.Count} curated posing animations into GLTF.");
+					exporter.Export(resource, tempGlbPath);
+					glbBytes = File.ReadAllBytes(tempGlbPath);
 				}
-				catch (Exception ex)
+				finally
 				{
-					GD.PrintErr($"[VRF] Error populating animation filter: {ex.Message}");
+					if (File.Exists(tempGlbPath))
+					{
+						File.Delete(tempGlbPath);
+					}
 				}
-			}
-
-			string tempGlbPath = Path.Combine(Path.GetTempPath(), $"{heroKey}_{Guid.NewGuid():N}.glb");
-			try
-			{
-				exporter.Export(resource, tempGlbPath);
-				glbBytes = File.ReadAllBytes(tempGlbPath);
-			}
-			finally
-			{
-				if (File.Exists(tempGlbPath))
-				{
-					File.Delete(tempGlbPath);
-				}
-			}
-		});
+			});
 
 		if (glbBytes != null)
 		{
 			GD.Print($"GLB generado con éxito ({glbBytes.Length / (1024 * 1024)} MB). Importando a Godot...");
+			EmitSignal(SignalName.LoadProgress, "Importing 3D skeleton and mesh parts into Godot...");
+			
+			// Clean up previous VRF resource if active
+			_currentVrfResource?.Dispose();
+			_currentVrfResource = null;
+			_currentVrfModel = null;
+			_currentFileLoader = fileLoader;
+
 			modelOwnerPackage.ReadEntry(entry, out byte[] modelData);
-			using var modelRes = new ValveResourceFormat.Resource();
-			using var ms = new MemoryStream(modelData);
+			var modelRes = new ValveResourceFormat.Resource();
+			var ms = new MemoryStream(modelData);
 			modelRes.Read(ms);
 			var vrfModel = modelRes.DataBlock as Model;
+			_currentVrfResource = modelRes;
+			_currentVrfModel = vrfModel;
 
+			// Index sequence metadata without decoding frames (Source 2 Viewer VRF pattern)
+			CurrentHeroAnimations = DeadlockPlayground.Tools.DeadlockAnimLoader.IndexAnimations(vrfModel, fileLoader);
+
+			EmitSignal(SignalName.LoadProgress, "Resolving hero materials and compiling PBR shaders...");
 			InstantiateInScene(glbBytes, heroKey, basePackage, meshMaterialMap, vrfModel, entry.DirectoryName, addonPackage);
+			EmitSignal(SignalName.LoadProgress, $"Finished loading {displayName}.");
 		}
 
 		EmitSignal(SignalName.LoadFinished);
@@ -386,12 +473,23 @@ public partial class VpkLoaderTest : Node3D
 
         if (_currentHeroNode != null)
         {
+            var animPlayer = SearchAnimationPlayer(_currentHeroNode);
+            if (animPlayer != null)
+            {
+                DeadlockAnimLoader.ClearAnimationLibrary(animPlayer);
+            }
             DeadlockAnimLoader.ClearHeroPoses(_currentHeroNode);
             DisposeNodeRecursively(_currentHeroNode);
             _currentHeroNode.GetParent()?.RemoveChild(_currentHeroNode);
             _currentHeroNode.QueueFree();
             _currentHeroNode = null;
         }
+
+        CurrentHeroAnimations.Clear();
+        _currentVrfResource?.Dispose();
+        _currentVrfResource = null;
+        _currentVrfModel = null;
+        _currentFileLoader = null;
 
         // Clean texture cache so reloading a hero or switching heroes never accesses disposed texture objects
         Source2MaterialHelper.cleanCache();
@@ -491,6 +589,9 @@ public partial class VpkLoaderTest : Node3D
 
 			// Apply initial submesh visibility rules (e.g. Viscous core/body, hair, weapons)
 			DeadlockMaterialResolver.ApplyInitialSubmeshVisibility(modelScene, hero);
+
+			// Ensure two-sided rendering on character clothing so inner fabric is never culled
+			ProceduralClothSolver.EnforceClothTwoSidedMaterials(modelScene);
 
 			// Note: Retargeted, clean poses were exported directly into glTF AnimationPlayer by VRF.
 			// DeadlockAnimLoader.LoadHeroPoses is bypassed here so it does not clear AnimationPlayer or push unretargeted raw bone frames.

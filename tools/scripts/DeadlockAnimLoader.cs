@@ -31,6 +31,19 @@ public static class DeadlockAnimLoader
         public Dictionary<string, (Godot.Vector3 Position, Godot.Quaternion Rotation)> BoneTransforms { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
+    public class AnimSequenceInfo
+    {
+        public string RawName { get; set; } = string.Empty;
+        public string CleanName { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string Category { get; set; } = "Misc / Other";
+        public int FrameCount { get; set; } = 1;
+        public float Fps { get; set; } = 30f;
+        public float Duration { get; set; } = 0.1f;
+        public bool IsLooping { get; set; }
+        public ValveResourceFormat.ResourceTypes.ModelAnimation.Animation VrfAnimation { get; set; }
+    }
+
     private static readonly Dictionary<int, Dictionary<string, PoseData>> _heroPosesCache = new();
 
     /// <summary>
@@ -273,7 +286,332 @@ public static class DeadlockAnimLoader
         _heroPosesCache.Remove(heroId);
     }
 
-    #region Animation Filtering & Pose Categorization
+    #region Animation Filtering, Classification & Lazy Decoding
+
+    /// <summary>
+    /// Checks whether an animation sequence is an internal, additive, procedural, or developer/test sequence.
+    /// </summary>
+    public static bool IsBlacklisted(string rawName, bool isAdditive)
+    {
+        if (string.IsNullOrWhiteSpace(rawName)) return true;
+
+        string lower = rawName.ToLowerInvariant();
+
+        // 1. Additive / Blended sequences
+        if (isAdditive || lower.Contains('@') || lower.Contains("_add") || lower.Contains("_delta") ||
+            lower.Contains("delta_") || lower.Contains("aim_matrix") || lower.Contains("turn_matrix") ||
+            lower.Contains("corrective_"))
+        {
+            return true;
+        }
+
+        // 2. Procedural / Helper sequences
+        if (lower.Contains("ragdoll") || lower.Contains("blend_space") || lower.Contains("ik_calc") ||
+            lower.Contains("lean_"))
+        {
+            return true;
+        }
+
+        // 3. Developer / Test sequences
+        string fileName = Path.GetFileName(rawName.Replace('\\', '/')).ToLowerInvariant();
+        if (fileName.StartsWith("test_") || fileName.StartsWith("dev_") || fileName.StartsWith("cam_") ||
+            fileName.StartsWith("camera_") || lower.Contains("/test_") || lower.Contains("/dev_") ||
+            lower.Contains("/cam_") || lower.Contains("/camera_"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Classifies an animation into semantic categories based on clip keywords.
+    /// </summary>
+    public static string ClassifyCategory(string cleanName)
+    {
+        string lower = cleanName.ToLowerInvariant();
+
+        // Idle: idle, id_, stand, rest
+        if (lower.Contains("idle") || lower.Contains("id_") || lower.Contains("stand") || lower.Contains("rest"))
+            return "Idle";
+
+        // Locomotion: walk, run, sprint, jog, dash, jump, mantle, slide, crouch
+        if (lower.Contains("walk") || lower.Contains("run") || lower.Contains("sprint") || lower.Contains("jog") ||
+            lower.Contains("dash") || lower.Contains("jump") || lower.Contains("mantle") || lower.Contains("slide") ||
+            lower.Contains("crouch"))
+            return "Locomotion";
+
+        // Combat: attack, shoot, fire, reload, aim, melee
+        if (lower.Contains("attack") || lower.Contains("shoot") || lower.Contains("fire") || lower.Contains("reload") ||
+            lower.Contains("aim") || lower.Contains("melee"))
+            return "Combat";
+
+        // Abilities: ability, cast, skill, ult
+        if (lower.Contains("ability") || lower.Contains("cast") || lower.Contains("skill") || lower.Contains("ult"))
+            return "Abilities";
+
+        // Emotes & Expressions: taunt, cheer, flair, intro, win, portrait
+        if (lower.Contains("taunt") || lower.Contains("cheer") || lower.Contains("flair") || lower.Contains("intro") ||
+            lower.Contains("win") || lower.Contains("portrait"))
+            return "Emotes & Expressions";
+
+        // Reactions: hit, flinch, stun, death, die
+        if (lower.Contains("hit") || lower.Contains("flinch") || lower.Contains("stun") || lower.Contains("death") ||
+            lower.Contains("die"))
+            return "Reactions";
+
+        // Misc / Other: default fallback
+        return "Misc / Other";
+    }
+
+    /// <summary>
+    /// Determines initial looping heuristic for an animation sequence.
+    /// </summary>
+    public static bool DetermineLooping(string cleanName, string category)
+    {
+        string lower = cleanName.ToLowerInvariant();
+        if (lower.Contains("loop") || lower.Contains("cycle")) return true;
+        if (category == "Idle") return true;
+        if (category == "Locomotion")
+        {
+            if (lower.Contains("jump") || lower.Contains("dash") || lower.Contains("mantle") || lower.Contains("slide"))
+                return false;
+            return true;
+        }
+        return false;
+    }
+
+    public static int GetCategoryPriority(string category) => category switch
+    {
+        "Idle" => 1,
+        "Locomotion" => 2,
+        "Combat" => 3,
+        "Abilities" => 4,
+        "Emotes & Expressions" => 5,
+        "Reactions" => 6,
+        _ => 7
+    };
+
+    /// <summary>
+    /// Fast VRF metadata indexer: queries animations from the model without decoding bone transform curves.
+    /// Emulates Source 2 Viewer (VRF) memory footprint and instant load times.
+    /// </summary>
+    public static List<AnimSequenceInfo> IndexAnimations(Model vrfModel, IFileLoader fileLoader)
+    {
+        var result = new List<AnimSequenceInfo>();
+        if (vrfModel == null || fileLoader == null) return result;
+
+        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> allAnimations;
+        try
+        {
+            allAnimations = vrfModel.GetAllAnimations(fileLoader).ToList();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[AnimLoader] Error retrieving model animations: {ex.Message}");
+            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>().ToList();
+        }
+
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var anim in allAnimations)
+        {
+            string rawName = anim.Name;
+            if (IsBlacklisted(rawName, anim.IsAdditive)) continue;
+
+            string cleanName = SanitizePoseName(rawName);
+            if (string.IsNullOrWhiteSpace(cleanName) || !seenNames.Add(cleanName)) continue;
+
+            string category = ClassifyCategory(cleanName);
+            float fps = anim.Fps > 0 ? anim.Fps : 30f;
+            int frameCount = anim.FrameCount > 0 ? anim.FrameCount : 1;
+            float duration = anim.Duration > 0 ? anim.Duration : (frameCount > 1 ? (frameCount - 1) / fps : 0.1f);
+            bool isLooping = DetermineLooping(cleanName, category);
+
+            result.Add(new AnimSequenceInfo
+            {
+                RawName = rawName,
+                CleanName = cleanName,
+                DisplayName = FormatDisplayName(cleanName),
+                Category = category,
+                FrameCount = frameCount,
+                Fps = fps,
+                Duration = duration,
+                IsLooping = isLooping,
+                VrfAnimation = anim
+            });
+        }
+
+        // Sort by category priority, then alphabetically by display name
+        result.Sort((a, b) =>
+        {
+            int catOrderA = GetCategoryPriority(a.Category);
+            int catOrderB = GetCategoryPriority(b.Category);
+            if (catOrderA != catOrderB) return catOrderA.CompareTo(catOrderB);
+            return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+        });
+
+        GD.Print($"[AnimLoader] Indexed {result.Count} discrete sequences across categories.");
+        return result;
+    }
+
+    /// <summary>
+    /// Decodes solely the selected sequence's keyframe data on-demand using ValveResourceFormat
+    /// and registers it into Godot's AnimationLibrary.
+    /// </summary>
+    public static Godot.Animation DecodeAnimationToGodot(
+        AnimSequenceInfo info,
+        Skeleton3D skeleton,
+        AnimationPlayer animPlayer,
+        Model vrfModel)
+    {
+        if (info == null || skeleton == null || animPlayer == null || vrfModel == null || info.VrfAnimation == null)
+            return null;
+
+        AnimationLibrary animLibrary;
+        if (animPlayer.HasAnimationLibrary(""))
+        {
+            animLibrary = animPlayer.GetAnimationLibrary("");
+        }
+        else
+        {
+            animLibrary = new AnimationLibrary();
+            animPlayer.AddAnimationLibrary("", animLibrary);
+        }
+
+        if (animLibrary.HasAnimation(info.CleanName))
+        {
+            return animLibrary.GetAnimation(info.CleanName);
+        }
+
+        var vrfSkeleton = vrfModel.Skeleton;
+        if (vrfSkeleton == null || vrfSkeleton.Bones.Length == 0) return null;
+
+        float fps = info.Fps > 0 ? info.Fps : 30f;
+        int totalFrames = Math.Max(1, info.FrameCount);
+        float duration = info.Duration > 0 ? info.Duration : (totalFrames > 1 ? (totalFrames - 1) / fps : 0.1f);
+
+        var godotAnim = new Godot.Animation
+        {
+            Length = Math.Max(0.01f, duration),
+            Step = 1.0f / fps,
+            LoopMode = info.IsLooping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None
+        };
+
+        string skeletonNodePath = animPlayer.GetPathTo(skeleton);
+
+        // Map bones that exist in both VRF skeleton and Godot Skeleton3D
+        var boneTrackMap = new Dictionary<int, (int PosTrack, int RotTrack)>();
+        for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
+        {
+            string boneName = vrfSkeleton.Bones[b].Name;
+            int godotBoneIdx = skeleton.FindBone(boneName);
+            if (godotBoneIdx == -1) continue;
+
+            int pTrack = godotAnim.AddTrack(Godot.Animation.TrackType.Position3D);
+            godotAnim.TrackSetPath(pTrack, $"{skeletonNodePath}:{boneName}");
+
+            int rTrack = godotAnim.AddTrack(Godot.Animation.TrackType.Rotation3D);
+            godotAnim.TrackSetPath(rTrack, $"{skeletonNodePath}:{boneName}");
+
+            boneTrackMap[b] = (pTrack, rTrack);
+        }
+
+        var frame = new Frame(vrfSkeleton, vrfModel.FlexControllers);
+        var rootBone = vrfSkeleton.Bones.FirstOrDefault(b => b.Parent == null);
+
+        for (int f = 0; f < totalFrames; f++)
+        {
+            float time = totalFrames > 1 ? (f / fps) : 0f;
+            if (time > (float)godotAnim.Length) time = (float)godotAnim.Length;
+
+            frame.Clear(vrfSkeleton);
+            frame.FrameIndex = f;
+            info.VrfAnimation.DecodeFrame(frame);
+
+            if (info.VrfAnimation.IsAdditive)
+            {
+                info.VrfAnimation.ComposeAdditiveOverBindPose(frame.Bones, vrfSkeleton);
+            }
+
+            for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
+            {
+                if (!boneTrackMap.TryGetValue(b, out var tracks)) continue;
+
+                var vrfBone = vrfSkeleton.Bones[b];
+                var fb = frame.Bones[b];
+                bool isRoot = (vrfBone == rootBone);
+
+                var (convPos, convRot) = BakeConversion(fb.Position, fb.Angle, isRoot);
+
+                if (isRoot)
+                {
+                    bool isShootOrRecoil = info.CleanName.Contains("shoot") || info.CleanName.Contains("fire") ||
+                                           info.CleanName.Contains("attack") || info.CleanName.Contains("recoil");
+                    if (isShootOrRecoil)
+                    {
+                        convPos = new System.Numerics.Vector3(0f, convPos.Y, 0f);
+                    }
+                }
+
+                var gPos = new Godot.Vector3(convPos.X, convPos.Y, convPos.Z);
+                var gRot = new Godot.Quaternion(convRot.X, convRot.Y, convRot.Z, convRot.W);
+
+                godotAnim.PositionTrackInsertKey(tracks.PosTrack, time, gPos);
+                godotAnim.RotationTrackInsertKey(tracks.RotTrack, time, gRot);
+            }
+        }
+
+        animLibrary.AddAnimation(info.CleanName, godotAnim);
+        GD.Print($"[AnimLoader] Decoded and registered '{info.CleanName}' ({godotAnim.Length:F2}s, {totalFrames} frames) into AnimationLibrary.");
+        return godotAnim;
+    }
+
+    /// <summary>
+    /// Clears animations in AnimationLibrary to instantly reclaim RAM.
+    /// </summary>
+    public static void ClearAnimationLibrary(AnimationPlayer animPlayer)
+    {
+        if (animPlayer == null) return;
+        if (animPlayer.HasAnimationLibrary(""))
+        {
+            var lib = animPlayer.GetAnimationLibrary("");
+            foreach (var name in lib.GetAnimationList())
+            {
+                lib.RemoveAnimation(name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks whether a bone is a procedural cloth or dress flap bone governed by ProceduralClothSolver.
+    /// </summary>
+    public static bool IsClothOrFlapBone(string boneName)
+    {
+        if (string.IsNullOrEmpty(boneName)) return false;
+        return boneName.StartsWith("$cloth_", StringComparison.OrdinalIgnoreCase)
+            || boneName.StartsWith("dress_cut_", StringComparison.OrdinalIgnoreCase)
+            || boneName.StartsWith("dress_out_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Strips any tracks for procedural cloth bones from a Godot Animation so AnimationPlayer
+    /// does not overwrite conformed cloth poses with static bind pose keyframes.
+    /// </summary>
+    public static void StripClothTracks(Godot.Animation anim)
+    {
+        if (anim == null) return;
+        for (int i = anim.GetTrackCount() - 1; i >= 0; i--)
+        {
+            string path = anim.TrackGetPath(i).ToString();
+            int colonIdx = path.LastIndexOf(':');
+            string target = colonIdx != -1 ? path.Substring(colonIdx + 1) : path;
+            if (IsClothOrFlapBone(target))
+            {
+                anim.RemoveTrack(i);
+            }
+        }
+    }
 
     private static List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> FilterPoses(
         List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> rawAnims)
@@ -281,46 +619,10 @@ public static class DeadlockAnimLoader
         var result = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // High priority keywords for studio hero posing
-        string[] highPriorityKeywords = new[]
-        {
-            "stand_idle", "primary_idle", "idle", "ui_hero_select", "ui_pose",
-            "hero_pose", "ui_hero", "idle_loadout", "out_of_combat_stand_idle",
-            "stand", "crouch_idle", "primary_crouch_idle", "crouch",
-            "walk", "primary_walk", "walk_n", "walk_center",
-            "run", "primary_run", "run_n", "run_c", "run_center", "sprint",
-            "primary_shoot", "shoot_idle", "hip_fire", "primary_hip_fire", "run_shoot", "shoot",
-            "melee", "cast", "attack", "reload", "jump", "dash", "aim"
-        };
-
-        // Garbage/debug keywords to unconditionally discard
-        string[] garbageKeywords = new[]
-        {
-            "ragdoll", "test_", "debug_", "_delta", "_face", "gesture_", "turn_",
-            "flinch_", "hit_", "pain_", "spawn_", "death_", "knockdown_inair",
-            "knockdown_large", "knockdown_medium", "mantle_", "stun_", "drown_"
-        };
-
         foreach (var anim in rawAnims)
         {
             string rawName = anim.Name;
-            if (string.IsNullOrWhiteSpace(rawName)) continue;
-
-            string lower = rawName.ToLowerInvariant();
-
-            // Discard garbage animations
-            if (garbageKeywords.Any(g => lower.Contains(g))) continue;
-
-            // Discard raw uncomposable additive layers unless they are high-value shoot/aim poses
-            if (anim.IsAdditive)
-            {
-                bool isShootOrAim = lower.Contains("shoot") || lower.Contains("fire") || lower.Contains("aim");
-                if (!isShootOrAim) continue;
-            }
-
-            // Check if matches high-value criteria
-            bool isHighValue = highPriorityKeywords.Any(k => lower.Contains(k));
-            if (!isHighValue) continue;
+            if (IsBlacklisted(rawName, anim.IsAdditive)) continue;
 
             string cleanName = SanitizePoseName(rawName);
             if (seenNames.Add(cleanName))
@@ -329,42 +631,10 @@ public static class DeadlockAnimLoader
             }
         }
 
-        // Ensure we always have at least one idle pose if available
-        if (result.Count == 0 && rawAnims.Count > 0)
-        {
-            result.AddRange(rawAnims.Take(10));
-        }
-
-        // Sort poses alphabetically by clean display name with idle/stand first
-        result.Sort((a, b) =>
-        {
-            string nameA = SanitizePoseName(a.Name).ToLowerInvariant();
-            string nameB = SanitizePoseName(b.Name).ToLowerInvariant();
-
-            int scoreA = GetPoseSortPriority(nameA);
-            int scoreB = GetPoseSortPriority(nameB);
-
-            if (scoreA != scoreB) return scoreA.CompareTo(scoreB);
-            return string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
-        });
-
         return result;
     }
 
-    private static int GetPoseSortPriority(string lowerName)
-    {
-        if (lowerName.Contains("stand_idle") || lowerName.Contains("primary_idle") || lowerName.Contains("hero_select")) return 1;
-        if (lowerName.Contains("idle")) return 2;
-        if (lowerName.Contains("crouch_idle")) return 3;
-        if (lowerName.Contains("stand")) return 4;
-        if (lowerName.Contains("crouch")) return 5;
-        if (lowerName.Contains("walk")) return 6;
-        if (lowerName.Contains("run")) return 7;
-        if (lowerName.Contains("shoot") || lowerName.Contains("fire")) return 8;
-        return 20;
-    }
-
-    private static string SanitizePoseName(string rawName)
+    public static string SanitizePoseName(string rawName)
     {
         string name = rawName.Replace('\\', '/');
 
@@ -393,7 +663,7 @@ public static class DeadlockAnimLoader
         return name.TrimStart('@');
     }
 
-    private static string FormatDisplayName(string cleanName)
+    public static string FormatDisplayName(string cleanName)
     {
         if (string.IsNullOrEmpty(cleanName)) return "";
         string formatted = cleanName.Replace('_', ' ');

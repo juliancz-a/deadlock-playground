@@ -194,7 +194,9 @@ public partial class PaintModExportPanelUI : PanelContainer
         if (_modDialogInstance != null)
         {
             var submeshes = _meshHierarchy?.Submeshes;
-            _modDialogInstance.Setup(heroCodename, heroDisplayName, submeshes, preBakedAtlas, _pathManager);
+            var vpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+            bool isCommunityMod = vpkLoader != null && (!string.IsNullOrWhiteSpace(vpkLoader.AddonVpkPath) || vpkLoader.ActiveAddonInfo != null);
+            _modDialogInstance.Setup(heroCodename, heroDisplayName, submeshes, preBakedAtlas, _pathManager, isCommunityMod);
             _modDialogInstance.Visible = true;
         }
     }

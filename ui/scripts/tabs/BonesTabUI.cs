@@ -72,6 +72,14 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
         SetXRay(!IsXRayEnabled);
     }
 
+    public void ToggleIK()
+    {
+        if (_checkMasterIK != null)
+        {
+            _checkMasterIK.ButtonPressed = !_checkMasterIK.ButtonPressed;
+        }
+    }
+
     public override void _Ready()
     {
         if (_sliderX != null) _sliderX.ValueChanged += (v) => OnSliderValueChanged(v, 0);

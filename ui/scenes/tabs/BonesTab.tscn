@@ -210,6 +210,9 @@ text = "Search & Pick Bone"
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
+fit_to_longest_item = false
+clip_text = true
+text_overrun_behavior = 3
 
 [node name="TransformGroup" type="VBoxContainer" parent="." unique_id=1521552237]
 layout_mode = 2
@@ -221,6 +224,8 @@ layout_mode = 2
 [node name="SelectedBoneLabel" type="Label" parent="TransformGroup/HeaderHBox" unique_id=539377409]
 layout_mode = 2
 size_flags_horizontal = 3
+autowrap_mode = 3
+text_overrun_behavior = 3
 text = "No Bone Selected"
 
 [node name="SliderXBox" type="HBoxContainer" parent="TransformGroup" unique_id=709309808]

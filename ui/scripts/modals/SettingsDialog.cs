@@ -464,6 +464,11 @@ public partial class SettingsDialog : PanelContainer
     {
         Visible = true;
         MoveToFront();
+        SetAnchorsPreset(LayoutPreset.Center);
+        OffsetLeft = -360;
+        OffsetTop = -270;
+        OffsetRight = 360;
+        OffsetBottom = 270;
         SyncFromSettings();
         UpdatePathFields();
         OnTabChanged(_tabContainer?.CurrentTab ?? 0);

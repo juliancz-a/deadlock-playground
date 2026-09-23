@@ -399,6 +399,16 @@ public partial class CameraTabUI : VBoxContainer
         _orbitCamera.RecenterOnTarget(targetCenter);
     }
 
+    public void ToggleProjection()
+    {
+        LinkReferences();
+        if (_camera == null) return;
+        var newType = _camera.Projection == Camera3D.ProjectionType.Perspective
+            ? Camera3D.ProjectionType.Orthogonal
+            : Camera3D.ProjectionType.Perspective;
+        SetProjection(newType);
+    }
+
     private Skeleton3D SearchSkeleton(Node node)
     {
         if (node is Skeleton3D sk) return sk;

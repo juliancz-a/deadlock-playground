@@ -486,11 +486,17 @@ public partial class CharacterTabUI : VBoxContainer
 
             item.Mesh.SetMeta("UserVisibility", isInitiallyVisible);
 
+            var row = new HBoxContainer
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill
+            };
+            row.AddThemeConstantOverride("separation", 6);
+
             var cb = new CheckBox
             {
-                Text = item.DisplayName,
                 ButtonPressed = isInitiallyVisible,
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
+                TooltipText = "Toggle submesh visibility",
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
 
             var localItem = item;
@@ -522,8 +528,43 @@ public partial class CharacterTabUI : VBoxContainer
                 }
             };
 
+            int charLen = item.DisplayName?.Length ?? 0;
+            float minHeight = charLen > 40 ? 52f : (charLen > 22 ? 38f : 28f);
+
+            var btnWrapper = new Control
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.Fill,
+                CustomMinimumSize = new Vector2(0, minHeight),
+                ClipContents = true
+            };
+
+            var nameBtn = new Button
+            {
+                Text = item.DisplayName,
+                Alignment = HorizontalAlignment.Left,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                TooltipText = item.DisplayName
+            };
+            nameBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            nameBtn.OffsetLeft = 0;
+            nameBtn.OffsetTop = 0;
+            nameBtn.OffsetRight = 0;
+            nameBtn.OffsetBottom = 0;
+            nameBtn.AddThemeFontSizeOverride("font_size", 11);
+            nameBtn.Pressed += () =>
+            {
+                cb.ButtonPressed = !cb.ButtonPressed;
+            };
+
+            btnWrapper.AddChild(nameBtn);
+            row.AddChild(cb);
+            row.AddChild(btnWrapper);
+
             item.CheckBoxWidget = cb;
-            _submeshContainer.AddChild(cb);
+            _submeshContainer.AddChild(row);
         }
     }
 
