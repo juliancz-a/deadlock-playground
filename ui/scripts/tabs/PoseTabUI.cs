@@ -36,6 +36,8 @@ public partial class PoseTabUI : VBoxContainer
 
     public override void _Ready()
     {
+        ProcessPriority = 100;
+
         _iconPlay = GD.Load<Texture2D>("res://assets/at-icons/play.svg");
         _iconPause = GD.Load<Texture2D>("res://assets/at-icons/pause.svg");
         _iconFolder = GD.Load<Texture2D>("res://assets/at-icons/folder.svg");
@@ -113,6 +115,12 @@ public partial class PoseTabUI : VBoxContainer
                     _btnPlayPause.Icon = _iconPlay;
                 }
             }
+
+            if (_skeleton != null)
+            {
+                ProceduralClothSolver.MarkDirty();
+                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
+            }
         }
     }
 
@@ -121,9 +129,13 @@ public partial class PoseTabUI : VBoxContainer
         _skeleton = skeleton;
     }
 
-
     public void SetAnimationPlayer(AnimationPlayer animPlayer)
     {
+        if (_animPlayer != null)
+        {
+            _animPlayer.AnimationFinished -= OnAnimationFinished;
+        }
+
         _animPlayer = animPlayer;
         if (_animPlayer == null)
         {
@@ -135,8 +147,30 @@ public partial class PoseTabUI : VBoxContainer
             return;
         }
 
+        _animPlayer.AnimationFinished += OnAnimationFinished;
+
         PopulateAnimationTreeFromPlayer();
         AutoSelectDefaultIdle();
+    }
+
+    private void OnAnimationFinished(StringName animName)
+    {
+        if (!_isLooping && _animPlayer != null)
+        {
+            _animPlayer.Pause();
+            if (_btnPlayPause != null)
+            {
+                _btnPlayPause.ButtonPressed = false;
+                _btnPlayPause.Icon = _iconPlay;
+            }
+
+            if (_skeleton != null)
+            {
+                _skeleton.ForceUpdateAllBoneTransforms();
+                ProceduralClothSolver.MarkDirty();
+                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
+            }
+        }
     }
 
     private void PopulateAnimationTreeFromPlayer()
@@ -149,6 +183,10 @@ public partial class PoseTabUI : VBoxContainer
         foreach (var animName in animList)
         {
             var anim = _animPlayer.GetAnimation(animName);
+            if (anim != null)
+            {
+                DeadlockAnimLoader.StripClothTracks(anim, _skeleton);
+            }
             string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
             string displayName = DeadlockAnimLoader.FormatDisplayName(cleanName);
             string category = DeadlockAnimLoader.ClassifyCategory(cleanName);
@@ -341,7 +379,7 @@ public partial class PoseTabUI : VBoxContainer
         // Configure animation playback parameters
         if (godotAnim != null)
         {
-            DeadlockAnimLoader.StripClothTracks(godotAnim);
+            DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
             godotAnim.LoopMode = _isLooping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None;
         }
 
@@ -392,7 +430,7 @@ public partial class PoseTabUI : VBoxContainer
 
         _skeleton.ForceUpdateAllBoneTransforms();
         ProceduralClothSolver.MarkDirty();
-        ProceduralClothSolver.Conform(_skeleton, force: true);
+        ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         NotifyPoseChanged(_activeAnimName);
     }
 
@@ -411,7 +449,7 @@ public partial class PoseTabUI : VBoxContainer
             var godotAnim = _animPlayer.GetAnimation(animName);
             if (godotAnim != null)
             {
-                DeadlockAnimLoader.StripClothTracks(godotAnim);
+                DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
             }
             _activeAnimLength = (float)(godotAnim?.Length ?? 0.1f);
 
@@ -435,7 +473,7 @@ public partial class PoseTabUI : VBoxContainer
 
             _skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true);
+            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
             NotifyPoseChanged(animName);
         }
     }
@@ -496,7 +534,7 @@ public partial class PoseTabUI : VBoxContainer
             {
                 _skeleton.ForceUpdateAllBoneTransforms();
                 ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true);
+                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
             }
         }
     }
@@ -521,7 +559,7 @@ public partial class PoseTabUI : VBoxContainer
         {
             _skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true);
+            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         }
     }
 
@@ -567,7 +605,7 @@ public partial class PoseTabUI : VBoxContainer
         {
             _skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true);
+            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         }
     }
 
@@ -586,7 +624,7 @@ public partial class PoseTabUI : VBoxContainer
             {
                 _skeleton.ForceUpdateAllBoneTransforms();
                 ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true);
+                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
                 NotifyPoseChanged(_activeAnimName);
             }
         }
@@ -613,7 +651,7 @@ public partial class PoseTabUI : VBoxContainer
             }
 
             _skeleton.ForceUpdateAllBoneTransforms();
-            ProceduralClothSolver.Conform(_skeleton);
+            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         }
     }
 

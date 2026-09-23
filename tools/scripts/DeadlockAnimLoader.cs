@@ -508,6 +508,9 @@ public static class DeadlockAnimLoader
             int godotBoneIdx = skeleton.FindBone(boneName);
             if (godotBoneIdx == -1) continue;
 
+            // Skip procedural cloth and flap bones actively governed by ProceduralClothSolver
+            if (IsClothOrFlapBone(boneName)) continue;
+
             int pTrack = godotAnim.AddTrack(Godot.Animation.TrackType.Position3D);
             godotAnim.TrackSetPath(pTrack, $"{skeletonNodePath}:{boneName}");
 
@@ -562,6 +565,7 @@ public static class DeadlockAnimLoader
             }
         }
 
+        StripClothTracks(godotAnim, skeleton);
         animLibrary.AddAnimation(info.CleanName, godotAnim);
         GD.Print($"[AnimLoader] Decoded and registered '{info.CleanName}' ({godotAnim.Length:F2}s, {totalFrames} frames) into AnimationLibrary.");
         return godotAnim;
@@ -585,28 +589,28 @@ public static class DeadlockAnimLoader
 
     /// <summary>
     /// Checks whether a bone is a procedural cloth or dress flap bone governed by ProceduralClothSolver.
+    /// Delegates to the centralized BoneLayerManager.IsProceduralClothBone classifier.
     /// </summary>
     public static bool IsClothOrFlapBone(string boneName)
     {
-        if (string.IsNullOrEmpty(boneName)) return false;
-        return boneName.StartsWith("$cloth_", StringComparison.OrdinalIgnoreCase)
-            || boneName.StartsWith("dress_cut_", StringComparison.OrdinalIgnoreCase)
-            || boneName.StartsWith("dress_out_", StringComparison.OrdinalIgnoreCase);
+        return BoneLayerManager.IsProceduralClothBone(boneName);
     }
 
     /// <summary>
     /// Strips any tracks for procedural cloth bones from a Godot Animation so AnimationPlayer
     /// does not overwrite conformed cloth poses with static bind pose keyframes.
+    /// Kinematic clothing bones (coats, jackets, bags) with authored animation are preserved.
     /// </summary>
-    public static void StripClothTracks(Godot.Animation anim)
+    public static void StripClothTracks(Godot.Animation anim, Skeleton3D skeleton = null)
     {
         if (anim == null) return;
+
         for (int i = anim.GetTrackCount() - 1; i >= 0; i--)
         {
             string path = anim.TrackGetPath(i).ToString();
             int colonIdx = path.LastIndexOf(':');
             string target = colonIdx != -1 ? path.Substring(colonIdx + 1) : path;
-            if (IsClothOrFlapBone(target))
+            if (BoneLayerManager.IsProceduralClothBone(target))
             {
                 anim.RemoveTrack(i);
             }

@@ -604,6 +604,7 @@ public partial class VpkLoaderTest : Node3D
 		if (skeleton != null)
 		{
 			GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
+			ProceduralClothSolver.EnsureClothingBonesParented(skeleton);
 			
 			// Instanciar y configurar la UI del Pose Editor legacy si está explícitamente asignada
 			if (PoseEditorScene != null)

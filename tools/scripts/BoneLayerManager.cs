@@ -243,7 +243,8 @@ public partial class BoneLayerManager : Node3D
             name.Contains("tassel") || name.Contains("ribbon") || name.Contains("strap") ||
             name.Contains("dangle") || name.Contains("ponytail") || name.Contains("fur") ||
             name.Contains("jiggle") || name.Contains("purse") || name.Contains("tabard") ||
-            name.Contains("sleeve_dangle") || name.StartsWith("$cloth") || name.Contains("boa"))
+            name.Contains("sleeve_dangle") || name.StartsWith("$cloth") || name.Contains("boa") ||
+            name.Contains("jacket") || name.Contains("bag"))
         {
             return BoneCategory.Clothing;
         }
@@ -272,6 +273,39 @@ public partial class BoneLayerManager : Node3D
         }
 
         return BoneCategory.Primary;
+    }
+
+    /// <summary>
+    /// Checks whether a bone is classified as clothing or secondary physics geometry.
+    /// Reuses the unified BoneCategory classifier.
+    /// </summary>
+    public static bool IsClothingBone(string boneName)
+    {
+        return ClassifyBone(boneName) == BoneCategory.Clothing;
+    }
+
+    /// <summary>
+    /// Checks whether a bone is a procedural cloth or dress flap bone governed by ProceduralClothSolver.
+    /// Bones starting with $cloth or cloth_ (hanging skirts, coats, robes), and dress_cut_/dress_out_ flaps,
+    /// are solved dynamically by the vertex-particle PBD simulation loop.
+    /// </summary>
+    public static bool IsProceduralClothBone(string boneName)
+    {
+        if (string.IsNullOrEmpty(boneName)) return false;
+
+        return boneName.StartsWith("$cloth", StringComparison.OrdinalIgnoreCase)
+            || boneName.StartsWith("cloth_", StringComparison.OrdinalIgnoreCase)
+            || boneName.StartsWith("dress_cut_", StringComparison.OrdinalIgnoreCase)
+            || boneName.StartsWith("dress_out_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Checks whether a bone is a kinematic clothing prop (coats, jackets, bags, flaps, belts)
+    /// that preserves authored animation keyframes or inherits parent motion via FK.
+    /// </summary>
+    public static bool IsKinematicClothingBone(string boneName)
+    {
+        return IsClothingBone(boneName) && !IsProceduralClothBone(boneName);
     }
 
     public void SetLayerEnabled(BoneCategory category, bool enabled)
