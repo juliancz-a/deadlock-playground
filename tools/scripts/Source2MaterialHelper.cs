@@ -68,13 +68,13 @@ public static class Source2MaterialHelper
     /// Checks HeroMaterialManager for bespoke hero overrides before falling back to generic
     /// Source 2 archetype builders (Glass, DynamicFX, VertexColorPbr, StandardPbr).
     /// </summary>
-    public static Godot.Material CreateMaterialFromVmat(Package package, string vmatPath, string meshName = null, Package addonPackage = null)
+    public static Godot.Material CreateMaterialFromVmat(Package package, string vmatPath, string meshName = null, Package addonPackage = null, string heroName = null)
     {
         if ((package == null && addonPackage == null) || string.IsNullOrWhiteSpace(vmatPath)) return null;
         if (!vmatPath.EndsWith("_c")) vmatPath += "_c";
 
-        // 1. Check for bespoke hero material overrides (e.g. Lash sparkles, Wraith cards)
-        var customHeroMat = HeroMaterialManager.TryCreateCustomMaterial(null, package, vmatPath, meshName, addonPackage);
+        // 1. Check for bespoke hero material overrides (e.g. Lash sparkles, Wraith cards, Lady Geist shawl)
+        var customHeroMat = HeroMaterialManager.TryCreateCustomMaterial(heroName, package, vmatPath, meshName, addonPackage);
         if (customHeroMat != null)
         {
             return customHeroMat;
@@ -109,7 +109,14 @@ public static class Source2MaterialHelper
             {
                 string fallbackPath = vmatPath.Replace("jitter02", "jitter01", StringComparison.OrdinalIgnoreCase)
                                               .Replace("Jitter02", "Jitter01", StringComparison.OrdinalIgnoreCase);
-                return CreateMaterialFromVmat(package, fallbackPath, meshName, addonPackage);
+                return CreateMaterialFromVmat(package, fallbackPath, meshName, addonPackage, heroName);
+            }
+
+            if (vmatPath.Contains("geist_shawl", StringComparison.OrdinalIgnoreCase) ||
+                (meshName != null && meshName.Contains("geist_shawl", StringComparison.OrdinalIgnoreCase)))
+            {
+                var shawlMat = DeadlockPlayground.Materials.Heroes.LadyGeistMaterialConfig.CreateShawlMaterial(package, vmatPath, meshName, addonPackage);
+                if (shawlMat != null) return shawlMat;
             }
 
             GD.PrintErr($"[Source2MaterialHelper] VMAT file not found in Addon or Base VPK: {vmatPath}");

@@ -24,7 +24,9 @@ public static class Source2ShaderRegistry
     private static Shader _unicornHairShader;
     private static Shader _unicornHornGlowShader;
     private static Shader _ladyGeistShader;
+    private static Shader _ladyGeistShawlShader;
     private static Shader _vindictaShader;
+    private static Shader _hazeHeadsmokeShader;
 
     public static Shader LoadValveShader(string shaderName)
     {
@@ -136,9 +138,22 @@ public static class Source2ShaderRegistry
         return _ladyGeistShader;
     }
 
+    public static Shader GetLadyGeistShawlShader()
+    {
+        _ladyGeistShawlShader ??= LoadValveShader("lady_geist_shawl.gdshader") ?? LoadValveShader("geist_shawl.gdshader");
+        return _ladyGeistShawlShader;
+    }
+
     public static Shader GetVindictaShader()
     {
         _vindictaShader ??= LoadValveShader("vindicta.gdshader");
         return _vindictaShader;
     }
+
+    public static Shader GetHazeHeadsmokeShader()
+    {
+        _hazeHeadsmokeShader ??= LoadValveShader("source2_haze_headsmoke.gdshader");
+        return _hazeHeadsmokeShader ?? GetFlameHairShader();
+    }
 }
+

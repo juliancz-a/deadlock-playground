@@ -26,6 +26,7 @@ public static class HeroMaterialManager
         RegisterConfig(new MirageMaterialConfig());
         RegisterConfig(new WraithMaterialConfig());
         RegisterConfig(new CelesteMaterialConfig());
+        RegisterConfig(new HazeMaterialConfig());
     }
 
     public static void RegisterConfig(IHeroMaterialConfig config)
@@ -54,6 +55,7 @@ public static class HeroMaterialManager
         if (lower.Contains("mirage")) return _configs.GetValueOrDefault("mirage");
         if (lower.Contains("wraith")) return _configs.GetValueOrDefault("wraith");
         if (lower.Contains("unicorn") || lower.Contains("celeste")) return _configs.GetValueOrDefault("unicorn");
+        if (lower.Contains("haze")) return _configs.GetValueOrDefault("haze");
 
         return null;
     }
@@ -74,6 +76,28 @@ public static class HeroMaterialManager
         // If heroName is unspecified, check if any registered hero matches vmatPath or meshName
         string vLower = vmatPath?.ToLowerInvariant() ?? "";
         string mLower = meshName?.ToLowerInvariant() ?? "";
+
+        // Lady Geist alias check (ghost, geist, shawl)
+        if (vLower.Contains("ghost") || vLower.Contains("geist") || mLower.Contains("ghost") || mLower.Contains("geist") || vLower.Contains("shawl") || mLower.Contains("shawl"))
+        {
+            var ghostConfig = _configs.GetValueOrDefault("ghost");
+            if (ghostConfig != null)
+            {
+                var customMat = ghostConfig.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
+                if (customMat != null) return customMat;
+            }
+        }
+
+        // Haze alias check (haze, headsmoke)
+        if (vLower.Contains("haze") || mLower.Contains("haze") || vLower.Contains("headsmoke") || mLower.Contains("headsmoke") || vLower.Contains("smoke") || mLower.Contains("smoke"))
+        {
+            var hazeConfig = _configs.GetValueOrDefault("haze");
+            if (hazeConfig != null)
+            {
+                var customMat = hazeConfig.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
+                if (customMat != null) return customMat;
+            }
+        }
 
         foreach (var kvp in _configs)
         {
@@ -199,6 +223,10 @@ public static class HeroMaterialManager
             if (vLower.Contains("ghost") || vLower.Contains("geist") || mLower.Contains("ghost") || mLower.Contains("geist") || vLower.Contains("shawl") || mLower.Contains("shawl"))
             {
                 config = _configs.GetValueOrDefault("ghost");
+            }
+            else if (vLower.Contains("haze") || mLower.Contains("haze") || vLower.Contains("headsmoke") || mLower.Contains("headsmoke") || vLower.Contains("smoke") || mLower.Contains("smoke"))
+            {
+                config = _configs.GetValueOrDefault("haze");
             }
         }
         return config?.GetSignatureMaterial(meshName, surfaceIndex, vmatPath, baseMat);

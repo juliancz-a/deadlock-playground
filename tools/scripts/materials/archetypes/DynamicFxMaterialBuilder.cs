@@ -41,7 +41,7 @@ public static class DynamicFxMaterialBuilder
         bool isDedicatedFxName = vmatLower.Contains("jitter") || vmatLower.Contains("armglow") ||
                                  vmatLower.Contains("vindicta_glow") || vmatLower.Contains("hornet_glow") ||
                                  vmatLower.Contains("inferno_armglow") || vmatLower.Contains("flame") ||
-                                 vmatLower.Contains("headglow") ||
+                                 vmatLower.Contains("headglow") || vmatLower.Contains("headsmoke") || vmatLower.Contains("smoke") ||
                                  vmatLower.Contains("sparkle") || vmatLower.Contains("sparkles") ||
                                  vmatLower.Contains("lash_sparkles") ||
                                  vmatLower.Contains("geist_arm") || vmatLower.Contains("ghost2_arm");
@@ -60,11 +60,16 @@ public static class DynamicFxMaterialBuilder
         bool isFxAlphaTest = matResource.IntParams.GetValueOrDefault("F_ALPHA_TEST", 0) == 1;
 
         bool isHeadGlow = vmatLower.Contains("headglow") || vmatLower.Contains("flame_hair");
+        bool isHeadSmoke = vmatLower.Contains("headsmoke") || vmatLower.Contains("smoke");
         bool isArmGlow = vmatLower.Contains("armglow") || vmatLower.Contains("flame_arm") || (vmatLower.Contains("inferno_flames") && !isHeadGlow);
         bool isSparkle = vmatLower.Contains("sparkle") || vmatLower.Contains("lash_sparkles");
 
         Shader fxShader;
-        if (isHeadGlow)
+        if (isHeadSmoke)
+        {
+            fxShader = Source2ShaderRegistry.GetHazeHeadsmokeShader();
+        }
+        else if (isHeadGlow)
         {
             fxShader = Source2ShaderRegistry.GetFlameHairShader();
         }
@@ -92,8 +97,12 @@ public static class DynamicFxMaterialBuilder
         shaderMat.SetShaderParameter("is_arm_glow", isArmGlow);
         bool isTranslucent = matResource.IntParams.GetValueOrDefault("F_TRANSLUCENT", 0) == 1;
         shaderMat.SetShaderParameter("is_translucent", isTranslucent);
+        bool useVertexColor = matResource.IntParams.GetValueOrDefault("g_bMaskVertexColorTint1", 0) == 1
+                           || matResource.IntParams.GetValueOrDefault("g_bMaskVertexColorTint", 0) == 1
+                           || matResource.IntParams.GetValueOrDefault("F_VERTEX_COLOR", 0) == 1;
+        shaderMat.SetShaderParameter("use_vertex_color", useVertexColor);
 
-        float alphaRef = 0.5f;
+        float alphaRef = 0.1f;
         if (matResource.FloatParams.TryGetValue("g_flAlphaTestReference1", out var aRef1)) alphaRef = aRef1;
         else if (matResource.FloatParams.TryGetValue("g_flAlphaTestReference", out var aRef0)) alphaRef = aRef0;
         shaderMat.SetShaderParameter("alpha_test_threshold", alphaRef);
@@ -232,13 +241,37 @@ public static class DynamicFxMaterialBuilder
         shaderMat.SetShaderParameter("emission_boost", emissionBoost);
 
         // 5. Pass Color Tint
-        Color baseTint = Colors.White;
-        if (matResource.VectorParams.TryGetValue("g_vColorTint1", out var ct1)) baseTint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
-        else if (matResource.VectorParams.TryGetValue("g_vColorTint", out var ct0)) baseTint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
-        shaderMat.SetShaderParameter("color_tint", baseTint);
+        Color baseTint = isHeadSmoke ? Colors.Black : Colors.White;
+        Color? fxTexCol = null;
+        if (matResource.VectorParams.TryGetValue("TextureColor1", out var tc1)) fxTexCol = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
+        else if (matResource.VectorParams.TryGetValue("TextureColor", out var tc0)) fxTexCol = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
+
+        Color? fxTintCol = null;
+        if (matResource.VectorParams.TryGetValue("g_vColorTint1", out var ct1)) fxTintCol = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
+        else if (matResource.VectorParams.TryGetValue("g_vColorTint", out var ct0)) fxTintCol = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
+        else if (matResource.VectorParams.TryGetValue("m_vColorTint", out var ctM)) fxTintCol = new Color(ctM.X, ctM.Y, ctM.Z, 1.0f);
+        else if (matResource.VectorParams.TryGetValue("g_vTintColor", out var ctG)) fxTintCol = new Color(ctG.X, ctG.Y, ctG.Z, 1.0f);
+        else if (matResource.VectorParams.TryGetValue("Color", out var ctC)) fxTintCol = new Color(ctC.X, ctC.Y, ctC.Z, 1.0f);
 
         bool maskTint = matResource.IntParams.GetValueOrDefault("g_bMaskColorTint1", 0) == 1
                      || matResource.IntParams.GetValueOrDefault("g_bMaskColorTint", 0) == 1;
+
+        if (fxTexCol.HasValue && fxTintCol.HasValue && maskTint)
+        {
+            var t = fxTexCol.Value;
+            var c = fxTintCol.Value;
+            baseTint = new Color(t.R * c.R, t.G * c.G, t.B * c.B, 1.0f);
+        }
+        else if (fxTexCol.HasValue)
+        {
+            baseTint = fxTexCol.Value;
+        }
+        else if (fxTintCol.HasValue)
+        {
+            baseTint = fxTintCol.Value;
+        }
+
+        shaderMat.SetShaderParameter("color_tint", baseTint);
         shaderMat.SetShaderParameter("mask_color_tint", maskTint);
 
         int tintMode = (int)matResource.IntParams.GetValueOrDefault("g_nTextureColorTintMode1",
@@ -252,7 +285,7 @@ public static class DynamicFxMaterialBuilder
                            ?? Source2TextureLoader.GetTextureParam(matResource, "TextureTranslucency")
                            ?? Source2TextureLoader.GetTextureParam(matResource, "TextureTranslucency1");
 
-        bool forceOpaque = !isArmGlow && !isFxAdditive && !isSparkle;
+        bool forceOpaque = !isArmGlow && !isFxAdditive && !isSparkle && !isHeadSmoke;
         if (!string.IsNullOrEmpty(colorTexPath))
         {
             var colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: forceOpaque, addonPackage: addonPackage);
@@ -266,6 +299,10 @@ public static class DynamicFxMaterialBuilder
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "self_illum_mask", forceOpaque: true, addonPackage: addonPackage);
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tSelfIllumMask", shaderMat, "texture_self_illum_mask", forceOpaque: true, addonPackage: addonPackage);
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tJitterMask", shaderMat, "jitter_mask", forceOpaque: true, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tJitterMask", shaderMat, "texture_jitter_mask", forceOpaque: true, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tNormalRoughness", shaderMat, "texture_normal_roughness", forceOpaque: false, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "TextureNormal1", shaderMat, "texture_normal_roughness", forceOpaque: false, addonPackage: addonPackage);
+        Source2TextureLoader.BindTextureIfPresent(package, matResource, "TextureNormal", shaderMat, "texture_normal_roughness", forceOpaque: false, addonPackage: addonPackage);
         Source2TextureLoader.BindTextureIfPresent(package, matResource, "g_tTintMaskRimLightMask", shaderMat, "tint_mask_rim_mask", forceOpaque: true, addonPackage: addonPackage);
 
         // 7. Render Priorities
@@ -277,7 +314,7 @@ public static class DynamicFxMaterialBuilder
         {
             shaderMat.RenderPriority = 2;
         }
-        else if (isHeadGlow)
+        else if (isHeadGlow || isHeadSmoke)
         {
             shaderMat.RenderPriority = 0; // Solid depth-tested geometry
         }

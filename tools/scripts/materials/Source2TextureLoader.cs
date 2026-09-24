@@ -234,9 +234,14 @@ public static class Source2TextureLoader
         bool isAlphaCardTexture = !forceOpaque ||
                                   isSparkle ||
                                   vtexInternalPath.Contains("fur", StringComparison.OrdinalIgnoreCase) ||
+                                  vtexInternalPath.Contains("geist_shawl_test", StringComparison.OrdinalIgnoreCase) ||
+                                  vtexInternalPath.Contains("normalroughness", StringComparison.OrdinalIgnoreCase) ||
                                   vtexInternalPath.Contains("card", StringComparison.OrdinalIgnoreCase) ||
                                   vtexInternalPath.Contains("eyelash", StringComparison.OrdinalIgnoreCase) ||
-                                  vtexInternalPath.Contains("lashes", StringComparison.OrdinalIgnoreCase);
+                                  vtexInternalPath.Contains("lashes", StringComparison.OrdinalIgnoreCase) ||
+                                  vtexInternalPath.Contains("headsmoke", StringComparison.OrdinalIgnoreCase) ||
+                                  vtexInternalPath.Contains("smoke", StringComparison.OrdinalIgnoreCase) ||
+                                  vtexInternalPath.Contains("opacity", StringComparison.OrdinalIgnoreCase);
 
         // Encode to PNG via Skia. Skia handles internal bitmap format (BGRA8888) to standard PNG conversion reliably.
         using var skImage = SKImage.FromBitmap(skBitmap);

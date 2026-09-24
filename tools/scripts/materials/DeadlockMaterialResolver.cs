@@ -57,13 +57,14 @@ public static class DeadlockMaterialResolver
         if (mLower.Contains("glass") || mLower.Contains("lens") || mLower.Contains("specs") || mLower.Contains("spectacle") ||
             matLower.Contains("glass") || matLower.Contains("lens") || matLower.Contains("specs") || matLower.Contains("spectacle")) return false;
 
-        // 6. Hair and fur layers (Lady Geist shawl fur01-fur05, geist_fur cards, etc.)
-        bool isBaseShawlCloth = mLower.Equals("ghost_shawl") || mLower.Equals("shawl") || mLower.Equals("geist_shawl") ||
-                                mLower.EndsWith("_ghost_shawl") || mLower.EndsWith("_geist_shawl") || mLower.EndsWith("_shawl");
-        if ((mLower.Contains("fur") || matLower.Contains("fur")) && !isBaseShawlCloth) return false;
+        // 6. Hair and fur layers (Lady Geist shawl fur01-fur05, geist_fur cards, geist_shawl, ghost_shawl)
+        if (mLower.Contains("shawl") || matLower.Contains("shawl") ||
+            mLower.Contains("fur") || matLower.Contains("fur")) return false;
 
-        // 7. Flame, fire, volumetric particle VFX, sparkles and hero outline shells (Infernus armglow/flames, Lash sparkles, Celeste hornglow, etc.)
+        // 7. Flame, fire, volumetric particle VFX, sparkles, smoke and hero outline shells (Infernus armglow/flames, Haze headsmoke, Lash sparkles, Celeste hornglow, etc.)
         if (mLower.Contains("flame") || matLower.Contains("flame") ||
+            mLower.Contains("smoke") || matLower.Contains("smoke") ||
+            mLower.Contains("headsmoke") || matLower.Contains("headsmoke") ||
             mLower.Contains("sparkle") || matLower.Contains("sparkle") ||
             mLower.Contains("sparkles") || matLower.Contains("sparkles") ||
             mLower.Contains("lash_sparkles") || matLower.Contains("lash_sparkles") ||
@@ -252,10 +253,16 @@ public static class DeadlockMaterialResolver
             return true;
         }
 
-        // Fur shells (Lady Geist shawl fur01-fur05, geist_fur, etc.) preserve AlphaScissor two-sided card material
-        bool isBaseShawlClothMat = mLower.Equals("ghost_shawl") || mLower.Equals("shawl") || mLower.Equals("geist_shawl") ||
-                                   mLower.EndsWith("_ghost_shawl") || mLower.EndsWith("_geist_shawl") || mLower.EndsWith("_shawl");
-        if ((mLower.Contains("fur") || matLower.Contains("fur")) && !isBaseShawlClothMat)
+        // Fur shells and shawl layers (Lady Geist shawl fur01-fur05, geist_fur, geist_shawl, ghost_shawl)
+        if (mLower.Contains("shawl") || matLower.Contains("shawl") ||
+            mLower.Contains("fur") || matLower.Contains("fur"))
+        {
+            return true;
+        }
+
+        // Volumetric smoke & headsmoke (Haze headsmoke)
+        if (mLower.Contains("headsmoke") || matLower.Contains("headsmoke") ||
+            mLower.Contains("smoke") || matLower.Contains("smoke"))
         {
             return true;
         }
@@ -265,7 +272,7 @@ public static class DeadlockMaterialResolver
             string sPath = sm.Shader.ResourcePath?.ToLowerInvariant() ?? "";
             if (sPath.Contains("lash_sparkles") || sPath.Contains("cards") || sPath.Contains("wraith_card") ||
                 sPath.Contains("unicorn_hornglow") || sPath.Contains("viscous_outline") || sPath.Contains("viscous.gdshader") ||
-                sPath.Contains("source2_glass"))
+                sPath.Contains("source2_glass") || sPath.Contains("shawl") || sPath.Contains("headsmoke") || sPath.Contains("smoke"))
             {
                 return true;
             }

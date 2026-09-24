@@ -363,44 +363,43 @@ public static class VmatColorExtractor
         // True tint parameters (g_vColorTint, g_vColorTint1, m_vColorTint, g_vTintColor)
         // TextureColor/TextureColor1 in VectorParams are texture fallbacks, NOT tints.
         // Using TextureColor1 as a tint darkens weapons (like Wraith's gun) to pitch black!
+        bool isSmoke = vmatLower.Contains("smoke") || vmatLower.Contains("headsmoke");
+
         System.Numerics.Vector4? tintVec = null;
         if (mat.VectorParams.TryGetValue("g_vColorTint", out var vt1) && (vt1.X < 0.999f || vt1.Y < 0.999f || vt1.Z < 0.999f)) tintVec = vt1;
         else if (mat.VectorParams.TryGetValue("g_vColorTint1", out var vt2) && (vt2.X < 0.999f || vt2.Y < 0.999f || vt2.Z < 0.999f)) tintVec = vt2;
         else if (mat.VectorParams.TryGetValue("m_vColorTint", out var vt6)) tintVec = vt6;
         else if (mat.VectorParams.TryGetValue("g_vTintColor", out var vt7)) tintVec = vt7;
         else if (mat.VectorParams.TryGetValue("Color", out var vt8)) tintVec = vt8;
-        else if (!hasDiffuseTexture)
+        else if (!hasDiffuseTexture || isSmoke)
         {
-            // Only use fallback TextureColor/TextureColor1 when there is NO diffuse texture
-            if (mat.VectorParams.TryGetValue("TextureColor1", out var vt4) && (vt4.X > 0.001f || vt4.Y > 0.001f || vt4.Z > 0.001f)) tintVec = vt4;
-            else if (mat.VectorParams.TryGetValue("TextureColor", out var vt5) && (vt5.X > 0.001f || vt5.Y > 0.001f || vt5.Z > 0.001f)) tintVec = vt5;
+            // Only use fallback TextureColor/TextureColor1 when there is NO diffuse texture or for smoke
+            if (mat.VectorParams.TryGetValue("TextureColor1", out var vt4)) tintVec = vt4;
+            else if (mat.VectorParams.TryGetValue("TextureColor", out var vt5)) tintVec = vt5;
         }
 
-        Color baseColor = Colors.White;
+        Color baseColor = isSmoke ? Colors.Black : Colors.White;
 
-// Si la superficie usa colores de vértices (Wraith head, Dev vertcolor, etc.),
+        // Si la superficie usa colores de vértices (Wraith head, Dev vertcolor, etc.),
         // el albedo base DEBE ser blanco puro. De lo contrario, cualquier tinte vectorial
         // tiñe de marrón uniforme la piel, el pelo y los ojos de la malla.
-        if (useVertexColorAsAlbedo)
+        if (useVertexColorAsAlbedo && !isSmoke)
         {
             baseColor = Colors.White;
         }
         else if (tintVec.HasValue)
         {
             var tv = tintVec.Value;
-            if (tv.X > 0.001f || tv.Y > 0.001f || tv.Z > 0.001f)
-            {
-                float alpha = tv.W > 0.001f ? tv.W : (isGlass ? glassOpacity : 1.0f);
-                baseColor = new Color(tv.X, tv.Y, tv.Z, alpha);
-            }
+            float alpha = tv.W > 0.001f ? tv.W : (isGlass ? glassOpacity : 1.0f);
+            baseColor = new Color(tv.X, tv.Y, tv.Z, alpha);
         }
         else if (isGlass)
         {
             baseColor = new Color(0.06f, 0.07f, 0.09f, glassOpacity);
         }
 
-        // Si es una cabeza o superficie facial completa, nunca permitir tintes oscuros residuales
-        bool isHeadSurface = vmatLower.Contains("head") || isEyeSurface;
+        // Si es una cabeza o superficie facial completa, nunca permitir tintes oscuros residuales (smoke is excluded)
+        bool isHeadSurface = !isSmoke && (vmatLower.Contains("head") || isEyeSurface);
         if (isHeadSurface && !isGlass && (baseColor != Colors.White))
         {
             baseColor = Colors.White;

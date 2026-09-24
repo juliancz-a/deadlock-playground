@@ -777,7 +777,7 @@ public partial class VpkLoaderTest : Node3D
 						}
 					}
 				}
-				// Cross-model authentic fallback: fur shells prioritize ghost_shawl_fur.vmat / geist_fur.vmat; base shawl prioritizes ghost_shawl.vmat
+				// Cross-model authentic fallback: fur shells prioritize ghost_shawl_fur.vmat / geist_fur.vmat; base shawl prioritizes geist_shawl.vmat / ghost_shawl.vmat
 				if (materialPaths == null || materialPaths.Count == 0)
 				{
 					string fallbackVmat = isFurShellSubmesh
@@ -786,7 +786,7 @@ public partial class VpkLoaderTest : Node3D
 							: "models/heroes_wip/geist/materials/geist_fur.vmat")
 						: (heroName.Contains("ghost", StringComparison.OrdinalIgnoreCase)
 							? "models/heroes_staging/ghost/materials/ghost_shawl.vmat"
-							: "models/heroes_wip/geist/materials/geist_fur.vmat");
+							: "models/heroes_wip/geist/materials/geist_shawl.vmat");
 					materialPaths = new List<string> { fallbackVmat };
 					GD.Print($"  [MaterialMap] Fallback fur/shawl mesh '{meshName}' to '{fallbackVmat}'");
 				}
@@ -823,7 +823,7 @@ public partial class VpkLoaderTest : Node3D
 						vmatPath = submeshFb;
 					}
 
-					Godot.Material mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName, addonPackage);
+					Godot.Material mat = Source2MaterialHelper.CreateMaterialFromVmat(package, vmatPath, meshName, addonPackage, heroName);
 
 					// If material is a dummy, null, or untextured on a fur/shawl mesh, cascade through authentic hero fur materials
 					if (isFurOrShawlMesh && (IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase))))
@@ -837,7 +837,7 @@ public partial class VpkLoaderTest : Node3D
 								{
 									if (!IsDummyMaterialPath(cand))
 									{
-										var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, cand, meshName, addonPackage);
+										var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, cand, meshName, addonPackage, heroName);
 										if (!IsDummyMaterial(fbMat, cand))
 										{
 											mat = fbMat;
@@ -854,7 +854,7 @@ public partial class VpkLoaderTest : Node3D
 						if (mat == null || IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase)))
 						{
 							string ghostFurFallback = "models/heroes_staging/ghost/materials/ghost_shawl_fur.vmat";
-							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFurFallback, meshName, addonPackage);
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFurFallback, meshName, addonPackage, heroName);
 							if (fbMat != null && !IsDummyMaterial(fbMat, ghostFurFallback))
 							{
 								mat = fbMat;
@@ -866,7 +866,7 @@ public partial class VpkLoaderTest : Node3D
 						if (mat == null || IsDummyMaterial(mat, vmatPath) || (isFurShellSubmesh && !vmatPath.Contains("fur", StringComparison.OrdinalIgnoreCase)))
 						{
 							string geistFallback = "models/heroes_wip/geist/materials/geist_fur.vmat";
-							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, geistFallback, meshName, addonPackage);
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, geistFallback, meshName, addonPackage, heroName);
 							if (fbMat != null && !IsDummyMaterial(fbMat, geistFallback))
 							{
 								mat = fbMat;
@@ -874,15 +874,25 @@ public partial class VpkLoaderTest : Node3D
 							}
 						}
 
-						// Cascade 4: ghost_shawl.vmat (strictly for base cloth shawl, NOT for fur shell submeshes!)
+						// Cascade 4: geist_shawl.vmat / ghost_shawl.vmat (strictly for base cloth shawl, NOT for fur shell submeshes!)
 						if (!isFurShellSubmesh && (mat == null || IsDummyMaterial(mat, vmatPath)))
 						{
-							string ghostFallback = "models/heroes_staging/ghost/materials/ghost_shawl.vmat";
-							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFallback, meshName, addonPackage);
-							if (fbMat != null && !IsDummyMaterial(fbMat, ghostFallback))
+							string geistShawlFallback = "models/heroes_wip/geist/materials/geist_shawl.vmat";
+							var fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, geistShawlFallback, meshName, addonPackage, heroName);
+							if (fbMat != null && !IsDummyMaterial(fbMat, geistShawlFallback))
 							{
 								mat = fbMat;
-								vmatPath = ghostFallback;
+								vmatPath = geistShawlFallback;
+							}
+							else
+							{
+								string ghostFallback = "models/heroes_staging/ghost/materials/ghost_shawl.vmat";
+								fbMat = Source2MaterialHelper.CreateMaterialFromVmat(package, ghostFallback, meshName, addonPackage, heroName);
+								if (fbMat != null && !IsDummyMaterial(fbMat, ghostFallback))
+								{
+									mat = fbMat;
+									vmatPath = ghostFallback;
+								}
 							}
 						}
 					}
@@ -894,11 +904,15 @@ public partial class VpkLoaderTest : Node3D
 
 					if (mat == null && (meshName.Contains("jitter", StringComparison.OrdinalIgnoreCase) || vmatPath.Contains("jitter", StringComparison.OrdinalIgnoreCase)))
 					{
-						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/punkgoat/materials/punkgoat_border_jitter01.vmat", meshName, addonPackage);
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/punkgoat/materials/punkgoat_border_jitter01.vmat", meshName, addonPackage, heroName);
 					}
 					if (mat == null && isCardMesh)
 					{
-						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/wraith/materials/wraith_cards.vmat", meshName, addonPackage);
+						mat = Source2MaterialHelper.CreateMaterialFromVmat(package, "models/heroes_wip/wraith/materials/wraith_cards.vmat", meshName, addonPackage, heroName);
+					}
+					if (mat == null && (isFurOrShawlMesh || meshName.Contains("shawl", StringComparison.OrdinalIgnoreCase) || meshName.Contains("fur", StringComparison.OrdinalIgnoreCase)))
+					{
+						mat = DeadlockPlayground.Materials.Heroes.LadyGeistMaterialConfig.CreateShawlMaterial(package, vmatPath ?? "models/heroes_wip/geist/materials/geist_shawl.vmat", meshName, addonPackage);
 					}
 
 					if (mat != null)
