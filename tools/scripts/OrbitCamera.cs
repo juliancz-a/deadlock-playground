@@ -29,6 +29,7 @@ public partial class OrbitCamera : Node3D
 
     private Camera3D _camera;
     private bool _isOrbiting = false;
+    private bool _isPanning = false;
 
     // Current state variables
     private float _yaw = 0f;
@@ -170,14 +171,15 @@ public partial class OrbitCamera : Node3D
 
     private void HandleCameraInput(InputEvent @event)
     {
-        // 1. Unconditional release of orbit if RMB or MMB was released
+        // 1. Unconditional release of orbit or pan if RMB, MMB, or LMB was released
         if (@event is InputEventMouseButton mouseBtnRelease && !mouseBtnRelease.Pressed)
         {
-            if (mouseBtnRelease.ButtonIndex == MouseButton.Middle || mouseBtnRelease.ButtonIndex == MouseButton.Right)
+            if (mouseBtnRelease.ButtonIndex == MouseButton.Middle || mouseBtnRelease.ButtonIndex == MouseButton.Right || mouseBtnRelease.ButtonIndex == MouseButton.Left)
             {
-                if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
+                if (_isOrbiting || _isPanning || Input.MouseMode == Input.MouseModeEnum.Captured)
                 {
                     _isOrbiting = false;
+                    _isPanning = false;
                     Input.MouseMode = Input.MouseModeEnum.Visible;
                     GetViewport()?.SetInputAsHandled();
                     return;
@@ -185,24 +187,42 @@ public partial class OrbitCamera : Node3D
             }
         }
 
-        // 2. Unconditional mouse motion handling while orbiting
-        if (@event is InputEventMouseMotion mouseMotionEvent && _isOrbiting)
+        // 2. Mouse motion handling while orbiting or panning
+        if (@event is InputEventMouseMotion mouseMotionEvent)
         {
-            bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
-            if (isOrtho && LockOrbitInOrtho)
+            if (_isPanning)
             {
+                float panFactor = (_camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal)
+                    ? _targetOrthoSize * 0.0018f
+                    : _currentZoom * 0.0015f;
+                Vector3 right = GlobalTransform.Basis.X.Normalized();
+                Vector3 up = GlobalTransform.Basis.Y.Normalized();
+                _targetPan += (-right * mouseMotionEvent.Relative.X + up * mouseMotionEvent.Relative.Y) * panFactor;
+                _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
+                _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
+                _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+                GetViewport()?.SetInputAsHandled();
                 return;
             }
 
-            _yaw -= mouseMotionEvent.Relative.X * OrbitSensitivity;
-            _pitch -= mouseMotionEvent.Relative.Y * OrbitSensitivity;
-            _pitch = Mathf.Clamp(_pitch, PitchMin, PitchMax);
-            OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
-            GetViewport()?.SetInputAsHandled();
-            return;
+            if (_isOrbiting)
+            {
+                bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
+                if (isOrtho && LockOrbitInOrtho)
+                {
+                    return;
+                }
+
+                _yaw -= mouseMotionEvent.Relative.X * OrbitSensitivity;
+                _pitch -= mouseMotionEvent.Relative.Y * OrbitSensitivity;
+                _pitch = Mathf.Clamp(_pitch, PitchMin, PitchMax);
+                OnCameraRotated?.Invoke(PitchDegrees, YawDegrees, RollDegrees);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
         }
 
-        // 3. Block initiating camera zoom/orbit if mouse is hovering over any UI element (sidebar, UV canvas, floating panels, dialogs)
+        // 3. Block initiating camera zoom/orbit/pan if mouse is hovering over any UI element (sidebar, UV canvas, floating panels, dialogs)
         var hovered = GetTree()?.Root?.GuiGetHoveredControl();
         if (hovered != null)
         {
@@ -213,14 +233,32 @@ public partial class OrbitCamera : Node3D
             }
         }
 
-        // Orbit (Middle Mouse Button / Right Mouse Button) press
+        // Pan (Shift + Middle Mouse Button)
         if (@event is InputEventMouseButton mouseBtnEvent)
         {
-            if (mouseBtnEvent.ButtonIndex == MouseButton.Middle || mouseBtnEvent.ButtonIndex == MouseButton.Right)
+            if (mouseBtnEvent.ButtonIndex == MouseButton.Middle && Input.IsPhysicalKeyPressed(Key.Shift))
+            {
+                _isPanning = mouseBtnEvent.Pressed;
+                if (_isPanning)
+                {
+                    _isOrbiting = false;
+                    Input.MouseMode = Input.MouseModeEnum.Captured;
+                }
+                else
+                {
+                    Input.MouseMode = Input.MouseModeEnum.Visible;
+                }
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+
+            // Orbit (Middle Mouse Button only)
+            if (mouseBtnEvent.ButtonIndex == MouseButton.Middle && !Input.IsPhysicalKeyPressed(Key.Shift))
             {
                 _isOrbiting = mouseBtnEvent.Pressed;
                 if (_isOrbiting)
                 {
+                    _isPanning = false;
                     Input.MouseMode = Input.MouseModeEnum.Captured;
                 }
                 else
@@ -265,9 +303,10 @@ public partial class OrbitCamera : Node3D
         }
         else if (@event is InputEventKey keyEvent && keyEvent.Pressed && keyEvent.Keycode == Key.Escape)
         {
-            if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
+            if (_isOrbiting || _isPanning || Input.MouseMode == Input.MouseModeEnum.Captured)
             {
                 _isOrbiting = false;
+                _isPanning = false;
                 Input.MouseMode = Input.MouseModeEnum.Visible;
                 GetViewport()?.SetInputAsHandled();
                 return;
@@ -279,22 +318,53 @@ public partial class OrbitCamera : Node3D
     {
         if (what == NotificationApplicationFocusOut || what == 1004 /* NotificationWindowFocusOut */)
         {
-            if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
+            if (_isOrbiting || _isPanning || Input.MouseMode == Input.MouseModeEnum.Captured)
             {
                 _isOrbiting = false;
+                _isPanning = false;
                 Input.MouseMode = Input.MouseModeEnum.Visible;
             }
         }
     }
 
+    private bool IsUserTyping()
+    {
+        if (PaintTabUI.IsRenameDialogOpen) return true;
+
+        Control focusOwner = null;
+        var root = GetTree()?.Root;
+        if (root != null)
+        {
+            focusOwner = root.GuiGetFocusOwner();
+            if (focusOwner == null)
+            {
+                foreach (var child in root.GetChildren())
+                {
+                    if (child is Window win && win.Visible)
+                    {
+                        focusOwner = win.GuiGetFocusOwner();
+                        if (focusOwner != null) break;
+                    }
+                }
+            }
+        }
+        if (focusOwner == null)
+        {
+            focusOwner = GetViewport()?.GuiGetFocusOwner();
+        }
+
+        return focusOwner is LineEdit or TextEdit;
+    }
+
     public override void _Process(double delta)
     {
-        // Fail-safe: If physically neither RMB nor MMB is held, restore Visible cursor
-        if (_isOrbiting || Input.MouseMode == Input.MouseModeEnum.Captured)
+        // Fail-safe: If physically neither RMB nor MMB nor LMB is held, restore Visible cursor
+        if (_isOrbiting || _isPanning || Input.MouseMode == Input.MouseModeEnum.Captured)
         {
-            if (!Input.IsMouseButtonPressed(MouseButton.Right) && !Input.IsMouseButtonPressed(MouseButton.Middle))
+            if (!Input.IsMouseButtonPressed(MouseButton.Right) && !Input.IsMouseButtonPressed(MouseButton.Middle) && !Input.IsMouseButtonPressed(MouseButton.Left))
             {
                 _isOrbiting = false;
+                _isPanning = false;
                 if (Input.MouseMode == Input.MouseModeEnum.Captured)
                 {
                     Input.MouseMode = Input.MouseModeEnum.Visible;
@@ -307,6 +377,28 @@ public partial class OrbitCamera : Node3D
         // Apply rotation
         Rotation = new Vector3(_pitch, _yaw, _roll);
 
+        // Check if user is typing in any text box to block camera movement
+        bool isTyping = IsUserTyping();
+
+        // Keyboard Zoom (+ / - or Numpad +/-)
+        if (!isTyping)
+        {
+            if (Input.IsPhysicalKeyPressed(Key.Equal) || Input.IsPhysicalKeyPressed(Key.KpAdd))
+            {
+                if (_camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal)
+                    _targetOrthoSize = Mathf.Clamp(_targetOrthoSize - OrthoSizeSensitivity * 3.0f * fDelta, OrthoSizeMin, OrthoSizeMax);
+                else
+                    _targetZoom = Mathf.Clamp(_targetZoom - ZoomSensitivity * 5.0f * fDelta, ZoomMin, ZoomMax);
+            }
+            if (Input.IsPhysicalKeyPressed(Key.Minus) || Input.IsPhysicalKeyPressed(Key.KpSubtract))
+            {
+                if (_camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal)
+                    _targetOrthoSize = Mathf.Clamp(_targetOrthoSize + OrthoSizeSensitivity * 3.0f * fDelta, OrthoSizeMin, OrthoSizeMax);
+                else
+                    _targetZoom = Mathf.Clamp(_targetZoom + ZoomSensitivity * 5.0f * fDelta, ZoomMin, ZoomMax);
+            }
+        }
+
         // Apply Zoom smoothly
         _currentZoom = Mathf.Lerp(_currentZoom, _targetZoom, ZoomLerpSpeed * fDelta);
         if (_camera != null)
@@ -318,38 +410,48 @@ public partial class OrbitCamera : Node3D
             }
         }
 
-        // Handle Panning (WASD or Arrows)
-        Vector3 inputDir = Vector3.Zero;
-        
-        // W/S map to Up/Down (Y-axis pan)
-        if (Input.IsPhysicalKeyPressed(Key.W) || Input.IsPhysicalKeyPressed(Key.Up)) inputDir.Y += 1;
-        if (Input.IsPhysicalKeyPressed(Key.S) || Input.IsPhysicalKeyPressed(Key.Down)) inputDir.Y -= 1;
-        
-        // A/D map to Left/Right (X-axis pan)
-        if (Input.IsPhysicalKeyPressed(Key.A) || Input.IsPhysicalKeyPressed(Key.Left)) inputDir.X -= 1;
-        if (Input.IsPhysicalKeyPressed(Key.D) || Input.IsPhysicalKeyPressed(Key.Right)) inputDir.X += 1;
-
-        if (inputDir != Vector3.Zero)
+        // Handle Panning (WASD / QE or configured keybinds)
+        if (!isTyping)
         {
-            // Transform input to camera space (ignoring pitch to keep movement horizontal unless specified)
-            Vector3 forward = -GlobalTransform.Basis.Z;
-            forward.Y = 0;
-            forward = forward.Normalized();
-
-            Vector3 right = GlobalTransform.Basis.X;
-            right.Y = 0;
-            right = right.Normalized();
-
-            Vector3 up = Vector3.Up;
-
-            Vector3 moveDir = (right * inputDir.X + up * inputDir.Y + forward * inputDir.Z).Normalized();
+            Vector3 inputDir = Vector3.Zero;
+            float speedMult = Input.IsPhysicalKeyPressed(Key.Shift) ? 2.5f : 1.0f;
             
-            _targetPan += moveDir * PanSpeed * fDelta;
+            bool moveUp = InputMap.HasAction("camera_pan_up") ? Input.IsActionPressed("camera_pan_up") : Input.IsPhysicalKeyPressed(Key.W);
+            bool moveDown = InputMap.HasAction("camera_pan_down") ? Input.IsActionPressed("camera_pan_down") : Input.IsPhysicalKeyPressed(Key.S);
+            bool moveLeft = InputMap.HasAction("camera_pan_left") ? Input.IsActionPressed("camera_pan_left") : Input.IsPhysicalKeyPressed(Key.A);
+            bool moveRight = InputMap.HasAction("camera_pan_right") ? Input.IsActionPressed("camera_pan_right") : Input.IsPhysicalKeyPressed(Key.D);
+            bool elevUp = InputMap.HasAction("camera_elevate_up") ? Input.IsActionPressed("camera_elevate_up") : Input.IsPhysicalKeyPressed(Key.E);
+            bool elevDown = InputMap.HasAction("camera_elevate_down") ? Input.IsActionPressed("camera_elevate_down") : Input.IsPhysicalKeyPressed(Key.Q);
 
-            // Clamp Target Pan within bounding box
-            _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
-            _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
-            _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+            if (moveUp) inputDir.Y += 1;
+            if (moveDown) inputDir.Y -= 1;
+            if (moveLeft) inputDir.X -= 1;
+            if (moveRight) inputDir.X += 1;
+            if (elevUp) inputDir.Y += 1;
+            if (elevDown) inputDir.Y -= 1;
+
+            if (inputDir != Vector3.Zero)
+            {
+                // Transform input to camera space (ignoring pitch to keep movement horizontal unless specified)
+                Vector3 forward = -GlobalTransform.Basis.Z;
+                forward.Y = 0;
+                forward = forward.Normalized();
+
+                Vector3 right = GlobalTransform.Basis.X;
+                right.Y = 0;
+                right = right.Normalized();
+
+                Vector3 up = Vector3.Up;
+
+                Vector3 moveDir = (right * inputDir.X + up * inputDir.Y + forward * inputDir.Z).Normalized();
+                
+                _targetPan += moveDir * (PanSpeed * speedMult) * fDelta;
+
+                // Clamp Target Pan within bounding box
+                _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
+                _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
+                _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+            }
         }
 
         // Apply Pan smoothly

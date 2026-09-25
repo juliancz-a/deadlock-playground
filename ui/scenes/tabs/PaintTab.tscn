@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://csvusgj1vik1u"]
 
 [ext_resource type="Script" uid="uid://c8iqg3e0fyesi" path="res://ui/scripts/tabs/PaintTabUI.cs" id="1_paint"]
-[ext_resource type="Texture2D" uid="uid://at_icon_trash" path="res://assets/at-icons/trash.svg" id="2_trash"]
+
 
 [node name="PaintTab" type="VBoxContainer" unique_id=1849204999]
 anchors_preset = 15
@@ -30,12 +30,6 @@ size_flags_horizontal = 3
 theme_type_variation = &"TitleLabel"
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 text = "HERO: NONE"
-
-[node name="BtnResetPose" type="Button" parent="HeaderCard/VBox/HBoxHeader" unique_id=1010101005]
-layout_mode = 2
-theme_override_font_sizes/font_size = 11
-tooltip_text = "Snap character to Bind Pose for painting"
-text = "Reset Pose"
 
 [node name="HBoxTarget" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101006]
 layout_mode = 2
@@ -145,14 +139,7 @@ text = "+ LAYER"
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 11
-text = "- DEL"
-
-[node name="BtnClearLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101029]
-custom_minimum_size = Vector2(28, 28)
-layout_mode = 2
-tooltip_text = "Clear Active Texture Layer"
-icon = ExtResource("2_trash")
-expand_icon = true
+text = "DELETE"
 
 [node name="BtnMoveUp" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101030]
 custom_minimum_size = Vector2(28, 0)

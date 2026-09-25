@@ -518,6 +518,7 @@ namespace DeadlockPlayground.UI
         private void OnStackChanged()
         {
             UpdateResolutionLabel();
+            RebuildWireframe();
             _canvasDrawArea?.QueueRedraw();
         }
 

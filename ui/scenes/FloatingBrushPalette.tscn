@@ -14,6 +14,8 @@
 [ext_resource type="Texture2D" uid="uid://cr5vunpgwpj3y" path="res://assets/at-icons/redo.svg" id="12_icon_redo"]
 [ext_resource type="Texture2D" uid="uid://40drwhprmtjg" path="res://assets/at-icons/trash.svg" id="13_icon_trash"]
 [ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="14_5yohq"]
+[ext_resource type="Texture2D" uid="uid://mgjva1c5mhu8" path="res://assets/at-icons/cog.svg" id="15_icon_cog"]
+[ext_resource type="Texture2D" uid="uid://b3vs7211skkc4" path="res://assets/at-icons/folder.svg" id="16_icon_folder"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_root"]
 
@@ -133,11 +135,11 @@ icon = ExtResource("5_icon_eraser")
 icon_alignment = 1
 expand_icon = true
 
-[node name="BtnFill" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1544804760]
+[node name="BtnFill" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1418319999]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 32)
 layout_mode = 2
-tooltip_text = "Bucket Fill Submesh [G]"
+tooltip_text = "Bucket Fill Submesh [F]"
 toggle_mode = true
 icon = ExtResource("6_icon_bucket")
 icon_alignment = 1
@@ -213,24 +215,14 @@ icon = ExtResource("12_icon_redo")
 icon_alignment = 1
 expand_icon = true
 
-[node name="HSeparator2" type="HSeparator" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=949581784]
-layout_mode = 2
-
-[node name="BtnClear" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=36220679]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(32, 32)
-layout_mode = 2
-tooltip_text = "Clear Active Layer"
-icon = ExtResource("13_icon_trash")
-icon_alignment = 1
-expand_icon = true
-
 [node name="BtnToggleFlyout" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1811216306]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 28)
 layout_mode = 2
 tooltip_text = "Toggle Tool Options"
-text = "⚙"
+icon = ExtResource("15_icon_cog")
+icon_alignment = 1
+expand_icon = true
 
 [node name="BtnPin" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1687413234]
 unique_name_in_owner = true
@@ -329,24 +321,6 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
 size_flags_horizontal = 3
-
-[node name="ColorRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=1035395603]
-layout_mode = 2
-
-[node name="LblColor" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ColorRow" unique_id=1565909392]
-custom_minimum_size = Vector2(65, 0)
-layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
-text = "Color:"
-
-[node name="ColorPickerButton" type="ColorPickerButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ColorRow" unique_id=1429105664]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 24)
-layout_mode = 2
-size_flags_horizontal = 3
-color = Color(0.85, 0.15, 0.2, 1)
-edit_alpha = false
 
 [node name="ShapeRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions" unique_id=448908851]
 layout_mode = 2
@@ -548,42 +522,17 @@ theme_override_font_sizes/font_size = 11
 text = "100%"
 horizontal_alignment = 2
 
-[node name="BucketFillOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1082421785]
+[node name="BucketFillOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1409135999]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="FillColorRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=1374809367]
-layout_mode = 2
-
-[node name="LblColor" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/FillColorRow" unique_id=2140346099]
-custom_minimum_size = Vector2(65, 0)
-layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
-text = "Color:"
-
-[node name="FillColorPicker" type="ColorPickerButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/FillColorRow" unique_id=1471651995]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 24)
-layout_mode = 2
-size_flags_horizontal = 3
-color = Color(0.85, 0.15, 0.2, 1)
-edit_alpha = false
-
-[node name="LblHint" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=599975345]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.65, 0.68, 0.72, 1)
-theme_override_font_sizes/font_size = 10
-text = "Click a 3D submesh to fill its entire atlas UV region."
-autowrap_mode = 2
-
-[node name="BtnFillActiveSubmesh" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=1487320771]
+[node name="BtnFillActiveSubmesh" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=1544219994]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
-text = "Fill Active Submesh"
+text = "Fill Active Submesh Layer"
 
 [node name="MagicWandOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1409135736]
 unique_name_in_owner = true
@@ -629,17 +578,17 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
-min_value = 0.002
-max_value = 0.4
-step = 0.002
-value = 0.08
+min_value = 0.005
+max_value = 0.8
+step = 0.005
+value = 0.15
 
 [node name="LblTolerance" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/ToleranceRow" unique_id=468478089]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 11
-text = "0.080"
+text = "0.150"
 horizontal_alignment = 2
 
 [node name="MaskControlsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions" unique_id=459942161]
@@ -795,10 +744,12 @@ size_flags_horizontal = 3
 
 [node name="BtnLoadFont" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontRow" unique_id=157983655]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(32, 0)
+custom_minimum_size = Vector2(32, 24)
 layout_mode = 2
 tooltip_text = "Load custom font file (.ttf, .otf)..."
-text = "📁"
+icon = ExtResource("16_icon_folder")
+icon_alignment = 1
+expand_icon = true
 
 [node name="FontSizeRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=1039418349]
 layout_mode = 2
@@ -941,6 +892,33 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "0°"
 horizontal_alignment = 2
+
+[node name="TextFlipRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=1558565140]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblFlip" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextFlipRow" unique_id=1344015141]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Flip:"
+
+[node name="BtnFlipH" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextFlipRow" unique_id=2081192843]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Flip text horizontally"
+toggle_mode = true
+text = "Flip H"
+
+[node name="BtnFlipV" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextFlipRow" unique_id=2081192844]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Flip text vertically"
+toggle_mode = true
+text = "Flip V"
 
 [node name="BtnBakeText" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=528249225]
 unique_name_in_owner = true

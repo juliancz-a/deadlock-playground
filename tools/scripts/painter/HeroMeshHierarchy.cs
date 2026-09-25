@@ -52,6 +52,7 @@ namespace DeadlockPlayground.Painter
         public SubmeshNodeInfo ActiveTarget => _activeTarget;
 
         public bool IsPaintingModeActive { get; set; } = false;
+        public Node3D HeroRoot { get; private set; }
 
         private bool _isAnySoloed = false;
         private readonly Dictionary<MeshInstance3D, bool> _preSoloVisibility = new();
@@ -65,6 +66,7 @@ namespace DeadlockPlayground.Painter
         {
             CleanupGeneratedSubmeshes();
 
+            HeroRoot = heroNode;
             _currentHeroName = heroNode?.Name.ToString().ToLowerInvariant() ?? string.Empty;
             _submeshes.Clear();
             _preSoloVisibility.Clear();

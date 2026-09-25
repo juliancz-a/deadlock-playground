@@ -684,7 +684,7 @@ theme_override_constants/margin_bottom = 4
 [node name="NavLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge/MarginContainer" unique_id=1268961489]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.75, 0.8, 0.9)
-text = "Move: WASD | Rotate: RMB | Zoom: Scroll"
+text = "Rotate: MMB | Pan: Shift+MMB | Move: WASD / QE | Zoom: Scroll"
 
 [node name="ModalsLayer" type="Control" parent="UIRoot/MainHUD" unique_id=1736869492]
 layout_mode = 1

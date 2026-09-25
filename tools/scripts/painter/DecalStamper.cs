@@ -20,6 +20,12 @@ namespace DeadlockPlayground.Painter
         private Vector3 _currentWorldPos = Vector3.Zero;
         private Vector3 _currentNormal = Vector3.Up;
         private Vector2 _currentHitUv = Vector2.Zero;
+        private Vector3 _decalRight = Vector3.Right;
+        private Vector3 _decalDown = Vector3.Back;
+        private Vector3 _worldTangent = Vector3.Zero;
+        private Vector3 _worldBitangent = Vector3.Zero;
+        private float _unitsU = 1.0f;
+        private float _unitsV = 1.0f;
         private bool _hasPlacement = false;
 
         public bool HasPlacement => _hasPlacement;
@@ -38,9 +44,12 @@ namespace DeadlockPlayground.Painter
             _previewDecal = new Decal
             {
                 Name = "PainterDecalPreview",
-                Size = new Vector3(0.5f, 0.5f, 0.5f),
+                Size = new Vector3(0.5f, 1.2f, 0.5f),
                 TextureAlbedo = DecalTexture,
                 CullMask = 1,
+                NormalFade = 0.0f,
+                UpperFade = 0.0f,
+                LowerFade = 0.0f,
                 Visible = false
             };
 
@@ -128,11 +137,17 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        public void PlaceAt(Vector3 worldPos, Vector3 normal, Vector2 uv)
+        public void PlaceAt(Vector3 worldPos, Vector3 normal, Vector2 uv, Vector3 decalRight = default, Vector3 decalDown = default, Vector3 tangent = default, Vector3 bitangent = default, float unitsU = 1.0f, float unitsV = 1.0f)
         {
             _currentWorldPos = worldPos;
             _currentNormal = normal;
             _currentHitUv = uv;
+            _decalRight = decalRight;
+            _decalDown = decalDown;
+            _worldTangent = tangent;
+            _worldBitangent = bitangent;
+            _unitsU = unitsU;
+            _unitsV = unitsV;
             _hasPlacement = true;
 
             UpdatePreviewTransform();
@@ -162,8 +177,12 @@ namespace DeadlockPlayground.Painter
             basis = basis.Rotated(forward, Mathf.DegToRad(RotationDegrees));
 
             float size3D = DecalScale * 2.0f;
+            float depth3D = Mathf.Max(1.0f, size3D * 2.0f);
+            _previewDecal.NormalFade = 0.0f;
+            _previewDecal.UpperFade = 0.0f;
+            _previewDecal.LowerFade = 0.0f;
             _previewDecal.Transform = new Transform3D(basis, _currentWorldPos);
-            _previewDecal.Size = new Vector3(size3D, size3D, size3D);
+            _previewDecal.Size = new Vector3(size3D, depth3D, size3D);
         }
 
         public bool BakeToActiveLayer()
@@ -181,7 +200,18 @@ namespace DeadlockPlayground.Painter
                 return false;
             }
 
-            bool success = _layerManager.StampDecalToAtlas(_currentHitUv, DecalTexture, RotationDegrees, DecalScale);
+            bool success = _layerManager.StampDecalToAtlas(
+                _currentHitUv, 
+                DecalTexture, 
+                RotationDegrees, 
+                DecalScale, 
+                _painter?.MagicWandTool,
+                _decalRight,
+                _decalDown,
+                _worldTangent,
+                _worldBitangent,
+                _unitsU,
+                _unitsV);
             if (success)
             {
                 EmitSignal(SignalName.DecalBaked);

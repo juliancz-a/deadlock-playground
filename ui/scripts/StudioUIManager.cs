@@ -74,6 +74,7 @@ public partial class StudioUIManager : CanvasLayer
     private Godot.Timer _toastTimer;
     private string _lastExportedFilePath = "";
     private readonly List<string> _loadingLogHistory = new();
+    private Label _navLabel;
 
     public static StudioUIManager Instance { get; private set; }
     public string SavePath => _pathManager?.CurrentSavePath ?? OS.GetSystemDir(OS.SystemDir.Pictures);
@@ -332,6 +333,12 @@ public partial class StudioUIManager : CanvasLayer
         _uvCanvasPanel ??= GetNodeOrNull<UVCanvas2DUI>("MainHUD/VBoxContainer/MainSplit/UVCanvasPanel")
                         ?? GetTree().Root.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
 
+        _navLabel ??= _navBadge?.FindChild("NavLabel", true, false) as Label;
+        if (_navLabel != null)
+        {
+            _navLabel.Text = KeybindsManager.GetNavigationCheatsheet();
+        }
+
         _painterKeymapBadge ??= GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge")
                              ?? GetTree().Root.FindChild("PainterKeymapBadge", true, false) as Control;
         _painterKeymapLabel ??= _painterKeymapBadge?.FindChild("PainterKeymapLabel", true, false) as Label;
@@ -339,6 +346,8 @@ public partial class StudioUIManager : CanvasLayer
         {
             _painterKeymapLabel.Text = KeybindsManager.GetFullPainterCheatsheet();
         }
+
+        KeybindsManager.OnKeybindsChanged += UpdateKeybindsUI;
 
         _btnQuickXRay ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/BtnQuickXRay")
                        ?? GetTree().Root.FindChild("BtnQuickXRay", true, false) as Button;
@@ -494,6 +503,10 @@ public partial class StudioUIManager : CanvasLayer
                 _tabPaint?.SetCurrentHero(hero);
             }
             _tabPaint?.OnTabActivated();
+
+            // Disable IK when entering paint mode
+            _currentIKManager?.SetMasterIKEnabled(false);
+            _tabBones?.DisableMasterIK();
 
             if (_exportPanel != null)
             {
@@ -785,6 +798,11 @@ public partial class StudioUIManager : CanvasLayer
             gizmoManager.IKManager = ikManager;
             _currentIKManager.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
             _tabBones?.SetIKManager(ikManager);
+            if (_currentTabIndex == 8)
+            {
+                _currentIKManager.SetMasterIKEnabled(false);
+                _tabBones?.DisableMasterIK();
+            }
 
             // Synchronize Weapon Bone Attachments
             SyncWeaponBoneAttachments(heroNode, skeleton);
@@ -1159,6 +1177,18 @@ public partial class StudioUIManager : CanvasLayer
         {
             // Gizmo viewport only renders line wireframes & markers on Layer 2, so zero shadow allocation needed
             gizmoViewport.PositionalShadowAtlasSize = 0;
+        }
+    }
+
+    private void UpdateKeybindsUI()
+    {
+        if (_painterKeymapLabel != null)
+        {
+            _painterKeymapLabel.Text = KeybindsManager.GetFullPainterCheatsheet();
+        }
+        if (_navLabel != null)
+        {
+            _navLabel.Text = KeybindsManager.GetNavigationCheatsheet();
         }
     }
     #endregion

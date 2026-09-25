@@ -100,10 +100,15 @@ namespace DeadlockPlayground.Tools
             AddDefault("Texture Paint", "paint_uv_toggle", "Toggle 2D UV Canvas", "Toggle docked 2D UV Texture Canvas", Key.U);
 
             // 2. Camera
+            AddDefault("Camera", "camera_pan_up", "Move Up", "Move camera viewport up (W)", Key.W);
+            AddDefault("Camera", "camera_pan_down", "Move Down", "Move camera viewport down (S)", Key.S);
+            AddDefault("Camera", "camera_pan_left", "Move Left", "Move camera viewport left (A)", Key.A);
+            AddDefault("Camera", "camera_pan_right", "Move Right", "Move camera viewport right (D)", Key.D);
+            AddDefault("Camera", "camera_elevate_up", "Elevate Up", "Raise camera elevation (E)", Key.E);
+            AddDefault("Camera", "camera_elevate_down", "Elevate Down", "Lower camera elevation (Q)", Key.Q);
             AddDefault("Camera", "camera_freecam", "Freecam Toggle", "Toggle between Orbit and Freecam navigation", Key.F);
             AddDefault("Camera", "camera_reset", "Reset View", "Reset camera angle, zoom, and orientation", Key.Home, 
                 secKey: Key.R, secCtrl: true);
-            AddDefault("Camera", "camera_orbit", "Orbit Controls", "Orbit / Rotate viewport camera (Hold RMB or MMB)", Key.None);
             AddDefault("Camera", "camera_focus", "Focus Model", "Recenter and focus camera on character model", Key.F, ctrl: true);
 
             // 3. Bones / Rigging
@@ -359,6 +364,25 @@ namespace DeadlockPlayground.Tools
         {
             EnsureInitialized();
             return $"[{GetShortcutText("paint_brush")}] Brush  [{GetShortcutText("paint_eraser")}] Erase  [{GetShortcutText("paint_bucket")}] Fill  [{GetShortcutText("paint_wand")}] Wand  [{GetShortcutText("paint_decal")}] Decal  [{GetShortcutText("paint_text")}] Text  [{GetShortcutText("paint_mirror")}] Mirror  [{GetShortcutText("brush_size_down")}/{GetShortcutText("brush_size_up")}] Size  [{GetShortcutText("paint_uv_toggle")}] 2D UV";
+        }
+
+        public static string GetNavigationCheatsheet()
+        {
+            EnsureInitialized();
+            string up = GetShortcutText("camera_pan_up");
+            string down = GetShortcutText("camera_pan_down");
+            string left = GetShortcutText("camera_pan_left");
+            string right = GetShortcutText("camera_pan_right");
+            string eleUp = GetShortcutText("camera_elevate_up");
+            string eleDown = GetShortcutText("camera_elevate_down");
+
+            string moveStr = $"{up}{left}{down}{right}";
+            if (!string.IsNullOrEmpty(eleDown) && !string.IsNullOrEmpty(eleUp) && eleDown != "None" && eleUp != "None")
+            {
+                moveStr += $" / {eleDown}{eleUp}";
+            }
+
+            return $"Rotate: MMB | Pan: Shift+MMB | Move: {moveStr} | Zoom: Scroll";
         }
     }
 }

@@ -67,17 +67,16 @@ public partial class PaintTabUI : VBoxContainer
     private ConfirmationDialog _confirmResDialog;
     private int _previousResolutionIndex = 1;
     private int _pendingResolution = 2048;
-    private Button _btnResetPose;
+    private int _pendingResolutionIndex = 1;
+    private Texture2D _iconPencil;
 
     // Submesh Hierarchy
     private VBoxContainer _submeshListContainer;
     private Button _btnShowAllMeshes;
     private Button _btnHideAccMeshes;
 
-    // Layers
     private Button _btnAddLayer;
     private Button _btnDeleteLayer;
-    private Button _btnClearLayer;
     private Button _btnMoveUp;
     private Button _btnMoveDown;
     private VBoxContainer _layersListContainer;
@@ -87,6 +86,35 @@ public partial class PaintTabUI : VBoxContainer
     private ConfirmationDialog _renameLayerDialog;
     private LineEdit _renameLayerInput;
     private int _layerIndexToRename = -1;
+    public static bool IsRenameDialogOpen { get; private set; }
+
+    private StyleBoxFlat _renameBtnNormalStyle;
+    private StyleBoxFlat _renameBtnHoverStyle;
+    private StyleBoxFlat _renameBtnPressedStyle;
+    private StyleBoxFlat _renameBtnDisabledStyle;
+
+    private void EnsureRenameButtonStyles()
+    {
+        if (_renameBtnNormalStyle != null) return;
+        _renameBtnNormalStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.18f, 0.22f, 0.26f, 0.6f),
+            CornerRadiusBottomLeft = 4,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            ContentMarginLeft = 2,
+            ContentMarginRight = 2,
+            ContentMarginTop = 2,
+            ContentMarginBottom = 2
+        };
+        _renameBtnHoverStyle = (StyleBoxFlat)_renameBtnNormalStyle.Duplicate();
+        _renameBtnHoverStyle.BgColor = new Color(0.28f, 0.35f, 0.44f, 0.9f);
+        _renameBtnPressedStyle = (StyleBoxFlat)_renameBtnNormalStyle.Duplicate();
+        _renameBtnPressedStyle.BgColor = new Color(0.12f, 0.15f, 0.18f, 1.0f);
+        _renameBtnDisabledStyle = (StyleBoxFlat)_renameBtnNormalStyle.Duplicate();
+        _renameBtnDisabledStyle.BgColor = new Color(0.12f, 0.12f, 0.12f, 0.3f);
+    }
 
     // Export
     private Button _btnExportPng;
@@ -176,7 +204,6 @@ public partial class PaintTabUI : VBoxContainer
     {
         // Header
         _lblHeroName = GetNodeOrNull<Label>("HeaderCard/VBox/HBoxHeader/HeroNameLabel");
-        _btnResetPose = GetNodeOrNull<Button>("HeaderCard/VBox/HBoxHeader/BtnResetPose");
         _optTargetMesh = GetNodeOrNull<OptionButton>("HeaderCard/VBox/HBoxTarget/OptTargetMesh");
         if (_optTargetMesh != null)
         {
@@ -195,7 +222,6 @@ public partial class PaintTabUI : VBoxContainer
         // Layers
         _btnAddLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnAddLayer");
         _btnDeleteLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnDeleteLayer");
-        _btnClearLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnClearLayer");
         _btnMoveUp = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnMoveUp");
         _btnMoveDown = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnMoveDown");
         _layersListContainer = GetNodeOrNull<VBoxContainer>("LayersCard/VBox/ScrollContainer/LayersListContainer");
@@ -238,29 +264,41 @@ public partial class PaintTabUI : VBoxContainer
         _previousResolutionIndex = 1;
     }
 
-    private void ShowResolutionConfirmModal(int newRes)
+    private void ShowResolutionConfirmModal(int newRes, int newIdx)
     {
+        _pendingResolution = newRes;
+        _pendingResolutionIndex = newIdx;
         if (_confirmResDialog == null)
         {
             _confirmResDialog = new ConfirmationDialog
             {
-                Title = "Change Canvas Resolution?",
-                OkButtonText = "Change Resolution",
+                Title = "Change Canvas Resolution",
+                OkButtonText = "Accept",
                 CancelButtonText = "Cancel"
             };
             _confirmResDialog.Confirmed += () =>
             {
-                _previousResolutionIndex = _optResolution.Selected;
+                _previousResolutionIndex = _pendingResolutionIndex;
+                _optResolution.Select(_previousResolutionIndex);
                 _layerManager?.SetCanvasResolution(new Vector2I(_pendingResolution, _pendingResolution));
+                _painter?.SyncSelectionMaskState();
+                if (_meshHierarchy?.ActiveTarget != null)
+                {
+                    _meshHierarchy.SelectTarget(_meshHierarchy.ActiveTarget, _meshHierarchy.ActiveTarget.SurfaceIndex);
+                }
             };
             _confirmResDialog.Canceled += () =>
+            {
+                _optResolution.Select(_previousResolutionIndex);
+            };
+            _confirmResDialog.CloseRequested += () =>
             {
                 _optResolution.Select(_previousResolutionIndex);
             };
             AddChild(_confirmResDialog);
         }
 
-        _confirmResDialog.DialogText = $"Changing canvas resolution to {newRes}x{newRes} will clear all current paint layers.\n\nAre you sure you want to proceed?";
+        _confirmResDialog.DialogText = "Changing the canvas resolution will clean the textures, are you sure?";
         _confirmResDialog.PopupCentered(new Vector2I(420, 160));
     }
 
@@ -299,14 +337,8 @@ public partial class PaintTabUI : VBoxContainer
                 int res = (int)_optResolution.GetItemId((int)idx);
                 if (_layerManager != null && _layerManager.CanvasSize.X == res) return;
 
-                _previousResolutionIndex = (int)idx;
-                _layerManager?.SetCanvasResolution(new Vector2I(res, res));
+                ShowResolutionConfirmModal(res, (int)idx);
             };
-        }
-
-        if (_btnResetPose != null)
-        {
-            _btnResetPose.Pressed += () => ResetCharacterPose();
         }
 
         // Submesh Actions
@@ -327,10 +359,6 @@ public partial class PaintTabUI : VBoxContainer
         if (_btnDeleteLayer != null)
         {
             _btnDeleteLayer.Pressed += () => _layerManager?.DeleteActiveLayer();
-        }
-        if (_btnClearLayer != null)
-        {
-            _btnClearLayer.Pressed += () => _layerManager?.ClearCurrentLayer();
         }
         if (_btnMoveUp != null)
         {
@@ -809,14 +837,24 @@ public partial class PaintTabUI : VBoxContainer
             selectBtn.Pressed += () => _layerManager.SelectLayer(layerIndex);
             btnWrapper.AddChild(selectBtn);
 
+            EnsureRenameButtonStyles();
+            _iconPencil ??= GD.Load<Texture2D>("res://assets/at-icons/pencil.svg");
             var renameBtn = new Button
             {
-                Text = "✏",
+                Icon = _iconPencil,
+                ExpandIcon = true,
+                IconAlignment = HorizontalAlignment.Center,
                 CustomMinimumSize = new Vector2(26, 26),
                 TooltipText = "Rename layer",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
                 Disabled = layer.IsLocked
             };
+            renameBtn.AddThemeStyleboxOverride("normal", _renameBtnNormalStyle);
+            renameBtn.AddThemeStyleboxOverride("hover", _renameBtnHoverStyle);
+            renameBtn.AddThemeStyleboxOverride("pressed", _renameBtnPressedStyle);
+            renameBtn.AddThemeStyleboxOverride("disabled", _renameBtnDisabledStyle);
+            renameBtn.AddThemeStyleboxOverride("focus", _renameBtnNormalStyle);
+
             int capturedIdx = layerIndex;
             renameBtn.Pressed += () => ShowRenameLayerDialog(capturedIdx);
 
@@ -864,11 +902,29 @@ public partial class PaintTabUI : VBoxContainer
         {
             ConfirmRenameLayer();
             _renameLayerDialog.Hide();
+            IsRenameDialogOpen = false;
         };
         vbox.AddChild(_renameLayerInput);
 
         _renameLayerDialog.AddChild(vbox);
-        _renameLayerDialog.Confirmed += ConfirmRenameLayer;
+        _renameLayerDialog.Confirmed += () =>
+        {
+            ConfirmRenameLayer();
+            IsRenameDialogOpen = false;
+        };
+        _renameLayerDialog.Canceled += () =>
+        {
+            IsRenameDialogOpen = false;
+        };
+        _renameLayerDialog.CloseRequested += () =>
+        {
+            IsRenameDialogOpen = false;
+        };
+        _renameLayerDialog.VisibilityChanged += () =>
+        {
+            if (_renameLayerDialog != null)
+                IsRenameDialogOpen = _renameLayerDialog.Visible;
+        };
         AddChild(_renameLayerDialog);
     }
 
@@ -884,6 +940,7 @@ public partial class PaintTabUI : VBoxContainer
             _renameLayerInput.Text = layer.Name;
             _renameLayerInput.SelectAll();
         }
+        IsRenameDialogOpen = true;
         _renameLayerDialog.PopupCentered(new Vector2I(360, 120));
         _renameLayerInput?.GrabFocus();
     }
@@ -928,12 +985,10 @@ public partial class PaintTabUI : VBoxContainer
     {
         if (_optTargetMesh != null) _optTargetMesh.Disabled = !hasHero;
         if (_optResolution != null) _optResolution.Disabled = !hasHero;
-        if (_btnResetPose != null) _btnResetPose.Disabled = !hasHero;
         if (_btnShowAllMeshes != null) _btnShowAllMeshes.Disabled = !hasHero;
         if (_btnHideAccMeshes != null) _btnHideAccMeshes.Disabled = !hasHero;
         if (_btnAddLayer != null) _btnAddLayer.Disabled = !hasHero;
         if (_btnDeleteLayer != null) _btnDeleteLayer.Disabled = !hasHero;
-        if (_btnClearLayer != null) _btnClearLayer.Disabled = !hasHero;
         if (_btnMoveUp != null) _btnMoveUp.Disabled = !hasHero;
         if (_btnMoveDown != null) _btnMoveDown.Disabled = !hasHero;
         if (_btnExportPng != null) _btnExportPng.Disabled = !hasHero;
@@ -1140,6 +1195,9 @@ public partial class PaintTabUI : VBoxContainer
         var skeleton = SearchSkeleton(_currentHero);
         if (skeleton != null)
         {
+            var ikManager = skeleton.GetNodeOrNull<CharacterIKManager>("CharacterIKManager");
+            ikManager?.SetMasterIKEnabled(false);
+
             for (int i = 0; i < skeleton.GetBoneCount(); i++)
             {
                 skeleton.ResetBonePose(i);

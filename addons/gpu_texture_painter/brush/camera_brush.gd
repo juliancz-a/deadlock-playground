@@ -92,8 +92,17 @@ extends Node3D
 @export var blend_mode: int = 0
 
 ## Whether to modulate strokes with selection mask.
-@export var use_selection_mask: bool = false
-@export var selection_mask_rid: RID = RID()
+@export var use_selection_mask: bool = false:
+	set(val):
+		if use_selection_mask != val:
+			use_selection_mask = val
+			get_atlas_textures()
+
+@export var selection_mask_rid: RID = RID():
+	set(val):
+		if selection_mask_rid != val:
+			selection_mask_rid = val
+			get_atlas_textures()
 
 ## Whether the brush is currently drawing.
 @export var drawing: bool = false:

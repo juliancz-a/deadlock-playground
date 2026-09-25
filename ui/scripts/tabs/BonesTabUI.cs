@@ -220,6 +220,16 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
         if (_btnSnapIKToFK != null) _btnSnapIKToFK.Disabled = !isIK;
     }
 
+    public void DisableMasterIK()
+    {
+        if (_checkMasterIK != null)
+        {
+            _checkMasterIK.SetPressedNoSignal(false);
+        }
+        _ikManager?.SetMasterIKEnabled(false);
+        UpdateIKUIState();
+    }
+
     public void SetSkeleton(Skeleton3D skeleton)
     {
         _skeleton = skeleton;

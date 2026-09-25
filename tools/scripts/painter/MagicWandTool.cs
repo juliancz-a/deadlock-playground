@@ -16,11 +16,11 @@ namespace DeadlockPlayground.Painter
         [Signal] public delegate void MaskUpdatedEventHandler(bool hasActiveMask);
         [Signal] public delegate void ColorSampledEventHandler(Color color);
 
-        private float _tolerance = 0.08f;
+        private float _tolerance = 0.15f;
         public float Tolerance
         {
             get => _tolerance;
-            set => _tolerance = Mathf.Clamp(value, 0.002f, 0.50f);
+            set => _tolerance = Mathf.Clamp(value, 0.005f, 0.80f);
         }
 
         public Color TargetColor { get; private set; } = Colors.White;
@@ -136,8 +136,33 @@ namespace DeadlockPlayground.Painter
             float dr = c1.R - c2.R;
             float dg = c1.G - c2.G;
             float db = c1.B - c2.B;
-            // Normalized Euclidean distance in sRGB space [0.0 .. 1.0]
-            return Mathf.Sqrt((dr * dr + dg * dg + db * db) / 3.0f);
+            // Perceptually weighted Euclidean distance (Rec. 709 luminance weights: 0.2126 R, 0.7152 G, 0.0722 B)
+            float deltaE = Mathf.Sqrt(0.2126f * dr * dr + 0.7152f * dg * dg + 0.0722f * db * db);
+
+            // Special handling for white / near-white outlines:
+            // When target or candidate is white/light grey, anti-aliased perimeter pixels
+            // blend with the dark background mesh, reducing luminance while remaining neutral.
+            bool c1IsNearWhite = c1.R > 0.70f && c1.G > 0.70f && c1.B > 0.70f;
+            bool c2IsNearWhite = c2.R > 0.70f && c2.G > 0.70f && c2.B > 0.70f;
+            if (c1IsNearWhite || c2IsNearWhite)
+            {
+                Color whiteRef = c2IsNearWhite ? c2 : c1;
+                Color cand = c2IsNearWhite ? c1 : c2;
+
+                float maxVal = Mathf.Max(cand.R, Mathf.Max(cand.G, cand.B));
+                float minVal = Mathf.Min(cand.R, Mathf.Min(cand.G, cand.B));
+                float chroma = maxVal - minVal;
+
+                // Neutral/low-chroma candidate (white/grey outline)
+                if (chroma < 0.25f && maxVal > 0.30f)
+                {
+                    float lumDiff = Mathf.Abs(whiteRef.R - maxVal);
+                    float outlineDist = lumDiff * 0.55f + chroma * 0.45f;
+                    return Mathf.Min(deltaE, outlineDist);
+                }
+            }
+
+            return deltaE;
         }
 
         public static bool IsColorMatch(Color c1, Color c2, float tolerance)
@@ -212,6 +237,50 @@ namespace DeadlockPlayground.Painter
             return true;
         }
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        public static float GetByteColorDistance(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2)
+        {
+            float dr = (r1 - r2) * (1.0f / 255.0f);
+            float dg = (g1 - g2) * (1.0f / 255.0f);
+            float db = (b1 - b2) * (1.0f / 255.0f);
+            float deltaE = MathF.Sqrt(0.2126f * dr * dr + 0.7152f * dg * dg + 0.0722f * db * db);
+
+            bool c1IsNearWhite = r1 > 178 && g1 > 178 && b1 > 178;
+            bool c2IsNearWhite = r2 > 178 && g2 > 178 && b2 > 178;
+            if (c1IsNearWhite || c2IsNearWhite)
+            {
+                byte whiteR = c2IsNearWhite ? r2 : r1;
+                byte candR = c2IsNearWhite ? r1 : r2;
+                byte candG = c2IsNearWhite ? g1 : g2;
+                byte candB = c2IsNearWhite ? b1 : b2;
+
+                byte maxValB = Math.Max(candR, Math.Max(candG, candB));
+                byte minValB = Math.Min(candR, Math.Min(candG, candB));
+                float chroma = (maxValB - minValB) * (1.0f / 255.0f);
+
+                if (chroma < 0.25f && maxValB > 76)
+                {
+                    float lumDiff = MathF.Abs(whiteR - maxValB) * (1.0f / 255.0f);
+                    float outlineDist = lumDiff * 0.55f + chroma * 0.45f;
+                    return Math.Min(deltaE, outlineDist);
+                }
+            }
+
+            return deltaE;
+        }
+
+        private static readonly Half[] _halfLut = PrecomputeHalfLut();
+
+        private static Half[] PrecomputeHalfLut()
+        {
+            var lut = new Half[256];
+            for (int i = 0; i < 256; i++)
+            {
+                lut[i] = (Half)(i / 255.0f);
+            }
+            return lut;
+        }
+
         private void RebuildMaskFromSeedPoints(RenderingDevice rd, int atlasSize)
         {
             if (_activeAtlasMask == null || _activeAtlasMask.Length != atlasSize * atlasSize)
@@ -225,69 +294,87 @@ namespace DeadlockPlayground.Painter
                 if (seed.SubmeshImage == null) continue;
 
                 var img = seed.SubmeshImage;
+                if (img.GetFormat() != Image.Format.Rgba8)
+                {
+                    img.Convert(Image.Format.Rgba8);
+                }
+
                 int imgW = img.GetWidth();
                 int imgH = img.GetHeight();
-                int seedX = Mathf.Clamp((int)(seed.HitUV.X * imgW), 0, imgW - 1);
-                int seedY = Mathf.Clamp((int)(seed.HitUV.Y * imgH), 0, imgH - 1);
+                int seedX = Math.Clamp((int)(seed.HitUV.X * imgW), 0, imgW - 1);
+                int seedY = Math.Clamp((int)(seed.HitUV.Y * imgH), 0, imgH - 1);
 
-                int rectX = Mathf.Clamp((int)(seed.SubmeshRect.Position.X * atlasSize), 0, atlasSize - 1);
-                int rectY = Mathf.Clamp((int)(seed.SubmeshRect.Position.Y * atlasSize), 0, atlasSize - 1);
-                int rectW = Mathf.Clamp((int)(seed.SubmeshRect.Size.X * atlasSize), 1, atlasSize - rectX);
-                int rectH = Mathf.Clamp((int)(seed.SubmeshRect.Size.Y * atlasSize), 1, atlasSize - rectY);
+                int rectX = Math.Clamp((int)(seed.SubmeshRect.Position.X * atlasSize), 0, atlasSize - 1);
+                int rectY = Math.Clamp((int)(seed.SubmeshRect.Position.Y * atlasSize), 0, atlasSize - 1);
+                int rectW = Math.Clamp((int)(seed.SubmeshRect.Size.X * atlasSize), 1, atlasSize - rectX);
+                int rectH = Math.Clamp((int)(seed.SubmeshRect.Size.Y * atlasSize), 1, atlasSize - rectY);
 
-                float[] submeshMask = new float[imgW * imgH];
+                byte[] rawImg = img.GetData();
+                byte[] submeshMask = new byte[imgW * imgH];
 
                 float tol = _tolerance;
-                // Soft edge threshold: allows gentle boundary transition to capture beard & hair blends
-                float softTol = tol * 1.35f;
-                // Propagation cutoff in flood fill: slightly beyond hard tolerance so it flows into the fringe
-                float flowTol = tol * 1.15f;
+                float softTol = tol * 1.60f;
+                float flowTol = tol * 1.35f;
+
+                int minSelX = imgW, maxSelX = -1, minSelY = imgH, maxSelY = -1;
+
+                int seedOffset = (seedY * imgW + seedX) * 4;
+                byte targetR = rawImg[seedOffset];
+                byte targetG = rawImg[seedOffset + 1];
+                byte targetB = rawImg[seedOffset + 2];
+                byte targetA = rawImg[seedOffset + 3];
 
                 if (seed.Contiguous)
                 {
-                    bool[] visited = new bool[imgW * imgH];
-                    Queue<int> q = new Queue<int>();
+                    int[] q = new int[imgW * imgH];
+                    int qHead = 0, qTail = 0;
 
                     int seedIdx = seedY * imgW + seedX;
-                    visited[seedIdx] = true;
-                    submeshMask[seedIdx] = 1.0f;
-                    q.Enqueue(seedIdx);
+                    submeshMask[seedIdx] = 255;
+                    q[qTail++] = seedIdx;
 
-                    int[] dxs = { 1, -1, 0, 0 };
-                    int[] dys = { 0, 0, 1, -1 };
+                    minSelX = seedX; maxSelX = seedX;
+                    minSelY = seedY; maxSelY = seedY;
 
-                    while (q.Count > 0)
+                    while (qHead < qTail)
                     {
-                        int curr = q.Dequeue();
+                        int curr = q[qHead++];
                         int cx = curr % imgW;
                         int cy = curr / imgW;
 
-                        for (int dir = 0; dir < 4; dir++)
+                        if (cx < minSelX) minSelX = cx;
+                        if (cx > maxSelX) maxSelX = cx;
+                        if (cy < minSelY) minSelY = cy;
+                        if (cy > maxSelY) maxSelY = cy;
+
+                        // 4 directions
+                        if (cx > 0) CheckAndEnqueue(cx - 1, cy);
+                        if (cx < imgW - 1) CheckAndEnqueue(cx + 1, cy);
+                        if (cy > 0) CheckAndEnqueue(cx, cy - 1);
+                        if (cy < imgH - 1) CheckAndEnqueue(cx, cy + 1);
+
+                        void CheckAndEnqueue(int nx, int ny)
                         {
-                            int nx = cx + dxs[dir];
-                            int ny = cy + dys[dir];
-                            if (nx < 0 || nx >= imgW || ny < 0 || ny >= imgH) continue;
-
                             int nIdx = ny * imgW + nx;
-                            if (visited[nIdx]) continue;
+                            if (submeshMask[nIdx] != 0) return; // visited
 
-                            visited[nIdx] = true;
-                            Color col = img.GetPixel(nx, ny);
-                            if (seed.TargetColor.A > 0.001f && col.A <= 0.001f) continue;
+                            int nOff = nIdx * 4;
+                            byte a = rawImg[nOff + 3];
+                            if (targetA > 0 && a == 0) return;
 
-                            float dist = GetColorDistance(col, seed.TargetColor);
+                            float dist = GetByteColorDistance(rawImg[nOff], rawImg[nOff + 1], rawImg[nOff + 2], targetR, targetG, targetB);
                             if (dist <= tol)
                             {
-                                submeshMask[nIdx] = 1.0f;
-                                q.Enqueue(nIdx);
+                                submeshMask[nIdx] = 255;
+                                q[qTail++] = nIdx;
                             }
                             else if (dist <= softTol)
                             {
                                 float match = 1.0f - (dist - tol) / Math.Max(0.0001f, softTol - tol);
-                                submeshMask[nIdx] = match;
+                                submeshMask[nIdx] = (byte)Math.Clamp((int)(match * 255f), 1, 255);
                                 if (dist <= flowTol)
                                 {
-                                    q.Enqueue(nIdx);
+                                    q[qTail++] = nIdx;
                                 }
                             }
                         }
@@ -295,128 +382,131 @@ namespace DeadlockPlayground.Painter
                 }
                 else
                 {
-                    for (int py = 0; py < imgH; py++)
+                    object bbLock = new object();
+                    System.Threading.Tasks.Parallel.For(0, imgH, () => (MinX: imgW, MaxX: -1, MinY: imgH, MaxY: -1), (py, state, localBB) =>
                     {
                         int row = py * imgW;
+                        int pRow = row * 4;
                         for (int px = 0; px < imgW; px++)
                         {
-                            Color col = img.GetPixel(px, py);
-                            if (seed.TargetColor.A > 0.001f && col.A <= 0.001f) continue;
+                            int pOff = pRow + px * 4;
+                            byte a = rawImg[pOff + 3];
+                            if (targetA > 0 && a == 0) continue;
 
-                            float dist = GetColorDistance(col, seed.TargetColor);
+                            float dist = GetByteColorDistance(rawImg[pOff], rawImg[pOff + 1], rawImg[pOff + 2], targetR, targetG, targetB);
                             if (dist <= tol)
                             {
-                                submeshMask[row + px] = 1.0f;
+                                submeshMask[row + px] = 255;
+                                if (px < localBB.MinX) localBB.MinX = px;
+                                if (px > localBB.MaxX) localBB.MaxX = px;
+                                if (py < localBB.MinY) localBB.MinY = py;
+                                if (py > localBB.MaxY) localBB.MaxY = py;
                             }
                             else if (dist <= softTol)
                             {
-                                submeshMask[row + px] = 1.0f - (dist - tol) / Math.Max(0.0001f, softTol - tol);
+                                float match = 1.0f - (dist - tol) / Math.Max(0.0001f, softTol - tol);
+                                byte bMatch = (byte)Math.Clamp((int)(match * 255f), 0, 255);
+                                submeshMask[row + px] = bMatch;
+                                if (bMatch >= 128)
+                                {
+                                    if (px < localBB.MinX) localBB.MinX = px;
+                                    if (px > localBB.MaxX) localBB.MaxX = px;
+                                    if (py < localBB.MinY) localBB.MinY = py;
+                                    if (py > localBB.MaxY) localBB.MaxY = py;
+                                }
                             }
                         }
-                    }
+                        return localBB;
+                    },
+                    localBB =>
+                    {
+                        if (localBB.MaxX >= 0)
+                        {
+                            lock (bbLock)
+                            {
+                                if (localBB.MinX < minSelX) minSelX = localBB.MinX;
+                                if (localBB.MaxX > maxSelX) maxSelX = localBB.MaxX;
+                                if (localBB.MinY < minSelY) minSelY = localBB.MinY;
+                                if (localBB.MaxY > maxSelY) maxSelY = localBB.MaxY;
+                            }
+                        }
+                    });
                 }
 
-                // 1-pixel border dilation to capture blended hair/beard fringe pixels
-                float[] dilatedMask = (float[])submeshMask.Clone();
-                float dilationTol = tol * 1.05f;
-                for (int py = 0; py < imgH; py++)
+                // Border dilation & 3x3 smoothing bounded strictly to active area
+                if (maxSelX >= 0)
                 {
-                    for (int px = 0; px < imgW; px++)
+                    int dMinX = Math.Max(0, minSelX - 4);
+                    int dMaxX = Math.Min(imgW - 1, maxSelX + 4);
+                    int dMinY = Math.Max(0, minSelY - 4);
+                    int dMaxY = Math.Min(imgH - 1, maxSelY + 4);
+
+                    byte[] passMask = (byte[])submeshMask.Clone();
+                    float dilationTol = tol * 1.35f;
+                    for (int py = dMinY; py <= dMaxY; py++)
                     {
-                        int idx = py * imgW + px;
-                        if (submeshMask[idx] > 0.35f) continue;
-
-                        // Check if adjacent to high confidence selection
-                        bool neighborSelected = false;
-                        if (px > 0 && submeshMask[idx - 1] >= 0.5f) neighborSelected = true;
-                        else if (px < imgW - 1 && submeshMask[idx + 1] >= 0.5f) neighborSelected = true;
-                        else if (py > 0 && submeshMask[idx - imgW] >= 0.5f) neighborSelected = true;
-                        else if (py < imgH - 1 && submeshMask[idx + imgW] >= 0.5f) neighborSelected = true;
-
-                        if (neighborSelected)
+                        int row = py * imgW;
+                        for (int px = dMinX; px <= dMaxX; px++)
                         {
-                            Color col = img.GetPixel(px, py);
-                            if (seed.TargetColor.A <= 0.001f || col.A > 0.001f)
+                            int idx = row + px;
+                            if (passMask[idx] >= 128) continue;
+
+                            bool neighborSelected = (px > 0 && passMask[idx - 1] >= 128) ||
+                                                   (px < imgW - 1 && passMask[idx + 1] >= 128) ||
+                                                   (py > 0 && passMask[idx - imgW] >= 128) ||
+                                                   (py < imgH - 1 && passMask[idx + imgW] >= 128);
+
+                            if (neighborSelected)
                             {
-                                float dist = GetColorDistance(col, seed.TargetColor);
+                                int pOff = idx * 4;
+                                float dist = GetByteColorDistance(rawImg[pOff], rawImg[pOff + 1], rawImg[pOff + 2], targetR, targetG, targetB);
                                 if (dist <= dilationTol)
                                 {
-                                    float fringeStrength = Mathf.Clamp(1.0f - (dist - tol) / Math.Max(0.0001f, dilationTol - tol), 0.2f, 0.75f);
-                                    dilatedMask[idx] = Mathf.Max(dilatedMask[idx], fringeStrength);
+                                    float fringe = Math.Clamp(1.0f - (dist - tol) / Math.Max(0.0001f, dilationTol - tol), 0.55f, 0.95f);
+                                    submeshMask[idx] = Math.Max(submeshMask[idx], (byte)(fringe * 255f));
                                 }
                             }
                         }
                     }
                 }
 
-                // 3x3 anti-aliasing smoothing filter on boundary pixels to eliminate pixelated stair-steps
-                float[] filteredMask = (float[])dilatedMask.Clone();
-                for (int py = 1; py < imgH - 1; py++)
-                {
-                    for (int px = 1; px < imgW - 1; px++)
-                    {
-                        int idx = py * imgW + px;
-                        float center = dilatedMask[idx];
-                        float l = dilatedMask[idx - 1];
-                        float r = dilatedMask[idx + 1];
-                        float u = dilatedMask[idx - imgW];
-                        float d = dilatedMask[idx + imgW];
-
-                        if ((center > 0.001f && center < 0.999f) ||
-                            (center >= 0.999f && (l < 0.5f || r < 0.5f || u < 0.5f || d < 0.5f)) ||
-                            (center <= 0.001f && (l > 0.5f || r > 0.5f || u > 0.5f || d > 0.5f)))
-                        {
-                            float filtered = center * 0.4f + (l + r + u + d) * 0.15f;
-                            filteredMask[idx] = filtered;
-                        }
-                    }
-                }
-
-                // Map submeshMask into _activeAtlasMask with bilinear resampling and proper combine modes
-                for (int y = 0; y < rectH; y++)
+                // Parallel bilinear blit into active atlas mask
+                var combineMode = seed.CombineMode;
+                byte[] activeMask = _activeAtlasMask;
+                System.Threading.Tasks.Parallel.For(0, rectH, y =>
                 {
                     float v = ((float)y + 0.5f) / rectH * imgH - 0.5f;
-                    int y0 = Mathf.Clamp((int)MathF.Floor(v), 0, imgH - 1);
-                    int y1 = Mathf.Clamp(y0 + 1, 0, imgH - 1);
-                    float fv = Mathf.Clamp(v - y0, 0.0f, 1.0f);
+                    int y0 = Math.Clamp((int)MathF.Floor(v), 0, imgH - 1);
+                    int y1 = Math.Clamp(y0 + 1, 0, imgH - 1);
+                    float fv = Math.Clamp(v - y0, 0.0f, 1.0f);
 
                     int atlasRow = (rectY + y) * atlasSize;
 
                     for (int x = 0; x < rectW; x++)
                     {
                         float u = ((float)x + 0.5f) / rectW * imgW - 0.5f;
-                        int x0 = Mathf.Clamp((int)MathF.Floor(u), 0, imgW - 1);
-                        int x1 = Mathf.Clamp(x0 + 1, 0, imgH - 1);
-                        float fu = Mathf.Clamp(u - x0, 0.0f, 1.0f);
+                        int x0 = Math.Clamp((int)MathF.Floor(u), 0, imgW - 1);
+                        int x1 = Math.Clamp(x0 + 1, 0, imgH - 1);
+                        float fu = Math.Clamp(u - x0, 0.0f, 1.0f);
 
-                        // Bilinear interpolation
-                        float m00 = filteredMask[y0 * imgW + x0];
-                        float m10 = filteredMask[y0 * imgW + x1];
-                        float m01 = filteredMask[y1 * imgW + x0];
-                        float m11 = filteredMask[y1 * imgW + x1];
+                        byte m00 = submeshMask[y0 * imgW + x0];
+                        byte m10 = submeshMask[y0 * imgW + x1];
+                        byte m01 = submeshMask[y1 * imgW + x0];
+                        byte m11 = submeshMask[y1 * imgW + x1];
 
                         float top = m00 + (m10 - m00) * fu;
                         float bottom = m01 + (m11 - m01) * fu;
-                        float val = top + (bottom - top) * fv;
+                        byte byteVal = (byte)Math.Clamp((int)MathF.Round(top + (bottom - top) * fv), 0, 255);
 
-                        byte byteVal = (byte)Mathf.Clamp((int)MathF.Round(val * 255.0f), 0, 255);
                         int atlasIdx = atlasRow + (rectX + x);
-
-                        if (seed.CombineMode == MagicWandCombineMode.Subtract)
-                        {
-                            _activeAtlasMask[atlasIdx] = (byte)Math.Max(0, _activeAtlasMask[atlasIdx] - byteVal);
-                        }
-                        else if (seed.CombineMode == MagicWandCombineMode.Add)
-                        {
-                            _activeAtlasMask[atlasIdx] = (byte)Math.Min(255, _activeAtlasMask[atlasIdx] + byteVal);
-                        }
+                        if (combineMode == MagicWandCombineMode.Subtract)
+                            activeMask[atlasIdx] = (byte)Math.Max(0, activeMask[atlasIdx] - byteVal);
+                        else if (combineMode == MagicWandCombineMode.Add)
+                            activeMask[atlasIdx] = (byte)Math.Min(255, activeMask[atlasIdx] + byteVal);
                         else
-                        {
-                            // Replace
-                            _activeAtlasMask[atlasIdx] = byteVal;
-                        }
+                            activeMask[atlasIdx] = byteVal;
                     }
-                }
+                });
             }
 
             UploadMaskToGpu(rd, atlasSize);
@@ -427,17 +517,19 @@ namespace DeadlockPlayground.Painter
             if (_activeAtlasMask == null || !_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid)) return;
 
             byte[] uploadBytes = new byte[atlasSize * atlasSize * 8];
+            Half one = (Half)1.0f;
+            var lut = _halfLut;
+            byte[] mask = _activeAtlasMask;
+            int totalPixels = atlasSize * atlasSize;
+
             unsafe
             {
-                fixed (byte* pMask = _activeAtlasMask)
-                fixed (byte* pUpload = uploadBytes)
+                fixed (byte* pMask = mask, pUpload = uploadBytes)
                 {
                     Half* hDst = (Half*)pUpload;
-                    Half one = (Half)1.0f;
-                    int pixelCount = atlasSize * atlasSize;
-                    for (int i = 0; i < pixelCount; i++)
+                    for (int i = 0; i < totalPixels; i++)
                     {
-                        Half v = (Half)(pMask[i] / 255.0f);
+                        Half v = lut[pMask[i]];
                         int off = i * 4;
                         hDst[off] = v;
                         hDst[off + 1] = v;

@@ -29,7 +29,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnMirror;
     private Button _btnUndo;
     private Button _btnRedo;
-    private Button _btnClear;
     private Button _btnToggleFlyout;
     private Button _btnPin;
     private Label _lblKeymapHint;
@@ -51,7 +50,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
     // Brush controls
     private OptionButton _optBlendMode;
-    private ColorPickerButton _colorPicker;
     private OptionButton _optBrushShape;
     private HSlider _sliderBrushSize;
     private Label _lblBrushSize;
@@ -70,7 +68,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Label _lblEraseFlow;
 
     // Bucket fill controls
-    private ColorPickerButton _fillColorPicker;
     private Button _btnFillActiveSubmesh;
 
     // Magic Wand controls
@@ -107,6 +104,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Label _lblTextScale;
     private HSlider _sliderTextRot;
     private Label _lblTextRot;
+    private Button _btnFlipH;
+    private Button _btnFlipV;
     private Button _btnBakeText;
     private FileDialog _textFileDialog;
 
@@ -149,8 +148,14 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         ApplyIdleModulates();
         KeybindsManager.OnKeybindsChanged += UpdateTooltipsAndKeymaps;
-        UpdateTooltipsAndKeymaps();
         SelectTool(BrushToolMode.Paint, forceFlyoutOpen: true);
+
+        Resized += () => CallDeferred(nameof(ClampPositionToBounds));
+        VisibilityChanged += () =>
+        {
+            if (Visible) CallDeferred(nameof(ClampPositionToBounds));
+        };
+        GetParentControl()?.Connect(Control.SignalName.Resized, Callable.From(() => CallDeferred(nameof(ClampPositionToBounds))));
     }
 
     private void ApplyIdleModulates()
@@ -167,7 +172,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnMirror != null) _btnMirror.Modulate = idleCol;
         if (_btnUndo != null) _btnUndo.Modulate = idleCol;
         if (_btnRedo != null) _btnRedo.Modulate = idleCol;
-        if (_btnClear != null) _btnClear.Modulate = idleCol;
         if (_btnToggleFlyout != null) _btnToggleFlyout.Modulate = idleCol;
     }
 
@@ -239,6 +243,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             }
             SyncFromPainter();
         }
+
+        if (_textProjector != null)
+        {
+            if (_btnFlipH != null) _btnFlipH.ButtonPressed = _textProjector.FlipH;
+            if (_btnFlipV != null) _btnFlipV.ButtonPressed = _textProjector.FlipV;
+        }
     }
 
     private T ResolveNode<T>(string uniqueName, string fallbackName) where T : class
@@ -264,8 +274,14 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         _btnUndo = ResolveNode<Button>("BtnUndo", "BtnUndo");
         _btnRedo = ResolveNode<Button>("BtnRedo", "BtnRedo");
-        _btnClear = ResolveNode<Button>("BtnClear", "BtnClear");
         _btnToggleFlyout = ResolveNode<Button>("BtnToggleFlyout", "BtnToggleFlyout");
+        if (_btnToggleFlyout != null && _btnToggleFlyout.Icon == null)
+        {
+            _btnToggleFlyout.Icon = GD.Load<Texture2D>("res://assets/at-icons/cog.svg");
+            _btnToggleFlyout.ExpandIcon = true;
+            _btnToggleFlyout.IconAlignment = HorizontalAlignment.Center;
+            _btnToggleFlyout.Text = string.Empty;
+        }
         _btnPin = ResolveNode<Button>("BtnPin", "BtnPin");
         _lblKeymapHint = ResolveNode<Label>("KeymapHintLabel", "KeymapHintLabel");
 
@@ -303,7 +319,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         // Brush controls
         _optBlendMode = ResolveNode<OptionButton>("OptBlendMode", "OptBlendMode");
-        _colorPicker = ResolveNode<ColorPickerButton>("ColorPickerButton", "ColorPickerButton");
         _optBrushShape = ResolveNode<OptionButton>("OptShape", "OptShape");
         _sliderBrushSize = ResolveNode<HSlider>("SliderSize", "SliderSize");
         _lblBrushSize = ResolveNode<Label>("LblSize", "LblSize");
@@ -322,7 +337,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _lblEraseFlow = ResolveNode<Label>("LblEraseFlow", "LblEraseFlow");
 
         // Bucket Fill controls
-        _fillColorPicker = ResolveNode<ColorPickerButton>("FillColorPicker", "FillColorPicker");
         _btnFillActiveSubmesh = ResolveNode<Button>("BtnFillActiveSubmesh", "BtnFillActiveSubmesh");
 
         // Decal controls
@@ -339,6 +353,13 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _editText = ResolveNode<LineEdit>("EditText", "EditText");
         _optSystemFont = ResolveNode<OptionButton>("OptSystemFont", "OptSystemFont");
         _btnLoadFont = ResolveNode<Button>("BtnLoadFont", "BtnLoadFont");
+        if (_btnLoadFont != null && _btnLoadFont.Icon == null)
+        {
+            _btnLoadFont.Icon = GD.Load<Texture2D>("res://assets/at-icons/folder.svg");
+            _btnLoadFont.ExpandIcon = true;
+            _btnLoadFont.IconAlignment = HorizontalAlignment.Center;
+            _btnLoadFont.Text = string.Empty;
+        }
         _sliderFontSize = ResolveNode<HSlider>("SliderFontSize", "SliderFontSize");
         _lblFontSize = ResolveNode<Label>("LblFontSize", "LblFontSize");
         _pickerTextColor = ResolveNode<ColorPickerButton>("PickerTextColor", "PickerTextColor");
@@ -349,6 +370,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _lblTextScale = ResolveNode<Label>("LblTextScale", "LblTextScale");
         _sliderTextRot = ResolveNode<HSlider>("SliderTextRot", "SliderTextRot");
         _lblTextRot = ResolveNode<Label>("LblTextRot", "LblTextRot");
+        _btnFlipH = ResolveNode<Button>("BtnFlipH", "BtnFlipH");
+        _btnFlipV = ResolveNode<Button>("BtnFlipV", "BtnFlipV");
         _btnBakeText = ResolveNode<Button>("BtnBakeText", "BtnBakeText");
         _textFileDialog = ResolveNode<FileDialog>("TextFileDialog", "TextFileDialog");
 
@@ -418,7 +441,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         // Action buttons
         if (_btnUndo != null) _btnUndo.Pressed += () => EmitSignal(SignalName.UndoRequested);
         if (_btnRedo != null) _btnRedo.Pressed += () => EmitSignal(SignalName.RedoRequested);
-        if (_btnClear != null) _btnClear.Pressed += () => EmitSignal(SignalName.ClearRequested);
 
         if (_btnToggleFlyout != null)
         {
@@ -453,15 +475,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 int mode = _optBlendMode.GetItemId((int)idx);
                 if (_painter != null) _painter.BlendMode = mode;
                 EmitSignal(SignalName.BlendModeChanged, mode);
-            };
-        }
-
-        if (_colorPicker != null)
-        {
-            _colorPicker.ColorChanged += (c) =>
-            {
-                if (_painter != null) _painter.BrushColor = c;
-                if (_fillColorPicker != null) _fillColorPicker.Color = c;
             };
         }
 
@@ -545,20 +558,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
 
         // Bucket Fill
-        if (_fillColorPicker != null)
-        {
-            _fillColorPicker.ColorChanged += (c) =>
-            {
-                if (_painter != null) _painter.BrushColor = c;
-                if (_colorPicker != null) _colorPicker.Color = c;
-            };
-        }
-
         if (_btnFillActiveSubmesh != null)
         {
             _btnFillActiveSubmesh.Pressed += () =>
             {
-                Color fillCol = _fillColorPicker?.Color ?? _painter?.BrushColor ?? Colors.White;
+                Color fillCol = _btnColor?.Color ?? _painter?.BrushColor ?? Colors.White;
                 EmitSignal(SignalName.FillRequested, fillCol);
             };
         }
@@ -771,6 +775,22 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             };
         }
 
+        if (_btnFlipH != null)
+        {
+            _btnFlipH.Toggled += (toggled) =>
+            {
+                if (_textProjector != null) _textProjector.FlipH = toggled;
+            };
+        }
+
+        if (_btnFlipV != null)
+        {
+            _btnFlipV.Toggled += (toggled) =>
+            {
+                if (_textProjector != null) _textProjector.FlipV = toggled;
+            };
+        }
+
         if (_btnBakeText != null)
         {
             _btnBakeText.Pressed += () =>
@@ -789,6 +809,55 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
     }
 
+    public override void _Input(InputEvent @event)
+    {
+        if (_isDragging && @event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && !mb.Pressed)
+        {
+            _isDragging = false;
+        }
+    }
+
+    private Vector2 ClampGlobalPosition(Vector2 targetPos)
+    {
+        var parent = GetParentControl();
+        Rect2 bounds = parent != null ? parent.GetGlobalRect() : GetViewportRect();
+
+        float minX = bounds.Position.X + 8.0f;
+        float maxX = Mathf.Max(minX, bounds.End.X - Size.X - 8.0f);
+        float minY = bounds.Position.Y + 8.0f;
+        float maxY = Mathf.Max(minY, bounds.End.Y - Size.Y - 8.0f);
+
+        targetPos.X = Mathf.Clamp(targetPos.X, minX, maxX);
+        targetPos.Y = Mathf.Clamp(targetPos.Y, minY, maxY);
+
+        Button btnUV = GetNodeOrNull<Button>("../BtnOpenUVCanvas") ?? GetTree()?.Root?.FindChild("BtnOpenUVCanvas", true, false) as Button;
+        if (btnUV != null && btnUV.IsVisibleInTree())
+        {
+            Rect2 uvRect = btnUV.GetGlobalRect().Grow(6.0f);
+            Rect2 paletteRect = new Rect2(targetPos, Size);
+            if (paletteRect.Intersects(uvRect))
+            {
+                float overlapY = uvRect.End.Y - targetPos.Y;
+                float overlapX = uvRect.End.X - targetPos.X;
+                if (overlapY < overlapX)
+                {
+                    targetPos.Y = Mathf.Clamp(uvRect.End.Y, minY, maxY);
+                }
+                else
+                {
+                    targetPos.X = Mathf.Clamp(uvRect.End.X, minX, maxX);
+                }
+            }
+        }
+
+        return targetPos;
+    }
+
+    public void ClampPositionToBounds()
+    {
+        GlobalPosition = ClampGlobalPosition(GlobalPosition);
+    }
+
     private void OnDragHandleGuiInput(InputEvent @event)
     {
         if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
@@ -805,7 +874,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
         else if (@event is InputEventMouseMotion && _isDragging)
         {
-            GlobalPosition = GetGlobalMousePosition() - _dragOffset;
+            GlobalPosition = ClampGlobalPosition(GetGlobalMousePosition() - _dragOffset);
         }
     }
 
@@ -984,8 +1053,6 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     {
         if (_painter != null) _painter.BrushColor = color;
         if (_btnColor != null) _btnColor.Color = color;
-        if (_colorPicker != null) _colorPicker.Color = color;
-        if (_fillColorPicker != null) _fillColorPicker.Color = color;
     }
 
     private void OnMirrorToggled(bool enabled)
@@ -1009,7 +1076,6 @@ public void UpdateTooltipsAndKeymaps()
         if (_btnMirror != null) _btnMirror.TooltipText = $"Mirror Symmetry [{KeybindsManager.GetShortcutText("paint_mirror")}]";
         if (_btnUndo != null) _btnUndo.TooltipText = $"Undo [{KeybindsManager.GetShortcutText("paint_undo")}]";
         if (_btnRedo != null) _btnRedo.TooltipText = $"Redo [{KeybindsManager.GetShortcutText("paint_redo")}]";
-        if (_btnClear != null) _btnClear.TooltipText = "Clear Active Layer";
 
         if (_lblKeymapHint != null)
         {
@@ -1072,8 +1138,6 @@ public void UpdateTooltipsAndKeymaps()
         if (_painter == null) return;
 
         if (_btnColor != null) _btnColor.Color = _painter.BrushColor;
-        if (_colorPicker != null) _colorPicker.Color = _painter.BrushColor;
-        if (_fillColorPicker != null) _fillColorPicker.Color = _painter.BrushColor;
         if (_sliderBrushSize != null) _sliderBrushSize.Value = _painter.BrushSize;
         if (_sliderBrushHardness != null) _sliderBrushHardness.Value = _painter.BrushHardness;
         if (_sliderBrushFlow != null) _sliderBrushFlow.Value = _painter.BrushFlow;
@@ -1124,13 +1188,6 @@ public void UpdateTooltipsAndKeymaps()
         if (@event.IsActionPressed("paint_eraser"))
         {
             SelectTool(BrushToolMode.Erase, forceFlyoutOpen: true);
-            GetViewport()?.SetInputAsHandled();
-            return;
-        }
-
-        if (@event.IsActionPressed("paint_bucket"))
-        {
-            SelectTool(BrushToolMode.BucketFill, forceFlyoutOpen: true);
             GetViewport()?.SetInputAsHandled();
             return;
         }

@@ -68,6 +68,34 @@ namespace DeadlockPlayground.Painter
         public float RotationDegrees { get; set; } = 0.0f;
         public float TextScale { get; set; } = 0.25f;
 
+        private bool _flipH = false;
+        public bool FlipH
+        {
+            get => _flipH;
+            set
+            {
+                if (_flipH != value)
+                {
+                    _flipH = value;
+                    UpdateLabel();
+                }
+            }
+        }
+
+        private bool _flipV = false;
+        public bool FlipV
+        {
+            get => _flipV;
+            set
+            {
+                if (_flipV != value)
+                {
+                    _flipV = value;
+                    UpdateLabel();
+                }
+            }
+        }
+
         private Font _customFont;
         public Font CustomFont
         {
@@ -91,6 +119,12 @@ namespace DeadlockPlayground.Painter
         private Vector3 _currentWorldPos = Vector3.Zero;
         private Vector3 _currentNormal = Vector3.Up;
         private Vector2 _currentHitUv = Vector2.Zero;
+        private Vector3 _decalRight = Vector3.Right;
+        private Vector3 _decalDown = Vector3.Back;
+        private Vector3 _worldTangent = Vector3.Zero;
+        private Vector3 _worldBitangent = Vector3.Zero;
+        private float _unitsU = 1.0f;
+        private float _unitsV = 1.0f;
         private bool _hasPlacement = false;
 
         public bool HasPlacement => _hasPlacement;
@@ -98,12 +132,36 @@ namespace DeadlockPlayground.Painter
         public Texture2D CurrentTexture => _renderedTexture ?? (Texture2D)_subViewport?.GetTexture();
         public Texture2D TextTexture => CurrentTexture;
 
+        public Font GetConfiguredFont()
+        {
+            var baseFont = _customFont ?? PlaygroundThemeHelper.GetFontColus();
+            if (baseFont == null) return null;
+
+            // Wrap in FontVariation with contextual alternates and ligatures disabled
+            // to prevent inverted/rotated 'A' and 'L' in fonts like Colus that substitute lapidary glyphs.
+            var variation = new FontVariation();
+            variation.BaseFont = baseFont;
+            var dict = new Godot.Collections.Dictionary();
+            var ts = TextServerManager.GetPrimaryInterface();
+            string[] tags = { "calt", "liga", "clig", "dlig", "hlig", "salt", "titl", "swsh", "cswh", "ss01", "ss02", "ss03", "ss04", "ss05", "c2sc", "smcp" };
+            foreach (var t in tags)
+            {
+                dict[t] = 0;
+                if (ts != null)
+                {
+                    dict[(long)ts.NameToTag(t)] = 0;
+                }
+            }
+            variation.OpentypeFeatures = dict;
+            return variation;
+        }
+
         public Vector2 GetRenderedTextSize(string textToTest = null)
         {
             string str = textToTest ?? _text;
             if (string.IsNullOrEmpty(str)) return Vector2.Zero;
 
-            var font = _customFont ?? PlaygroundThemeHelper.GetFontColus();
+            var font = GetConfiguredFont();
             if (font == null) return new Vector2(str.Length * _fontSize * 0.6f, _fontSize);
 
             return font.GetStringSize(str, HorizontalAlignment.Left, -1, _fontSize);
@@ -165,7 +223,40 @@ namespace DeadlockPlayground.Painter
                     parentContainer.AddChild(this);
                 }
 
+                RenderingServer.FramePostDraw += OnFramePostDraw;
                 UpdateLabel();
+            }
+        }
+
+        public override void _ExitTree()
+        {
+            RenderingServer.FramePostDraw -= OnFramePostDraw;
+            base._ExitTree();
+        }
+
+        private void OnFramePostDraw()
+        {
+            if (_isDirty && _subViewport != null)
+            {
+                var vpTex = _subViewport.GetTexture();
+                if (vpTex != null)
+                {
+                    var img = vpTex.GetImage();
+                    if (img != null && !img.IsEmpty())
+                    {
+                        if (_renderedTexture == null)
+                        {
+                            _renderedTexture = ImageTexture.CreateFromImage(img);
+                        }
+                        else
+                        {
+                            _renderedTexture.SetImage(img);
+                        }
+                        _isDirty = false;
+                        _dirtyFrames = 0;
+                        EmitSignal(SignalName.TextureChanged, _renderedTexture);
+                    }
+                }
             }
         }
 
@@ -173,22 +264,7 @@ namespace DeadlockPlayground.Painter
         {
             if (_isDirty && _subViewport != null)
             {
-                _dirtyFrames++;
-                if (_dirtyFrames >= 1)
-                {
-                    var vpTex = _subViewport.GetTexture();
-                    if (vpTex != null)
-                    {
-                        var img = vpTex.GetImage();
-                        if (img != null && !img.IsEmpty())
-                        {
-                            _renderedTexture = ImageTexture.CreateFromImage(img);
-                            _isDirty = false;
-                            _dirtyFrames = 0;
-                            EmitSignal(SignalName.TextureChanged, _renderedTexture);
-                        }
-                    }
-                }
+                _subViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
             }
         }
 
@@ -198,7 +274,7 @@ namespace DeadlockPlayground.Painter
 
             _label.Text = _text;
 
-            var font = _customFont ?? PlaygroundThemeHelper.GetFontColus();
+            var font = GetConfiguredFont();
             if (font != null)
             {
                 _label.AddThemeFontOverride("font", font);
@@ -218,8 +294,17 @@ namespace DeadlockPlayground.Painter
                 _label.RemoveThemeColorOverride("font_outline_color");
             }
 
+            _label.PivotOffset = _label.Size * 0.5f;
+            _label.Scale = new Vector2(_flipH ? -1.0f : 1.0f, _flipV ? -1.0f : 1.0f);
+
             _isDirty = true;
             _dirtyFrames = 0;
+
+            if (_subViewport != null)
+            {
+                _subViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+                EmitSignal(SignalName.TextureChanged, CurrentTexture);
+            }
         }
 
         public bool LoadFontFromFile(string filePath)
@@ -251,11 +336,17 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        public void PlaceAt(Vector3 worldPos, Vector3 normal, Vector2 hitUv)
+        public void PlaceAt(Vector3 worldPos, Vector3 normal, Vector2 hitUv, Vector3 decalRight = default, Vector3 decalDown = default, Vector3 tangent = default, Vector3 bitangent = default, float unitsU = 1.0f, float unitsV = 1.0f)
         {
             _currentWorldPos = worldPos;
             _currentNormal = normal;
             _currentHitUv = hitUv;
+            _decalRight = decalRight;
+            _decalDown = decalDown;
+            _worldTangent = tangent;
+            _worldBitangent = bitangent;
+            _unitsU = unitsU;
+            _unitsV = unitsV;
             _hasPlacement = true;
 
             EmitSignal(SignalName.TextPlaced, worldPos, hitUv);
@@ -269,7 +360,7 @@ namespace DeadlockPlayground.Painter
             }
 
             Texture2D tex = _renderedTexture;
-            if (tex == null)
+            if (tex == null || _isDirty)
             {
                 var vpTexture = _subViewport.GetTexture();
                 if (vpTexture != null)
@@ -277,15 +368,35 @@ namespace DeadlockPlayground.Painter
                     var img = vpTexture.GetImage();
                     if (img != null && !img.IsEmpty())
                     {
-                        _renderedTexture = ImageTexture.CreateFromImage(img);
+                        if (_renderedTexture == null)
+                        {
+                            _renderedTexture = ImageTexture.CreateFromImage(img);
+                        }
+                        else
+                        {
+                            _renderedTexture.SetImage(img);
+                        }
                         tex = _renderedTexture;
+                        _isDirty = false;
+                        _dirtyFrames = 0;
                     }
                 }
             }
 
             if (tex == null) return false;
 
-            bool success = _layerManager.StampDecalToAtlas(_currentHitUv, tex, RotationDegrees, TextScale);
+            bool success = _layerManager.StampDecalToAtlas(
+                _currentHitUv, 
+                tex, 
+                RotationDegrees, 
+                TextScale, 
+                _painter?.MagicWandTool,
+                _decalRight,
+                _decalDown,
+                _worldTangent,
+                _worldBitangent,
+                _unitsU,
+                _unitsV);
 
             if (success)
             {

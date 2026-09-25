@@ -121,7 +121,23 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        public bool IsMirroringEnabled { get; set; } = false;
+        private bool _isMirroringEnabled = false;
+        public bool IsMirroringEnabled
+        {
+            get => _isMirroringEnabled;
+            set
+            {
+                _isMirroringEnabled = value;
+                if (_isMirroringEnabled)
+                {
+                    EnsureMirrorCameraBrush();
+                }
+                else if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                {
+                    _mirrorCameraBrush.Set("drawing", false);
+                }
+            }
+        }
         private Node3D _mirrorCameraBrush;
 
         public HeroMeshHierarchy MeshHierarchy { get; set; }
@@ -220,6 +236,10 @@ namespace DeadlockPlayground.Painter
                     _worldViewport.AddChild(_cameraBrush);
                     AttachCameraBrushWorld();
                 }
+                if (IsMirroringEnabled)
+                {
+                    EnsureMirrorCameraBrush();
+                }
                 return;
             }
 
@@ -233,7 +253,8 @@ namespace DeadlockPlayground.Painter
             _cameraBrush = (Node3D)brushScript.New();
             _cameraBrush.Name = "ActiveCameraBrush";
             _cameraBrush.Set("projection", 1); // 1 = PROJECTION_ORTHOGONAL (constant radius pencil)
-            _cameraBrush.Set("resolution", new Vector2I(2048, 2048));
+            int atlasRes = _layerManager?.CanvasSize.X ?? 2048;
+            _cameraBrush.Set("resolution", new Vector2I(atlasRes, atlasRes));
             _cameraBrush.Set("max_distance", 0.35f);
             _cameraBrush.Set("draw_speed", 35.0f);
             _cameraBrush.Set("drawing", false);
@@ -242,21 +263,44 @@ namespace DeadlockPlayground.Painter
             targetParent.AddChild(_cameraBrush);
             AttachCameraBrushWorld();
 
-            if (IsMirroringEnabled && (_mirrorCameraBrush == null || !GodotObject.IsInstanceValid(_mirrorCameraBrush)))
+            if (IsMirroringEnabled)
             {
-                _mirrorCameraBrush = (Node3D)brushScript.New();
-                _mirrorCameraBrush.Name = "MirrorCameraBrush";
-                _mirrorCameraBrush.Set("projection", 1);
-                _mirrorCameraBrush.Set("resolution", new Vector2I(2048, 2048));
-                _mirrorCameraBrush.Set("max_distance", 0.35f);
-                _mirrorCameraBrush.Set("draw_speed", 35.0f);
-                _mirrorCameraBrush.Set("drawing", false);
-                targetParent.AddChild(_mirrorCameraBrush);
-                AttachMirrorCameraBrushWorld();
+                EnsureMirrorCameraBrush();
             }
 
             SyncCameraBrushProperties(force: true);
             GD.Print("[MeshPainter3D] Initialized and added CameraBrush to scene!");
+        }
+
+        private void EnsureMirrorCameraBrush()
+        {
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            {
+                AttachMirrorCameraBrushWorld();
+                SyncCameraBrushProperties(force: true);
+                return;
+            }
+
+            var brushScript = GD.Load<GDScript>("res://addons/gpu_texture_painter/brush/camera_brush.gd");
+            if (brushScript == null)
+            {
+                GD.PrintErr("[MeshPainter3D] Failed to load camera_brush.gd for mirror brush");
+                return;
+            }
+
+            var targetParent = _worldViewport as Node ?? _camera as Node ?? this;
+            _mirrorCameraBrush = (Node3D)brushScript.New();
+            _mirrorCameraBrush.Name = "MirrorCameraBrush";
+            _mirrorCameraBrush.Set("projection", 1);
+            int atlasRes = _layerManager?.CanvasSize.X ?? 2048;
+            _mirrorCameraBrush.Set("resolution", new Vector2I(atlasRes, atlasRes));
+            _mirrorCameraBrush.Set("max_distance", 0.35f);
+            _mirrorCameraBrush.Set("draw_speed", 35.0f);
+            _mirrorCameraBrush.Set("drawing", false);
+            targetParent.AddChild(_mirrorCameraBrush);
+            AttachMirrorCameraBrushWorld();
+            SyncCameraBrushProperties(force: true);
+            GD.Print("[MeshPainter3D] Initialized MirrorCameraBrush!");
         }
 
         private void AttachCameraBrushWorld()
@@ -289,6 +333,47 @@ namespace DeadlockPlayground.Painter
                     cbViewport.World3D = w3d;
                 }
             }
+
+            if (_mirrorCameraBrush.HasMethod("get_atlas_textures"))
+            {
+                _mirrorCameraBrush.Call("get_atlas_textures");
+            }
+        }
+
+        private (Vector3 MirroredPos, Vector3 MirroredNormal) ComputeMirroredPointAndNormal(Vector3 worldPos, Vector3 worldNormal)
+        {
+            Node3D heroRoot = MeshHierarchy?.HeroRoot;
+            if (heroRoot != null && GodotObject.IsInstanceValid(heroRoot))
+            {
+                Vector3 localPos = heroRoot.ToLocal(worldPos);
+                localPos.X = -localPos.X;
+                Vector3 mirWorldPos = heroRoot.ToGlobal(localPos);
+
+                Vector3 localNorm = heroRoot.GlobalBasis.Inverse() * worldNormal;
+                localNorm.X = -localNorm.X;
+                Vector3 mirWorldNorm = (heroRoot.GlobalBasis * localNorm).Normalized();
+
+                return (mirWorldPos, mirWorldNorm);
+            }
+            return (new Vector3(-worldPos.X, worldPos.Y, worldPos.Z), new Vector3(-worldNormal.X, worldNormal.Y, worldNormal.Z));
+        }
+
+        private (Vector3 MirroredPos, Vector3 MirroredDir) ComputeMirroredPointAndDir(Vector3 worldPos, Vector3 worldDir)
+        {
+            Node3D heroRoot = MeshHierarchy?.HeroRoot;
+            if (heroRoot != null && GodotObject.IsInstanceValid(heroRoot))
+            {
+                Vector3 localPos = heroRoot.ToLocal(worldPos);
+                localPos.X = -localPos.X;
+                Vector3 mirWorldPos = heroRoot.ToGlobal(localPos);
+
+                Vector3 localDir = heroRoot.GlobalBasis.Inverse() * worldDir;
+                localDir.X = -localDir.X;
+                Vector3 mirWorldDir = (heroRoot.GlobalBasis * localDir).Normalized();
+
+                return (mirWorldPos, mirWorldDir);
+            }
+            return (new Vector3(-worldPos.X, worldPos.Y, worldPos.Z), new Vector3(-worldDir.X, worldDir.Y, worldDir.Z).Normalized());
         }
 
         public void SyncCameraBrushProperties(bool force = false)
@@ -529,18 +614,38 @@ namespace DeadlockPlayground.Painter
                 {
                     if (_decalStamper != null && _decalStamper.DecalTexture != null)
                     {
-                        _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV);
+                        Basis decalBasis = _previewDecalNode != null ? _previewDecalNode.Transform.Basis : Basis.Identity;
+                        Vector3 decalRight = decalBasis.Column0.Normalized();
+                        Vector3 decalDown = decalBasis.Column2.Normalized();
+                        float unitsU = (_lastHit.WorldUnitsPerU > 1e-4f && _lastHit.WorldUnitsPerU < 20.0f) ? _lastHit.WorldUnitsPerU : 0.5f;
+                        float unitsV = (_lastHit.WorldUnitsPerV > 1e-4f && _lastHit.WorldUnitsPerV < 20.0f) ? _lastHit.WorldUnitsPerV : 0.5f;
+
+                        _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
                         _decalStamper.BakeToActiveLayer();
 
                         if (IsMirroringEnabled)
                         {
-                            Vector3 mirrorWorldPos = new Vector3(-_lastHit.HitPositionWorld.X, _lastHit.HitPositionWorld.Y, _lastHit.HitPositionWorld.Z);
-                            Vector3 mirrorNormal = new Vector3(-_lastHit.HitNormal.X, _lastHit.HitNormal.Y, _lastHit.HitNormal.Z);
-                            var mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: false);
+                            var (mirrorWorldPos, mirrorNormal) = ComputeMirroredPointAndNormal(_lastHit.HitPositionWorld, _lastHit.HitNormal);
+                            RaycastHitResult mirrorHit = default;
+                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                            {
+                                mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: false);
+                            }
+                            if (!mirrorHit.Hit)
+                            {
+                                RaycastAllSubmeshes(mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, out _, out mirrorHit);
+                            }
+
                             if (mirrorHit.Hit)
                             {
-                                _decalStamper.PlaceAt(mirrorHit.HitPositionWorld, mirrorHit.HitNormal, mirrorHit.HitUV);
+                                Vector3 mRight = new Vector3(-decalRight.X, decalRight.Y, decalRight.Z).Normalized();
+                                Vector3 mDown = new Vector3(-decalDown.X, decalDown.Y, decalDown.Z).Normalized();
+                                float mUnitsU = (mirrorHit.WorldUnitsPerU > 1e-4f && mirrorHit.WorldUnitsPerU < 20.0f) ? mirrorHit.WorldUnitsPerU : 0.5f;
+                                float mUnitsV = (mirrorHit.WorldUnitsPerV > 1e-4f && mirrorHit.WorldUnitsPerV < 20.0f) ? mirrorHit.WorldUnitsPerV : 0.5f;
+
+                                _decalStamper.PlaceAt(mirrorHit.HitPositionWorld, mirrorHit.HitNormal, mirrorHit.HitUV, mRight, mDown, mirrorHit.WorldTangent, mirrorHit.WorldBitangent, mUnitsU, mUnitsV);
                                 _decalStamper.BakeToActiveLayer();
+                                _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
                             }
                         }
                     }
@@ -549,18 +654,38 @@ namespace DeadlockPlayground.Painter
                 {
                     if (_textProjector != null)
                     {
-                        _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV);
+                        Basis decalBasis = _previewDecalNode != null ? _previewDecalNode.Transform.Basis : Basis.Identity;
+                        Vector3 decalRight = decalBasis.Column0.Normalized();
+                        Vector3 decalDown = decalBasis.Column2.Normalized();
+                        float unitsU = (_lastHit.WorldUnitsPerU > 1e-4f && _lastHit.WorldUnitsPerU < 20.0f) ? _lastHit.WorldUnitsPerU : 0.5f;
+                        float unitsV = (_lastHit.WorldUnitsPerV > 1e-4f && _lastHit.WorldUnitsPerV < 20.0f) ? _lastHit.WorldUnitsPerV : 0.5f;
+
+                        _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
                         _textProjector.BakeToActiveLayer();
 
                         if (IsMirroringEnabled)
                         {
-                            Vector3 mirrorWorldPos = new Vector3(-_lastHit.HitPositionWorld.X, _lastHit.HitPositionWorld.Y, _lastHit.HitPositionWorld.Z);
-                            Vector3 mirrorNormal = new Vector3(-_lastHit.HitNormal.X, _lastHit.HitNormal.Y, _lastHit.HitNormal.Z);
-                            var mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: false);
+                            var (mirrorWorldPos, mirrorNormal) = ComputeMirroredPointAndNormal(_lastHit.HitPositionWorld, _lastHit.HitNormal);
+                            RaycastHitResult mirrorHit = default;
+                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                            {
+                                mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: false);
+                            }
+                            if (!mirrorHit.Hit)
+                            {
+                                RaycastAllSubmeshes(mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, out _, out mirrorHit);
+                            }
+
                             if (mirrorHit.Hit)
                             {
-                                _textProjector.PlaceAt(mirrorHit.HitPositionWorld, mirrorHit.HitNormal, mirrorHit.HitUV);
+                                Vector3 mRight = new Vector3(-decalRight.X, decalRight.Y, decalRight.Z).Normalized();
+                                Vector3 mDown = new Vector3(-decalDown.X, decalDown.Y, decalDown.Z).Normalized();
+                                float mUnitsU = (mirrorHit.WorldUnitsPerU > 1e-4f && mirrorHit.WorldUnitsPerU < 20.0f) ? mirrorHit.WorldUnitsPerU : 0.5f;
+                                float mUnitsV = (mirrorHit.WorldUnitsPerV > 1e-4f && mirrorHit.WorldUnitsPerV < 20.0f) ? mirrorHit.WorldUnitsPerV : 0.5f;
+
+                                _textProjector.PlaceAt(mirrorHit.HitPositionWorld, mirrorHit.HitNormal, mirrorHit.HitUV, mRight, mDown, mirrorHit.WorldTangent, mirrorHit.WorldBitangent, mUnitsU, mUnitsV);
                                 _textProjector.BakeToActiveLayer();
+                                _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
                             }
                         }
                     }
@@ -600,8 +725,7 @@ namespace DeadlockPlayground.Painter
                 {
                     if (_lastHit.Hit)
                     {
-                        Vector3 mirrorPos = new Vector3(-_lastHit.HitPositionWorld.X, _lastHit.HitPositionWorld.Y, _lastHit.HitPositionWorld.Z);
-                        Vector3 mirrorRayDir = new Vector3(-rayDir.X, rayDir.Y, rayDir.Z).Normalized();
+                        var (mirrorPos, mirrorRayDir) = ComputeMirroredPointAndDir(_lastHit.HitPositionWorld, rayDir);
                         Vector3 mirrorBrushPos = mirrorPos - mirrorRayDir * 0.15f;
                         _mirrorCameraBrush.GlobalPosition = mirrorBrushPos;
                         Vector3 up = Mathf.Abs(mirrorRayDir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
@@ -625,6 +749,10 @@ namespace DeadlockPlayground.Painter
                     _layerManager?.RecordInitialSnapshot();
                     _preStrokeAtlasData = _layerManager?.GetAtlasDataSnapshot();
                     _cameraBrush?.Call("get_atlas_textures");
+                    if (IsMirroringEnabled && _mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                    {
+                        _mirrorCameraBrush.Call("get_atlas_textures");
+                    }
                     EmitSignal(SignalName.StrokeStarted);
                 }
             }
@@ -741,9 +869,12 @@ namespace DeadlockPlayground.Painter
                 _previewDecalNode = new Decal
                 {
                     Name = "PainterLiveDecalPreview",
-                    Size = new Vector3(0.5f, 0.6f, 0.5f),
-                    AlbedoMix = 0.85f,
+                    Size = new Vector3(0.5f, 1.2f, 0.5f),
+                    AlbedoMix = 0.95f,
                     CullMask = 1,
+                    NormalFade = 0.0f,
+                    UpperFade = 0.0f,
+                    LowerFade = 0.0f,
                     Visible = false
                 };
             }
@@ -1082,7 +1213,11 @@ namespace DeadlockPlayground.Painter
                         float uvSpanV = (aspect < 1.0f) ? scale / aspect : scale;
                         float sizeX = uvSpanU * unitsU;
                         float sizeZ = uvSpanV * unitsV;
-                        _previewDecalNode.Size = new Vector3(sizeX, 0.6f, sizeZ);
+                        float depthY = Mathf.Max(1.0f, Mathf.Max(sizeX, sizeZ) * 2.0f);
+                        _previewDecalNode.NormalFade = 0.0f;
+                        _previewDecalNode.UpperFade = 0.0f;
+                        _previewDecalNode.LowerFade = 0.0f;
+                        _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
                         Basis basis = new Basis(tangent, normal, bitangent);
                         basis = basis.Rotated(normal, Mathf.DegToRad(rotDeg));
@@ -1115,7 +1250,11 @@ namespace DeadlockPlayground.Painter
                         float uvSpanV = (aspect < 1.0f) ? scale / aspect : scale;
                         float sizeX = uvSpanU * unitsU;
                         float sizeZ = uvSpanV * unitsV;
-                        _previewDecalNode.Size = new Vector3(sizeX, 0.6f, sizeZ);
+                        float depthY = Mathf.Max(1.0f, Mathf.Max(sizeX, sizeZ) * 2.0f);
+                        _previewDecalNode.NormalFade = 0.0f;
+                        _previewDecalNode.UpperFade = 0.0f;
+                        _previewDecalNode.LowerFade = 0.0f;
+                        _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
                         Basis basis = new Basis(tangent, normal, bitangent);
                         basis = basis.Rotated(normal, Mathf.DegToRad(rotDeg));
@@ -1363,7 +1502,7 @@ namespace DeadlockPlayground.Painter
             _isActionClickDown = false;
             byte[] postData = _layerManager?.GetAtlasDataSnapshot();
             bool isErase = ToolMode == BrushToolMode.Erase;
-            _layerManager?.CommitStrokeToActiveLayer(_preStrokeAtlasData, postData, BrushColor, isErase);
+            _layerManager?.CommitStrokeToActiveLayer(_preStrokeAtlasData, postData, BrushColor, isErase, _magicWandTool);
             _layerManager?.RecompositeGpuLayers();
             _layerManager?.RecordUndoSnapshot();
             EmitSignal(SignalName.StrokeFinished);
@@ -1496,27 +1635,41 @@ namespace DeadlockPlayground.Painter
                         {
                             paintRegion.Resize(img.GetWidth(), img.GetHeight());
                         }
+                        if (paintRegion.GetFormat() != Image.Format.Rgba8) paintRegion.Convert(Image.Format.Rgba8);
                         int w = img.GetWidth();
                         int h = img.GetHeight();
-                        for (int y = 0; y < h; y++)
+                        byte[] baseBytes = img.GetData();
+                        byte[] paintBytes = paintRegion.GetData();
+
+                        System.Threading.Tasks.Parallel.For(0, h, y =>
                         {
+                            int row = y * w * 4;
                             for (int x = 0; x < w; x++)
                             {
-                                Color pCol = paintRegion.GetPixel(x, y);
-                                if (pCol.A > 0.001f)
+                                int off = row + x * 4;
+                                byte pa = paintBytes[off + 3];
+                                if (pa > 0)
                                 {
-                                    Color bCol = img.GetPixel(x, y);
-                                    float a = pCol.A;
-                                    Color comp = new Color(
-                                        pCol.R * a + bCol.R * (1.0f - a),
-                                        pCol.G * a + bCol.G * (1.0f - a),
-                                        pCol.B * a + bCol.B * (1.0f - a),
-                                        1.0f
-                                    );
-                                    img.SetPixel(x, y, comp);
+                                    if (pa == 255)
+                                    {
+                                        baseBytes[off] = paintBytes[off];
+                                        baseBytes[off + 1] = paintBytes[off + 1];
+                                        baseBytes[off + 2] = paintBytes[off + 2];
+                                        baseBytes[off + 3] = 255;
+                                    }
+                                    else
+                                    {
+                                        int a = pa;
+                                        int invA = 255 - a;
+                                        baseBytes[off] = (byte)((paintBytes[off] * a + baseBytes[off] * invA) / 255);
+                                        baseBytes[off + 1] = (byte)((paintBytes[off + 1] * a + baseBytes[off + 1] * invA) / 255);
+                                        baseBytes[off + 2] = (byte)((paintBytes[off + 2] * a + baseBytes[off + 2] * invA) / 255);
+                                        baseBytes[off + 3] = 255;
+                                    }
                                 }
                             }
-                        }
+                        });
+                        img.SetData(w, h, false, Image.Format.Rgba8, baseBytes);
                     }
                 }
             }
@@ -1712,6 +1865,11 @@ namespace DeadlockPlayground.Painter
             {
                 _selectionOutlineMesh.QueueFree();
                 _selectionOutlineMesh = null;
+            }
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            {
+                _mirrorCameraBrush.QueueFree();
+                _mirrorCameraBrush = null;
             }
             base._ExitTree();
         }

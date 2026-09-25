@@ -108,8 +108,9 @@ void fragment() {
 			if (mask_size.x > 1) {
 				vec2 uv_dx = dFdx(clamped_uv);
 				vec2 uv_dy = dFdy(clamped_uv);
-				vec2 d_x = (length(uv_dx) > 1e-6) ? uv_dx : vec2(1.0 / float(mask_size.x), 0.0);
-				vec2 d_y = (length(uv_dy) > 1e-6) ? uv_dy : vec2(0.0, 1.0 / float(mask_size.y));
+				float texel_step = 1.0 / float(mask_size.x);
+				vec2 d_x = (length(uv_dx) > 1e-6 && length(uv_dx) < 0.05) ? uv_dx : vec2(texel_step, 0.0);
+				vec2 d_y = (length(uv_dy) > 1e-6 && length(uv_dy) < 0.05) ? uv_dy : vec2(0.0, texel_step);
 
 				float m_center = texture(selection_mask, clamped_uv).r;
 				float m_r = texture(selection_mask, clamped_uv + d_x).r;
@@ -117,10 +118,11 @@ void fragment() {
 				float m_u = texture(selection_mask, clamped_uv + d_y).r;
 				float m_d = texture(selection_mask, clamped_uv - d_y).r;
 
-				bool is_edge = (m_center >= 0.5) && (m_r < 0.5 || m_l < 0.5 || m_u < 0.5 || m_d < 0.5);
+				bool is_edge = ((m_center >= 0.5) && (m_r < 0.5 || m_l < 0.5 || m_u < 0.5 || m_d < 0.5))
+				            || ((m_center < 0.5) && (m_r >= 0.5 || m_l >= 0.5 || m_u >= 0.5 || m_d >= 0.5));
 
 				if (is_edge) {
-					// Razor-thin 1-pixel animated marching ants boundary outline
+					// Animated marching ants outline (alternating black & white dashes)
 					float ant = sin((FRAGCOORD.x + FRAGCOORD.y + TIME * 16.0) * 0.4);
 					vec3 ant_color = (ant > 0.0) ? vec3(1.0, 1.0, 1.0) : vec3(0.05, 0.05, 0.05);
 					final_color = ant_color;

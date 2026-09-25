@@ -466,6 +466,8 @@ namespace DeadlockPlayground.Painter
                 ActiveLayerIndex = _activeLayerIndex
             };
 
+            int maxSnapshots = CanvasSize.X >= 4096 ? 5 : MaxUndoSnapshots;
+
             for (int i = 0; i < _layers.Count; i++)
             {
                 if (_layers[i].GpuData != null && _layers[i].GpuData.Length > 0)
@@ -475,7 +477,7 @@ namespace DeadlockPlayground.Painter
             }
 
             _undoStack.Add(snap);
-            if (_undoStack.Count > MaxUndoSnapshots + 1)
+            if (_undoStack.Count > maxSnapshots + 1)
             {
                 _undoStack.RemoveAt(0);
             }
@@ -817,7 +819,18 @@ namespace DeadlockPlayground.Painter
             GD.Print($"[SkinLayerManager] Bucket filled submesh '{mesh.Name}' with {color.ToHtml()} (UseMask={useMask}, HitUV={hitUv})");
         }
 
-        public bool StampDecalToAtlas(Vector2 hitUv, Texture2D decalTexture, float rotationDeg, float scale)
+        public bool StampDecalToAtlas(
+            Vector2 hitUv, 
+            Texture2D decalTexture, 
+            float rotationDeg, 
+            float scale, 
+            MagicWandTool wandTool = null,
+            Vector3 decalRight = default,
+            Vector3 decalDown = default,
+            Vector3 worldTangent = default,
+            Vector3 worldBitangent = default,
+            float unitsU = 1.0f,
+            float unitsV = 1.0f)
         {
             if (decalTexture == null || _targetMesh == null || !GodotObject.IsInstanceValid(_targetMesh) || _atlasManager == null || !GodotObject.IsInstanceValid(_atlasManager))
             {
@@ -845,10 +858,13 @@ namespace DeadlockPlayground.Painter
             Image decalImg = decalTexture.GetImage();
             if (decalImg == null) return false;
             if (decalImg.IsCompressed()) decalImg.Decompress();
+            if (decalImg.GetFormat() != Image.Format.Rgba8) decalImg.Convert(Image.Format.Rgba8);
 
             int dW = decalImg.GetWidth();
             int dH = decalImg.GetHeight();
             if (dW <= 0 || dH <= 0) return false;
+
+            byte[] rawDecal = decalImg.GetData();
 
             RecordInitialSnapshot();
 
@@ -869,7 +885,24 @@ namespace DeadlockPlayground.Painter
             float cosR = Mathf.Cos(rad);
             float sinR = Mathf.Sin(rad);
 
-            float diag = Mathf.Sqrt(halfExtX * halfExtX + halfExtY * halfExtY);
+            bool use3DProjection = decalRight.LengthSquared() > 0.001f && worldTangent.LengthSquared() > 0.001f;
+            Vector3 T = worldTangent * unitsU;
+            Vector3 B = worldBitangent * unitsV;
+
+            float decalSizeX = spanU * unitsU;
+            float decalSizeZ = spanV * unitsV;
+            if (decalSizeX < 1e-4f) decalSizeX = 1e-4f;
+            if (decalSizeZ < 1e-4f) decalSizeZ = 1e-4f;
+
+            float dU_decalX = T.Dot(decalRight) / decalSizeX;
+            float dV_decalX = B.Dot(decalRight) / decalSizeX;
+            float dU_decalZ = T.Dot(decalDown) / decalSizeZ;
+            float dV_decalZ = B.Dot(decalDown) / decalSizeZ;
+
+            float submeshW = size.X * atlasSize;
+            float submeshH = size.Y * atlasSize;
+
+            float diag = Mathf.Sqrt(halfExtX * halfExtX + halfExtY * halfExtY) * 1.5f;
             int minX = Mathf.Clamp((int)(centerPx.X - diag), 0, atlasSize - 1);
             int maxX = Mathf.Clamp((int)(centerPx.X + diag), 0, atlasSize - 1);
             int minY = Mathf.Clamp((int)(centerPx.Y - diag), 0, atlasSize - 1);
@@ -884,7 +917,7 @@ namespace DeadlockPlayground.Painter
                 }
                 unsafe
                 {
-                    fixed (byte* pDst = ActiveLayer.GpuData)
+                    fixed (byte* pDst = ActiveLayer.GpuData, pDecal = rawDecal)
                     {
                         Half* hLayer = (Half*)pDst;
                         for (int y = minY; y <= maxY; y++)
@@ -892,13 +925,24 @@ namespace DeadlockPlayground.Painter
                             int rowOffset = y * atlasSize * 4;
                             for (int x = minX; x <= maxX; x++)
                             {
-                                float nx = (float)(x - centerPx.X) / halfExtX;
-                                float ny = (float)(y - centerPx.Y) / halfExtY;
-
-                                float rx = nx * cosR - ny * sinR;
-                                float ry = nx * sinR + ny * cosR;
+                                float rx, ry;
+                                if (use3DProjection)
+                                {
+                                    float deltaU = (float)(x - centerPx.X) / submeshW;
+                                    float deltaV = (float)(y - centerPx.Y) / submeshH;
+                                    rx = (deltaU * dU_decalX + deltaV * dV_decalX) * 2.0f;
+                                    ry = (deltaU * dU_decalZ + deltaV * dV_decalZ) * 2.0f;
+                                }
+                                else
+                                {
+                                    float nx = (float)(x - centerPx.X) / halfExtX;
+                                    float ny = (float)(y - centerPx.Y) / halfExtY;
+                                    rx = nx * cosR - ny * sinR;
+                                    ry = nx * sinR + ny * cosR;
+                                }
 
                                 if (Mathf.Abs(rx) > 1.0f || Mathf.Abs(ry) > 1.0f) continue;
+                                if (wandTool != null && wandTool.HasActiveSelection && !wandTool.IsPixelSelected(x, y)) continue;
 
                                 float du = (rx + 1.0f) * 0.5f;
                                 float dv = (ry + 1.0f) * 0.5f;
@@ -906,7 +950,12 @@ namespace DeadlockPlayground.Painter
                                 int px = Mathf.Clamp((int)(du * dW), 0, dW - 1);
                                 int py = Mathf.Clamp((int)(dv * dH), 0, dH - 1);
 
-                                Color dCol = decalImg.GetPixel(px, py).SrgbToLinear();
+                                int dOff = (py * dW + px) * 4;
+                                byte rawA = pDecal[dOff + 3];
+                                if (rawA == 0) continue;
+
+                                float dAlpha = rawA / 255.0f;
+                                Color dCol = new Color(pDecal[dOff] / 255.0f, pDecal[dOff + 1] / 255.0f, pDecal[dOff + 2] / 255.0f, dAlpha).SrgbToLinear();
                                 if (dCol.A <= 0.001f) continue;
 
                                 int idx = rowOffset + x * 4;
@@ -1105,7 +1154,7 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        public unsafe void CommitStrokeToActiveLayer(byte[] preStrokeData, byte[] postStrokeData, Color? strokeColor = null, bool isErase = false)
+        public unsafe void CommitStrokeToActiveLayer(byte[] preStrokeData, byte[] postStrokeData, Color? strokeColor = null, bool isErase = false, MagicWandTool wandTool = null)
         {
             var layer = ActiveLayer;
             if (layer == null || postStrokeData == null || postStrokeData.Length == 0) return;
@@ -1124,7 +1173,10 @@ namespace DeadlockPlayground.Painter
                 if (amSize > 0) atlasWidth = amSize;
             }
 
-            int minX = int.MaxValue, maxX = -1, minY = int.MaxValue, maxY = -1;
+            int numRows = pixelCount / atlasWidth;
+            int globalMinX = int.MaxValue, globalMaxX = -1, globalMinY = int.MaxValue, globalMaxY = -1;
+            object boundsLock = new object();
+            bool checkWand = wandTool != null && wandTool.HasActiveSelection;
 
             fixed (byte* pPre = preStrokeData, pPost = postStrokeData, pLayer = layer.GpuData)
             {
@@ -1135,74 +1187,94 @@ namespace DeadlockPlayground.Painter
                 Half* hLayer = (Half*)pLayer;
 
                 float op = Mathf.Max(layer.Opacity, 0.001f);
+                bool hasPre = preStrokeData != null && preStrokeData.Length == len;
 
-                for (int i = 0; i < pixelCount; i++)
+                System.Threading.Tasks.Parallel.For(0, numRows, () => (MinX: int.MaxValue, MaxX: -1, MinY: int.MaxValue, MaxY: -1), (py, state, localBounds) =>
                 {
-                    if (preStrokeData != null && preStrokeData.Length == len && uPost[i] == uPre[i]) continue;
-
-                    int px = i % atlasWidth;
-                    int py = i / atlasWidth;
-                    if (px < minX) minX = px;
-                    if (px > maxX) maxX = px;
-                    if (py < minY) minY = py;
-                    if (py > maxY) maxY = py;
-
-                    int hOffset = i * 4;
-
-                    float actualA = (float)hPost[hOffset + 3];
-                    float unscaledA = Mathf.Clamp(actualA / op, 0.0f, 1.0f);
-
-                    if (isErase)
+                    int rowOffset = py * atlasWidth;
+                    for (int px = 0; px < atlasWidth; px++)
                     {
-                        float curA = (float)hLayer[hOffset + 3];
-                        float deltaErase = 0.0f;
-                        if (preStrokeData != null && preStrokeData.Length == len)
+                        int i = rowOffset + px;
+                        if (hasPre && uPost[i] == uPre[i]) continue;
+                        if (checkWand && !wandTool.IsPixelSelected(px, py)) continue;
+
+                        if (px < localBounds.MinX) localBounds.MinX = px;
+                        if (px > localBounds.MaxX) localBounds.MaxX = px;
+                        if (py < localBounds.MinY) localBounds.MinY = py;
+                        if (py > localBounds.MaxY) localBounds.MaxY = py;
+
+                        int hOffset = i * 4;
+                        float actualA = (float)hPost[hOffset + 3];
+                        float unscaledA = Mathf.Clamp(actualA / op, 0.0f, 1.0f);
+
+                        if (isErase)
                         {
-                            float rawPreA = (float)hPre[hOffset + 3];
-                            deltaErase = Mathf.Max(0.0f, rawPreA - actualA);
+                            float curA = (float)hLayer[hOffset + 3];
+                            float deltaErase = 0.0f;
+                            if (hasPre)
+                            {
+                                float rawPreA = (float)hPre[hOffset + 3];
+                                deltaErase = Mathf.Max(0.0f, rawPreA - actualA);
+                            }
+                            else
+                            {
+                                deltaErase = 1.0f - actualA;
+                            }
+                            float newLayerA = Mathf.Clamp(curA - deltaErase / op, 0.0f, 1.0f);
+                            hLayer[hOffset + 3] = (Half)newLayerA;
+                        }
+                        else if (strokeColor.HasValue)
+                        {
+                            Color c = strokeColor.Value.SrgbToLinear();
+                            float curA = (float)hLayer[hOffset + 3];
+                            if (curA <= 0.001f)
+                            {
+                                hLayer[hOffset] = (Half)c.R;
+                                hLayer[hOffset + 1] = (Half)c.G;
+                                hLayer[hOffset + 2] = (Half)c.B;
+                                hLayer[hOffset + 3] = (Half)unscaledA;
+                            }
+                            else
+                            {
+                                float outA = Mathf.Clamp(unscaledA + curA * (1.0f - unscaledA), 0.0f, 1.0f);
+                                float curR = (float)hLayer[hOffset];
+                                float curG = (float)hLayer[hOffset + 1];
+                                float curB = (float)hLayer[hOffset + 2];
+                                float outR = (outA > 0.0001f) ? (c.R * unscaledA + curR * curA * (1.0f - unscaledA)) / outA : c.R;
+                                float outG = (outA > 0.0001f) ? (c.G * unscaledA + curG * curA * (1.0f - unscaledA)) / outA : c.G;
+                                float outB = (outA > 0.0001f) ? (c.B * unscaledA + curB * curA * (1.0f - unscaledA)) / outA : c.B;
+                                hLayer[hOffset] = (Half)outR;
+                                hLayer[hOffset + 1] = (Half)outG;
+                                hLayer[hOffset + 2] = (Half)outB;
+                                hLayer[hOffset + 3] = (Half)outA;
+                            }
                         }
                         else
                         {
-                            deltaErase = 1.0f - actualA;
-                        }
-                        float newLayerA = Mathf.Clamp(curA - deltaErase / op, 0.0f, 1.0f);
-                        hLayer[hOffset + 3] = (Half)newLayerA;
-                    }
-                    else if (strokeColor.HasValue)
-                    {
-                        Color c = strokeColor.Value.SrgbToLinear();
-                        float curA = (float)hLayer[hOffset + 3];
-                        if (curA <= 0.001f)
-                        {
-                            hLayer[hOffset] = (Half)c.R;
-                            hLayer[hOffset + 1] = (Half)c.G;
-                            hLayer[hOffset + 2] = (Half)c.B;
+                            hLayer[hOffset] = hPost[hOffset];
+                            hLayer[hOffset + 1] = hPost[hOffset + 1];
+                            hLayer[hOffset + 2] = hPost[hOffset + 2];
                             hLayer[hOffset + 3] = (Half)unscaledA;
                         }
-                        else
+                    }
+                    return localBounds;
+                },
+                localBounds =>
+                {
+                    if (localBounds.MaxX >= 0)
+                    {
+                        lock (boundsLock)
                         {
-                            float outA = Mathf.Clamp(unscaledA + curA * (1.0f - unscaledA), 0.0f, 1.0f);
-                            float curR = (float)hLayer[hOffset];
-                            float curG = (float)hLayer[hOffset + 1];
-                            float curB = (float)hLayer[hOffset + 2];
-                            float outR = (outA > 0.0001f) ? (c.R * unscaledA + curR * curA * (1.0f - unscaledA)) / outA : c.R;
-                            float outG = (outA > 0.0001f) ? (c.G * unscaledA + curG * curA * (1.0f - unscaledA)) / outA : c.G;
-                            float outB = (outA > 0.0001f) ? (c.B * unscaledA + curB * curA * (1.0f - unscaledA)) / outA : c.B;
-                            hLayer[hOffset] = (Half)outR;
-                            hLayer[hOffset + 1] = (Half)outG;
-                            hLayer[hOffset + 2] = (Half)outB;
-                            hLayer[hOffset + 3] = (Half)outA;
+                            if (localBounds.MinX < globalMinX) globalMinX = localBounds.MinX;
+                            if (localBounds.MaxX > globalMaxX) globalMaxX = localBounds.MaxX;
+                            if (localBounds.MinY < globalMinY) globalMinY = localBounds.MinY;
+                            if (localBounds.MaxY > globalMaxY) globalMaxY = localBounds.MaxY;
                         }
                     }
-                    else
-                    {
-                        hLayer[hOffset] = hPost[hOffset];
-                        hLayer[hOffset + 1] = hPost[hOffset + 1];
-                        hLayer[hOffset + 2] = hPost[hOffset + 2];
-                        hLayer[hOffset + 3] = (Half)unscaledA;
-                    }
-                }
+                });
             }
+
+            int minX = globalMinX, maxX = globalMaxX, minY = globalMinY, maxY = globalMaxY;
 
             if (maxX >= 0 && MeshHierarchy != null)
             {
@@ -1455,151 +1527,160 @@ namespace DeadlockPlayground.Painter
                 Half* hDst = (Half*)pDst;
                 Half* hBase = pBase != null ? (Half*)pBase : null;
 
-                for (int i = 0; i < pixelCount; i++)
+                int chunkSize = 32768;
+                int numChunks = (pixelCount + chunkSize - 1) / chunkSize;
+
+                System.Threading.Tasks.Parallel.For(0, numChunks, chunkIdx =>
                 {
-                    if (uSrc[i] == 0) continue;
+                    int start = chunkIdx * chunkSize;
+                    int end = Math.Min(start + chunkSize, pixelCount);
 
-                    int hOffset = i * 4;
-                    float srcA = (float)hSrc[hOffset + 3] * opacity;
-                    if (srcA <= 0.0001f) continue;
-
-                    float srcR = (float)hSrc[hOffset];
-                    float srcG = (float)hSrc[hOffset + 1];
-                    float srcB = (float)hSrc[hOffset + 2];
-
-                    if (uDst[i] == 0)
+                    for (int i = start; i < end; i++)
                     {
-                        float bR = hBase != null ? (float)hBase[hOffset] : 1.0f;
-                        float bG = hBase != null ? (float)hBase[hOffset + 1] : 1.0f;
-                        float bB = hBase != null ? (float)hBase[hOffset + 2] : 1.0f;
+                        if (uSrc[i] == 0) continue;
 
-                        float outR, outG, outB;
+                        int hOffset = i * 4;
+                        float srcA = (float)hSrc[hOffset + 3] * opacity;
+                        if (srcA <= 0.0001f) continue;
 
-                        if (mode == LayerBlendMode.Multiply)
+                        float srcR = (float)hSrc[hOffset];
+                        float srcG = (float)hSrc[hOffset + 1];
+                        float srcB = (float)hSrc[hOffset + 2];
+
+                        if (uDst[i] == 0)
                         {
-                            outR = bR * srcR;
-                            outG = bG * srcG;
-                            outB = bB * srcB;
-                        }
-                        else if (mode == LayerBlendMode.Screen)
-                        {
-                            outR = 1.0f - (1.0f - bR) * (1.0f - srcR);
-                            outG = 1.0f - (1.0f - bG) * (1.0f - srcG);
-                            outB = 1.0f - (1.0f - bB) * (1.0f - srcB);
-                        }
-                        else if (mode == LayerBlendMode.Overlay)
-                        {
-                            outR = bR < 0.5f ? (2.0f * bR * srcR) : (1.0f - 2.0f * (1.0f - bR) * (1.0f - srcR));
-                            outG = bG < 0.5f ? (2.0f * bG * srcG) : (1.0f - 2.0f * (1.0f - bG) * (1.0f - srcG));
-                            outB = bB < 0.5f ? (2.0f * bB * srcB) : (1.0f - 2.0f * (1.0f - bB) * (1.0f - srcB));
-                        }
-                        else if (mode == LayerBlendMode.Darken)
-                        {
-                            outR = Mathf.Min(bR, srcR);
-                            outG = Mathf.Min(bG, srcG);
-                            outB = Mathf.Min(bB, srcB);
-                        }
-                        else if (mode == LayerBlendMode.Lighten)
-                        {
-                            outR = Mathf.Max(bR, srcR);
-                            outG = Mathf.Max(bG, srcG);
-                            outB = Mathf.Max(bB, srcB);
-                        }
-                        else if (mode == LayerBlendMode.ColorDodge)
-                        {
-                            outR = bR / Mathf.Max(1.0f - srcR, 0.001f);
-                            outG = bG / Mathf.Max(1.0f - srcG, 0.001f);
-                            outB = bB / Mathf.Max(1.0f - srcB, 0.001f);
+                            float bR = hBase != null ? (float)hBase[hOffset] : 1.0f;
+                            float bG = hBase != null ? (float)hBase[hOffset + 1] : 1.0f;
+                            float bB = hBase != null ? (float)hBase[hOffset + 2] : 1.0f;
+
+                            float outR, outG, outB;
+
+                            if (mode == LayerBlendMode.Multiply)
+                            {
+                                outR = bR * srcR;
+                                outG = bG * srcG;
+                                outB = bB * srcB;
+                            }
+                            else if (mode == LayerBlendMode.Screen)
+                            {
+                                outR = 1.0f - (1.0f - bR) * (1.0f - srcR);
+                                outG = 1.0f - (1.0f - bG) * (1.0f - srcG);
+                                outB = 1.0f - (1.0f - bB) * (1.0f - srcB);
+                            }
+                            else if (mode == LayerBlendMode.Overlay)
+                            {
+                                outR = bR < 0.5f ? (2.0f * bR * srcR) : (1.0f - 2.0f * (1.0f - bR) * (1.0f - srcR));
+                                outG = bG < 0.5f ? (2.0f * bG * srcG) : (1.0f - 2.0f * (1.0f - bG) * (1.0f - srcG));
+                                outB = bB < 0.5f ? (2.0f * bB * srcB) : (1.0f - 2.0f * (1.0f - bB) * (1.0f - srcB));
+                            }
+                            else if (mode == LayerBlendMode.Darken)
+                            {
+                                outR = Mathf.Min(bR, srcR);
+                                outG = Mathf.Min(bG, srcG);
+                                outB = Mathf.Min(bB, srcB);
+                            }
+                            else if (mode == LayerBlendMode.Lighten)
+                            {
+                                outR = Mathf.Max(bR, srcR);
+                                outG = Mathf.Max(bG, srcG);
+                                outB = Mathf.Max(bB, srcB);
+                            }
+                            else if (mode == LayerBlendMode.ColorDodge)
+                            {
+                                outR = bR / Mathf.Max(1.0f - srcR, 0.001f);
+                                outG = bG / Mathf.Max(1.0f - srcG, 0.001f);
+                                outB = bB / Mathf.Max(1.0f - srcB, 0.001f);
+                            }
+                            else
+                            {
+                                outR = srcR;
+                                outG = srcG;
+                                outB = srcB;
+                            }
+
+                            hDst[hOffset] = (Half)outR;
+                            hDst[hOffset + 1] = (Half)outG;
+                            hDst[hOffset + 2] = (Half)outB;
+                            hDst[hOffset + 3] = (Half)Mathf.Clamp(srcA, 0.0f, 1.0f);
                         }
                         else
                         {
-                            outR = srcR;
-                            outG = srcG;
-                            outB = srcB;
-                        }
+                            float dstR = (float)hDst[hOffset];
+                            float dstG = (float)hDst[hOffset + 1];
+                            float dstB = (float)hDst[hOffset + 2];
+                            float dstA = (float)hDst[hOffset + 3];
 
-                        hDst[hOffset] = (Half)outR;
-                        hDst[hOffset + 1] = (Half)outG;
-                        hDst[hOffset + 2] = (Half)outB;
-                        hDst[hOffset + 3] = (Half)Mathf.Clamp(srcA, 0.0f, 1.0f);
+                            float outA = Mathf.Clamp(srcA + dstA * (1.0f - srcA), 0.0f, 1.0f);
+                            float outR, outG, outB;
+
+                            if (mode == LayerBlendMode.Multiply)
+                            {
+                                float blendR = dstR * srcR;
+                                float blendG = dstG * srcG;
+                                float blendB = dstB * srcB;
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Screen)
+                            {
+                                float blendR = 1.0f - (1.0f - dstR) * (1.0f - srcR);
+                                float blendG = 1.0f - (1.0f - dstG) * (1.0f - srcG);
+                                float blendB = 1.0f - (1.0f - dstB) * (1.0f - srcB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Overlay)
+                            {
+                                float blendR = dstR < 0.5f ? (2.0f * dstR * srcR) : (1.0f - 2.0f * (1.0f - dstR) * (1.0f - srcR));
+                                float blendG = dstG < 0.5f ? (2.0f * dstG * srcG) : (1.0f - 2.0f * (1.0f - dstG) * (1.0f - srcG));
+                                float blendB = dstB < 0.5f ? (2.0f * dstB * srcB) : (1.0f - 2.0f * (1.0f - dstB) * (1.0f - srcB));
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Darken)
+                            {
+                                float blendR = Mathf.Min(dstR, srcR);
+                                float blendG = Mathf.Min(dstG, srcG);
+                                float blendB = Mathf.Min(dstB, srcB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Lighten)
+                            {
+                                float blendR = Mathf.Max(dstR, srcR);
+                                float blendG = Mathf.Max(dstG, srcG);
+                                float blendB = Mathf.Max(dstB, srcB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.ColorDodge)
+                            {
+                                float blendR = dstR / Mathf.Max(1.0f - srcR, 0.001f);
+                                float blendG = dstG / Mathf.Max(1.0f - srcG, 0.001f);
+                                float blendB = dstB / Mathf.Max(1.0f - srcB, 0.001f);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else
+                            {
+                                outR = (srcR * srcA + dstR * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
+                                outG = (srcG * srcA + dstG * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
+                                outB = (srcB * srcA + dstB * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
+                            }
+
+                            hDst[hOffset] = (Half)outR;
+                            hDst[hOffset + 1] = (Half)outG;
+                            hDst[hOffset + 2] = (Half)outB;
+                            hDst[hOffset + 3] = (Half)outA;
+                        }
                     }
-                    else
-                    {
-                        float dstR = (float)hDst[hOffset];
-                        float dstG = (float)hDst[hOffset + 1];
-                        float dstB = (float)hDst[hOffset + 2];
-                        float dstA = (float)hDst[hOffset + 3];
-
-                        float outA = Mathf.Clamp(srcA + dstA * (1.0f - srcA), 0.0f, 1.0f);
-                        float outR, outG, outB;
-
-                        if (mode == LayerBlendMode.Multiply)
-                        {
-                            float blendR = dstR * srcR;
-                            float blendG = dstG * srcG;
-                            float blendB = dstB * srcB;
-                            outR = Mathf.Lerp(dstR, blendR, srcA);
-                            outG = Mathf.Lerp(dstG, blendG, srcA);
-                            outB = Mathf.Lerp(dstB, blendB, srcA);
-                        }
-                        else if (mode == LayerBlendMode.Screen)
-                        {
-                            float blendR = 1.0f - (1.0f - dstR) * (1.0f - srcR);
-                            float blendG = 1.0f - (1.0f - dstG) * (1.0f - srcG);
-                            float blendB = 1.0f - (1.0f - dstB) * (1.0f - srcB);
-                            outR = Mathf.Lerp(dstR, blendR, srcA);
-                            outG = Mathf.Lerp(dstG, blendG, srcA);
-                            outB = Mathf.Lerp(dstB, blendB, srcA);
-                        }
-                        else if (mode == LayerBlendMode.Overlay)
-                        {
-                            float blendR = dstR < 0.5f ? (2.0f * dstR * srcR) : (1.0f - 2.0f * (1.0f - dstR) * (1.0f - srcR));
-                            float blendG = dstG < 0.5f ? (2.0f * dstG * srcG) : (1.0f - 2.0f * (1.0f - dstG) * (1.0f - srcG));
-                            float blendB = dstB < 0.5f ? (2.0f * dstB * srcB) : (1.0f - 2.0f * (1.0f - dstB) * (1.0f - srcB));
-                            outR = Mathf.Lerp(dstR, blendR, srcA);
-                            outG = Mathf.Lerp(dstG, blendG, srcA);
-                            outB = Mathf.Lerp(dstB, blendB, srcA);
-                        }
-                        else if (mode == LayerBlendMode.Darken)
-                        {
-                            float blendR = Mathf.Min(dstR, srcR);
-                            float blendG = Mathf.Min(dstG, srcG);
-                            float blendB = Mathf.Min(dstB, srcB);
-                            outR = Mathf.Lerp(dstR, blendR, srcA);
-                            outG = Mathf.Lerp(dstG, blendG, srcA);
-                            outB = Mathf.Lerp(dstB, blendB, srcA);
-                        }
-                        else if (mode == LayerBlendMode.Lighten)
-                        {
-                            float blendR = Mathf.Max(dstR, srcR);
-                            float blendG = Mathf.Max(dstG, srcG);
-                            float blendB = Mathf.Max(dstB, srcB);
-                            outR = Mathf.Lerp(dstR, blendR, srcA);
-                            outG = Mathf.Lerp(dstG, blendG, srcA);
-                            outB = Mathf.Lerp(dstB, blendB, srcA);
-                        }
-                        else if (mode == LayerBlendMode.ColorDodge)
-                        {
-                            float blendR = dstR / Mathf.Max(1.0f - srcR, 0.001f);
-                            float blendG = dstG / Mathf.Max(1.0f - srcG, 0.001f);
-                            float blendB = dstB / Mathf.Max(1.0f - srcB, 0.001f);
-                            outR = Mathf.Lerp(dstR, blendR, srcA);
-                            outG = Mathf.Lerp(dstG, blendG, srcA);
-                            outB = Mathf.Lerp(dstB, blendB, srcA);
-                        }
-                        else
-                        {
-                            outR = (srcR * srcA + dstR * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
-                            outG = (srcG * srcA + dstG * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
-                            outB = (srcB * srcA + dstB * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
-                        }
-
-                        hDst[hOffset] = (Half)outR;
-                        hDst[hOffset + 1] = (Half)outG;
-                        hDst[hOffset + 2] = (Half)outB;
-                        hDst[hOffset + 3] = (Half)outA;
-                    }
-                }
+                });
             }
         }
 
