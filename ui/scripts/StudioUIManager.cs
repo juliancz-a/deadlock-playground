@@ -2,6 +2,7 @@ using Godot;
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Tools;
 
@@ -76,6 +77,14 @@ public partial class StudioUIManager : CanvasLayer
     private readonly List<string> _loadingLogHistory = new();
     private Label _navLabel;
 
+    // Update Notification Banner
+    private PanelContainer _updateNotificationPanel;
+    private Label _updateNotificationTitle;
+    private Label _updateNotificationDetails;
+    private Button _btnUpdateAction;
+    private Button _btnUpdateDismiss;
+    private string _currentReleaseUrl = "";
+
     public static StudioUIManager Instance { get; private set; }
     public string SavePath => _pathManager?.CurrentSavePath ?? OS.GetSystemDir(OS.SystemDir.Pictures);
 
@@ -97,6 +106,7 @@ public partial class StudioUIManager : CanvasLayer
 
         LinkNodes();
         CreateToastUI();
+        CreateUpdateNotificationUI();
         CreateFallbackDialog();
         InitTabs();
         ConnectEvents();
@@ -110,6 +120,9 @@ public partial class StudioUIManager : CanvasLayer
         SwitchTab(0);
 
         PlaygroundThemeHelper.AutoDecorate(this);
+
+        // Non-blocking update check on application startup
+        _ = CheckUpdatesOnStartupAsync();
     }
 
     private SubViewport _worldViewport;
@@ -1049,6 +1062,190 @@ public partial class StudioUIManager : CanvasLayer
         if (_toastBtn != null) _toastBtn.Visible = !string.IsNullOrEmpty(filePath);
         if (_toastPanel != null) _toastPanel.Visible = true;
         _toastTimer?.Start();
+    }
+    #endregion
+
+    #region Update Notification System
+    private void CreateUpdateNotificationUI()
+    {
+        _updateNotificationPanel = new PanelContainer();
+        _updateNotificationPanel.Visible = false;
+        _updateNotificationPanel.CustomMinimumSize = new Vector2(380, 0);
+
+        var bgStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.12f, 0.16f, 0.15f, 0.96f),
+            BorderColor = PlaygroundThemeHelper.SageGreen,
+            BorderWidthLeft = 2,
+            BorderWidthTop = 2,
+            BorderWidthRight = 2,
+            BorderWidthBottom = 2,
+            CornerRadiusTopLeft = 8,
+            CornerRadiusTopRight = 8,
+            CornerRadiusBottomLeft = 8,
+            CornerRadiusBottomRight = 8,
+            ShadowColor = new Color(0, 0, 0, 0.45f),
+            ShadowSize = 8,
+            ShadowOffset = new Vector2(0, 4)
+        };
+        _updateNotificationPanel.AddThemeStyleboxOverride("panel", bgStyle);
+
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 16);
+        margin.AddThemeConstantOverride("margin_top", 12);
+        margin.AddThemeConstantOverride("margin_right", 16);
+        margin.AddThemeConstantOverride("margin_bottom", 12);
+
+        var hbox = new HBoxContainer();
+        hbox.AddThemeConstantOverride("separation", 14);
+
+        // GitHub / Update Icon
+        var iconRect = new TextureRect
+        {
+            CustomMinimumSize = new Vector2(28, 28),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+        };
+        if (ResourceLoader.Exists("res://assets/icons/github.svg"))
+        {
+            iconRect.Texture = GD.Load<Texture2D>("res://assets/icons/github.svg");
+            iconRect.Modulate = PlaygroundThemeHelper.SageGreen;
+        }
+
+        // Labels
+        var vboxText = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            Alignment = BoxContainer.AlignmentMode.Center
+        };
+        vboxText.AddThemeConstantOverride("separation", 2);
+
+        _updateNotificationTitle = new Label
+        {
+            Text = "Update Available"
+        };
+        PlaygroundThemeHelper.MakeHeaderLabel(_updateNotificationTitle);
+        _updateNotificationTitle.AddThemeFontSizeOverride("font_size", 14);
+
+        _updateNotificationDetails = new Label
+        {
+            Text = "New version available"
+        };
+        PlaygroundThemeHelper.MakeMutedLabel(_updateNotificationDetails);
+        _updateNotificationDetails.AddThemeFontSizeOverride("font_size", 12);
+
+        vboxText.AddChild(_updateNotificationTitle);
+        vboxText.AddChild(_updateNotificationDetails);
+
+        // Action & Dismiss buttons
+        var hboxBtns = new HBoxContainer
+        {
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+        };
+        hboxBtns.AddThemeConstantOverride("separation", 8);
+
+        _btnUpdateAction = new Button
+        {
+            Text = "View Release",
+            CustomMinimumSize = new Vector2(100, 30)
+        };
+        PlaygroundThemeHelper.MakeAccentButton(_btnUpdateAction);
+        _btnUpdateAction.Pressed += OnUpdateActionPressed;
+
+        _btnUpdateDismiss = new Button
+        {
+            Text = "✕",
+            TooltipText = "Dismiss",
+            CustomMinimumSize = new Vector2(30, 30)
+        };
+        PlaygroundThemeHelper.MakeSecondaryButton(_btnUpdateDismiss);
+        _btnUpdateDismiss.Pressed += OnUpdateDismissPressed;
+
+        hboxBtns.AddChild(_btnUpdateAction);
+        hboxBtns.AddChild(_btnUpdateDismiss);
+
+        hbox.AddChild(iconRect);
+        hbox.AddChild(vboxText);
+        hbox.AddChild(hboxBtns);
+
+        margin.AddChild(hbox);
+        _updateNotificationPanel.AddChild(margin);
+
+        _updateNotificationPanel.SetAnchorsPreset(Control.LayoutPreset.TopRight);
+        _updateNotificationPanel.GrowHorizontal = Control.GrowDirection.Begin;
+        _updateNotificationPanel.GrowVertical = Control.GrowDirection.End;
+        _updateNotificationPanel.OffsetTop = 46;
+        _updateNotificationPanel.OffsetRight = -20;
+
+        var hud = GetNodeOrNull("MainHUD") ?? this;
+        hud.AddChild(_updateNotificationPanel);
+    }
+
+    private void OnUpdateActionPressed()
+    {
+        if (!string.IsNullOrEmpty(_currentReleaseUrl))
+        {
+            OS.ShellOpen(_currentReleaseUrl);
+        }
+        HideUpdateNotification();
+    }
+
+    private void OnUpdateDismissPressed()
+    {
+        HideUpdateNotification();
+    }
+
+    public void ShowUpdateNotification(string latestVersion, string releaseUrl)
+    {
+        if (_updateNotificationPanel == null) return;
+
+        _currentReleaseUrl = releaseUrl;
+        if (_updateNotificationDetails != null)
+        {
+            string formattedVersion = latestVersion.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+                ? latestVersion
+                : $"v{latestVersion}";
+            _updateNotificationDetails.Text = $"New version available: {formattedVersion}";
+        }
+
+        _updateNotificationPanel.Modulate = new Color(1, 1, 1, 0.0f);
+        _updateNotificationPanel.Visible = true;
+
+        var tween = CreateTween();
+        tween.TweenProperty(_updateNotificationPanel, "modulate:a", 1.0f, 0.35f);
+    }
+
+    public void HideUpdateNotification()
+    {
+        if (_updateNotificationPanel == null || !_updateNotificationPanel.Visible) return;
+
+        var tween = CreateTween();
+        tween.TweenProperty(_updateNotificationPanel, "modulate:a", 0.0f, 0.2f);
+        tween.TweenCallback(Callable.From(() =>
+        {
+            _updateNotificationPanel.Visible = false;
+            _updateNotificationPanel.Modulate = new Color(1, 1, 1, 1.0f);
+        }));
+    }
+
+    private async Task CheckUpdatesOnStartupAsync()
+    {
+        try
+        {
+            var result = await UpdateChecker.CheckForUpdatesAsync().ConfigureAwait(false);
+            if (result.IsUpdateAvailable && !string.IsNullOrEmpty(result.ReleaseUrl))
+            {
+                Callable.From(() =>
+                {
+                    ShowUpdateNotification(result.RemoteVersionTag, result.ReleaseUrl);
+                }).CallDeferred();
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.Print($"[StudioUIManager] Startup update check failed: {ex.Message}");
+        }
     }
     #endregion
 
