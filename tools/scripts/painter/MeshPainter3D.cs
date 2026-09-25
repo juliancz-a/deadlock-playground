@@ -61,6 +61,7 @@ namespace DeadlockPlayground.Painter
         private SubViewport _worldViewport;
         private SubViewportContainer _worldViewportContainer;
         private SkinLayerManager _layerManager;
+        public SkinLayerManager LayerManager => _layerManager;
         private FloatingBrushPaletteUI _brushPalette;
         private readonly MeshRaycaster _raycaster = new();
         private MeshInstance3D _currentMesh;
@@ -1541,6 +1542,28 @@ namespace DeadlockPlayground.Painter
             }
 
             _magicWandTool?.ClearMask();
+        }
+
+        /// <summary>
+        /// Cancels any in-progress stroke and invalidates cached stroke data and selection masks.
+        /// Invoked on hero unload/switch to prevent paint artifacts or masks from leaking across characters.
+        /// </summary>
+        public void ResetSession()
+        {
+            _isMouseDown = false;
+            _strokeInProgress = false;
+            _isActionClickDown = false;
+            _preStrokeAtlasData = null;
+            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+            {
+                _cameraBrush.Set("drawing", false);
+            }
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            {
+                _mirrorCameraBrush.Set("drawing", false);
+            }
+            _magicWandTool?.ClearMask();
+            SyncSelectionMaskState();
         }
 
         [Obsolete("CPU raycasting paint strokes have been deprecated in favor of CameraBrush GPU compute projection.")]

@@ -937,6 +937,8 @@ public partial class StudioUIManager : CanvasLayer
         _tabCharacter?.ClearSubmeshes();
         _tabShading?.ClearHero();
         _tabPaint?.ClearHero();
+        _tabPaint?.LayerManager?.ClearHistory();
+        _tabPaint?.Painter?.ResetSession();
         _tabBones?.SetSkeleton(null);
         _tabBones?.SetIKManager(null);
         _tabPose?.SetSkeleton(null);

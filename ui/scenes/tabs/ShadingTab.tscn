@@ -187,6 +187,7 @@ text = "Outline Color"
 [node name="ColorOutline" type="ColorPickerButton" parent="ToonGroup/OutlineColorBox" unique_id=256773124]
 custom_minimum_size = Vector2(70, 24)
 layout_mode = 2
+color = Color(0.08, 0.08, 0.08, 1)
 
 [node name="ShadowAmountBox" type="HBoxContainer" parent="ToonGroup" unique_id=770078110]
 layout_mode = 2

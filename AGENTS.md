@@ -108,6 +108,31 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Shaders: `res://assets/shaders/painter/*.gdshader` and `res://shaders/*.gdshader`
    - Components: `res://ui/scenes/components/*.tscn` and `res://ui/scripts/components/*.cs`
 
+### D. Skeletal Animation & Additive Ingestion Rules
+1. **Coordinate Space Conversion for Additive Quaternions (Z-Up to Y-Up)**:
+   - Source 2 authors animations in Z-Up space. For additive delta sequences (recoil, firing, aiming), converting raw components `(convRot.X, convRot.Y, convRot.Z, convRot.W)` directly into Godot causes a -90 degree pitch around the X-axis for root and spine joints.
+   - Always convert additive Source 2 delta quaternions to Godot's bone space:
+     ```csharp
+     var correctedRot = new Godot.Quaternion(convRot.X, convRot.Z, -convRot.Y, convRot.W).Normalized();
+     ```
+   - In `BakeConversion`, skip `SourceToGltfRotation` multiplication on root joints when `isAdditive == true` (`isRoot && !isAdditive`) so root/pelvis deltas align with the imported skeleton's coordinate frame without receiving double rotation.
+2. **Preserve Pelvis Elevation Track**:
+   - Stripping all `Position3D` tracks from additive sequences leaves the `pelvis` bone at local $(0, 0, 0)$ relative to `root`, dropping the character's hips to the floor.
+   - While limb translation tracks (arms, legs, head) must be omitted so joints evaluate against rest, the `pelvis` bone MUST retain its default rest height:
+     ```csharp
+     if (boneName.Equals("pelvis", StringComparison.OrdinalIgnoreCase))
+     {
+         int pTrack = godotAnim.AddTrack(Godot.Animation.TrackType.Position3D);
+         godotAnim.TrackSetPath(pTrack, $"{skeletonPath}:pelvis");
+         godotAnim.PositionTrackInsertKey(pTrack, 0.0, skeleton.GetBoneRest(pelvisIdx).Origin);
+     }
+     ```
+   - In `StripAdditivePositionTracks`, always skip tracks targeting `:pelvis` and verify the pelvis position track exists.
+3. **Additive Layer Classification & Default Stance Protection**:
+   - Firing deltas (`recoil`, `primary_fire_aimed`, `shoot`, `burst`, `_add`, `_delta`) are authored as runtime additive modifiers, not standalone base poses.
+   - Categorize these sequences into `"Additive Layers"` in `DeadlockAnimLoader.ClassifyCategory`.
+   - In `PoseTabUI.cs`, present `"Additive Layers"` as a distinct subcategory collapsed by default, and exclude it from `AutoSelectDefaultIdle()` so partial overlays are never accidentally loaded as default stances.
+
 ---
 
 ## 4. Key Workflows & Verification Procedures

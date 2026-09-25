@@ -240,6 +240,7 @@ public partial class ShadingTabUI : VBoxContainer
         }
         if (_colorToonOutline != null)
         {
+            _colorToonOutline.Color = new Color(0.08f, 0.08f, 0.08f, 1.0f);
             _colorToonOutline.ColorChanged += (c) =>
             {
                 if (!_isSyncing) UpdateToonMaterialsUniforms();
@@ -404,12 +405,13 @@ public partial class ShadingTabUI : VBoxContainer
 
         // Build dynamic UI for hero config
         var heroConfig = HeroMaterialManager.GetConfigForHero(_currentHeroName);
+        if (_colorToonOutline != null)
+        {
+            _colorToonOutline.Color = heroConfig?.SignatureOutlineColor ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
+        }
+
         if (heroConfig != null)
         {
-            if (heroConfig.SignatureOutlineColor.HasValue && _colorToonOutline != null)
-            {
-                _colorToonOutline.Color = heroConfig.SignatureOutlineColor.Value;
-            }
 
             if (_lblHeroSignature != null) _lblHeroSignature.Text = heroConfig.DisplayName;
             if (_checkHeroSignature != null)
@@ -452,6 +454,11 @@ public partial class ShadingTabUI : VBoxContainer
         _characterSurfaces.Clear();
         _currentHero = null;
         _currentHeroName = string.Empty;
+
+        if (_colorToonOutline != null)
+        {
+            _colorToonOutline.Color = new Color(0.08f, 0.08f, 0.08f, 1.0f);
+        }
 
         if (_dynamicHeroControls != null)
         {

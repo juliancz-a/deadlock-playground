@@ -148,7 +148,7 @@ public static class Source2MaterialHelper
             if (outlineShader != null)
             {
                 var outlineMat = new ShaderMaterial { Shader = outlineShader };
-                Color tint = new Color(0.407843f, 0.94902f, 0.415686f, 1.0f);
+                Color tint = new Color(0.08f, 0.08f, 0.08f, 1.0f);
                 if (matResource.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc1))
                     tint = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
                 else if (matResource.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc0))

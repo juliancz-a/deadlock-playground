@@ -188,8 +188,20 @@ public partial class PaintTabUI : VBoxContainer
         if (_brushPalette != null)
         {
             _brushPalette.Setup(_painter, _decalStamper, _textProjector);
-            _brushPalette.UndoRequested += () => _layerManager?.Undo();
-            _brushPalette.RedoRequested += () => _layerManager?.Redo();
+            _brushPalette.UndoRequested += () =>
+            {
+                if (_layerManager != null && _layerManager.CanUndo)
+                {
+                    _layerManager.Undo();
+                }
+            };
+            _brushPalette.RedoRequested += () =>
+            {
+                if (_layerManager != null && _layerManager.CanRedo)
+                {
+                    _layerManager.Redo();
+                }
+            };
             _brushPalette.ClearRequested += () => _layerManager?.ClearCurrentLayer();
             _brushPalette.BlendModeChanged += (mode) =>
             {
@@ -313,7 +325,11 @@ public partial class PaintTabUI : VBoxContainer
 
         if (_layerManager != null)
         {
-            _layerManager.StackChanged += RefreshLayersListUI;
+            _layerManager.StackChanged += () =>
+            {
+                RefreshLayersListUI();
+                _brushPalette?.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+            };
             _layerManager.LayerSelected += OnLayerSelected;
         }
 
@@ -499,6 +515,8 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         // 2. Setup GPU Texture Painter OverlayAtlasManager on the hero
+        _painter?.ResetSession();
+        _layerManager?.ClearHistory();
         _layerManager?.SetupForHero(heroNode);
 
         // 3. Register submeshes and apply overlay parameters to meshes
@@ -582,12 +600,15 @@ public partial class PaintTabUI : VBoxContainer
         if (_lblActiveMesh != null) _lblActiveMesh.Text = "Target: None";
         if (_optTargetMesh != null) _optTargetMesh.Clear();
 
+        _painter?.ResetSession();
         _painter?.SetTargetMesh(null);
+        _layerManager?.ClearHistory();
         _layerManager?.CleanupHeroAtlas();
         _meshHierarchy?.ScanHero(null);
         _decalStamper?.HidePreview();
 
         UpdateControlsState(false);
+        _brushPalette?.UpdateUndoRedoState(false, false);
     }
 
     private void OnTargetMeshChanged(MeshInstance3D mesh, int surfaceIndex)

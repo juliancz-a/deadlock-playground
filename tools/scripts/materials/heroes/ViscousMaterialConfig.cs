@@ -11,7 +11,6 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
     public Color? SignatureGlowColor => new Color(0.12f, 0.72f, 0.32f, 1.0f); // Viscous slime green
 
     private Color? _dynamicOutlineColor;
-    public Color? SignatureOutlineColor => _dynamicOutlineColor ?? new Color(0.407843f, 0.94902f, 0.415686f, 1.0f);
 
     private Shader _slimeShader;
 
@@ -56,7 +55,7 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
             if (outlineShader == null) return null;
 
             var mat = new ShaderMaterial { Shader = outlineShader };
-            Color tint = new Color(0.407843f, 0.94902f, 0.415686f, 1.0f);
+            Color tint = new Color(0.08f, 0.08f, 0.08f, 1.0f);
             float thickness = 0.004f;
 
             if (package != null)
@@ -287,7 +286,7 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
         // Slime Outline Tint
         var rowOutCol = new HBoxContainer();
         var lblOutCol = new Label { Text = "Outline Tint:", CustomMinimumSize = new Vector2(130, 0) };
-        var cpOutCol = new ColorPickerButton { Color = SignatureOutlineColor ?? new Color(0.407843f, 0.94902f, 0.415686f, 1.0f), CustomMinimumSize = new Vector2(60, 26) };
+        var cpOutCol = new ColorPickerButton { Color = _dynamicOutlineColor ?? new Color(0.08f, 0.08f, 0.08f, 1.0f), CustomMinimumSize = new Vector2(60, 26) };
         rowOutCol.AddChild(lblOutCol);
         rowOutCol.AddChild(cpOutCol);
         vbox.AddChild(rowOutCol);

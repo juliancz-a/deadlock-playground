@@ -73,8 +73,10 @@ namespace DeadlockPlayground.Painter
             InitializeOverlayAtlas();
 
             ClearAllLayers();
+            ClearHistory();
             AddNewLayer("Paint Layer 1");
             RecompositeGpuLayers();
+            RecordInitialSnapshot();
             NotifyStackChanged();
             NotifyLayerSelected(0);
         }
@@ -448,6 +450,20 @@ namespace DeadlockPlayground.Painter
 
         public bool CanUndo => _undoStack.Count > 1;
         public bool CanRedo => _redoStack.Count > 0;
+
+        /// <summary>
+        /// Clears all undo and redo history snapshots and invalidates cached atlas buffers.
+        /// Invoked when unloading or switching heroes to prevent strokes from leaking across characters.
+        /// </summary>
+        public void ClearHistory()
+        {
+            _undoStack.Clear();
+            _redoStack.Clear();
+            _compositeBuffer = null;
+            _baseAtlasBuffer = null;
+            _hasPopulatedBaseAtlasBuffer = false;
+            NotifyStackChanged();
+        }
 
         public void RecordInitialSnapshot()
         {
@@ -1778,7 +1794,7 @@ namespace DeadlockPlayground.Painter
         {
             ClearAtlasManager();
             ClearAllLayers();
-            _baseAtlasBuffer = null;
+            ClearHistory();
             _currentHero = null;
         }
 

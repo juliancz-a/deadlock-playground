@@ -1145,6 +1145,7 @@ public void UpdateTooltipsAndKeymaps()
         if (_optEraseShape != null) _optEraseShape.Select((int)_painter.EraserShape);
         if (_optBlendMode != null) _optBlendMode.Select(_painter.BlendMode);
         UpdateSelectTargetLabel();
+        UpdateUndoRedoState(_painter?.LayerManager?.CanUndo ?? false, _painter?.LayerManager?.CanRedo ?? false);
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -1166,6 +1167,11 @@ public void UpdateTooltipsAndKeymaps()
 
         if (@event.IsActionPressed("paint_undo"))
         {
+            if (_painter?.LayerManager != null && !_painter.LayerManager.CanUndo)
+            {
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
             EmitSignal(SignalName.UndoRequested);
             GetViewport()?.SetInputAsHandled();
             return;
@@ -1173,6 +1179,11 @@ public void UpdateTooltipsAndKeymaps()
 
         if (@event.IsActionPressed("paint_redo"))
         {
+            if (_painter?.LayerManager != null && !_painter.LayerManager.CanRedo)
+            {
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
             EmitSignal(SignalName.RedoRequested);
             GetViewport()?.SetInputAsHandled();
             return;
@@ -1261,6 +1272,20 @@ public void UpdateTooltipsAndKeymaps()
                    ?? _painter?.CurrentMesh?.Name.ToString()
                    ?? "None";
         _lblSelectTarget.Text = $"Target: {name}";
+    }
+
+    public void UpdateUndoRedoState(bool canUndo, bool canRedo)
+    {
+        if (_btnUndo != null)
+        {
+            _btnUndo.Disabled = !canUndo;
+            _btnUndo.Modulate = canUndo ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+        }
+        if (_btnRedo != null)
+        {
+            _btnRedo.Disabled = !canRedo;
+            _btnRedo.Modulate = canRedo ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+        }
     }
 
     public override void _ExitTree()

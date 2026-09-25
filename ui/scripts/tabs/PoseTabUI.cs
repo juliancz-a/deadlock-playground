@@ -186,6 +186,10 @@ public partial class PoseTabUI : VBoxContainer
             if (anim != null)
             {
                 DeadlockAnimLoader.StripClothTracks(anim, _skeleton);
+                if (DeadlockAnimLoader.IsAdditiveOrRecoilSequence(animName))
+                {
+                    DeadlockAnimLoader.StripAdditivePositionTracks(anim, _skeleton);
+                }
             }
             string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
             string displayName = DeadlockAnimLoader.FormatDisplayName(cleanName);
@@ -244,6 +248,7 @@ public partial class PoseTabUI : VBoxContainer
             "Abilities",
             "Emotes & Expressions",
             "Reactions",
+            "Additive Layers",
             "Misc / Other"
         };
 
@@ -262,11 +267,17 @@ public partial class PoseTabUI : VBoxContainer
             TreeItem categoryItem = _animTree.CreateItem(root);
             categoryItem.SetIcon(0, _iconFolder);
             categoryItem.SetIconMaxWidth(0, 16);
-            categoryItem.SetCustomColor(0, new Color(0.95f, 0.85f, 0.6f, 1.0f));
+            Color catColor = category switch
+            {
+                "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
+                "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
+                _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
+            };
+            categoryItem.SetCustomColor(0, catColor);
             categoryItem.SetCustomMinimumHeight(28);
             categoryItem.SetText(0, $"{category} ({itemsInCategory.Count})");
             categoryItem.SetSelectable(0, false);
-            categoryItem.Collapsed = false;
+            categoryItem.Collapsed = (category == "Additive Layers");
 
             foreach (var anim in itemsInCategory)
             {
@@ -311,6 +322,12 @@ public partial class PoseTabUI : VBoxContainer
         if (bestAnim == null)
         {
             bestAnim = _currentHeroAnimations.FirstOrDefault(a => a.Category == "Idle");
+        }
+
+        if (bestAnim == null)
+        {
+            // Pick first non-additive baseline animation if possible
+            bestAnim = _currentHeroAnimations.FirstOrDefault(a => a.Category != "Additive Layers");
         }
 
         if (bestAnim == null)
@@ -380,6 +397,12 @@ public partial class PoseTabUI : VBoxContainer
         if (godotAnim != null)
         {
             DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
+            if (DeadlockAnimLoader.IsAdditiveOrRecoilSequence(targetAnim) ||
+                DeadlockAnimLoader.IsAdditiveOrRecoilSequence(info?.CleanName) ||
+                DeadlockAnimLoader.IsAdditiveOrRecoilSequence(info?.RawName))
+            {
+                DeadlockAnimLoader.StripAdditivePositionTracks(godotAnim, _skeleton);
+            }
             godotAnim.LoopMode = _isLooping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None;
         }
 
@@ -450,6 +473,10 @@ public partial class PoseTabUI : VBoxContainer
             if (godotAnim != null)
             {
                 DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
+                if (DeadlockAnimLoader.IsAdditiveOrRecoilSequence(animName))
+                {
+                    DeadlockAnimLoader.StripAdditivePositionTracks(godotAnim, _skeleton);
+                }
             }
             _activeAnimLength = (float)(godotAnim?.Length ?? 0.1f);
 
