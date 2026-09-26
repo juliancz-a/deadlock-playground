@@ -26,7 +26,7 @@
 [ext_resource type="PackedScene" uid="uid://wjfypfotgq0w" path="res://ui/scenes/components/UVCanvasPanel.tscn" id="24_uv_canvas"]
 [ext_resource type="FontFile" uid="uid://dcds1t4ij4ajc" path="res://assets/fonts/Supersonic Rocketship.ttf" id="25_seu75"]
 [ext_resource type="Texture2D" uid="uid://b407xjf02tgde" path="res://assets/at-icons/uv_layer.svg" id="25_uv_icon"]
-[ext_resource type="Shader" uid="uid://px44p7nn6kk8" path="res://shaders/modal_backdrop_blur.gdshader" id="26_backdrop_shader"]
+[ext_resource type="Shader" uid="uid://px44p7nn6kk8" path="res://assets/shaders/modal_backdrop_blur.gdshader" id="26_backdrop_shader"]
 [ext_resource type="PackedScene" uid="uid://b7l2p8q4m5oax" path="res://ui/scenes/modals/FeedbackDialog.tscn" id="27_feedback_dialog"]
 [ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="28_modal_theme"]
 [ext_resource type="Script" uid="uid://diun3p2kyu2cy" path="res://ui/scripts/modals/AboutDialog.cs" id="29_qsp4k"]

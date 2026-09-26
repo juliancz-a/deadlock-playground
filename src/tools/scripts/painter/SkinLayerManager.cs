@@ -100,8 +100,7 @@ namespace DeadlockPlayground.Painter
                 return;
             }
 
-            var shader = GD.Load<Shader>("res://shaders/hero_painter_overlay.gdshader")
-                      ?? GD.Load<Shader>("res://assets/shaders/painter/hero_painter_overlay.gdshader");
+            var shader = GD.Load<Shader>("res://assets/shaders/painter/hero_painter_overlay.gdshader");
 
             if (shader == null)
             {

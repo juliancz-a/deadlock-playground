@@ -1,6 +1,7 @@
 {
     "dotrush.roslyn.projectOrSolutionFiles": [
         "d:\\GameDev\\deadlock-playground\\Deadlock_Playground.sln",
-        "d:\\GameDev\\deadlock-playground\\Deadlock_Playground.csproj"
+        "d:\\GameDev\\deadlock-playground\\src\\Deadlock_Playground.sln",
+        "d:\\GameDev\\deadlock-playground\\src\\Deadlock_Playground.csproj"
     ]
 }

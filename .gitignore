@@ -1,8 +1,10 @@
 # Godot 4+ specific ignores
 .godot/
+src/.godot/
 /android/
 
 # Development tools, inspection utilities, and debug scripts
-
 tools/inspector
+src/tools/inspector
 docs/
+

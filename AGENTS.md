@@ -10,16 +10,16 @@ Always consult this guide before implementing new features, modifying shaders, a
 
 | Component | Specification | Technical Notes |
 |---|---|---|
-| **Game Engine** | **Godot Engine 4.7.2 (.NET / C#)** | Project SDK: `Godot.NET.Sdk/4.7.2` configured in `Deadlock_Playground.csproj`. |
+| **Game Engine** | **Godot Engine 4.7.2 (.NET / C#)** | Project SDK: `Godot.NET.Sdk/4.7.2` configured in `src/Deadlock_Playground.csproj` (Godot engine root is `src/`). |
 | **Runtime Target** | **.NET 10.0 (`net10.0`)** | High-performance C# 13 runtime (with `net9.0` condition for Android). |
 | **Language Stack** | **C# 13 + GLSL (`.gdshader` / compute `.glsl`) + GDScript** | GDScript is used only for the `gpu_texture_painter` addon pipeline; all core logic is C#. |
 | **Unsafe Blocks** | `AllowUnsafeBlocks = true` | Unmanaged pointers (`ulong*`, `Half*`) used in `SkinLayerManager.cs` for 60 FPS 4K compositing. |
-| **Rendering Backend** | **Forward+ (Direct3D 12 on Windows / Vulkan)** | Driver set to `d3d12` via `rendering_device/driver.windows="d3d12"` in `project.godot`. |
-| **Physics Engine** | **Jolt Physics** | Configured via `3d/physics_engine="Jolt Physics"` in `project.godot`. |
+| **Rendering Backend** | **Forward+ (Direct3D 12 on Windows / Vulkan)** | Driver set to `d3d12` via `rendering_device/driver.windows="d3d12"` in `src/project.godot`. |
+| **Physics Engine** | **Jolt Physics** | Configured via `3d/physics_engine="Jolt Physics"` in `src/project.godot`. |
 | **Physics Layer 32** | `"Bone Picking"` | Reserved for bone gizmo selection raycasts. |
 | **Visual Layer 21** | `1 << 20` (Bit 20) | **Strictly reserved for GPU Texture Painter `CameraBrush` culling mask.** |
 | **Display Resolution** | 1920 × 1080 | Canvas stretch mode: `canvas_items`, aspect: `expand`. Window mode: `3` (borderless). |
-| **UI Theme** | `res://assets/themes/PlaygroundTheme.tres` | Global custom theme applied in `project.godot`. |
+| **UI Theme** | `res://assets/themes/PlaygroundTheme.tres` | Global custom theme applied in `src/project.godot`. |
 
 ### Primary NuGet Dependencies
 - **`ValveResourceFormat` (`20.0.6980`)**: Reverse-engineered Source 2 parser by SteamDatabase. Ingests compiled `.vmdl_c` (models), `.vmat_c` (materials), `.vtex_c` (textures), and `.vanim_c` (animations) from Deadlock's `pak01_dir.vpk`.
@@ -105,7 +105,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - When introducing panel toggle states (e.g. `_uvCanvasUserWantsOpen`), store the user's explicit preference in `StudioUIManager.cs` so switching tabs does not forcibly reopen closed panels.
 4. **Asset Organization**:
    - Icons: `res://assets/at-icons/*.svg`
-   - Shaders: `res://assets/shaders/painter/*.gdshader` and `res://shaders/*.gdshader`
+   - Shaders: `res://assets/shaders/painter/*.gdshader`, `res://assets/shaders/valve/*.gdshader`, and `res://assets/shaders/*.gdshader`
    - Components: `res://ui/scenes/components/*.tscn` and `res://ui/scripts/components/*.cs`
 
 ### D. Skeletal Animation & Additive Ingestion Rules

@@ -1,6 +1,6 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deadlock_Playground", "src\Deadlock_Playground.csproj", "{FD1DD71A-9716-4372-89A9-3C5D789B15B0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deadlock_Playground", "Deadlock_Playground.csproj", "{FD1DD71A-9716-4372-89A9-3C5D789B15B0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
