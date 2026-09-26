@@ -81,9 +81,15 @@ public partial class StudioUIManager : CanvasLayer
     private PanelContainer _updateNotificationPanel;
     private Label _updateNotificationTitle;
     private Label _updateNotificationDetails;
+    private ProgressBar _updateProgressBar;
+    private Button _btnUpdateNow;
     private Button _btnUpdateAction;
     private Button _btnUpdateDismiss;
     private string _currentReleaseUrl = "";
+    private string _currentDirectZipUrl = "";
+    private string _currentRemoteVersion = "";
+    private bool _isDownloadingUpdate = false;
+    private bool _isUpdatePrepared = false;
 
     public static StudioUIManager Instance { get; private set; }
     public string SavePath => _pathManager?.CurrentSavePath ?? OS.GetSystemDir(OS.SystemDir.Pictures);
@@ -118,6 +124,13 @@ public partial class StudioUIManager : CanvasLayer
 
         LinkNodes();
         CreateToastUI();
+
+        // Check if application was restarted after an update swap
+        if (UpdateChecker.CleanupPostUpdate() || UpdateChecker.IsPostUpdateLaunch)
+        {
+            ShowToast("Deadlock Playground updated successfully!");
+        }
+
         CreateUpdateNotificationUI();
         CreateFallbackDialog();
         InitTabs();
@@ -1100,7 +1113,7 @@ public partial class StudioUIManager : CanvasLayer
     {
         _updateNotificationPanel = new PanelContainer();
         _updateNotificationPanel.Visible = false;
-        _updateNotificationPanel.CustomMinimumSize = new Vector2(380, 0);
+        _updateNotificationPanel.CustomMinimumSize = new Vector2(460, 0);
 
         var bgStyle = new StyleBoxFlat
         {
@@ -1143,7 +1156,7 @@ public partial class StudioUIManager : CanvasLayer
             iconRect.Modulate = PlaygroundThemeHelper.SageGreen;
         }
 
-        // Labels
+        // Labels & Progress Bar
         var vboxText = new VBoxContainer
         {
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -1165,8 +1178,38 @@ public partial class StudioUIManager : CanvasLayer
         PlaygroundThemeHelper.MakeMutedLabel(_updateNotificationDetails);
         _updateNotificationDetails.AddThemeFontSizeOverride("font_size", 12);
 
+        _updateProgressBar = new ProgressBar
+        {
+            MinValue = 0,
+            MaxValue = 100,
+            Value = 0,
+            ShowPercentage = false,
+            CustomMinimumSize = new Vector2(0, 6),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            Visible = false
+        };
+        var bgTrack = new StyleBoxFlat
+        {
+            BgColor = new Color(0.1f, 0.14f, 0.13f, 0.8f),
+            CornerRadiusTopLeft = 3,
+            CornerRadiusTopRight = 3,
+            CornerRadiusBottomLeft = 3,
+            CornerRadiusBottomRight = 3
+        };
+        var fillTrack = new StyleBoxFlat
+        {
+            BgColor = PlaygroundThemeHelper.SageGreen,
+            CornerRadiusTopLeft = 3,
+            CornerRadiusTopRight = 3,
+            CornerRadiusBottomLeft = 3,
+            CornerRadiusBottomRight = 3
+        };
+        _updateProgressBar.AddThemeStyleboxOverride("background", bgTrack);
+        _updateProgressBar.AddThemeStyleboxOverride("fill", fillTrack);
+
         vboxText.AddChild(_updateNotificationTitle);
         vboxText.AddChild(_updateNotificationDetails);
+        vboxText.AddChild(_updateProgressBar);
 
         // Action & Dismiss buttons
         var hboxBtns = new HBoxContainer
@@ -1175,12 +1218,20 @@ public partial class StudioUIManager : CanvasLayer
         };
         hboxBtns.AddThemeConstantOverride("separation", 8);
 
+        _btnUpdateNow = new Button
+        {
+            Text = "Update Now",
+            CustomMinimumSize = new Vector2(100, 30)
+        };
+        PlaygroundThemeHelper.MakeAccentButton(_btnUpdateNow);
+        _btnUpdateNow.Pressed += OnUpdateNowPressed;
+
         _btnUpdateAction = new Button
         {
             Text = "View Release",
-            CustomMinimumSize = new Vector2(100, 30)
+            CustomMinimumSize = new Vector2(95, 30)
         };
-        PlaygroundThemeHelper.MakeAccentButton(_btnUpdateAction);
+        PlaygroundThemeHelper.MakeSecondaryButton(_btnUpdateAction);
         _btnUpdateAction.Pressed += OnUpdateActionPressed;
 
         _btnUpdateDismiss = new Button
@@ -1192,6 +1243,7 @@ public partial class StudioUIManager : CanvasLayer
         PlaygroundThemeHelper.MakeSecondaryButton(_btnUpdateDismiss);
         _btnUpdateDismiss.Pressed += OnUpdateDismissPressed;
 
+        hboxBtns.AddChild(_btnUpdateNow);
         hboxBtns.AddChild(_btnUpdateAction);
         hboxBtns.AddChild(_btnUpdateDismiss);
 
@@ -1212,6 +1264,110 @@ public partial class StudioUIManager : CanvasLayer
         hud.AddChild(_updateNotificationPanel);
     }
 
+    private async void OnUpdateNowPressed()
+    {
+        if (OS.HasFeature("editor"))
+        {
+            ShowToast("In-app auto-update is disabled in Editor mode. Open GitHub release page instead.");
+            if (!string.IsNullOrEmpty(_currentReleaseUrl))
+            {
+                OS.ShellOpen(_currentReleaseUrl);
+            }
+            return;
+        }
+
+        if (_isUpdatePrepared)
+        {
+            // Update archive already extracted and staged; execute atomic swap & relaunch
+            UpdateChecker.ApplyUpdateAndRestart();
+            return;
+        }
+
+        if (_isDownloadingUpdate) return;
+
+        if (string.IsNullOrEmpty(_currentDirectZipUrl))
+        {
+            if (!string.IsNullOrEmpty(_currentReleaseUrl))
+            {
+                OS.ShellOpen(_currentReleaseUrl);
+            }
+            return;
+        }
+
+        _isDownloadingUpdate = true;
+        if (_btnUpdateNow != null) _btnUpdateNow.Disabled = true;
+        if (_btnUpdateAction != null) _btnUpdateAction.Disabled = true;
+        if (_btnUpdateDismiss != null) _btnUpdateDismiss.Disabled = true;
+
+        if (_updateNotificationTitle != null) _updateNotificationTitle.Text = "Downloading Update...";
+        if (_updateNotificationDetails != null) _updateNotificationDetails.Text = "Connecting...";
+        if (_updateProgressBar != null)
+        {
+            _updateProgressBar.Visible = true;
+            _updateProgressBar.Value = 0;
+        }
+
+        bool success = await Task.Run(async () =>
+        {
+            return await UpdateChecker.DownloadAndPrepareUpdateAsync(
+                _currentDirectZipUrl,
+                onProgress: (progress, status) =>
+                {
+                    Callable.From(() =>
+                    {
+                        if (_updateNotificationDetails != null)
+                        {
+                            _updateNotificationDetails.Text = status;
+                        }
+                        if (_updateProgressBar != null && progress >= 0f)
+                        {
+                            _updateProgressBar.Value = Math.Clamp(progress * 100f, 0f, 100f);
+                        }
+                    }).CallDeferred();
+                }
+            ).ConfigureAwait(false);
+        }).ConfigureAwait(true);
+
+        _isDownloadingUpdate = false;
+
+        if (success)
+        {
+            _isUpdatePrepared = true;
+            if (_updateNotificationTitle != null) _updateNotificationTitle.Text = "Update Ready";
+            if (_updateNotificationDetails != null) _updateNotificationDetails.Text = "Restart to apply update.";
+            if (_updateProgressBar != null) _updateProgressBar.Visible = false;
+
+            if (_btnUpdateNow != null)
+            {
+                _btnUpdateNow.Text = "Restart & Apply";
+                _btnUpdateNow.Disabled = false;
+            }
+            if (_btnUpdateDismiss != null) _btnUpdateDismiss.Disabled = false;
+        }
+        else
+        {
+            // Restore UI state
+            _isUpdatePrepared = false;
+            string formattedVersion = _currentRemoteVersion.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+                ? _currentRemoteVersion
+                : $"v{_currentRemoteVersion}";
+
+            if (_updateNotificationTitle != null) _updateNotificationTitle.Text = "Update Available";
+            if (_updateNotificationDetails != null) _updateNotificationDetails.Text = $"New version available: {formattedVersion}";
+            if (_updateProgressBar != null) _updateProgressBar.Visible = false;
+
+            if (_btnUpdateNow != null)
+            {
+                _btnUpdateNow.Text = "Update Now";
+                _btnUpdateNow.Disabled = false;
+            }
+            if (_btnUpdateAction != null) _btnUpdateAction.Disabled = false;
+            if (_btnUpdateDismiss != null) _btnUpdateDismiss.Disabled = false;
+
+            ShowToast("Update failed to download. Please download manually from GitHub.");
+        }
+    }
+
     private void OnUpdateActionPressed()
     {
         if (!string.IsNullOrEmpty(_currentReleaseUrl))
@@ -1226,17 +1382,52 @@ public partial class StudioUIManager : CanvasLayer
         HideUpdateNotification();
     }
 
-    public void ShowUpdateNotification(string latestVersion, string releaseUrl)
+    public void ShowUpdateNotification(string latestVersion, string releaseUrl, string directZipUrl = "")
     {
         if (_updateNotificationPanel == null) return;
 
+        _currentRemoteVersion = latestVersion;
         _currentReleaseUrl = releaseUrl;
-        if (_updateNotificationDetails != null)
+        _currentDirectZipUrl = directZipUrl;
+        _isDownloadingUpdate = false;
+        _isUpdatePrepared = false;
+
+        string formattedVersion = latestVersion.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+            ? latestVersion
+            : $"v{latestVersion}";
+
+        if (_updateNotificationTitle != null) _updateNotificationTitle.Text = "Update Available";
+        if (_updateNotificationDetails != null) _updateNotificationDetails.Text = $"New version available: {formattedVersion}";
+        if (_updateProgressBar != null)
         {
-            string formattedVersion = latestVersion.StartsWith("v", StringComparison.OrdinalIgnoreCase)
-                ? latestVersion
-                : $"v{latestVersion}";
-            _updateNotificationDetails.Text = $"New version available: {formattedVersion}";
+            _updateProgressBar.Visible = false;
+            _updateProgressBar.Value = 0;
+        }
+
+        if (_btnUpdateNow != null)
+        {
+            _btnUpdateNow.Text = "Update Now";
+            _btnUpdateNow.Disabled = false;
+            _btnUpdateNow.Visible = !string.IsNullOrEmpty(directZipUrl);
+        }
+
+        if (_btnUpdateAction != null)
+        {
+            _btnUpdateAction.Disabled = false;
+            _btnUpdateAction.Visible = true;
+            if (string.IsNullOrEmpty(directZipUrl))
+            {
+                PlaygroundThemeHelper.MakeAccentButton(_btnUpdateAction);
+            }
+            else
+            {
+                PlaygroundThemeHelper.MakeSecondaryButton(_btnUpdateAction);
+            }
+        }
+
+        if (_btnUpdateDismiss != null)
+        {
+            _btnUpdateDismiss.Disabled = false;
         }
 
         _updateNotificationPanel.Modulate = new Color(1, 1, 1, 0.0f);
@@ -1249,6 +1440,7 @@ public partial class StudioUIManager : CanvasLayer
     public void HideUpdateNotification()
     {
         if (_updateNotificationPanel == null || !_updateNotificationPanel.Visible) return;
+        if (_isDownloadingUpdate) return;
 
         var tween = CreateTween();
         tween.TweenProperty(_updateNotificationPanel, "modulate:a", 0.0f, 0.2f);
@@ -1264,11 +1456,11 @@ public partial class StudioUIManager : CanvasLayer
         try
         {
             var result = await UpdateChecker.CheckForUpdatesAsync().ConfigureAwait(false);
-            if (result.IsUpdateAvailable && !string.IsNullOrEmpty(result.ReleaseUrl))
+            if (result.IsUpdateAvailable && (!string.IsNullOrEmpty(result.ReleaseUrl) || !string.IsNullOrEmpty(result.DirectZipUrl)))
             {
                 Callable.From(() =>
                 {
-                    ShowUpdateNotification(result.RemoteVersionTag, result.ReleaseUrl);
+                    ShowUpdateNotification(result.RemoteVersionTag, result.ReleaseUrl, result.DirectZipUrl);
                 }).CallDeferred();
             }
         }
