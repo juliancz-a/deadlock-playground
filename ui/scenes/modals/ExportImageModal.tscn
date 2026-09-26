@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://bmnaxn7uec4qy"]
+[gd_scene format=3 uid="uid://bw8tisw4klbmt"]
 
 [ext_resource type="Script" uid="uid://db18cpkof7gcb" path="res://ui/scripts/ExportPanelUI.cs" id="1_export"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_dwmip"]
@@ -15,7 +15,7 @@ corner_radius_top_right = 10
 corner_radius_bottom_right = 10
 corner_radius_bottom_left = 10
 
-[node name="ExportPanel" type="PanelContainer" unique_id=714186449 node_paths=PackedStringArray("_btnFormat1x1", "_btnFormat4x3", "_btnFormat16x9", "_btnFormat9x16", "_btnRes1080p", "_btnRes1440p", "_btnRes4K", "_checkIncludeBg", "_chkIncludeBonesWireframe", "_btnExport", "_lblDimensionPreview")]
+[node name="ExportImageModal" type="PanelContainer" unique_id=714186449 node_paths=PackedStringArray("_btnFormat1x1", "_btnFormat4x3", "_btnFormat16x9", "_btnFormat9x16", "_btnRes1080p", "_btnRes1440p", "_btnRes4K", "_checkIncludeBg", "_chkIncludeBonesWireframe", "_btnExport", "_lblDimensionPreview")]
 custom_minimum_size = Vector2(250, 0)
 anchors_preset = 1
 anchor_left = 1.0
@@ -40,7 +40,6 @@ _btnExport = NodePath("MarginContainer/VBoxContainer/BtnExport")
 _lblDimensionPreview = NodePath("MarginContainer/VBoxContainer/LblDimensions")
 
 [node name="MarginContainer" type="MarginContainer" parent="." unique_id=682550156]
-custom_maximum_size = Vector2(280, -1)
 layout_mode = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 12
@@ -152,11 +151,8 @@ text = "Include Background"
 
 [node name="ChkIncludeBonesWireframe" type="CheckBox" parent="MarginContainer/VBoxContainer/VBoxOptions" unique_id=1983746251]
 layout_mode = 2
-tooltip_text = "Renders bone gizmos, joints, and wireframe overlays in the captured export image."
-theme_override_colors/font_color = Color(0.41056433, 0.4646374, 0.4111739, 1)
-theme_override_font_sizes/font_size = 11
 text = "Include Bone & Wireframe Controls"
-autowrap_mode = 3
+tooltip_text = "Renders bone gizmos, joints, and wireframe overlays in the captured export image."
 
 [node name="BtnExport" type="Button" parent="MarginContainer/VBoxContainer" unique_id=2101226669]
 custom_minimum_size = Vector2(0, 32)

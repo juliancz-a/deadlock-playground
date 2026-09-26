@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ctdilfr25jvj2"
-path="res://.godot/imported/Paint_Splatter055.jpg-8f9bedf91e808c7db928ba9a38fb9f54.ctex"
+uid="uid://dvxr5u6l2xen"
+path="res://.godot/imported/DeadlockPlaygroundBebop.png-6e8702c50b847650ec263cdf1a843e59.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/backgrounds/intro/Paint_Splatter055.jpg"
-dest_files=["res://.godot/imported/Paint_Splatter055.jpg-8f9bedf91e808c7db928ba9a38fb9f54.ctex"]
+source_file="res://assets/backgrounds/intro/DeadlockPlaygroundBebop.png"
+dest_files=["res://.godot/imported/DeadlockPlaygroundBebop.png-6e8702c50b847650ec263cdf1a843e59.ctex"]
 
 [params]
 

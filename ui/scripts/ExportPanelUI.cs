@@ -20,8 +20,12 @@ public partial class ExportPanelUI : PanelContainer
 
     [ExportCategory("Options & Export")]
     [Export] private CheckBox _checkIncludeBg;
+    [Export] private CheckBox _chkIncludeBonesWireframe;
     [Export] private Button _btnExport;
     [Export] private Label _lblDimensionPreview;
+
+    public CheckBox ChkIncludeBackground => _checkIncludeBg;
+    public CheckBox ChkIncludeBonesWireframe => _chkIncludeBonesWireframe;
 
     [ExportCategory("Viewport Framing Overlay")]
     [Export] private Control _framingOverlay;
@@ -69,6 +73,19 @@ public partial class ExportPanelUI : PanelContainer
         _screenshotHelper = new ScreenshotHelper();
         AddChild(_screenshotHelper);
         _screenshotHelper.ScreenshotSaved += OnScreenshotSaved;
+
+        _checkIncludeBg ??= GetNodeOrNull<CheckBox>("MarginContainer/VBoxContainer/VBoxOptions/ChkIncludeBackground")
+                         ?? GetNodeOrNull<CheckBox>("MarginContainer/VBoxContainer/VBoxOptions/CheckIncludeBg")
+                         ?? GetNodeOrNull<CheckBox>("MarginContainer/VBoxContainer/HBoxExport/CheckIncludeBg")
+                         ?? FindChild("ChkIncludeBackground", true, false) as CheckBox
+                         ?? FindChild("CheckIncludeBg", true, false) as CheckBox;
+
+        _chkIncludeBonesWireframe ??= GetNodeOrNull<CheckBox>("MarginContainer/VBoxContainer/VBoxOptions/ChkIncludeBonesWireframe")
+                                   ?? FindChild("ChkIncludeBonesWireframe", true, false) as CheckBox;
+
+        _btnExport ??= GetNodeOrNull<Button>("MarginContainer/VBoxContainer/BtnExport")
+                    ?? GetNodeOrNull<Button>("MarginContainer/VBoxContainer/HBoxExport/BtnExport")
+                    ?? FindChild("BtnExport", true, false) as Button;
 
         ConnectEvents();
         UpdateSelectionUI();
@@ -255,6 +272,7 @@ public partial class ExportPanelUI : PanelContainer
         Vector2I res = CalculateTargetResolution();
         bool includeBg = _checkIncludeBg == null || _checkIncludeBg.ButtonPressed;
         bool transparent = !includeBg;
+        bool includeBonesWireframe = _chkIncludeBonesWireframe != null && _chkIncludeBonesWireframe.ButtonPressed;
 
         if (_btnExport != null) _btnExport.Disabled = true;
 
@@ -268,9 +286,14 @@ public partial class ExportPanelUI : PanelContainer
 
         EmitSignal(SignalName.ExportRequested, res, includeBg);
 
-        await _screenshotHelper.CaptureAsync(camera, res, transparent, false, saveDir, gizmo);
-
-        if (_btnExport != null) _btnExport.Disabled = false;
+        try
+        {
+            await _screenshotHelper.CaptureAsync(camera, res, transparent, false, saveDir, gizmo, includeBonesWireframe);
+        }
+        finally
+        {
+            if (_btnExport != null) _btnExport.Disabled = false;
+        }
     }
 
     private void OnScreenshotSaved(string absolutePath)

@@ -1,5 +1,7 @@
 using Godot;
+using Gizmo3DPlugin;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 
@@ -96,7 +98,7 @@ public partial class ScreenshotHelper : Node
         AddChild(_captureViewport);
     }
 
-    public Task CaptureAsync(Camera3D mainCamera, int resolutionMultiplier, bool transparent, bool useJpg, string saveDirectory, Node3D gizmoManager = null)
+    public Task CaptureAsync(Camera3D mainCamera, int resolutionMultiplier, bool transparent, bool useJpg, string saveDirectory, Node3D gizmoManager = null, bool includeBonesWireframe = false)
     {
         Vector2I baseSize = (Vector2I)GetViewport().GetVisibleRect().Size;
         Vector2I targetRes = resolutionMultiplier switch
@@ -109,10 +111,10 @@ public partial class ScreenshotHelper : Node
             _ => baseSize * Math.Max(1, resolutionMultiplier)
         };
 
-        return CaptureAsync(mainCamera, targetRes, transparent, useJpg, saveDirectory, gizmoManager);
+        return CaptureAsync(mainCamera, targetRes, transparent, useJpg, saveDirectory, gizmoManager, includeBonesWireframe);
     }
 
-    public async Task CaptureAsync(Camera3D mainCamera, Vector2I targetResolution, bool transparent, bool useJpg, string saveDirectory, Node3D gizmoManager = null)
+    public async Task CaptureAsync(Camera3D mainCamera, Vector2I targetResolution, bool transparent, bool useJpg, string saveDirectory, Node3D gizmoManager = null, bool includeBonesWireframe = false)
     {
         if (mainCamera == null)
         {
@@ -151,7 +153,16 @@ public partial class ScreenshotHelper : Node
         _captureCamera.Attributes = mainCamera.Attributes;
         _captureCamera.Projection = mainCamera.Projection;
         _captureCamera.Size = mainCamera.Size;
-        _captureCamera.CullMask = mainCamera.CullMask; // Exclude Gizmo layer (layer 2)
+
+        // CullMask: include Layer 2 (Gizmos & Wireframes) only if includeBonesWireframe is true; exclude Layer 21 (CameraBrush)
+        if (includeBonesWireframe)
+        {
+            _captureCamera.CullMask = (mainCamera.CullMask | 2) & ~(uint)(1 << 20);
+        }
+        else
+        {
+            _captureCamera.CullMask = (mainCamera.CullMask & ~(uint)2) & ~(uint)(1 << 20);
+        }
 
         _captureCamera.Current = true;
 
@@ -175,12 +186,11 @@ public partial class ScreenshotHelper : Node
             _captureCamera.Fov = mainCamera.Fov;
         }
 
-        // 3. Hide Gizmos temporarily & Sync Background
-        bool wasGizmoVisible = true;
-        if (gizmoManager != null)
+        // 3. Temporarily hide Bone & Wireframe Controls if includeBonesWireframe is false
+        var boneVisibilityBackup = new BoneWireframeVisibilityBackup();
+        if (!includeBonesWireframe)
         {
-            wasGizmoVisible = gizmoManager.Visible;
-            gizmoManager.Visible = false;
+            boneVisibilityBackup.CollectAndHide(GetTree().Root, gizmoManager);
         }
 
         if (transparent)
@@ -256,34 +266,221 @@ public partial class ScreenshotHelper : Node
 
         _shaderCanvas.Visible = hasShaders;
 
-        // 5. Render Pass
-        _capture3DViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
-        _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
-
-        // Wait two frames to ensure render completes in both viewports
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-
-        _capture3DViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-        _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-
-        // 6. Save Image
-        Image img = _captureViewport.GetTexture().GetImage();
-
-        await Task.Run(() =>
+        try
         {
-            if (!saveAsJpg)
-                img.SavePng(filePath);
-            else
-                img.SaveJpg(filePath, 0.95f);
-        });
+            // 5. Render Pass
+            _capture3DViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+            _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
 
-        // 7. Restore Gizmos
-        if (gizmoManager != null)
+            // Wait two frames to ensure render completes in both viewports
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            _capture3DViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+            _captureViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+
+            // 6. Save Image
+            Image img = _captureViewport.GetTexture().GetImage();
+
+            await Task.Run(() =>
+            {
+                if (!saveAsJpg)
+                    img.SavePng(filePath);
+                else
+                    img.SaveJpg(filePath, 0.95f);
+            });
+        }
+        finally
         {
-            gizmoManager.Visible = wasGizmoVisible;
+            // 7. Restore bone and wireframe visibility states immediately after capture
+            boneVisibilityBackup.Restore();
         }
 
         EmitSignal(SignalName.ScreenshotSaved, filePath);
+    }
+
+    private sealed class BoneWireframeVisibilityBackup
+    {
+        private readonly List<(Node3D Node, bool WasVisible)> _states = new();
+        private readonly List<(CanvasItem Item, bool WasVisible)> _canvasStates = new();
+        private readonly HashSet<ulong> _visitedInstanceIds = new();
+
+        public void CollectAndHide(Node root, Node3D primaryGizmoManager)
+        {
+            if (root == null) return;
+
+            // 1. Primary Gizmo Manager
+            if (primaryGizmoManager != null && GodotObject.IsInstanceValid(primaryGizmoManager))
+            {
+                SaveAndHide(primaryGizmoManager);
+
+                if (primaryGizmoManager is SkeletonGizmoManager sgm)
+                {
+                    if (sgm.LayerManager != null && GodotObject.IsInstanceValid(sgm.LayerManager))
+                    {
+                        SaveAndHide(sgm.LayerManager);
+                    }
+                    if (sgm.IKManager != null && GodotObject.IsInstanceValid(sgm.IKManager))
+                    {
+                        SaveAndHide(sgm.IKManager);
+                    }
+                    if (sgm.TargetSkeleton != null && GodotObject.IsInstanceValid(sgm.TargetSkeleton))
+                    {
+                        CollectSkeletonDebugNodes(sgm.TargetSkeleton);
+                    }
+                }
+            }
+
+            // 2. Discover any additional SkeletonGizmoManager
+            var allSgm = FindNodesOfType<SkeletonGizmoManager>(root);
+            foreach (var sgm in allSgm)
+            {
+                SaveAndHide(sgm);
+                if (sgm.LayerManager != null && GodotObject.IsInstanceValid(sgm.LayerManager))
+                {
+                    SaveAndHide(sgm.LayerManager);
+                }
+                if (sgm.IKManager != null && GodotObject.IsInstanceValid(sgm.IKManager))
+                {
+                    SaveAndHide(sgm.IKManager);
+                }
+                if (sgm.TargetSkeleton != null && GodotObject.IsInstanceValid(sgm.TargetSkeleton))
+                {
+                    CollectSkeletonDebugNodes(sgm.TargetSkeleton);
+                }
+            }
+
+            // 3. Discover CharacterIKManager
+            var allIK = FindNodesOfType<CharacterIKManager>(root);
+            foreach (var ik in allIK)
+            {
+                SaveAndHide(ik);
+                foreach (Node child in ik.GetChildren())
+                {
+                    if (child is Node3D n3d)
+                    {
+                        SaveAndHide(n3d);
+                    }
+                }
+            }
+
+            // 4. Discover Gizmo3D
+            var allGizmos = FindNodesOfType<Gizmo3D>(root);
+            foreach (var g in allGizmos)
+            {
+                SaveAndHide(g);
+            }
+
+            // 5. All Skeletons in the tree: hide wireframe mesh instances & bone attachments
+            var allSkeletons = FindNodesOfType<Skeleton3D>(root);
+            foreach (var skel in allSkeletons)
+            {
+                CollectSkeletonDebugNodes(skel);
+            }
+
+            // 6. UI Gizmo overlay
+            var gizmoViewportContainer = root.FindChild("GizmoViewportContainer", true, false) as CanvasItem;
+            if (gizmoViewportContainer != null)
+            {
+                SaveAndHide(gizmoViewportContainer);
+            }
+        }
+
+        private void CollectSkeletonDebugNodes(Skeleton3D skeleton)
+        {
+            if (skeleton == null || !GodotObject.IsInstanceValid(skeleton)) return;
+
+            int childCount = skeleton.GetChildCount();
+            for (int i = 0; i < childCount; i++)
+            {
+                Node child = skeleton.GetChild(i);
+                if (child is MeshInstance3D mesh)
+                {
+                    // Layer 2 is used exclusively for bone wireframes & gizmos
+                    if ((mesh.Layers & 2) != 0 || mesh.Name.ToString().Contains("Wireframe") || mesh.Name.ToString().Contains("Skeleton"))
+                    {
+                        SaveAndHide(mesh);
+                    }
+                }
+                else if (child is BoneAttachment3D attachment)
+                {
+                    SaveAndHide(attachment);
+                    int attCount = attachment.GetChildCount();
+                    for (int j = 0; j < attCount; j++)
+                    {
+                        if (attachment.GetChild(j) is Node3D attN3d)
+                        {
+                            SaveAndHide(attN3d);
+                        }
+                    }
+                }
+            }
+        }
+
+        public void SaveAndHide(Node3D node)
+        {
+            if (node != null && GodotObject.IsInstanceValid(node))
+            {
+                ulong id = node.GetInstanceId();
+                if (_visitedInstanceIds.Add(id))
+                {
+                    _states.Add((node, node.Visible));
+                    node.Visible = false;
+                }
+            }
+        }
+
+        public void SaveAndHide(CanvasItem item)
+        {
+            if (item != null && GodotObject.IsInstanceValid(item))
+            {
+                ulong id = item.GetInstanceId();
+                if (_visitedInstanceIds.Add(id))
+                {
+                    _canvasStates.Add((item, item.Visible));
+                    item.Visible = false;
+                }
+            }
+        }
+
+        public void Restore()
+        {
+            foreach (var (node, wasVisible) in _states)
+            {
+                if (node != null && GodotObject.IsInstanceValid(node))
+                {
+                    node.Visible = wasVisible;
+                }
+            }
+            _states.Clear();
+
+            foreach (var (item, wasVisible) in _canvasStates)
+            {
+                if (item != null && GodotObject.IsInstanceValid(item))
+                {
+                    item.Visible = wasVisible;
+                }
+            }
+            _canvasStates.Clear();
+            _visitedInstanceIds.Clear();
+        }
+
+        private static List<T> FindNodesOfType<T>(Node root) where T : class
+        {
+            var list = new List<T>();
+            Traverse(root, list);
+            return list;
+
+            static void Traverse(Node parent, List<T> results)
+            {
+                if (parent == null) return;
+                if (parent is T match) results.Add(match);
+                int count = parent.GetChildCount();
+                for (int i = 0; i < count; i++)
+                {
+                    Traverse(parent.GetChild(i), results);
+                }
+            }
+        }
     }
 }

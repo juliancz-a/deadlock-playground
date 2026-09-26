@@ -1631,6 +1631,7 @@ namespace DeadlockPlayground.Painter
                 if (img != null)
                 {
                     if (img.IsCompressed()) img.Decompress();
+                    if (img.HasMipmaps()) img.ClearMipmaps();
                     if (img.GetFormat() != Image.Format.Rgba8) img.Convert(Image.Format.Rgba8);
                 }
             }
@@ -1664,6 +1665,16 @@ namespace DeadlockPlayground.Painter
                         byte[] baseBytes = img.GetData();
                         byte[] paintBytes = paintRegion.GetData();
 
+                        int expectedBaseSize = w * h * 4;
+                        if (baseBytes.Length > expectedBaseSize)
+                        {
+                            baseBytes = baseBytes.AsSpan(0, expectedBaseSize).ToArray();
+                        }
+                        if (paintBytes.Length > expectedBaseSize)
+                        {
+                            paintBytes = paintBytes.AsSpan(0, expectedBaseSize).ToArray();
+                        }
+
                         System.Threading.Tasks.Parallel.For(0, h, y =>
                         {
                             int row = y * w * 4;
@@ -1692,6 +1703,11 @@ namespace DeadlockPlayground.Painter
                                 }
                             }
                         });
+
+                        if (baseBytes.Length > expectedBaseSize)
+                        {
+                            baseBytes = baseBytes.AsSpan(0, expectedBaseSize).ToArray();
+                        }
                         img.SetData(w, h, false, Image.Format.Rgba8, baseBytes);
                     }
                 }
