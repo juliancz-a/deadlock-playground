@@ -24,6 +24,7 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         ThemeOverrideConstants();
         BuildUI();
         KeybindsManager.OnKeybindsChanged += RefreshAllButtons;
+        VisibilityChanged += () => { if (!IsVisibleInTree()) StopListening(); };
     }
 
     public override void _ExitTree()
@@ -231,6 +232,7 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
 
         btn.Text = "Press any key...";
         btn.Modulate = new Color(1.0f, 0.85f, 0.4f);
+        btn.ReleaseFocus();
         _lblConflictWarning.Visible = false;
     }
 
@@ -247,26 +249,29 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         _lblConflictWarning.Visible = false;
     }
 
-    public override void _UnhandledKeyInput(InputEvent @event)
+    public override void _Input(InputEvent @event)
     {
         if (_listeningAction == null || @event is not InputEventKey keyEvent || !keyEvent.Pressed || keyEvent.Echo)
             return;
 
+        // Consume event immediately so Godot's built-in UI focus navigation cannot trap Arrow keys, Tab, Enter, Space
+        GetViewport()?.SetInputAsHandled();
+
+        Key pressedKey = keyEvent.Keycode != Key.None ? keyEvent.Keycode : keyEvent.PhysicalKeycode;
+
         // Check for Escape to cancel
-        if (keyEvent.Keycode == Key.Escape)
+        if (pressedKey == Key.Escape)
         {
             StopListening();
-            GetViewport()?.SetInputAsHandled();
             return;
         }
 
         // Ignore pure modifier presses
-        if (keyEvent.Keycode == Key.Ctrl || keyEvent.Keycode == Key.Shift || keyEvent.Keycode == Key.Alt || keyEvent.Keycode == Key.Meta)
+        if (pressedKey == Key.Ctrl || pressedKey == Key.Shift || pressedKey == Key.Alt || pressedKey == Key.Meta)
         {
             return;
         }
 
-        Key pressedKey = keyEvent.Keycode;
         bool ctrl = keyEvent.CtrlPressed || keyEvent.MetaPressed;
         bool shift = keyEvent.ShiftPressed;
         bool alt = keyEvent.AltPressed;
@@ -277,7 +282,6 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
             KeybindsManager.ForceRebind(_listeningAction, pressedKey, ctrl, shift, alt);
             StopListening();
             RefreshAllButtons();
-            GetViewport()?.SetInputAsHandled();
             return;
         }
 
@@ -292,7 +296,6 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
             string keyStr = KeybindsManager.FormatKey(pressedKey, ctrl, shift, alt);
             _lblConflictWarning.Text = $"⚠ Conflict: '{keyStr}' is already assigned to '{conflictActionName}'. Press '{keyStr}' again to overwrite, or press Esc to cancel.";
             _lblConflictWarning.Visible = true;
-            GetViewport()?.SetInputAsHandled();
             return;
         }
 
@@ -300,7 +303,6 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         KeybindsManager.Rebind(_listeningAction, pressedKey, ctrl, shift, alt, out _);
         StopListening();
         RefreshAllButtons();
-        GetViewport()?.SetInputAsHandled();
     }
 
     private void RefreshAllButtons()

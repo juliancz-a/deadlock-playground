@@ -28,7 +28,7 @@ public static class DeadlockHeroCatalog
         new("Apollo", "fencer", "models/heroes_wip/fencer/fencer.vmdl_c", HeroCategory.UpdatedAndNew),
         new("Bebop", "bebop", "models/heroes_staging/bebop/bebop.vmdl_c", HeroCategory.UpdatedAndNew),
         new("Billy", "punkgoat", "models/heroes_wip/punkgoat/punkgoat.vmdl_c", HeroCategory.UpdatedAndNew),
-        new("Calico", "nano", "models/heroes_staging/nano/nano_v2/nano.vmdl_c", HeroCategory.LegacyStaging),
+        new("Calico", "nano", "models/heroes_staging/nano/nano_v2/nano.vmdl_c", HeroCategory.UpdatedAndNew),
         new("Celeste", "unicorn", "models/heroes_wip/unicorn/unicorn.vmdl_c", HeroCategory.UpdatedAndNew),
         new("The Doorman", "doorman", "models/heroes_wip/doorman_v2/doorman.vmdl_c", HeroCategory.UpdatedAndNew),
         new("Drifter", "drifter", "models/heroes_wip/drifter/drifter.vmdl_c", HeroCategory.UpdatedAndNew),

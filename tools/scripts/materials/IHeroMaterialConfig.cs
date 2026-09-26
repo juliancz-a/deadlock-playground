@@ -53,9 +53,10 @@ public interface IHeroMaterialConfig
 
     /// <summary>
     /// Overload prioritizing active Addon VPK over base game VPK for bespoke hero materials.
+    /// Preserves base game package so loaders retain access to base game assets.
     /// </summary>
     Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName, SteamDatabase.ValvePak.Package addonPackage)
-        => TryCreateCustomMaterial(addonPackage ?? package, vmatPath, meshName);
+        => TryCreateCustomMaterial(package, vmatPath, meshName);
 
     /// <summary>
     /// Checks if a surface on this hero must strictly preserve its original material and bypass Toon swapping or outline NextPass.

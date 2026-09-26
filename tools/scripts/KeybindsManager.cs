@@ -304,6 +304,7 @@ namespace DeadlockPlayground.Tools
                 var ev = new InputEventKey
                 {
                     Keycode = binding.Keycode,
+                    PhysicalKeycode = binding.Keycode,
                     CtrlPressed = binding.Ctrl,
                     ShiftPressed = binding.Shift,
                     AltPressed = binding.Alt
@@ -316,6 +317,7 @@ namespace DeadlockPlayground.Tools
                 var secEv = new InputEventKey
                 {
                     Keycode = binding.SecondaryKeycode,
+                    PhysicalKeycode = binding.SecondaryKeycode,
                     CtrlPressed = binding.SecondaryCtrl,
                     ShiftPressed = binding.SecondaryShift,
                     AltPressed = binding.SecondaryAlt
@@ -353,6 +355,12 @@ namespace DeadlockPlayground.Tools
                 Key.Bracketright => "]",
                 Key.Period => ".",
                 Key.Comma => ",",
+                Key.Up => "Up",
+                Key.Down => "Down",
+                Key.Left => "Left",
+                Key.Right => "Right",
+                Key.Pageup => "Page Up",
+                Key.Pagedown => "Page Down",
                 _ => key.ToString()
             };
 

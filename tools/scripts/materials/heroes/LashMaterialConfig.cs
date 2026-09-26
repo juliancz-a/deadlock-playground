@@ -40,6 +40,11 @@ public class LashMaterialConfig : IHeroMaterialConfig
 
     public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName)
     {
+        return TryCreateCustomMaterial(package, vmatPath, meshName, null);
+    }
+
+    public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName, Package addonPackage)
+    {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
         if (!vmatLower.Contains("lash_sparkles") && !(vmatLower.Contains("sparkle") && vmatLower.Contains("lash")))
         {
@@ -52,10 +57,26 @@ public class LashMaterialConfig : IHeroMaterialConfig
         var shaderMat = new ShaderMaterial { Shader = sparkleShader };
         shaderMat.RenderPriority = 3;
         shaderMat.SetMeta("PreserveShading", true);
+        if (!string.IsNullOrEmpty(vmatPath))
+        {
+            shaderMat.SetMeta("OriginalVmatPath", vmatPath);
+        }
+
+        var vrfMat = Source2MaterialHelper.TryReadVmat(package, vmatPath, addonPackage);
+        string maskPath = null;
+        if (vrfMat != null)
+        {
+            maskPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tSelfIllumMask")
+                    ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureSelfIllumMask")
+                    ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tTranslucency")
+                    ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
+                    ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor");
+        }
+        maskPath ??= "models/heroes_wip/lash/materials/lash_sparkles_mask_psd_c38399ee.vtex";
 
         // Load sparkle mask with raw RGBA (forceOpaque: false)
-        var maskTex = Source2TextureLoader.LoadVtexTexture(package, "models/heroes_wip/lash/materials/lash_sparkles_mask_psd_c38399ee.vtex", forceOpaque: false)
-                   ?? Source2TextureLoader.LoadVtexTexture(package, "lash_sparkles_mask_psd_c38399ee.vtex", forceOpaque: false);
+        var maskTex = Source2TextureLoader.LoadVtexTexture(package, maskPath, forceOpaque: false, addonPackage: addonPackage)
+                   ?? Source2TextureLoader.LoadVtexTexture(package, System.IO.Path.GetFileName(maskPath), forceOpaque: false, addonPackage: addonPackage);
 
         if (maskTex != null)
         {

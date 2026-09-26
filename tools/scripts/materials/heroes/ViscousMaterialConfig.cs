@@ -45,6 +45,11 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
 
     public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName)
     {
+        return TryCreateCustomMaterial(package, vmatPath, meshName, null);
+    }
+
+    public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName, SteamDatabase.ValvePak.Package addonPackage)
+    {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
         string meshLower = meshName?.ToLowerInvariant() ?? "";
 
@@ -58,34 +63,24 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
             Color tint = new Color(0.08f, 0.08f, 0.08f, 1.0f);
             float thickness = 0.004f;
 
-            if (package != null)
+            var vrfMat = Source2MaterialHelper.TryReadVmat(package, vmatPath, addonPackage);
+            if (vrfMat != null)
             {
-                var entry = Source2MaterialHelper.FindVmatEntry(package, vmatPath);
-                if (entry != null)
-                {
-                    package.ReadEntry(entry, out byte[] data);
-                    using var res = new ValveResourceFormat.Resource();
-                    using var ms = new System.IO.MemoryStream(data);
-                    res.Read(ms);
-                    if (res.DataBlock is ValveResourceFormat.ResourceTypes.Material vrfMat)
-                    {
-                        if (vrfMat.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc1))
-                            tint = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc0))
-                            tint = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var ct1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct1))
-                            tint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var ct0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct0))
-                            tint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vSolidOutlineTint1", out var ot1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot1))
-                            tint = new Color(ot1.X, ot1.Y, ot1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vSolidOutlineTint", out var ot0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot0))
-                            tint = new Color(ot0.X, ot0.Y, ot0.Z, 1.0f);
+                if (vrfMat.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc1))
+                    tint = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(tc0))
+                    tint = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var ct1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct1))
+                    tint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var ct0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct0))
+                    tint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vSolidOutlineTint1", out var ot1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot1))
+                    tint = new Color(ot1.X, ot1.Y, ot1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vSolidOutlineTint", out var ot0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ot0))
+                    tint = new Color(ot0.X, ot0.Y, ot0.Z, 1.0f);
 
-                        if (vrfMat.FloatParams.TryGetValue("g_flOutlineThickness1", out var th1)) thickness = th1;
-                        else if (vrfMat.FloatParams.TryGetValue("g_flOutlineThickness", out var th0)) thickness = th0;
-                    }
-                }
+                if (vrfMat.FloatParams.TryGetValue("g_flOutlineThickness1", out var th1)) thickness = th1;
+                else if (vrfMat.FloatParams.TryGetValue("g_flOutlineThickness", out var th0)) thickness = th0;
             }
 
             _dynamicOutlineColor = tint;
@@ -111,44 +106,34 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
             float opacity = 0.55f;
             ImageTexture colorTex = null;
 
-            if (package != null)
+            var vrfMat = Source2MaterialHelper.TryReadVmat(package, vmatPath, addonPackage);
+            if (vrfMat != null)
             {
-                var entry = Source2MaterialHelper.FindVmatEntry(package, vmatPath);
-                if (entry != null)
+                if (vrfMat.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f))
+                    slimeBase = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f))
+                    slimeBase = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var vt1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(vt1))
+                    slimeBase = new Color(vt1.X, vt1.Y, vt1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var vt0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(vt0))
+                    slimeBase = new Color(vt0.X, vt0.Y, vt0.Z, 1.0f);
+
+                if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint1", out var si1) && (si1.X > 0.001f || si1.Y > 0.001f || si1.Z > 0.001f))
+                    rimGlow = new Color(si1.X, si1.Y, si1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint", out var si0) && (si0.X > 0.001f || si0.Y > 0.001f || si0.Z > 0.001f))
+                    rimGlow = new Color(si0.X, si0.Y, si0.Z, 1.0f);
+
+                if (vrfMat.FloatParams.TryGetValue("g_flCloakFactor1", out var cf1) && cf1 > 0.01f)
+                    opacity = Mathf.Clamp(cf1 * 0.55f, 0.35f, 0.85f);
+                else if (vrfMat.FloatParams.TryGetValue("g_flOpacityScale1", out var os1) && os1 > 0.01f)
+                    opacity = Mathf.Clamp(os1, 0.35f, 0.85f);
+
+                string colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
+                                   ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
+                                   ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
+                if (!string.IsNullOrEmpty(colorTexPath))
                 {
-                    package.ReadEntry(entry, out byte[] data);
-                    using var res = new ValveResourceFormat.Resource();
-                    using var ms = new System.IO.MemoryStream(data);
-                    res.Read(ms);
-                    if (res.DataBlock is ValveResourceFormat.ResourceTypes.Material vrfMat)
-                    {
-                        if (vrfMat.VectorParams.TryGetValue("TextureColor1", out var tc1) && (tc1.X > 0.001f || tc1.Y > 0.001f || tc1.Z > 0.001f))
-                            slimeBase = new Color(tc1.X, tc1.Y, tc1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("TextureColor", out var tc0) && (tc0.X > 0.001f || tc0.Y > 0.001f || tc0.Z > 0.001f))
-                            slimeBase = new Color(tc0.X, tc0.Y, tc0.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var vt1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(vt1))
-                            slimeBase = new Color(vt1.X, vt1.Y, vt1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var vt0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(vt0))
-                            slimeBase = new Color(vt0.X, vt0.Y, vt0.Z, 1.0f);
-
-                        if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint1", out var si1) && (si1.X > 0.001f || si1.Y > 0.001f || si1.Z > 0.001f))
-                            rimGlow = new Color(si1.X, si1.Y, si1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint", out var si0) && (si0.X > 0.001f || si0.Y > 0.001f || si0.Z > 0.001f))
-                            rimGlow = new Color(si0.X, si0.Y, si0.Z, 1.0f);
-
-                        if (vrfMat.FloatParams.TryGetValue("g_flCloakFactor1", out var cf1) && cf1 > 0.01f)
-                            opacity = Mathf.Clamp(cf1 * 0.55f, 0.35f, 0.85f);
-                        else if (vrfMat.FloatParams.TryGetValue("g_flOpacityScale1", out var os1) && os1 > 0.01f)
-                            opacity = Mathf.Clamp(os1, 0.35f, 0.85f);
-
-                        string colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
-                                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
-                                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
-                        if (!string.IsNullOrEmpty(colorTexPath))
-                        {
-                            colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: false);
-                        }
-                    }
+                    colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: false, addonPackage: addonPackage);
                 }
             }
 

@@ -45,6 +45,11 @@ public class CelesteMaterialConfig : IHeroMaterialConfig
 
     public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName)
     {
+        return TryCreateCustomMaterial(package, vmatPath, meshName, null);
+    }
+
+    public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName, Package addonPackage)
+    {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
         string meshLower = meshName?.ToLowerInvariant() ?? "";
 
@@ -60,40 +65,30 @@ public class CelesteMaterialConfig : IHeroMaterialConfig
             float selfIllumScale = 0.15f;
             ImageTexture colorTex = null;
 
-            if (package != null)
+            var vrfMat = Source2MaterialHelper.TryReadVmat(package, vmatPath, addonPackage);
+            if (vrfMat != null)
             {
-                var entry = Source2MaterialHelper.FindVmatEntry(package, vmatPath);
-                if (entry != null)
+                if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var ct1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct1))
+                    colorTint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var ct0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct0))
+                    colorTint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
+
+                if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint1", out var si1))
+                    selfIllumTint = new Color(si1.X, si1.Y, si1.Z, 1.0f);
+                else if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint", out var si0))
+                    selfIllumTint = new Color(si0.X, si0.Y, si0.Z, 1.0f);
+
+                if (vrfMat.FloatParams.TryGetValue("g_flSelfIllumScale1", out var sc1))
+                    selfIllumScale = sc1;
+                else if (vrfMat.FloatParams.TryGetValue("g_flSelfIllumScale", out var sc0))
+                    selfIllumScale = sc0;
+
+                string colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
+                                   ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
+                                   ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
+                if (!string.IsNullOrEmpty(colorTexPath))
                 {
-                    package.ReadEntry(entry, out byte[] data);
-                    using var res = new ValveResourceFormat.Resource();
-                    using var ms = new System.IO.MemoryStream(data);
-                    res.Read(ms);
-                    if (res.DataBlock is VrfMaterial vrfMat)
-                    {
-                        if (vrfMat.VectorParams.TryGetValue("g_vColorTint1", out var ct1) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct1))
-                            colorTint = new Color(ct1.X, ct1.Y, ct1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vColorTint", out var ct0) && !Source2ColorMatrix.IsNeutralWhiteOrBlack(ct0))
-                            colorTint = new Color(ct0.X, ct0.Y, ct0.Z, 1.0f);
-
-                        if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint1", out var si1))
-                            selfIllumTint = new Color(si1.X, si1.Y, si1.Z, 1.0f);
-                        else if (vrfMat.VectorParams.TryGetValue("g_vSelfIllumTint", out var si0))
-                            selfIllumTint = new Color(si0.X, si0.Y, si0.Z, 1.0f);
-
-                        if (vrfMat.FloatParams.TryGetValue("g_flSelfIllumScale1", out var sc1))
-                            selfIllumScale = sc1;
-                        else if (vrfMat.FloatParams.TryGetValue("g_flSelfIllumScale", out var sc0))
-                            selfIllumScale = sc0;
-
-                        string colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
-                                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
-                                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
-                        if (!string.IsNullOrEmpty(colorTexPath))
-                        {
-                            colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: true);
-                        }
-                    }
+                    colorTex = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: true, addonPackage: addonPackage);
                 }
             }
 

@@ -292,40 +292,7 @@ public class HazeMaterialConfig : IHeroMaterialConfig
     }
 
     private static VrfMaterial TryReadVmat(Package package, string vmatPath, Package addonPackage = null)
-    {
-        if (string.IsNullOrWhiteSpace(vmatPath)) return null;
-        PackageEntry entry = null;
-        Package targetPkg = null;
-
-        if (addonPackage != null)
-        {
-            entry = Source2MaterialHelper.FindVmatEntry(addonPackage, vmatPath);
-            if (entry != null) targetPkg = addonPackage;
-        }
-        if (entry == null && package != null)
-        {
-            entry = Source2MaterialHelper.FindVmatEntry(package, vmatPath);
-            if (entry != null) targetPkg = package;
-        }
-        if (entry == null || targetPkg == null) return null;
-
-        try
-        {
-            targetPkg.ReadEntry(entry, out byte[] data);
-            using var resource = new ValveResourceFormat.Resource();
-            using var ms = new MemoryStream(data);
-            resource.Read(ms);
-            if (resource.ResourceType == ResourceType.Material)
-            {
-                return (VrfMaterial)resource.DataBlock;
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[HazeMaterialConfig] Error parsing VMAT ({vmatPath}): {ex.Message}");
-        }
-        return null;
-    }
+        => Source2MaterialHelper.TryReadVmat(package, vmatPath, addonPackage);
 
     public bool ShouldPreserveMaterial(string meshName, string vmatPath, Godot.Material material)
     {

@@ -97,6 +97,18 @@ public partial class StudioUIManager : CanvasLayer
         Instance = this;
         GetViewport().TransparentBg = false;
 
+        var win = GetWindow();
+        if (win != null)
+        {
+            win.MinSize = new Vector2I(1280, 720);
+            DisplayServer.WindowSetMaxSize(Vector2I.Zero);
+            var mode = DisplayServer.WindowGetMode();
+            _isFullscreen = mode == DisplayServer.WindowMode.Fullscreen ||
+                            mode == DisplayServer.WindowMode.ExclusiveFullscreen ||
+                            win.Mode == Window.ModeEnum.Fullscreen ||
+                            win.Mode == Window.ModeEnum.ExclusiveFullscreen;
+        }
+
         _pathManager = new GamePathManager();
         AddChild(_pathManager);
 
@@ -126,7 +138,7 @@ public partial class StudioUIManager : CanvasLayer
     }
 
     private SubViewport _worldViewport;
-    private bool _isFullscreen = true;
+    private bool _isFullscreen = false;
 
     public void ToggleFullscreen()
     {
@@ -144,39 +156,55 @@ public partial class StudioUIManager : CanvasLayer
         Vector2I winSize = win.Size;
         var currentDsMode = DisplayServer.WindowGetMode();
 
-        bool isSpanningScreen = (winSize.X >= screenSize.X - 60 && winSize.Y >= screenSize.Y - 60);
-
-        bool isFs = _isFullscreen ||
-                    win.Mode == Window.ModeEnum.Fullscreen ||
+        // True Fullscreen is either exclusive fullscreen or borderless fullscreen covering the entire screen.
+        // Any windowed state (including Maximized with titlebar) is windowed and can toggle straight to Fullscreen.
+        bool isFs = win.Mode == Window.ModeEnum.Fullscreen ||
                     win.Mode == Window.ModeEnum.ExclusiveFullscreen ||
-                    win.Mode == Window.ModeEnum.Maximized ||
                     currentDsMode == DisplayServer.WindowMode.Fullscreen ||
                     currentDsMode == DisplayServer.WindowMode.ExclusiveFullscreen ||
-                    currentDsMode == DisplayServer.WindowMode.Maximized ||
-                    (win.Borderless && isSpanningScreen);
+                    (win.Borderless && winSize.X >= screenSize.X && winSize.Y >= screenSize.Y);
 
         if (isFs)
         {
             // Switch to Windowed mode
             _isFullscreen = false;
 
-            // 1. Remove borderless and fullscreen mode
-            DisplayServer.WindowSetMaxSize(new Vector2I(1600, 900));
+            // 1. Unclamp MaxSize so users on 1440p, 4K, and UltraWide monitors can freely maximize or resize
+            DisplayServer.WindowSetMaxSize(Vector2I.Zero);
             DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
             win.Mode = Window.ModeEnum.Windowed;
             win.Borderless = false;
             DisplayServer.WindowSetFlag(DisplayServer.WindowFlags.Borderless, false);
 
-            Vector2I targetSize = new Vector2I(1600, 900);
+            // 2. Query active monitor usable rect and dynamically compute responsive windowed size
+            Rect2I usableRect = DisplayServer.ScreenGetUsableRect(screen);
+            Vector2I targetSize;
+
+            if (usableRect.Size.X < 1280 || usableRect.Size.Y < 720)
+            {
+                // If the monitor usable area is smaller than 1280x720 (e.g. netbooks or sub-720p screens), clamp to usableRect - (40, 40)
+                targetSize = new Vector2I(
+                    Math.Max(640, usableRect.Size.X - 40),
+                    Math.Max(480, usableRect.Size.Y - 40)
+                );
+                win.MinSize = targetSize;
+            }
+            else
+            {
+                // Target: ~80% - 85% of usableRect size, clamped to minimum 1280x720
+                int targetW = Mathf.Clamp((int)(usableRect.Size.X * 0.85f), 1280, usableRect.Size.X);
+                int targetH = Mathf.Clamp((int)(usableRect.Size.Y * 0.85f), 720, usableRect.Size.Y);
+                targetSize = new Vector2I(targetW, targetH);
+                win.MinSize = new Vector2I(1280, 720);
+            }
+
             DisplayServer.WindowSetSize(targetSize);
             win.Size = targetSize;
 
-            Rect2I screenRect = DisplayServer.ScreenGetUsableRect(screen);
-            Vector2I centerPos = screenRect.Position + (screenRect.Size - targetSize) / 2;
+            // 3. Center the window dynamically within the active monitor's usable rect
+            Vector2I centerPos = usableRect.Position + (usableRect.Size - targetSize) / 2;
             DisplayServer.WindowSetPosition(centerPos);
             win.Position = centerPos;
-
-            DisplayServer.WindowSetMaxSize(new Vector2I(1920, 1080));
 
             if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Fullscreen";
         }

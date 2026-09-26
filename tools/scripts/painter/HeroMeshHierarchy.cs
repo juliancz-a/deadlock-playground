@@ -348,7 +348,7 @@ namespace DeadlockPlayground.Painter
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var weaponOutline = new ShaderMaterial { Shader = outlineShader };
-                    weaponOutline.SetShaderParameter("outline_width", 1.0f);
+                    weaponOutline.SetShaderParameter("outline_width", 0.5f);
                     weaponOutline.SetShaderParameter("outline_color", sigColor);
                     return (null, weaponOutline, true);
                 }
@@ -371,7 +371,7 @@ namespace DeadlockPlayground.Painter
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var outline = new ShaderMaterial { Shader = outlineShader };
-                    outline.SetShaderParameter("outline_width", 1.0f);
+                    outline.SetShaderParameter("outline_width", 0.5f);
                     outline.SetShaderParameter("outline_color", sigColor);
                     return (null, outline, true);
                 }
@@ -389,7 +389,7 @@ namespace DeadlockPlayground.Painter
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var weaponOutline = new ShaderMaterial { Shader = outlineShader };
-                    weaponOutline.SetShaderParameter("outline_width", 1.0f);
+                    weaponOutline.SetShaderParameter("outline_width", 0.5f);
                     weaponOutline.SetShaderParameter("outline_color", sigColor);
                     return (null, weaponOutline, true);
                 }
@@ -405,7 +405,7 @@ namespace DeadlockPlayground.Painter
             var toonMat = new ShaderMaterial { Shader = toonShader };
             var outlineMat = new ShaderMaterial { Shader = outlineShader };
 
-            outlineMat.SetShaderParameter("outline_width", 1.0f);
+            outlineMat.SetShaderParameter("outline_width", 0.5f);
             outlineMat.SetShaderParameter("outline_color", outlineCol);
 
             if (origMat is StandardMaterial3D stdMat)

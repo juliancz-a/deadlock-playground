@@ -24,6 +24,7 @@
 [ext_resource type="PackedScene" uid="uid://c7k2p8b1mx5yq" path="res://ui/scenes/components/PaintModExportPanel.tscn" id="22_paint_mod_export"]
 [ext_resource type="PackedScene" uid="uid://c8k8f2y0x1m4p" path="res://ui/scenes/modals/SettingsDialog.tscn" id="23_settings_dialog"]
 [ext_resource type="PackedScene" uid="uid://wjfypfotgq0w" path="res://ui/scenes/components/UVCanvasPanel.tscn" id="24_uv_canvas"]
+[ext_resource type="FontFile" uid="uid://dcds1t4ij4ajc" path="res://assets/fonts/Supersonic Rocketship.ttf" id="25_seu75"]
 [ext_resource type="Texture2D" uid="uid://b407xjf02tgde" path="res://assets/at-icons/uv_layer.svg" id="25_uv_icon"]
 [ext_resource type="Shader" uid="uid://px44p7nn6kk8" path="res://shaders/modal_backdrop_blur.gdshader" id="26_backdrop_shader"]
 [ext_resource type="PackedScene" uid="uid://b7l2p8q4m5oax" path="res://ui/scenes/modals/FeedbackDialog.tscn" id="27_feedback_dialog"]
@@ -116,6 +117,12 @@ shader_parameter/double_vision_split = 0.008
 [sub_resource type="CanvasItemMaterial" id="CanvasItemMaterial_premult"]
 blend_mode = 4
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_5auy4"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_dwvqn"]
+bg_color = Color(0.6, 0.6, 0.6, 0)
+
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_modal_backdrop"]
 shader = ExtResource("26_backdrop_shader")
 shader_parameter/blur_amount = 2.5
@@ -126,7 +133,7 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_tabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
@@ -142,7 +149,6 @@ _btnTabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContain
 _btnTabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/LightButton")
 _btnTabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
 _btnTabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PaintButton")
-_tabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContainer/PaintTab")
 _exportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
 _paintModExportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
 _navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge")
@@ -375,8 +381,6 @@ layout_mode = 2
 [node name="ShadingTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1642219470 instance=ExtResource("13_shading_tab")]
 visible = false
 layout_mode = 2
-_crtRect = NodePath("../../../../../../ViewportArea/ShaderOverlayStack/CRTRect")
-_glitchRect = NodePath("../../../../../../ViewportArea/ShaderOverlayStack/GlitchRect")
 
 [node name="PaintTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1849204999 instance=ExtResource("15_paint_tab")]
 visible = false
@@ -571,10 +575,8 @@ script = ExtResource("20_cam_pad")
 
 [node name="ExportPanel" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=156702132 instance=ExtResource("14_export")]
 layout_mode = 1
-offset_left = -266.0
 offset_top = 12.0
 offset_right = -12.0
-offset_bottom = 290.0
 
 [node name="PaintModExportPanel" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=714186499 instance=ExtResource("22_paint_mod_export")]
 visible = false
@@ -654,6 +656,7 @@ alignment = 2
 visible = false
 layout_mode = 2
 mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_5auy4")
 
 [node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge" unique_id=931196299]
 layout_mode = 2
@@ -664,8 +667,9 @@ theme_override_constants/margin_bottom = 4
 
 [node name="PainterKeymapLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/PainterKeymapBadge/MarginContainer" unique_id=1268961499]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 0.95)
-theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.6974139, 0.6396792, 0.39785355, 0.9490196)
+theme_override_fonts/font = ExtResource("25_seu75")
+theme_override_font_sizes/font_size = 13
 text = "[B] Brush  [E] Erase  [G] Fill  [M] Wand  [L] Decal  [T] Text  [N] Mirror  [-/+] Size  [U] 2D UV"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -673,6 +677,7 @@ vertical_alignment = 1
 [node name="NavBadge" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer" unique_id=947025821]
 layout_mode = 2
 mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_dwvqn")
 
 [node name="MarginContainer" type="MarginContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge" unique_id=931196230]
 layout_mode = 2
@@ -683,7 +688,8 @@ theme_override_constants/margin_bottom = 4
 
 [node name="NavLabel" type="Label" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge/MarginContainer" unique_id=1268961489]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.75, 0.8, 0.9)
+theme_override_colors/font_color = Color(0.6974139, 0.6396792, 0.39785355, 0.9490196)
+theme_override_fonts/font = ExtResource("25_seu75")
 text = "Rotate: MMB | Pan: Shift+MMB | Move: WASD / QE | Zoom: Scroll"
 
 [node name="ModalsLayer" type="Control" parent="UIRoot/MainHUD" unique_id=1736869492]
@@ -719,17 +725,6 @@ access = 2
 [node name="SettingsModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=184693709 instance=ExtResource("23_settings_dialog")]
 visible = false
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -360.0
-offset_top = -270.0
-offset_right = 360.0
-offset_bottom = 270.0
-grow_horizontal = 2
-grow_vertical = 2
 
 [node name="FeedbackModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=892347102 instance=ExtResource("27_feedback_dialog")]
 visible = false
@@ -864,7 +859,7 @@ layout_mode = 2
 size_flags_horizontal = 4
 theme_override_colors/font_color = Color(0.7, 0.78, 0.9, 0.85)
 theme_override_font_sizes/font_size = 12
+text = "Initializing load..."
 horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
-text = "Initializing load..."

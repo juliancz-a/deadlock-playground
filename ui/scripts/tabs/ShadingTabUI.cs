@@ -528,7 +528,7 @@ public partial class ShadingTabUI : VBoxContainer
                     ?? (_colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f));
                 var toonMat = new ShaderMaterial { Shader = _toonShader };
                 var outlineMat = new ShaderMaterial { Shader = _toonOutlineShader };
-                outlineMat.SetShaderParameter("outline_width", _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.0f);
+                outlineMat.SetShaderParameter("outline_width", _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 0.5f);
                 outlineMat.SetShaderParameter("outline_color", defaultOutlineCol);
 
                 // Transfer properties from original StandardMaterial3D
@@ -841,7 +841,7 @@ public partial class ShadingTabUI : VBoxContainer
         float shadowAmt = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.40f;
         Color shadowCol = _colorToonShadow != null ? _colorToonShadow.Color : new Color(0.18f, 0.16f, 0.26f, 1.0f);
 
-        float outWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 1.0f;
+        float outWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 0.5f;
         Color outCol = _colorToonOutline != null ? _colorToonOutline.Color : new Color(0.08f, 0.08f, 0.08f, 1.0f);
 
         foreach (var record in _characterSurfaces)
@@ -968,8 +968,8 @@ public partial class ShadingTabUI : VBoxContainer
         if (_sliderToonSmoothness != null) _sliderToonSmoothness.Value = 0.30;
         if (_lblToonSmoothness != null) _lblToonSmoothness.Text = "0.30";
         if (_checkToonOutline != null) _checkToonOutline.ButtonPressed = true;
-        if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 1.0;
-        if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "1.0px";
+        if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 0.5;
+        if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "0.5px";
         if (_colorToonOutline != null) _colorToonOutline.Color = new Color(0.08f, 0.08f, 0.08f, 1.0f);
         if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.40;
         if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.40";

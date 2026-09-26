@@ -99,6 +99,17 @@ public static class HeroMaterialManager
             }
         }
 
+        // Cards / Deck check (wraith cards, floating handcards)
+        if (vLower.Contains("card") || mLower.Contains("card") || vLower.Contains("deck") || mLower.Contains("deck"))
+        {
+            var wraithConfig = _configs.GetValueOrDefault("wraith");
+            if (wraithConfig != null)
+            {
+                var customMat = wraithConfig.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
+                if (customMat != null) return customMat;
+            }
+        }
+
         foreach (var kvp in _configs)
         {
             string key = kvp.Key;

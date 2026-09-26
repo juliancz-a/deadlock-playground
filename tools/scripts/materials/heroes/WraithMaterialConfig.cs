@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Godot;
 using SteamDatabase.ValvePak;
 using ValveResourceFormat.ResourceTypes;
@@ -31,17 +32,35 @@ public class WraithMaterialConfig : IHeroMaterialConfig
 
     public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName)
     {
+        return TryCreateCustomMaterial(package, vmatPath, meshName, null);
+    }
+
+    public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName, Package addonPackage)
+    {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
-        if (!vmatLower.Contains("wraith_cards") && !vmatLower.Contains("handcards") && !(vmatLower.Contains("card") && vmatLower.Contains("wraith")))
+        string meshLower = meshName?.ToLowerInvariant() ?? "";
+        bool isCardMat = vmatLower.Contains("wraith_cards") || vmatLower.Contains("handcards") || (vmatLower.Contains("card") && (vmatLower.Contains("wraith") || meshLower.Contains("wraith") || meshLower.Contains("card")));
+        bool isCardMesh = meshLower.Contains("card") || meshLower.Contains("deck");
+
+        if (!isCardMat && !isCardMesh)
         {
             return null;
         }
 
-        // Case A: Fedora hat card on wraith_model (Surface [3])
-        // Must be an opaque StandardMaterial3D with Backface Culling enabled and Transparency disabled.
-        if (meshName != null && meshName.Contains("wraith_model", StringComparison.OrdinalIgnoreCase))
+        // Dynamically resolve VMAT from active Addon VPK (Priority 1) or Base Game VPK (Priority 2)
+        VrfMaterial vrfMat = Source2MaterialHelper.TryReadVmat(package, vmatPath, addonPackage);
+        if (vrfMat == null && !string.IsNullOrEmpty(vmatPath) && !vmatPath.Contains("wraith_cards"))
         {
-            return CreateHatCardMaterial(package);
+            vrfMat = Source2MaterialHelper.TryReadVmat(package, "models/heroes_wip/wraith/materials/wraith_cards.vmat", addonPackage);
+        }
+
+        // Distinguish Fedora hat card vs Floating handcards
+        bool isHandcards = meshLower.Contains("handcard") || meshLower.Contains("cards_model") || meshLower.Contains("card_fx");
+        bool isHatCard = !isHandcards && (meshLower.Contains("wraith_model") || meshLower.Contains("hat"));
+
+        if (isHatCard)
+        {
+            return CreateHatCardMaterial(package, addonPackage, vrfMat, vmatPath);
         }
 
         // Case B: Floating handcards with psychic aura skirt
@@ -49,21 +68,53 @@ public class WraithMaterialConfig : IHeroMaterialConfig
         if (cardShader != null)
         {
             var shaderMat = new ShaderMaterial { Shader = cardShader };
-            shaderMat.ResourceName = vmatPath;
+            shaderMat.ResourceName = string.IsNullOrEmpty(vmatPath) ? "wraith_cards" : vmatPath;
             shaderMat.SetMeta("PreserveShading", true);
+            if (!string.IsNullOrEmpty(vmatPath))
+            {
+                shaderMat.SetMeta("OriginalVmatPath", vmatPath);
+            }
 
-            var albedo = Source2TextureLoader.GetOrLoadTexture(package, "models/heroes_wip/wraith/materials/wraith_cards_color_psd_71101b24.vtex", forceOpaque: true)
-                      ?? Source2TextureLoader.GetOrLoadTexture(package, "wraith_cards_color_psd_71101b24.vtex", forceOpaque: true);
+            string colorTexPath = null;
+            string maskTexPath = null;
+            string nrTexPath = null;
+
+            if (vrfMat != null)
+            {
+                colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
+                            ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
+                            ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
+
+                maskTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tSelfIllumMask")
+                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureSelfIllumMask")
+                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tTranslucency")
+                           ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureTranslucency");
+
+                nrTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tNormalRoughness")
+                         ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureNormalRoughness")
+                         ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tNormal")
+                         ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureNormal");
+            }
+
+            colorTexPath ??= "models/heroes_wip/wraith/materials/wraith_cards_color_psd_71101b24.vtex";
+            maskTexPath ??= "models/heroes_wip/wraith/materials/wraith_cards_mask_psd_b2fc96c4.vtex";
+            nrTexPath ??= "models/heroes_wip/wraith/materials/wraith_cards_vmat_g_tnormalroughness_ebebd272.vtex";
+
+            var albedo = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: true, addonPackage: addonPackage)
+                      ?? Source2TextureLoader.GetOrLoadTexture(package, Path.GetFileName(colorTexPath), forceOpaque: true, addonPackage: addonPackage);
             if (albedo != null) shaderMat.SetShaderParameter("g_tColor", albedo);
 
-            var mask = Source2TextureLoader.GetOrLoadTexture(package, "models/heroes_wip/wraith/materials/wraith_cards_mask_psd_b2fc96c4.vtex", forceOpaque: false)
-                    ?? Source2TextureLoader.GetOrLoadTexture(package, "wraith_cards_mask_psd_b2fc96c4.vtex", forceOpaque: false);
+            var mask = Source2TextureLoader.GetOrLoadTexture(package, maskTexPath, forceOpaque: false, addonPackage: addonPackage)
+                    ?? Source2TextureLoader.GetOrLoadTexture(package, Path.GetFileName(maskTexPath), forceOpaque: false, addonPackage: addonPackage);
             if (mask != null) shaderMat.SetShaderParameter("g_tSelfIllumMask", mask);
 
-            var nr = Source2TextureLoader.GetOrLoadTexture(package, "models/heroes_wip/wraith/materials/wraith_cards_vmat_g_tnormalroughness_ebebd272.vtex", forceOpaque: true)
-                  ?? Source2TextureLoader.GetOrLoadTexture(package, "wraith_cards_vmat_g_tnormalroughness_ebebd272.vtex", forceOpaque: true);
+            var nr = Source2TextureLoader.GetOrLoadTexture(package, nrTexPath, forceOpaque: true, addonPackage: addonPackage)
+                  ?? Source2TextureLoader.GetOrLoadTexture(package, Path.GetFileName(nrTexPath), forceOpaque: true, addonPackage: addonPackage);
             if (nr != null) shaderMat.SetShaderParameter("g_tNormalRoughness", nr);
 
+            // In source2_cards.gdshader, baseTex.rgb already contains the authentic card and aura colors
+            // authored directly by Valve in g_tColor (dark purple card body, #B165FF lilac glyphs & halo strip).
+            // Passing Colors.White preserves 100% of the authentic VTEX texture colors without hardcoded tints or pink/magenta blowout.
             shaderMat.SetShaderParameter("g_vSelfIllumTint", Colors.White);
             shaderMat.SetShaderParameter("g_flSelfIllumScale", 2.0f);
             shaderMat.SetShaderParameter("g_flHaloAlpha", 0.10f);
@@ -73,14 +124,14 @@ public class WraithMaterialConfig : IHeroMaterialConfig
             return shaderMat;
         }
 
-        return CreateHatCardMaterial(package);
+        return CreateHatCardMaterial(package, addonPackage, vrfMat, vmatPath);
     }
 
-    public static StandardMaterial3D CreateHatCardMaterial(Package package)
+    public static StandardMaterial3D CreateHatCardMaterial(Package package, Package addonPackage = null, VrfMaterial vrfMat = null, string vmatPath = null)
     {
         var mat = new StandardMaterial3D
         {
-            ResourceName = "wraith_hat_card",
+            ResourceName = string.IsNullOrEmpty(vmatPath) ? "wraith_hat_card" : vmatPath,
             Transparency = BaseMaterial3D.TransparencyEnum.Disabled,
             CullMode = BaseMaterial3D.CullModeEnum.Back,
             DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Always,
@@ -89,19 +140,47 @@ public class WraithMaterialConfig : IHeroMaterialConfig
             AlbedoColor = Colors.White
         };
         mat.SetMeta("PreserveShading", true);
+        if (!string.IsNullOrEmpty(vmatPath))
+        {
+            mat.SetMeta("OriginalVmatPath", vmatPath);
+        }
 
-        var albedo = Source2TextureLoader.GetOrLoadTexture(package, "models/heroes_wip/wraith/materials/wraith_cards_color_psd_71101b24.vtex", forceOpaque: true)
-                  ?? Source2TextureLoader.GetOrLoadTexture(package, "wraith_cards_color_psd_71101b24.vtex", forceOpaque: true);
+        if (vrfMat == null)
+        {
+            vrfMat = Source2MaterialHelper.TryReadVmat(package, vmatPath ?? "models/heroes_wip/wraith/materials/wraith_cards.vmat", addonPackage);
+        }
+
+        string colorTexPath = null;
+        string maskTexPath = null;
+
+        if (vrfMat != null)
+        {
+            colorTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor")
+                        ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureColor")
+                        ?? Source2TextureLoader.GetTextureParam(vrfMat, "g_tColor1");
+
+            maskTexPath = Source2TextureLoader.GetTextureParam(vrfMat, "g_tSelfIllumMask")
+                       ?? Source2TextureLoader.GetTextureParam(vrfMat, "TextureSelfIllumMask");
+        }
+
+        colorTexPath ??= "models/heroes_wip/wraith/materials/wraith_cards_color_psd_71101b24.vtex";
+        maskTexPath ??= "models/heroes_wip/wraith/materials/wraith_cards_mask_psd_b2fc96c4.vtex";
+
+        var albedo = Source2TextureLoader.GetOrLoadTexture(package, colorTexPath, forceOpaque: true, addonPackage: addonPackage)
+                  ?? Source2TextureLoader.GetOrLoadTexture(package, Path.GetFileName(colorTexPath), forceOpaque: true, addonPackage: addonPackage);
         if (albedo != null) mat.AlbedoTexture = albedo;
 
-        var mask = Source2TextureLoader.GetOrLoadTexture(package, "models/heroes_wip/wraith/materials/wraith_cards_mask_psd_b2fc96c4.vtex", forceOpaque: false)
-                ?? Source2TextureLoader.GetOrLoadTexture(package, "wraith_cards_mask_psd_b2fc96c4.vtex", forceOpaque: false);
+        var mask = Source2TextureLoader.GetOrLoadTexture(package, maskTexPath, forceOpaque: false, addonPackage: addonPackage)
+                ?? Source2TextureLoader.GetOrLoadTexture(package, Path.GetFileName(maskTexPath), forceOpaque: false, addonPackage: addonPackage);
         if (mask != null)
         {
             mat.EmissionEnabled = true;
             mat.EmissionTexture = mask;
             mat.EmissionOperator = BaseMaterial3D.EmissionOperatorEnum.Multiply;
-            mat.Emission = new Color(0.663f, 0.404f, 0.961f, 1.0f); // Lilac #A967F5
+            // No hardcoded colors: With EmissionOperator = Multiply and Emission = Colors.White,
+            // the emission color is 100% derived from the authentic VTEX texture (wraith_cards_color)
+            // modulated by the self-illumination mask.
+            mat.Emission = Colors.White;
             mat.EmissionEnergyMultiplier = 1.2f;
         }
 

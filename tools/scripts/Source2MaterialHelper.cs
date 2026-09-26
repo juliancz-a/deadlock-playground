@@ -349,4 +349,46 @@ public static class Source2MaterialHelper
 
         return entry;
     }
+
+    /// <summary>
+    /// Reads and parses a .vmat_c resource from the active Addon VPK (Priority 1) or Base Game VPK (Priority 2).
+    /// Returns null if the entry cannot be found or is not a material resource.
+    /// </summary>
+    public static VrfMaterial TryReadVmat(Package package, string vmatPath, Package addonPackage = null)
+    {
+        if (string.IsNullOrWhiteSpace(vmatPath)) return null;
+        if (!vmatPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) vmatPath += "_c";
+
+        PackageEntry entry = null;
+        Package targetPkg = null;
+
+        if (addonPackage != null)
+        {
+            entry = FindVmatEntry(addonPackage, vmatPath);
+            if (entry != null) targetPkg = addonPackage;
+        }
+        if (entry == null && package != null)
+        {
+            entry = FindVmatEntry(package, vmatPath);
+            if (entry != null) targetPkg = package;
+        }
+        if (entry == null || targetPkg == null) return null;
+
+        try
+        {
+            targetPkg.ReadEntry(entry, out byte[] data);
+            using var resource = new ValveResourceFormat.Resource();
+            using var ms = new MemoryStream(data);
+            resource.Read(ms);
+            if (resource.ResourceType == ResourceType.Material)
+            {
+                return (VrfMaterial)resource.DataBlock;
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[Source2MaterialHelper] Error parsing VMAT ({vmatPath}): {ex.Message}");
+        }
+        return null;
+    }
 }
