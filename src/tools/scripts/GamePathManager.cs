@@ -4,7 +4,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
-public partial class GamePathManager : Node
+public class GamePathManager
 {
     private const string ConfigPath = "user://settings.cfg";
     private const string DeadlockRelativePath = "steamapps/common/Deadlock/game/citadel/pak01_dir.vpk";
@@ -14,7 +14,7 @@ public partial class GamePathManager : Node
     public string CurrentCsdkPath { get; private set; }
     public string CurrentResourceCompilerPath { get; private set; }
 
-    public override void _Ready()
+    public GamePathManager()
     {
         LoadConfig();
     }

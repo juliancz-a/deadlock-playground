@@ -6,6 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using HttpClient = System.Net.Http.HttpClient;
+using SharpCompress.Archives;
+using SharpCompress.Common;
+using SharpCompress.Readers;
 
 namespace DeadlockPlayground.Tools;
 
@@ -193,7 +196,13 @@ public static class UpdateChecker
                     string name = asset.TryGetProperty("name", out var nameProp) ? (nameProp.GetString() ?? string.Empty) : string.Empty;
                     string dlUrl = asset.TryGetProperty("browser_download_url", out var dlProp) ? (dlProp.GetString() ?? string.Empty) : string.Empty;
 
-                    if (string.IsNullOrWhiteSpace(dlUrl) || !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    bool isArchive = name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".7z", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".rar", StringComparison.OrdinalIgnoreCase);
+
+                    if (string.IsNullOrWhiteSpace(dlUrl) || !isArchive)
                     {
                         continue;
                     }
@@ -203,6 +212,8 @@ public static class UpdateChecker
                     if (lower.Contains("win") || lower.Contains("windows")) score += 10;
                     if (lower.Contains("x86_64") || lower.Contains("x64")) score += 5;
                     if (lower.Contains("deadlock")) score += 2;
+                    if (lower.EndsWith(".zip")) score += 2;
+                    if (lower.EndsWith(".7z")) score += 2;
 
                     if (score > bestScore)
                     {
@@ -261,13 +272,28 @@ public static class UpdateChecker
             string userDataDir = OS.GetUserDataDir();
             Directory.CreateDirectory(userDataDir);
 
-            string tempZipPath = Path.Combine(userDataDir, "deadlock_update.zip");
+            string fileExt = ".zip";
+            try
+            {
+                var uri = new Uri(zipUrl);
+                string ext = Path.GetExtension(uri.AbsolutePath);
+                if (!string.IsNullOrEmpty(ext)) fileExt = ext;
+            }
+            catch { }
+
+            string tempArchivePath = Path.Combine(userDataDir, $"deadlock_update{fileExt}");
             string stagingDir = Path.Combine(userDataDir, "update_staging");
 
-            if (File.Exists(tempZipPath))
+            // Clean up any stale downloaded archives
+            try
             {
-                try { File.Delete(tempZipPath); } catch { }
+                var oldArchives = Directory.GetFiles(userDataDir, "deadlock_update*");
+                foreach (var old in oldArchives)
+                {
+                    try { File.Delete(old); } catch { }
+                }
             }
+            catch { }
 
             onProgress?.Invoke(0f, "Connecting to download server...");
             using var response = await _downloadHttpClient.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
@@ -276,7 +302,7 @@ public static class UpdateChecker
             long totalBytes = response.Content.Headers.ContentLength ?? -1L;
             GD.Print($"[UpdateChecker] Starting download of {zipUrl} (Total size: {totalBytes} bytes)...");
 
-            await using (var fileStream = new FileStream(tempZipPath, FileMode.Create, System.IO.FileAccess.Write, FileShare.None, bufferSize: 81920, useAsync: true))
+            await using (var fileStream = new FileStream(tempArchivePath, FileMode.Create, System.IO.FileAccess.Write, FileShare.None, bufferSize: 81920, useAsync: true))
             await using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
             {
                 byte[] buffer = new byte[81920];
@@ -312,7 +338,7 @@ public static class UpdateChecker
                 }
             }
 
-            onProgress?.Invoke(1.0f, "Extracting update files...");
+            onProgress?.Invoke(0f, "Preparing to extract update files...");
 
             if (Directory.Exists(stagingDir))
             {
@@ -322,7 +348,7 @@ public static class UpdateChecker
 
             await Task.Run(() =>
             {
-                System.IO.Compression.ZipFile.ExtractToDirectory(tempZipPath, stagingDir, overwriteFiles: true);
+                ExtractArchive(tempArchivePath, stagingDir, onProgress);
             }, cancellationToken).ConfigureAwait(false);
 
             string effectiveStaging = GetEffectiveStagingDirectory();
@@ -459,6 +485,148 @@ public static class UpdateChecker
     }
 
     /// <summary>
+    /// Attempts to extract the archive using available system tools (native 7-Zip or Windows tar.exe) for maximum performance.
+    /// </summary>
+    private static bool TryExtractWithSystemTool(string archivePath, string destinationDir)
+    {
+        try
+        {
+            // 1. Check for 7z.exe (official 7-Zip)
+            string[] potential7zPaths = new[]
+            {
+                @"C:\Program Files\7-Zip\7z.exe",
+                @"C:\Program Files (x86)\7-Zip\7z.exe"
+            };
+            foreach (var p in potential7zPaths)
+            {
+                if (File.Exists(p))
+                {
+                    GD.Print($"[UpdateChecker] Using system 7-Zip at {p} for ultra-fast extraction...");
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = p,
+                        Arguments = $"x \"{archivePath}\" -o\"{destinationDir}\" -y",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    if (proc != null)
+                    {
+                        proc.WaitForExit();
+                        if (proc.ExitCode == 0) return true;
+                    }
+                }
+            }
+
+            // 2. Check for Windows built-in tar.exe (libarchive)
+            string sysDir = System.Environment.SystemDirectory;
+            string tarPath = Path.Combine(sysDir, "tar.exe");
+            if (File.Exists(tarPath))
+            {
+                GD.Print($"[UpdateChecker] Trying Windows native tar.exe at {tarPath}...");
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = tarPath,
+                    Arguments = $"-xf \"{archivePath}\" -C \"{destinationDir}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc != null)
+                {
+                    proc.WaitForExit();
+                    if (proc.ExitCode == 0) return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.Print($"[UpdateChecker] System extraction tool note: {ex.Message}");
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts an archive (.zip, .7z, .tar.gz, etc.) into the specified destination directory.
+    /// Uses native ZipFile for standard zip files where possible, falling back to SharpCompress for .7z and other formats.
+    /// Reports progress during sequential streaming extraction.
+    /// </summary>
+    private static void ExtractArchive(string archivePath, string destinationDir, Action<float, string> onProgress = null)
+    {
+        string ext = Path.GetExtension(archivePath).ToLowerInvariant();
+
+        // 1. Fast-path for .zip archives using native .NET ZipFile
+        if (ext == ".zip")
+        {
+            try
+            {
+                System.IO.Compression.ZipFile.ExtractToDirectory(archivePath, destinationDir, overwriteFiles: true);
+                onProgress?.Invoke(1.0f, "Extraction complete.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"[UpdateChecker] ZipFile extraction fallback to SharpCompress: {ex.Message}");
+            }
+        }
+
+        // 2. Fast-path for non-zip (e.g. .7z) using native OS utility (7z.exe or tar.exe) if available
+        onProgress?.Invoke(0.1f, "Extracting update files...");
+        if (TryExtractWithSystemTool(archivePath, destinationDir))
+        {
+            onProgress?.Invoke(1.0f, "Extraction complete.");
+            return;
+        }
+
+        // 3. Managed sequential extraction with SharpCompress reader
+        using var archive = ArchiveFactory.OpenArchive(archivePath);
+
+        int totalEntries = 0;
+        try
+        {
+            foreach (var e in archive.Entries)
+            {
+                if (!e.IsDirectory) totalEntries++;
+            }
+        }
+        catch { }
+
+        int extractedCount = 0;
+        var lastReportTime = DateTime.UtcNow;
+
+        using var reader = archive.ExtractAllEntries();
+        while (reader.MoveToNextEntry())
+        {
+            if (!reader.Entry.IsDirectory)
+            {
+                reader.WriteEntryToDirectory(destinationDir, new ExtractionOptions
+                {
+                    ExtractFullPath = true,
+                    Overwrite = true
+                });
+
+                extractedCount++;
+                var now = DateTime.UtcNow;
+                if ((now - lastReportTime).TotalMilliseconds >= 50 || extractedCount == totalEntries)
+                {
+                    lastReportTime = now;
+                    float progress = totalEntries > 0 ? (float)extractedCount / totalEntries : -1f;
+                    string status = totalEntries > 0
+                        ? $"Extracting files... {(int)(progress * 100f)}% ({extractedCount} / {totalEntries})"
+                        : $"Extracting files... ({extractedCount} files)";
+                    onProgress?.Invoke(progress, status);
+                }
+            }
+        }
+
+        onProgress?.Invoke(1.0f, "Extraction complete.");
+    }
+
+    /// <summary>
     /// Recursively copies files and subdirectories from sourceDir to targetDir.
     /// If a target file is locked by the active process, it renames the target to .bak before copying.
     /// </summary>
@@ -551,10 +719,10 @@ public static class UpdateChecker
 
             // Clean user data temporary download and staging files
             string userDataDir = OS.GetUserDataDir();
-            string tempZip = Path.Combine(userDataDir, "deadlock_update.zip");
-            if (File.Exists(tempZip))
+            var oldArchives = Directory.GetFiles(userDataDir, "deadlock_update*");
+            foreach (var old in oldArchives)
             {
-                try { File.Delete(tempZip); } catch { }
+                try { File.Delete(old); } catch { }
             }
 
             string stagingDir = Path.Combine(userDataDir, "update_staging");

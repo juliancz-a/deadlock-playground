@@ -49,11 +49,71 @@ vec4 sample_bicubic_smooth(sampler2D tex, vec2 uv, vec2 min_bounds, vec2 max_bou
 	vec2 c2 = clamp(vec2(t0.x, t1.y), min_bounds, max_bounds);
 	vec2 c3 = clamp(vec2(t1.x, t1.y), min_bounds, max_bounds);
 
-	vec4 result = texture(tex, c0) * (s0.x * s0.y) +
-	              texture(tex, c1) * (s1.x * s0.y) +
-	              texture(tex, c2) * (s0.x * s1.y) +
-	              texture(tex, c3) * (s1.x * s1.y);
-	return clamp(result, vec4(0.0), vec4(1.0));
+	vec4 s00 = texture(tex, c0);
+	vec4 s10 = texture(tex, c1);
+	vec4 s01 = texture(tex, c2);
+	vec4 s11 = texture(tex, c3);
+
+	float w_00 = s0.x * s0.y;
+	float w_10 = s1.x * s0.y;
+	float w_01 = s0.x * s1.y;
+	float w_11 = s1.x * s1.y;
+
+	// Alpha-weighted color reconstruction: eliminates dark fringes near empty (0,0,0,0) texels
+	// without erroneously scaling straight RGB by 1/alpha when stroke opacity is low.
+	float aw00 = w_00 * s00.a;
+	float aw10 = w_10 * s10.a;
+	float aw01 = w_01 * s01.a;
+	float aw11 = w_11 * s11.a;
+	float total_aw = aw00 + aw10 + aw01 + aw11;
+
+	vec3 rgb = (total_aw > 1e-5)
+		? (s00.rgb * aw00 + s10.rgb * aw10 + s01.rgb * aw01 + s11.rgb * aw11) / total_aw
+		: (s00.rgb * w_00 + s10.rgb * w_10 + s01.rgb * w_01 + s11.rgb * w_11);
+
+	float a = s00.a * w_00 + s10.a * w_10 + s01.a * w_01 + s11.a * w_11;
+	return vec4(rgb, clamp(a, 0.0, 1.0));
+}
+
+// Alpha-weighted bilinear filtering fallback for when bicubic filtering is disabled
+vec4 sample_bilinear_smooth(sampler2D tex, vec2 uv, vec2 min_bounds, vec2 max_bounds) {
+	ivec2 itex_size = textureSize(tex, 0);
+	if (itex_size.x <= 2 || itex_size.y <= 2) {
+		return texture(tex, clamp(uv, min_bounds, max_bounds));
+	}
+	vec2 tex_size = vec2(itex_size);
+	vec2 inv_size = 1.0 / tex_size;
+	vec2 tc = uv * tex_size - 0.5;
+	vec2 f = fract(tc);
+	vec2 base_pos = floor(tc);
+
+	vec2 c0 = clamp((base_pos + vec2(0.5, 0.5)) * inv_size, min_bounds, max_bounds);
+	vec2 c1 = clamp((base_pos + vec2(1.5, 0.5)) * inv_size, min_bounds, max_bounds);
+	vec2 c2 = clamp((base_pos + vec2(0.5, 1.5)) * inv_size, min_bounds, max_bounds);
+	vec2 c3 = clamp((base_pos + vec2(1.5, 1.5)) * inv_size, min_bounds, max_bounds);
+
+	vec4 s00 = texture(tex, c0);
+	vec4 s10 = texture(tex, c1);
+	vec4 s01 = texture(tex, c2);
+	vec4 s11 = texture(tex, c3);
+
+	float w_00 = (1.0 - f.x) * (1.0 - f.y);
+	float w_10 = f.x * (1.0 - f.y);
+	float w_01 = (1.0 - f.x) * f.y;
+	float w_11 = f.x * f.y;
+
+	float aw00 = w_00 * s00.a;
+	float aw10 = w_10 * s10.a;
+	float aw01 = w_01 * s01.a;
+	float aw11 = w_11 * s11.a;
+	float total_aw = aw00 + aw10 + aw01 + aw11;
+
+	vec3 rgb = (total_aw > 1e-5)
+		? (s00.rgb * aw00 + s10.rgb * aw10 + s01.rgb * aw01 + s11.rgb * aw11) / total_aw
+		: (s00.rgb * w_00 + s10.rgb * w_10 + s01.rgb * w_01 + s11.rgb * w_11);
+
+	float a = s00.a * w_00 + s10.a * w_10 + s01.a * w_01 + s11.a * w_11;
+	return vec4(rgb, clamp(a, 0.0, 1.0));
 }
 
 void vertex() {
@@ -95,13 +155,11 @@ void fragment() {
 
 		vec4 paint = smooth_bicubic
 			? sample_bicubic_smooth(overlay_texture, v_atlas_uv, min_atlas, max_atlas)
-			: texture(overlay_texture, clamped_uv);
+			: sample_bilinear_smooth(overlay_texture, clamped_uv, min_atlas, max_atlas);
 
 		float final_alpha = clamp(paint.a, 0.0, 1.0);
-		// Un-premultiply straight RGB safely to prevent edge darkening under blend_mix
-		vec3 final_color = (final_alpha > 0.001)
-			? clamp(paint.rgb / final_alpha, vec3(0.0), vec3(1.0))
-			: clamp(paint.rgb, vec3(0.0), vec3(1.0));
+		// Straight RGB is preserved accurately by alpha-weighted filtering without division artifacts
+		vec3 final_color = clamp(paint.rgb, vec3(0.0), vec3(1.0));
 
 		if (show_selection_mask) {
 			ivec2 mask_size = textureSize(selection_mask, 0);

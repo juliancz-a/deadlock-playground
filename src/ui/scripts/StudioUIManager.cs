@@ -116,7 +116,6 @@ public partial class StudioUIManager : CanvasLayer
         }
 
         _pathManager = new GamePathManager();
-        AddChild(_pathManager);
 
         // Restore persisted gizmo display settings (bone opacity, wireframe opacity, etc.)
         // before any tab or subsystem reads GizmoDisplaySettings values.
@@ -1266,18 +1265,14 @@ public partial class StudioUIManager : CanvasLayer
 
     private async void OnUpdateNowPressed()
     {
-        if (OS.HasFeature("editor"))
-        {
-            ShowToast("In-app auto-update is disabled in Editor mode. Open GitHub release page instead.");
-            if (!string.IsNullOrEmpty(_currentReleaseUrl))
-            {
-                OS.ShellOpen(_currentReleaseUrl);
-            }
-            return;
-        }
-
         if (_isUpdatePrepared)
         {
+            if (OS.HasFeature("editor"))
+            {
+                ShowToast("Update verified and staged! Executable replacement is skipped in Editor mode.");
+                return;
+            }
+
             // Update archive already extracted and staged; execute atomic swap & relaunch
             UpdateChecker.ApplyUpdateAndRestart();
             return;
@@ -1318,6 +1313,10 @@ public partial class StudioUIManager : CanvasLayer
                         if (_updateNotificationDetails != null)
                         {
                             _updateNotificationDetails.Text = status;
+                        }
+                        if (_updateNotificationTitle != null && status.StartsWith("Extracting", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _updateNotificationTitle.Text = "Extracting Update...";
                         }
                         if (_updateProgressBar != null && progress >= 0f)
                         {
