@@ -67,8 +67,13 @@ namespace DeadlockPlayground.UI
 
         public bool IsResizingWidth => _isResizingWidth;
 
+        private TextureRect _baseTextureRect = null;
+        private ShaderMaterial _baseTextureMat = null;
+        private TextureRect _paintOverlayRect = null;
+        private ShaderMaterial _paintOverlayMat = null;
         private ColorRect _selectionOverlayRect = null;
         private ShaderMaterial _selectionOverlayMat = null;
+        private Control _wireframeOverlay = null;
 
         public override void _Ready()
         {
@@ -250,15 +255,77 @@ namespace DeadlockPlayground.UI
 
             _viewportContainer = GetNodeOrNull<SubViewportContainer>("VBoxContainer/ViewportContainer")
                               ?? FindChild("ViewportContainer", true, false) as SubViewportContainer;
+            if (_viewportContainer != null)
+            {
+                _viewportContainer.TextureFilter = TextureFilterEnum.Nearest;
+            }
 
             _subViewport = GetNodeOrNull<SubViewport>("VBoxContainer/ViewportContainer/UVCanvasViewport")
                         ?? FindChild("UVCanvasViewport", true, false) as SubViewport;
 
             _canvasDrawArea = GetNodeOrNull<Control>("VBoxContainer/ViewportContainer/UVCanvasViewport/UVCanvasControl")
                            ?? FindChild("UVCanvasControl", true, false) as Control;
+            if (_canvasDrawArea != null)
+            {
+                _canvasDrawArea.TextureFilter = TextureFilterEnum.Nearest;
+            }
 
             if (_canvasDrawArea != null)
             {
+                _baseTextureRect = _canvasDrawArea.GetNodeOrNull<TextureRect>("BaseTextureRect");
+                if (_baseTextureRect == null)
+                {
+                    var oldBaseNode = _canvasDrawArea.GetNodeOrNull<Node>("BaseTextureRect");
+                    if (oldBaseNode != null)
+                    {
+                        _canvasDrawArea.RemoveChild(oldBaseNode);
+                        oldBaseNode.QueueFree();
+                    }
+
+                    _baseTextureRect = new TextureRect
+                    {
+                        Name = "BaseTextureRect",
+                        MouseFilter = Control.MouseFilterEnum.Ignore,
+                        ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                        StretchMode = TextureRect.StretchModeEnum.Scale,
+                        TextureFilter = TextureFilterEnum.Nearest,
+                        Visible = false
+                    };
+                    _canvasDrawArea.AddChild(_baseTextureRect);
+                    _canvasDrawArea.MoveChild(_baseTextureRect, 0);
+                }
+                _baseTextureRect.TextureFilter = TextureFilterEnum.Nearest;
+
+                var baseShader = GD.Load<Shader>("res://assets/shaders/painter/uv_canvas_base.gdshader");
+                if (baseShader != null)
+                {
+                    _baseTextureMat = new ShaderMaterial { Shader = baseShader };
+                    _baseTextureRect.Material = _baseTextureMat;
+                }
+
+                _paintOverlayRect = _canvasDrawArea.GetNodeOrNull<TextureRect>("PaintOverlayRect");
+                if (_paintOverlayRect == null)
+                {
+                    _paintOverlayRect = new TextureRect
+                    {
+                        Name = "PaintOverlayRect",
+                        MouseFilter = Control.MouseFilterEnum.Ignore,
+                        ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                        StretchMode = TextureRect.StretchModeEnum.Scale,
+                        TextureFilter = TextureFilterEnum.Nearest,
+                        Visible = false
+                    };
+                    _canvasDrawArea.AddChild(_paintOverlayRect);
+                }
+                _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
+
+                var paintShader = GD.Load<Shader>("res://assets/shaders/painter/uv_canvas_paint.gdshader");
+                if (paintShader != null)
+                {
+                    _paintOverlayMat = new ShaderMaterial { Shader = paintShader };
+                    _paintOverlayRect.Material = _paintOverlayMat;
+                }
+
                 _selectionOverlayRect = _canvasDrawArea.GetNodeOrNull<ColorRect>("SelectionOverlayRect");
                 if (_selectionOverlayRect == null)
                 {
@@ -276,6 +343,20 @@ namespace DeadlockPlayground.UI
                 {
                     _selectionOverlayMat = new ShaderMaterial { Shader = shader };
                     _selectionOverlayRect.Material = _selectionOverlayMat;
+                }
+
+                _wireframeOverlay = _canvasDrawArea.GetNodeOrNull<Control>("WireframeOverlay");
+                if (_wireframeOverlay == null)
+                {
+                    _wireframeOverlay = new Control
+                    {
+                        Name = "WireframeOverlay",
+                        MouseFilter = Control.MouseFilterEnum.Ignore,
+                        LayoutMode = 1,
+                        AnchorsPreset = (int)Control.LayoutPreset.FullRect
+                    };
+                    _wireframeOverlay.Draw += () => OnDrawWireframeOverlay(_wireframeOverlay);
+                    _canvasDrawArea.AddChild(_wireframeOverlay);
                 }
             }
 
@@ -342,6 +423,7 @@ namespace DeadlockPlayground.UI
                 _canvasDrawArea.MouseExited += () =>
                 {
                     _hoverMousePos = new Vector2(-9999, -9999);
+                    _wireframeOverlay?.QueueRedraw();
                     _canvasDrawArea.QueueRedraw();
                 };
                 _canvasDrawArea.Resized += () =>
@@ -677,28 +759,48 @@ namespace DeadlockPlayground.UI
             // 1. Background fill
             canvas.DrawRect(new Rect2(Vector2.Zero, canvas.Size), new Color(0.06f, 0.07f, 0.09f, 1.0f));
 
-            // 2. Set 2D transform to local atlas pixel coordinates
-            canvas.DrawSetTransform(_pan, 0.0f, new Vector2(_zoom, _zoom));
+            // 2. Atlas bounds backdrop
+            canvas.DrawRect(new Rect2(_pan, new Vector2(atlasSize * _zoom, atlasSize * _zoom)), new Color(0.12f, 0.14f, 0.18f, 1.0f));
 
-            // 3. Atlas bounds backdrop
-            canvas.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), new Color(0.12f, 0.14f, 0.18f, 1.0f));
-            canvas.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), new Color(0.35f, 0.40f, 0.50f, 0.85f), filled: false, width: 2.0f / _zoom);
-
-            // 3b. Draw base diffuse texture backdrop (if enabled)
-            if (_showBaseTexture)
+            // 3. Update base diffuse texture with opaque RGB shader (prevents low-alpha crushing)
+            var baseTex = _layerManager?.GetBaseTextureResource();
+            if (_baseTextureRect != null)
             {
-                var baseTex = _layerManager?.GetBaseTextureResource();
-                if (baseTex != null && GodotObject.IsInstanceValid(baseTex))
+                bool showBase = _showBaseTexture && baseTex != null && GodotObject.IsInstanceValid(baseTex);
+                _baseTextureRect.Visible = showBase;
+                if (showBase)
                 {
-                    canvas.DrawTextureRect(baseTex, new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), false);
+                    _baseTextureRect.Position = _pan;
+                    _baseTextureRect.Scale = new Vector2(_zoom, _zoom);
+                    _baseTextureRect.Size = new Vector2(atlasSize, atlasSize);
+                    _baseTextureRect.TextureFilter = TextureFilterEnum.Nearest;
+                    _baseTextureRect.Texture = baseTex;
+                    if (_baseTextureRect.Material != _baseTextureMat && _baseTextureMat != null)
+                    {
+                        _baseTextureRect.Material = _baseTextureMat;
+                    }
+                    _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
                 }
             }
 
-            // 4. Draw GPU composited atlas texture (paint overlay)
+            // 4. Update GPU composited atlas texture (paint overlay)
             var atlasTex = _layerManager?.GetAtlasTextureResource();
-            if (atlasTex != null && GodotObject.IsInstanceValid(atlasTex))
+            if (_paintOverlayRect != null)
             {
-                canvas.DrawTextureRect(atlasTex, new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), false);
+                bool showAtlas = atlasTex != null && GodotObject.IsInstanceValid(atlasTex);
+                _paintOverlayRect.Visible = showAtlas;
+                if (showAtlas)
+                {
+                    _paintOverlayRect.Position = _pan;
+                    _paintOverlayRect.Scale = new Vector2(_zoom, _zoom);
+                    _paintOverlayRect.Size = new Vector2(atlasSize, atlasSize);
+                    _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
+                    _paintOverlayRect.Texture = atlasTex;
+                    if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
+                    {
+                        _paintOverlayRect.Material = _paintOverlayMat;
+                    }
+                }
             }
 
             // 4b. Update and position Magic Wand selection overlay (marching ants + protective stencil)
@@ -727,27 +829,46 @@ namespace DeadlockPlayground.UI
                 }
             }
 
-            // 5. Active submesh highlight border
+            // 5. Trigger wireframe and cursor overlay redraw
+            if (_wireframeOverlay != null)
+            {
+                _wireframeOverlay.Size = canvas.Size;
+                _wireframeOverlay.QueueRedraw();
+            }
+        }
+
+        private void OnDrawWireframeOverlay(Control overlay)
+        {
+            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+            if (atlasSize <= 0) atlasSize = 2048;
+
+            // Set 2D transform to local atlas pixel coordinates
+            overlay.DrawSetTransform(_pan, 0.0f, new Vector2(_zoom, _zoom));
+
+            // Atlas bounds border
+            overlay.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), new Color(0.35f, 0.40f, 0.50f, 0.85f), filled: false, width: 2.0f / _zoom);
+
+            // Active submesh highlight border
             if (_hasSubmeshRect)
             {
-                canvas.DrawRect(_cachedSubmeshAtlasRect, new Color(0.96f, 0.77f, 0.26f, 0.95f), filled: false, width: 2.0f / _zoom);
+                overlay.DrawRect(_cachedSubmeshAtlasRect, new Color(0.96f, 0.77f, 0.26f, 0.95f), filled: false, width: 2.0f / _zoom);
             }
 
-            // 6. Anti-aliased UV wireframe overlay
+            // Anti-aliased UV wireframe overlay
             if (_wireframeMode != WireframeDisplayMode.Off)
             {
                 var points = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryPoints : _cachedAllWirePoints;
                 if (points != null && points.Length > 0)
                 {
                     float baseAlpha = (_wireframeMode == WireframeDisplayMode.Outlines) ? 0.85f : 0.40f;
-                    canvas.DrawMultiline(points, new Color(0.85f, 0.88f, 0.95f, baseAlpha * _wireframeOpacity), width: 1.0f / _zoom, antialiased: true);
+                    overlay.DrawMultiline(points, new Color(0.85f, 0.88f, 0.95f, baseAlpha * _wireframeOpacity), width: 1.0f / _zoom, antialiased: true);
                 }
             }
 
-            // 7. Restore identity transform for screen-space cursor preview
-            canvas.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+            // Restore identity transform for screen-space cursor preview
+            overlay.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
 
-            // 8. Cursor preview circle (only for radial brush tools: Paint & Erase)
+            // Cursor preview circle (only for radial brush tools: Paint & Erase)
             if (_hoverMousePos.X > -1000 && _painter != null)
             {
                 if (_painter.ToolMode == BrushToolMode.Paint || _painter.ToolMode == BrushToolMode.Erase)
@@ -756,7 +877,7 @@ namespace DeadlockPlayground.UI
                     Color cursorCol = (_painter.ToolMode == BrushToolMode.Erase)
                         ? new Color(1.0f, 0.35f, 0.35f, 0.85f)
                         : new Color(1.0f, 1.0f, 1.0f, 0.85f);
-                    canvas.DrawCircle(_hoverMousePos, brushRadius, cursorCol, filled: false, width: 1.5f, antialiased: true);
+                    overlay.DrawCircle(_hoverMousePos, brushRadius, cursorCol, filled: false, width: 1.5f, antialiased: true);
                 }
             }
         }
@@ -820,6 +941,7 @@ namespace DeadlockPlayground.UI
             else if (@event is InputEventMouseMotion mm)
             {
                 _hoverMousePos = mm.Position;
+                _wireframeOverlay?.QueueRedraw();
 
                 if (_isPanning)
                 {

@@ -63,6 +63,8 @@ namespace DeadlockPlayground.Painter
         private SkinLayerManager _layerManager;
         public SkinLayerManager LayerManager => _layerManager;
         private FloatingBrushPaletteUI _brushPalette;
+        private Control _cameraControlPad;
+        private bool _clickOriginatedOnUI = false;
         private readonly MeshRaycaster _raycaster = new();
         private MeshInstance3D _currentMesh;
         public MeshInstance3D CurrentMesh => _currentMesh;
@@ -145,14 +147,39 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
+            var hovered = GetTree()?.Root?.GuiGetHoveredControl();
+            if (hovered != null)
+            {
+                bool isMainViewport = (hovered.Name == "SubViewportContainer" && hovered.GetParent()?.Name == "ViewportArea");
+                if (!isMainViewport)
+                {
+                    return true;
+                }
+            }
+
+            Vector2 globalMouse = GetViewport().GetMousePosition();
+
             if (_brushPalette != null && GodotObject.IsInstanceValid(_brushPalette) && _brushPalette.Visible)
             {
-                Vector2 globalMouse = GetViewport().GetMousePosition();
                 if (_brushPalette.GetGlobalRect().HasPoint(globalMouse))
                 {
                     return true;
                 }
             }
+
+            if (_cameraControlPad == null || !GodotObject.IsInstanceValid(_cameraControlPad))
+            {
+                _cameraControlPad = GetTree()?.Root?.FindChild("CameraControlPad", true, false) as Control;
+            }
+
+            if (_cameraControlPad != null && GodotObject.IsInstanceValid(_cameraControlPad) && _cameraControlPad.Visible)
+            {
+                if (_cameraControlPad.GetGlobalRect().HasPoint(globalMouse))
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
 
@@ -504,7 +531,17 @@ namespace DeadlockPlayground.Painter
 
             EnsureCameraBrush();
 
-            if (IsMouseOverUI())
+            bool isLeftDown = Input.IsMouseButtonPressed(MouseButton.Left);
+            if (!isLeftDown)
+            {
+                _clickOriginatedOnUI = false;
+            }
+            else if (IsMouseOverUI() && !_isMouseDown)
+            {
+                _clickOriginatedOnUI = true;
+            }
+
+            if (IsMouseOverUI() || _clickOriginatedOnUI)
             {
                 if (_cursorGizmo != null) _cursorGizmo.Visible = false;
                 if (_previewDecalNode != null) _previewDecalNode.Visible = false;
@@ -516,7 +553,6 @@ namespace DeadlockPlayground.Painter
             UpdateSelectionOutline();
 
             var camera = _worldViewport?.GetCamera3D() ?? _camera;
-            bool isLeftDown = Input.IsMouseButtonPressed(MouseButton.Left);
 
             bool canPaintLayer = _layerManager?.ActiveLayer != null && !_layerManager.ActiveLayer.IsLocked && _layerManager.ActiveLayer.IsVisible;
             bool isPainting = IsPaintingActive && canPaintLayer && isLeftDown && _lastHit.Hit 
@@ -1397,6 +1433,13 @@ namespace DeadlockPlayground.Painter
         public override void _UnhandledInput(InputEvent @event)
         {
             if (!IsPaintingActive) return;
+
+            if (@event is InputEventMouseButton mbRelease && !mbRelease.Pressed && mbRelease.ButtonIndex == MouseButton.Left)
+            {
+                _clickOriginatedOnUI = false;
+            }
+
+            if (IsMouseOverUI() || _clickOriginatedOnUI) return;
             if (_currentMesh == null && ToolMode != BrushToolMode.SelectSubmesh && !(@event is InputEventMouseButton mb && mb.AltPressed)) return;
 
             if (@event is InputEventMouseButton mouseBtn && mouseBtn.ButtonIndex == MouseButton.Left && mouseBtn.Pressed)

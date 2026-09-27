@@ -51,7 +51,7 @@ public static class Source2TextureLoader
             _textureCache.Remove(cacheKey);
         }
 
-        var tex = ExtractVtexToGodot(package, internalPath, maxDimension: 1024, forceOpaque: forceOpaque, addonPackage: addonPackage);
+        var tex = ExtractVtexToGodot(package, internalPath, maxDimension: 4096, forceOpaque: forceOpaque, addonPackage: addonPackage);
         if (tex != null)
         {
             tex.ResourceName = internalPath;
@@ -145,7 +145,7 @@ public static class Source2TextureLoader
     /// Priority 2: Base Game VPK.
     /// Converts Skia Bgra8888 -> Rgba8888 and handles forceOpaque vs alpha cutout preservation.
     /// </summary>
-    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 1024, bool forceOpaque = true, Package addonPackage = null)
+    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = true, Package addonPackage = null)
     {
         if (package == null && addonPackage == null) return null;
         if (string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
@@ -200,9 +200,9 @@ public static class Source2TextureLoader
 
         uint maxMip = texture.NumMipLevels > 0 ? (uint)(texture.NumMipLevels - 1) : 0;
         uint mipLevel = 0;
-        if (texture.Width > maxDimension || texture.Height > maxDimension)
+        while (mipLevel < maxMip && ((texture.Width >> (int)mipLevel) > maxDimension || (texture.Height >> (int)mipLevel) > maxDimension))
         {
-            mipLevel = (uint)Math.Min(2, maxMip);
+            mipLevel++;
         }
 
         SKBitmap skBitmap;

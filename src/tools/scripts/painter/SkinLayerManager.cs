@@ -1440,7 +1440,7 @@ namespace DeadlockPlayground.Painter
 
                 if (img.GetWidth() != rectW || img.GetHeight() != rectH)
                 {
-                    img.Resize(rectW, rectH, Image.Interpolation.Bilinear);
+                    img.Resize(rectW, rectH, Image.Interpolation.Nearest);
                 }
 
                 unsafe
@@ -1453,12 +1453,30 @@ namespace DeadlockPlayground.Painter
                             int rowOffset = (rectY + y) * atlasSize * 4;
                             for (int x = 0; x < rectW; x++)
                             {
-                                Color c = img.GetPixel(x, y).SrgbToLinear();
+                                Color rawCol = img.GetPixel(x, y);
+                                float a = rawCol.A;
+                                float r = rawCol.R;
+                                float g = rawCol.G;
+                                float b = rawCol.B;
+
+                                // Ensure color channels are NOT premultiplied by alpha:
+                                // If raw data came from a format where RGB was pre-scaled by A, unscale it:
+                                // RGB = RGB / max(0.01, A)
+                                if (a > 0.001f && a < 0.999f)
+                                {
+                                    float invA = 1.0f / Mathf.Max(0.01f, a);
+                                    r = Mathf.Clamp(r * invA, 0.0f, 1.0f);
+                                    g = Mathf.Clamp(g * invA, 0.0f, 1.0f);
+                                    b = Mathf.Clamp(b * invA, 0.0f, 1.0f);
+                                }
+
+                                Color c = new Color(r, g, b, a).SrgbToLinear();
                                 int idx = rowOffset + (rectX + x) * 4;
                                 hBase[idx] = (Half)c.R;
                                 hBase[idx + 1] = (Half)c.G;
                                 hBase[idx + 2] = (Half)c.B;
-                                hBase[idx + 3] = (Half)1.0f;
+                                // Preserve authentic raw alpha channel in memory (tint mask, cavity AO, fabric spec)
+                                hBase[idx + 3] = (Half)a;
                             }
                         }
                     }

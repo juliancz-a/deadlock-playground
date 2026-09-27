@@ -592,88 +592,100 @@ namespace DeadlockPlayground.Painter
             Texture2D baseTex = null;
             if (submesh.Mesh != null)
             {
-                var mat = submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
-                       ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex);
+                var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
+                       ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
+                       ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
+                       ?? submesh.Mesh.MaterialOverride;
 
-                if (mat is StandardMaterial3D std && std.AlbedoTexture != null)
+                if (mat != null)
                 {
-                    baseTex = std.AlbedoTexture;
-                }
-                else if (mat is ShaderMaterial shMat)
-                {
-                    string[] texParams = { "g_tColor", "g_tColor1", "g_tColorA", "texture_albedo", "albedo_texture" };
-                    foreach (var p in texParams)
-                    {
-                        var t = shMat.GetShaderParameter(p);
-                        if (t.VariantType == Variant.Type.Object && t.AsGodotObject() is Texture2D td)
-                        {
-                            baseTex = td;
-                            break;
-                        }
-                    }
+                    baseTex = SkinLayerManager.ExtractBaseTexture(mat);
                 }
             }
 
-            // Resize paint composite to power of two
-            var finalImage = (Image)isolatedImage.Duplicate();
-            if (finalImage.GetWidth() != targetRes || finalImage.GetHeight() != targetRes)
-            {
-                finalImage.Resize(targetRes, targetRes, Image.Interpolation.Lanczos);
-            }
+            int exportWidth = targetRes > 0 ? targetRes : 2048;
+            int exportHeight = targetRes > 0 ? targetRes : 2048;
 
-            // Composite over base texture if present
+            Image baseImg = null;
             if (baseTex != null)
             {
-                var baseImg = baseTex.GetImage();
+                baseImg = baseTex.GetImage();
                 if (baseImg != null)
                 {
-                    var baseResized = (Image)baseImg.Duplicate();
-                    baseResized.Convert(Image.Format.Rgba8);
-                    if (baseResized.GetWidth() != targetRes || baseResized.GetHeight() != targetRes)
+                    if (baseImg.IsCompressed())
                     {
-                        baseResized.Resize(targetRes, targetRes, Image.Interpolation.Lanczos);
+                        baseImg.Decompress();
                     }
-
-                    // Alpha composite: final = paint.rgb * paint.a + base.rgb * (1 - paint.a)
-                    finalImage.Convert(Image.Format.Rgba8);
-                    byte[] paintData = finalImage.GetData();
-                    byte[] baseData = baseResized.GetData();
-
-                    int pixelCount = targetRes * targetRes;
-                    for (int i = 0; i < pixelCount; i++)
-                    {
-                        int idx = i * 4;
-                        float pA = paintData[idx + 3] / 255.0f;
-                        if (pA <= 0.001f)
-                        {
-                            paintData[idx] = baseData[idx];
-                            paintData[idx + 1] = baseData[idx + 1];
-                            paintData[idx + 2] = baseData[idx + 2];
-                            paintData[idx + 3] = 255;
-                        }
-                        else if (pA < 0.999f)
-                        {
-                            float bR = baseData[idx];
-                            float bG = baseData[idx + 1];
-                            float bB = baseData[idx + 2];
-
-                            float pR = paintData[idx];
-                            float pG = paintData[idx + 1];
-                            float pB = paintData[idx + 2];
-
-                            paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
-                            paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
-                            paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
-                            paintData[idx + 3] = 255;
-                        }
-                        else
-                        {
-                            paintData[idx + 3] = 255;
-                        }
-                    }
-
-                    finalImage = Image.CreateFromData(targetRes, targetRes, false, Image.Format.Rgba8, paintData);
+                    // Retain native full dimensions if base texture is high-res (e.g. 2048x2048)
+                    exportWidth = Mathf.Max(exportWidth, baseImg.GetWidth());
+                    exportHeight = Mathf.Max(exportHeight, baseImg.GetHeight());
                 }
+            }
+
+            // Ensure isolated painted region matches target dimensions without blur
+            var finalImage = (Image)isolatedImage.Duplicate();
+            if (finalImage.IsCompressed())
+            {
+                finalImage.Decompress();
+            }
+            if (finalImage.GetWidth() != exportWidth || finalImage.GetHeight() != exportHeight)
+            {
+                finalImage.Resize(exportWidth, exportHeight, Image.Interpolation.Nearest);
+            }
+            finalImage.Convert(Image.Format.Rgba8);
+
+            // Composite over base texture if present
+            if (baseImg != null)
+            {
+                var baseUnscaled = (Image)baseImg.Duplicate();
+                baseUnscaled.Convert(Image.Format.Rgba8);
+                if (baseUnscaled.GetWidth() != exportWidth || baseUnscaled.GetHeight() != exportHeight)
+                {
+                    baseUnscaled.Resize(exportWidth, exportHeight, Image.Interpolation.Nearest);
+                }
+
+                // Alpha composite: final = paint.rgb * paint.a + base.rgb * (1 - paint.a)
+                byte[] paintData = finalImage.GetData();
+                byte[] baseData = baseUnscaled.GetData();
+
+                int pixelCount = exportWidth * exportHeight;
+                for (int i = 0; i < pixelCount; i++)
+                {
+                    int idx = i * 4;
+                    float pA = paintData[idx + 3] / 255.0f;
+                    if (pA <= 0.001f)
+                    {
+                        // 1:1 unpainted: exact raw base texels byte-for-byte!
+                        paintData[idx] = baseData[idx];
+                        paintData[idx + 1] = baseData[idx + 1];
+                        paintData[idx + 2] = baseData[idx + 2];
+                        // Preserve Valve's original Alpha channel (cavity AO, tint, fabric spec) byte-for-byte
+                        paintData[idx + 3] = baseData[idx + 3];
+                    }
+                    else if (pA < 0.999f)
+                    {
+                        float bR = baseData[idx];
+                        float bG = baseData[idx + 1];
+                        float bB = baseData[idx + 2];
+
+                        float pR = paintData[idx];
+                        float pG = paintData[idx + 1];
+                        float pB = paintData[idx + 2];
+
+                        paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
+                        paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
+                        paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
+                        // Preserve Valve's original Alpha channel byte-for-byte
+                        paintData[idx + 3] = baseData[idx + 3];
+                    }
+                    else
+                    {
+                        // Full paint opacity replaces RGB but retains authentic base alpha channel
+                        paintData[idx + 3] = baseData[idx + 3];
+                    }
+                }
+
+                finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
             }
 
             return finalImage;
@@ -1033,9 +1045,9 @@ namespace DeadlockPlayground.Painter
 		}
 	]
 	""m_outputTypeString"" ""string"" ""2D""
-	""m_outputFormat"" ""string"" ""BGRA8888""
+	""m_outputFormat"" ""string"" ""BC7""
 	""m_outputClearColor"" ""vector4"" ""0 0 0 0""
-	""m_nOutputMinDimension"" ""int"" ""0""
+	""m_nOutputMinDimension"" ""int"" ""4""
 	""m_nOutputMaxDimension"" ""int"" ""0""
 	""m_textureOutputChannelArray"" ""element_array""
 	[

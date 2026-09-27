@@ -10,7 +10,7 @@ public partial class OrbitCamera : Node3D
 
     [ExportGroup("Zoom Settings")]
     [Export] public float ZoomSensitivity = 0.25f;
-    [Export] public float ZoomMin = 0.15f;
+    [Export] public float ZoomMin = 0.02f;
     [Export] public float ZoomMax = 20.0f;
     [Export] public float ZoomLerpSpeed = 10.0f;
 
@@ -22,7 +22,7 @@ public partial class OrbitCamera : Node3D
     [Export] public float PanLerpSpeed = 10.0f;
 
     [ExportGroup("Orthogonal Settings")]
-    [Export] public float OrthoSizeMin = 0.5f;
+    [Export] public float OrthoSizeMin = 0.02f;
     [Export] public float OrthoSizeMax = 20.0f;
     [Export] public float OrthoSizeSensitivity = 0.25f;
     [Export] public bool LockOrbitInOrtho { get; set; } = true;
@@ -145,6 +145,9 @@ public partial class OrbitCamera : Node3D
             SetProcessInput(false);
             return;
         }
+
+        // Allow zooming in close to fine surface details without near-plane geometry clipping
+        _camera.Near = 0.01f;
 
         // Initialize state
         Vector3 rot = Rotation;
@@ -269,7 +272,7 @@ public partial class OrbitCamera : Node3D
                 return;
             }
 
-            // Zoom (Scroll Wheel)
+            // Zoom (Scroll Wheel - proportional zoom so user can zoom closer into fine details smoothly)
             if (mouseBtnEvent.Pressed)
             {
                 bool isOrtho = _camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal;
@@ -277,11 +280,13 @@ public partial class OrbitCamera : Node3D
                 {
                     if (isOrtho)
                     {
-                        _targetOrthoSize = Mathf.Clamp(_targetOrthoSize - OrthoSizeSensitivity, OrthoSizeMin, OrthoSizeMax);
+                        float step = Mathf.Max(0.01f, _targetOrthoSize * 0.12f);
+                        _targetOrthoSize = Mathf.Clamp(_targetOrthoSize - step, OrthoSizeMin, OrthoSizeMax);
                     }
                     else
                     {
-                        _targetZoom = Mathf.Clamp(_targetZoom - ZoomSensitivity, ZoomMin, ZoomMax);
+                        float step = Mathf.Max(0.01f, _targetZoom * 0.12f);
+                        _targetZoom = Mathf.Clamp(_targetZoom - step, ZoomMin, ZoomMax);
                     }
                     GetViewport()?.SetInputAsHandled();
                     return;
@@ -290,11 +295,13 @@ public partial class OrbitCamera : Node3D
                 {
                     if (isOrtho)
                     {
-                        _targetOrthoSize = Mathf.Clamp(_targetOrthoSize + OrthoSizeSensitivity, OrthoSizeMin, OrthoSizeMax);
+                        float step = Mathf.Max(0.01f, _targetOrthoSize * 0.12f);
+                        _targetOrthoSize = Mathf.Clamp(_targetOrthoSize + step, OrthoSizeMin, OrthoSizeMax);
                     }
                     else
                     {
-                        _targetZoom = Mathf.Clamp(_targetZoom + ZoomSensitivity, ZoomMin, ZoomMax);
+                        float step = Mathf.Max(0.01f, _targetZoom * 0.12f);
+                        _targetZoom = Mathf.Clamp(_targetZoom + step, ZoomMin, ZoomMax);
                     }
                     GetViewport()?.SetInputAsHandled();
                     return;
@@ -386,16 +393,16 @@ public partial class OrbitCamera : Node3D
             if (Input.IsPhysicalKeyPressed(Key.Equal) || Input.IsPhysicalKeyPressed(Key.KpAdd))
             {
                 if (_camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal)
-                    _targetOrthoSize = Mathf.Clamp(_targetOrthoSize - OrthoSizeSensitivity * 3.0f * fDelta, OrthoSizeMin, OrthoSizeMax);
+                    _targetOrthoSize = Mathf.Clamp(_targetOrthoSize - Mathf.Max(0.01f, _targetOrthoSize * 1.5f) * fDelta, OrthoSizeMin, OrthoSizeMax);
                 else
-                    _targetZoom = Mathf.Clamp(_targetZoom - ZoomSensitivity * 5.0f * fDelta, ZoomMin, ZoomMax);
+                    _targetZoom = Mathf.Clamp(_targetZoom - Mathf.Max(0.01f, _targetZoom * 1.5f) * fDelta, ZoomMin, ZoomMax);
             }
             if (Input.IsPhysicalKeyPressed(Key.Minus) || Input.IsPhysicalKeyPressed(Key.KpSubtract))
             {
                 if (_camera != null && _camera.Projection == Camera3D.ProjectionType.Orthogonal)
-                    _targetOrthoSize = Mathf.Clamp(_targetOrthoSize + OrthoSizeSensitivity * 3.0f * fDelta, OrthoSizeMin, OrthoSizeMax);
+                    _targetOrthoSize = Mathf.Clamp(_targetOrthoSize + Mathf.Max(0.01f, _targetOrthoSize * 1.5f) * fDelta, OrthoSizeMin, OrthoSizeMax);
                 else
-                    _targetZoom = Mathf.Clamp(_targetZoom + ZoomSensitivity * 5.0f * fDelta, ZoomMin, ZoomMax);
+                    _targetZoom = Mathf.Clamp(_targetZoom + Mathf.Max(0.01f, _targetZoom * 1.5f) * fDelta, ZoomMin, ZoomMax);
             }
         }
 
