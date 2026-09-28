@@ -533,6 +533,18 @@ namespace DeadlockPlayground.Painter
                     sm.ToonMaterial.SetShaderParameter("shadow_tint", shadowColor);
                     sm.ToonMaterial.SetShaderParameter("shadow_tint_amount", shadowAmt);
                 }
+                if (sm.OriginalMaterial is ShaderMaterial origSm &&
+                    (origSm.Shader?.ResourcePath?.Contains("unicorn_hair") == true ||
+                     origSm.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                     origSm.Shader?.ResourcePath?.Contains("source2_pbr") == true))
+                {
+                    origSm.SetShaderParameter("toon_intensity", intensity);
+                    origSm.SetShaderParameter("steps", steps);
+                    origSm.SetShaderParameter("step_smoothness", smoothness);
+                    origSm.SetShaderParameter("shadow_tint", shadowColor);
+                    origSm.SetShaderParameter("shadow_tint_amount", shadowAmt);
+                }
+
                 if (sm.OutlineMaterial != null)
                 {
                     sm.OutlineMaterial.SetShaderParameter("outline_width", outlineWidth);

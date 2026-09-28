@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Tools;
+using DeadlockPlayground.UI;
 
 public partial class FloatingBrushPaletteUI : PanelContainer
 {
@@ -68,6 +69,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Label _lblEraseFlow;
 
     // Bucket fill controls
+    private HSlider _sliderBucketTolerance;
+    private Label _lblBucketTolerance;
     private Button _btnFillActiveSubmesh;
 
     // Magic Wand controls
@@ -337,6 +340,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _lblEraseFlow = ResolveNode<Label>("LblEraseFlow", "LblEraseFlow");
 
         // Bucket Fill controls
+        _sliderBucketTolerance = ResolveNode<HSlider>("SliderBucketTolerance", "SliderBucketTolerance");
+        _lblBucketTolerance = ResolveNode<Label>("LblBucketTolerance", "LblBucketTolerance");
         _btnFillActiveSubmesh = ResolveNode<Button>("BtnFillActiveSubmesh", "BtnFillActiveSubmesh");
 
         // Decal controls
@@ -396,6 +401,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             _optBlendMode.AddItem("Darken", 4);
             _optBlendMode.AddItem("Lighten", 5);
             _optBlendMode.AddItem("Color Dodge", 6);
+            _optBlendMode.AddItem("Color (HSL)", 7);
             _optBlendMode.Select(0);
         }
 
@@ -435,7 +441,16 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToolDecal != null) _btnToolDecal.Pressed += () => OnToolButtonClicked(BrushToolMode.Decal);
         if (_btnToolText != null) _btnToolText.Pressed += () => OnToolButtonClicked(BrushToolMode.Text);
 
-        if (_btnColor != null) _btnColor.ColorChanged += SetUniversalColor;
+        if (_btnColor != null)
+        {
+            _btnColor.ColorChanged += OnColorPickerColorChanged;
+            _btnColor.PopupClosed += OnColorPickerPopupClosed;
+            var picker = _btnColor.GetPicker();
+            if (picker != null)
+            {
+                picker.ColorChanged += OnColorPickerColorChanged;
+            }
+        }
         if (_btnMirror != null) _btnMirror.Toggled += OnMirrorToggled;
 
         // Action buttons
@@ -558,6 +573,18 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
 
         // Bucket Fill
+        if (_sliderBucketTolerance != null)
+        {
+            _sliderBucketTolerance.ValueChanged += (v) =>
+            {
+                if (_painter != null) _painter.BucketFillTolerance = (float)v;
+                if (_lblBucketTolerance != null)
+                {
+                    _lblBucketTolerance.Text = v >= 0.99 ? "100%" : $"{Mathf.RoundToInt(v * 100)}%";
+                }
+            };
+        }
+
         if (_btnFillActiveSubmesh != null)
         {
             _btnFillActiveSubmesh.Pressed += () =>
@@ -581,7 +608,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         {
             _chkContiguous.Toggled += (contiguous) =>
             {
-                if (_painter?.MagicWandTool != null)
+                if (_painter?.MagicWandTool != null && _painter.MagicWandTool.Contiguous != contiguous)
                 {
                     _painter.MagicWandTool.Contiguous = contiguous;
                     if (_painter.MagicWandTool.HasSelection)
@@ -596,8 +623,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         {
             _chkUseMask.Toggled += (active) =>
             {
-                if (_painter?.MagicWandTool != null) _painter.MagicWandTool.UseSelectionMask = active;
-                _painter?.SyncSelectionMaskState();
+                if (_painter?.MagicWandTool != null && _painter.MagicWandTool.UseSelectionMask != active)
+                {
+                    _painter.MagicWandTool.UseSelectionMask = active;
+                    _painter.SyncSelectionMaskState();
+                }
             };
         }
 
@@ -605,7 +635,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         {
             _chkIsolateSubmesh.Toggled += (isolate) =>
             {
-                if (_painter?.MagicWandTool != null)
+                if (_painter?.MagicWandTool != null && _painter.MagicWandTool.IsolateSubmesh != isolate)
                 {
                     _painter.MagicWandTool.IsolateSubmesh = isolate;
                     if (_painter.MagicWandTool.HasSelection)
@@ -850,6 +880,27 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             }
         }
 
+        QuickColorPaletteUI quickPalette = GetNodeOrNull<QuickColorPaletteUI>("../QuickColorPalette")
+            ?? GetTree()?.Root?.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+        if (quickPalette != null && quickPalette.IsVisibleInTree())
+        {
+            Rect2 palRect = quickPalette.GetPaletteGlobalRect().Grow(6.0f);
+            Rect2 paletteRect = new Rect2(targetPos, Size);
+            if (paletteRect.Intersects(palRect))
+            {
+                float overlapY = palRect.End.Y - targetPos.Y;
+                float overlapX = palRect.End.X - targetPos.X;
+                if (overlapY < overlapX)
+                {
+                    targetPos.Y = Mathf.Clamp(palRect.End.Y, minY, maxY);
+                }
+                else
+                {
+                    targetPos.X = Mathf.Clamp(palRect.End.X, minX, maxX);
+                }
+            }
+        }
+
         return targetPos;
     }
 
@@ -1005,6 +1056,19 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         UpdateSelectTargetLabel();
         UpdateFlyoutSections(mode);
 
+        if (mode == BrushToolMode.BucketFill && _sliderBucketTolerance != null && _painter != null)
+        {
+            _sliderBucketTolerance.SetValueNoSignal(_painter.BucketFillTolerance);
+            if (_lblBucketTolerance != null)
+            {
+                _lblBucketTolerance.Text = _painter.BucketFillTolerance >= 0.99f ? "100%" : $"{Mathf.RoundToInt(_painter.BucketFillTolerance * 100)}%";
+            }
+        }
+        else if (mode == BrushToolMode.MagicWand && _painter?.MagicWandTool != null)
+        {
+            UpdateWandUI();
+        }
+
         if (forceFlyoutOpen && _flyoutPanel != null)
         {
             _flyoutPanel.Visible = true;
@@ -1049,10 +1113,63 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
     }
 
+    private ulong _colorChangeTimestamp = 0;
+
+    private void OnColorPickerColorChanged(Color color)
+    {
+        // 1. Live preview update (brush and button update live, palette reflects active highlight, but NO recents are added while dragging)
+        SetUniversalColor(color, commitToRecents: false);
+
+        // 2. Debounce commit: if dragging stops for 400ms without new changes, commit that single settled color
+        ulong currentId = ++_colorChangeTimestamp;
+        var tree = GetTree();
+        if (tree != null)
+        {
+            tree.CreateTimer(0.4).Timeout += () =>
+            {
+                if (_colorChangeTimestamp == currentId)
+                {
+                    CommitCurrentColorToRecents();
+                }
+            };
+        }
+    }
+
+    private void OnColorPickerPopupClosed()
+    {
+        // User closed the popup -> immediately commit current color and cancel any pending timer
+        _colorChangeTimestamp++;
+        CommitCurrentColorToRecents();
+    }
+
+    private void CommitCurrentColorToRecents()
+    {
+        Color col = _btnColor != null ? _btnColor.Color : (_painter != null ? _painter.BrushColor : Colors.White);
+        var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("../QuickColorPalette")
+                        ?? GetTree()?.Root?.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+        quickPalette?.AddRecentColor(col);
+    }
+
     public void SetUniversalColor(Color color)
     {
+        SetUniversalColor(color, commitToRecents: true);
+    }
+
+    public void SetUniversalColor(Color color, bool commitToRecents)
+    {
         if (_painter != null) _painter.BrushColor = color;
-        if (_btnColor != null) _btnColor.Color = color;
+        if (_btnColor != null && _btnColor.Color != color) _btnColor.Color = color;
+
+        var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("../QuickColorPalette")
+                        ?? GetTree()?.Root?.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+        if (commitToRecents)
+        {
+            quickPalette?.AddRecentColor(color);
+        }
+        else
+        {
+            quickPalette?.SetActiveColor(color, commitToRecents: false);
+        }
     }
 
     private void OnMirrorToggled(bool enabled)
@@ -1113,7 +1230,7 @@ public void UpdateTooltipsAndKeymaps()
         }
         if (_sliderWandTolerance != null)
         {
-            _sliderWandTolerance.Value = wand.Tolerance;
+            _sliderWandTolerance.SetValueNoSignal(wand.Tolerance);
         }
         if (_lblWandTolerance != null)
         {
@@ -1121,15 +1238,15 @@ public void UpdateTooltipsAndKeymaps()
         }
         if (_chkContiguous != null)
         {
-            _chkContiguous.ButtonPressed = wand.Contiguous;
+            _chkContiguous.SetPressedNoSignal(wand.Contiguous);
         }
         if (_chkUseMask != null)
         {
-            _chkUseMask.ButtonPressed = wand.UseSelectionMask;
+            _chkUseMask.SetPressedNoSignal(wand.UseSelectionMask);
         }
         if (_chkIsolateSubmesh != null)
         {
-            _chkIsolateSubmesh.ButtonPressed = wand.IsolateSubmesh;
+            _chkIsolateSubmesh.SetPressedNoSignal(wand.IsolateSubmesh);
         }
     }
 
@@ -1138,12 +1255,20 @@ public void UpdateTooltipsAndKeymaps()
         if (_painter == null) return;
 
         if (_btnColor != null) _btnColor.Color = _painter.BrushColor;
-        if (_sliderBrushSize != null) _sliderBrushSize.Value = _painter.BrushSize;
-        if (_sliderBrushHardness != null) _sliderBrushHardness.Value = _painter.BrushHardness;
-        if (_sliderBrushFlow != null) _sliderBrushFlow.Value = _painter.BrushFlow;
+        if (_sliderBrushSize != null) _sliderBrushSize.SetValueNoSignal(_painter.BrushSize);
+        if (_sliderBrushHardness != null) _sliderBrushHardness.SetValueNoSignal(_painter.BrushHardness);
+        if (_sliderBrushFlow != null) _sliderBrushFlow.SetValueNoSignal(_painter.BrushFlow);
         if (_optBrushShape != null) _optBrushShape.Select((int)_painter.BrushShape);
         if (_optEraseShape != null) _optEraseShape.Select((int)_painter.EraserShape);
         if (_optBlendMode != null) _optBlendMode.Select(_painter.BlendMode);
+        if (_sliderBucketTolerance != null)
+        {
+            _sliderBucketTolerance.SetValueNoSignal(_painter.BucketFillTolerance);
+            if (_lblBucketTolerance != null)
+            {
+                _lblBucketTolerance.Text = _painter.BucketFillTolerance >= 0.99f ? "100%" : $"{Mathf.RoundToInt(_painter.BucketFillTolerance * 100)}%";
+            }
+        }
         UpdateSelectTargetLabel();
         UpdateUndoRedoState(_painter?.LayerManager?.CanUndo ?? false, _painter?.LayerManager?.CanRedo ?? false);
     }
@@ -1199,6 +1324,13 @@ public void UpdateTooltipsAndKeymaps()
         if (@event.IsActionPressed("paint_eraser"))
         {
             SelectTool(BrushToolMode.Erase, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_bucket"))
+        {
+            SelectTool(BrushToolMode.BucketFill, forceFlyoutOpen: true);
             GetViewport()?.SetInputAsHandled();
             return;
         }

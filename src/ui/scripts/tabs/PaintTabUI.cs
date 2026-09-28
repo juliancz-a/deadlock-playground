@@ -208,7 +208,7 @@ public partial class PaintTabUI : VBoxContainer
                 _layerManager?.SetOverlayBlendMode(mode);
                 _painter?.SyncCameraBrushProperties(force: true);
             };
-            _brushPalette.FillRequested += (color) => _layerManager?.FillCurrentSubmesh(color, null, _painter?.MagicWandTool);
+            _brushPalette.FillRequested += (color) => _layerManager?.FillCurrentSubmesh(color, null, _painter?.MagicWandTool, _painter != null ? _painter.BucketFillTolerance : 0.5f);
         }
     }
 
@@ -259,6 +259,7 @@ public partial class PaintTabUI : VBoxContainer
             _optLayerBlend.AddItem("Darken", (int)LayerBlendMode.Darken);
             _optLayerBlend.AddItem("Lighten", (int)LayerBlendMode.Lighten);
             _optLayerBlend.AddItem("Color Dodge", (int)LayerBlendMode.ColorDodge);
+            _optLayerBlend.AddItem("Color (HSL)", (int)LayerBlendMode.Color);
             _optLayerBlend.Select(0);
         }
 

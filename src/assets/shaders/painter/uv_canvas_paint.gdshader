@@ -1,8 +1,6 @@
 shader_type canvas_item;
 render_mode blend_mix;
 
-uniform sampler2D TEXTURE : filter_nearest;
-
 // Converts linear HDR half-float color from the GPU atlas composite buffer
 // to sRGB for accurate presentation on the 2D canvas.
 vec3 linear_to_srgb(vec3 c) {

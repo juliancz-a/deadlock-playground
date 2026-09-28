@@ -5,6 +5,7 @@ uniform vec2 atlas_size = vec2(2048.0, 2048.0);
 uniform vec2 submesh_pos = vec2(0.0, 0.0);
 uniform vec2 submesh_size = vec2(1.0, 1.0);
 uniform bool has_submesh_rect = false;
+uniform bool show_stencil_pattern = true;
 
 void fragment() {
 	vec2 uv = UV;
@@ -32,7 +33,7 @@ void fragment() {
 		float ant = sin((FRAGCOORD.x + FRAGCOORD.y + TIME * 16.0) * 0.4);
 		vec3 ant_color = (ant > 0.0) ? vec3(1.0, 1.0, 1.0) : vec3(0.05, 0.05, 0.05);
 		COLOR = vec4(ant_color, 1.0);
-	} else if (m_center < 0.5) {
+	} else if (m_center < 0.5 && show_stencil_pattern) {
 		// UNSELECTED area: protective diagonal stencil hatch (matching 3D viewport)
 		bool in_submesh = true;
 		if (has_submesh_rect) {

@@ -204,12 +204,13 @@ size_flags_horizontal = 3
 size_flags_vertical = 4
 max_value = 1.0
 step = 0.05
-value = 0.1
+value = 0.5
 
 [node name="LabelShadow" type="Label" parent="ToonGroup/ShadowAmountBox" unique_id=1751595922]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
-text = "0.12"
+text = "0.50"
+
 
 [node name="ShadowColorBox" type="HBoxContainer" parent="ToonGroup" unique_id=208584359]
 layout_mode = 2

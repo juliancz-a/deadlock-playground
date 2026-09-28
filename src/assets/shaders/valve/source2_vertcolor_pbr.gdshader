@@ -27,6 +27,13 @@ uniform vec2 self_illum_scroll_speed = vec2(0.0);
 uniform float self_illum_fresnel_exponent = 0.0;
 uniform float self_illum_albedo_factor = 0.0;
 
+// Stylized NPR Stepped Toon & Shadow Tint controls
+uniform float toon_intensity : hint_range(0.0, 1.0) = 0.0;
+uniform float step_smoothness : hint_range(0.0, 1.0) = 0.3;
+uniform vec4 shadow_tint : source_color = vec4(0.18, 0.16, 0.26, 1.0);
+uniform float shadow_tint_amount : hint_range(0.0, 1.0) = 0.40;
+
+
 vec3 DecodeHemiOctahedron(vec2 e) {
     vec2 temp = e * 2.0 - 1.0;
     vec3 n = vec3(temp.x + temp.y, temp.x - temp.y, 1.0 - abs(temp.x) - abs(temp.y));
@@ -86,3 +93,29 @@ void fragment() {
         EMISSION = illum_color * (si_val * self_illum_scale);
     }
 }
+
+void light() {
+	if (toon_intensity > 0.01) {
+		vec3 safe_norm = normalize(NORMAL);
+		vec3 safe_light = normalize(LIGHT);
+		float NdotL = dot(safe_norm, safe_light);
+		float half_lambert = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
+
+		float shadow_threshold = 0.45;
+		float shadow_feather = mix(0.04, 0.12, step_smoothness);
+		float light_step = smoothstep(shadow_threshold - shadow_feather, shadow_threshold + shadow_feather, half_lambert);
+		float light_intensity = mix(half_lambert, light_step, toon_intensity);
+
+		vec3 cool_ambient = vec3(0.75, 0.75, 0.85);
+		vec3 base_shadow = ALBEDO * 0.35 * cool_ambient;
+		vec3 tinted_shadow = ALBEDO * shadow_tint.rgb * 1.5;
+		vec3 shadow_ambient = mix(base_shadow, tinted_shadow, shadow_tint_amount);
+		vec3 lit_color = ALBEDO * LIGHT_COLOR;
+
+		DIFFUSE_LIGHT += mix(shadow_ambient, lit_color, light_intensity) * clamp(ATTENUATION, 0.0, 1.0);
+	} else {
+		float NdotL = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+		DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * NdotL * ATTENUATION;
+	}
+}
+

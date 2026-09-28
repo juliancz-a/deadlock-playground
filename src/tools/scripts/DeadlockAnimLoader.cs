@@ -309,11 +309,20 @@ public static class DeadlockAnimLoader
     /// <summary>
     /// Checks whether an animation sequence is an internal, additive, procedural, or developer/test sequence.
     /// </summary>
-    public static bool IsBlacklisted(string rawName, bool isAdditive)
+    public static bool IsBlacklisted(string rawName, bool isAdditive, string targetSkeletonName = null)
     {
         if (string.IsNullOrWhiteSpace(rawName)) return true;
 
+        // In Deadlock, .vnmskel clips are intermediate Maya/AnimGraph2 skeletons that have incompatible
+        // bone counts, end bones (e.g. head_end, hand_end_L) and scrambled bone indices that destroy the .vmdl skeleton.
+        if (!string.IsNullOrEmpty(targetSkeletonName) &&
+            targetSkeletonName.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         string lower = rawName.ToLowerInvariant();
+
 
         // 1. Procedural / Blend space matrices that are not discrete anim clips
         if (lower.Contains('@') || lower.Contains("aim_matrix") || lower.Contains("turn_matrix") ||
@@ -345,9 +354,10 @@ public static class DeadlockAnimLoader
     /// </summary>
     public static string ClassifyCategory(string cleanName, bool isVrfAdditive = false)
     {
-        // 1. Additive Layers: runtime additive modifiers / firing deltas
-        if (isVrfAdditive || IsAdditiveDeltaLayer(cleanName))
+        // 1. Additive Layers: runtime additive modifiers / firing deltas / item overlays
+        if (isVrfAdditive || IsAdditiveDeltaLayer(cleanName) || cleanName.StartsWith("item_", StringComparison.OrdinalIgnoreCase))
             return "Additive Layers";
+
 
         string lower = cleanName.ToLowerInvariant();
 
@@ -438,7 +448,8 @@ public static class DeadlockAnimLoader
         foreach (var anim in allAnimations)
         {
             string rawName = anim.Name;
-            if (IsBlacklisted(rawName, anim.IsAdditive)) continue;
+            if (IsBlacklisted(rawName, anim.IsAdditive, anim.TargetSkeletonName)) continue;
+
 
             string cleanName = SanitizePoseName(rawName);
             if (string.IsNullOrWhiteSpace(cleanName) || !seenNames.Add(cleanName)) continue;
@@ -507,6 +518,13 @@ public static class DeadlockAnimLoader
 
         var vrfSkeleton = vrfModel.Skeleton;
         if (vrfSkeleton == null || vrfSkeleton.Bones.Length == 0) return null;
+
+        if (info.VrfAnimation?.TargetSkeletonName?.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            GD.Print($"[AnimLoader] Skipping decoding of AnimGraph2 Maya clip '{info.CleanName}' (incompatible .vnmskel target).");
+            return null;
+        }
+
 
         float fps = info.Fps > 0 ? info.Fps : 30f;
         int totalFrames = Math.Max(1, info.FrameCount);
@@ -897,7 +915,8 @@ public static class DeadlockAnimLoader
         foreach (var anim in rawAnims)
         {
             string rawName = anim.Name;
-            if (IsBlacklisted(rawName, anim.IsAdditive)) continue;
+            if (IsBlacklisted(rawName, anim.IsAdditive, anim.TargetSkeletonName)) continue;
+
 
             string cleanName = SanitizePoseName(rawName);
             if (seenNames.Add(cleanName))

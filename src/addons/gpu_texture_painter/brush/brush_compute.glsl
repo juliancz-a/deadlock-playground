@@ -31,6 +31,20 @@ layout(rgba16f, set = 2, binding = 7) uniform restrict image2D overlay_texture_7
 layout(rgba16f, set = 2, binding = 8) uniform restrict readonly image2D base_texture_0;
 layout(rgba16f, set = 2, binding = 9) uniform restrict readonly image2D selection_mask_image;
 
+float get_luminance(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 set_luminance(vec3 c, float l) {
+    float d = l - get_luminance(c);
+    vec3 res = c + vec3(d);
+    float lum = get_luminance(res);
+    float min_c = min(res.r, min(res.g, res.b));
+    float max_c = max(res.r, max(res.g, res.b));
+    if (min_c < 0.0) res = lum + ((res - lum) * lum) / max(lum - min_c, 0.0001);
+    if (max_c > 1.0) res = lum + ((res - lum) * (1.0 - lum)) / max(max_c - lum, 0.0001);
+    return clamp(res, 0.0, 1.0);
+}
 
 // The code we want to execute in each invocation
 void main() {
@@ -117,6 +131,8 @@ void main() {
                     blended_brush_rgb = max(under_col, brush_color.rgb); \
                 } else if (mode == 6) { \
                     blended_brush_rgb = under_col / max(vec3(1.0f) - brush_color.rgb, vec3(0.001f)); \
+                } else if (mode == 7) { \
+                    blended_brush_rgb = set_luminance(brush_color.rgb, get_luminance(under_col)); \
                 } else { \
                     blended_brush_rgb = brush_color.rgb; \
                 } \

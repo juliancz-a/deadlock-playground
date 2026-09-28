@@ -20,12 +20,29 @@ namespace DeadlockPlayground.Painter
         public float Tolerance
         {
             get => _tolerance;
-            set => _tolerance = Mathf.Clamp(value, 0.005f, 0.80f);
+            set => _tolerance = Mathf.Clamp(value, 0.005f, 1.0f);
         }
+
+        /// <summary>
+        /// Perceptual quadratic threshold mapping giving fine control in the 0.05 - 0.25 range without mesh flooding.
+        /// </summary>
+        public float EffectiveTolerance => MathF.Pow(_tolerance, 2.2f) * 0.5f;
 
         public Color TargetColor { get; private set; } = Colors.White;
         public bool HasSelection { get; private set; } = false;
-        public bool UseSelectionMask { get; set; } = true;
+        private bool _useSelectionMask = true;
+        public bool UseSelectionMask
+        {
+            get => _useSelectionMask;
+            set
+            {
+                if (_useSelectionMask != value)
+                {
+                    _useSelectionMask = value;
+                    EmitSignal(SignalName.MaskUpdated, HasActiveSelection);
+                }
+            }
+        }
         public bool Contiguous { get; set; } = true;
         public bool IsolateSubmesh { get; set; } = false;
 
@@ -74,21 +91,36 @@ namespace DeadlockPlayground.Painter
         {
         }
 
-        public bool HasActiveSelection => HasSelection && UseSelectionMask;
+        public bool HasActiveSelection => HasSelection;
 
         public bool IsPixelSelected(int atlasX, int atlasY)
         {
-            if (!HasSelection || !UseSelectionMask || _activeAtlasMask == null) return true;
+            if (!HasSelection || _activeAtlasMask == null) return true;
             if (atlasX < 0 || atlasY < 0 || atlasX >= _currentAtlasSize || atlasY >= _currentAtlasSize) return false;
             return _activeAtlasMask[atlasY * _currentAtlasSize + atlasX] >= 128;
         }
 
+        public float GetPixelMaskValue(int atlasX, int atlasY)
+        {
+            if (!HasSelection || _activeAtlasMask == null) return 1.0f;
+            if (atlasX < 0 || atlasY < 0 || atlasX >= _currentAtlasSize || atlasY >= _currentAtlasSize) return 0.0f;
+            return _activeAtlasMask[atlasY * _currentAtlasSize + atlasX] * (1.0f / 255.0f);
+        }
+
         public bool IsUvSelected(Vector2 uv)
         {
-            if (!HasSelection || !UseSelectionMask || _activeAtlasMask == null || _currentAtlasSize <= 0) return true;
+            if (!HasSelection || _activeAtlasMask == null || _currentAtlasSize <= 0) return true;
             int x = Mathf.Clamp((int)(uv.X * _currentAtlasSize), 0, _currentAtlasSize - 1);
             int y = Mathf.Clamp((int)(uv.Y * _currentAtlasSize), 0, _currentAtlasSize - 1);
             return IsPixelSelected(x, y);
+        }
+
+        public float GetUvMaskValue(Vector2 uv)
+        {
+            if (!HasSelection || _activeAtlasMask == null || _currentAtlasSize <= 0) return 1.0f;
+            int x = Mathf.Clamp((int)(uv.X * _currentAtlasSize), 0, _currentAtlasSize - 1);
+            int y = Mathf.Clamp((int)(uv.Y * _currentAtlasSize), 0, _currentAtlasSize - 1);
+            return GetPixelMaskValue(x, y);
         }
 
         private void EnsureMaskTexture(RenderingDevice rd, int atlasSize)
@@ -136,8 +168,8 @@ namespace DeadlockPlayground.Painter
             float dr = c1.R - c2.R;
             float dg = c1.G - c2.G;
             float db = c1.B - c2.B;
-            // Perceptually weighted Euclidean distance (Rec. 709 luminance weights: 0.2126 R, 0.7152 G, 0.0722 B)
-            float deltaE = Mathf.Sqrt(0.2126f * dr * dr + 0.7152f * dg * dg + 0.0722f * db * db);
+            // Perceptual luma-weighted color distance: sqrt(0.299 * dr^2 + 0.587 * dg^2 + 0.114 * db^2)
+            float deltaE = MathF.Sqrt(0.299f * dr * dr + 0.587f * dg * dg + 0.114f * db * db);
 
             // Special handling for white / near-white outlines:
             // When target or candidate is white/light grey, anti-aliased perimeter pixels
@@ -233,7 +265,7 @@ namespace DeadlockPlayground.Painter
             EmitSignal(SignalName.ColorSampled, TargetColor);
             EmitSignal(SignalName.MaskUpdated, true);
 
-            GD.Print($"[MagicWandTool] Generated selection mask: Color=#{TargetColor.ToHtml(false)} Mode={combineMode} Contiguous={Contiguous} Tol={_tolerance:F2} Seeds={_seedPoints.Count}");
+            GD.Print($"[MagicWandTool] Generated selection mask: Color=#{TargetColor.ToHtml(false)} Mode={combineMode} Contiguous={Contiguous} Tol={_tolerance:F2} (Eff={EffectiveTolerance:F4}) Seeds={_seedPoints.Count}");
             return true;
         }
 
@@ -243,7 +275,8 @@ namespace DeadlockPlayground.Painter
             float dr = (r1 - r2) * (1.0f / 255.0f);
             float dg = (g1 - g2) * (1.0f / 255.0f);
             float db = (b1 - b2) * (1.0f / 255.0f);
-            float deltaE = MathF.Sqrt(0.2126f * dr * dr + 0.7152f * dg * dg + 0.0722f * db * db);
+            // Perceptual luma-weighted color distance: sqrt(0.299 * dr^2 + 0.587 * dg^2 + 0.114 * db^2)
+            float deltaE = MathF.Sqrt(0.299f * dr * dr + 0.587f * dg * dg + 0.114f * db * db);
 
             bool c1IsNearWhite = r1 > 178 && g1 > 178 && b1 > 178;
             bool c2IsNearWhite = r2 > 178 && g2 > 178 && b2 > 178;
@@ -312,9 +345,9 @@ namespace DeadlockPlayground.Painter
                 byte[] rawImg = img.GetData();
                 byte[] submeshMask = new byte[imgW * imgH];
 
-                float tol = _tolerance;
-                float softTol = tol * 1.60f;
-                float flowTol = tol * 1.35f;
+                float tol = EffectiveTolerance;
+                float softTol = tol * 1.50f;
+                float flowTol = tol * 1.25f;
 
                 int minSelX = imgW, maxSelX = -1, minSelY = imgH, maxSelY = -1;
 
@@ -433,39 +466,74 @@ namespace DeadlockPlayground.Painter
                     });
                 }
 
-                // Border dilation & 3x3 smoothing bounded strictly to active area
+                // 1-pixel morphological expansion (grow) to bridge bilinear texture seams
+                // + 1.0–1.5 px feathering filter along perimeter for smooth anti-aliased edge blending
                 if (maxSelX >= 0)
                 {
-                    int dMinX = Math.Max(0, minSelX - 4);
-                    int dMaxX = Math.Min(imgW - 1, maxSelX + 4);
-                    int dMinY = Math.Max(0, minSelY - 4);
-                    int dMaxY = Math.Min(imgH - 1, maxSelY + 4);
+                    int pad = 5;
+                    int dMinX = Math.Max(0, minSelX - pad);
+                    int dMaxX = Math.Min(imgW - 1, maxSelX + pad);
+                    int dMinY = Math.Max(0, minSelY - pad);
+                    int dMaxY = Math.Min(imgH - 1, maxSelY + pad);
 
-                    byte[] passMask = (byte[])submeshMask.Clone();
-                    float dilationTol = tol * 1.35f;
+                    // Step 1: 1-pixel dilation / expansion
+                    byte[] dilated = new byte[imgW * imgH];
+                    Array.Copy(submeshMask, dilated, submeshMask.Length);
+
                     for (int py = dMinY; py <= dMaxY; py++)
                     {
                         int row = py * imgW;
                         for (int px = dMinX; px <= dMaxX; px++)
                         {
                             int idx = row + px;
-                            if (passMask[idx] >= 128) continue;
+                            if (submeshMask[idx] >= 128) continue;
 
-                            bool neighborSelected = (px > 0 && passMask[idx - 1] >= 128) ||
-                                                   (px < imgW - 1 && passMask[idx + 1] >= 128) ||
-                                                   (py > 0 && passMask[idx - imgW] >= 128) ||
-                                                   (py < imgH - 1 && passMask[idx + imgW] >= 128);
+                            bool hasNeighbor = (px > 0 && submeshMask[idx - 1] >= 128) ||
+                                               (px < imgW - 1 && submeshMask[idx + 1] >= 128) ||
+                                               (py > 0 && submeshMask[idx - imgW] >= 128) ||
+                                               (py < imgH - 1 && submeshMask[idx + imgW] >= 128);
 
-                            if (neighborSelected)
+                            if (hasNeighbor)
                             {
-                                int pOff = idx * 4;
-                                float dist = GetByteColorDistance(rawImg[pOff], rawImg[pOff + 1], rawImg[pOff + 2], targetR, targetG, targetB);
-                                if (dist <= dilationTol)
-                                {
-                                    float fringe = Math.Clamp(1.0f - (dist - tol) / Math.Max(0.0001f, dilationTol - tol), 0.55f, 0.95f);
-                                    submeshMask[idx] = Math.Max(submeshMask[idx], (byte)(fringe * 255f));
-                                }
+                                dilated[idx] = 255;
                             }
+                        }
+                    }
+
+                    // Step 2: Separable 3-tap binomial / box-blur feathering pass [1, 2, 1]/4 (~1.2 px blur radius)
+                    int bW = dMaxX - dMinX + 1;
+                    int bH = dMaxY - dMinY + 1;
+                    float[] hBlur = new float[bW * bH];
+
+                    for (int py = dMinY; py <= dMaxY; py++)
+                    {
+                        int row = py * imgW;
+                        int bRow = (py - dMinY) * bW;
+                        for (int px = dMinX; px <= dMaxX; px++)
+                        {
+                            float left = (px > 0) ? dilated[row + px - 1] : dilated[row + px];
+                            float center = dilated[row + px];
+                            float right = (px < imgW - 1) ? dilated[row + px + 1] : dilated[row + px];
+                            hBlur[bRow + (px - dMinX)] = (left + 2.0f * center + right) * 0.25f;
+                        }
+                    }
+
+                    // Vertical pass writing back into submeshMask
+                    for (int py = dMinY; py <= dMaxY; py++)
+                    {
+                        int row = py * imgW;
+                        int bRow = (py - dMinY) * bW;
+                        int bPrevRow = Math.Max(0, py - dMinY - 1) * bW;
+                        int bNextRow = Math.Min(bH - 1, py - dMinY + 1) * bW;
+
+                        for (int px = dMinX; px <= dMaxX; px++)
+                        {
+                            int xOff = px - dMinX;
+                            float top = hBlur[bPrevRow + xOff];
+                            float mid = hBlur[bRow + xOff];
+                            float bot = hBlur[bNextRow + xOff];
+                            float val = (top + 2.0f * mid + bot) * 0.25f;
+                            submeshMask[row + px] = (byte)Math.Clamp((int)MathF.Round(val), 0, 255);
                         }
                     }
                 }
@@ -560,7 +628,7 @@ namespace DeadlockPlayground.Painter
         public void ClearMask()
         {
             HasSelection = false;
-            UseSelectionMask = false;
+            _useSelectionMask = false;
             _seedPoints.Clear();
 
             if (_activeAtlasMask != null)

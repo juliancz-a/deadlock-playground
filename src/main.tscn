@@ -31,6 +31,7 @@
 [ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="28_modal_theme"]
 [ext_resource type="Script" uid="uid://diun3p2kyu2cy" path="res://ui/scripts/modals/AboutDialog.cs" id="29_qsp4k"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="30_kq58d"]
+[ext_resource type="PackedScene" uid="uid://bkc7qpal8tx01" path="res://ui/scenes/components/QuickColorPalette.tscn" id="31_quick_palette"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -133,9 +134,10 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_quickColorPalette", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
 layer = 2
 script = ExtResource("5_studio_ui")
+_quickColorPalette = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
 _btnFeedback = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/FeedbackButton")
 _btnAbout = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
@@ -598,6 +600,14 @@ icon = ExtResource("25_uv_icon")
 icon_alignment = 1
 expand_icon = true
 
+[node name="QuickColorPalette" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=1984729103 instance=ExtResource("31_quick_palette")]
+visible = false
+layout_mode = 1
+offset_left = 68.0
+offset_top = 16.0
+offset_right = 232.0
+offset_bottom = 48.0
+
 [node name="FloatingBrushPalette" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=2089182341 instance=ExtResource("21_brush_palette")]
 visible = false
 layout_mode = 1
@@ -693,6 +703,7 @@ theme_override_fonts/font = ExtResource("25_seu75")
 text = "Rotate: MMB | Pan: Shift+MMB | Move: WASD / QE | Zoom: Scroll"
 
 [node name="ModalsLayer" type="Control" parent="UIRoot/MainHUD" unique_id=1736869492]
+z_index = 100
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -700,6 +711,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+
 
 [node name="ModalBackdrop" type="ColorRect" parent="UIRoot/MainHUD/ModalsLayer" unique_id=987162534]
 visible = false

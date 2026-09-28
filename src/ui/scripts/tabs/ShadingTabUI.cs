@@ -514,11 +514,18 @@ public partial class ShadingTabUI : VBoxContainer
                     isAdditive = sm.BlendMode == BaseMaterial3D.BlendModeEnum.Add;
                     isTranslucent = isTranslucent || sm.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
                 }
-                else if (origMat is ShaderMaterial)
+                else if (origMat is ShaderMaterial smMat)
                 {
-                    // Procedural dynamic glow or energy layer or glass: treat as VFX
-                    isAdditive = true;
+                    bool isStructural = smMat.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true
+                                     || smMat.Shader?.ResourcePath?.Contains("source2_pbr") == true
+                                     || smMat.Shader?.ResourcePath?.Contains("unicorn_hair") == true;
+                    if (!isStructural)
+                    {
+                        // Procedural dynamic glow or energy layer or glass: treat as VFX
+                        isAdditive = true;
+                    }
                 }
+
 
                 // 1. Signature material from HeroMaterialManager
                 ShaderMaterial sigMat = HeroMaterialManager.GetSignatureMaterial(_currentHeroName, meshNameLower, i, matPath, origMat as StandardMaterial3D);
@@ -654,6 +661,10 @@ public partial class ShadingTabUI : VBoxContainer
             else
             {
                 baseMat = record.OriginalMaterial;
+                if (record.OriginalMaterial is ShaderMaterial smOrig && smOrig.Shader?.ResourcePath?.Contains("unicorn_hair") == true)
+                {
+                    smOrig.SetShaderParameter("toon_intensity", 0.0f);
+                }
             }
 
             // Outline NextPass for Toon: ONLY on structural body/clothing meshes using DeadlockMaterialResolver selective filter
@@ -838,7 +849,7 @@ public partial class ShadingTabUI : VBoxContainer
         float intensity = _sliderToonIntensity != null ? (float)_sliderToonIntensity.Value : 1.0f;
         float steps = _sliderToonSteps != null ? (float)_sliderToonSteps.Value : 3.0f;
         float smooth = _sliderToonSmoothness != null ? (float)_sliderToonSmoothness.Value : 0.30f;
-        float shadowAmt = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.40f;
+        float shadowAmt = _sliderToonShadowAmount != null ? (float)_sliderToonShadowAmount.Value : 0.50f;
         Color shadowCol = _colorToonShadow != null ? _colorToonShadow.Color : new Color(0.18f, 0.16f, 0.26f, 1.0f);
 
         float outWidth = _sliderToonOutlineWidth != null ? (float)_sliderToonOutlineWidth.Value : 0.5f;
@@ -874,7 +885,8 @@ public partial class ShadingTabUI : VBoxContainer
             // but it shares the same stepped-diffuse + shadow-tint + rim uniforms.
             // Push the slider values here so the head stays visually in sync.
             if (record.OriginalMaterial is ShaderMaterial smPbr &&
-                (smPbr.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
+                (smPbr.Shader?.ResourcePath?.Contains("unicorn_hair") == true ||
+                 smPbr.Shader?.ResourcePath?.Contains("source2_vertcolor_pbr") == true ||
                  smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true))
             {
                 smPbr.SetShaderParameter("toon_intensity",    intensity);
@@ -888,6 +900,7 @@ public partial class ShadingTabUI : VBoxContainer
                 smPbr.SetShaderParameter("rim_smoothness",    0.2f);
                 smPbr.SetShaderParameter("rim_blend",         1.0f);
             }
+
         }
 
         // Forward to HeroMeshHierarchy submeshes
@@ -971,8 +984,9 @@ public partial class ShadingTabUI : VBoxContainer
         if (_sliderToonOutlineWidth != null) _sliderToonOutlineWidth.Value = 0.5;
         if (_lblToonOutlineWidth != null) _lblToonOutlineWidth.Text = "0.5px";
         if (_colorToonOutline != null) _colorToonOutline.Color = new Color(0.08f, 0.08f, 0.08f, 1.0f);
-        if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.40;
-        if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.40";
+        if (_sliderToonShadowAmount != null) _sliderToonShadowAmount.Value = 0.50;
+        if (_lblToonShadowAmount != null) _lblToonShadowAmount.Text = "0.50";
+
         if (_colorToonShadow != null) _colorToonShadow.Color = new Color(0.18f, 0.16f, 0.26f, 1.0f);
 
         UpdateToonMaterialsUniforms();

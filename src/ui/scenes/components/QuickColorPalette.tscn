@@ -1,0 +1,254 @@
+[gd_scene format=3 uid="uid://bkc7qpal8tx01"]
+
+[ext_resource type="Script" uid="uid://djbgliu7cwpsp" path="res://ui/scripts/components/QuickColorPaletteUI.cs" id="1_palette_script"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_panel"]
+content_margin_left = 6.0
+content_margin_top = 4.0
+content_margin_right = 6.0
+content_margin_bottom = 4.0
+bg_color = Color(0.1, 0.11, 0.14, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.25, 0.28, 0.35, 0.7)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.4)
+shadow_size = 4
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_swatch"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_expand_normal"]
+content_margin_left = 4.0
+content_margin_top = 0.0
+content_margin_right = 4.0
+content_margin_bottom = 0.0
+bg_color = Color(0.18, 0.21, 0.28, 0.7)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.38, 0.48, 0.6)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_expand_hover"]
+content_margin_left = 4.0
+content_margin_top = 0.0
+content_margin_right = 4.0
+content_margin_bottom = 0.0
+bg_color = Color(0.28, 0.32, 0.42, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.6, 0.65, 0.8, 0.9)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_popup_panel"]
+content_margin_left = 8.0
+content_margin_top = 8.0
+content_margin_right = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.09, 0.1, 0.13, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.28, 0.32, 0.4, 0.85)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.5)
+shadow_size = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pin_btn"]
+content_margin_left = 6.0
+content_margin_top = 2.0
+content_margin_right = 6.0
+content_margin_bottom = 2.0
+bg_color = Color(0.18, 0.22, 0.28, 0.8)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.42, 0.52, 0.8)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="QuickColorPalette" type="PanelContainer" unique_id=1984729103 node_paths=PackedStringArray("_swatchContainer", "_btnSwatch0", "_btnSwatch1", "_btnSwatch2", "_btnSwatch3", "_btnSwatch4", "_btnExpand", "_popupPanel", "_lblTitle", "_btnClosePopup", "_recentGrid", "_btnPinCurrent", "_favoritesGrid")]
+z_index = 15
+custom_minimum_size = Vector2(164, 32)
+theme_override_styles/panel = SubResource("StyleBoxFlat_bar_panel")
+script = ExtResource("1_palette_script")
+_swatchContainer = NodePath("SwatchContainer")
+_btnSwatch0 = NodePath("SwatchContainer/Swatch0")
+_btnSwatch1 = NodePath("SwatchContainer/Swatch1")
+_btnSwatch2 = NodePath("SwatchContainer/Swatch2")
+_btnSwatch3 = NodePath("SwatchContainer/Swatch3")
+_btnSwatch4 = NodePath("SwatchContainer/Swatch4")
+_btnExpand = NodePath("SwatchContainer/BtnExpand")
+_popupPanel = NodePath("ColorPalettePopup")
+_lblTitle = NodePath("ColorPalettePopup/VBox/Header/Title")
+_btnClosePopup = NodePath("ColorPalettePopup/VBox/Header/BtnClose")
+_recentGrid = NodePath("ColorPalettePopup/VBox/RecentGrid")
+_btnPinCurrent = NodePath("ColorPalettePopup/VBox/FavoritesHeader/BtnPin")
+_favoritesGrid = NodePath("ColorPalettePopup/VBox/FavoritesGrid")
+
+[node name="SwatchContainer" type="HBoxContainer" parent="." unique_id=1498102301]
+layout_mode = 2
+theme_override_constants/separation = 5
+alignment = 1
+
+[node name="Swatch0" type="Button" parent="SwatchContainer" unique_id=1498102302]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_swatch")
+
+[node name="Swatch1" type="Button" parent="SwatchContainer" unique_id=1498102303]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_swatch")
+
+[node name="Swatch2" type="Button" parent="SwatchContainer" unique_id=1498102304]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_swatch")
+
+[node name="Swatch3" type="Button" parent="SwatchContainer" unique_id=1498102305]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_swatch")
+
+[node name="Swatch4" type="Button" parent="SwatchContainer" unique_id=1498102306]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/hover = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_swatch")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_swatch")
+
+[node name="BtnExpand" type="Button" parent="SwatchContainer" unique_id=1498102307]
+custom_minimum_size = Vector2(22, 24)
+layout_mode = 2
+tooltip_text = "Color History & Favorites"
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 12
+theme_override_styles/normal = SubResource("StyleBoxFlat_expand_normal")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_expand_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_expand_hover")
+text = "+"
+
+[node name="ColorPalettePopup" type="PanelContainer" parent="." unique_id=1498102308]
+visible = false
+top_level = true
+z_index = 25
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_popup_panel")
+
+[node name="VBox" type="VBoxContainer" parent="ColorPalettePopup" unique_id=1498102309]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="ColorPalettePopup/VBox" unique_id=1498102310]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="ColorPalettePopup/VBox/Header" unique_id=1498102311]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 0.95)
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 10
+text = "COLOR PALETTE"
+
+[node name="BtnClose" type="Button" parent="ColorPalettePopup/VBox/Header" unique_id=1498102312]
+custom_minimum_size = Vector2(18, 18)
+layout_mode = 2
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_font_sizes/font_size = 9
+text = "✕"
+
+[node name="LblRecent" type="Label" parent="ColorPalettePopup/VBox" unique_id=1498102313]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.6, 0.7, 0.8)
+theme_override_font_sizes/font_size = 12
+text = "Recent Swatches"
+
+[node name="RecentGrid" type="GridContainer" parent="ColorPalettePopup/VBox" unique_id=1498102314]
+layout_mode = 2
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+columns = 5
+
+[node name="HSeparator" type="HSeparator" parent="ColorPalettePopup/VBox" unique_id=1498102315]
+layout_mode = 2
+
+[node name="FavoritesHeader" type="HBoxContainer" parent="ColorPalettePopup/VBox" unique_id=1498102316]
+layout_mode = 2
+
+[node name="LblFav" type="Label" parent="ColorPalettePopup/VBox/FavoritesHeader" unique_id=1498102317]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.55, 0.6, 0.7, 0.8)
+theme_override_font_sizes/font_size = 12
+text = "Pinned Favorites"
+
+[node name="BtnPin" type="Button" parent="ColorPalettePopup/VBox/FavoritesHeader" unique_id=1498102318]
+custom_minimum_size = Vector2(40, 18)
+layout_mode = 2
+tooltip_text = "Pin current active color to favorites"
+focus_mode = 0
+mouse_default_cursor_shape = 2
+theme_override_font_sizes/font_size = 9
+theme_override_styles/normal = SubResource("StyleBoxFlat_pin_btn")
+text = "+ Pin"
+
+[node name="FavoritesGrid" type="GridContainer" parent="ColorPalettePopup/VBox" unique_id=1498102319]
+layout_mode = 2
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+columns = 5

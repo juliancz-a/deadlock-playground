@@ -44,8 +44,11 @@ void light() {
 	float light_intensity = smoothstep(shadow_threshold - shadow_feather, shadow_threshold + shadow_feather, half_lambert);
 
 	vec3 cool_ambient = vec3(0.75, 0.75, 0.85);
-	vec3 shadow_ambient = ALBEDO * 0.45 * mix(cool_ambient, shadow_tint.rgb, shadow_tint_amount);
+	vec3 base_shadow = ALBEDO * 0.35 * cool_ambient;
+	vec3 tinted_shadow = ALBEDO * shadow_tint.rgb * 1.5;
+	vec3 shadow_ambient = mix(base_shadow, tinted_shadow, shadow_tint_amount);
 	vec3 lit_color = ALBEDO * LIGHT_COLOR;
 
 	DIFFUSE_LIGHT += mix(shadow_ambient, lit_color, light_intensity) * clamp(ATTENUATION, 0.0, 1.0);
+
 }

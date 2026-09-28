@@ -11,8 +11,6 @@ public partial class ExportModDialog : CanvasLayer
     [Signal] public delegate void ExportCancelledEventHandler();
 
     [Export] private LineEdit _txtModName;
-    [Export] private LineEdit _txtAuthor;
-    [Export] private LineEdit _txtDescription;
     [Export] private Label _lblHero;
     [Export] private VBoxContainer _submeshChecklistContainer;
     [Export] private OptionButton _optResolution;
@@ -23,7 +21,7 @@ public partial class ExportModDialog : CanvasLayer
     [Export] private Button _btnBrowseCsdkPath;
     [Export] private CheckBox _chkInstallCitadel;
     [Export] private CheckBox _chkCustomFolder;
-    [Export] private HBoxContainer _customFolderContainer;
+    [Export] private Control _customFolderContainer;
     [Export] private LineEdit _txtCustomFolder;
     [Export] private Button _btnBrowseCustomFolder;
     [Export] private Label _lblTargetVpkInfo;
@@ -50,9 +48,8 @@ public partial class ExportModDialog : CanvasLayer
 
     private void FindNodes()
     {
-        _txtModName ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/GridMeta/TxtModName");
-        _txtAuthor ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/GridMeta/TxtAuthor");
-        _txtDescription ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/GridMeta/TxtDescription");
+        _txtModName ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName/TxtModName")
+                     ?? FindChild("TxtModName", true, false) as LineEdit;
         _lblHero ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/HBoxHero/LblHeroValue");
         _submeshChecklistContainer ??= GetNodeOrNull<VBoxContainer>("DialogPanel/Margin/VBox/ScrollSubmeshes/SubmeshChecklist");
         _optResolution ??= GetNodeOrNull<OptionButton>("DialogPanel/Margin/VBox/HBoxRes/OptResolution");
@@ -66,9 +63,12 @@ public partial class ExportModDialog : CanvasLayer
 
         _chkInstallCitadel ??= GetNodeOrNull<CheckBox>("DialogPanel/Margin/VBox/VBoxInstall/ChkInstallCitadel");
         _chkCustomFolder ??= GetNodeOrNull<CheckBox>("DialogPanel/Margin/VBox/VBoxInstall/ChkCustomFolder");
-        _customFolderContainer ??= GetNodeOrNull<HBoxContainer>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer");
-        _txtCustomFolder ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/TxtCustomFolder");
-        _btnBrowseCustomFolder ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/BtnBrowseCustomFolder");
+        _customFolderContainer ??= GetNodeOrNull<Control>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer")
+                                ?? FindChild("CustomFolderContainer", true, false) as Control;
+        _txtCustomFolder ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder/TxtCustomFolder")
+                          ?? FindChild("TxtCustomFolder", true, false) as LineEdit;
+        _btnBrowseCustomFolder ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder/BtnBrowseCustomFolder")
+                                ?? FindChild("BtnBrowseCustomFolder", true, false) as Button;
 
         _lblTargetVpkInfo ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/LblTargetVpkInfo");
         _btnConfirmExport ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnConfirmExport");
@@ -267,7 +267,7 @@ public partial class ExportModDialog : CanvasLayer
 
         if (_txtModName != null)
         {
-            _txtModName.Text = $"{_heroDisplayName.Replace(" ", "")}_CustomSkin";
+            _txtModName.Text = $"{_heroDisplayName.Replace(" ", "")}_Skin";
         }
 
         if (_lblHero != null)
@@ -446,7 +446,11 @@ public partial class ExportModDialog : CanvasLayer
         else
         {
             string modName = _txtModName?.Text.Trim();
-            if (string.IsNullOrEmpty(modName)) modName = "CustomSkin";
+            if (string.IsNullOrEmpty(modName)) modName = $"{_heroDisplayName.Replace(" ", "")}_Skin";
+            if (modName.EndsWith(".vpk", StringComparison.OrdinalIgnoreCase))
+            {
+                modName = modName.Substring(0, modName.Length - 4);
+            }
             string folder = _txtCustomFolder?.Text.Trim();
             if (string.IsNullOrEmpty(folder)) folder = "Custom Folder";
             _lblTargetVpkInfo.Text = $"Will be exported as: {modName}.vpk (in {folder})";
@@ -485,7 +489,11 @@ public partial class ExportModDialog : CanvasLayer
         }
 
         string modName = _txtModName?.Text.Trim();
-        if (string.IsNullOrEmpty(modName)) modName = $"{_heroDisplayName}_CustomSkin";
+        if (string.IsNullOrEmpty(modName)) modName = $"{_heroDisplayName.Replace(" ", "")}_Skin";
+        if (modName.EndsWith(".vpk", StringComparison.OrdinalIgnoreCase))
+        {
+            modName = modName.Substring(0, modName.Length - 4);
+        }
 
         string compilerPath = _txtCompilerPath?.Text.Trim() ?? "";
         string csdkPath = _txtCsdkPath?.Text.Trim() ?? "";
@@ -493,8 +501,6 @@ public partial class ExportModDialog : CanvasLayer
         var config = new ModExportConfig
         {
             ModName = modName,
-            Author = _txtAuthor?.Text.Trim() ?? "",
-            Description = _txtDescription?.Text.Trim() ?? "",
             HeroCodename = _heroCodename,
             HeroDisplayName = _heroDisplayName,
             TargetSubmeshes = selectedSubmeshes,

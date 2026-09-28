@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using DeadlockPlayground.UI;
 
 namespace DeadlockPlayground.Painter
 {
@@ -28,13 +29,26 @@ namespace DeadlockPlayground.Painter
     public partial class MeshPainter3D : Node
     {
         [Signal] public delegate void ColorSampledEventHandler(Color color);
+        [Signal] public delegate void BrushColorChangedEventHandler(Color color);
         [Signal] public delegate void StrokeStartedEventHandler();
         [Signal] public delegate void StrokeFinishedEventHandler();
 
         [Export] public bool IsPaintingActive { get; set; } = true;
 
         // Brush parameters
-        public Color BrushColor { get; set; } = new Color(0.85f, 0.15f, 0.2f, 1.0f);
+        private Color _brushColor = new Color(0.85f, 0.15f, 0.2f, 1.0f);
+        public Color BrushColor
+        {
+            get => _brushColor;
+            set
+            {
+                if (_brushColor != value)
+                {
+                    _brushColor = value;
+                    EmitSignal(SignalName.BrushColorChanged, value);
+                }
+            }
+        }
         public float BrushSize { get; set; } = 32.0f;
         public float BrushHardness { get; set; } = 0.5f;
         public float BrushFlow { get; set; } = 1.0f;
@@ -52,6 +66,25 @@ namespace DeadlockPlayground.Painter
         }
         public int BlendMode { get; set; } = 0;
 
+        // Tolerance parameters
+        private float _magicWandTolerance = 0.15f;
+        public float MagicWandTolerance
+        {
+            get => _magicWandTolerance;
+            set
+            {
+                _magicWandTolerance = Mathf.Clamp(value, 0.005f, 1.0f);
+                if (_magicWandTool != null) _magicWandTool.Tolerance = _magicWandTolerance;
+            }
+        }
+
+        private float _bucketFillTolerance = 0.50f;
+        public float BucketFillTolerance
+        {
+            get => _bucketFillTolerance;
+            set => _bucketFillTolerance = Mathf.Clamp(value, 0.01f, 1.0f);
+        }
+
         // Submesh Selection Outline Gizmo
         private MeshInstance3D _selectionOutlineMesh;
         private ShaderMaterial _outlineMaskMat;
@@ -63,6 +96,12 @@ namespace DeadlockPlayground.Painter
         private SkinLayerManager _layerManager;
         public SkinLayerManager LayerManager => _layerManager;
         private FloatingBrushPaletteUI _brushPalette;
+        private QuickColorPaletteUI _quickColorPalette;
+        public QuickColorPaletteUI QuickColorPalette
+        {
+            get => _quickColorPalette;
+            set => _quickColorPalette = value;
+        }
         private Control _cameraControlPad;
         private bool _clickOriginatedOnUI = false;
         private readonly MeshRaycaster _raycaster = new();
@@ -162,6 +201,19 @@ namespace DeadlockPlayground.Painter
             if (_brushPalette != null && GodotObject.IsInstanceValid(_brushPalette) && _brushPalette.Visible)
             {
                 if (_brushPalette.GetGlobalRect().HasPoint(globalMouse))
+                {
+                    return true;
+                }
+            }
+
+            if (_quickColorPalette == null || !GodotObject.IsInstanceValid(_quickColorPalette))
+            {
+                _quickColorPalette = GetTree()?.Root?.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+            }
+
+            if (_quickColorPalette != null && GodotObject.IsInstanceValid(_quickColorPalette) && _quickColorPalette.Visible)
+            {
+                if (_quickColorPalette.IsMouseOverPalette(globalMouse))
                 {
                     return true;
                 }
@@ -499,7 +551,7 @@ namespace DeadlockPlayground.Painter
             _cameraBrush.Set("max_bleed", maxBleed);
             _cameraBrush.Set("resolution", brushRes);
 
-            bool useMask = _magicWandTool != null && _magicWandTool.HasSelection && _magicWandTool.UseSelectionMask;
+            bool useMask = _magicWandTool != null && _magicWandTool.HasSelection;
             _cameraBrush.Set("use_selection_mask", useMask);
             if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
             {
@@ -595,12 +647,12 @@ namespace DeadlockPlayground.Painter
                         var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
                         if (hit.Hit)
                         {
-                            _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool);
+                            _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool, BucketFillTolerance);
                         }
                         else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
                         {
                             MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
-                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool);
+                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool, BucketFillTolerance);
                         }
                     }
                 }
@@ -1488,13 +1540,13 @@ namespace DeadlockPlayground.Painter
                         var hit = _currentMesh != null ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
                         if (hit.Hit)
                         {
-                            _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool);
+                            _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool, BucketFillTolerance);
                             GetViewport()?.SetInputAsHandled();
                         }
                         else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
                         {
                             MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
-                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool);
+                            _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool, BucketFillTolerance);
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
@@ -1786,25 +1838,26 @@ namespace DeadlockPlayground.Painter
         {
             if (_magicWandTool == null) return;
 
-            bool hasMask = _magicWandTool.HasSelection && _magicWandTool.UseSelectionMask;
-            Rid maskRid = hasMask ? _magicWandTool.SelectionMaskRid : new Rid();
+            bool hasSelection = _magicWandTool.HasSelection;
+            bool showPattern = _magicWandTool.UseSelectionMask;
+            Rid maskRid = hasSelection ? _magicWandTool.SelectionMaskRid : new Rid();
 
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
                 _cameraBrush.Set("selection_mask_rid", maskRid);
-                _cameraBrush.Set("use_selection_mask", hasMask);
+                _cameraBrush.Set("use_selection_mask", hasSelection);
                 _cameraBrush.Call("get_atlas_textures");
             }
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
                 _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
-                _mirrorCameraBrush.Set("use_selection_mask", hasMask);
+                _mirrorCameraBrush.Set("use_selection_mask", hasSelection);
                 _mirrorCameraBrush.Call("get_atlas_textures");
             }
 
             if (_layerManager != null)
             {
-                _layerManager.SetSelectionMaskOverlay(hasMask ? _magicWandTool.MaskTextureResource : null, hasMask);
+                _layerManager.SetSelectionMaskOverlay(hasSelection ? _magicWandTool.MaskTextureResource : null, hasSelection, showPattern);
             }
 
             _brushPalette?.UpdateWandUI();

@@ -40,8 +40,6 @@ namespace DeadlockPlayground.Painter
     public partial class ModExportConfig : RefCounted
     {
         public string ModName { get; set; } = "CustomSkin";
-        public string Author { get; set; } = "";
-        public string Description { get; set; } = "";
         public string HeroCodename { get; set; } = "hero";
         public string HeroDisplayName { get; set; } = "Hero";
         public List<SubmeshNodeInfo> TargetSubmeshes { get; set; } = new();

@@ -526,6 +526,7 @@ namespace DeadlockPlayground.Painter
             RestoreSnapshot(previous);
             RecompositeGpuLayers();
             NotifyStackChanged();
+            NotifyLayerSelected(_activeLayerIndex);
             GD.Print($"[SkinLayerManager] Undo performed. Remaining undo steps: {_undoStack.Count - 1}");
         }
 
@@ -544,16 +545,16 @@ namespace DeadlockPlayground.Painter
             RestoreSnapshot(next);
             RecompositeGpuLayers();
             NotifyStackChanged();
+            NotifyLayerSelected(_activeLayerIndex);
             GD.Print($"[SkinLayerManager] Redo performed. Remaining redo steps: {_redoStack.Count}");
         }
 
         private void RestoreSnapshot(LayerPaintSnapshot snapshot)
         {
             if (snapshot == null) return;
-            if (snapshot.ActiveLayerIndex >= 0 && snapshot.ActiveLayerIndex < _layers.Count)
-            {
-                _activeLayerIndex = snapshot.ActiveLayerIndex;
-            }
+
+            // Preserve current active layer so undo/redo does NOT switch the user's active layer selection
+            int preservedActiveLayer = _activeLayerIndex;
 
             for (int i = 0; i < _layers.Count; i++)
             {
@@ -565,6 +566,11 @@ namespace DeadlockPlayground.Painter
                 {
                     Array.Clear(_layers[i].GpuData, 0, _layers[i].GpuData.Length);
                 }
+            }
+
+            if (_layers.Count > 0)
+            {
+                _activeLayerIndex = Math.Clamp(preservedActiveLayer, 0, _layers.Count - 1);
             }
         }
 
@@ -616,11 +622,13 @@ namespace DeadlockPlayground.Painter
 
         private Texture2D _selectionMaskTexture;
         private bool _showSelectionMask = false;
+        private bool _showStencilPattern = true;
 
-        public void SetSelectionMaskOverlay(Texture2D maskTexture, bool show)
+        public void SetSelectionMaskOverlay(Texture2D maskTexture, bool show, bool showPattern = true)
         {
             _selectionMaskTexture = maskTexture;
             _showSelectionMask = show;
+            _showStencilPattern = showPattern;
             ApplyOverlayParametersToMeshes();
         }
 
@@ -647,10 +655,12 @@ namespace DeadlockPlayground.Painter
                     {
                         mat.SetShaderParameter("selection_mask", _selectionMaskTexture);
                         mat.SetShaderParameter("show_selection_mask", true);
+                        mat.SetShaderParameter("show_stencil_pattern", _showStencilPattern);
                     }
                     else
                     {
                         mat.SetShaderParameter("show_selection_mask", false);
+                        mat.SetShaderParameter("show_stencil_pattern", false);
                         mat.SetShaderParameter("selection_mask", (Texture2D)null);
                     }
 
@@ -711,12 +721,12 @@ namespace DeadlockPlayground.Painter
         }
 
         // --- Submesh Bucket Fill ---
-        public void FillCurrentSubmesh(Color color, Vector2? hitUv = null, MagicWandTool wandTool = null)
+        public void FillCurrentSubmesh(Color color, Vector2? hitUv = null, MagicWandTool wandTool = null, float tolerance = 0.5f)
         {
-            FillSubmesh(_targetMesh, color, hitUv, wandTool);
+            FillSubmesh(_targetMesh, color, hitUv, wandTool, tolerance);
         }
 
-        public void FillSubmesh(MeshInstance3D mesh, Color color, Vector2? hitUv = null, MagicWandTool wandTool = null)
+        public void FillSubmesh(MeshInstance3D mesh, Color color, Vector2? hitUv = null, MagicWandTool wandTool = null, float tolerance = 0.5f)
         {
             if (_targetMesh != null && mesh != _targetMesh)
             {
@@ -767,9 +777,9 @@ namespace DeadlockPlayground.Painter
             Half hR = (Half)linearCol.R;
             Half hG = (Half)linearCol.G;
             Half hB = (Half)linearCol.B;
-            Half hA = (Half)1.0f;
+            Half hA = (Half)1.0f; // Solid 100% target opacity
 
-            bool useMask = wandTool != null && wandTool.HasSelection && wandTool.UseSelectionMask;
+            bool useMask = wandTool != null && wandTool.HasSelection;
 
             if (ActiveLayer != null)
             {
@@ -779,42 +789,225 @@ namespace DeadlockPlayground.Painter
                     ActiveLayer.GpuData = new byte[bufferLen];
                 }
 
+                bool[] fillMask = new bool[width * height];
+
                 if (useMask)
                 {
-                    unsafe
+                    // Fill matching mask pixels with solid 100% target opacity (no feather attenuation)
+                    for (int y = 0; y < height; y++)
                     {
-                        fixed (byte* pDst = ActiveLayer.GpuData)
+                        int ay = startY + y;
+                        for (int x = 0; x < width; x++)
                         {
-                            Half* hLayer = (Half*)pDst;
-                            for (int y = startY; y < startY + height; y++)
+                            int ax = startX + x;
+                            float maskVal = wandTool.GetPixelMaskValue(ax, ay);
+                            if (maskVal >= 0.5f)
                             {
-                                int rowOffset = y * atlasSize * 4;
-                                for (int x = startX; x < startX + width; x++)
-                                {
-                                    if (!wandTool.IsPixelSelected(x, y)) continue;
-                                    int idx = rowOffset + x * 4;
-                                    hLayer[idx] = hR;
-                                    hLayer[idx + 1] = hG;
-                                    hLayer[idx + 2] = hB;
-                                    hLayer[idx + 3] = hA;
-                                }
+                                fillMask[y * width + x] = true;
                             }
                         }
                     }
                 }
                 else
                 {
-                    unsafe
+                    int seedLocalX = width / 2;
+                    int seedLocalY = height / 2;
+                    if (hitUv.HasValue)
                     {
-                        fixed (byte* pDst = ActiveLayer.GpuData)
+                        seedLocalX = Mathf.Clamp((int)(hitUv.Value.X * width), 0, width - 1);
+                        seedLocalY = Mathf.Clamp((int)(hitUv.Value.Y * height), 0, height - 1);
+                    }
+
+                    if (tolerance >= 0.99f)
+                    {
+                        // 100% Maximum Tolerance: Island / Submesh Flood Fill
+                        if (hitUv.HasValue && _baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
                         {
-                            Half* hLayer = (Half*)pDst;
-                            for (int y = startY; y < startY + height; y++)
+                            unsafe
                             {
-                                int rowOffset = y * atlasSize * 4;
-                                for (int x = startX; x < startX + width; x++)
+                                fixed (byte* pBase = _baseAtlasBuffer)
                                 {
-                                    int idx = rowOffset + x * 4;
+                                    Half* hBase = (Half*)pBase;
+                                    int seedAtlasIdx = ((startY + seedLocalY) * atlasSize + (startX + seedLocalX)) * 4;
+                                    float seedAlpha = (float)hBase[seedAtlasIdx + 3];
+
+                                    bool hasAlphaChannel = seedAlpha > 0.001f;
+                                    int[] q = new int[width * height];
+                                    int qHead = 0, qTail = 0;
+
+                                    int seedIdx = seedLocalY * width + seedLocalX;
+                                    fillMask[seedIdx] = true;
+                                    q[qTail++] = seedIdx;
+
+                                    while (qHead < qTail)
+                                    {
+                                        int curr = q[qHead++];
+                                        int cx = curr % width;
+                                        int cy = curr / width;
+
+                                        void CheckNeighbor(int nx, int ny)
+                                        {
+                                            int nIdx = ny * width + nx;
+                                            if (fillMask[nIdx]) return;
+
+                                            if (hasAlphaChannel)
+                                            {
+                                                int atlasIdx = ((startY + ny) * atlasSize + (startX + nx)) * 4;
+                                                float a = (float)hBase[atlasIdx + 3];
+                                                if (a <= 0.001f) return;
+                                            }
+
+                                            fillMask[nIdx] = true;
+                                            q[qTail++] = nIdx;
+                                        }
+
+                                        if (cx > 0) CheckNeighbor(cx - 1, cy);
+                                        if (cx < width - 1) CheckNeighbor(cx + 1, cy);
+                                        if (cy > 0) CheckNeighbor(cx, cy - 1);
+                                        if (cy < height - 1) CheckNeighbor(cx, cy + 1);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Array.Fill(fillMask, true);
+                        }
+                    }
+                    else
+                    {
+                        // Dedicated Paint Bucket Tolerance Flood Fill
+                        if (_baseAtlasBuffer == null || _baseAtlasBuffer.Length != bufferLen)
+                        {
+                            RebuildBaseAtlasBuffer();
+                        }
+
+                        unsafe
+                        {
+                            fixed (byte* pBase = _baseAtlasBuffer, pLayer = ActiveLayer.GpuData)
+                            {
+                                Half* hBase = (Half*)pBase;
+                                Half* hLayer = (Half*)pLayer;
+
+                                int seedAtlasIdx = ((startY + seedLocalY) * atlasSize + (startX + seedLocalX)) * 4;
+
+                                float sR, sG, sB, sA;
+                                float layerA = (float)hLayer[seedAtlasIdx + 3];
+                                if (layerA > 0.05f)
+                                {
+                                    sR = (float)hLayer[seedAtlasIdx];
+                                    sG = (float)hLayer[seedAtlasIdx + 1];
+                                    sB = (float)hLayer[seedAtlasIdx + 2];
+                                    sA = layerA;
+                                }
+                                else if (hBase != null)
+                                {
+                                    sR = (float)hBase[seedAtlasIdx];
+                                    sG = (float)hBase[seedAtlasIdx + 1];
+                                    sB = (float)hBase[seedAtlasIdx + 2];
+                                    sA = (float)hBase[seedAtlasIdx + 3];
+                                }
+                                else
+                                {
+                                    sR = 1f; sG = 1f; sB = 1f; sA = 1f;
+                                }
+
+                                int[] q = new int[width * height];
+                                int qHead = 0, qTail = 0;
+
+                                int seedIdx = seedLocalY * width + seedLocalX;
+                                fillMask[seedIdx] = true;
+                                q[qTail++] = seedIdx;
+
+                                while (qHead < qTail)
+                                {
+                                    int curr = q[qHead++];
+                                    int cx = curr % width;
+                                    int cy = curr / width;
+
+                                    void CheckNeighbor(int nx, int ny)
+                                    {
+                                        int nIdx = ny * width + nx;
+                                        if (fillMask[nIdx]) return;
+
+                                        int atlasIdx = ((startY + ny) * atlasSize + (startX + nx)) * 4;
+                                        float cR, cG, cB, cA;
+                                        float pA = (float)hLayer[atlasIdx + 3];
+                                        if (pA > 0.05f)
+                                        {
+                                            cR = (float)hLayer[atlasIdx];
+                                            cG = (float)hLayer[atlasIdx + 1];
+                                            cB = (float)hLayer[atlasIdx + 2];
+                                            cA = pA;
+                                        }
+                                        else if (hBase != null)
+                                        {
+                                            cR = (float)hBase[atlasIdx];
+                                            cG = (float)hBase[atlasIdx + 1];
+                                            cB = (float)hBase[atlasIdx + 2];
+                                            cA = (float)hBase[atlasIdx + 3];
+                                        }
+                                        else
+                                        {
+                                            cR = 1f; cG = 1f; cB = 1f; cA = 1f;
+                                        }
+
+                                        if (sA > 0.001f && cA <= 0.001f) return;
+
+                                        float dr = cR - sR;
+                                        float dg = cG - sG;
+                                        float db = cB - sB;
+                                        float dist = MathF.Sqrt(0.299f * dr * dr + 0.587f * dg * dg + 0.114f * db * db);
+
+                                        if (dist <= tolerance)
+                                        {
+                                            fillMask[nIdx] = true;
+                                            q[qTail++] = nIdx;
+                                        }
+                                    }
+
+                                    if (cx > 0) CheckNeighbor(cx - 1, cy);
+                                    if (cx < width - 1) CheckNeighbor(cx + 1, cy);
+                                    if (cy > 0) CheckNeighbor(cx, cy - 1);
+                                    if (cy < height - 1) CheckNeighbor(cx, cy + 1);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 1-pixel dilation on the bucket fill region to eliminate fringing / seam gaps
+                bool[] dilatedMask = (bool[])fillMask.Clone();
+                for (int y = 0; y < height; y++)
+                {
+                    int row = y * width;
+                    for (int x = 0; x < width; x++)
+                    {
+                        if (fillMask[row + x])
+                        {
+                            if (x > 0) dilatedMask[row + (x - 1)] = true;
+                            if (x < width - 1) dilatedMask[row + (x + 1)] = true;
+                            if (y > 0) dilatedMask[(y - 1) * width + x] = true;
+                            if (y < height - 1) dilatedMask[(y + 1) * width + x] = true;
+                        }
+                    }
+                }
+
+                // Apply solid, 100% target opacity paint
+                unsafe
+                {
+                    fixed (byte* pDst = ActiveLayer.GpuData)
+                    {
+                        Half* hLayer = (Half*)pDst;
+                        for (int y = 0; y < height; y++)
+                        {
+                            int rowOffset = (startY + y) * atlasSize * 4;
+                            int maskRow = y * width;
+                            for (int x = 0; x < width; x++)
+                            {
+                                if (dilatedMask[maskRow + x])
+                                {
+                                    int idx = rowOffset + (startX + x) * 4;
                                     hLayer[idx] = hR;
                                     hLayer[idx + 1] = hG;
                                     hLayer[idx + 2] = hB;
@@ -831,7 +1024,7 @@ namespace DeadlockPlayground.Painter
 
             MeshHierarchy?.MarkSubmeshDirty(mesh);
 
-            GD.Print($"[SkinLayerManager] Bucket filled submesh '{mesh.Name}' with {color.ToHtml()} (UseMask={useMask}, HitUV={hitUv})");
+            GD.Print($"[SkinLayerManager] Bucket filled submesh '{mesh.Name}' with {color.ToHtml()} (Tol={tolerance:F2}, UseMask={useMask}, HitUV={hitUv})");
         }
 
         public bool StampDecalToAtlas(
@@ -1093,10 +1286,12 @@ namespace DeadlockPlayground.Painter
                         float dSq = dx * dx + dySq;
                         if (dSq > rSq) continue;
 
+                        float wandWeight = 1.0f;
                         if (wandTool != null && wandTool.HasActiveSelection)
                         {
-                            Vector2 uv = new Vector2((float)x / atlasSize, (float)y / atlasSize);
-                            if (!wandTool.IsUvSelected(uv)) continue;
+                            float maskVal = wandTool.GetPixelMaskValue(x, y);
+                            if (maskVal < 0.5f) continue;
+                            wandWeight = Math.Clamp((maskVal - 0.5f) / 0.5f, 0.0f, 1.0f);
                         }
 
                         float dist = Mathf.Sqrt(dSq);
@@ -1112,7 +1307,7 @@ namespace DeadlockPlayground.Painter
                             falloff = falloff * falloff * (3.0f - 2.0f * falloff);
                         }
 
-                        float dabAlpha = falloff * flow;
+                        float dabAlpha = falloff * flow * wandWeight;
                         if (dabAlpha <= 0.0001f) continue;
 
                         int idx = rowOffset + x * 4;
@@ -1211,7 +1406,7 @@ namespace DeadlockPlayground.Painter
                     {
                         int i = rowOffset + px;
                         if (hasPre && uPost[i] == uPre[i]) continue;
-                        if (checkWand && !wandTool.IsPixelSelected(px, py)) continue;
+                        if (checkWand && wandTool.GetPixelMaskValue(px, py) < 0.5f) continue;
 
                         if (px < localBounds.MinX) localBounds.MinX = px;
                         if (px > localBounds.MaxX) localBounds.MaxX = px;
@@ -1549,6 +1744,41 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private static float GetLuminance(float r, float g, float b)
+        {
+            return 0.299f * r + 0.587f * g + 0.114f * b;
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private static void SetLuminance(float r, float g, float b, float l, out float resR, out float resG, out float resB)
+        {
+            float d = l - GetLuminance(r, g, b);
+            float cr = r + d;
+            float cg = g + d;
+            float cb = b + d;
+            float lum = GetLuminance(cr, cg, cb);
+            float minC = MathF.Min(cr, MathF.Min(cg, cb));
+            float maxC = MathF.Max(cr, MathF.Max(cg, cb));
+            if (minC < 0.0f)
+            {
+                float denom = MathF.Max(lum - minC, 0.0001f);
+                cr = lum + ((cr - lum) * lum) / denom;
+                cg = lum + ((cg - lum) * lum) / denom;
+                cb = lum + ((cb - lum) * lum) / denom;
+            }
+            if (maxC > 1.0f)
+            {
+                float denom = MathF.Max(maxC - lum, 0.0001f);
+                cr = lum + ((cr - lum) * (1.0f - lum)) / denom;
+                cg = lum + ((cg - lum) * (1.0f - lum)) / denom;
+                cb = lum + ((cb - lum) * (1.0f - lum)) / denom;
+            }
+            resR = Math.Clamp(cr, 0.0f, 1.0f);
+            resG = Math.Clamp(cg, 0.0f, 1.0f);
+            resB = Math.Clamp(cb, 0.0f, 1.0f);
+        }
+
         private static unsafe void BlendLayerBuffer(byte[] dst, byte[] src, float opacity, LayerBlendMode mode, byte[] baseBuffer)
         {
             int pixelCount = dst.Length / 8;
@@ -1624,6 +1854,11 @@ namespace DeadlockPlayground.Painter
                                 outG = bG / Mathf.Max(1.0f - srcG, 0.001f);
                                 outB = bB / Mathf.Max(1.0f - srcB, 0.001f);
                             }
+                            else if (mode == LayerBlendMode.Color)
+                            {
+                                float baseLum = GetLuminance(bR, bG, bB);
+                                SetLuminance(srcR, srcG, srcB, baseLum, out outR, out outG, out outB);
+                            }
                             else
                             {
                                 outR = srcR;
@@ -1696,6 +1931,14 @@ namespace DeadlockPlayground.Painter
                                 float blendR = dstR / Mathf.Max(1.0f - srcR, 0.001f);
                                 float blendG = dstG / Mathf.Max(1.0f - srcG, 0.001f);
                                 float blendB = dstB / Mathf.Max(1.0f - srcB, 0.001f);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Color)
+                            {
+                                float underLum = GetLuminance(dstR, dstG, dstB);
+                                SetLuminance(srcR, srcG, srcB, underLum, out float blendR, out float blendG, out float blendB);
                                 outR = Mathf.Lerp(dstR, blendR, srcA);
                                 outG = Mathf.Lerp(dstG, blendG, srcA);
                                 outB = Mathf.Lerp(dstB, blendB, srcA);

@@ -46,6 +46,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnQuickXRay;
     [Export] private Button _btnQuickFullscreen;
     [Export] private Button _btnOpenUVCanvas;
+    [Export] private QuickColorPaletteUI _quickColorPalette;
     private Label _painterKeymapLabel;
     private bool _uvCanvasUserWantsOpen = true;
 
@@ -432,6 +433,28 @@ public partial class StudioUIManager : CanvasLayer
             };
         }
 
+        _quickColorPalette ??= GetNodeOrNull<QuickColorPaletteUI>("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
+                            ?? GetTree().Root.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+        if (_quickColorPalette == null)
+        {
+            var viewportArea = GetNodeOrNull<Control>("MainHUD/VBoxContainer/MainSplit/ViewportArea")
+                            ?? GetTree().Root.FindChild("ViewportArea", true, false) as Control;
+            if (viewportArea != null)
+            {
+                var scene = GD.Load<PackedScene>("res://ui/scenes/components/QuickColorPalette.tscn");
+                if (scene != null)
+                {
+                    _quickColorPalette = scene.Instantiate<QuickColorPaletteUI>();
+                    viewportArea.AddChild(_quickColorPalette);
+                }
+            }
+        }
+        if (_quickColorPalette != null)
+        {
+            _quickColorPalette.Visible = false;
+            _quickColorPalette.Setup(_tabPaint?.Painter, _tabPaint?.BrushPalette, _btnOpenUVCanvas);
+        }
+
         if (_uvCanvasPanel != null)
         {
             _uvCanvasPanel.VisibilityToggled += (isVisible) =>
@@ -441,6 +464,7 @@ public partial class StudioUIManager : CanvasLayer
                 {
                     _btnOpenUVCanvas.Visible = (_currentTabIndex == 8 && !isVisible);
                 }
+                _quickColorPalette?.UpdateBarPosition();
             };
         }
 
@@ -546,6 +570,7 @@ public partial class StudioUIManager : CanvasLayer
             if (_uvCanvasPanel != null) _uvCanvasPanel.Visible = false;
             if (_painterKeymapBadge != null) _painterKeymapBadge.Visible = false;
             if (_btnOpenUVCanvas != null) _btnOpenUVCanvas.Visible = false;
+            if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
         }
         else if (tabIndex == 8)
@@ -595,6 +620,12 @@ public partial class StudioUIManager : CanvasLayer
             if (_btnOpenUVCanvas != null)
             {
                 _btnOpenUVCanvas.Visible = (_uvCanvasPanel == null || !_uvCanvasPanel.Visible);
+            }
+            if (_quickColorPalette != null)
+            {
+                _quickColorPalette.Setup(_tabPaint?.Painter, _tabPaint?.BrushPalette, _btnOpenUVCanvas);
+                _quickColorPalette.Visible = true;
+                _quickColorPalette.UpdateBarPosition();
             }
             if (_navBadge != null) _navBadge.Visible = true;
         }
@@ -1039,7 +1070,13 @@ public partial class StudioUIManager : CanvasLayer
         {
             _modalBackdrop.Visible = anyModalOpen;
         }
+
+        if (anyModalOpen)
+        {
+            _quickColorPalette?.ClosePopup();
+        }
     }
+
 
     #region Toast Notification System
     private void CreateToastUI()

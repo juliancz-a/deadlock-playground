@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://tl6boi5u0fxc" path="res://ui/scripts/modals/ExportModDialog.cs" id="1_dialog"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
+[ext_resource type="FontFile" uid="uid://dcds1t4ij4ajc" path="res://assets/fonts/Supersonic Rocketship.ttf" id="3_2b2w5"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal"]
 bg_color = Color(0.0784314, 0.0862745, 0.117647, 0.980392)
@@ -59,9 +60,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -320.0
-offset_top = -380.0
+offset_top = -330.0
 offset_right = 320.0
-offset_bottom = 380.0
+offset_bottom = 330.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
@@ -93,6 +94,7 @@ layout_mode = 2
 [node name="LblHero" type="Label" parent="DialogPanel/Margin/VBox/HBoxHero" unique_id=987123407]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
 text = "Target Hero:"
 
 [node name="LblHeroValue" type="Label" parent="DialogPanel/Margin/VBox/HBoxHero" unique_id=987123408]
@@ -100,49 +102,14 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
 text = "Hero"
 
-[node name="GridMeta" type="GridContainer" parent="DialogPanel/Margin/VBox" unique_id=987123409]
-layout_mode = 2
-theme_override_constants/h_separation = 10
-theme_override_constants/v_separation = 5
-columns = 2
-
-[node name="LblModName" type="Label" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123410]
-custom_minimum_size = Vector2(110, 0)
-layout_mode = 2
-text = "Mod Name:"
-
-[node name="TxtModName" type="LineEdit" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123411]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "CustomSkin"
-placeholder_text = "Mod name (e.g. Dynamo_MechaSkin)"
-
-[node name="LblAuthor" type="Label" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123412]
-layout_mode = 2
-text = "Author:"
-
-[node name="TxtAuthor" type="LineEdit" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123413]
-layout_mode = 2
-size_flags_horizontal = 3
-placeholder_text = "Author name (optional)"
-
-[node name="LblDesc" type="Label" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123414]
-layout_mode = 2
-text = "Description:"
-
-[node name="TxtDescription" type="LineEdit" parent="DialogPanel/Margin/VBox/GridMeta" unique_id=987123415]
-layout_mode = 2
-size_flags_horizontal = 3
-placeholder_text = "Mod notes / details (optional)"
-
 [node name="LblSubmeshes" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123416]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 14
 text = "Target Submeshes to Compile & Package:"
 
 [node name="ScrollSubmeshes" type="ScrollContainer" parent="DialogPanel/Margin/VBox" unique_id=987123417]
-custom_minimum_size = Vector2(0, 140)
+custom_minimum_size = Vector2(0, 170)
 layout_mode = 2
 horizontal_scroll_mode = 0
 
@@ -187,6 +154,7 @@ text = "Browse..."
 [node name="LblCompilerStatus" type="Label" parent="DialogPanel/Margin/VBox/VBoxCompiler" unique_id=987123455]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.75, 0.4, 1)
+theme_override_fonts/font = ExtResource("3_2b2w5")
 theme_override_font_sizes/font_size = 11
 text = "Checking resourcecompiler.exe..."
 
@@ -214,6 +182,7 @@ theme_override_constants/separation = 8
 [node name="LblCsdkDownload" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123471]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.78, 0.35, 1)
+theme_override_fonts/font = ExtResource("3_2b2w5")
 theme_override_font_sizes/font_size = 11
 text = "CSDK12 is needed to compile"
 
@@ -241,22 +210,54 @@ text = "Install directly to Deadlock "
 layout_mode = 2
 text = "Export .vpk to custom directory..."
 
-[node name="CustomFolderContainer" type="HBoxContainer" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123430]
+[node name="CustomFolderContainer" type="VBoxContainer" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123430]
 visible = false
 layout_mode = 2
+theme_override_constants/separation = 4
 
-[node name="TxtCustomFolder" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer" unique_id=987123431]
+[node name="HBoxFolder" type="HBoxContainer" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer" unique_id=987123444]
+layout_mode = 2
+
+[node name="LblFolder" type="Label" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder" unique_id=987123445]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Folder:"
+
+[node name="TxtCustomFolder" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder" unique_id=987123431]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Select custom output folder..."
 
-[node name="BtnBrowseCustomFolder" type="Button" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer" unique_id=987123432]
+[node name="BtnBrowseCustomFolder" type="Button" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder" unique_id=987123432]
 layout_mode = 2
 text = "Browse..."
+
+[node name="HBoxFileName" type="HBoxContainer" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer" unique_id=987123446]
+layout_mode = 2
+
+[node name="LblModName" type="Label" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName" unique_id=987123410]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "File Name:"
+
+[node name="TxtModName" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName" unique_id=987123411]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Hero_Skin"
+placeholder_text = "e.g. Infernus_Skin"
+
+[node name="LblVpkExt" type="Label" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName" unique_id=987123447]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 0.9)
+theme_override_font_sizes/font_size = 11
+text = ".vpk"
 
 [node name="LblTargetVpkInfo" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123433]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.4, 0.9, 0.5, 1)
+theme_override_fonts/font = ExtResource("3_2b2w5")
 theme_override_font_sizes/font_size = 12
 text = "Will be installed as: pak01_dir.vpk"
 
@@ -282,8 +283,8 @@ visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.72, 0.35, 1)
 theme_override_font_sizes/font_size = 11
-autowrap_mode = 3
 text = "⚠ This contains painted textures over a third-party community mod. Intended strictly for personal use. If you plan to share or redistribute this package, make sure to review and respect the original creator's license and permissions."
+autowrap_mode = 3
 
 [node name="FolderDialog" type="FileDialog" parent="." unique_id=987123437]
 title = "Open a Directory"

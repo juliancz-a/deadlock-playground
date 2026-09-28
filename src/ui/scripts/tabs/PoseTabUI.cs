@@ -309,31 +309,36 @@ public partial class PoseTabUI : VBoxContainer
 
         DeadlockAnimLoader.AnimSequenceInfo bestAnim = null;
 
-        // Try high-value idles first
+        // Try high-value primary idles first:
         bestAnim = _currentHeroAnimations.FirstOrDefault(a =>
             a.Category == "Idle" && (
-                a.CleanName.EndsWith("stand_idle") ||
-                a.CleanName == "shoot_idle" ||
+                a.CleanName == "primary_stand_idle" ||
+                a.CleanName == "primary_idle" ||
+                a.CleanName == "stand_idle" ||
                 a.CleanName == "idle_loadout" ||
+                (a.CleanName.EndsWith("stand_idle") && !a.CleanName.StartsWith("item_") && !a.CleanName.StartsWith("sleep_") && !a.CleanName.StartsWith("corner_")) ||
                 a.CleanName.EndsWith("out_of_combat_stand_idle") ||
                 a.CleanName.Contains("primary_idle")
             ));
 
         if (bestAnim == null)
         {
-            bestAnim = _currentHeroAnimations.FirstOrDefault(a => a.Category == "Idle");
+            bestAnim = _currentHeroAnimations.FirstOrDefault(a =>
+                a.Category == "Idle" && !a.CleanName.StartsWith("item_"));
         }
 
         if (bestAnim == null)
         {
             // Pick first non-additive baseline animation if possible
-            bestAnim = _currentHeroAnimations.FirstOrDefault(a => a.Category != "Additive Layers");
+            bestAnim = _currentHeroAnimations.FirstOrDefault(a =>
+                a.Category != "Additive Layers" && !a.CleanName.StartsWith("item_"));
         }
 
         if (bestAnim == null)
         {
             bestAnim = _currentHeroAnimations.FirstOrDefault();
         }
+
 
         if (bestAnim != null)
         {

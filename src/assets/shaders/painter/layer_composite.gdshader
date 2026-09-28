@@ -2,8 +2,23 @@ shader_type canvas_item;
 render_mode blend_mix;
 
 uniform sampler2D screen_texture : hint_screen_texture, filter_linear_mipmap;
-uniform int u_blend_mode = 0; // 0: Normal, 1: Multiply, 2: Screen, 3: Overlay, 4: Darken, 5: Lighten, 6: Color Dodge
+uniform int u_blend_mode = 0; // 0: Normal, 1: Multiply, 2: Screen, 3: Overlay, 4: Darken, 5: Lighten, 6: Color Dodge, 7: Color
 uniform float u_layer_opacity : hint_range(0.0, 1.0) = 1.0;
+
+float get_luminance(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 set_luminance(vec3 c, float l) {
+    float d = l - get_luminance(c);
+    vec3 res = c + vec3(d);
+    float lum = get_luminance(res);
+    float min_c = min(res.r, min(res.g, res.b));
+    float max_c = max(res.r, max(res.g, res.b));
+    if (min_c < 0.0) res = lum + ((res - lum) * lum) / max(lum - min_c, 0.0001);
+    if (max_c > 1.0) res = lum + ((res - lum) * (1.0 - lum)) / max(max_c - lum, 0.0001);
+    return clamp(res, 0.0, 1.0);
+}
 
 void fragment() {
     vec4 top = texture(TEXTURE, UV);
@@ -26,6 +41,8 @@ void fragment() {
         blended = max(bottom.rgb, top.rgb);
     } else if (u_blend_mode == 6) { // Color Dodge
         blended = bottom.rgb / max(vec3(1.0) - top.rgb, vec3(0.001));
+    } else if (u_blend_mode == 7) { // Color (HSL)
+        blended = set_luminance(top.rgb, get_luminance(bottom.rgb));
     }
 
     float effective_alpha = top.a * u_layer_opacity;

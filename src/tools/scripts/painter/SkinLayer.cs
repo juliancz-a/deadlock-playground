@@ -11,7 +11,8 @@ namespace DeadlockPlayground.Painter
         Overlay = 3,
         Darken = 4,
         Lighten = 5,
-        ColorDodge = 6
+        ColorDodge = 6,
+        Color = 7
     }
 
     public partial class SkinLayer : RefCounted

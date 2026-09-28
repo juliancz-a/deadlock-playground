@@ -197,7 +197,8 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 		return
 
 	var active_atlases: Array[RID] = []
-	active_atlases.resize(8)
+	for i in range(8):
+		active_atlases.append(fallback_rid)
 
 	var base_tex_rid: RID = fallback_rid
 
@@ -207,14 +208,14 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 			continue
 		if manager.atlas_index < 0 or manager.atlas_index >= 8:
 			continue
-		if manager.atlas_texture_rid.is_valid() and rd.texture_is_valid(manager.atlas_texture_rid):
+		if manager.atlas_texture_rid is RID and manager.atlas_texture_rid.is_valid() and rd.texture_is_valid(manager.atlas_texture_rid):
 			active_atlases[manager.atlas_index] = manager.atlas_texture_rid
-		if manager.base_texture_rid.is_valid() and rd.texture_is_valid(manager.base_texture_rid):
+		if manager.base_texture_rid is RID and manager.base_texture_rid.is_valid() and rd.texture_is_valid(manager.base_texture_rid):
 			base_tex_rid = manager.base_texture_rid
 
 	var uniforms: Array[RDUniform] = []
 	for i in range(8):
-		var tex_rid: RID = active_atlases[i] if (i < active_atlases.size() and active_atlases[i].is_valid() and rd.texture_is_valid(active_atlases[i])) else fallback_rid
+		var tex_rid: RID = active_atlases[i] if (active_atlases[i] is RID and active_atlases[i].is_valid() and rd.texture_is_valid(active_atlases[i])) else fallback_rid
 		var uniform = RDUniform.new()
 		uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 		uniform.binding = i
@@ -225,7 +226,9 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 	var base_uniform = RDUniform.new()
 	base_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 	base_uniform.binding = 8
-	var valid_base_rid: RID = base_tex_rid if (base_tex_rid.is_valid() and rd.texture_is_valid(base_tex_rid)) else fallback_rid
+	var valid_base_rid: RID = fallback_rid
+	if base_tex_rid is RID and base_tex_rid.is_valid() and rd.texture_is_valid(base_tex_rid):
+		valid_base_rid = base_tex_rid
 	base_uniform.add_id(valid_base_rid)
 	uniforms.append(base_uniform)
 
@@ -233,7 +236,9 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 	var mask_uniform = RDUniform.new()
 	mask_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 	mask_uniform.binding = 9
-	var valid_mask_rid: RID = camera_brush.selection_mask_rid if (camera_brush and camera_brush.selection_mask_rid.is_valid() and rd.texture_is_valid(camera_brush.selection_mask_rid)) else fallback_rid
+	var valid_mask_rid: RID = fallback_rid
+	if camera_brush and camera_brush.selection_mask_rid is RID and camera_brush.selection_mask_rid.is_valid() and rd.texture_is_valid(camera_brush.selection_mask_rid):
+		valid_mask_rid = camera_brush.selection_mask_rid
 	mask_uniform.add_id(valid_mask_rid)
 	uniforms.append(mask_uniform)
 

@@ -10,6 +10,7 @@ uniform uint atlas_index;
 uniform float layer_opacity : hint_range(0.0, 1.0) = 1.0;
 uniform bool is_paint_target = true;
 uniform bool show_selection_mask = false;
+uniform bool show_stencil_pattern = true;
 
 uniform bool smooth_bicubic = true;
 
@@ -185,7 +186,7 @@ void fragment() {
 					vec3 ant_color = (ant > 0.0) ? vec3(1.0, 1.0, 1.0) : vec3(0.05, 0.05, 0.05);
 					final_color = ant_color;
 					final_alpha = 1.0;
-				} else if (m_center < 0.5) {
+				} else if (m_center < 0.5 && show_stencil_pattern) {
 					// UNSELECTED / UNPAINTABLE area has protective stencil overlay
 					float stripe = sin((FRAGCOORD.x - FRAGCOORD.y) * 0.25);
 					vec3 hatch_col = (stripe > 0.0) ? vec3(0.06, 0.06, 0.10) : vec3(0.01, 0.01, 0.03);

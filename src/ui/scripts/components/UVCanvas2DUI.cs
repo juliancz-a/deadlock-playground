@@ -21,6 +21,7 @@ namespace DeadlockPlayground.UI
         private Label _lblTitle;
         private Label _lblResolution;
         private Button _btnResetZoom;
+        private OptionButton _optBlendMode;
         private Button _btnBaseTex;
         private Button _btnMesh;
         private Button _btnOutline;
@@ -43,12 +44,12 @@ namespace DeadlockPlayground.UI
         private Vector2 _lastAtlasPx = Vector2.Zero;
         private Vector2 _hoverMousePos = new Vector2(-9999, -9999);
 
-        // UV Wireframe Cache & Mode (Default: FullMesh)
-        private WireframeDisplayMode _wireframeMode = WireframeDisplayMode.FullMesh;
+        // UV Wireframe Cache & Mode (Default: Outlines to preserve performance)
+        private WireframeDisplayMode _wireframeMode = WireframeDisplayMode.Outlines;
         private float _wireframeOpacity = 0.5f;
         private bool _showBaseTexture = true;
-        private Vector2[] _cachedBoundaryPoints = null;
-        private Vector2[] _cachedAllWirePoints = null;
+        private ArrayMesh _cachedBoundaryMesh = null;
+        private ArrayMesh _cachedAllWireMesh = null;
         private Rect2 _cachedSubmeshAtlasRect = default;
         private bool _hasSubmeshRect = false;
 
@@ -74,6 +75,9 @@ namespace DeadlockPlayground.UI
         private ColorRect _selectionOverlayRect = null;
         private ShaderMaterial _selectionOverlayMat = null;
         private Control _wireframeOverlay = null;
+
+        private bool _hasInitialFit = false;
+        private Vector2 _lastDrawAreaSize = Vector2.Zero;
 
         public override void _Ready()
         {
@@ -240,6 +244,29 @@ namespace DeadlockPlayground.UI
 
             _btnResetZoom = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnResetZoom")
                          ?? FindChild("BtnResetZoom", true, false) as Button;
+
+            _optBlendMode = GetNodeOrNull<OptionButton>("VBoxContainer/Header/Margin/HBox/OptBlendMode")
+                         ?? FindChild("OptBlendMode", true, false) as OptionButton;
+            if (_optBlendMode != null)
+            {
+                _optBlendMode.Clear();
+                _optBlendMode.AddItem("Normal", 0);
+                _optBlendMode.AddItem("Multiply", 1);
+                _optBlendMode.AddItem("Screen", 2);
+                _optBlendMode.AddItem("Overlay", 3);
+                _optBlendMode.AddItem("Darken", 4);
+                _optBlendMode.AddItem("Lighten", 5);
+                _optBlendMode.AddItem("Color Dodge", 6);
+                _optBlendMode.AddItem("Color (HSL)", 7);
+                _optBlendMode.Select(0);
+
+                _optBlendMode.ItemSelected += (idx) =>
+                {
+                    int mode = _optBlendMode.GetItemId((int)idx);
+                    if (_painter != null) _painter.BlendMode = mode;
+                    _layerManager?.SetOverlayBlendMode(mode);
+                };
+            }
 
             _btnBaseTex = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnBaseTex")
                        ?? FindChild("BtnBaseTex", true, false) as Button;
@@ -428,7 +455,22 @@ namespace DeadlockPlayground.UI
                 };
                 _canvasDrawArea.Resized += () =>
                 {
-                    FitToView();
+                    if (!_hasInitialFit)
+                    {
+                        FitToView();
+                    }
+                    else
+                    {
+                        Vector2 newSize = _canvasDrawArea.Size;
+                        if (_lastDrawAreaSize.X > 0 && _lastDrawAreaSize.Y > 0 && newSize.X > 0 && newSize.Y > 0)
+                        {
+                            Vector2 delta = (newSize - _lastDrawAreaSize) * 0.5f;
+                            _pan += delta;
+                        }
+                        _lastDrawAreaSize = newSize;
+                        _wireframeOverlay?.QueueRedraw();
+                        _canvasDrawArea.QueueRedraw();
+                    }
                 };
             }
         }
@@ -449,11 +491,20 @@ namespace DeadlockPlayground.UI
             {
                 _painter.MagicWandTool.MaskUpdated -= OnMagicWandMaskUpdated;
             }
+            if (_brushPalette != null)
+            {
+                _brushPalette.BlendModeChanged -= OnBrushPaletteBlendModeChanged;
+            }
 
             _layerManager = layerManager;
             _painter = painter;
             _meshHierarchy = hierarchy;
             _brushPalette = palette;
+
+            if (_brushPalette != null)
+            {
+                _brushPalette.BlendModeChanged += OnBrushPaletteBlendModeChanged;
+            }
 
             if (_painter != null && _painter.MagicWandTool != null)
             {
@@ -479,6 +530,16 @@ namespace DeadlockPlayground.UI
 
         private void OnMagicWandMaskUpdated(bool hasActiveMask)
         {
+            if (_selectionOverlayRect != null)
+            {
+                bool hasSelection = _painter?.MagicWandTool != null && _painter.MagicWandTool.HasSelection;
+                bool showPattern = _painter?.MagicWandTool != null && _painter.MagicWandTool.UseSelectionMask;
+                _selectionOverlayRect.Visible = hasSelection;
+                if (_selectionOverlayMat != null)
+                {
+                    _selectionOverlayMat.SetShaderParameter("show_stencil_pattern", showPattern);
+                }
+            }
             _canvasDrawArea?.QueueRedraw();
         }
 
@@ -503,7 +564,10 @@ namespace DeadlockPlayground.UI
                 _layerManager?.RebuildBaseAtlasBuffer();
                 RebuildWireframe();
                 UpdateResolutionLabel();
-                CallDeferred(nameof(FitToView));
+                if (!_hasInitialFit)
+                {
+                    CallDeferred(nameof(FitToView));
+                }
                 _canvasDrawArea?.QueueRedraw();
             }
         }
@@ -600,8 +664,24 @@ namespace DeadlockPlayground.UI
         private void OnStackChanged()
         {
             UpdateResolutionLabel();
+            if (_optBlendMode != null && _layerManager?.ActiveLayer != null)
+            {
+                int bMode = (int)_layerManager.ActiveLayer.BlendMode;
+                if (bMode >= 0 && bMode < _optBlendMode.ItemCount)
+                {
+                    _optBlendMode.Select(bMode);
+                }
+            }
             RebuildWireframe();
             _canvasDrawArea?.QueueRedraw();
+        }
+
+        private void OnBrushPaletteBlendModeChanged(int mode)
+        {
+            if (_optBlendMode != null && mode >= 0 && mode < _optBlendMode.ItemCount)
+            {
+                _optBlendMode.Select(mode);
+            }
         }
 
         private void OnTargetMeshChanged(MeshInstance3D mesh, int surfaceIndex)
@@ -626,8 +706,8 @@ namespace DeadlockPlayground.UI
 
         public void RebuildWireframe()
         {
-            _cachedBoundaryPoints = null;
-            _cachedAllWirePoints = null;
+            _cachedBoundaryMesh = null;
+            _cachedAllWireMesh = null;
             _hasSubmeshRect = false;
 
             if (_meshHierarchy == null) return;
@@ -747,8 +827,27 @@ namespace DeadlockPlayground.UI
                 }
             }
 
-            _cachedAllWirePoints = allPoints.ToArray();
-            _cachedBoundaryPoints = boundaryPoints.ToArray();
+            _cachedAllWireMesh = BuildLineMesh(allPoints);
+            _cachedBoundaryMesh = BuildLineMesh(boundaryPoints);
+        }
+
+        private static ArrayMesh BuildLineMesh(List<Vector2> points)
+        {
+            if (points == null || points.Count < 2) return null;
+
+            var meshArrays = new Godot.Collections.Array();
+            meshArrays.Resize((int)Mesh.ArrayType.Max);
+
+            Vector3[] verts = new Vector3[points.Count];
+            for (int i = 0; i < points.Count; i++)
+            {
+                verts[i] = new Vector3(points[i].X, points[i].Y, 0.0f);
+            }
+            meshArrays[(int)Mesh.ArrayType.Vertex] = verts;
+
+            var arrayMesh = new ArrayMesh();
+            arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Lines, meshArrays);
+            return arrayMesh;
         }
 
         private void OnDrawCanvas(Control canvas)
@@ -806,9 +905,10 @@ namespace DeadlockPlayground.UI
             // 4b. Update and position Magic Wand selection overlay (marching ants + protective stencil)
             if (_selectionOverlayRect != null)
             {
-                bool showOverlay = _painter?.MagicWandTool != null && _painter.MagicWandTool.HasSelection && _painter.MagicWandTool.UseSelectionMask;
-                _selectionOverlayRect.Visible = showOverlay;
-                if (showOverlay)
+                bool hasSelection = _painter?.MagicWandTool != null && _painter.MagicWandTool.HasSelection;
+                bool showPattern = _painter?.MagicWandTool != null && _painter.MagicWandTool.UseSelectionMask;
+                _selectionOverlayRect.Visible = hasSelection;
+                if (hasSelection)
                 {
                     _selectionOverlayRect.Position = _pan;
                     _selectionOverlayRect.Scale = new Vector2(_zoom, _zoom);
@@ -820,6 +920,7 @@ namespace DeadlockPlayground.UI
                         _selectionOverlayMat.SetShaderParameter("selection_mask", maskTex);
                         _selectionOverlayMat.SetShaderParameter("atlas_size", new Vector2(atlasSize, atlasSize));
                         _selectionOverlayMat.SetShaderParameter("has_submesh_rect", _hasSubmeshRect);
+                        _selectionOverlayMat.SetShaderParameter("show_stencil_pattern", showPattern);
                         if (_hasSubmeshRect)
                         {
                             _selectionOverlayMat.SetShaderParameter("submesh_pos", _cachedSubmeshAtlasRect.Position / atlasSize);
@@ -854,14 +955,15 @@ namespace DeadlockPlayground.UI
                 overlay.DrawRect(_cachedSubmeshAtlasRect, new Color(0.96f, 0.77f, 0.26f, 0.95f), filled: false, width: 2.0f / _zoom);
             }
 
-            // Anti-aliased UV wireframe overlay
+            // Static GPU cached UV wireframe overlay (draws in a single GPU draw call)
             if (_wireframeMode != WireframeDisplayMode.Off)
             {
-                var points = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryPoints : _cachedAllWirePoints;
-                if (points != null && points.Length > 0)
+                var mesh = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryMesh : _cachedAllWireMesh;
+                if (mesh != null)
                 {
                     float baseAlpha = (_wireframeMode == WireframeDisplayMode.Outlines) ? 0.85f : 0.40f;
-                    overlay.DrawMultiline(points, new Color(0.85f, 0.88f, 0.95f, baseAlpha * _wireframeOpacity), width: 1.0f / _zoom, antialiased: true);
+                    Color wireColor = new Color(0.85f, 0.88f, 0.95f, baseAlpha * _wireframeOpacity);
+                    overlay.DrawMesh(mesh, null, Transform2D.Identity, wireColor);
                 }
             }
 
@@ -907,6 +1009,7 @@ namespace DeadlockPlayground.UI
                 else if (mb.ButtonIndex == MouseButton.Middle)
                 {
                     _isPanning = mb.Pressed;
+                    if (_isPanning) _hasInitialFit = true;
                     canvas.AcceptEvent();
                     GetViewport()?.SetInputAsHandled();
                     return;
@@ -916,6 +1019,7 @@ namespace DeadlockPlayground.UI
                     if (Input.IsKeyPressed(Key.Space))
                     {
                         _isPanning = mb.Pressed;
+                        if (_isPanning) _hasInitialFit = true;
                         return;
                     }
 
@@ -997,7 +1101,7 @@ namespace DeadlockPlayground.UI
                         }
                     }
                     Vector2 submeshUv = (size.X > 0 && size.Y > 0) ? (uv - pos) / size : uv;
-                    _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, submeshUv, _painter.MagicWandTool);
+                    _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, submeshUv, _painter.MagicWandTool, _painter.BucketFillTolerance);
                     _canvasDrawArea?.QueueRedraw();
                 }
             }
@@ -1132,6 +1236,7 @@ namespace DeadlockPlayground.UI
 
         private void ZoomAtPoint(Vector2 mousePos, float factor)
         {
+            _hasInitialFit = true;
             Vector2 atlasPosBefore = (mousePos - _pan) / _zoom;
             _zoom = Mathf.Clamp(_zoom * factor, 0.05f, 40.0f);
             _pan = mousePos - atlasPosBefore * _zoom;
@@ -1157,6 +1262,9 @@ namespace DeadlockPlayground.UI
             _zoom = Mathf.Clamp(Mathf.Min(availW / atlasSize, availH / atlasSize), 0.05f, 40.0f);
             Vector2 scaledSize = new Vector2(atlasSize, atlasSize) * _zoom;
             _pan = (viewSize - scaledSize) * 0.5f;
+            _lastDrawAreaSize = viewSize;
+            _hasInitialFit = true;
+            _wireframeOverlay?.QueueRedraw();
             _canvasDrawArea.QueueRedraw();
         }
     }

@@ -528,6 +528,34 @@ visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
+[node name="ToleranceRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=1918249977]
+layout_mode = 2
+
+[node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/ToleranceRow" unique_id=1667191255]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
+theme_override_font_sizes/font_size = 11
+text = "Tolerance:"
+
+[node name="SliderBucketTolerance" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/ToleranceRow" unique_id=14395540]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.01
+max_value = 1.0
+step = 0.01
+value = 0.5
+
+[node name="LblBucketTolerance" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/ToleranceRow" unique_id=468478099]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "50%"
+horizontal_alignment = 2
+
 [node name="BtnFillActiveSubmesh" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions" unique_id=1544219994]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 28)
