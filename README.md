@@ -10,10 +10,27 @@
 
 **A 3D character posing, real-time texture painting, and model inspection suite for Valve's *Deadlock*.**
 
+[![Latest Release](https://img.shields.io/github/v/release/juliancz-a/deadlock-playground?color=brightgreen&label=Download%20Build)](https://github.com/juliancz-a/deadlock-playground/releases/latest)
 [![Engine](https://img.shields.io/badge/Godot%20Engine-4.7.2%20.NET-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org/)
 [![Runtime](https://img.shields.io/badge/.NET-10.0%20%7C%20C%23%2013-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-blue?logo=windows&logoColor=white)](#requirements--setup)
+
+<br />
+
+[📦 **Download Releases**](https://github.com/juliancz-a/deadlock-playground/releases) • [🎬 **Watch Showcase Video**](https://youtu.be/0GgRUHwB0ek)
+
+</div>
+
+---
+
+## Video Showcase
+
+Watch a full walkthrough of the real-time 3D texture painting, UV canvas editing, posing controls, and direct Source 2 VPK mod export in action:
+
+<div align="center">
+
+[![Watch the Video Demo](https://img.youtube.com/vi/0GgRUHwB0ek/maxresdefault.jpg)](https://youtu.be/0GgRUHwB0ek)
 
 </div>
 
@@ -21,7 +38,7 @@
 
 ## Overview
 
-**Deadlock Playground** is an open-source,  desktop application designed to view, inspect, pose, and paint 3D character models from Valve's *Deadlock*. It is built from the ground up for modders and community, providing direct, native access to Source 2 assets without requiring external export pipelines or heavy 3D DCC software suites.
+**Deadlock Playground** is an open-source desktop application designed to view, inspect, pose, and paint 3D character models from Valve's *Deadlock*. It is built from the ground up for modders and the community, providing direct, native access to Source 2 assets without requiring external export pipelines or heavy 3D DCC software suites.
 
 ## Core Features
 
@@ -46,7 +63,7 @@
 
 ### 3. In-Engine 2D / 3D Texture Painting & Skin Studio
 * **Simultaneous 3D & 2D Canvas Painting:** Paint directly on the character model in the 3D viewport via orthographic GPU compute projection, or paint on the flattened 2D UV unwrapped texture dock.
-* **Non-Destructive Multi-Layer Stack:** Full layer manager supporting multiple canvas layers, visibility toggling, layer opacity, and standard blend modes (*Normal*, *Multiply*, *Screen*, *Overlay*). Layer 0 remains protected as the immutable original diffuse texture.
+* **Non-Destructive Multi-Layer Stack:** Full layer manager supporting multiple canvas layers, visibility toggling, layer opacity, and standard blend modes (*Normal*, *Multiply*, *Screen*, *Overlay*, *Color*, *Luminosity*). Layer 0 remains protected as the immutable original diffuse texture.
 * **Comprehensive Brush Suite:** Configurable brush radius, hardness, spacing, opacity, flow, jitter, and procedural shapes (*Soft Circle*, *Hard Circle*, *Splatter*, *Grunge*, *Square*).
 * **Advanced Selection Tools:**
   * **Magic Wand:** Perceptual sRGB BFS flood-fill on the UV texture atlas with customizable tolerance and contiguous fill settings.
@@ -57,14 +74,13 @@
 
 ### 4. Shading & Materials Pipeline
 * **PBR vs. Toon Switcher:** Instant toggling between authentic PBR materials and stylized NPR Toon shading with customizable outline width, color, and depth offsets.
-* **Hero Bespoke Shaders:**Shader for character-specific effects for customization:
-  * **Infernus:** arm glow and flame plume hair.
+* **Hero Bespoke Shaders:** Custom shaders for character-specific effects:
+  * **Infernus:** Arm glow and flame plume hair.
   * **Lady Geist:** Spectral arm tinting.
   * **Viscous:** Translucent slime volume rendering, interior core protection, and hull exclusion.
   * **Vindicta:** Translucent spectral aura.
   * **Lash:** Animated gold shoulder sparkles with desynchronized step wiping.
-  * **Wraith** Cards glow and translucent effect.
-
+  * **Wraith:** Cards glow and translucent effects.
 
 ### 5. Virtual Photography & High-Resolution Image Export
 * **Studio Orbit Camera:** Smooth turntable orbit, pan, dolly zoom, and frame-selection (`F` key) camera controller.
@@ -74,10 +90,14 @@
 ### 6. Seamless GitHub Releases Auto-Updater
 * Built-in `UpdateChecker` that automatically queries the GitHub Releases API for new builds, stages update packages, and cleans up post-update temporary files seamlessly upon restart.
 
+---
 
 ## Requirements & Setup
 
-### Prerequisites
+### Pre-Built Binaries
+If you just want to run the application, head over to the [**Releases**](https://github.com/juliancz-a/deadlock-playground/releases) page and download the latest Windows x64 archive.
+
+### Prerequisites (For Developers)
 1. **Godot Engine 4.7.2 (.NET / C# version):** Download the standard .NET build of Godot 4.7.2 from [godotengine.org](https://godotengine.org/download/).
 2. **.NET 10.0 SDK:** Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 3. **Deadlock Installation:** A local installation of *Deadlock* on Steam (the application reads `pak01_dir.vpk` from your local game directory to ingest character models, textures, and animations).
@@ -86,7 +106,7 @@
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/juliancz-a/deadlock-playground.git
+git clone [https://github.com/juliancz-a/deadlock-playground.git](https://github.com/juliancz-a/deadlock-playground.git)
 cd deadlock-playground
 
 # 2. Restore NuGet dependencies
