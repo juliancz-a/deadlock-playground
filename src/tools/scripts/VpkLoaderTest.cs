@@ -168,14 +168,18 @@ public partial class VpkLoaderTest : Node3D
 	public async Task LoadHeroAsync(string hero, string model)
 	{
 		var catalogEntry = DeadlockHeroCatalog.GetByCodename(hero) ??
-		                   DeadlockHeroCatalog.GetByCodename(model);
+		                   DeadlockHeroCatalog.GetByCodename(model) ??
+		                   DeadlockHeroCatalog.ResolveHero(hero) ??
+		                   DeadlockHeroCatalog.ResolveHero(model);
 		if (catalogEntry != null)
 		{
 			await LoadHeroModelAsync(catalogEntry);
 			return;
 		}
 
-		string internalRoute = $"models/heroes_staging/{hero}/{model}.vmdl_c";
+		string internalRoute = hero.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+			? hero
+			: $"models/heroes_staging/{hero}/{model}.vmdl_c";
 		await LoadModelInternalAsync(internalRoute, hero, hero);
 	}
 
@@ -992,15 +996,51 @@ public partial class VpkLoaderTest : Node3D
 			fileNameOnly = Path.GetFileNameWithoutExtension(fileNameOnly);
 		}
 
+		string dirName = searchRoute.Replace('\\', '/').Trim('/');
+		if (dirName.EndsWith(".vmdl_c", StringComparison.OrdinalIgnoreCase) || dirName.EndsWith(".vmdl", StringComparison.OrdinalIgnoreCase))
+		{
+			dirName = Path.GetDirectoryName(dirName)?.Replace('\\', '/').Trim('/') ?? "";
+		}
+
 		foreach (var ext in new[] { "vmdl_c", "vmdl" })
 		{
 			if (package.Entries.TryGetValue(ext, out var modelEntries) && modelEntries.Count > 0)
 			{
-				// 1. Match exact filename
+				// 1. If directory is known, search within that directory for the primary model
+				if (!string.IsNullOrEmpty(dirName))
+				{
+					var inDir = modelEntries.Where(e => e.DirectoryName.Equals(dirName, StringComparison.OrdinalIgnoreCase)).ToList();
+					if (inDir.Count > 0)
+					{
+						// Exact filename match in directory
+						entry = inDir.Find(e => e.FileName.Equals(fileNameOnly, StringComparison.OrdinalIgnoreCase));
+						if (entry != null) return entry;
+
+						// Hero key match in directory
+						if (!string.IsNullOrEmpty(heroKey))
+						{
+							entry = inDir.Find(e => e.FileName.Equals(heroKey, StringComparison.OrdinalIgnoreCase));
+							if (entry != null) return entry;
+						}
+
+						// Primary character model candidate in directory (skip physics, ragdoll, hitbox, anim, weapon)
+						var cleanInDir = inDir.Find(e =>
+							!e.FileName.Contains("_physics", StringComparison.OrdinalIgnoreCase) &&
+							!e.FileName.Contains("_agdoll", StringComparison.OrdinalIgnoreCase) &&
+							!e.FileName.Contains("_hitbox", StringComparison.OrdinalIgnoreCase) &&
+							!e.FileName.Contains("_anim", StringComparison.OrdinalIgnoreCase) &&
+							!e.FileName.Contains("_weapon", StringComparison.OrdinalIgnoreCase));
+						if (cleanInDir != null) return cleanInDir;
+
+						return inDir[0];
+					}
+				}
+
+				// 2. Match exact filename
 				entry = modelEntries.Find(e => e.FileName.Equals(fileNameOnly, StringComparison.OrdinalIgnoreCase));
 				if (entry != null) return entry;
 
-				// 2. Match hero key if hero-specific
+				// 3. Match hero key if hero-specific
 				if (!string.IsNullOrEmpty(heroKey))
 				{
 					entry = modelEntries.Find(e =>
@@ -1012,7 +1052,7 @@ public partial class VpkLoaderTest : Node3D
 					if (entry != null) return entry;
 				}
 
-				// 3. For addon packages: fallback to primary character model (exclude physics/ragdoll/hitbox/weapons)
+				// 4. For addon packages: fallback to primary character model (exclude physics/ragdoll/hitbox/weapons)
 				if (isAddon)
 				{
 					var candidates = modelEntries.Where(e =>

@@ -13,6 +13,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnFeedback;
     [Export] private Button _btnAbout;
     [Export] private Button _btnQuit;
+    [Export] private Button _btnNews;
 
     [ExportCategory("Tab Navigation Buttons")]
     [Export] private Button _btnTabCharacter;
@@ -58,6 +59,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private SettingsDialog _settingsModal;
     [Export] private FeedbackDialog _feedbackModal;
     [Export] private PanelContainer _aboutModal;
+    [Export] private ChangelogModalUI _changelogModal;
     [Export] private PanelContainer _loadingOverlay;
     [Export] private Label _loadingLabel;
     [Export] private Label _loadingLogLabel;
@@ -65,6 +67,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
 
+    private Control _unreadBadge;
     private CharacterIKManager _currentIKManager;
 
     // Services
@@ -143,6 +146,8 @@ public partial class StudioUIManager : CanvasLayer
 
         // Switch to default Character tab
         SwitchTab(0);
+
+        UpdateNewsBadgeState();
 
         PlaygroundThemeHelper.AutoDecorate(this);
 
@@ -248,8 +253,19 @@ public partial class StudioUIManager : CanvasLayer
         if ((_settingsModal != null && _settingsModal.Visible) ||
             (_feedbackModal != null && _feedbackModal.Visible) ||
             (_aboutModal != null && _aboutModal.Visible) ||
+            (_changelogModal != null && _changelogModal.Visible) ||
             (_loadingOverlay != null && _loadingOverlay.Visible))
         {
+            if (key.Keycode == Key.Escape)
+            {
+                if (_changelogModal != null && _changelogModal.Visible)
+                {
+                    _changelogModal.Close();
+                    UpdateModalsState();
+                    UpdateNewsBadgeState();
+                    GetViewport().SetInputAsHandled();
+                }
+            }
             return;
         }
 
@@ -342,6 +358,14 @@ public partial class StudioUIManager : CanvasLayer
                    ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/AboutButton");
         _btnQuit ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
                   ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/QuitButton");
+        _btnNews ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/NewsButton")
+                  ?? GetNodeOrNull<Button>("MainHUD/TopBar/HBoxContainer/NewsButton")
+                  ?? GetNodeOrNull<Button>("MainHUD/VBoxContainer/TopBar/HBoxContainer/ChangelogButton")
+                  ?? GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/NewsButton")
+                  ?? GetTree().Root.FindChild("NewsButton", true, false) as Button
+                  ?? GetTree().Root.FindChild("BtnNews", true, false) as Button;
+
+        _unreadBadge ??= _btnNews?.FindChild("UnreadBadge", true, false) as Control;
 
         // Tab Buttons
         _btnTabCharacter ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
@@ -495,6 +519,19 @@ public partial class StudioUIManager : CanvasLayer
 
         _gameFolderDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/GameFolderDialog");
         _saveFolderDialog ??= GetNodeOrNull<FileDialog>("MainHUD/ModalsLayer/ScreenshotFolderDialog");
+
+        _changelogModal ??= GetNodeOrNull<ChangelogModalUI>("MainHUD/ModalsLayer/ChangelogModal")
+                         ?? GetTree().Root.FindChild("ChangelogModal", true, false) as ChangelogModalUI;
+
+        if (_changelogModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/ChangelogModal.tscn");
+            if (modalScene != null)
+            {
+                _changelogModal = modalScene.Instantiate<ChangelogModalUI>();
+                _modalsLayer.AddChild(_changelogModal);
+            }
+        }
     }
 
     private void InitTabs()
@@ -685,6 +722,25 @@ public partial class StudioUIManager : CanvasLayer
         if (_btnQuit != null)
         {
             _btnQuit.Pressed += () => GetTree().Quit();
+        }
+
+        if (_btnNews != null)
+        {
+            _btnNews.Pressed += () =>
+            {
+                _changelogModal?.Open();
+                UpdateModalsState();
+                UpdateNewsBadgeState();
+            };
+        }
+
+        if (_changelogModal != null)
+        {
+            _changelogModal.DialogClosed += () =>
+            {
+                UpdateModalsState();
+                UpdateNewsBadgeState();
+            };
         }
 
         if (_btnAboutClose != null)
@@ -1051,15 +1107,21 @@ public partial class StudioUIManager : CanvasLayer
         UpdateModalsState();
     }
 
+    public bool IsAnyModalOpen()
+    {
+        return (_settingsModal != null && _settingsModal.Visible)
+            || (_feedbackModal != null && _feedbackModal.Visible)
+            || (_aboutModal != null && _aboutModal.Visible)
+            || (_changelogModal != null && _changelogModal.Visible)
+            || (_loadingOverlay != null && _loadingOverlay.Visible)
+            || (_gameFolderDialog != null && _gameFolderDialog.Visible)
+            || (_saveFolderDialog != null && _saveFolderDialog.Visible)
+            || (_fallbackPathDialog != null && _fallbackPathDialog.Visible);
+    }
+
     public void UpdateModalsState()
     {
-        bool anyModalOpen = (_settingsModal != null && _settingsModal.Visible)
-                         || (_feedbackModal != null && _feedbackModal.Visible)
-                         || (_aboutModal != null && _aboutModal.Visible)
-                         || (_loadingOverlay != null && _loadingOverlay.Visible)
-                         || (_gameFolderDialog != null && _gameFolderDialog.Visible)
-                         || (_saveFolderDialog != null && _saveFolderDialog.Visible)
-                         || (_fallbackPathDialog != null && _fallbackPathDialog.Visible);
+        bool anyModalOpen = IsAnyModalOpen();
 
         if (_modalsLayer != null)
         {
@@ -1074,6 +1136,14 @@ public partial class StudioUIManager : CanvasLayer
         if (anyModalOpen)
         {
             _quickColorPalette?.ClosePopup();
+        }
+    }
+
+    public void UpdateNewsBadgeState()
+    {
+        if (_unreadBadge != null)
+        {
+            _unreadBadge.Visible = ChangelogModalUI.HasUnreadChangelog();
         }
     }
 

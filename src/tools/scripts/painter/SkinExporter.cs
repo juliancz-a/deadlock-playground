@@ -505,7 +505,7 @@ namespace DeadlockPlayground.Painter
             return null;
         }
 
-        private static string ResolveHeroInternalFolder(string heroCodename, List<SubmeshNodeInfo> submeshes)
+        public static string ResolveHeroInternalFolder(string heroCodename, List<SubmeshNodeInfo> submeshes = null)
         {
             string cleanHero = string.IsNullOrEmpty(heroCodename) ? "custom_hero" : heroCodename.ToLowerInvariant();
 
@@ -527,7 +527,7 @@ namespace DeadlockPlayground.Painter
             }
 
             // 2. Query DeadlockHeroCatalog
-            var entry = DeadlockHeroCatalog.GetByCodename(cleanHero);
+            var entry = DeadlockHeroCatalog.ResolveHero(cleanHero) ?? DeadlockHeroCatalog.GetByPath(cleanHero);
             if (entry != null && !string.IsNullOrEmpty(entry.VmdlRelativePath))
             {
                 string vmdlDir = Path.GetDirectoryName(entry.VmdlRelativePath)?.Replace('\\', '/');
@@ -537,7 +537,13 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 3. Fallback default
+            // 3. If cleanHero is already a full or relative path starting with models/
+            if (cleanHero.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
+            {
+                return cleanHero.TrimEnd('/');
+            }
+
+            // 4. Fallback default
             return $"models/heroes_staging/{cleanHero}";
         }
 

@@ -6,6 +6,7 @@ namespace DeadlockPlayground.Catalog;
 
 public enum HeroCategory
 {
+    NewUpdate,
     UpdatedAndNew,
     LegacyStaging
 }
@@ -14,13 +15,24 @@ public record DeadlockHeroEntry(
     string DisplayName,
     string InternalCodename,
     string VmdlRelativePath,
-    HeroCategory Category
+    HeroCategory Category,
+    string WipAlias = null
 );
 
 public static class DeadlockHeroCatalog
 {
     public static readonly IReadOnlyList<DeadlockHeroEntry> Entries = new List<DeadlockHeroEntry>
     {
+        // ==========================================
+        // Category: New Heroes (Update - WIP Roster)
+        // ==========================================
+        new("Violet", "violet", "models/heroes_wip/artist/artist.vmdl_c", HeroCategory.NewUpdate, "artist"),
+        new("Baba", "baba", "models/heroes_wip/baba/baba.vmdl_c", HeroCategory.NewUpdate, "baba"),
+        new("Deadman Danny", "deadman_danny", "models/heroes_wip/deadpack/deadpack.vmdl_c", HeroCategory.NewUpdate, "deadpack"),
+        new("Nurse Harrow", "nurse_harrow", "models/heroes_wip/nurse/nurse.vmdl_c", HeroCategory.NewUpdate, "nurse"),
+        new("Ratking", "ratking", "models/heroes_wip/ratking/ratking.vmdl_c", HeroCategory.NewUpdate, "ratking"),
+        new("Solomon", "solomon", "models/heroes_wip/chessmaster/chessmaster.vmdl_c", HeroCategory.NewUpdate, "chessmaster"),
+
         // ==========================================
         // Category: Updated & New Heroes
         // ==========================================
@@ -78,6 +90,9 @@ public static class DeadlockHeroCatalog
         new("Wraith (Old)", "wraith_old", "models/heroes_staging/wraith/wraith.vmdl_c", HeroCategory.LegacyStaging)
     };
 
+    public static IEnumerable<DeadlockHeroEntry> NewUpdateHeroes =>
+        Entries.Where(e => e.Category == HeroCategory.NewUpdate);
+
     public static IEnumerable<DeadlockHeroEntry> UpdatedHeroes =>
         Entries.Where(e => e.Category == HeroCategory.UpdatedAndNew);
 
@@ -90,8 +105,8 @@ public static class DeadlockHeroCatalog
     }
 
     /// <summary>
-    /// Resolves any directory name, internal codename, or model folder (e.g. "hornet_v3", "inferno_v4")
-    /// to its authentic in-game hero display name and catalog entry.
+    /// Resolves any directory name, internal codename, model folder (e.g. "artist", "chessmaster", "deadpack"),
+    /// or model path to its authentic in-game hero display name and catalog entry.
     /// </summary>
     public static DeadlockHeroEntry ResolveHero(string candidate)
     {
@@ -99,16 +114,18 @@ public static class DeadlockHeroCatalog
 
         string clean = candidate.Trim().ToLowerInvariant();
 
-        // 1. Direct match on InternalCodename or DisplayName
+        // 1. Direct match on InternalCodename, DisplayName, or WipAlias
         var match = Entries.FirstOrDefault(e =>
             e.InternalCodename.Equals(clean, StringComparison.OrdinalIgnoreCase) ||
-            e.DisplayName.Equals(clean, StringComparison.OrdinalIgnoreCase));
+            e.DisplayName.Equals(clean, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(e.WipAlias) && e.WipAlias.Equals(clean, StringComparison.OrdinalIgnoreCase)));
         if (match != null) return match;
 
-        // 2. Check if any hero's VmdlRelativePath contains this directory (e.g. "/hornet_v3/", "/inferno_v4/")
+        // 2. Check if any hero's VmdlRelativePath contains this directory (e.g. "/artist/", "/hornet_v3/")
         match = Entries.FirstOrDefault(e =>
             e.VmdlRelativePath.IndexOf($"/{clean}/", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            e.VmdlRelativePath.IndexOf($"/{clean}.", StringComparison.OrdinalIgnoreCase) >= 0);
+            e.VmdlRelativePath.IndexOf($"/{clean}.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            (!string.IsNullOrEmpty(e.WipAlias) && clean.EndsWith($"/{e.WipAlias}", StringComparison.OrdinalIgnoreCase)));
         if (match != null) return match;
 
         // 3. Strip version suffixes like _v2, _v3, _v4
@@ -127,9 +144,22 @@ public static class DeadlockHeroCatalog
             if (match != null) return match;
         }
 
-        // 5. Special aliases dictionary for known Deadlock internal dev names
+        // 5. Special aliases dictionary for known Deadlock internal dev names & update heroes
         var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            { "violet", "violet" },
+            { "artist", "violet" },
+            { "baba", "baba" },
+            { "deadman_danny", "deadman_danny" },
+            { "deadman danny", "deadman_danny" },
+            { "deadman", "deadman_danny" },
+            { "deadpack", "deadman_danny" },
+            { "nurse_harrow", "nurse_harrow" },
+            { "nurse harrow", "nurse_harrow" },
+            { "nurse", "nurse_harrow" },
+            { "ratking", "ratking" },
+            { "solomon", "solomon" },
+            { "chessmaster", "solomon" },
             { "hornet", "hornet" },
             { "hornet_v3", "hornet" },
             { "inferno", "inferno" },
@@ -199,7 +229,8 @@ public static class DeadlockHeroCatalog
         // 6. Substring check
         match = Entries.FirstOrDefault(e =>
             clean.Contains(e.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
-            clean.Contains(e.DisplayName.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase));
+            clean.Contains(e.DisplayName.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(e.WipAlias) && clean.Contains(e.WipAlias, StringComparison.OrdinalIgnoreCase)));
         if (match != null) return match;
 
         return null;
@@ -208,7 +239,29 @@ public static class DeadlockHeroCatalog
     public static DeadlockHeroEntry GetByPath(string path)
     {
         if (string.IsNullOrEmpty(path)) return null;
-        string normalized = path.Replace('\\', '/').ToLowerInvariant();
-        return Entries.FirstOrDefault(e => e.VmdlRelativePath.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+        string normalized = path.Replace('\\', '/').Trim().ToLowerInvariant();
+        var match = Entries.FirstOrDefault(e => e.VmdlRelativePath.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+        if (match != null) return match;
+
+        string cleanDir = normalized.TrimEnd('/');
+        return Entries.FirstOrDefault(e =>
+        {
+            string entryDir = System.IO.Path.GetDirectoryName(e.VmdlRelativePath)?.Replace('\\', '/').TrimEnd('/').ToLowerInvariant();
+            return !string.IsNullOrEmpty(entryDir) && (cleanDir.Equals(entryDir, StringComparison.OrdinalIgnoreCase) || cleanDir.EndsWith("/" + entryDir, StringComparison.OrdinalIgnoreCase));
+        });
     }
+}
+
+/// <summary>
+/// Alias class forwarding directly to DeadlockHeroCatalog for developer ergonomics.
+/// </summary>
+public static class HeroCatalog
+{
+    public static IReadOnlyList<DeadlockHeroEntry> Entries => DeadlockHeroCatalog.Entries;
+    public static IEnumerable<DeadlockHeroEntry> NewUpdateHeroes => DeadlockHeroCatalog.NewUpdateHeroes;
+    public static IEnumerable<DeadlockHeroEntry> UpdatedHeroes => DeadlockHeroCatalog.UpdatedHeroes;
+    public static IEnumerable<DeadlockHeroEntry> LegacyHeroes => DeadlockHeroCatalog.LegacyHeroes;
+    public static DeadlockHeroEntry GetByCodename(string codename) => DeadlockHeroCatalog.GetByCodename(codename);
+    public static DeadlockHeroEntry ResolveHero(string candidate) => DeadlockHeroCatalog.ResolveHero(candidate);
+    public static DeadlockHeroEntry GetByPath(string path) => DeadlockHeroCatalog.GetByPath(path);
 }

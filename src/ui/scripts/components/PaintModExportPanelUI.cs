@@ -103,7 +103,11 @@ public partial class PaintModExportPanelUI : PanelContainer
                 {
                     string heroName = ResolveHeroCodename();
                     string meshName = _meshHierarchy?.ActiveTarget?.RawName ?? "body";
-                    string relativeTexPath = $"models/heroes_staging/{heroName}/materials/{heroName}_{meshName}_color.png";
+                    var catalogEntry = DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(heroName);
+                    string heroFolder = catalogEntry != null && !string.IsNullOrEmpty(catalogEntry.VmdlRelativePath)
+                        ? Path.GetDirectoryName(catalogEntry.VmdlRelativePath)?.Replace('\\', '/')
+                        : $"models/heroes_staging/{heroName}";
+                    string relativeTexPath = $"{heroFolder}/materials/{heroName}_{meshName}_color.png";
                     var res = _exporter?.ExportVmat(path, relativeTexPath);
                     if (_lblStatus != null && res != null)
                     {

@@ -1,8 +1,9 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://dikiyyrp7b08b"]
 
-[ext_resource type="Script" path="res://ui/scripts/tabs/CharacterTabUI.cs" id="1_char"]
+[ext_resource type="Script" uid="uid://cyy83uh7loppl" path="res://ui/scripts/tabs/CharacterTabUI.cs" id="1_char"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_cxjk5"]
 
-[node name="CharacterTab" type="VBoxContainer" node_paths=PackedStringArray("_heroOptionButton", "_submeshContainer", "_btnShowAll", "_btnHideAccessories", "_optAddonMods", "_lblAddonDetails")]
+[node name="CharacterTab" type="VBoxContainer" unique_id=848590226 node_paths=PackedStringArray("_updateHeroOptionButton", "_heroOptionButton", "_optAddonMods", "_lblAddonDetails", "_submeshContainer", "_btnShowAll", "_btnHideAccessories")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -12,6 +13,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 12
 script = ExtResource("1_char")
+_updateHeroOptionButton = NodePath("HeroSelectGroup/UpdateHeroOptionButton")
 _heroOptionButton = NodePath("HeroSelectGroup/HeroOptionButton")
 _optAddonMods = NodePath("HeroSelectGroup/AddonOptionButton")
 _lblAddonDetails = NodePath("HeroSelectGroup/AddonDetailsLabel")
@@ -19,86 +21,106 @@ _submeshContainer = NodePath("SubmeshPanel/ScrollContainer/SubmeshContainer")
 _btnShowAll = NodePath("SubmeshHeader/HBoxButtons/BtnShowAll")
 _btnHideAccessories = NodePath("SubmeshHeader/HBoxButtons/BtnHideAccessories")
 
-[node name="HeroSelectGroup" type="VBoxContainer" parent="."]
+[node name="HeroSelectGroup" type="VBoxContainer" parent="." unique_id=183166962]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="HeroLabel" type="Label" parent="HeroSelectGroup"]
+[node name="UpdateHeroLabel" type="RichTextLabel" parent="HeroSelectGroup" unique_id=1439922209]
 layout_mode = 2
+size_flags_vertical = 4
 theme_type_variation = &"TitleLabel"
-text = "Character Model"
+theme_override_colors/default_color = Color(0.9372549, 0.87058824, 0.7490196, 1)
+theme_override_fonts/normal_font = ExtResource("2_cxjk5")
+theme_override_font_sizes/normal_font_size = 18
+bbcode_enabled = true
+text = "[color=#E0DD16]NEW [/color]CHARACTERS MODELS"
+fit_content = true
 
-[node name="HeroOptionButton" type="OptionButton" parent="HeroSelectGroup"]
+[node name="UpdateHeroOptionButton" type="OptionButton" parent="HeroSelectGroup" unique_id=845928530]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
-fit_to_longest_item = false
-clip_text = true
 text_overrun_behavior = 3
+clip_text = true
+fit_to_longest_item = false
 search_bar_enabled = true
 
-[node name="AddonLabel" type="Label" parent="HeroSelectGroup"]
+[node name="HeroLabel" type="Label" parent="HeroSelectGroup" unique_id=558308242]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Character Models"
+
+[node name="HeroOptionButton" type="OptionButton" parent="HeroSelectGroup" unique_id=631588507]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text_overrun_behavior = 3
+clip_text = true
+fit_to_longest_item = false
+search_bar_enabled = true
+
+[node name="AddonLabel" type="Label" parent="HeroSelectGroup" unique_id=477641126]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
 text = "Modded Character Models"
 
-[node name="AddonOptionButton" type="OptionButton" parent="HeroSelectGroup"]
+[node name="AddonOptionButton" type="OptionButton" parent="HeroSelectGroup" unique_id=1269741063]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 size_flags_horizontal = 3
-fit_to_longest_item = false
-clip_text = true
 text_overrun_behavior = 3
+clip_text = true
+fit_to_longest_item = false
 
-[node name="AddonDetailsLabel" type="RichTextLabel" parent="HeroSelectGroup"]
+[node name="AddonDetailsLabel" type="RichTextLabel" parent="HeroSelectGroup" unique_id=490486138]
 layout_mode = 2
+theme_override_font_sizes/normal_font_size = 11
 bbcode_enabled = true
+text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]"
 fit_content = true
 scroll_active = false
 autowrap_mode = 2
-theme_override_font_sizes/normal_font_size = 11
-text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]"
 
-[node name="HSeparator1" type="HSeparator" parent="."]
+[node name="HSeparator1" type="HSeparator" parent="." unique_id=274751755]
 layout_mode = 2
 
-[node name="SubmeshHeader" type="VBoxContainer" parent="."]
+[node name="SubmeshHeader" type="VBoxContainer" parent="." unique_id=1441264564]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="PartsLabel" type="Label" parent="SubmeshHeader"]
+[node name="PartsLabel" type="Label" parent="SubmeshHeader" unique_id=1178518771]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
 text = "Submesh Visibility"
 
-[node name="HBoxButtons" type="HBoxContainer" parent="SubmeshHeader"]
+[node name="HBoxButtons" type="HBoxContainer" parent="SubmeshHeader" unique_id=51882036]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="BtnShowAll" type="Button" parent="SubmeshHeader/HBoxButtons"]
+[node name="BtnShowAll" type="Button" parent="SubmeshHeader/HBoxButtons" unique_id=909829504]
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Show All"
 
-[node name="BtnHideAccessories" type="Button" parent="SubmeshHeader/HBoxButtons"]
+[node name="BtnHideAccessories" type="Button" parent="SubmeshHeader/HBoxButtons" unique_id=119327991]
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Hide Accessories"
 
-[node name="SubmeshPanel" type="PanelContainer" parent="."]
+[node name="SubmeshPanel" type="PanelContainer" parent="." unique_id=1998057264]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="ScrollContainer" type="ScrollContainer" parent="SubmeshPanel"]
+[node name="ScrollContainer" type="ScrollContainer" parent="SubmeshPanel" unique_id=116344128]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="SubmeshContainer" type="VBoxContainer" parent="SubmeshPanel/ScrollContainer"]
+[node name="SubmeshContainer" type="VBoxContainer" parent="SubmeshPanel/ScrollContainer" unique_id=1682339525]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3

@@ -32,6 +32,14 @@
 [ext_resource type="Script" uid="uid://diun3p2kyu2cy" path="res://ui/scripts/modals/AboutDialog.cs" id="29_qsp4k"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="30_kq58d"]
 [ext_resource type="PackedScene" uid="uid://bkc7qpal8tx01" path="res://ui/scenes/components/QuickColorPalette.tscn" id="31_quick_palette"]
+[ext_resource type="PackedScene" path="res://ui/scenes/modals/ChangelogModal.tscn" id="32_changelog_modal"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_unread_badge"]
+bg_color = Color(0.96, 0.62, 0.07, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -134,10 +142,11 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_quickColorPalette", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_quickColorPalette", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _quickColorPalette = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
+_btnNews = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/NewsButton")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
 _btnFeedback = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/FeedbackButton")
 _btnAbout = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
@@ -161,6 +170,7 @@ _modalBackdrop = NodePath("MainHUD/ModalsLayer/ModalBackdrop")
 _settingsModal = NodePath("MainHUD/ModalsLayer/SettingsModal")
 _feedbackModal = NodePath("MainHUD/ModalsLayer/FeedbackModal")
 _aboutModal = NodePath("MainHUD/ModalsLayer/AboutModal")
+_changelogModal = NodePath("MainHUD/ModalsLayer/ChangelogModal")
 _loadingOverlay = NodePath("MainHUD/ModalsLayer/LoadingOverlay")
 _loadingLabel = NodePath("MainHUD/ModalsLayer/LoadingOverlay/VBox/Label")
 _loadingLogLabel = NodePath("MainHUD/ModalsLayer/LoadingOverlay/VBox/LogLabel")
@@ -216,6 +226,25 @@ text = "Deadlock Playground"
 [node name="_Spacer" type="Control" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1906916890]
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="NewsButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=981247192]
+layout_mode = 2
+tooltip_text = "Updates & Changelog"
+text = "Updates"
+
+[node name="UnreadBadge" type="Panel" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer/NewsButton" unique_id=981247193]
+custom_minimum_size = Vector2(8, 8)
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -7.0
+offset_top = 2.0
+offset_right = 1.0
+offset_bottom = 10.0
+grow_horizontal = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_unread_badge")
 
 [node name="SettingsButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=578225235]
 layout_mode = 2
@@ -742,6 +771,10 @@ layout_mode = 1
 visible = false
 layout_mode = 1
 
+[node name="ChangelogModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=184693799 instance=ExtResource("32_changelog_modal")]
+visible = false
+layout_mode = 1
+
 [node name="AboutModal" type="PanelContainer" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1871805012]
 visible = false
 custom_minimum_size = Vector2(620, 500)
@@ -815,7 +848,7 @@ theme_override_fonts/normal_font = ExtResource("30_kq58d")
 theme_override_fonts/bold_font = ExtResource("30_kq58d")
 bbcode_enabled = true
 text = "[font_size=24][b]Deadlock Playground[/b][/font_size]
-[color=#A35A4E]v1.0.0[/color]
+[color=#A35A4E]v1.0.1[/color]
 
 An open-source, community-driven tool designed to view, inspect, pose, and paint 3D character models from Valve's Deadlock for art reference, virtual photography, skin creation, and modding.
 

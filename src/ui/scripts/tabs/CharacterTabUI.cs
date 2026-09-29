@@ -5,10 +5,13 @@ using System.Collections.Generic;
 using System.Linq;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Addons;
+using DeadlockPlayground.UI;
 
 public partial class CharacterTabUI : VBoxContainer
 {
     [Signal] public delegate void CharacterRequestedEventHandler(string internalId);
+
+    [Export] private OptionButton _updateHeroOptionButton;
 
     [Export] private OptionButton _heroOptionButton;
     [Export] private OptionButton _optAddonMods;
@@ -29,10 +32,15 @@ public partial class CharacterTabUI : VBoxContainer
 
     private readonly List<SubmeshItem> _submeshes = new();
     private readonly List<DeadlockHeroEntry> _selectableHeroes = new();
+    private readonly List<DeadlockHeroEntry> _selectableUpdateHeroes = new();
     private readonly List<AddonModInfo> _addonMods = new();
 
     public override void _Ready()
     {
+        _updateHeroOptionButton ??= GetNodeOrNull<OptionButton>("HeroSelectGroup/UpdateHeroOptionButton")
+                                  ?? GetNodeOrNull<OptionButton>("HeroSelectGroup/HeroOptionButton2");
+        _heroOptionButton ??= GetNodeOrNull<OptionButton>("HeroSelectGroup/HeroOptionButton");
+
         ConnectEvents();
 
         if (_vpkLoader == null)
@@ -43,7 +51,7 @@ public partial class CharacterTabUI : VBoxContainer
         }
 
         PopulateAddonDropdown();
-        PopulateHeroDropdown();
+        PopulateHeroDropdowns();
 
         if (_vpkLoader != null)
         {
@@ -74,55 +82,61 @@ public partial class CharacterTabUI : VBoxContainer
         }
     }
 
-    private void PopulateHeroDropdown()
+    public void PopulateHeroDropdown()
     {
-        if (_heroOptionButton == null) return;
+        PopulateHeroDropdowns();
+    }
 
-        _heroOptionButton.Clear();
-        _selectableHeroes.Clear();
+    public void PopulateHeroDropdown(OptionButton heroOptionButton)
+    {
+        if (heroOptionButton == null) return;
+        HeroSelectionUI.PopulateDropdown(heroOptionButton, _selectableHeroes);
+    }
 
-        _heroOptionButton.AddItem("Select a Hero...", -1);
-        _heroOptionButton.SetItemDisabled(0, true);
-
-        // Header: -- Heroes --
-        _heroOptionButton.AddItem("-- Heroes --", -1);
-        int heroHeaderIndex = _heroOptionButton.ItemCount - 1;
-        _heroOptionButton.SetItemDisabled(heroHeaderIndex, true);
-
-        foreach (var hero in DeadlockHeroCatalog.UpdatedHeroes)
+    public void PopulateHeroDropdowns()
+    {
+        if (_updateHeroOptionButton != null)
         {
-            int currentId = _selectableHeroes.Count;
-            _selectableHeroes.Add(hero);
-            _heroOptionButton.AddItem($"  {hero.DisplayName}", currentId);
+            HeroSelectionUI.PopulateUpdateHeroesDropdown(_updateHeroOptionButton, _selectableUpdateHeroes);
+            if (_updateHeroOptionButton.ItemCount > 0)
+            {
+                _updateHeroOptionButton.Select(0);
+            }
         }
 
-        // Header: -- Legacy / Prototype Heroes --
-        _heroOptionButton.AddItem("-- Legacy / Prototype Heroes --", -1);
-        int legacyHeaderIndex = _heroOptionButton.ItemCount - 1;
-        _heroOptionButton.SetItemDisabled(legacyHeaderIndex, true);
-
-        foreach (var hero in DeadlockHeroCatalog.LegacyHeroes)
+        if (_heroOptionButton != null)
         {
-            int currentId = _selectableHeroes.Count;
-            _selectableHeroes.Add(hero);
-            _heroOptionButton.AddItem($"  {hero.DisplayName}", currentId);
+            if (_updateHeroOptionButton != null)
+            {
+                HeroSelectionUI.PopulateStandardHeroesDropdown(_heroOptionButton, _selectableHeroes);
+            }
+            else
+            {
+                HeroSelectionUI.PopulateDropdown(_heroOptionButton, _selectableHeroes);
+            }
+
+            if (_heroOptionButton.ItemCount > 0)
+            {
+                _heroOptionButton.Select(0);
+            }
         }
 
         if (_vpkLoader?.LastLoadedHeroEntry != null)
         {
             SyncHeroDropdownToHero(_vpkLoader.LastLoadedHeroEntry);
         }
-        else
-        {
-            _heroOptionButton.Select(0);
-        }
     }
 
     private void ConnectEvents()
     {
+        if (_updateHeroOptionButton != null)
+        {
+            _updateHeroOptionButton.ItemSelected += OnUpdateHeroSelected;
+        }
+
         if (_heroOptionButton != null)
         {
-            _heroOptionButton.ItemSelected += OnHeroSelected;
+            _heroOptionButton.ItemSelected += OnStandardHeroSelected;
         }
 
         if (_optAddonMods != null)
@@ -310,14 +324,43 @@ public partial class CharacterTabUI : VBoxContainer
         }
     }
 
-    private async void OnHeroSelected(long index)
+    private async void OnUpdateHeroSelected(long index)
+    {
+        if (_updateHeroOptionButton == null) return;
+        int id = _updateHeroOptionButton.GetItemId((int)index);
+        if (id < 0 || id >= _selectableUpdateHeroes.Count) return;
+
+        // Reset the standard hero dropdown to placeholder
+        if (_heroOptionButton != null && _heroOptionButton.ItemCount > 0)
+        {
+            _heroOptionButton.Select(0);
+        }
+
+        var entry = _selectableUpdateHeroes[id];
+        await LoadSelectedHeroAsync(entry);
+    }
+
+    private async void OnStandardHeroSelected(long index)
     {
         if (_heroOptionButton == null) return;
         int id = _heroOptionButton.GetItemId((int)index);
         if (id < 0 || id >= _selectableHeroes.Count) return;
 
+        // Reset the update hero dropdown to placeholder
+        if (_updateHeroOptionButton != null && _updateHeroOptionButton.ItemCount > 0)
+        {
+            _updateHeroOptionButton.Select(0);
+        }
+
         var entry = _selectableHeroes[id];
-        GD.Print($"[CharacterTab] Loading vanilla hero: {entry.DisplayName} ({entry.InternalCodename}) from {entry.VmdlRelativePath}");
+        await LoadSelectedHeroAsync(entry);
+    }
+
+    private async System.Threading.Tasks.Task LoadSelectedHeroAsync(DeadlockHeroEntry entry)
+    {
+        if (entry == null) return;
+
+        GD.Print($"[CharacterTab] Loading hero: {entry.DisplayName} ({entry.InternalCodename}) from {entry.VmdlRelativePath}");
         EmitSignal(SignalName.CharacterRequested, entry.InternalCodename);
 
         // If active addon is a full model replacement, reset addon selector to Vanilla so it doesn't conflict
@@ -355,14 +398,44 @@ public partial class CharacterTabUI : VBoxContainer
 
     private void SyncHeroDropdownToHero(DeadlockHeroEntry hero)
     {
-        if (_heroOptionButton == null || hero == null) return;
-        for (int i = 0; i < _selectableHeroes.Count; i++)
+        if (hero == null) return;
+
+        // 1. Check if the hero matches an entry in the update heroes dropdown
+        if (_updateHeroOptionButton != null)
         {
-            var entry = _selectableHeroes[i];
-            if (entry.InternalCodename.Equals(hero.InternalCodename, StringComparison.OrdinalIgnoreCase))
+            for (int i = 0; i < _selectableUpdateHeroes.Count; i++)
             {
-                SelectOptionByItemId(_heroOptionButton, i);
-                return;
+                var entry = _selectableUpdateHeroes[i];
+                if (entry.InternalCodename.Equals(hero.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
+                    entry.DisplayName.Equals(hero.DisplayName, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(hero.WipAlias) && entry.InternalCodename.Equals(hero.WipAlias, StringComparison.OrdinalIgnoreCase)))
+                {
+                    SelectOptionByItemId(_updateHeroOptionButton, i);
+                    if (_heroOptionButton != null && _heroOptionButton.ItemCount > 0)
+                    {
+                        _heroOptionButton.Select(0);
+                    }
+                    return;
+                }
+            }
+        }
+
+        // 2. Check if the hero matches an entry in the standard heroes dropdown
+        if (_heroOptionButton != null)
+        {
+            for (int i = 0; i < _selectableHeroes.Count; i++)
+            {
+                var entry = _selectableHeroes[i];
+                if (entry.InternalCodename.Equals(hero.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
+                    entry.DisplayName.Equals(hero.DisplayName, StringComparison.OrdinalIgnoreCase))
+                {
+                    SelectOptionByItemId(_heroOptionButton, i);
+                    if (_updateHeroOptionButton != null && _updateHeroOptionButton.ItemCount > 0)
+                    {
+                        _updateHeroOptionButton.Select(0);
+                    }
+                    return;
+                }
             }
         }
     }

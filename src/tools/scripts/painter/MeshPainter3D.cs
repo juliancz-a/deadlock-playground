@@ -186,6 +186,11 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
+            if (StudioUIManager.Instance != null && StudioUIManager.Instance.IsAnyModalOpen())
+            {
+                return true;
+            }
+
             var hovered = GetTree()?.Root?.GuiGetHoveredControl();
             if (hovered != null)
             {
