@@ -1011,7 +1011,9 @@ namespace DeadlockPlayground.UI
 
                 if (_isSelecting && currentSelType == SelectionToolType.Rectangular)
                 {
-                    Rect2 selRect = new Rect2(_selectionStartAtlasPx, Vector2.Zero).Expand(_selectionCurrentAtlasPx);
+                    Vector2 pMin = new Vector2(Mathf.Min(_selectionStartAtlasPx.X, _selectionCurrentAtlasPx.X), Mathf.Min(_selectionStartAtlasPx.Y, _selectionCurrentAtlasPx.Y));
+                    Vector2 pMax = new Vector2(Mathf.Max(_selectionStartAtlasPx.X, _selectionCurrentAtlasPx.X), Mathf.Max(_selectionStartAtlasPx.Y, _selectionCurrentAtlasPx.Y));
+                    Rect2 selRect = new Rect2(pMin, pMax - pMin);
                     overlay.DrawRect(selRect, marqueeFill, filled: true);
                     overlay.DrawRect(selRect, marqueeColor, filled: false, width: 1.5f / _zoom);
                 }
@@ -1337,10 +1339,15 @@ namespace DeadlockPlayground.UI
             {
                 _isSelecting = false;
                 _selectionCurrentAtlasPx = atlasPx;
-                Rect2 rect = new Rect2(_selectionStartAtlasPx, Vector2.Zero).Expand(_selectionCurrentAtlasPx);
-                if (rect.Size.X >= 1.0f && rect.Size.Y >= 1.0f)
+                Vector2 p1 = _selectionStartAtlasPx;
+                Vector2 p2 = _selectionCurrentAtlasPx;
+                float diffX = MathF.Abs(p2.X - p1.X);
+                float diffY = MathF.Abs(p2.Y - p1.Y);
+                if (diffX >= 1.0f || diffY >= 1.0f)
                 {
-                    _painter?.SelectionMask?.RasterizeRect(rect, combineMode);
+                    int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                    _painter?.SelectionMask?.EnsureSize(atlasSize);
+                    _painter?.SelectionMask?.RasterizeRect(p1, p2, combineMode);
                     _painter?.SyncSelectionMaskState();
                     _brushPalette?.UpdateWandUI();
                 }
@@ -1353,6 +1360,8 @@ namespace DeadlockPlayground.UI
                 _lassoPoints.Add(atlasPx);
                 if (_lassoPoints.Count >= 3)
                 {
+                    int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                    _painter?.SelectionMask?.EnsureSize(atlasSize);
                     _painter?.SelectionMask?.RasterizePolygon(_lassoPoints, combineMode);
                     _painter?.SyncSelectionMaskState();
                     _brushPalette?.UpdateWandUI();
@@ -1390,6 +1399,8 @@ namespace DeadlockPlayground.UI
         {
             if (_polyPoints.Count >= 3)
             {
+                int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                _painter?.SelectionMask?.EnsureSize(atlasSize);
                 _painter?.SelectionMask?.RasterizePolygon(_polyPoints, combineMode);
                 _painter?.SyncSelectionMaskState();
                 _brushPalette?.UpdateWandUI();
@@ -1471,7 +1482,7 @@ namespace DeadlockPlayground.UI
                 _layerManager.EnsureCpuSynced();
                 _layerManager.RecordInitialSnapshot();
                 var dirtyRect = _layerManager.PaintDab2D(atlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool);
-                _layerManager.RecompositeGpuLayers(dirtyRect);
+                _layerManager.UpdateActiveLayerGpuTextureThrottled(dirtyRect);
                 _canvasDrawArea?.QueueRedraw();
             }
             else if (mode == BrushToolMode.BucketFill)
@@ -1514,28 +1525,13 @@ namespace DeadlockPlayground.UI
             }
             else if (mode == BrushToolMode.MagicWand)
             {
-                var active = _meshHierarchy?.ActiveTarget;
-                if (active != null && active.Mesh != null)
-                {
-                    Vector2 uv = new Vector2(
-                        Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
-                        Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
-                    );
+                MagicWandCombineMode combineMode = MagicWandCombineMode.Replace;
+                if (Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
+                else if (Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
 
-                    MagicWandCombineMode combineMode = MagicWandCombineMode.Replace;
-                    if (Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
-                    else if (Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
-
-                    RaycastHitResult hit = new RaycastHitResult
-                    {
-                        Hit = true,
-                        HitUV = uv,
-                        HitSurfaceIndex = active.SurfaceIndex
-                    };
-
-                    _painter.ExecuteMagicWandSelection(hit, combineMode);
-                    _canvasDrawArea?.QueueRedraw();
-                }
+                _painter?.ExecuteMagicWandSelectionAtlasPx(atlasPx, combineMode);
+                _canvasDrawArea?.QueueRedraw();
+                _wireframeOverlay?.QueueRedraw();
             }
             else if (mode == BrushToolMode.Decal)
             {
@@ -1570,10 +1566,10 @@ namespace DeadlockPlayground.UI
                 _accumulated2DDirtyRect = (_accumulated2DDirtyRect.Size.X <= 0) ? dirtyRect : _accumulated2DDirtyRect.Merge(dirtyRect);
 
                 ulong nowMs = Time.GetTicksMsec();
-                if (nowMs - _lastStrokeRecompositeMs >= 60)
+                if (nowMs - _lastStrokeRecompositeMs >= 33)
                 {
                     _lastStrokeRecompositeMs = nowMs;
-                    _layerManager.RecompositeGpuLayers(_accumulated2DDirtyRect);
+                    _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
                     _accumulated2DDirtyRect = default;
                 }
             }

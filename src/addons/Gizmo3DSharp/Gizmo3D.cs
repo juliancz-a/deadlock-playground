@@ -592,15 +592,31 @@ public partial class Gizmo3D : Node3D
     /// Remove a node from the list of nodes currently being edited.
     /// </summary>
     /// <param name="target">The node to remove.</param>
+    private static void SafeFreeRid(ref Rid rid)
+    {
+        if (rid.IsValid)
+        {
+            try
+            {
+                FreeRid(rid);
+            }
+            catch
+            {
+                // Already freed or collected
+            }
+            rid = new Rid();
+        }
+    }
+
     public bool Deselect(Node3D target)
     {
         if (!Selections.TryGetValue(target, out var item))
             return false;
         Selections.Remove(target);
-        FreeRid(item.SboxInstance);
-        FreeRid(item.SboxInstanceOffset);
-        FreeRid(item.SboxXrayInstance);
-        FreeRid(item.SboxXrayInstanceOffset);
+        SafeFreeRid(ref item.SboxInstance);
+        SafeFreeRid(ref item.SboxInstanceOffset);
+        SafeFreeRid(ref item.SboxXrayInstance);
+        SafeFreeRid(ref item.SboxXrayInstanceOffset);
         EmitSignal(SignalName.SelectionChanged, target, false);
         return true;
     }
@@ -622,10 +638,14 @@ public partial class Gizmo3D : Node3D
     {
         foreach (var item in Selections)
         {
-            FreeRid(item.Value.SboxInstance);
-            FreeRid(item.Value.SboxInstanceOffset);
-            FreeRid(item.Value.SboxXrayInstance);
-            FreeRid(item.Value.SboxXrayInstanceOffset);
+            var sbox = item.Value.SboxInstance;
+            var sboxOff = item.Value.SboxInstanceOffset;
+            var sboxXray = item.Value.SboxXrayInstance;
+            var sboxXrayOff = item.Value.SboxXrayInstanceOffset;
+            SafeFreeRid(ref sbox);
+            SafeFreeRid(ref sboxOff);
+            SafeFreeRid(ref sboxXray);
+            SafeFreeRid(ref sboxXrayOff);
             EmitSignal(SignalName.SelectionChanged, item.Key, false);
         }
         Selections.Clear();
@@ -663,16 +683,16 @@ public partial class Gizmo3D : Node3D
         GetTree().Root.FocusExited -= OnFocusExited;
         for (int i = 0; i < 3; i++)
         {
-            FreeRid(MoveGizmoInstance[i]);
-            FreeRid(MoveArrowGizmoInstance[i]);
-            FreeRid(MovePlaneGizmoInstance[i]);
-            FreeRid(RotateGizmoInstance[i]);
-            FreeRid(ScaleGizmoInstance[i]);
-            FreeRid(ScalePlaneGizmoInstance[i]);
-            FreeRid(AxisGizmoInstance[i]);
+            SafeFreeRid(ref MoveGizmoInstance[i]);
+            SafeFreeRid(ref MoveArrowGizmoInstance[i]);
+            SafeFreeRid(ref MovePlaneGizmoInstance[i]);
+            SafeFreeRid(ref RotateGizmoInstance[i]);
+            SafeFreeRid(ref ScaleGizmoInstance[i]);
+            SafeFreeRid(ref ScalePlaneGizmoInstance[i]);
+            SafeFreeRid(ref AxisGizmoInstance[i]);
         }
         // Rotation white outline
-        FreeRid(RotateGizmoInstance[3]);
+        SafeFreeRid(ref RotateGizmoInstance[3]);
         ClearSelection();
     }
 

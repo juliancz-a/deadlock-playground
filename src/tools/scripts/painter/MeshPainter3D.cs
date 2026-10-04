@@ -716,10 +716,13 @@ namespace DeadlockPlayground.Painter
 
             bool useMask = _magicWandTool != null && _magicWandTool.HasSelection;
             _cameraBrush.Set("use_selection_mask", useMask);
-            if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
+            Rid maskRid = (useMask && _magicWandTool.SelectionMaskRid.IsValid) ? _magicWandTool.SelectionMaskRid : new Rid();
+            var rd = RenderingServer.GetRenderingDevice();
+            if (maskRid.IsValid && rd != null && !rd.TextureIsValid(maskRid))
             {
-                _cameraBrush.Set("selection_mask_rid", _magicWandTool.SelectionMaskRid);
+                maskRid = new Rid();
             }
+            _cameraBrush.Set("selection_mask_rid", maskRid);
 
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
@@ -732,10 +735,7 @@ namespace DeadlockPlayground.Painter
                 _mirrorCameraBrush.Set("brush_center", brushCenter);
                 _mirrorCameraBrush.Set("brush_radius", brushRadius);
                 _mirrorCameraBrush.Set("use_selection_mask", useMask);
-                if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
-                {
-                    _mirrorCameraBrush.Set("selection_mask_rid", _magicWandTool.SelectionMaskRid);
-                }
+                _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
             }
         }
 
@@ -1627,6 +1627,8 @@ namespace DeadlockPlayground.Painter
             {
                 _raycaster.BuildFromMesh(_currentMesh, -1);
                 _layerManager?.SetupForMesh(_currentMesh, surfaceIndex);
+                int atlasDim = _layerManager?.CanvasSize.X ?? 2048;
+                _magicWandTool?.SelectionMask?.EnsureSize(atlasDim);
                 ApplyFrontFacesOnlyToMaterials();
             }
 
@@ -2427,9 +2429,15 @@ namespace DeadlockPlayground.Painter
 
             var selMask = _magicWandTool?.SelectionMask;
             if (selMask == null) return;
-            int atlasSize = selMask.CanvasSize > 0 ? selMask.CanvasSize : 2048;
-            selMask.EnsureBuffer(atlasSize);
+            int atlasSize = _layerManager?.CanvasSize.X ?? (selMask.CanvasSize > 0 ? selMask.CanvasSize : 2048);
+            selMask.EnsureSize(atlasSize);
+
             byte[] maskBuf = selMask.Buffer;
+            if (maskBuf == null || maskBuf.Length != atlasSize * atlasSize)
+            {
+                selMask.EnsureBuffer(atlasSize);
+                maskBuf = selMask.Buffer;
+            }
 
             if (mode == SelectionCombineMode.Replace)
             {
@@ -2472,11 +2480,16 @@ namespace DeadlockPlayground.Painter
 
             Transform3D globalTransform = _currentMesh.GlobalTransform;
             int triCount = _raycaster.TriangleCount;
-            int selectedPixelCount = 0;
+
+            var candidateTris = new List<(Vector2 s0, Vector2 s1, Vector2 s2, Vector2 u0, Vector2 u1, Vector2 u2, int uvMinX, int uvMaxX, int uvMinY, int uvMaxY, float invDenom, bool allVerticesInside)>();
 
             for (int t = 0; t < triCount; t++)
             {
                 var tri = _raycaster.GetTriangle(t);
+
+                // Scope to currently active surface index
+                if (_currentSurfaceIndex >= 0 && tri.SurfaceIndex != _currentSurfaceIndex)
+                    continue;
 
                 // 1. Transform to world space
                 Vector3 w0 = globalTransform * tri.V0;
@@ -2485,32 +2498,6 @@ namespace DeadlockPlayground.Painter
 
                 // 2. Behind camera check
                 if (camera.IsPositionBehind(w0) && camera.IsPositionBehind(w1) && camera.IsPositionBehind(w2)) continue;
-
-                // 2b. Front Faces Only & Depth Occlusion Check
-                if (FrontFacesOnly)
-                {
-                    Vector3 worldNormal = (globalTransform.Basis * tri.Normal).Normalized();
-                    Vector3 triCenter = (w0 + w1 + w2) / 3.0f;
-                    Vector3 viewDir = (triCenter - camera.GlobalPosition).Normalized();
-                    if (worldNormal.Dot(viewDir) >= 0.0f)
-                    {
-                        continue; // Discard back-facing triangle
-                    }
-
-                    // Depth occlusion check: ensure raycast stops at the first intersected polygon
-                    Vector3 rayOrigin = camera.GlobalPosition;
-                    Vector3 toTri = triCenter - rayOrigin;
-                    float distToTri = toTri.Length();
-                    if (distToTri > 1e-4f)
-                    {
-                        Vector3 rayDir = toTri / distToTri;
-                        var occHit = _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: true);
-                        if (occHit.Hit && occHit.Distance < distToTri - 0.02f)
-                        {
-                            continue; // Occluded by front-facing geometry
-                        }
-                    }
-                }
 
                 // 3. Project to screen
                 Vector2 s0 = camera.UnprojectPosition(w0);
@@ -2523,9 +2510,35 @@ namespace DeadlockPlayground.Painter
                 float sMaxY = Mathf.Max(s0.Y, Mathf.Max(s1.Y, s2.Y));
                 Rect2 triScreenBounds = new Rect2(sMinX, sMinY, Mathf.Max(sMaxX - sMinX, 0.001f), Mathf.Max(sMaxY - sMinY, 0.001f));
 
+                // EARLY REJECTION: Discard triangles outside screen marquee immediately
                 if (!marqueeBounds.Intersects(triScreenBounds)) continue;
 
-                // 4. UV triangle in atlas pixels
+                // 4. Front Faces Only & Depth Occlusion (only on triangles touching marquee)
+                if (FrontFacesOnly)
+                {
+                    Vector3 worldNormal = (globalTransform.Basis * tri.Normal).Normalized();
+                    Vector3 triCenter = (w0 + w1 + w2) / 3.0f;
+                    Vector3 viewDir = (triCenter - camera.GlobalPosition).Normalized();
+                    if (worldNormal.Dot(viewDir) >= 0.0f)
+                    {
+                        continue; // Back-facing
+                    }
+
+                    Vector3 rayOrigin = camera.GlobalPosition;
+                    Vector3 toTri = triCenter - rayOrigin;
+                    float distToTri = toTri.Length();
+                    if (distToTri > 1e-4f)
+                    {
+                        Vector3 rayDir = toTri / distToTri;
+                        var occHit = _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: true);
+                        if (occHit.Hit && occHit.Distance < distToTri - 0.02f)
+                        {
+                            continue; // Occluded
+                        }
+                    }
+                }
+
+                // 5. UV triangle in atlas pixels
                 Vector2 u0 = (submeshPos + tri.UV0 * submeshSize) * atlasSize;
                 Vector2 u1 = (submeshPos + tri.UV1 * submeshSize) * atlasSize;
                 Vector2 u2 = (submeshPos + tri.UV2 * submeshSize) * atlasSize;
@@ -2543,23 +2556,29 @@ namespace DeadlockPlayground.Painter
                     ? (Geometry2D.IsPointInPolygon(s0, polyArr) && Geometry2D.IsPointInPolygon(s1, polyArr) && Geometry2D.IsPointInPolygon(s2, polyArr))
                     : (marqueeBounds.HasPoint(s0) && marqueeBounds.HasPoint(s1) && marqueeBounds.HasPoint(s2));
 
-                for (int py = uvMinY; py <= uvMaxY; py++)
+                candidateTris.Add((s0, s1, s2, u0, u1, u2, uvMinX, uvMaxX, uvMinY, uvMaxY, invDenom, allVerticesInside));
+            }
+
+            byte fillByte = (mode == SelectionCombineMode.Subtract) ? (byte)0 : (byte)255;
+            System.Threading.Tasks.Parallel.ForEach(candidateTris, cTri =>
+            {
+                for (int py = cTri.uvMinY; py <= cTri.uvMaxY; py++)
                 {
                     float uvY = py + 0.5f;
                     int row = py * atlasSize;
-                    for (int px = uvMinX; px <= uvMaxX; px++)
+                    for (int px = cTri.uvMinX; px <= cTri.uvMaxX; px++)
                     {
                         float uvX = px + 0.5f;
-                        float wA = ((u1.Y - u2.Y) * (uvX - u2.X) + (u2.X - u1.X) * (uvY - u2.Y)) * invDenom;
-                        float wB = ((u2.Y - u0.Y) * (uvX - u2.X) + (u0.X - u2.X) * (uvY - u2.Y)) * invDenom;
+                        float wA = ((cTri.u1.Y - cTri.u2.Y) * (uvX - cTri.u2.X) + (cTri.u2.X - cTri.u1.X) * (uvY - cTri.u2.Y)) * cTri.invDenom;
+                        float wB = ((cTri.u2.Y - cTri.u0.Y) * (uvX - cTri.u2.X) + (cTri.u0.X - cTri.u2.X) * (uvY - cTri.u2.Y)) * cTri.invDenom;
                         float wC = 1.0f - wA - wB;
 
                         if (wA >= -0.02f && wB >= -0.02f && wC >= -0.02f)
                         {
-                            bool inside = allVerticesInside;
+                            bool inside = cTri.allVerticesInside;
                             if (!inside)
                             {
-                                Vector2 screenPos = wA * s0 + wB * s1 + wC * s2;
+                                Vector2 screenPos = wA * cTri.s0 + wB * cTri.s1 + wC * cTri.s2;
                                 inside = isPoly
                                     ? Geometry2D.IsPointInPolygon(screenPos, polyArr)
                                     : marqueeBounds.HasPoint(screenPos);
@@ -2567,20 +2586,18 @@ namespace DeadlockPlayground.Painter
 
                             if (inside)
                             {
-                                int idx = row + px;
-                                maskBuf[idx] = (mode == SelectionCombineMode.Subtract) ? (byte)0 : (byte)255;
-                                selectedPixelCount++;
+                                maskBuf[row + px] = fillByte;
                             }
                         }
                     }
                 }
-            }
+            });
 
             selMask.UseSelectionMask = true;
             selMask.UpdateSelectionStateAndUpload();
             SyncSelectionMaskState();
             _brushPalette?.UpdateWandUI();
-            GD.Print($"[MeshPainter3D] Rasterized 3D selection marquee (mode={mode}, selectedPixels={selectedPixelCount})");
+            GD.Print($"[MeshPainter3D] Rasterized 3D selection marquee (mode={mode}, candidateTriangles={candidateTris.Count})");
         }
 
         [Obsolete("CPU raycasting paint strokes have been deprecated in favor of CameraBrush GPU compute projection.")]
@@ -2603,150 +2620,35 @@ namespace DeadlockPlayground.Painter
         public void ExecuteMagicWandSelection(RaycastHitResult hit, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
         {
             if (_currentMesh == null || _layerManager == null || _magicWandTool == null) return;
+            int atlasSize = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int seedX = Math.Clamp((int)(hit.HitUV.X * atlasSize), 0, atlasSize - 1);
+            int seedY = Math.Clamp((int)(hit.HitUV.Y * atlasSize), 0, atlasSize - 1);
+            ExecuteMagicWandAtPixel(seedX, seedY, combineMode);
+        }
 
-            // Ensure base atlas buffer is populated with submesh textures
-            _layerManager.RebuildBaseAtlasBuffer();
+        public void ExecuteMagicWandSelectionAtlasPx(Vector2 atlasPx, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
+        {
+            if (_layerManager == null || _magicWandTool == null) return;
+            int atlasSize = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int seedX = Math.Clamp((int)atlasPx.X, 0, atlasSize - 1);
+            int seedY = Math.Clamp((int)atlasPx.Y, 0, atlasSize - 1);
+            ExecuteMagicWandAtPixel(seedX, seedY, combineMode);
+        }
 
-            Texture2D baseTex = null;
-            int sCount = _currentMesh.Mesh != null ? _currentMesh.Mesh.GetSurfaceCount() : 1;
-            int surfaceIdx = Mathf.Clamp(hit.HitSurfaceIndex, 0, sCount - 1);
+        private void ExecuteMagicWandAtPixel(int seedX, int seedY, MagicWandCombineMode combineMode)
+        {
+            if (_layerManager == null || _magicWandTool == null) return;
 
-            var origMat = HeroMeshHierarchy.GetAuthenticMaterial(_currentMesh, surfaceIdx)
-                       ?? _currentMesh.GetSurfaceOverrideMaterial(surfaceIdx)
-                       ?? (_currentMesh.Mesh != null ? _currentMesh.Mesh.SurfaceGetMaterial(surfaceIdx) : null)
-                       ?? _currentMesh.MaterialOverride;
-
-            if (origMat != null)
+            _layerManager.EnsureCpuSynced();
+            if (_layerManager.BaseAtlasBuffer == null)
             {
-                baseTex = SkinLayerManager.ExtractBaseTexture(origMat);
+                _layerManager.RebuildBaseAtlasBuffer();
             }
 
-            Rect2 submeshRect = new Rect2(0, 0, 1, 1);
-            var overlayMat = _currentMesh.MaterialOverlay as ShaderMaterial;
-            if (overlayMat != null)
-            {
-                if (baseTex == null)
-                {
-                    var gCol = overlayMat.GetShaderParameter("g_tColor");
-                    if (gCol.VariantType == Variant.Type.Object && gCol.AsGodotObject() is Texture2D t2d)
-                    {
-                        baseTex = t2d;
-                    }
-                }
-            }
-
-            Image img = null;
-            if (baseTex != null)
-            {
-                img = baseTex.GetImage();
-                if (img != null)
-                {
-                    if (img.IsCompressed()) img.Decompress();
-                    if (img.HasMipmaps()) img.ClearMipmaps();
-                    if (img.GetFormat() != Image.Format.Rgba8) img.Convert(Image.Format.Rgba8);
-                }
-            }
-
-            if (img == null)
-            {
-                img = Image.CreateEmpty(512, 512, false, Image.Format.Rgba8);
-                img.Fill(Colors.White);
-            }
-
-            // Composite live painted layers over the submesh base texture so wand samples the true visible surface
-            if (_layerManager != null)
-            {
-                var fullAtlas = _layerManager.BakeCompositeImage(surfaceIdx);
-                if (fullAtlas != null)
-                {
-                    int rX = Mathf.Clamp((int)(submeshRect.Position.X * fullAtlas.GetWidth()), 0, fullAtlas.GetWidth() - 1);
-                    int rY = Mathf.Clamp((int)(submeshRect.Position.Y * fullAtlas.GetHeight()), 0, fullAtlas.GetHeight() - 1);
-                    int rW = Mathf.Clamp((int)(submeshRect.Size.X * fullAtlas.GetWidth()), 1, fullAtlas.GetWidth() - rX);
-                    int rH = Mathf.Clamp((int)(submeshRect.Size.Y * fullAtlas.GetHeight()), 1, fullAtlas.GetHeight() - rY);
-                    var paintRegion = fullAtlas.GetRegion(new Rect2I(rX, rY, rW, rH));
-                    if (paintRegion != null)
-                    {
-                        if (paintRegion.GetWidth() != img.GetWidth() || paintRegion.GetHeight() != img.GetHeight())
-                        {
-                            paintRegion.Resize(img.GetWidth(), img.GetHeight());
-                        }
-                        if (paintRegion.GetFormat() != Image.Format.Rgba8) paintRegion.Convert(Image.Format.Rgba8);
-                        int w = img.GetWidth();
-                        int h = img.GetHeight();
-                        byte[] baseBytes = img.GetData();
-                        byte[] paintBytes = paintRegion.GetData();
-
-                        int expectedBaseSize = w * h * 4;
-                        if (baseBytes.Length > expectedBaseSize)
-                        {
-                            baseBytes = baseBytes.AsSpan(0, expectedBaseSize).ToArray();
-                        }
-                        if (paintBytes.Length > expectedBaseSize)
-                        {
-                            paintBytes = paintBytes.AsSpan(0, expectedBaseSize).ToArray();
-                        }
-
-                        System.Threading.Tasks.Parallel.For(0, h, y =>
-                        {
-                            int row = y * w * 4;
-                            for (int x = 0; x < w; x++)
-                            {
-                                int off = row + x * 4;
-                                byte pa = paintBytes[off + 3];
-                                if (pa > 0)
-                                {
-                                    if (pa == 255)
-                                    {
-                                        baseBytes[off] = paintBytes[off];
-                                        baseBytes[off + 1] = paintBytes[off + 1];
-                                        baseBytes[off + 2] = paintBytes[off + 2];
-                                        baseBytes[off + 3] = 255;
-                                    }
-                                    else
-                                    {
-                                        int a = pa;
-                                        int invA = 255 - a;
-                                        baseBytes[off] = (byte)((paintBytes[off] * a + baseBytes[off] * invA) / 255);
-                                        baseBytes[off + 1] = (byte)((paintBytes[off + 1] * a + baseBytes[off + 1] * invA) / 255);
-                                        baseBytes[off + 2] = (byte)((paintBytes[off + 2] * a + baseBytes[off + 2] * invA) / 255);
-                                        baseBytes[off + 3] = 255;
-                                    }
-                                }
-                            }
-                        });
-
-                        if (baseBytes.Length > expectedBaseSize)
-                        {
-                            baseBytes = baseBytes.AsSpan(0, expectedBaseSize).ToArray();
-                        }
-                        img.SetData(w, h, false, Image.Format.Rgba8, baseBytes);
-                    }
-                }
-            }
-
-            int px = Mathf.Clamp((int)(hit.HitUV.X * img.GetWidth()), 0, img.GetWidth() - 1);
-            int py = Mathf.Clamp((int)(hit.HitUV.Y * img.GetHeight()), 0, img.GetHeight() - 1);
-            Color sampledColor = img.GetPixel(px, py);
-
-            Rid baseTextureRid = new();
-            int atlasSize = _layerManager.CanvasSize.X;
-            if (_layerManager.AtlasManager != null && GodotObject.IsInstanceValid(_layerManager.AtlasManager))
-            {
-                var ridVal = _layerManager.AtlasManager.Get("base_texture_rid");
-                if (ridVal.VariantType == Variant.Type.Rid)
-                {
-                    baseTextureRid = ridVal.AsRid();
-                }
-                var sizeVal = _layerManager.AtlasManager.Get("atlas_size");
-                if (sizeVal.VariantType == Variant.Type.Int)
-                {
-                    atlasSize = (int)sizeVal;
-                }
-            }
-
-            if (_magicWandTool.GenerateMask(sampledColor, hit.HitUV, img, submeshRect, baseTextureRid, atlasSize, combineMode))
+            if (_magicWandTool.GenerateMaskFromAtlas(seedX, seedY, _layerManager, combineMode))
             {
                 SyncSelectionMaskState();
+                _brushPalette?.UpdateWandUI();
             }
         }
 
@@ -2756,7 +2658,21 @@ namespace DeadlockPlayground.Painter
 
             bool hasSelection = _magicWandTool.HasSelection;
             bool showPattern = _magicWandTool.UseSelectionMask;
-            Rid maskRid = hasSelection ? _magicWandTool.SelectionMaskRid : new Rid();
+            Rid maskRid = new Rid();
+
+            if (hasSelection)
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null)
+                {
+                    _magicWandTool.SelectionMask?.EnsureMaskTexture(rd, _magicWandTool.CurrentAtlasSize);
+                }
+                var candRid = _magicWandTool.SelectionMaskRid;
+                if (candRid.IsValid && rd != null && rd.TextureIsValid(candRid))
+                {
+                    maskRid = candRid;
+                }
+            }
 
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {

@@ -47,20 +47,38 @@ namespace DeadlockPlayground.Painter
         public SelectionToolType CurrentToolType { get; set; } = SelectionToolType.Rectangular;
 
         private Rid _maskTextureRid = new();
-        public Rid MaskTextureRid => _maskTextureRid;
+        private int _maskTextureSize = 0;
+        public Rid MaskTextureRid
+        {
+            get
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid) || _maskTextureSize != CanvasSize))
+                {
+                    EnsureMaskTexture(rd, CanvasSize);
+                }
+                return _maskTextureRid;
+            }
+        }
 
         private Texture2Drd _maskTextureResource;
         public Texture2Drd MaskTextureResource
         {
             get
             {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid) || _maskTextureSize != CanvasSize))
+                {
+                    EnsureMaskTexture(rd, CanvasSize);
+                }
                 if (_maskTextureResource == null)
                 {
                     _maskTextureResource = new Texture2Drd();
                 }
-                if (_maskTextureRid.IsValid && _maskTextureResource.TextureRdRid != _maskTextureRid)
+                var currentRid = MaskTextureRid;
+                if (currentRid.IsValid && _maskTextureResource.TextureRdRid != currentRid)
                 {
-                    _maskTextureResource.TextureRdRid = _maskTextureRid;
+                    _maskTextureResource.TextureRdRid = currentRid;
                 }
                 return _maskTextureResource;
             }
@@ -85,7 +103,7 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureBuffer(int canvasSize)
         {
-            if (canvasSize <= 0) canvasSize = 2048;
+            if (canvasSize < 512) canvasSize = 512;
             if (_buffer == null || CanvasSize != canvasSize || _buffer.Length != canvasSize * canvasSize)
             {
                 CanvasSize = canvasSize;
@@ -96,10 +114,10 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureMaskTexture(RenderingDevice rd, int canvasSize)
         {
-            if (canvasSize <= 0) canvasSize = 2048;
+            if (canvasSize < 512) canvasSize = 512;
             EnsureBuffer(canvasSize);
 
-            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid) && CanvasSize == canvasSize)
+            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid) && _maskTextureSize == canvasSize)
             {
                 return;
             }
@@ -108,6 +126,7 @@ namespace DeadlockPlayground.Painter
             {
                 rd.FreeRid(_maskTextureRid);
                 _maskTextureRid = new Rid();
+                _maskTextureSize = 0;
             }
 
             var fmt = new RDTextureFormat
@@ -119,17 +138,32 @@ namespace DeadlockPlayground.Painter
                 UsageBits = RenderingDevice.TextureUsageBits.SamplingBit |
                             RenderingDevice.TextureUsageBits.StorageBit |
                             RenderingDevice.TextureUsageBits.CanUpdateBit |
-                            RenderingDevice.TextureUsageBits.CanCopyFromBit
+                            RenderingDevice.TextureUsageBits.CanCopyFromBit |
+                            RenderingDevice.TextureUsageBits.CanCopyToBit
             };
 
             var view = new RDTextureView();
             byte[] zeroBytes = new byte[canvasSize * canvasSize * 8];
-            var dataArray = new Godot.Collections.Array<byte[]>();
-            dataArray.Add(zeroBytes);
+            var dataArray = new Godot.Collections.Array<byte[]> { zeroBytes };
             _maskTextureRid = rd.TextureCreate(fmt, view, dataArray);
+            _maskTextureSize = canvasSize;
             if (_maskTextureResource != null)
             {
                 _maskTextureResource.TextureRdRid = _maskTextureRid;
+            }
+        }
+
+        public void EnsureSize(int canvasSize)
+        {
+            if (canvasSize < 512) canvasSize = 512;
+            if (CanvasSize != canvasSize || _buffer == null || _buffer.Length != canvasSize * canvasSize || _maskTextureSize != canvasSize)
+            {
+                EnsureBuffer(canvasSize);
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null)
+                {
+                    EnsureMaskTexture(rd, canvasSize);
+                }
             }
         }
 
@@ -201,15 +235,20 @@ namespace DeadlockPlayground.Painter
             return _buffer[y * CanvasSize + x] * (1.0f / 255.0f);
         }
 
-        public void RasterizeRect(Rect2 pixelRect, SelectionCombineMode mode)
+        public void RasterizeRect(Vector2 p1, Vector2 p2, SelectionCombineMode mode)
         {
             int size = CanvasSize;
             EnsureBuffer(size);
 
-            int minX = Math.Clamp((int)MathF.Floor(pixelRect.Position.X), 0, size - 1);
-            int minY = Math.Clamp((int)MathF.Floor(pixelRect.Position.Y), 0, size - 1);
-            int maxX = Math.Clamp((int)MathF.Ceiling(pixelRect.End.X), 0, size - 1);
-            int maxY = Math.Clamp((int)MathF.Ceiling(pixelRect.End.Y), 0, size - 1);
+            int xStart = (int)MathF.Round(MathF.Min(p1.X, p2.X));
+            int xEnd   = (int)MathF.Round(MathF.Max(p1.X, p2.X));
+            int yStart = (int)MathF.Round(MathF.Min(p1.Y, p2.Y));
+            int yEnd   = (int)MathF.Round(MathF.Max(p1.Y, p2.Y));
+
+            int minX = Math.Clamp(xStart, 0, size - 1);
+            int maxX = Math.Clamp(xEnd, 0, size - 1);
+            int minY = Math.Clamp(yStart, 0, size - 1);
+            int maxY = Math.Clamp(yEnd, 0, size - 1);
 
             if (minX > maxX) (minX, maxX) = (maxX, minX);
             if (minY > maxY) (minY, maxY) = (maxY, minY);
@@ -226,19 +265,16 @@ namespace DeadlockPlayground.Painter
                 for (int x = minX; x <= maxX; x++)
                 {
                     int idx = row + x;
-                    if (mode == SelectionCombineMode.Subtract)
-                    {
-                        buf[idx] = 0;
-                    }
-                    else
-                    {
-                        buf[idx] = 255;
-                    }
+                    buf[idx] = (mode == SelectionCombineMode.Subtract) ? (byte)0 : (byte)255;
                 }
             }
 
-            ApplyEdgeFeathering(minX, minY, maxX, maxY);
             UpdateSelectionStateAndUpload();
+        }
+
+        public void RasterizeRect(Rect2 pixelRect, SelectionCombineMode mode)
+        {
+            RasterizeRect(pixelRect.Position, pixelRect.End, mode);
         }
 
         public void RasterizePolygon(IReadOnlyList<Vector2> points, SelectionCombineMode mode)
@@ -499,6 +535,7 @@ namespace DeadlockPlayground.Painter
         public void Cleanup()
         {
             _buffer = null;
+            _maskTextureSize = 0;
             if (_maskTextureResource != null)
             {
                 _maskTextureResource.TextureRdRid = new Rid();

@@ -91,12 +91,14 @@ func apply_single_mesh(mesh_instance: MeshInstance3D, native_w: int, native_h: i
 		push_error("OverlayAtlasManager.apply_single_mesh: invalid mesh_instance")
 		return
 
-	# Compute atlas size = next power-of-two >= max(native_w, native_h), clamped to [64, 4096]
+	# Compute atlas size = next power-of-two >= max(native_w, native_h), clamped to [512, 4096]
 	var max_dim: int = maxi(native_w, native_h)
-	var size: int = 64
+	if max_dim <= 0:
+		max_dim = 2048
+	var size: int = 512
 	while size < max_dim:
 		size *= 2
-	atlas_size = clampi(size, 64, 4096)
+	atlas_size = clampi(size, 512, 4096)
 
 	_create_texture()
 	_create_texture_resource()

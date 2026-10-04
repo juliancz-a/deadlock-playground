@@ -342,6 +342,10 @@ namespace DeadlockPlayground.Painter
                 {
                     if (evictedMgr != null && GodotObject.IsInstanceValid(evictedMgr))
                     {
+                        evictedMgr.Set("atlas_texture_rid", new Rid());
+                        evictedMgr.Set("base_texture_rid", new Rid());
+                        evictedMgr.Set("composite_texture_rid", new Rid());
+                        evictedMgr.Set("full_composite_rid", new Rid());
                         evictedMgr.GetParent()?.RemoveChild(evictedMgr);
                         evictedMgr.QueueFree();
                     }
@@ -474,6 +478,17 @@ namespace DeadlockPlayground.Painter
             _atlasLruKeys.Clear();
             _activeAtlasManager = null;
             _activeMaterialKey = null;
+
+            if (_scratchTextureRid.IsValid)
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && rd.TextureIsValid(_scratchTextureRid))
+                {
+                    rd.FreeRid(_scratchTextureRid);
+                }
+                _scratchTextureRid = new Rid();
+            }
+            _scratchBuffer = null;
         }
 
         /// <summary>Backward-compat alias for ClearAllAtlasManagers.</summary>
@@ -481,6 +496,7 @@ namespace DeadlockPlayground.Painter
 
         public void SetCanvasResolution(Vector2I newSize)
         {
+            if (newSize.X < 512 || newSize.Y < 512) newSize = new Vector2I(Math.Max(512, newSize.X), Math.Max(512, newSize.Y));
             if (newSize == CanvasSize) return;
             CanvasSize = newSize;
 
@@ -848,6 +864,148 @@ namespace DeadlockPlayground.Painter
             {
                 rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
             }
+        }
+
+        private const int ScratchTextureSize = 1024;
+        private Rid _scratchTextureRid = new();
+        private byte[] _scratchBuffer;
+
+        private void EnsureScratchTexture(RenderingDevice rd)
+        {
+            if (_scratchTextureRid.IsValid && rd.TextureIsValid(_scratchTextureRid))
+                return;
+
+            if (_scratchTextureRid.IsValid)
+            {
+                rd.FreeRid(_scratchTextureRid);
+                _scratchTextureRid = new Rid();
+            }
+
+            _scratchBuffer = new byte[ScratchTextureSize * ScratchTextureSize * 8];
+
+            var fmt = new RDTextureFormat
+            {
+                Format = RenderingDevice.DataFormat.R16G16B16A16Sfloat,
+                Width = ScratchTextureSize,
+                Height = ScratchTextureSize,
+                UsageBits = RenderingDevice.TextureUsageBits.StorageBit |
+                            RenderingDevice.TextureUsageBits.SamplingBit |
+                            RenderingDevice.TextureUsageBits.CanUpdateBit |
+                            RenderingDevice.TextureUsageBits.CanCopyFromBit |
+                            RenderingDevice.TextureUsageBits.CanCopyToBit
+            };
+            var view = new RDTextureView();
+            _scratchTextureRid = rd.TextureCreate(fmt, view, new Godot.Collections.Array<byte[]> { _scratchBuffer });
+        }
+
+        public void UpdateActiveLayerGpuTextureThrottled(Rect2I dirtyRect)
+        {
+            var layer = ActiveLayer;
+            if (layer == null) return;
+            var rd = RenderingServer.GetRenderingDevice();
+            if (rd == null || !layer.LayerRid.IsValid || !rd.TextureIsValid(layer.LayerRid)) return;
+
+            int atlasSize = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int bufferLen = atlasSize * atlasSize * 8;
+            if (layer.GpuData == null || layer.GpuData.Length != bufferLen) return;
+
+            // If no valid localized rect or larger than scratch texture limit, do a full fallback update
+            if (dirtyRect.Size.X <= 0 || dirtyRect.Size.Y <= 0 ||
+                dirtyRect.Size.X > ScratchTextureSize || dirtyRect.Size.Y > ScratchTextureSize)
+            {
+                rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
+
+                if (_layers.Count <= 1 && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+                {
+                    var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
+                    if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
+                    {
+                        rd.TextureUpdate(fullRidVal.AsRid(), 0, layer.GpuData);
+                    }
+                }
+                return;
+            }
+
+            EnsureScratchTexture(rd);
+            if (!_scratchTextureRid.IsValid || !rd.TextureIsValid(_scratchTextureRid))
+            {
+                rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
+                return;
+            }
+
+            int minX = Math.Clamp(dirtyRect.Position.X, 0, atlasSize - 1);
+            int minY = Math.Clamp(dirtyRect.Position.Y, 0, atlasSize - 1);
+            int maxX = Math.Clamp(dirtyRect.End.X, 0, atlasSize);
+            int maxY = Math.Clamp(dirtyRect.End.Y, 0, atlasSize);
+            int w = maxX - minX;
+            int h = maxY - minY;
+            if (w <= 0 || h <= 0) return;
+
+            // Localized row-by-row blit into top-left of scratchBuffer
+            int rowBytes = w * 8;
+            for (int y = 0; y < h; y++)
+            {
+                int srcOffset = ((minY + y) * atlasSize + minX) * 8;
+                int dstOffset = (y * ScratchTextureSize) * 8;
+                Buffer.BlockCopy(layer.GpuData, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+            }
+
+            // Upload localized scratch texture (only touches scratch rows)
+            rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
+
+            // GPU VRAM-to-VRAM sub-region copy
+            rd.TextureCopy(
+                _scratchTextureRid,
+                layer.LayerRid,
+                Vector3.Zero,
+                new Vector3(minX, minY, 0),
+                new Vector3(w, h, 1),
+                0, 0, 0, 0
+            );
+
+            // Keep full_composite_rid synchronized for immediate 2D/3D feedback
+            if (_layers.Count <= 1 && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            {
+                var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
+                if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
+                {
+                    rd.TextureCopy(
+                        _scratchTextureRid,
+                        fullRidVal.AsRid(),
+                        Vector3.Zero,
+                        new Vector3(minX, minY, 0),
+                        new Vector3(w, h, 1),
+                        0, 0, 0, 0
+                    );
+                }
+            }
+        }
+
+        private static Rid _fallbackDummyTextureRid = new();
+
+        public static Rid GetFallbackDummyTextureRid()
+        {
+            var rd = RenderingServer.GetRenderingDevice();
+            if (rd == null) return new Rid();
+            if (_fallbackDummyTextureRid.IsValid && rd.TextureIsValid(_fallbackDummyTextureRid))
+            {
+                return _fallbackDummyTextureRid;
+            }
+            var fmt = new RDTextureFormat
+            {
+                Format = RenderingDevice.DataFormat.R16G16B16A16Sfloat,
+                Width = 1,
+                Height = 1,
+                UsageBits = RenderingDevice.TextureUsageBits.StorageBit |
+                            RenderingDevice.TextureUsageBits.SamplingBit |
+                            RenderingDevice.TextureUsageBits.CanUpdateBit |
+                            RenderingDevice.TextureUsageBits.CanCopyFromBit |
+                            RenderingDevice.TextureUsageBits.CanCopyToBit
+            };
+            var view = new RDTextureView();
+            byte[] zero = new byte[8];
+            _fallbackDummyTextureRid = rd.TextureCreate(fmt, view, new Godot.Collections.Array<byte[]> { zero });
+            return _fallbackDummyTextureRid;
         }
 
         public void SyncGpuStrokeToComposite()
@@ -1449,6 +1607,7 @@ namespace DeadlockPlayground.Painter
                 int nativeDim = (mgr != null && GodotObject.IsInstanceValid(mgr))
                     ? (int)mgr.Call("get_native_atlas_size")
                     : 2048;
+                if (nativeDim < 512) nativeDim = 2048;
                 CanvasSize = new Vector2I(nativeDim, nativeDim);
                 _layers.Clear();
                 _undoStack.Clear();
@@ -2025,6 +2184,7 @@ namespace DeadlockPlayground.Painter
 
         private Texture2Drd _baseTextureResource;
         private bool _hasPopulatedBaseAtlasBuffer = false;
+        public bool HasPopulatedBaseAtlasBuffer => _hasPopulatedBaseAtlasBuffer;
 
         public Texture2D GetBaseTextureResource()
         {
@@ -2054,6 +2214,60 @@ namespace DeadlockPlayground.Painter
         }
 
         public byte[] CompositeBuffer => _compositeBuffer;
+        public byte[] BaseAtlasBuffer => _baseAtlasBuffer;
+
+        public Color GetVisibleColorAtAtlasPx(int x, int y)
+        {
+            int atlasSize = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            if (x < 0 || x >= atlasSize || y < 0 || y >= atlasSize) return Colors.White;
+
+            if (_baseAtlasBuffer == null || !_hasPopulatedBaseAtlasBuffer || _baseAtlasBuffer.Length < atlasSize * atlasSize * 8)
+            {
+                RebuildBaseAtlasBuffer();
+            }
+
+            int idx = (y * atlasSize + x) * 4;
+            unsafe
+            {
+                float baseR = 1.0f, baseG = 1.0f, baseB = 1.0f;
+                if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length >= (idx + 4) * 2)
+                {
+                    fixed (byte* pBase = _baseAtlasBuffer)
+                    {
+                        Half* hBase = (Half*)pBase;
+                        baseR = (float)hBase[idx];
+                        baseG = (float)hBase[idx + 1];
+                        baseB = (float)hBase[idx + 2];
+                    }
+                }
+
+                if (_compositeBuffer != null && _compositeBuffer.Length >= (idx + 4) * 2)
+                {
+                    fixed (byte* pComp = _compositeBuffer)
+                    {
+                        Half* hComp = (Half*)pComp;
+                        float r = (float)hComp[idx];
+                        float g = (float)hComp[idx + 1];
+                        float b = (float)hComp[idx + 2];
+                        float a = (float)hComp[idx + 3];
+
+                        if (a >= 0.999f)
+                        {
+                            return new Color(r, g, b, 1.0f).LinearToSrgb();
+                        }
+                        if (a > 0.001f)
+                        {
+                            float finalR = r * a + baseR * (1.0f - a);
+                            float finalG = g * a + baseG * (1.0f - a);
+                            float finalB = b * a + baseB * (1.0f - a);
+                            return new Color(finalR, finalG, finalB, 1.0f).LinearToSrgb();
+                        }
+                    }
+                }
+
+                return new Color(baseR, baseG, baseB, 1.0f).LinearToSrgb();
+            }
+        }
 
         public unsafe Rect2I PaintDab2D(
             Vector2 atlasPx,
@@ -2247,10 +2461,10 @@ namespace DeadlockPlayground.Painter
 
             float dist = fromAtlasPx.DistanceTo(toAtlasPx);
             float brushRadius = sizePx * 0.5f;
-            float step = MathF.Max(1.0f, brushRadius * 0.15f);
-            int steps = Math.Max(1, (int)MathF.Ceiling(dist / step));
+            float stepDistance = MathF.Max(4.0f, brushRadius * 0.35f);
+            int steps = Math.Clamp((int)MathF.Ceiling(dist / stepDistance), 1, 32);
 
-            for (int i = 0; i <= steps; i++)
+            for (int i = 1; i <= steps; i++)
             {
                 float t = (float)i / steps;
                 Vector2 pt = fromAtlasPx.Lerp(toAtlasPx, t);

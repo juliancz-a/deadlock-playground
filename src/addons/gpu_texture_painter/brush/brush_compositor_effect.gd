@@ -196,7 +196,10 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 		return
 
 	var fallback_rid := _get_fallback_dummy_texture_rid()
-	if not fallback_rid.is_valid() or not rd.texture_is_valid(fallback_rid):
+	if not (fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid)):
+		_create_dummy_texture()
+		fallback_rid = dummy_texture_rid
+	if not (fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid)):
 		push_error("CameraBrush: Failed to create fallback dummy texture.")
 		return
 
@@ -235,6 +238,8 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 		if idx >= 0 and idx < 8:
 			if manager.atlas_texture_rid is RID and manager.atlas_texture_rid.is_valid() and rd.texture_is_valid(manager.atlas_texture_rid):
 				active_atlases[idx] = manager.atlas_texture_rid
+			else:
+				active_atlases[idx] = fallback_rid
 			if (not base_tex_rid.is_valid() or base_tex_rid == fallback_rid) and manager.base_texture_rid is RID and manager.base_texture_rid.is_valid() and rd.texture_is_valid(manager.base_texture_rid):
 				base_tex_rid = manager.base_texture_rid
 
@@ -264,25 +269,30 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 	mask_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 	mask_uniform.binding = 9
 	var valid_mask_rid: RID = fallback_rid
-	if camera_brush and camera_brush.selection_mask_rid is RID and camera_brush.selection_mask_rid.is_valid() and rd.texture_is_valid(camera_brush.selection_mask_rid):
-		valid_mask_rid = camera_brush.selection_mask_rid
+	if camera_brush and "selection_mask_rid" in camera_brush:
+		var cand_rid = camera_brush.selection_mask_rid
+		if cand_rid is RID and cand_rid.is_valid() and rd.texture_is_valid(cand_rid):
+			valid_mask_rid = cand_rid
 	mask_uniform.add_id(valid_mask_rid)
 	uniforms.append(mask_uniform)
+
+	# Universal Fallback Sweep: ensure NO uniform points to an invalid RID
+	for u in uniforms:
+		var ids := u.get_ids()
+		for j in range(ids.size()):
+			var id: RID = ids[j]
+			if not (id is RID and id.is_valid() and rd.texture_is_valid(id)):
+				u.clear_ids()
+				u.add_id(fallback_rid)
+				break
 
 	atlas_texture_uniform_set = RID()
 
 	# Create uniform set using UniformSetCacheRD to manage lifecycle across canvas resizes
 	if shader.is_valid() and fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid):
-		var all_valid := true
-		for u in uniforms:
-			for id in u.get_ids():
-				if not (id is RID and id.is_valid() and rd.texture_is_valid(id)):
-					all_valid = false
-					break
-		if all_valid:
-			atlas_texture_uniform_set = UniformSetCacheRD.get_cache(shader, 2, uniforms)
-			if not atlas_texture_uniform_set.is_valid():
-				atlas_texture_uniform_set = rd.uniform_set_create(uniforms, shader, 2)
+		atlas_texture_uniform_set = UniformSetCacheRD.get_cache(shader, 2, uniforms)
+		if not atlas_texture_uniform_set.is_valid():
+			atlas_texture_uniform_set = rd.uniform_set_create(uniforms, shader, 2)
 
 
 func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data: RenderData) -> void:
@@ -357,6 +367,8 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 
 		# Get the RID for our color image, we will be reading from and writing to it.
 		var framebuffer_rid: RID = render_scene_buffers.get_color_layer(0)
+		if not (framebuffer_rid.is_valid() and rd.texture_is_valid(framebuffer_rid)):
+			return
 
 		# Create a uniform set, this will be cached, the cache will be cleared if our viewports configuration is changed.
 		var framebuffer_uniform := RDUniform.new()
@@ -364,6 +376,10 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 		framebuffer_uniform.binding = 0
 		framebuffer_uniform.add_id(framebuffer_rid)
 		var framebuffer_uniform_set := UniformSetCacheRD.get_cache(shader, 0, [framebuffer_uniform])
+		if not framebuffer_uniform_set.is_valid():
+			framebuffer_uniform_set = rd.uniform_set_create([framebuffer_uniform], shader, 0)
+		if not (framebuffer_uniform_set.is_valid() and rd.uniform_set_is_valid(framebuffer_uniform_set)):
+			return
 
 		# Run our compute shader.
 		var compute_list := rd.compute_list_begin()
