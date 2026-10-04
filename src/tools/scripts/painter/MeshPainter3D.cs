@@ -1616,6 +1616,43 @@ namespace DeadlockPlayground.Painter
             EnsureCursorGizmo();
             EnsureCameraBrush();
             AttachCameraBrushWorld();
+
+            if (_layerManager != null)
+            {
+                _layerManager.LayerSelected -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerRemoved -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerAdded -= OnLayerManagerAtlasAdded;
+                _layerManager.LayersReordered -= OnLayerManagerAtlasReordered;
+                _layerManager.StackChanged -= OnLayerManagerAtlasReordered;
+
+                _layerManager.LayerSelected += OnLayerManagerAtlasChanged;
+                _layerManager.LayerRemoved += OnLayerManagerAtlasChanged;
+                _layerManager.LayerAdded += OnLayerManagerAtlasAdded;
+                _layerManager.LayersReordered += OnLayerManagerAtlasReordered;
+                _layerManager.StackChanged += OnLayerManagerAtlasReordered;
+            }
+        }
+
+        private void OnLayerManagerAtlasChanged(int index)
+        {
+            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+            {
+                _cameraBrush.Call("get_atlas_textures");
+            }
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            {
+                _mirrorCameraBrush.Call("get_atlas_textures");
+            }
+        }
+
+        private void OnLayerManagerAtlasAdded(int index, string name)
+        {
+            OnLayerManagerAtlasChanged(index);
+        }
+
+        private void OnLayerManagerAtlasReordered()
+        {
+            OnLayerManagerAtlasChanged(0);
         }
 
         public void SetTargetMesh(MeshInstance3D mesh, int surfaceIndex = 0)

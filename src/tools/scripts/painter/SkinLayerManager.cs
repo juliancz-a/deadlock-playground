@@ -692,6 +692,7 @@ namespace DeadlockPlayground.Painter
 
             _layers.Add(newLayer);
             _activeLayerIndex = _layers.Count - 1;
+            InvalidateOtherLayers();
             UpdateActiveLayerBinding();
             ApplyOverlayParametersToMeshes();
             RecompositeGpuLayers();
@@ -763,19 +764,50 @@ namespace DeadlockPlayground.Painter
 
             var layer = _layers[index];
             _layers.RemoveAt(index);
+
+            // Safely detach from active atlas manager before freeing RID to prevent
+            // "Attempted to free invalid ID" in Texture2DRD
+            if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            {
+                var curActiveRid = _activeAtlasManager.Get("atlas_texture_rid");
+                if (curActiveRid.VariantType == Variant.Type.Rid && curActiveRid.AsRid() == layer.LayerRid)
+                {
+                    _activeAtlasManager.Set("atlas_texture_rid", new Rid());
+                    var resObj = _activeAtlasManager.Get("active_layer_resource");
+                    if (resObj.VariantType == Variant.Type.Object && resObj.AsGodotObject() is Texture2Drd texRd)
+                    {
+                        texRd.TextureRdRid = new Rid();
+                    }
+                }
+            }
+
             layer.CleanUp();
+            layer.GpuData = null;
+
+            InvalidateOtherLayers();
 
             if (_layers.Count == 0)
             {
                 AddNewLayer("Paint Layer 1");
             }
-            else if (_activeLayerIndex >= _layers.Count)
+            else
             {
-                _activeLayerIndex = _layers.Count - 1;
+                if (_activeLayerIndex >= _layers.Count)
+                {
+                    _activeLayerIndex = _layers.Count - 1;
+                }
+                UpdateActiveLayerBinding();
+                ApplyOverlayParametersToMeshes();
+                RecompositeGpuLayers();
             }
 
-            UpdateActiveLayerBinding();
-            RecompositeGpuLayers();
+            if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            {
+                if (_activeAtlasManager.HasMethod("_notify_brushes"))
+                {
+                    _activeAtlasManager.Call("_notify_brushes");
+                }
+            }
 
             NotifyLayerRemoved(index);
             NotifyLayerSelected(_activeLayerIndex);
@@ -794,7 +826,9 @@ namespace DeadlockPlayground.Painter
             _layers.Insert(toIndex, layer);
 
             _activeLayerIndex = toIndex;
+            InvalidateOtherLayers();
             UpdateActiveLayerBinding();
+            ApplyOverlayParametersToMeshes();
             RecompositeGpuLayers();
             NotifyLayersReordered();
             NotifyLayerSelected(_activeLayerIndex);
@@ -909,30 +943,6 @@ namespace DeadlockPlayground.Painter
             int bufferLen = atlasSize * atlasSize * 8;
             if (layer.GpuData == null || layer.GpuData.Length != bufferLen) return;
 
-            // If no valid localized rect or larger than scratch texture limit, do a full fallback update
-            if (dirtyRect.Size.X <= 0 || dirtyRect.Size.Y <= 0 ||
-                dirtyRect.Size.X > ScratchTextureSize || dirtyRect.Size.Y > ScratchTextureSize)
-            {
-                rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
-
-                if (_layers.Count <= 1 && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
-                {
-                    var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
-                    if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
-                    {
-                        rd.TextureUpdate(fullRidVal.AsRid(), 0, layer.GpuData);
-                    }
-                }
-                return;
-            }
-
-            EnsureScratchTexture(rd);
-            if (!_scratchTextureRid.IsValid || !rd.TextureIsValid(_scratchTextureRid))
-            {
-                rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
-                return;
-            }
-
             int minX = Math.Clamp(dirtyRect.Position.X, 0, atlasSize - 1);
             int minY = Math.Clamp(dirtyRect.Position.Y, 0, atlasSize - 1);
             int maxX = Math.Clamp(dirtyRect.End.X, 0, atlasSize);
@@ -941,42 +951,117 @@ namespace DeadlockPlayground.Painter
             int h = maxY - minY;
             if (w <= 0 || h <= 0) return;
 
-            // Localized row-by-row blit into top-left of scratchBuffer
-            int rowBytes = w * 8;
-            for (int y = 0; y < h; y++)
+            EnsureScratchTexture(rd);
+            if (!_scratchTextureRid.IsValid || !rd.TextureIsValid(_scratchTextureRid))
             {
-                int srcOffset = ((minY + y) * atlasSize + minX) * 8;
-                int dstOffset = (y * ScratchTextureSize) * 8;
-                Buffer.BlockCopy(layer.GpuData, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
+                return;
             }
 
-            // Upload localized scratch texture (only touches scratch rows)
-            rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
-
-            // GPU VRAM-to-VRAM sub-region copy
-            rd.TextureCopy(
-                _scratchTextureRid,
-                layer.LayerRid,
-                Vector3.Zero,
-                new Vector3(minX, minY, 0),
-                new Vector3(w, h, 1),
-                0, 0, 0, 0
-            );
-
-            // Keep full_composite_rid synchronized for immediate 2D/3D feedback
-            if (_layers.Count <= 1 && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            // Single tile fast-path (fits in scratch texture)
+            if (w <= ScratchTextureSize && h <= ScratchTextureSize)
             {
-                var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
-                if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
+                int rowBytes = w * 8;
+                for (int y = 0; y < h; y++)
                 {
-                    rd.TextureCopy(
-                        _scratchTextureRid,
-                        fullRidVal.AsRid(),
-                        Vector3.Zero,
-                        new Vector3(minX, minY, 0),
-                        new Vector3(w, h, 1),
-                        0, 0, 0, 0
-                    );
+                    int srcOffset = ((minY + y) * atlasSize + minX) * 8;
+                    int dstOffset = (y * ScratchTextureSize) * 8;
+                    Buffer.BlockCopy(layer.GpuData, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                }
+
+                rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
+                rd.TextureCopy(_scratchTextureRid, layer.LayerRid, Vector3.Zero, new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
+
+                if (_layers.Count <= 1 && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+                {
+                    var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
+                    if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
+                    {
+                        rd.TextureCopy(_scratchTextureRid, fullRidVal.AsRid(), Vector3.Zero, new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
+                    }
+                }
+                return;
+            }
+
+            // Multi-tile chunked upload (only touches dirty area tiles, never full 134MB fallback!)
+            for (int ty = minY; ty < maxY; ty += ScratchTextureSize)
+            {
+                int tileH = Math.Min(ScratchTextureSize, maxY - ty);
+                for (int tx = minX; tx < maxX; tx += ScratchTextureSize)
+                {
+                    int tileW = Math.Min(ScratchTextureSize, maxX - tx);
+                    int rowBytes = tileW * 8;
+                    for (int y = 0; y < tileH; y++)
+                    {
+                        int srcOffset = ((ty + y) * atlasSize + tx) * 8;
+                        int dstOffset = (y * ScratchTextureSize) * 8;
+                        Buffer.BlockCopy(layer.GpuData, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                    }
+
+                    rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
+                    rd.TextureCopy(_scratchTextureRid, layer.LayerRid, Vector3.Zero, new Vector3(tx, ty, 0), new Vector3(tileW, tileH, 1), 0, 0, 0, 0);
+
+                    if (_layers.Count <= 1 && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+                    {
+                        var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
+                        if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
+                        {
+                            rd.TextureCopy(_scratchTextureRid, fullRidVal.AsRid(), Vector3.Zero, new Vector3(tx, ty, 0), new Vector3(tileW, tileH, 1), 0, 0, 0, 0);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void UploadBufferRectChunked(RenderingDevice rd, Rid destRid, byte[] buffer, int atlasSize, Rect2I rect)
+        {
+            if (rd == null || !destRid.IsValid || !rd.TextureIsValid(destRid) || buffer == null) return;
+            EnsureScratchTexture(rd);
+            if (!_scratchTextureRid.IsValid || !rd.TextureIsValid(_scratchTextureRid))
+            {
+                rd.TextureUpdate(destRid, 0, buffer);
+                return;
+            }
+
+            int minX = Math.Clamp(rect.Position.X, 0, atlasSize - 1);
+            int minY = Math.Clamp(rect.Position.Y, 0, atlasSize - 1);
+            int maxX = Math.Clamp(rect.End.X, 0, atlasSize);
+            int maxY = Math.Clamp(rect.End.Y, 0, atlasSize);
+            int w = maxX - minX;
+            int h = maxY - minY;
+            if (w <= 0 || h <= 0) return;
+
+            if (w <= ScratchTextureSize && h <= ScratchTextureSize)
+            {
+                int rowBytes = w * 8;
+                for (int y = 0; y < h; y++)
+                {
+                    int srcOffset = ((minY + y) * atlasSize + minX) * 8;
+                    int dstOffset = (y * ScratchTextureSize) * 8;
+                    Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                }
+
+                rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
+                rd.TextureCopy(_scratchTextureRid, destRid, Vector3.Zero, new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
+                return;
+            }
+
+            for (int ty = minY; ty < maxY; ty += ScratchTextureSize)
+            {
+                int tileH = Math.Min(ScratchTextureSize, maxY - ty);
+                for (int tx = minX; tx < maxX; tx += ScratchTextureSize)
+                {
+                    int tileW = Math.Min(ScratchTextureSize, maxX - tx);
+                    int rowBytes = tileW * 8;
+                    for (int y = 0; y < tileH; y++)
+                    {
+                        int srcOffset = ((ty + y) * atlasSize + tx) * 8;
+                        int dstOffset = (y * ScratchTextureSize) * 8;
+                        Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                    }
+
+                    rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
+                    rd.TextureCopy(_scratchTextureRid, destRid, Vector3.Zero, new Vector3(tx, ty, 0), new Vector3(tileW, tileH, 1), 0, 0, 0, 0);
                 }
             }
         }
@@ -1056,6 +1141,7 @@ namespace DeadlockPlayground.Painter
             if (index < 0 || index >= _layers.Count) return;
 
             _activeLayerIndex = index;
+            InvalidateOtherLayers();
             UpdateActiveLayerBinding();
             RecompositeGpuLayers();
             ApplyOverlayParametersToMeshes();
@@ -1081,7 +1167,9 @@ namespace DeadlockPlayground.Painter
                     rd.TextureClear(layer.LayerRid, new Color(0, 0, 0, 0), 0, 1, 0, 1);
                 }
             }
+            InvalidateOtherLayers();
             RecompositeGpuLayers();
+            ApplyOverlayParametersToMeshes();
             RecordUndoSnapshot();
             NotifyStackChanged();
             GD.Print("[SkinLayerManager] Cleared active layer paint.");
@@ -1173,7 +1261,7 @@ namespace DeadlockPlayground.Painter
                 UncompressedLength = bufferLen
             };
 
-            int maxSnapshots = CanvasSize.X >= 4096 ? 5 : MaxUndoSnapshots;
+            int maxSnapshots = CanvasSize.X >= 4096 ? 3 : (CanvasSize.X >= 2048 ? 6 : MaxUndoSnapshots);
 
             LayerPaintSnapshot prevSnap = _undoStack.Count > 0 ? _undoStack[^1] : null;
 
@@ -1181,6 +1269,12 @@ namespace DeadlockPlayground.Painter
             {
                 var layer = _layers[i];
                 if (layer.GpuData == null || layer.GpuData.Length == 0) continue;
+
+                if (layer.IsBlank())
+                {
+                    snap.CompressedLayerData[i] = Array.Empty<byte>();
+                    continue;
+                }
 
                 if (targetLayerOnly.HasValue && targetLayerOnly.Value != i && prevSnap != null)
                 {
@@ -1221,7 +1315,10 @@ namespace DeadlockPlayground.Painter
             _undoStack.Add(snap);
             if (_undoStack.Count > maxSnapshots + 1)
             {
+                var removed = _undoStack[0];
                 _undoStack.RemoveAt(0);
+                removed.PendingRawLayerData.Clear();
+                removed.CompressedLayerData.Clear();
             }
             _redoStack.Clear();
             _hasGpuUndo = false;
@@ -1454,6 +1551,20 @@ namespace DeadlockPlayground.Painter
 
                 if (mat != null)
                 {
+                    if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+                    {
+                        var activeRes = _activeAtlasManager.Get("active_layer_resource");
+                        if (activeRes.VariantType == Variant.Type.Object && activeRes.AsGodotObject() is Texture2D actTex)
+                        {
+                            mat.SetShaderParameter("active_layer_texture", actTex);
+                        }
+                        var atlasRes = _activeAtlasManager.Get("atlas_texture_resource");
+                        if (atlasRes.VariantType == Variant.Type.Object && atlasRes.AsGodotObject() is Texture2D atlTex)
+                        {
+                            mat.SetShaderParameter("overlay_texture", atlTex);
+                        }
+                    }
+
                     mat.SetShaderParameter("layer_opacity", ActiveLayer?.Opacity ?? 1.0f);
                     mat.SetShaderParameter("active_layer_visible", ActiveLayer?.IsVisible ?? true);
                     mat.SetShaderParameter("active_layer_opacity", ActiveLayer?.Opacity ?? 1.0f);
@@ -2474,11 +2585,21 @@ namespace DeadlockPlayground.Painter
             return new Rect2I(minX, minY, maxX - minX + 1, maxY - minY + 1);
         }
 
-        public void Finish2DStroke()
+        public void Finish2DStroke(Rect2I? strokeDirtyRect = null)
         {
-            SyncActiveLayerGpuTexture();
-            RecompositeGpuLayers();
-            RecordUndoSnapshot();
+            if (strokeDirtyRect.HasValue && strokeDirtyRect.Value.Size.X > 0 && strokeDirtyRect.Value.Size.Y > 0)
+            {
+                // Partial stroke: dirty area has already been uploaded tile-by-tile via UpdateActiveLayerGpuTextureThrottled.
+                // Recomposite only the dirty bounding rect to eliminate the CPU full-buffer scan and PCIe stall!
+                RecompositeGpuLayers(strokeDirtyRect.Value);
+                RecordUndoSnapshot(_activeLayerIndex);
+            }
+            else
+            {
+                SyncActiveLayerGpuTexture();
+                RecompositeGpuLayers();
+                RecordUndoSnapshot(_activeLayerIndex);
+            }
 
             if (_targetMesh != null && MeshHierarchy != null)
             {
@@ -2894,7 +3015,23 @@ namespace DeadlockPlayground.Painter
             var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
             if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid)
             {
-                rd.TextureUpdate(fullRidVal.AsRid(), 0, _compositeBuffer);
+                if (dirtyRect.HasValue && dirtyRect.Value.Size.X > 0 && dirtyRect.Value.Size.Y > 0)
+                {
+                    if (_layers.Count <= 1 && active != null && active.LayerRid.IsValid && rd.TextureIsValid(active.LayerRid))
+                    {
+                        // 1-layer fast path: direct GPU-to-GPU copy in 0.01ms with zero CPU/PCIe overhead
+                        rd.TextureCopy(active.LayerRid, fullRidVal.AsRid(), Vector3.Zero, Vector3.Zero, new Vector3(atlasSize, atlasSize, 1), 0, 0, 0, 0);
+                    }
+                    else
+                    {
+                        // Multi-layer path: upload only dirty tiles
+                        UploadBufferRectChunked(rd, fullRidVal.AsRid(), _compositeBuffer, atlasSize, dirtyRect.Value);
+                    }
+                }
+                else
+                {
+                    rd.TextureUpdate(fullRidVal.AsRid(), 0, _compositeBuffer);
+                }
             }
             else
             {
@@ -2902,7 +3039,14 @@ namespace DeadlockPlayground.Painter
                 var atlasRidVal = _activeAtlasManager.Get("atlas_texture_rid");
                 if (atlasRidVal.VariantType == Variant.Type.Rid && atlasRidVal.AsRid().IsValid && compRidVal.VariantType != Variant.Type.Rid)
                 {
-                    rd.TextureUpdate(atlasRidVal.AsRid(), 0, _compositeBuffer);
+                    if (dirtyRect.HasValue && dirtyRect.Value.Size.X > 0 && dirtyRect.Value.Size.Y > 0)
+                    {
+                        UploadBufferRectChunked(rd, atlasRidVal.AsRid(), _compositeBuffer, atlasSize, dirtyRect.Value);
+                    }
+                    else
+                    {
+                        rd.TextureUpdate(atlasRidVal.AsRid(), 0, _compositeBuffer);
+                    }
                 }
             }
         }

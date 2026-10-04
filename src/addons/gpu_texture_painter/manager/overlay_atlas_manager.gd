@@ -301,20 +301,32 @@ func _apply_texture_to_texture_resource() -> void:
 	if not atlas_texture_resource or not active_layer_resource or not full_composite_resource:
 		_create_texture_resource()
 	
+	var target_atlas_rid := RID()
 	if composite_texture_rid.is_valid() and rd and rd.texture_is_valid(composite_texture_rid):
-		atlas_texture_resource.texture_rd_rid = composite_texture_rid
-	elif atlas_texture_rid.is_valid():
-		atlas_texture_resource.texture_rd_rid = atlas_texture_rid
+		target_atlas_rid = composite_texture_rid
+	elif atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+		target_atlas_rid = atlas_texture_rid
 
-	if atlas_texture_rid.is_valid():
-		active_layer_resource.texture_rd_rid = atlas_texture_rid
+	if atlas_texture_resource.texture_rd_rid != target_atlas_rid:
+		atlas_texture_resource.texture_rd_rid = target_atlas_rid
 
+	var target_active_rid := RID()
+	if atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+		target_active_rid = atlas_texture_rid
+
+	if active_layer_resource.texture_rd_rid != target_active_rid:
+		active_layer_resource.texture_rd_rid = target_active_rid
+
+	var target_full_rid := RID()
 	if full_composite_rid.is_valid() and rd and rd.texture_is_valid(full_composite_rid):
-		full_composite_resource.texture_rd_rid = full_composite_rid
-	elif composite_texture_rid.is_valid():
-		full_composite_resource.texture_rd_rid = composite_texture_rid
-	elif atlas_texture_rid.is_valid():
-		full_composite_resource.texture_rd_rid = atlas_texture_rid
+		target_full_rid = full_composite_rid
+	elif composite_texture_rid.is_valid() and rd and rd.texture_is_valid(composite_texture_rid):
+		target_full_rid = composite_texture_rid
+	elif atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+		target_full_rid = atlas_texture_rid
+
+	if full_composite_resource.texture_rd_rid != target_full_rid:
+		full_composite_resource.texture_rd_rid = target_full_rid
 
 	notify_property_list_changed()
 

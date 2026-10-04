@@ -43,6 +43,7 @@ namespace DeadlockPlayground.UI
         private bool _isPainting = false;
         private Vector2 _lastAtlasPx = Vector2.Zero;
         private Vector2 _hoverMousePos = new Vector2(-9999, -9999);
+        private Rect2I _totalStrokeDirtyRect = default;
 
         // Advanced Selection State (Rectangular, Lasso, Polygonal)
         private bool _isSelecting = false;
@@ -1117,6 +1118,52 @@ namespace DeadlockPlayground.UI
                         overlay.DrawCircle(_hoverMousePos, 1.5f, cursorCol, filled: true);
                     }
                 }
+                else if (_painter.ToolMode == BrushToolMode.Decal)
+                {
+                    var decalTex = _painter.DecalStamper?.DecalTexture;
+                    if (decalTex != null)
+                    {
+                        float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                        float rotDeg = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                        int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                        float dW = decalTex.GetWidth();
+                        float dH = decalTex.GetHeight();
+                        float aspect = dW / dH;
+                        float spanU = (aspect >= 1.0f) ? scale * aspect : scale;
+                        float spanV = (aspect < 1.0f) ? scale / aspect : scale;
+                        float w = spanU * atlasSize * _zoom;
+                        float h = spanV * atlasSize * _zoom;
+
+                        overlay.DrawSetTransform(_hoverMousePos, Mathf.DegToRad(rotDeg), Vector2.One);
+                        Rect2 rect = new Rect2(-w * 0.5f, -h * 0.5f, w, h);
+                        overlay.DrawTextureRect(decalTex, rect, false, new Color(1, 1, 1, 0.75f));
+                        overlay.DrawRect(rect, new Color(0.96f, 0.77f, 0.26f, 0.9f), filled: false, width: 1.5f);
+                        overlay.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+                    }
+                }
+                else if (_painter.ToolMode == BrushToolMode.Text)
+                {
+                    var textTex = _painter.TextProjector?.CurrentTexture;
+                    if (textTex != null)
+                    {
+                        float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                        float rotDeg = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                        int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                        float dW = textTex.GetWidth();
+                        float dH = textTex.GetHeight();
+                        float aspect = dW / dH;
+                        float spanU = (aspect >= 1.0f) ? scale * aspect : scale;
+                        float spanV = (aspect < 1.0f) ? scale / aspect : scale;
+                        float w = spanU * atlasSize * _zoom;
+                        float h = spanV * atlasSize * _zoom;
+
+                        overlay.DrawSetTransform(_hoverMousePos, Mathf.DegToRad(rotDeg), Vector2.One);
+                        Rect2 rect = new Rect2(-w * 0.5f, -h * 0.5f, w, h);
+                        overlay.DrawTextureRect(textTex, rect, false, new Color(1, 1, 1, 0.75f));
+                        overlay.DrawRect(rect, new Color(0.4f, 0.8f, 1.0f, 0.9f), filled: false, width: 1.5f);
+                        overlay.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+                    }
+                }
             }
         }
 
@@ -1237,8 +1284,13 @@ namespace DeadlockPlayground.UI
                         if (_isPainting)
                         {
                             _isPainting = false;
-                            _accumulated2DDirtyRect = default;
-                            _layerManager?.Finish2DStroke();
+                            if (_accumulated2DDirtyRect.Size.X > 0)
+                            {
+                                _layerManager?.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                                _accumulated2DDirtyRect = default;
+                            }
+                            _layerManager?.Finish2DStroke(_totalStrokeDirtyRect);
+                            _totalStrokeDirtyRect = default;
                             canvas.QueueRedraw();
                         }
                     }
@@ -1481,7 +1533,11 @@ namespace DeadlockPlayground.UI
                 _accumulated2DDirtyRect = default;
                 _layerManager.EnsureCpuSynced();
                 _layerManager.RecordInitialSnapshot();
-                var dirtyRect = _layerManager.PaintDab2D(atlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool);
+
+                var shape = (mode == BrushToolMode.Erase) ? _painter.EraserShape : _painter.BrushShape;
+                var brushTex = _painter.GetBrushTexture(shape);
+                var dirtyRect = _layerManager.PaintDab2D(atlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool, shape, brushTex);
+                _totalStrokeDirtyRect = dirtyRect;
                 _layerManager.UpdateActiveLayerGpuTextureThrottled(dirtyRect);
                 _canvasDrawArea?.QueueRedraw();
             }
@@ -1545,7 +1601,28 @@ namespace DeadlockPlayground.UI
                     var decalTex = _painter.DecalStamper?.DecalTexture;
                     if (decalTex != null)
                     {
-                        _layerManager.StampDecalToAtlas(uv, decalTex, 0.0f, 1.0f);
+                        float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                        float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                        _layerManager.StampDecalToAtlas(uv, decalTex, rot, scale, _painter.MagicWandTool);
+                        _canvasDrawArea?.QueueRedraw();
+                    }
+                }
+            }
+            else if (mode == BrushToolMode.Text)
+            {
+                Vector2 uv = new Vector2(
+                    Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
+                    Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
+                );
+                var active = _meshHierarchy?.ActiveTarget;
+                if (active != null && active.Mesh != null)
+                {
+                    var textTex = _painter.TextProjector?.CurrentTexture;
+                    if (textTex != null)
+                    {
+                        float rot = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                        float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                        _layerManager.StampDecalToAtlas(uv, textTex, rot, scale, _painter.MagicWandTool);
                         _canvasDrawArea?.QueueRedraw();
                     }
                 }
@@ -1562,11 +1639,33 @@ namespace DeadlockPlayground.UI
             {
                 if (fromAtlasPx.DistanceSquaredTo(toAtlasPx) < 0.01f) return;
 
-                var dirtyRect = _layerManager.PaintStroke2D(fromAtlasPx, toAtlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool);
-                _accumulated2DDirtyRect = (_accumulated2DDirtyRect.Size.X <= 0) ? dirtyRect : _accumulated2DDirtyRect.Merge(dirtyRect);
+                var shape = (mode == BrushToolMode.Erase) ? _painter.EraserShape : _painter.BrushShape;
+                var brushTex = _painter.GetBrushTexture(shape);
+                var dirtyRect = _layerManager.PaintStroke2D(fromAtlasPx, toAtlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool, shape, brushTex);
+                _totalStrokeDirtyRect = (_totalStrokeDirtyRect.Size.X == 0) ? dirtyRect : _totalStrokeDirtyRect.Merge(dirtyRect);
+
+                // If adding this segment would make dirty rect exceed 512px, flush previously accumulated rect immediately
+                if (_accumulated2DDirtyRect.Size.X > 0)
+                {
+                    var merged = _accumulated2DDirtyRect.Merge(dirtyRect);
+                    if (merged.Size.X > 512 || merged.Size.Y > 512)
+                    {
+                        _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                        _accumulated2DDirtyRect = dirtyRect;
+                        _lastStrokeRecompositeMs = Time.GetTicksMsec();
+                    }
+                    else
+                    {
+                        _accumulated2DDirtyRect = merged;
+                    }
+                }
+                else
+                {
+                    _accumulated2DDirtyRect = dirtyRect;
+                }
 
                 ulong nowMs = Time.GetTicksMsec();
-                if (nowMs - _lastStrokeRecompositeMs >= 33)
+                if (nowMs - _lastStrokeRecompositeMs >= 25)
                 {
                     _lastStrokeRecompositeMs = nowMs;
                     _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
