@@ -58,6 +58,12 @@ func _notification(what):
 		_cleanup_texture()
 
 
+func _exit_tree() -> void:
+	if is_in_group(GROUP_NAME):
+		remove_from_group(GROUP_NAME)
+	_cleanup_texture()
+
+
 func apply() -> void:
 	_create_texture()
 	_create_texture_resource()
@@ -282,7 +288,6 @@ func _cleanup_texture() -> void:
 	if base_texture_rid.is_valid() and rd and rd.texture_is_valid(base_texture_rid):
 		rd.free_rid(base_texture_rid)
 		base_texture_rid = RID()
-	_notify_brushes()
 
 
 func _notify_brushes() -> void:
@@ -308,6 +313,8 @@ func _apply_texture_to_texture_resource() -> void:
 		target_atlas_rid = atlas_texture_rid
 
 	if atlas_texture_resource.texture_rd_rid != target_atlas_rid:
+		if atlas_texture_resource.texture_rd_rid.is_valid() and rd and not rd.texture_is_valid(atlas_texture_resource.texture_rd_rid):
+			atlas_texture_resource = Texture2DRD.new()
 		atlas_texture_resource.texture_rd_rid = target_atlas_rid
 
 	var target_active_rid := RID()
@@ -315,6 +322,8 @@ func _apply_texture_to_texture_resource() -> void:
 		target_active_rid = atlas_texture_rid
 
 	if active_layer_resource.texture_rd_rid != target_active_rid:
+		if active_layer_resource.texture_rd_rid.is_valid() and rd and not rd.texture_is_valid(active_layer_resource.texture_rd_rid):
+			active_layer_resource = Texture2DRD.new()
 		active_layer_resource.texture_rd_rid = target_active_rid
 
 	var target_full_rid := RID()
@@ -326,6 +335,8 @@ func _apply_texture_to_texture_resource() -> void:
 		target_full_rid = atlas_texture_rid
 
 	if full_composite_resource.texture_rd_rid != target_full_rid:
+		if full_composite_resource.texture_rd_rid.is_valid() and rd and not rd.texture_is_valid(full_composite_resource.texture_rd_rid):
+			full_composite_resource = Texture2DRD.new()
 		full_composite_resource.texture_rd_rid = target_full_rid
 
 	notify_property_list_changed()

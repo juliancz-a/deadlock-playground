@@ -46,7 +46,8 @@ public class LashMaterialConfig : IHeroMaterialConfig
     public Godot.Material TryCreateCustomMaterial(Package package, string vmatPath, string meshName, Package addonPackage)
     {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
-        if (!vmatLower.Contains("lash_sparkles") && !(vmatLower.Contains("sparkle") && vmatLower.Contains("lash")))
+        string mLower = meshName?.ToLowerInvariant() ?? "";
+        if (!vmatLower.Contains("sparkle") && !mLower.Contains("sparkle"))
         {
             return null;
         }

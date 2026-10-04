@@ -246,79 +246,139 @@ public static class Source2TextureLoader
 
         int width = skBitmap.Width;
         int height = skBitmap.Height;
+        int pixelCount = width * height;
         IntPtr pixelsPtr = skBitmap.GetPixels();
         int byteCount = skBitmap.ByteCount;
-        if (pixelsPtr == IntPtr.Zero || byteCount <= 0) return null;
+        if (pixelsPtr == IntPtr.Zero || byteCount <= 0 || width <= 0 || height <= 0) return null;
 
-        byte[] rawBytes = new byte[byteCount];
-        Marshal.Copy(pixelsPtr, rawBytes, 0, byteCount);
+        // Allocate a standard 32-bit RGBA buffer of exact size width * height * 4
+        byte[] rgbaBytes = new byte[pixelCount * 4];
 
-        bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
-        unsafe
+        // Format 1: 32-bit BGRA (Most common Source 2 format from VRF on Windows)
+        if (skBitmap.ColorType == SKColorType.Bgra8888 && byteCount >= pixelCount * 4)
         {
-            fixed (byte* ptr = rawBytes)
+            byte[] rawBytes = new byte[pixelCount * 4];
+            Marshal.Copy(pixelsPtr, rawBytes, 0, rawBytes.Length);
+
+            unsafe
             {
-                uint* p32 = (uint*)ptr;
-                int pixelCount = width * height;
-                if (!isAlphaCardTexture)
+                fixed (byte* srcPtr = rawBytes)
+                fixed (byte* dstPtr = rgbaBytes)
                 {
-                    if (isBgra)
+                    uint* s32 = (uint*)srcPtr;
+                    uint* d32 = (uint*)dstPtr;
+
+                    if (!isAlphaCardTexture)
                     {
                         for (int i = 0; i < pixelCount; i++)
                         {
-                            uint c = p32[i];
+                            uint c = s32[i];
                             byte b = (byte)(c & 0xFF);
                             byte g = (byte)((c >> 8) & 0xFF);
                             byte r = (byte)((c >> 16) & 0xFF);
-                            p32[i] = (uint)(r | (g << 8) | (b << 16) | (0xFF << 24));
+                            byte a = forceOpaque ? (byte)0xFF : (byte)((c >> 24) & 0xFF);
+                            d32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
                         }
                     }
                     else
                     {
+                        bool hasVisiblePixels = false;
                         for (int i = 0; i < pixelCount; i++)
                         {
-                            p32[i] |= 0xFF000000;
+                            uint c = s32[i];
+                            byte a = (byte)((c >> 24) & 0xFF);
+                            if (a > 12) { hasVisiblePixels = true; break; }
+                        }
+
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = s32[i];
+                            byte b = (byte)(c & 0xFF);
+                            byte g = (byte)((c >> 8) & 0xFF);
+                            byte r = (byte)((c >> 16) & 0xFF);
+                            byte a = (byte)((c >> 24) & 0xFF);
+                            if (!hasVisiblePixels) a = 0xFF;
+                            d32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
                         }
                     }
                 }
-                else
+            }
+        }
+        // Format 2: 32-bit RGBA
+        else if (skBitmap.ColorType == SKColorType.Rgba8888 && byteCount >= pixelCount * 4)
+        {
+            Marshal.Copy(pixelsPtr, rgbaBytes, 0, rgbaBytes.Length);
+            unsafe
+            {
+                fixed (byte* ptr = rgbaBytes)
                 {
-                    bool hasVisiblePixels = false;
-                    if (isBgra)
+                    uint* d32 = (uint*)ptr;
+                    if (!isAlphaCardTexture && forceOpaque)
                     {
                         for (int i = 0; i < pixelCount; i++)
                         {
-                            uint c = p32[i];
-                            byte b = (byte)(c & 0xFF);
-                            byte g = (byte)((c >> 8) & 0xFF);
-                            byte r = (byte)((c >> 16) & 0xFF);
-                            byte a = (byte)((c >> 24) & 0xFF);
-                            if (a > 12) hasVisiblePixels = true;
-                            p32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            d32[i] |= 0xFF000000;
                         }
                     }
-                    else
+                    else if (isAlphaCardTexture)
                     {
+                        bool hasVisiblePixels = false;
                         for (int i = 0; i < pixelCount; i++)
                         {
-                            uint c = p32[i];
-                            byte a = (byte)((c >> 24) & 0xFF);
-                            if (a > 12) hasVisiblePixels = true;
+                            if (((d32[i] >> 24) & 0xFF) > 12) { hasVisiblePixels = true; break; }
+                        }
+                        if (!hasVisiblePixels)
+                        {
+                            for (int i = 0; i < pixelCount; i++) d32[i] |= 0xFF000000;
                         }
                     }
+                }
+            }
+        }
+        // Format 3: 8-bit Single Channel (Gray8 or Alpha8 - masks like lash_sparkles_mask, jitter_mask, etc.)
+        else if ((skBitmap.ColorType == SKColorType.Gray8 || skBitmap.ColorType == SKColorType.Alpha8) && byteCount >= pixelCount)
+        {
+            byte[] rawBytes = new byte[pixelCount];
+            Marshal.Copy(pixelsPtr, rawBytes, 0, rawBytes.Length);
 
-                    if (!hasVisiblePixels)
+            unsafe
+            {
+                fixed (byte* srcPtr = rawBytes)
+                fixed (byte* dstPtr = rgbaBytes)
+                {
+                    uint* d32 = (uint*)dstPtr;
+                    for (int i = 0; i < pixelCount; i++)
                     {
-                        for (int i = 0; i < pixelCount; i++)
+                        byte v = srcPtr[i];
+                        // Replicate value across R, G, B, and A so shaders sampling .r, .rgb, or .a get the exact mask value
+                        d32[i] = (uint)(v | (v << 8) | (v << 16) | (v << 24));
+                    }
+                }
+            }
+        }
+        // Format 4: Fallback for any other format (e.g. Rgb565) via GetPixel
+        else
+        {
+            unsafe
+            {
+                fixed (byte* dstPtr = rgbaBytes)
+                {
+                    uint* d32 = (uint*)dstPtr;
+                    int idx = 0;
+                    for (int y = 0; y < height; y++)
+                    {
+                        for (int x = 0; x < width; x++)
                         {
-                            p32[i] |= 0xFF000000;
+                            var col = skBitmap.GetPixel(x, y);
+                            byte a = (!isAlphaCardTexture && forceOpaque) ? (byte)0xFF : col.Alpha;
+                            d32[idx++] = (uint)(col.Red | (col.Green << 8) | (col.Blue << 16) | (a << 24));
                         }
                     }
                 }
             }
         }
 
-        var godotImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, rawBytes);
+        var godotImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, rgbaBytes);
         godotImage.GenerateMipmaps();
         var imageTex = ImageTexture.CreateFromImage(godotImage);
         if (imageTex != null)

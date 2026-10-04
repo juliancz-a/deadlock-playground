@@ -70,7 +70,9 @@ public static class DeadlockMaterialResolver
             mLower.Contains("lash_sparkles") || matLower.Contains("lash_sparkles") ||
             mLower.Contains("billboard") || matLower.Contains("billboard") ||
             mLower.Contains("particle") || matLower.Contains("particle") ||
-            mLower.Contains("quad") || matLower.Contains("quad") ||
+            mLower.Contains("ghost_glow") || matLower.Contains("ghost_glow") ||
+            mLower.Contains("vindicta_glow") || matLower.Contains("vindicta_glow") ||
+            mLower.Contains("hornet_glow") || matLower.Contains("hornet_glow") ||
             mLower.Contains("armglow") || matLower.Contains("armglow") ||
             mLower.Contains("hornglow") || matLower.Contains("keyglow") ||
             matLower.Contains("armglow") || matLower.Contains("headglow") || matLower.Contains("keyglow") || matLower.Contains("hornglow") ||
@@ -246,8 +248,11 @@ public static class DeadlockMaterialResolver
             return true;
         }
 
-        // Dedicated VFX: Sparkles, playing cards
+        // Dedicated VFX: Sparkles, playing cards, ghost glow / ethereal aura
         if (mLower.Contains("sparkle") || matLower.Contains("sparkle") ||
+            mLower.Contains("ghost_glow") || matLower.Contains("ghost_glow") ||
+            mLower.Contains("vindicta_glow") || matLower.Contains("vindicta_glow") ||
+            mLower.Contains("hornet_glow") || matLower.Contains("hornet_glow") ||
             mLower.Contains("card") || matLower.Contains("card") || rName.Contains("card"))
         {
             return true;
@@ -270,9 +275,10 @@ public static class DeadlockMaterialResolver
         if (material is ShaderMaterial sm && sm.Shader != null)
         {
             string sPath = sm.Shader.ResourcePath?.ToLowerInvariant() ?? "";
-            if (sPath.Contains("lash_sparkles") || sPath.Contains("cards") || sPath.Contains("wraith_card") ||
+            if (sPath.Contains("lash_sparkles") || sPath.Contains("vindicta") || sPath.Contains("cards") || sPath.Contains("wraith_card") ||
                 sPath.Contains("unicorn_hornglow") || sPath.Contains("viscous_outline") || sPath.Contains("viscous.gdshader") ||
-                sPath.Contains("source2_glass") || sPath.Contains("shawl") || sPath.Contains("headsmoke") || sPath.Contains("smoke"))
+                sPath.Contains("source2_glass") || sPath.Contains("shawl") || sPath.Contains("headsmoke") || sPath.Contains("smoke") ||
+                (sPath.Contains("source2_dynamic_fx_add") && (mLower.Contains("glow") || mLower.Contains("sparkle"))))
             {
                 return true;
             }

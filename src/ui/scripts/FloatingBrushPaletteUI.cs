@@ -18,6 +18,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     [Signal] public delegate void DecalBakedEventHandler();
 
     // Strip buttons
+    private Control _toolStripPanel;
     private Button _dragHandle;
     private Button _btnToolSelect;
     private Button _btnToolBrush;
@@ -365,7 +366,9 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             }
         }
 
-        // Flyout container & title
+        // Toolbar strip & Flyout container
+        _toolStripPanel = ResolveNode<Control>("ToolStripPanel", "ToolStripPanel")
+                       ?? FindChild("ToolStripPanel", true, false) as Control;
         _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel");
         _chkFrontFacesOnly = ResolveNode<CheckBox>("ChkFrontFacesOnly", "ChkFrontFacesOnly");
         if (_flyoutPanel != null)
@@ -1923,5 +1926,32 @@ public void UpdateTooltipsAndKeymaps()
         var uvCanvas = GetNodeOrNull<UVCanvas2DUI>("../UVCanvas2D")
                     ?? GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI;
         uvCanvas?.QueueCanvasRedraw();
+    }
+
+    public bool IsMouseOverPalette(Vector2 globalMouse)
+    {
+        if (!Visible) return false;
+
+        if (_toolStripPanel != null && GodotObject.IsInstanceValid(_toolStripPanel) && _toolStripPanel.Visible)
+        {
+            if (_toolStripPanel.GetGlobalRect().HasPoint(globalMouse)) return true;
+        }
+
+        if (_flyoutPanel != null && GodotObject.IsInstanceValid(_flyoutPanel) && _flyoutPanel.Visible)
+        {
+            if (_flyoutPanel.GetGlobalRect().HasPoint(globalMouse)) return true;
+        }
+
+        if (_btnColor != null && GodotObject.IsInstanceValid(_btnColor))
+        {
+            var picker = _btnColor.GetPopup();
+            if (picker != null && GodotObject.IsInstanceValid(picker) && picker.Visible)
+            {
+                var pickerRect = new Rect2(picker.Position, picker.Size);
+                if (pickerRect.HasPoint(globalMouse)) return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -96,13 +96,15 @@ extends Node3D
 	set(val):
 		if use_selection_mask != val:
 			use_selection_mask = val
-			get_atlas_textures()
+			if is_inside_tree() and (drawing or (brush_compositor_effect and brush_compositor_effect.atlas_texture_uniform_set.is_valid())):
+				get_atlas_textures()
 
 @export var selection_mask_rid: RID = RID():
 	set(val):
 		if selection_mask_rid != val:
 			selection_mask_rid = val
-			get_atlas_textures()
+			if is_inside_tree() and (drawing or (brush_compositor_effect and brush_compositor_effect.atlas_texture_uniform_set.is_valid())):
+				get_atlas_textures()
 
 ## Whether the brush is currently drawing.
 @export var drawing: bool = false:
@@ -223,10 +225,39 @@ func _notification(what: int) -> void:
 	elif what == NOTIFICATION_ENABLED:
 		viewport.render_target_update_mode = SubViewport.UpdateMode.UPDATE_ALWAYS if drawing else SubViewport.UpdateMode.UPDATE_DISABLED
 
+func reset_atlas_textures() -> void:
+	if brush_compositor_effect:
+		brush_compositor_effect.atlas_texture_uniform_set = RID()
+		RenderingServer.call_on_render_thread(brush_compositor_effect.clear_atlas_textures)
+
 func get_atlas_textures() -> void:
-	var all_managers := get_tree().get_nodes_in_group(OverlayAtlasManager.GROUP_NAME)
+	if not is_inside_tree():
+		return
+	var tree := get_tree()
+	if tree == null:
+		reset_atlas_textures()
+		return
+	var all_managers := tree.get_nodes_in_group(OverlayAtlasManager.GROUP_NAME)
 		
 	if all_managers.is_empty():
+		reset_atlas_textures()
 		return
 
-	RenderingServer.call_on_render_thread(brush_compositor_effect.get_atlas_textures.bind(all_managers))
+	var active_mgr: OverlayAtlasManager = null
+	for item in all_managers:
+		var manager := item as OverlayAtlasManager
+		if manager == null or not is_instance_valid(manager) or manager.is_queued_for_deletion() or not manager.is_inside_tree():
+			continue
+		if manager.get("is_active_target") == true:
+			active_mgr = manager
+			break
+
+	if active_mgr == null:
+		reset_atlas_textures()
+		return
+
+	var act_rid: RID = active_mgr.atlas_texture_rid if active_mgr.atlas_texture_rid is RID else RID()
+	var base_rid: RID = active_mgr.base_texture_rid if active_mgr.base_texture_rid is RID else RID()
+	var mask_rid: RID = selection_mask_rid if use_selection_mask else RID()
+
+	RenderingServer.call_on_render_thread(brush_compositor_effect.bind_atlas_textures.bind(act_rid, base_rid, mask_rid))

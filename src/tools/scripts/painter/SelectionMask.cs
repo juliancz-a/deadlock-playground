@@ -122,7 +122,13 @@ namespace DeadlockPlayground.Painter
                 return;
             }
 
-            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
+            if (_maskTextureResource != null && _maskTextureResource.TextureRdRid.IsValid)
+            {
+                _maskTextureResource.TextureRdRid = new Rid();
+                _maskTextureRid = new Rid();
+                _maskTextureSize = 0;
+            }
+            else if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
             {
                 rd.FreeRid(_maskTextureRid);
                 _maskTextureRid = new Rid();
@@ -538,15 +544,21 @@ namespace DeadlockPlayground.Painter
             _maskTextureSize = 0;
             if (_maskTextureResource != null)
             {
-                _maskTextureResource.TextureRdRid = new Rid();
+                if (_maskTextureResource.TextureRdRid.IsValid)
+                {
+                    _maskTextureResource.TextureRdRid = new Rid();
+                }
                 _maskTextureResource = null;
-            }
-
-            var rd = RenderingServer.GetRenderingDevice();
-            if (rd != null && _maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
-            {
-                rd.FreeRid(_maskTextureRid);
                 _maskTextureRid = new Rid();
+            }
+            else
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && _maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
+                {
+                    rd.FreeRid(_maskTextureRid);
+                    _maskTextureRid = new Rid();
+                }
             }
         }
     }

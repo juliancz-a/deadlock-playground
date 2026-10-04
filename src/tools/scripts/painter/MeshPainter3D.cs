@@ -325,7 +325,7 @@ namespace DeadlockPlayground.Painter
 
             if (_brushPalette != null && GodotObject.IsInstanceValid(_brushPalette) && _brushPalette.Visible)
             {
-                if (_brushPalette.GetGlobalRect().HasPoint(globalMouse))
+                if (_brushPalette.IsMouseOverPalette(globalMouse))
                 {
                     return true;
                 }
@@ -570,7 +570,7 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            if (_mirrorCameraBrush.HasMethod("get_atlas_textures"))
+            if (_currentMesh != null && IsPaintingActive && _mirrorCameraBrush.HasMethod("get_atlas_textures"))
             {
                 _mirrorCameraBrush.Call("get_atlas_textures");
             }
@@ -690,10 +690,11 @@ namespace DeadlockPlayground.Painter
 
             if (force || _lastBlendMode != activeBlendMode)
             {
-                _cameraBrush.Set("blend_mode", activeBlendMode);
+                // Active layer stores raw paint dabs; layer blend mode is dynamically evaluated by hero_painter_overlay.gdshader and compositor
+                _cameraBrush.Set("blend_mode", 0);
                 if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
                 {
-                    _mirrorCameraBrush.Set("blend_mode", activeBlendMode);
+                    _mirrorCameraBrush.Set("blend_mode", 0);
                 }
                 _lastBlendMode = activeBlendMode;
                 BlendMode = activeBlendMode;
@@ -1635,11 +1636,13 @@ namespace DeadlockPlayground.Painter
 
         private void OnLayerManagerAtlasChanged(int index)
         {
-            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+            if (!IsInsideTree() || GetTree() == null) return;
+            if (!IsPaintingActive || _currentMesh == null || _layerManager?.AtlasManager == null) return;
+            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush) && _cameraBrush.IsInsideTree())
             {
                 _cameraBrush.Call("get_atlas_textures");
             }
-            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush) && _mirrorCameraBrush.IsInsideTree())
             {
                 _mirrorCameraBrush.Call("get_atlas_textures");
             }
@@ -1673,7 +1676,14 @@ namespace DeadlockPlayground.Painter
 
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
-                _cameraBrush.Call("get_atlas_textures");
+                if (_currentMesh != null && IsPaintingActive)
+                {
+                    _cameraBrush.Call("get_atlas_textures");
+                }
+                else
+                {
+                    _cameraBrush.Call("reset_atlas_textures");
+                }
             }
         }
 
@@ -2292,10 +2302,12 @@ namespace DeadlockPlayground.Painter
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
                 _cameraBrush.Set("drawing", false);
+                _cameraBrush.Call("reset_atlas_textures");
             }
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
                 _mirrorCameraBrush.Set("drawing", false);
+                _mirrorCameraBrush.Call("reset_atlas_textures");
             }
             _magicWandTool?.ClearMask();
             SyncSelectionMaskState();
@@ -2715,13 +2727,27 @@ namespace DeadlockPlayground.Painter
             {
                 _cameraBrush.Set("selection_mask_rid", maskRid);
                 _cameraBrush.Set("use_selection_mask", hasSelection);
-                _cameraBrush.Call("get_atlas_textures");
+                if (_currentMesh != null && IsPaintingActive)
+                {
+                    _cameraBrush.Call("get_atlas_textures");
+                }
+                else
+                {
+                    _cameraBrush.Call("reset_atlas_textures");
+                }
             }
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
                 _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
                 _mirrorCameraBrush.Set("use_selection_mask", hasSelection);
-                _mirrorCameraBrush.Call("get_atlas_textures");
+                if (_currentMesh != null && IsPaintingActive)
+                {
+                    _mirrorCameraBrush.Call("get_atlas_textures");
+                }
+                else
+                {
+                    _mirrorCameraBrush.Call("reset_atlas_textures");
+                }
             }
 
             if (_layerManager != null)
@@ -2880,6 +2906,14 @@ namespace DeadlockPlayground.Painter
         public override void _ExitTree()
         {
             GizmoDisplaySettings.OnSettingsChanged -= ApplyOutlineSettings;
+            if (_layerManager != null && GodotObject.IsInstanceValid(_layerManager))
+            {
+                _layerManager.LayerSelected -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerRemoved -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerAdded -= OnLayerManagerAtlasAdded;
+                _layerManager.LayersReordered -= OnLayerManagerAtlasReordered;
+                _layerManager.StackChanged -= OnLayerManagerAtlasReordered;
+            }
             if (_cursorGizmo != null && GodotObject.IsInstanceValid(_cursorGizmo))
             {
                 _cursorGizmo.QueueFree();

@@ -77,6 +77,29 @@ public static class HeroMaterialManager
         string vLower = vmatPath?.ToLowerInvariant() ?? "";
         string mLower = meshName?.ToLowerInvariant() ?? "";
 
+        // Vindicta alias check (vindicta, hornet, ghost_glow, vindicta_glow)
+        if (vLower.Contains("vindicta") || mLower.Contains("vindicta") || vLower.Contains("hornet") || mLower.Contains("hornet") ||
+            mLower.Contains("ghost_glow") || vLower.Contains("ghost_glow") || mLower.Contains("vindicta_glow") || vLower.Contains("vindicta_glow"))
+        {
+            var vindictaConfig = _configs.GetValueOrDefault("vindicta");
+            if (vindictaConfig != null)
+            {
+                var customMat = vindictaConfig.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
+                if (customMat != null) return customMat;
+            }
+        }
+
+        // Lash alias check (lash, sparkle)
+        if (vLower.Contains("lash") || mLower.Contains("lash") || vLower.Contains("sparkle") || mLower.Contains("sparkle"))
+        {
+            var lashConfig = _configs.GetValueOrDefault("lash");
+            if (lashConfig != null)
+            {
+                var customMat = lashConfig.TryCreateCustomMaterial(package, vmatPath, meshName, addonPackage);
+                if (customMat != null) return customMat;
+            }
+        }
+
         // Lady Geist alias check (ghost, geist, shawl)
         if (vLower.Contains("ghost") || vLower.Contains("geist") || mLower.Contains("ghost") || mLower.Contains("geist") || vLower.Contains("shawl") || mLower.Contains("shawl"))
         {

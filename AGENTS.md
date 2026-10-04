@@ -133,6 +133,14 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Categorize these sequences into `"Additive Layers"` in `DeadlockAnimLoader.ClassifyCategory`.
    - In `PoseTabUI.cs`, present `"Additive Layers"` as a distinct subcategory collapsed by default, and exclude it from `AutoSelectDefaultIdle()` so partial overlays are never accidentally loaded as default stances.
 
+### E. Mandatory Documentation Synchronization & Maintenance
+> [!IMPORTANT]
+> **AGENTS MUST KEEP DOCUMENTATION UPDATED**:
+> Whenever you modify texture painting pipelines, shaders, hero materials, animation loaders, or UI components:
+> 1. You **MUST** immediately update the relevant documentation in [`docs/`](file:///d:/GameDev/deadlock-playground/docs/) (such as [`hero_materials_and_shaders_guide.md`](file:///d:/GameDev/deadlock-playground/docs/hero_materials_and_shaders_guide.md), [`gpu_texture_painter_system.md`](file:///d:/GameDev/deadlock-playground/docs/gpu_texture_painter_system.md), [`agent_engineering_guide.md`](file:///d:/GameDev/deadlock-playground/docs/agent_engineering_guide.md), or [`texture_pipeline_audit/recent_changes_and_fixes.md`](file:///d:/GameDev/deadlock-playground/docs/texture_pipeline_audit/recent_changes_and_fixes.md)).
+> 2. Detail the exact root causes, architectural fixes, shader parameters, and file changes.
+> 3. Future agents rely on these technical documents as the architectural source of truth. Never leave code modified without updating its corresponding architectural guide.
+
 ---
 
 ## 4. Key Workflows & Verification Procedures

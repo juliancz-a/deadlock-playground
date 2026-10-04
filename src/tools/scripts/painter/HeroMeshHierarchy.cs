@@ -45,7 +45,7 @@ namespace DeadlockPlayground.Painter
         public string MaterialKey { get; set; }
         public string DisplayName { get; set; }
         public List<SubmeshNodeInfo> Submeshes { get; } = new();
-        public bool IsExpanded { get; set; } = true;
+        public bool IsExpanded { get; set; } = false;
     }
 
     public partial class HeroMeshHierarchy : Node

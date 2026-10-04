@@ -11,6 +11,7 @@ uniform uint atlas_index;
 uniform float layer_opacity : hint_range(0.0, 1.0) = 1.0;
 uniform bool active_layer_visible = true;
 uniform float active_layer_opacity : hint_range(0.0, 1.0) = 1.0;
+uniform int blend_mode = 0;
 uniform bool front_faces_only = true;
 uniform bool is_paint_target = true;
 uniform bool show_selection_mask = false;
@@ -20,6 +21,48 @@ uniform bool smooth_bicubic = false;
 
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
+
+float get_luminance(vec3 c) {
+	return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 set_luminance(vec3 c, float l) {
+	float d = l - get_luminance(c);
+	vec3 cr = c + vec3(d);
+	float lum = get_luminance(cr);
+	float min_c = min(cr.r, min(cr.g, cr.b));
+	float max_c = max(cr.r, max(cr.g, cr.b));
+	if (min_c < 0.0) {
+		float denom = max(lum - min_c, 0.0001);
+		cr = lum + ((cr - lum) * lum) / denom;
+	}
+	if (max_c > 1.0) {
+		float denom = max(max_c - lum, 0.0001);
+		cr = lum + ((cr - lum) * (1.0 - lum)) / denom;
+	}
+	return clamp(cr, vec3(0.0), vec3(1.0));
+}
+
+vec3 apply_blend_mode(vec3 base_col, vec3 src_col, int mode) {
+	if (mode == 1) { // Multiply
+		return base_col * src_col;
+	} else if (mode == 2) { // Screen
+		return vec3(1.0) - (vec3(1.0) - base_col) * (vec3(1.0) - src_col);
+	} else if (mode == 3) { // Overlay
+		vec3 less = 2.0 * base_col * src_col;
+		vec3 more = vec3(1.0) - 2.0 * (vec3(1.0) - base_col) * (vec3(1.0) - src_col);
+		return mix(more, less, step(base_col, vec3(0.5)));
+	} else if (mode == 4) { // Darken
+		return min(base_col, src_col);
+	} else if (mode == 5) { // Lighten
+		return max(base_col, src_col);
+	} else if (mode == 6) { // ColorDodge
+		return base_col / max(vec3(1.0) - src_col, vec3(0.001));
+	} else if (mode == 7) { // Color (HSL)
+		return set_luminance(src_col, get_luminance(base_col));
+	}
+	return src_col; // Normal (0)
+}
 
 // High-fidelity Cubic B-spline smooth texture filtering (strictly non-negative weights, zero ringing or dark outlines)
 vec4 sample_bicubic_smooth(sampler2D tex, vec2 uv, vec2 min_bounds, vec2 max_bounds) {
@@ -173,11 +216,23 @@ void fragment() {
 		}
 
 		if (active_paint.a > 0.0001) {
-			float out_a = clamp(active_paint.a + paint.a * (1.0 - active_paint.a), 0.0, 1.0);
-			vec3 out_rgb = (out_a > 0.0001)
-				? (active_paint.rgb * active_paint.a + paint.rgb * paint.a * (1.0 - active_paint.a)) / out_a
-				: active_paint.rgb;
-			paint = vec4(out_rgb, out_a);
+			vec3 base_color = (paint.a > 0.0001)
+				? mix(texture(g_tColor, v_mesh_uv).rgb, paint.rgb, paint.a)
+				: texture(g_tColor, v_mesh_uv).rgb;
+
+			vec3 blended_active = (blend_mode == 0)
+				? active_paint.rgb
+				: apply_blend_mode(base_color, active_paint.rgb, blend_mode);
+
+			if (paint.a > 0.0001) {
+				float out_a = clamp(active_paint.a + paint.a * (1.0 - active_paint.a), 0.0, 1.0);
+				vec3 out_rgb = (out_a > 0.0001)
+					? (blended_active * active_paint.a + paint.rgb * paint.a * (1.0 - active_paint.a)) / out_a
+					: blended_active;
+				paint = vec4(out_rgb, out_a);
+			} else {
+				paint = vec4(blended_active, active_paint.a);
+			}
 		}
 
 		float final_alpha = clamp(paint.a, 0.0, 1.0);
