@@ -2,7 +2,7 @@
 #version 450
 
 // Invocations in the (x, y, z) dimension
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D framebuffer;
 
@@ -18,6 +18,8 @@ layout(push_constant, std430) uniform Params {
     float is_erase;
     float blend_mode;
     float use_selection_mask;
+    vec2 rect_offset;
+    vec2 rect_max;
 } params;
 
 layout(rgba16f, set = 2, binding = 0) uniform restrict image2D overlay_texture_0;
@@ -48,10 +50,11 @@ vec3 set_luminance(vec3 c, float l) {
 
 // The code we want to execute in each invocation
 void main() {
-    // gl_GlobalInvocationID.x uniquely identifies this invocation across all work groups
-    ivec2 framebuffer_coords = ivec2(gl_GlobalInvocationID.xy);
+    // Offset invocation to localized bounding rect
+    ivec2 framebuffer_coords = ivec2(gl_GlobalInvocationID.xy) + ivec2(params.rect_offset);
 
-    if ((framebuffer_coords.x >= imageSize(framebuffer).x) || (framebuffer_coords.y >= imageSize(framebuffer).y)) {
+    if (framebuffer_coords.x > int(params.rect_max.x) || framebuffer_coords.y > int(params.rect_max.y) ||
+        framebuffer_coords.x >= imageSize(framebuffer).x || framebuffer_coords.y >= imageSize(framebuffer).y) {
 		return;
 	}
 

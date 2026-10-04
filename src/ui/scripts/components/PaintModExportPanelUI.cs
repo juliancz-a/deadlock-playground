@@ -24,6 +24,10 @@ public partial class PaintModExportPanelUI : PanelContainer
 
     public override void _Ready()
     {
+        MouseFilter = MouseFilterEnum.Stop;
+        var margin = GetNodeOrNull<Control>("MarginContainer");
+        if (margin != null) margin.MouseFilter = MouseFilterEnum.Stop;
+
         _btnExportMod ??= GetNodeOrNull<Button>("MarginContainer/VBoxContainer/BtnExportMod");
         _btnExportPng ??= GetNodeOrNull<Button>("MarginContainer/VBoxContainer/BtnExportPng");
         _btnExportVmat ??= GetNodeOrNull<Button>("MarginContainer/VBoxContainer/BtnExportVmat");
@@ -34,6 +38,13 @@ public partial class PaintModExportPanelUI : PanelContainer
         _pathManager.LoadConfig();
 
         ConnectEvents();
+    }
+
+    public bool IsAnyDialogOpen()
+    {
+        return (_exportFileDialog != null && _exportFileDialog.Visible)
+            || (_modDialogInstance != null && _modDialogInstance.Visible)
+            || (_progressDialogInstance != null && _progressDialogInstance.Visible);
     }
 
     public void Setup(SkinLayerManager layerManager, HeroMeshHierarchy meshHierarchy, Node3D heroNode)
@@ -68,6 +79,8 @@ public partial class PaintModExportPanelUI : PanelContainer
                 {
                     _exportFileDialog.FileMode = FileDialog.FileModeEnum.SaveFile;
                     _exportFileDialog.Filters = new[] { "*.png ; PNG Image" };
+                    _exportFileDialog.Transient = true;
+                    _exportFileDialog.Exclusive = true;
                     _exportFileDialog.PopupCentered(new Vector2I(700, 500));
                 }
             };
@@ -81,6 +94,8 @@ public partial class PaintModExportPanelUI : PanelContainer
                 {
                     _exportFileDialog.FileMode = FileDialog.FileModeEnum.SaveFile;
                     _exportFileDialog.Filters = new[] { "*.vmat ; Valve Material" };
+                    _exportFileDialog.Transient = true;
+                    _exportFileDialog.Exclusive = true;
                     _exportFileDialog.PopupCentered(new Vector2I(700, 500));
                 }
             };

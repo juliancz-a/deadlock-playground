@@ -39,6 +39,8 @@ namespace DeadlockPlayground.Painter
 
         public bool IsInitialized => _isInitialized;
         public int TriangleCount => _triangles.Count;
+        public IReadOnlyList<Triangle> Triangles => _triangles;
+        public Triangle GetTriangle(int index) => _triangles[index];
 
         /// <summary>
         /// Extracts triangle geometry and UV maps from the specified MeshInstance3D surface(s).
@@ -66,6 +68,7 @@ namespace DeadlockPlayground.Painter
                 if (arrays == null || arrays.Count == 0) continue;
 
                 var vertices = (Vector3[])arrays[(int)Mesh.ArrayType.Vertex];
+                var normals = (Vector3[])arrays[(int)Mesh.ArrayType.Normal];
                 var uvs = (Vector2[])arrays[(int)Mesh.ArrayType.TexUV];
                 var indices = (int[])arrays[(int)Mesh.ArrayType.Index];
 
@@ -83,6 +86,7 @@ namespace DeadlockPlayground.Painter
                 }
 
                 bool hasUVs = uvs != null && uvs.Length == vertices.Length;
+                bool hasNormals = normals != null && normals.Length == vertices.Length;
 
                 if (indices != null && indices.Length >= 3)
                 {
@@ -103,6 +107,15 @@ namespace DeadlockPlayground.Painter
                         Vector2 uv2 = hasUVs ? uvs[i2] : Vector2.Zero;
 
                         Vector3 normal = (v1 - v0).Cross(v2 - v0).Normalized();
+
+                        if (hasNormals)
+                        {
+                            Vector3 avgAuthored = (normals[i0] + normals[i1] + normals[i2]).Normalized();
+                            if (avgAuthored.LengthSquared() > 0.001f && normal.Dot(avgAuthored) < 0f)
+                            {
+                                normal = -normal; // Ensure normal points outward matching authored vertex normals
+                            }
+                        }
 
                         _triangles.Add(new Triangle
                         {
@@ -126,6 +139,15 @@ namespace DeadlockPlayground.Painter
                         Vector2 uv2 = hasUVs ? uvs[i + 2] : Vector2.Zero;
 
                         Vector3 normal = (v1 - v0).Cross(v2 - v0).Normalized();
+
+                        if (hasNormals)
+                        {
+                            Vector3 avgAuthored = (normals[i] + normals[i + 1] + normals[i + 2]).Normalized();
+                            if (avgAuthored.LengthSquared() > 0.001f && normal.Dot(avgAuthored) < 0f)
+                            {
+                                normal = -normal;
+                            }
+                        }
 
                         _triangles.Add(new Triangle
                         {

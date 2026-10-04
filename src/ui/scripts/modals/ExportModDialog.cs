@@ -13,7 +13,6 @@ public partial class ExportModDialog : CanvasLayer
     [Export] private LineEdit _txtModName;
     [Export] private Label _lblHero;
     [Export] private VBoxContainer _submeshChecklistContainer;
-    [Export] private OptionButton _optResolution;
     [Export] private LineEdit _txtCompilerPath;
     [Export] private Button _btnBrowseCompilerPath;
     [Export] private Label _lblCompilerStatus;
@@ -52,7 +51,6 @@ public partial class ExportModDialog : CanvasLayer
                      ?? FindChild("TxtModName", true, false) as LineEdit;
         _lblHero ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/HBoxHero/LblHeroValue");
         _submeshChecklistContainer ??= GetNodeOrNull<VBoxContainer>("DialogPanel/Margin/VBox/ScrollSubmeshes/SubmeshChecklist");
-        _optResolution ??= GetNodeOrNull<OptionButton>("DialogPanel/Margin/VBox/HBoxRes/OptResolution");
 
         _txtCompilerPath ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler/TxtCompilerPath");
         _btnBrowseCompilerPath ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler/BtnBrowseCompilerPath");
@@ -78,15 +76,6 @@ public partial class ExportModDialog : CanvasLayer
 
         _folderDialog ??= GetNodeOrNull<FileDialog>("FolderDialog");
         _compilerFileDialog ??= GetNodeOrNull<FileDialog>("CompilerFileDialog");
-
-        // Populate resolution options
-        if (_optResolution != null && _optResolution.ItemCount == 0)
-        {
-            _optResolution.AddItem("1024 x 1024", 1024);
-            _optResolution.AddItem("2048 x 2048 (Recommended)", 2048);
-            _optResolution.AddItem("4096 x 4096 (Ultra)", 4096);
-            _optResolution.Select(1); // Default to 2048
-        }
     }
 
     private void ConnectEvents()
@@ -482,10 +471,17 @@ public partial class ExportModDialog : CanvasLayer
         }
 
         int resolution = 2048;
-        if (_optResolution != null)
+        if (selectedSubmeshes.Count > 0 && selectedSubmeshes[0].Mesh != null)
         {
-            int selectedId = _optResolution.GetSelectedId();
-            if (selectedId > 0) resolution = selectedId;
+            var baseTex = SkinLayerManager.ExtractBaseTexture(
+                HeroMeshHierarchy.GetAuthenticMaterial(selectedSubmeshes[0].Mesh, selectedSubmeshes[0].SurfaceIndex)
+                ?? selectedSubmeshes[0].Mesh.GetSurfaceOverrideMaterial(selectedSubmeshes[0].SurfaceIndex)
+                ?? selectedSubmeshes[0].Mesh.MaterialOverride
+            );
+            if (baseTex != null)
+            {
+                resolution = Mathf.Max(baseTex.GetWidth(), baseTex.GetHeight());
+            }
         }
 
         string modName = _txtModName?.Text.Trim();

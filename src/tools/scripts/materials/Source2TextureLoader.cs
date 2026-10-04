@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Godot;
 using SteamDatabase.ValvePak;
 using ValveResourceFormat;
@@ -243,55 +244,81 @@ public static class Source2TextureLoader
                                   vtexInternalPath.Contains("smoke", StringComparison.OrdinalIgnoreCase) ||
                                   vtexInternalPath.Contains("opacity", StringComparison.OrdinalIgnoreCase);
 
-        // Encode to PNG via Skia. Skia handles internal bitmap format (BGRA8888) to standard PNG conversion reliably.
-        using var skImage = SKImage.FromBitmap(skBitmap);
-        if (skImage == null) return null;
+        int width = skBitmap.Width;
+        int height = skBitmap.Height;
+        IntPtr pixelsPtr = skBitmap.GetPixels();
+        int byteCount = skBitmap.ByteCount;
+        if (pixelsPtr == IntPtr.Zero || byteCount <= 0) return null;
 
-        using var encodedData = skImage.Encode(SKEncodedImageFormat.Png, 100);
-        if (encodedData == null) return null;
+        byte[] rawBytes = new byte[byteCount];
+        Marshal.Copy(pixelsPtr, rawBytes, 0, byteCount);
 
-        byte[] pngBytes = encodedData.ToArray();
-        var godotImage = new Image();
-        Error err = godotImage.LoadPngFromBuffer(pngBytes);
-        if (err != Error.Ok)
+        bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
+        unsafe
         {
-            GD.PrintErr($"[TextureLoader] Error loading PNG buffer ({vtexInternalPath}): {err}");
-            return null;
-        }
-
-        if (!isAlphaCardTexture)
-        {
-            // For standard non-card surfaces, remove BC7 roughness/specular masks by converting to Rgb8 and back to Rgba8
-            godotImage.Convert(Image.Format.Rgb8);
-            godotImage.Convert(Image.Format.Rgba8);
-        }
-        else
-        {
-            // For authentic alpha-card textures (fur, sparkles, eyelashes, cards), preserve the author-crafted cutout mask.
-            // Safeguard: if the decoded alpha is completely blank (all zeros), convert to opaque so geometry doesn't vanish.
-            bool hasVisiblePixels = false;
-            int stepX = Math.Max(1, godotImage.GetWidth() / 16);
-            int stepY = Math.Max(1, godotImage.GetHeight() / 16);
-            for (int y = 0; y < godotImage.GetHeight(); y += stepY)
+            fixed (byte* ptr = rawBytes)
             {
-                for (int x = 0; x < godotImage.GetWidth(); x += stepX)
+                uint* p32 = (uint*)ptr;
+                int pixelCount = width * height;
+                if (!isAlphaCardTexture)
                 {
-                    if (godotImage.GetPixel(x, y).A > 0.05f)
+                    if (isBgra)
                     {
-                        hasVisiblePixels = true;
-                        break;
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = p32[i];
+                            byte b = (byte)(c & 0xFF);
+                            byte g = (byte)((c >> 8) & 0xFF);
+                            byte r = (byte)((c >> 16) & 0xFF);
+                            p32[i] = (uint)(r | (g << 8) | (b << 16) | (0xFF << 24));
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            p32[i] |= 0xFF000000;
+                        }
                     }
                 }
-                if (hasVisiblePixels) break;
-            }
+                else
+                {
+                    bool hasVisiblePixels = false;
+                    if (isBgra)
+                    {
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = p32[i];
+                            byte b = (byte)(c & 0xFF);
+                            byte g = (byte)((c >> 8) & 0xFF);
+                            byte r = (byte)((c >> 16) & 0xFF);
+                            byte a = (byte)((c >> 24) & 0xFF);
+                            if (a > 12) hasVisiblePixels = true;
+                            p32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = p32[i];
+                            byte a = (byte)((c >> 24) & 0xFF);
+                            if (a > 12) hasVisiblePixels = true;
+                        }
+                    }
 
-            if (!hasVisiblePixels)
-            {
-                godotImage.Convert(Image.Format.Rgb8);
-                godotImage.Convert(Image.Format.Rgba8);
+                    if (!hasVisiblePixels)
+                    {
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            p32[i] |= 0xFF000000;
+                        }
+                    }
+                }
             }
         }
 
+        var godotImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, rawBytes);
         godotImage.GenerateMipmaps();
         var imageTex = ImageTexture.CreateFromImage(godotImage);
         if (imageTex != null)

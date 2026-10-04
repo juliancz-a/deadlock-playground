@@ -1,18 +1,22 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
+render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 
-uniform sampler2D overlay_texture : hint_default_transparent, filter_linear, repeat_disable;
+uniform sampler2D overlay_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D active_layer_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D g_tColor : source_color, filter_linear_mipmap, hint_default_white; // Base diffuse/AO
 uniform sampler2D selection_mask : hint_default_transparent, filter_linear, repeat_disable;
 uniform vec2 position_in_atlas;
 uniform vec2 size_in_atlas;
 uniform uint atlas_index;
 uniform float layer_opacity : hint_range(0.0, 1.0) = 1.0;
+uniform bool active_layer_visible = true;
+uniform float active_layer_opacity : hint_range(0.0, 1.0) = 1.0;
+uniform bool front_faces_only = true;
 uniform bool is_paint_target = true;
 uniform bool show_selection_mask = false;
 uniform bool show_stencil_pattern = true;
 
-uniform bool smooth_bicubic = true;
+uniform bool smooth_bicubic = false;
 
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
@@ -132,8 +136,10 @@ void fragment() {
 		if (!is_paint_target) {
 			discard;
 		}
-		// Backface rejection: discard surfaces pointing away from the camera
-		if (NORMAL.z <= 0.0) {
+		// Backface rejection: discard surfaces pointing away from the camera.
+		// Uses camera-space normal z component with threshold rather than !FRONT_FACING,
+		// allowing single-sided/ribbon geometry (hair, skirts, belts) to be painted.
+		if (front_faces_only && NORMAL.z < -0.1) {
 			discard;
 		}
 		uint exponential_bit = 1u << 30u;
@@ -157,6 +163,22 @@ void fragment() {
 		vec4 paint = smooth_bicubic
 			? sample_bicubic_smooth(overlay_texture, v_atlas_uv, min_atlas, max_atlas)
 			: sample_bilinear_smooth(overlay_texture, clamped_uv, min_atlas, max_atlas);
+
+		vec4 active_paint = vec4(0.0);
+		if (active_layer_visible) {
+			active_paint = smooth_bicubic
+				? sample_bicubic_smooth(active_layer_texture, v_atlas_uv, min_atlas, max_atlas)
+				: sample_bilinear_smooth(active_layer_texture, clamped_uv, min_atlas, max_atlas);
+			active_paint.a *= active_layer_opacity;
+		}
+
+		if (active_paint.a > 0.0001) {
+			float out_a = clamp(active_paint.a + paint.a * (1.0 - active_paint.a), 0.0, 1.0);
+			vec3 out_rgb = (out_a > 0.0001)
+				? (active_paint.rgb * active_paint.a + paint.rgb * paint.a * (1.0 - active_paint.a)) / out_a
+				: active_paint.rgb;
+			paint = vec4(out_rgb, out_a);
+		}
 
 		float final_alpha = clamp(paint.a, 0.0, 1.0);
 		// Straight RGB is preserved accurately by alpha-weighted filtering without division artifacts

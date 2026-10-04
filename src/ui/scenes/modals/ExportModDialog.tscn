@@ -118,18 +118,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 4
 
-[node name="HBoxRes" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123419]
-layout_mode = 2
-
-[node name="LblRes" type="Label" parent="DialogPanel/Margin/VBox/HBoxRes" unique_id=987123420]
-custom_minimum_size = Vector2(110, 0)
-layout_mode = 2
-text = "Resolution:"
-
-[node name="OptResolution" type="OptionButton" parent="DialogPanel/Margin/VBox/HBoxRes" unique_id=987123421]
-layout_mode = 2
-size_flags_horizontal = 3
-
 [node name="VBoxCompiler" type="VBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123450]
 layout_mode = 2
 theme_override_constants/separation = 3

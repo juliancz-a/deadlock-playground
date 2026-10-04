@@ -278,6 +278,44 @@ namespace DeadlockPlayground.UI
             RefreshPopupGrids();
         }
 
+        public List<string> GetPaletteHistory()
+        {
+            var list = new List<string>();
+            foreach (var col in _recentColors)
+            {
+                list.Add("#" + col.ToHtml(false).ToLowerInvariant());
+            }
+            return list;
+        }
+
+        public void SetPaletteHistory(IEnumerable<string> hexColors)
+        {
+            if (hexColors == null) return;
+            _recentColors.Clear();
+            foreach (var hex in hexColors)
+            {
+                if (string.IsNullOrWhiteSpace(hex)) continue;
+                try
+                {
+                    string cleanHex = hex.Trim();
+                    if (!cleanHex.StartsWith("#")) cleanHex = "#" + cleanHex;
+                    Color c = Color.FromHtml(cleanHex);
+                    _recentColors.Add(c);
+                }
+                catch { }
+            }
+            if (_recentColors.Count == 0)
+            {
+                InitializeDefaultColors();
+            }
+            if (_recentColors.Count > 0)
+            {
+                _activeColor = _recentColors[0];
+            }
+            RefreshSwatches();
+            RefreshPopupGrids();
+        }
+
         public void PinColor(Color color)
         {
             for (int i = 0; i < _favoriteColors.Count; i++)

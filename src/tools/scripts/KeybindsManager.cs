@@ -86,8 +86,13 @@ namespace DeadlockPlayground.Tools
             AddDefault("Texture Paint", "paint_brush", "Brush", "Switch to standard Brush painting tool", Key.B);
             AddDefault("Texture Paint", "paint_eraser", "Eraser", "Switch to Eraser tool", Key.E);
             AddDefault("Texture Paint", "paint_bucket", "Bucket Fill", "Switch to Submesh / Island Bucket Fill tool", Key.G);
-            AddDefault("Texture Paint", "paint_wand", "Magic Wand", "Switch to Magic Wand color-range mask tool", Key.M);
-            AddDefault("Texture Paint", "paint_decal", "Decal Stamper", "Switch to Decal projection stamper", Key.L);
+            AddDefault("Texture Paint", "paint_wand", "Magic Wand", "Switch to Magic Wand color-range mask tool", Key.W);
+            AddDefault("Texture Paint", "paint_select_rect", "Rectangular Selection", "Switch to Rectangular selection tool", Key.M);
+            AddDefault("Texture Paint", "paint_select_lasso", "Lasso Selection", "Switch to Lasso freehand selection tool", Key.L);
+            AddDefault("Texture Paint", "paint_select_poly", "Polygonal Selection", "Switch to Polygonal selection tool", Key.P);
+            AddDefault("Texture Paint", "paint_selection_invert", "Invert Selection", "Invert active selection mask", Key.I, ctrl: true, shift: true);
+            AddDefault("Texture Paint", "paint_selection_clear", "Clear Selection", "Clear active selection mask", Key.D, ctrl: true);
+            AddDefault("Texture Paint", "paint_decal", "Decal Stamper", "Switch to Decal projection stamper", Key.K);
             AddDefault("Texture Paint", "paint_text", "Text Projector", "Toggle 3D Text Projector panel", Key.T);
             AddDefault("Texture Paint", "paint_mirror", "Mirror Symmetry", "Toggle 3D Axis Symmetry painting", Key.N);
             AddDefault("Texture Paint", "paint_undo", "Undo", "Undo painter stroke", Key.Z, ctrl: true);

@@ -601,6 +601,7 @@ public partial class VpkLoaderTest : Node3D
 			// DeadlockAnimLoader.LoadHeroPoses is bypassed here so it does not clear AnimationPlayer or push unretargeted raw bone frames.
 
 			EmitSignal(SignalName.HeroLoaded, modelScene);
+			DeadlockPlayground.Painter.SkinLayerManager.RunHeroMaterialAudit(modelScene);
 
 			// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
 			var skeleton = SearchSkeleton(modelScene);

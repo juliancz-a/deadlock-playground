@@ -111,6 +111,12 @@ extends Node3D
 		if viewport:
 			viewport.render_target_update_mode = SubViewport.UpdateMode.UPDATE_ALWAYS if drawing else SubViewport.UpdateMode.UPDATE_DISABLED
 
+## Optional localized brush stroke center in viewport/atlas pixels (-1 = default to viewport center)
+@export var brush_center: Vector2 = Vector2(-1.0, -1.0)
+
+## Optional localized brush stroke radius in viewport/atlas pixels (-1 = default to full viewport radius)
+@export var brush_radius: float = -1.0
+
 var last_delta: float = 0.0
 
 var viewport: SubViewport

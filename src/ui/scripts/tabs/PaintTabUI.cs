@@ -4,6 +4,7 @@ using System.IO;
 using System.Collections.Generic;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Materials;
+using DeadlockPlayground.UI;
 
 public partial class PaintTabUI : VBoxContainer
 {
@@ -51,7 +52,40 @@ public partial class PaintTabUI : VBoxContainer
         public Button SelectBtn;
     }
 
+    private class MaterialGroupRowUI
+    {
+        public MaterialGroup Group;
+        public VBoxContainer GroupContainer;
+        public PanelContainer HeaderPanel;
+        public HBoxContainer HeaderRow;
+        public Button ToggleBtn;
+        public Label TitleLabel;
+        public Label BadgeLabel;
+        public Button PaintBtn;
+        public VBoxContainer ChildrenContainer;
+        public List<SubmeshRowUI> SubmeshRows = new();
+    }
+
+    private readonly List<MaterialGroupRowUI> _materialGroupRows = new();
     private readonly List<SubmeshRowUI> _submeshRows = new();
+    private StyleBoxFlat _groupHeaderStyle;
+
+    private void EnsureGroupHeaderStyle()
+    {
+        if (_groupHeaderStyle != null) return;
+        _groupHeaderStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.14f, 0.17f, 0.20f, 0.85f),
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4,
+            CornerRadiusBottomRight = 4,
+            ContentMarginLeft = 6,
+            ContentMarginRight = 6,
+            ContentMarginTop = 3,
+            ContentMarginBottom = 3
+        };
+    }
 
     public SkinLayerManager LayerManager => _layerManager;
     public HeroMeshHierarchy MeshHierarchy => _meshHierarchy;
@@ -63,12 +97,16 @@ public partial class PaintTabUI : VBoxContainer
     private Label _lblHeroName;
     private Label _lblActiveMesh;
     private OptionButton _optTargetMesh;
-    private OptionButton _optResolution;
-    private ConfirmationDialog _confirmResDialog;
-    private int _previousResolutionIndex = 1;
-    private int _pendingResolution = 2048;
-    private int _pendingResolutionIndex = 1;
+    private Label _lblCanvasResolution;
     private Texture2D _iconPencil;
+
+    // Project Save / Load (.dptex)
+    private Button _btnSaveProject;
+    private Button _btnLoadProject;
+    private FileDialog _saveProjectDialog;
+    private FileDialog _loadProjectDialog;
+    private ConfirmationDialog _confirmHeroMismatchDialog;
+    private string _pendingLoadProjectPath;
 
     // Submesh Hierarchy
     private VBoxContainer _submeshListContainer;
@@ -223,7 +261,9 @@ public partial class PaintTabUI : VBoxContainer
             _optTargetMesh.ClipText = true;
             _optTargetMesh.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
         }
-        _optResolution = GetNodeOrNull<OptionButton>("HeaderCard/VBox/HBoxRes/ResolutionOption");
+        _lblCanvasResolution = GetNodeOrNull<Label>("HeaderCard/VBox/HBoxRes/ResolutionLabel");
+        _btnSaveProject = GetNodeOrNull<Button>("HeaderCard/VBox/HBoxProject/BtnSaveProject");
+        _btnLoadProject = GetNodeOrNull<Button>("HeaderCard/VBox/HBoxProject/BtnLoadProject");
         _lblActiveMesh = GetNodeOrNull<Label>("HeaderCard/VBox/ActiveMeshLabel");
 
         // Submesh Hierarchy
@@ -247,6 +287,11 @@ public partial class PaintTabUI : VBoxContainer
         _btnInstallCitadel = GetNodeOrNull<Button>("ExportCard/VBox/BtnInstallCitadel");
         _lblExportStatus = GetNodeOrNull<Label>("ExportCard/VBox/LblExportStatus");
         _exportFileDialog = GetNodeOrNull<FileDialog>("ExportFileDialog");
+        if (_exportFileDialog != null)
+        {
+            _exportFileDialog.Transient = true;
+            _exportFileDialog.Exclusive = true;
+        }
 
         // Populate Blend Modes
         if (_optLayerBlend != null)
@@ -263,56 +308,205 @@ public partial class PaintTabUI : VBoxContainer
             _optLayerBlend.Select(0);
         }
 
-        PopulateResolutionDropdown();
+        UpdateCanvasResolutionLabel();
     }
 
-    private void PopulateResolutionDropdown()
+    public void UpdateCanvasResolutionLabel()
     {
-        if (_optResolution == null) return;
-        _optResolution.Clear();
-        _optResolution.AddItem("1024 x 1024", 1024);
-        _optResolution.AddItem("2048 x 2048", 2048);
-        _optResolution.AddItem("4096 x 4096", 4096);
-        _optResolution.Select(1); // 2048 selected by default
-        _previousResolutionIndex = 1;
-    }
-
-    private void ShowResolutionConfirmModal(int newRes, int newIdx)
-    {
-        _pendingResolution = newRes;
-        _pendingResolutionIndex = newIdx;
-        if (_confirmResDialog == null)
+        if (_lblCanvasResolution != null && _layerManager != null)
         {
-            _confirmResDialog = new ConfirmationDialog
+            _lblCanvasResolution.Text = $"{_layerManager.CanvasSize.X} x {_layerManager.CanvasSize.Y}";
+        }
+    }
+
+    private void OnSaveProjectPressed()
+    {
+        if (_saveProjectDialog == null)
+        {
+            _saveProjectDialog = new FileDialog
             {
-                Title = "Change Canvas Resolution",
-                OkButtonText = "Accept",
-                CancelButtonText = "Cancel"
+                Title = "Save Deadlock Playground Project (.dptex)",
+                FileMode = FileDialog.FileModeEnum.SaveFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new string[] { "*.dptex ; Deadlock Playground Project" },
+                UseNativeDialog = false,
+                Transient = true,
+                Exclusive = true
             };
-            _confirmResDialog.Confirmed += () =>
+            _saveProjectDialog.FileSelected += (path) =>
             {
-                _previousResolutionIndex = _pendingResolutionIndex;
-                _optResolution.Select(_previousResolutionIndex);
-                _layerManager?.SetCanvasResolution(new Vector2I(_pendingResolution, _pendingResolution));
-                _painter?.SyncSelectionMaskState();
-                if (_meshHierarchy?.ActiveTarget != null)
+                if (string.IsNullOrWhiteSpace(path)) return;
+                if (!path.EndsWith(".dptex", StringComparison.OrdinalIgnoreCase))
                 {
-                    _meshHierarchy.SelectTarget(_meshHierarchy.ActiveTarget, _meshHierarchy.ActiveTarget.SurfaceIndex);
+                    path += ".dptex";
+                }
+                string heroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "") : "hero";
+                string meshName = _meshHierarchy?.ActiveTarget?.RawName ?? "body";
+                var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
+                                ?? GetTree().Root.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+
+                var res = ProjectFileManager.SaveProject(path, _layerManager, heroName, meshName, quickPalette);
+                if (res.Success)
+                {
+                    if (_lblExportStatus != null) _lblExportStatus.Text = $"Saved project: {System.IO.Path.GetFileName(path)}";
+                    GD.Print($"[PaintTabUI] Saved project: {path}");
+                }
+                else
+                {
+                    if (_lblExportStatus != null) _lblExportStatus.Text = $"Error: {res.ErrorMessage}";
+                    GD.PrintErr($"[PaintTabUI] Error saving project: {res.ErrorMessage}");
                 }
             };
-            _confirmResDialog.Canceled += () =>
-            {
-                _optResolution.Select(_previousResolutionIndex);
-            };
-            _confirmResDialog.CloseRequested += () =>
-            {
-                _optResolution.Select(_previousResolutionIndex);
-            };
-            AddChild(_confirmResDialog);
+            AddChild(_saveProjectDialog);
         }
 
-        _confirmResDialog.DialogText = "Changing the canvas resolution will clean the textures, are you sure?";
-        _confirmResDialog.PopupCentered(new Vector2I(420, 160));
+        string defaultHeroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant() : "project";
+        _saveProjectDialog.CurrentFile = $"{defaultHeroName}_skin.dptex";
+        _saveProjectDialog.PopupCentered(new Vector2I(750, 500));
+    }
+
+    private void OnLoadProjectPressed()
+    {
+        if (_loadProjectDialog == null)
+        {
+            _loadProjectDialog = new FileDialog
+            {
+                Title = "Load Deadlock Playground Project (.dptex)",
+                FileMode = FileDialog.FileModeEnum.OpenFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new string[] { "*.dptex ; Deadlock Playground Project" },
+                UseNativeDialog = false,
+                Transient = true,
+                Exclusive = true
+            };
+            _loadProjectDialog.FileSelected += (path) =>
+            {
+                HandleProjectFileSelected(path);
+            };
+            AddChild(_loadProjectDialog);
+        }
+
+        _loadProjectDialog.PopupCentered(new Vector2I(750, 500));
+    }
+
+    private void HandleProjectFileSelected(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return;
+
+        var manifest = ProjectFileManager.PeekManifest(path);
+        if (manifest != null && !string.IsNullOrWhiteSpace(manifest.HeroId))
+        {
+            string currentHeroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "").Trim() : "";
+            string projHeroName = manifest.HeroId.Replace("Hero_", "").Trim();
+
+            if (!string.IsNullOrEmpty(currentHeroName) && !currentHeroName.Equals(projHeroName, StringComparison.OrdinalIgnoreCase))
+            {
+                _pendingLoadProjectPath = path;
+                ShowHeroMismatchDialog(projHeroName, currentHeroName);
+                return;
+            }
+        }
+
+        ExecuteLoadProject(path);
+    }
+
+    private void ShowHeroMismatchDialog(string projHero, string currentHero)
+    {
+        if (_confirmHeroMismatchDialog == null)
+        {
+            _confirmHeroMismatchDialog = new ConfirmationDialog
+            {
+                Title = "Hero Mismatch Warning",
+                OkButtonText = "Load Anyway",
+                CancelButtonText = "Cancel",
+                Transient = true,
+                Exclusive = true
+            };
+            _confirmHeroMismatchDialog.Confirmed += () =>
+            {
+                if (!string.IsNullOrEmpty(_pendingLoadProjectPath))
+                {
+                    ExecuteLoadProject(_pendingLoadProjectPath);
+                    _pendingLoadProjectPath = null;
+                }
+            };
+            _confirmHeroMismatchDialog.Canceled += () =>
+            {
+                _pendingLoadProjectPath = null;
+            };
+            _confirmHeroMismatchDialog.CloseRequested += () =>
+            {
+                _pendingLoadProjectPath = null;
+            };
+            AddChild(_confirmHeroMismatchDialog);
+        }
+
+        _confirmHeroMismatchDialog.DialogText = $"This project was created for hero '{projHero.ToUpperInvariant()}', but the current hero is '{currentHero.ToUpperInvariant()}'.\n\nLoading it may cause UV and texture misalignments. Do you wish to continue?";
+        _confirmHeroMismatchDialog.PopupCentered(new Vector2I(460, 180));
+    }
+
+    public bool IsAnyDialogOpen()
+    {
+        return (_saveProjectDialog != null && _saveProjectDialog.Visible)
+            || (_loadProjectDialog != null && _loadProjectDialog.Visible)
+            || (_confirmHeroMismatchDialog != null && _confirmHeroMismatchDialog.Visible)
+            || (_exportFileDialog != null && _exportFileDialog.Visible)
+            || (_renameLayerDialog != null && _renameLayerDialog.Visible)
+            || (_modDialogInstance != null && _modDialogInstance.Visible)
+            || (_progressDialogInstance != null && _progressDialogInstance.Visible)
+            || IsRenameDialogOpen;
+    }
+
+    private void ExecuteLoadProject(string path)
+    {
+        var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
+                        ?? GetTree().Root.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+
+        var res = ProjectFileManager.LoadProject(path, _layerManager, quickPalette);
+        if (res.Success)
+        {
+            // Sync resolution label
+            UpdateCanvasResolutionLabel();
+
+            // Sync layers list UI
+            RefreshLayersListUI();
+
+            // Reselect active layer
+            if (_layerManager.ActiveLayer != null)
+            {
+                OnLayerSelected(_layerManager.ActiveLayerIndex);
+            }
+
+            // Ensure submesh target
+            if (_meshHierarchy?.ActiveTarget != null)
+            {
+                _meshHierarchy.SelectTarget(_meshHierarchy.ActiveTarget, _meshHierarchy.ActiveTarget.SurfaceIndex);
+            }
+
+            _painter?.SyncSelectionMaskState();
+            _painter?.SyncCameraBrushProperties(true);
+            _layerManager?.ApplyOverlayParametersToMeshes();
+
+            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                        ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+            uvCanvas?.UpdateResolutionLabel();
+            uvCanvas?.RebuildWireframe();
+            uvCanvas?.QueueRedraw();
+
+            if (_brushPalette != null)
+            {
+                _brushPalette.SyncFromPainter();
+                _brushPalette.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+            }
+
+            if (_lblExportStatus != null) _lblExportStatus.Text = $"Loaded project: {System.IO.Path.GetFileName(path)}";
+            GD.Print($"[PaintTabUI] Successfully loaded project from {path}");
+        }
+        else
+        {
+            if (_lblExportStatus != null) _lblExportStatus.Text = $"Error: {res.ErrorMessage}";
+            GD.PrintErr($"[PaintTabUI] Error loading project: {res.ErrorMessage}");
+        }
     }
 
     private void ConnectEvents()
@@ -347,15 +541,16 @@ public partial class PaintTabUI : VBoxContainer
             };
         }
 
-        if (_optResolution != null)
-        {
-            _optResolution.ItemSelected += (idx) =>
-            {
-                int res = (int)_optResolution.GetItemId((int)idx);
-                if (_layerManager != null && _layerManager.CanvasSize.X == res) return;
 
-                ShowResolutionConfirmModal(res, (int)idx);
-            };
+
+        if (_btnSaveProject != null)
+        {
+            _btnSaveProject.Pressed += OnSaveProjectPressed;
+        }
+
+        if (_btnLoadProject != null)
+        {
+            _btnLoadProject.Pressed += OnLoadProjectPressed;
         }
 
         // Submesh Actions
@@ -375,7 +570,29 @@ public partial class PaintTabUI : VBoxContainer
         }
         if (_btnDeleteLayer != null)
         {
-            _btnDeleteLayer.Pressed += () => _layerManager?.DeleteActiveLayer();
+            _btnDeleteLayer.TooltipText = "Delete active layer\nShift+Click: Delete across all materials\nRight-Click: Options";
+            _btnDeleteLayer.Pressed += () =>
+            {
+                if (_layerManager == null) return;
+                if (Input.IsKeyPressed(Key.Shift))
+                {
+                    _layerManager.DeleteActiveLayerAcrossAllMaterials();
+                }
+                else
+                {
+                    _layerManager.DeleteActiveLayer();
+                }
+            };
+            _btnDeleteLayer.GuiInput += (ev) =>
+            {
+                if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Right && mb.Pressed)
+                {
+                    if (_layerManager != null)
+                    {
+                        ShowLayerContextMenu(_layerManager.ActiveLayerIndex, mb.GlobalPosition);
+                    }
+                }
+            };
         }
         if (_btnMoveUp != null)
         {
@@ -538,9 +755,8 @@ public partial class PaintTabUI : VBoxContainer
         // 4. Populate target dropdown and select default
         PopulateTargetDropdown();
 
-        // 5. Populate resolution dropdown (default 2048) and allocate canvas
-        PopulateResolutionDropdown();
-        _layerManager?.SetCanvasResolution(new Vector2I(2048, 2048));
+        // 5. Update canvas resolution label
+        UpdateCanvasResolutionLabel();
 
         // 6. Refresh submesh list UI
         RefreshSubmeshListUI();
@@ -595,7 +811,15 @@ public partial class PaintTabUI : VBoxContainer
         _cachedPaintSubmeshVisibility = null;
         _cachedPaintPreSoloVisibility = null;
         _cachedPaintSoloedSubmesh = null;
+        _materialGroupRows.Clear();
         _submeshRows.Clear();
+        if (_submeshListContainer != null)
+        {
+            foreach (Node child in _submeshListContainer.GetChildren())
+            {
+                child.QueueFree();
+            }
+        }
 
         if (_lblHeroName != null) _lblHeroName.Text = "HERO: NONE";
         if (_lblActiveMesh != null) _lblActiveMesh.Text = "Target: None";
@@ -644,19 +868,44 @@ public partial class PaintTabUI : VBoxContainer
 
         UpdateSubmeshRowHighlights();
         _painter?.SetTargetMesh(mesh, surfaceIndex);
+        UpdateCanvasResolutionLabel();
     }
 
     private void UpdateSubmeshRowHighlights()
     {
         if (_meshHierarchy == null) return;
         var active = _meshHierarchy.ActiveTarget;
-        foreach (var row in _submeshRows)
+
+        foreach (var groupRow in _materialGroupRows)
         {
-            if (row.SelectBtn != null && GodotObject.IsInstanceValid(row.SelectBtn))
+            bool isGroupActive = false;
+            if (groupRow.Group != null && active != null)
             {
-                row.SelectBtn.Modulate = (row.Submesh == active)
-                    ? new Color(1.0f, 0.85f, 0.4f, 1.0f)
-                    : Colors.White;
+                isGroupActive = groupRow.Group.Submeshes.Contains(active);
+            }
+
+            if (groupRow.PaintBtn != null && GodotObject.IsInstanceValid(groupRow.PaintBtn))
+            {
+                if (isGroupActive)
+                {
+                    groupRow.PaintBtn.Modulate = new Color(1.0f, 0.85f, 0.4f, 1.0f);
+                    groupRow.PaintBtn.Text = "Painting";
+                }
+                else
+                {
+                    groupRow.PaintBtn.Modulate = Colors.White;
+                    groupRow.PaintBtn.Text = "Paint";
+                }
+            }
+
+            foreach (var row in groupRow.SubmeshRows)
+            {
+                if (row.SelectBtn != null && GodotObject.IsInstanceValid(row.SelectBtn))
+                {
+                    row.SelectBtn.Modulate = (row.Submesh == active)
+                        ? new Color(1.0f, 0.85f, 0.4f, 1.0f)
+                        : Colors.White;
+                }
             }
         }
     }
@@ -679,37 +928,61 @@ public partial class PaintTabUI : VBoxContainer
             _layerManager.RebuildBaseAtlasBuffer();
         }
 
-        var submeshes = _meshHierarchy.Submeshes;
+        var groups = _meshHierarchy.MaterialGroups;
+        if (groups.Count == 0 && _meshHierarchy.Submeshes.Count > 0)
+        {
+            _meshHierarchy.RebuildMaterialGroups();
+            groups = _meshHierarchy.MaterialGroups;
+        }
 
         // Check if existing rows can be updated in-place
-        bool canUpdateInPlace = (_submeshRows.Count == submeshes.Count);
+        bool canUpdateInPlace = (_materialGroupRows.Count == groups.Count);
         if (canUpdateInPlace)
         {
-            for (int i = 0; i < submeshes.Count; i++)
+            for (int g = 0; g < groups.Count; g++)
             {
-                if (_submeshRows[i].Submesh != submeshes[i] ||
-                    !GodotObject.IsInstanceValid(_submeshRows[i].RowContainer))
+                var gRow = _materialGroupRows[g];
+                var grp = groups[g];
+                if (gRow.Group != grp || gRow.SubmeshRows.Count != grp.Submeshes.Count ||
+                    !GodotObject.IsInstanceValid(gRow.GroupContainer) ||
+                    !GodotObject.IsInstanceValid(gRow.ChildrenContainer))
                 {
                     canUpdateInPlace = false;
                     break;
                 }
+                for (int s = 0; s < grp.Submeshes.Count; s++)
+                {
+                    if (gRow.SubmeshRows[s].Submesh != grp.Submeshes[s] ||
+                        !GodotObject.IsInstanceValid(gRow.SubmeshRows[s].RowContainer))
+                    {
+                        canUpdateInPlace = false;
+                        break;
+                    }
+                }
+                if (!canUpdateInPlace) break;
             }
         }
 
         if (canUpdateInPlace)
         {
-            for (int i = 0; i < submeshes.Count; i++)
+            for (int g = 0; g < groups.Count; g++)
             {
-                var row = _submeshRows[i];
-                var sub = submeshes[i];
-                bool isVis = sub.Mesh != null && GodotObject.IsInstanceValid(sub.Mesh) && sub.Mesh.Visible;
-                row.VisCheck.SetPressedNoSignal(isVis);
-                row.SoloBtn.SetPressedNoSignal(sub.IsSoloed);
-                row.SoloBtn.Text = sub.IsSoloed ? "[Solo]" : "Solo";
-                row.SelectBtn.Modulate = (_meshHierarchy.ActiveTarget == sub)
-                    ? new Color(1.0f, 0.85f, 0.4f, 1.0f)
-                    : Colors.White;
+                var gRow = _materialGroupRows[g];
+                var grp = groups[g];
+                gRow.ToggleBtn.Text = grp.IsExpanded ? "▼" : "▶";
+                gRow.ChildrenContainer.Visible = grp.IsExpanded;
+
+                for (int s = 0; s < grp.Submeshes.Count; s++)
+                {
+                    var sRow = gRow.SubmeshRows[s];
+                    var sub = grp.Submeshes[s];
+                    bool isVis = sub.Mesh != null && GodotObject.IsInstanceValid(sub.Mesh) && sub.Mesh.Visible;
+                    sRow.VisCheck.SetPressedNoSignal(isVis);
+                    sRow.SoloBtn.SetPressedNoSignal(sub.IsSoloed);
+                    sRow.SoloBtn.Text = sub.IsSoloed ? "[Solo]" : "Solo";
+                }
             }
+            UpdateSubmeshRowHighlights();
             return;
         }
 
@@ -718,91 +991,224 @@ public partial class PaintTabUI : VBoxContainer
         {
             child.QueueFree();
         }
+        _materialGroupRows.Clear();
         _submeshRows.Clear();
 
-        foreach (var submesh in submeshes)
+        EnsureGroupHeaderStyle();
+
+        foreach (var group in groups)
         {
-            var row = new HBoxContainer
+            var groupContainer = new VBoxContainer
             {
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
+            groupContainer.AddThemeConstantOverride("separation", 2);
 
-            bool isVis = submesh.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh) && submesh.Mesh.Visible;
-            var visCheck = new CheckBox
+            var headerPanel = new PanelContainer
             {
-                ButtonPressed = isVis,
-                TooltipText = "Toggle submesh visibility",
+                SizeFlagsHorizontal = SizeFlags.ExpandFill
+            };
+            headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
+
+            var headerRow = new HBoxContainer
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill
+            };
+            headerRow.AddThemeConstantOverride("separation", 6);
+
+            var toggleBtn = new Button
+            {
+                Text = group.IsExpanded ? "▼" : "▶",
+                Flat = true,
+                CustomMinimumSize = new Vector2(22, 22),
+                TooltipText = "Expand/Collapse material group",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
-            var localSub = submesh;
-            visCheck.Toggled += (vis) =>
-            {
-                _meshHierarchy.SetMeshVisibility(localSub, vis);
-            };
+            toggleBtn.AddThemeFontSizeOverride("font_size", 10);
 
-            var soloBtn = new Button
+            var titleLabel = new Label
             {
-                Text = submesh.IsSoloed ? "[Solo]" : "Solo",
-                CustomMinimumSize = new Vector2(48, 26),
-                ToggleMode = true,
-                ButtonPressed = submesh.IsSoloed,
-                TooltipText = "Solo submesh (hide others)",
-                SizeFlagsVertical = SizeFlags.ShrinkCenter
-            };
-            soloBtn.Pressed += () => _meshHierarchy.ToggleSolo(localSub);
-
-            int charLen = submesh.DisplayName?.Length ?? 0;
-            float minHeight = charLen > 40 ? 52f : (charLen > 22 ? 38f : 28f);
-
-            var btnWrapper = new Control
-            {
+                Text = group.DisplayName,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                SizeFlagsVertical = SizeFlags.Fill,
-                CustomMinimumSize = new Vector2(0, minHeight),
-                ClipContents = true
-            };
-
-            var selectBtn = new Button
-            {
-                Text = submesh.DisplayName,
-                Alignment = HorizontalAlignment.Left,
-                AutowrapMode = TextServer.AutowrapMode.WordSmart,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                TooltipText = submesh.DisplayName
+                TooltipText = $"Material: {group.MaterialKey}"
             };
-            selectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-            selectBtn.OffsetLeft = 0;
-            selectBtn.OffsetTop = 0;
-            selectBtn.OffsetRight = 0;
-            selectBtn.OffsetBottom = 0;
-            selectBtn.AddThemeFontSizeOverride("font_size", 11);
-            if (_meshHierarchy.ActiveTarget == submesh)
+            titleLabel.AddThemeFontSizeOverride("font_size", 11);
+
+            var badgeLabel = new Label
             {
-                selectBtn.Modulate = new Color(1.0f, 0.85f, 0.4f, 1.0f);
+                Text = $"[{group.Submeshes.Count} {(group.Submeshes.Count == 1 ? "mesh" : "meshes")}]",
+                Modulate = new Color(0.65f, 0.68f, 0.72f),
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+            badgeLabel.AddThemeFontSizeOverride("font_size", 10);
+
+            var paintBtn = new Button
+            {
+                Text = "Paint",
+                CustomMinimumSize = new Vector2(52, 22),
+                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                TooltipText = $"Paint material group '{group.DisplayName}'"
+            };
+            paintBtn.AddThemeFontSizeOverride("font_size", 10);
+
+            var localGroup = group;
+            paintBtn.Pressed += () =>
+            {
+                SubmeshNodeInfo target = null;
+                foreach (var s in localGroup.Submeshes)
+                {
+                    if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) && s.Mesh.Visible)
+                    {
+                        target = s;
+                        break;
+                    }
+                }
+                target ??= (localGroup.Submeshes.Count > 0 ? localGroup.Submeshes[0] : null);
+                if (target != null)
+                {
+                    _meshHierarchy.SelectTarget(target, target.SurfaceIndex);
+                }
+            };
+
+            headerRow.AddChild(toggleBtn);
+            headerRow.AddChild(titleLabel);
+            headerRow.AddChild(badgeLabel);
+            headerRow.AddChild(paintBtn);
+            headerPanel.AddChild(headerRow);
+            groupContainer.AddChild(headerPanel);
+
+            var childrenContainer = new VBoxContainer
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                Visible = group.IsExpanded
+            };
+            childrenContainer.AddThemeConstantOverride("separation", 2);
+
+            var localChildren = childrenContainer;
+            var localToggle = toggleBtn;
+            toggleBtn.Pressed += () =>
+            {
+                localGroup.IsExpanded = !localGroup.IsExpanded;
+                localChildren.Visible = localGroup.IsExpanded;
+                localToggle.Text = localGroup.IsExpanded ? "▼" : "▶";
+            };
+
+            var groupSubmeshRows = new List<SubmeshRowUI>();
+
+            for (int i = 0; i < group.Submeshes.Count; i++)
+            {
+                var submesh = group.Submeshes[i];
+                bool isLast = (i == group.Submeshes.Count - 1);
+
+                var row = new HBoxContainer
+                {
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                };
+                row.AddThemeConstantOverride("separation", 4);
+
+                var branchLabel = new Label
+                {
+                    Text = isLast ? "  └─" : "  ├─",
+                    Modulate = new Color(0.45f, 0.48f, 0.52f),
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                };
+                branchLabel.AddThemeFontSizeOverride("font_size", 11);
+                row.AddChild(branchLabel);
+
+                bool isVis = submesh.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh) && submesh.Mesh.Visible;
+                var visCheck = new CheckBox
+                {
+                    ButtonPressed = isVis,
+                    TooltipText = "Toggle submesh visibility",
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                };
+                var localSub = submesh;
+                visCheck.Toggled += (vis) => _meshHierarchy.SetMeshVisibility(localSub, vis);
+                row.AddChild(visCheck);
+
+                var soloBtn = new Button
+                {
+                    Text = submesh.IsSoloed ? "[Solo]" : "Solo",
+                    CustomMinimumSize = new Vector2(44, 24),
+                    ToggleMode = true,
+                    ButtonPressed = submesh.IsSoloed,
+                    TooltipText = "Solo submesh (hide others)",
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                };
+                soloBtn.AddThemeFontSizeOverride("font_size", 10);
+                soloBtn.Pressed += () => _meshHierarchy.ToggleSolo(localSub);
+                row.AddChild(soloBtn);
+
+                int charLen = submesh.DisplayName?.Length ?? 0;
+                float minHeight = charLen > 40 ? 46f : (charLen > 22 ? 34f : 24f);
+
+                var btnWrapper = new Control
+                {
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    SizeFlagsVertical = SizeFlags.Fill,
+                    CustomMinimumSize = new Vector2(0, minHeight),
+                    ClipContents = true
+                };
+
+                var selectBtn = new Button
+                {
+                    Text = submesh.DisplayName,
+                    Alignment = HorizontalAlignment.Left,
+                    AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                    ClipText = true,
+                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                    TooltipText = submesh.DisplayName
+                };
+                selectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+                selectBtn.OffsetLeft = 0;
+                selectBtn.OffsetTop = 0;
+                selectBtn.OffsetRight = 0;
+                selectBtn.OffsetBottom = 0;
+                selectBtn.AddThemeFontSizeOverride("font_size", 10);
+
+                selectBtn.Pressed += () =>
+                {
+                    _meshHierarchy.SelectTarget(localSub, localSub.SurfaceIndex);
+                };
+
+                btnWrapper.AddChild(selectBtn);
+                row.AddChild(btnWrapper);
+
+                childrenContainer.AddChild(row);
+
+                var rowUI = new SubmeshRowUI
+                {
+                    Submesh = submesh,
+                    RowContainer = row,
+                    VisCheck = visCheck,
+                    SoloBtn = soloBtn,
+                    SelectBtn = selectBtn
+                };
+                groupSubmeshRows.Add(rowUI);
+                _submeshRows.Add(rowUI);
             }
-            selectBtn.Pressed += () =>
+
+            groupContainer.AddChild(childrenContainer);
+            _submeshListContainer.AddChild(groupContainer);
+
+            _materialGroupRows.Add(new MaterialGroupRowUI
             {
-                _meshHierarchy.SelectTarget(localSub, localSub.SurfaceIndex);
-            };
-
-            btnWrapper.AddChild(selectBtn);
-
-            row.AddChild(visCheck);
-            row.AddChild(soloBtn);
-            row.AddChild(btnWrapper);
-
-            _submeshListContainer.AddChild(row);
-
-            _submeshRows.Add(new SubmeshRowUI
-            {
-                Submesh = submesh,
-                RowContainer = row,
-                VisCheck = visCheck,
-                SoloBtn = soloBtn,
-                SelectBtn = selectBtn
+                Group = group,
+                GroupContainer = groupContainer,
+                HeaderPanel = headerPanel,
+                HeaderRow = headerRow,
+                ToggleBtn = toggleBtn,
+                TitleLabel = titleLabel,
+                BadgeLabel = badgeLabel,
+                PaintBtn = paintBtn,
+                ChildrenContainer = childrenContainer,
+                SubmeshRows = groupSubmeshRows
             });
         }
+
+        UpdateSubmeshRowHighlights();
     }
 
     private void RefreshLayersListUI()
@@ -857,6 +1263,13 @@ public partial class PaintTabUI : VBoxContainer
             }
 
             selectBtn.Pressed += () => _layerManager.SelectLayer(layerIndex);
+            selectBtn.GuiInput += (ev) =>
+            {
+                if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Right && mb.Pressed)
+                {
+                    ShowLayerContextMenu(layerIndex, mb.GlobalPosition);
+                }
+            };
             btnWrapper.AddChild(selectBtn);
 
             EnsureRenameButtonStyles();
@@ -895,6 +1308,55 @@ public partial class PaintTabUI : VBoxContainer
         RefreshLayersListUI();
     }
 
+    private PopupMenu _layerContextMenu;
+
+    private void ShowLayerContextMenu(int layerIdx, Vector2 screenPos)
+    {
+        if (_layerManager == null || layerIdx < 0 || layerIdx >= _layerManager.Layers.Count) return;
+
+        if (_layerContextMenu == null)
+        {
+            _layerContextMenu = new PopupMenu();
+            _layerContextMenu.Name = "LayerContextMenu";
+            AddChild(_layerContextMenu);
+        }
+
+        _layerContextMenu.Clear();
+        _layerContextMenu.AddItem("Rename Layer", 0);
+        _layerContextMenu.AddItem("Delete Layer (This Material)", 1);
+        _layerContextMenu.AddItem("Delete Layer (Across All Materials)", 2);
+
+        // Clear previous signal connections
+        var connections = _layerContextMenu.GetSignalConnectionList("id_pressed");
+        foreach (var conn in connections)
+        {
+            if (conn.TryGetValue("callable", out var cVal) && cVal.VariantType == Variant.Type.Callable)
+            {
+                _layerContextMenu.Disconnect("id_pressed", cVal.AsCallable());
+            }
+        }
+
+        int targetIdx = layerIdx;
+        _layerContextMenu.IdPressed += (id) =>
+        {
+            if (id == 0)
+            {
+                ShowRenameLayerDialog(targetIdx);
+            }
+            else if (id == 1)
+            {
+                _layerManager.DeleteLayer(targetIdx);
+            }
+            else if (id == 2)
+            {
+                _layerManager.DeleteLayerAcrossAllMaterials(targetIdx);
+            }
+        };
+
+        _layerContextMenu.Position = (Vector2I)screenPos;
+        _layerContextMenu.Popup();
+    }
+
     private void EnsureRenameLayerDialog()
     {
         if (_renameLayerDialog != null) return;
@@ -905,7 +1367,9 @@ public partial class PaintTabUI : VBoxContainer
             OkButtonText = "Rename",
             CancelButtonText = "Cancel",
             MinSize = new Vector2I(360, 120),
-            Size = new Vector2I(360, 120)
+            Size = new Vector2I(360, 120),
+            Transient = true,
+            Exclusive = true
         };
 
         var vbox = new VBoxContainer();
@@ -1006,7 +1470,6 @@ public partial class PaintTabUI : VBoxContainer
     private void UpdateControlsState(bool hasHero)
     {
         if (_optTargetMesh != null) _optTargetMesh.Disabled = !hasHero;
-        if (_optResolution != null) _optResolution.Disabled = !hasHero;
         if (_btnShowAllMeshes != null) _btnShowAllMeshes.Disabled = !hasHero;
         if (_btnHideAccMeshes != null) _btnHideAccMeshes.Disabled = !hasHero;
         if (_btnAddLayer != null) _btnAddLayer.Disabled = !hasHero;

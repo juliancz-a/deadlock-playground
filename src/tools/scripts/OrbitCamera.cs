@@ -231,6 +231,36 @@ public partial class OrbitCamera : Node3D
             return;
         }
 
+        if (PaintTabUI.IsRenameDialogOpen) return;
+
+        var rootWin = GetTree()?.Root;
+        if (rootWin != null)
+        {
+            var windows = rootWin.FindChildren("*", "Window", recursive: true, owned: false);
+            if (windows != null)
+            {
+                for (int i = 0; i < windows.Count; i++)
+                {
+                    if (windows[i] is Window win && win != rootWin && win.Visible)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            var exportPanel = rootWin.FindChild("PaintModExportPanel", true, false) as Control;
+            if (exportPanel != null && GodotObject.IsInstanceValid(exportPanel))
+            {
+                if (exportPanel.Visible && exportPanel.GetGlobalRect().HasPoint(GetViewport().GetMousePosition())) return;
+            }
+
+            var modDialog = rootWin.FindChild("ExportModDialog", true, false) as CanvasLayer;
+            if (modDialog != null && GodotObject.IsInstanceValid(modDialog) && modDialog.Visible) return;
+
+            var progDialog = rootWin.FindChild("ExportProgressDialog", true, false) as CanvasLayer;
+            if (progDialog != null && GodotObject.IsInstanceValid(progDialog) && progDialog.Visible) return;
+        }
+
         var hovered = GetTree()?.Root?.GuiGetHoveredControl();
         if (hovered != null)
         {

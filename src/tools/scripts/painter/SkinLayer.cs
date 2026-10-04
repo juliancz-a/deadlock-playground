@@ -23,6 +23,11 @@ namespace DeadlockPlayground.Painter
         public float Opacity { get; set; } = 1.0f;
         public LayerBlendMode BlendMode { get; set; } = LayerBlendMode.Normal;
         public byte[] GpuData { get; set; }
+        public byte[] CompressedGpuData { get; set; }
+        public ImageTexture Texture { get; set; }
+        public Image BackingImage { get; set; }
+        public Rid LayerRid { get; set; } = new Rid();
+        public bool IsCpuSynced { get; set; } = true;
 
         public SubViewport Viewport { get; private set; }
         public SubViewport CompositeViewport { get; set; }
@@ -36,65 +41,81 @@ namespace DeadlockPlayground.Painter
 
         public SkinLayer() { }
 
+        public bool IsBlank()
+        {
+            if (CompressedGpuData != null && CompressedGpuData.Length > 0)
+            {
+                return CompressedGpuData.Length < 250;
+            }
+            if (GpuData != null && GpuData.Length > 0)
+            {
+                unsafe
+                {
+                    fixed (byte* p = GpuData)
+                    {
+                        ulong* u = (ulong*)p;
+                        int uCount = GpuData.Length / 8;
+                        for (int i = 0; i < uCount; i++)
+                        {
+                            if (u[i] != 0) return false;
+                        }
+                    }
+                }
+                return true;
+            }
+            return true;
+        }
+
+        public void CompressGpuData()
+        {
+            if (GpuData != null && GpuData.Length > 0)
+            {
+                using var ms = new System.IO.MemoryStream();
+                using (var ds = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+                {
+                    ds.Write(GpuData, 0, GpuData.Length);
+                }
+                CompressedGpuData = ms.ToArray();
+                GpuData = null;
+            }
+        }
+
+        public void DecompressGpuData(int expectedLength)
+        {
+            if (GpuData == null || GpuData.Length != expectedLength)
+            {
+                if (CompressedGpuData != null && CompressedGpuData.Length > 0)
+                {
+                    byte[] decompressed = new byte[expectedLength];
+                    using var ms = new System.IO.MemoryStream(CompressedGpuData);
+                    using var ds = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionMode.Decompress);
+                    int totalRead = 0;
+                    while (totalRead < expectedLength)
+                    {
+                        int bytesRead = ds.Read(decompressed, totalRead, expectedLength - totalRead);
+                        if (bytesRead == 0) break;
+                        totalRead += bytesRead;
+                    }
+                    GpuData = decompressed;
+                }
+                else
+                {
+                    GpuData = new byte[expectedLength];
+                }
+            }
+        }
+
         public void Initialize(string name, Vector2I canvasSize, bool isLocked, Shader compositeShader, Shader dabShader, Texture2D baseTexture = null)
         {
             Name = name;
             _canvasSize = canvasSize;
             IsLocked = isLocked;
             _dabShader = dabShader;
-
-            // 1. Off-screen paint accumulator viewport
-            Viewport = new SubViewport
+            if (compositeShader != null)
             {
-                Name = $"LayerViewport_{name.Replace(" ", "_")}",
-                Size = canvasSize,
-                TransparentBg = true,
-                RenderTargetClearMode = SubViewport.ClearMode.Once,
-                RenderTargetUpdateMode = SubViewport.UpdateMode.Once,
-                HandleInputLocally = false,
-                GuiDisableInput = true
-            };
-            RenderingServer.ViewportSetTransparentBackground(Viewport.GetViewportRid(), true);
-
-            // If this is the locked base layer and a base texture is provided, draw it as a static backdrop
-            if (baseTexture != null)
-            {
-                var baseRect = new TextureRect
-                {
-                    Name = "BaseTextureRect",
-                    Texture = baseTexture,
-                    ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                    Size = canvasSize,
-                    Position = Vector2.Zero,
-                    MouseFilter = Control.MouseFilterEnum.Ignore
-                };
-                Viewport.AddChild(baseRect);
+                CompositeMaterial = new ShaderMaterial { Shader = compositeShader };
+                UpdateMaterialParameters();
             }
-
-            StrokeContainer = new Node2D { Name = "StrokeContainer" };
-            Viewport.AddChild(StrokeContainer);
-
-            // 2. Display quad for master CompositeViewport
-            BufferCopy = new BackBufferCopy
-            {
-                Name = $"BufferCopy_{name.Replace(" ", "_")}",
-                CopyMode = BackBufferCopy.CopyModeEnum.Viewport
-            };
-
-            CompositeMaterial = new ShaderMaterial { Shader = compositeShader };
-            UpdateMaterialParameters();
-
-            DisplayRect = new TextureRect
-            {
-                Name = $"DisplayRect_{name.Replace(" ", "_")}",
-                Texture = Viewport.GetTexture(),
-                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                Size = canvasSize,
-                Position = Vector2.Zero,
-                Material = CompositeMaterial,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
-                Visible = IsVisible
-            };
         }
 
         public void PaintDab(Vector2 uvCoordinate, Color brushColor, float brushSize, Texture2D brushMask, float hardness, float flow, Vector2 aspectScale = default)
@@ -224,6 +245,15 @@ namespace DeadlockPlayground.Painter
 
         public void CleanUp()
         {
+            if (LayerRid.IsValid)
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && rd.TextureIsValid(LayerRid))
+                {
+                    rd.FreeRid(LayerRid);
+                }
+                LayerRid = new Rid();
+            }
             if (BufferCopy != null && GodotObject.IsInstanceValid(BufferCopy))
             {
                 BufferCopy.QueueFree();

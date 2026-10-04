@@ -23,9 +23,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnToolBrush;
     private Button _btnToolErase;
     private Button _btnToolFill;
+    private Button _btnToolSelection;
     private Button _btnToolWand;
     private Button _btnToolDecal;
     private Button _btnToolText;
+    private Button _btnToolShape;
     private ColorPickerButton _btnColor;
     private Button _btnMirror;
     private Button _btnUndo;
@@ -33,6 +35,18 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnToggleFlyout;
     private Button _btnPin;
     private Label _lblKeymapHint;
+
+    // Selection tool state & controls
+    private SelectionToolType _currentSelectionType = SelectionToolType.Rectangular;
+    public SelectionToolType CurrentSelectionType => _currentSelectionType;
+    private Texture2D _iconRect;
+    private Texture2D _iconLasso;
+    private Texture2D _iconPoly;
+    private Texture2D _iconInvert;
+    private Button _btnFlyoutRect;
+    private Button _btnFlyoutLasso;
+    private Button _btnFlyoutPoly;
+    private Control _selectionOptions;
 
     // Flyout container & title
     private Control _flyoutPanel;
@@ -48,6 +62,24 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Control _wandOptions;
     private Control _decalOptions;
     private Control _textOptions;
+    private Control _shapeOptions;
+
+    // Shape controls
+    private Button _btnShapeSquare;
+    private Button _btnShapeCircle;
+    private Button _btnShapeLine;
+    private OptionButton _optShapeFillMode;
+    private HSlider _sliderStrokeWidth;
+    private Label _lblStrokeWidth;
+    private HSlider _sliderShapeWidth;
+    private Label _lblShapeWidth;
+    private HSlider _sliderShapeHeight;
+    private Label _lblShapeHeight;
+    private HSlider _sliderShapeRot;
+    private Label _lblShapeRot;
+    private Button _btnCommitShape;
+    private Button _btnCancelShape;
+    private CheckBox _chkFrontFacesOnly;
 
     // Brush controls
     private OptionButton _optBlendMode;
@@ -81,6 +113,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private CheckBox _chkContiguous;
     private CheckBox _chkUseMask;
     private CheckBox _chkIsolateSubmesh;
+    private CheckBox _chkAntiAliasing;
     private Button _btnClearMask;
 
     // Decal controls
@@ -169,9 +202,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToolBrush != null) _btnToolBrush.Modulate = idleCol;
         if (_btnToolErase != null) _btnToolErase.Modulate = idleCol;
         if (_btnToolFill != null) _btnToolFill.Modulate = idleCol;
+        if (_btnToolSelection != null) _btnToolSelection.Modulate = idleCol;
         if (_btnToolWand != null) _btnToolWand.Modulate = idleCol;
         if (_btnToolDecal != null) _btnToolDecal.Modulate = idleCol;
         if (_btnToolText != null) _btnToolText.Modulate = idleCol;
+        if (_btnToolShape != null) _btnToolShape.Modulate = idleCol;
         if (_btnMirror != null) _btnMirror.Modulate = idleCol;
         if (_btnUndo != null) _btnUndo.Modulate = idleCol;
         if (_btnRedo != null) _btnRedo.Modulate = idleCol;
@@ -226,6 +261,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             {
                 _painter.MeshHierarchy.TargetMeshChanged -= OnPainterTargetMeshChanged;
             }
+            if (_painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged -= OnShapeToolChanged;
+                _painter.ShapeTool.ShapeCommitted -= OnShapeToolCommitted;
+                _painter.ShapeTool.ShapeCancelled -= OnShapeToolCancelled;
+            }
         }
 
         _painter = painter;
@@ -243,6 +284,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             {
                 _painter.MagicWandTool.ColorSampled += (col) => UpdateWandUI();
                 _painter.MagicWandTool.MaskUpdated += (hasMask) => UpdateWandUI();
+            }
+            if (_painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged += OnShapeToolChanged;
+                _painter.ShapeTool.ShapeCommitted += OnShapeToolCommitted;
+                _painter.ShapeTool.ShapeCancelled += OnShapeToolCancelled;
             }
             SyncFromPainter();
         }
@@ -269,9 +316,27 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _btnToolBrush = ResolveNode<Button>("BtnBrush", "BtnBrush");
         _btnToolErase = ResolveNode<Button>("BtnErase", "BtnErase");
         _btnToolFill = ResolveNode<Button>("BtnFill", "BtnFill");
+        _btnToolSelection = ResolveNode<Button>("BtnSelection", "BtnSelection");
         _btnToolWand = ResolveNode<Button>("BtnWand", "BtnWand");
+        _iconRect = GD.Load<Texture2D>("res://assets/at-icons/selection_square.svg");
+        _iconLasso = GD.Load<Texture2D>("res://assets/at-icons/lasso.svg");
+        _iconPoly = GD.Load<Texture2D>("res://assets/at-icons/mesh_polygon.svg");
+        _iconInvert = GD.Load<Texture2D>("res://assets/icons/loop.svg");
+        if (_btnToolSelection != null)
+        {
+            _btnToolSelection.Icon = _iconRect;
+            _btnToolSelection.ExpandIcon = true;
+            _btnToolSelection.IconAlignment = HorizontalAlignment.Center;
+        }
+        if (_btnToolWand != null)
+        {
+            _btnToolWand.Icon = GD.Load<Texture2D>("res://assets/at-icons/magic_wand.svg");
+            _btnToolWand.ExpandIcon = true;
+            _btnToolWand.IconAlignment = HorizontalAlignment.Center;
+        }
         _btnToolDecal = ResolveNode<Button>("BtnDecal", "BtnDecal");
         _btnToolText = ResolveNode<Button>("BtnText", "BtnText");
+        _btnToolShape = ResolveNode<Button>("BtnShape", "BtnShape");
         _btnColor = ResolveNode<ColorPickerButton>("BtnColor", "BtnColor");
         _btnMirror = ResolveNode<Button>("BtnMirror", "BtnMirror");
 
@@ -290,7 +355,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         // Set up Radio ButtonGroup so tools are mutually exclusive
         _toolButtonGroup = new ButtonGroup();
-        var mutualButtons = new[] { _btnToolSelect, _btnToolBrush, _btnToolErase, _btnToolFill, _btnToolWand, _btnToolDecal, _btnToolText };
+        var mutualButtons = new[] { _btnToolSelect, _btnToolBrush, _btnToolErase, _btnToolFill, _btnToolSelection, _btnToolWand, _btnToolDecal, _btnToolText, _btnToolShape };
         foreach (var btn in mutualButtons)
         {
             if (btn != null)
@@ -302,6 +367,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         // Flyout container & title
         _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel");
+        _chkFrontFacesOnly = ResolveNode<CheckBox>("ChkFrontFacesOnly", "ChkFrontFacesOnly");
         if (_flyoutPanel != null)
         {
             _flyoutPanel.CustomMinimumSize = new Vector2(260, 290);
@@ -317,8 +383,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _eraserOptions = ResolveNode<Control>("EraserOptions", "EraserOptions");
         _bucketFillOptions = ResolveNode<Control>("BucketFillOptions", "BucketFillOptions");
         _wandOptions = ResolveNode<Control>("MagicWandOptions", "MagicWandOptions");
+        _selectionOptions = ResolveNode<Control>("SelectionOptions", "SelectionOptions");
         _decalOptions = ResolveNode<Control>("DecalOptions", "DecalOptions");
         _textOptions = ResolveNode<Control>("TextOptions", "TextOptions");
+        _shapeOptions = ResolveNode<Control>("ShapeOptions", "ShapeOptions");
 
         // Brush controls
         _optBlendMode = ResolveNode<OptionButton>("OptBlendMode", "OptBlendMode");
@@ -353,6 +421,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _lblDecalRot = ResolveNode<Label>("LblDecalRot", "LblDecalRot");
         _btnBakeDecal = ResolveNode<Button>("BtnBakeDecal", "BtnBakeDecal");
         _decalFileDialog = ResolveNode<FileDialog>("DecalFileDialog", "DecalFileDialog");
+        if (_decalFileDialog != null)
+        {
+            _decalFileDialog.Transient = true;
+            _decalFileDialog.Exclusive = true;
+        }
 
         // Text controls
         _editText = ResolveNode<LineEdit>("EditText", "EditText");
@@ -379,6 +452,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _btnFlipV = ResolveNode<Button>("BtnFlipV", "BtnFlipV");
         _btnBakeText = ResolveNode<Button>("BtnBakeText", "BtnBakeText");
         _textFileDialog = ResolveNode<FileDialog>("TextFileDialog", "TextFileDialog");
+        if (_textFileDialog != null)
+        {
+            _textFileDialog.Transient = true;
+            _textFileDialog.Exclusive = true;
+        }
 
         // Magic Wand controls
         _rectWandColorPreview = ResolveNode<ColorRect>("ColorPreview", "ColorPreview");
@@ -388,7 +466,24 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _chkContiguous = ResolveNode<CheckBox>("ChkContiguous", "ChkContiguous");
         _chkUseMask = ResolveNode<CheckBox>("ChkUseMask", "ChkUseMask");
         _chkIsolateSubmesh = ResolveNode<CheckBox>("ChkIsolateSubmesh", "ChkIsolateSubmesh");
+        _chkAntiAliasing = ResolveNode<CheckBox>("ChkAntiAliasing", "ChkAntiAliasing");
         _btnClearMask = ResolveNode<Button>("BtnClearMask", "BtnClearMask");
+
+        // Shape controls
+        _btnShapeSquare = ResolveNode<Button>("BtnShapeSquare", "BtnShapeSquare");
+        _btnShapeCircle = ResolveNode<Button>("BtnShapeCircle", "BtnShapeCircle");
+        _btnShapeLine = ResolveNode<Button>("BtnShapeLine", "BtnShapeLine");
+        _optShapeFillMode = ResolveNode<OptionButton>("OptShapeFillMode", "OptShapeFillMode");
+        _sliderStrokeWidth = ResolveNode<HSlider>("SliderStrokeWidth", "SliderStrokeWidth");
+        _lblStrokeWidth = ResolveNode<Label>("LblStrokeWidth", "LblStrokeWidth");
+        _sliderShapeWidth = ResolveNode<HSlider>("SliderShapeWidth", "SliderShapeWidth");
+        _lblShapeWidth = ResolveNode<Label>("LblShapeWidth", "LblShapeWidth");
+        _sliderShapeHeight = ResolveNode<HSlider>("SliderShapeHeight", "SliderShapeHeight");
+        _lblShapeHeight = ResolveNode<Label>("LblShapeHeight", "LblShapeHeight");
+        _sliderShapeRot = ResolveNode<HSlider>("SliderShapeRot", "SliderShapeRot");
+        _lblShapeRot = ResolveNode<Label>("LblShapeRot", "LblShapeRot");
+        _btnCommitShape = ResolveNode<Button>("BtnCommitShape", "BtnCommitShape");
+        _btnCancelShape = ResolveNode<Button>("BtnCancelShape", "BtnCancelShape");
 
         // Populate Blend Modes
         if (_optBlendMode != null)
@@ -428,6 +523,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             _optEraseShape.AddItem("Square", (int)BrushShapeType.Square);
             _optEraseShape.Select((int)BrushShapeType.HardCircle);
         }
+
+        BuildSelectionFlyoutControls();
     }
 
     private void ConnectEvents()
@@ -437,9 +534,26 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToolBrush != null) _btnToolBrush.Pressed += () => OnToolButtonClicked(BrushToolMode.Paint);
         if (_btnToolErase != null) _btnToolErase.Pressed += () => OnToolButtonClicked(BrushToolMode.Erase);
         if (_btnToolFill != null) _btnToolFill.Pressed += () => OnToolButtonClicked(BrushToolMode.BucketFill);
-        if (_btnToolWand != null) _btnToolWand.Pressed += () => OnToolButtonClicked(BrushToolMode.MagicWand);
+        if (_btnToolSelection != null)
+        {
+            _btnToolSelection.Pressed += () => OnToolButtonClicked(BrushToolMode.Selection);
+        }
+        if (_btnToolWand != null)
+        {
+            _btnToolWand.Pressed += () => OnToolButtonClicked(BrushToolMode.MagicWand);
+        }
         if (_btnToolDecal != null) _btnToolDecal.Pressed += () => OnToolButtonClicked(BrushToolMode.Decal);
         if (_btnToolText != null) _btnToolText.Pressed += () => OnToolButtonClicked(BrushToolMode.Text);
+        if (_btnToolShape != null) _btnToolShape.Pressed += () => OnToolButtonClicked(BrushToolMode.Shape);
+
+        if (_chkFrontFacesOnly != null)
+        {
+            _chkFrontFacesOnly.ButtonPressed = _painter?.FrontFacesOnly ?? true;
+            _chkFrontFacesOnly.Toggled += (enabled) =>
+            {
+                if (_painter != null) _painter.FrontFacesOnly = enabled;
+            };
+        }
 
         if (_btnColor != null)
         {
@@ -501,6 +615,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 {
                     _painter.BrushShape = (BrushShapeType)_optBrushShape.GetItemId((int)idx);
                     _painter.SyncCameraBrushProperties(force: true);
+                    QueueCanvasRedraw();
                 }
             };
         }
@@ -513,6 +628,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 {
                     _painter.EraserShape = (BrushShapeType)_optEraseShape.GetItemId((int)idx);
                     _painter.SyncCameraBrushProperties(force: true);
+                    QueueCanvasRedraw();
                 }
             };
         }
@@ -523,6 +639,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             {
                 if (_painter != null && _currentTool == BrushToolMode.Paint) _painter.BrushSize = (float)v;
                 if (_lblBrushSize != null) _lblBrushSize.Text = $"{Mathf.RoundToInt(v)} px";
+                QueueCanvasRedraw();
             };
         }
 
@@ -541,6 +658,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             {
                 if (_painter != null && _currentTool == BrushToolMode.Paint) _painter.BrushHardness = (float)v;
                 if (_lblBrushHardness != null) _lblBrushHardness.Text = $"{Mathf.RoundToInt(v * 100)}%";
+                QueueCanvasRedraw();
             };
         }
 
@@ -551,6 +669,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             {
                 if (_painter != null && _currentTool == BrushToolMode.Erase) _painter.BrushSize = (float)v;
                 if (_lblEraseSize != null) _lblEraseSize.Text = $"{Mathf.RoundToInt(v)} px";
+                QueueCanvasRedraw();
             };
         }
 
@@ -560,6 +679,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             {
                 if (_painter != null && _currentTool == BrushToolMode.Erase) _painter.BrushHardness = (float)v;
                 if (_lblEraseHardness != null) _lblEraseHardness.Text = $"{Mathf.RoundToInt(v * 100)}%";
+                QueueCanvasRedraw();
             };
         }
 
@@ -638,6 +758,21 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 if (_painter?.MagicWandTool != null && _painter.MagicWandTool.IsolateSubmesh != isolate)
                 {
                     _painter.MagicWandTool.IsolateSubmesh = isolate;
+                    if (_painter.MagicWandTool.HasSelection)
+                    {
+                        _painter.MagicWandTool.RecomputeWithTolerance(_painter.MagicWandTool.Tolerance);
+                    }
+                }
+            };
+        }
+
+        if (_chkAntiAliasing != null)
+        {
+            _chkAntiAliasing.Toggled += (on) =>
+            {
+                if (_painter?.MagicWandTool != null && _painter.MagicWandTool.AntiAliasing != on)
+                {
+                    _painter.MagicWandTool.AntiAliasing = on;
                     if (_painter.MagicWandTool.HasSelection)
                     {
                         _painter.MagicWandTool.RecomputeWithTolerance(_painter.MagicWandTool.Tolerance);
@@ -832,6 +967,66 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             };
         }
 
+        // Shape Tool events
+        if (_btnShapeSquare != null) _btnShapeSquare.Pressed += () => SetShapeType(CanvasShapeType.Square);
+        if (_btnShapeCircle != null) _btnShapeCircle.Pressed += () => SetShapeType(CanvasShapeType.Circle);
+        if (_btnShapeLine != null) _btnShapeLine.Pressed += () => SetShapeType(CanvasShapeType.Line);
+
+        if (_optShapeFillMode != null)
+        {
+            _optShapeFillMode.ItemSelected += (idx) =>
+            {
+                if (_painter?.ShapeTool != null)
+                {
+                    _painter.ShapeTool.FillMode = (ShapeFillMode)idx;
+                    TriggerShapePreviewUpdate();
+                }
+            };
+        }
+
+        if (_sliderStrokeWidth != null)
+        {
+            _sliderStrokeWidth.ValueChanged += (v) =>
+            {
+                if (_painter?.ShapeTool != null) _painter.ShapeTool.StrokeWidth = (float)v;
+                if (_lblStrokeWidth != null) _lblStrokeWidth.Text = $"{Mathf.RoundToInt(v)} px";
+                TriggerShapePreviewUpdate();
+            };
+        }
+
+        if (_sliderShapeWidth != null)
+        {
+            _sliderShapeWidth.ValueChanged += (v) =>
+            {
+                if (_painter?.ShapeTool != null) _painter.ShapeTool.Width = (float)v;
+                if (_lblShapeWidth != null) _lblShapeWidth.Text = $"{Mathf.RoundToInt(v)} px";
+                TriggerShapePreviewUpdate();
+            };
+        }
+
+        if (_sliderShapeHeight != null)
+        {
+            _sliderShapeHeight.ValueChanged += (v) =>
+            {
+                if (_painter?.ShapeTool != null) _painter.ShapeTool.Height = (float)v;
+                if (_lblShapeHeight != null) _lblShapeHeight.Text = $"{Mathf.RoundToInt(v)} px";
+                TriggerShapePreviewUpdate();
+            };
+        }
+
+        if (_sliderShapeRot != null)
+        {
+            _sliderShapeRot.ValueChanged += (v) =>
+            {
+                if (_painter?.ShapeTool != null) _painter.ShapeTool.RotationDegrees = (float)v;
+                if (_lblShapeRot != null) _lblShapeRot.Text = $"{Mathf.RoundToInt(v)}°";
+                TriggerShapePreviewUpdate();
+            };
+        }
+
+        if (_btnCommitShape != null) _btnCommitShape.Pressed += CommitCurrentShape;
+        if (_btnCancelShape != null) _btnCancelShape.Pressed += CancelCurrentShape;
+
         // Dragging support
         if (_dragHandle != null)
         {
@@ -1009,6 +1204,113 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
     }
 
+
+
+    public void SelectSelectionTool(SelectionToolType type, bool forceFlyoutOpen = false)
+    {
+        _currentSelectionType = type;
+        if (_painter?.SelectionMask != null)
+        {
+            _painter.SelectionMask.CurrentToolType = type;
+        }
+        UpdateSelectionToolIcon();
+        SelectTool(BrushToolMode.Selection, forceFlyoutOpen);
+        UpdateSelectionFlyoutActiveState();
+    }
+
+    private void UpdateSelectionToolIcon()
+    {
+        Button targetBtn = _btnToolSelection ?? _btnToolWand;
+        if (targetBtn == null) return;
+        Texture2D icon = _currentSelectionType switch
+        {
+            SelectionToolType.Lasso => _iconLasso ?? GD.Load<Texture2D>("res://assets/at-icons/lasso.svg"),
+            SelectionToolType.Polygonal => _iconPoly ?? GD.Load<Texture2D>("res://assets/at-icons/mesh_polygon.svg"),
+            _ => _iconRect ?? GD.Load<Texture2D>("res://assets/at-icons/selection_square.svg")
+        };
+        if (icon != null)
+        {
+            targetBtn.Icon = icon;
+        }
+    }
+
+    public void InvertSelection()
+    {
+        if (_painter?.SelectionMask != null)
+        {
+            _painter.SelectionMask.Invert();
+            _painter.SyncSelectionMaskState();
+            UpdateWandUI();
+            var uvCanvas = GetNodeOrNull<UVCanvas2DUI>("../UVCanvas2D")
+                        ?? GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
+        }
+    }
+
+    public void ClearSelection()
+    {
+        if (_painter?.SelectionMask != null)
+        {
+            _painter.SelectionMask.Clear();
+            _painter.SyncSelectionMaskState();
+            UpdateWandUI();
+            var uvCanvas = GetNodeOrNull<UVCanvas2DUI>("../UVCanvas2D")
+                        ?? GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
+        }
+    }
+
+    private void BuildSelectionFlyoutControls()
+    {
+        if (_selectionOptions == null)
+        {
+            _selectionOptions = ResolveNode<Control>("SelectionOptions", "SelectionOptions");
+        }
+        if (_selectionOptions == null) return;
+
+        _btnFlyoutRect = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionModes/BtnModeRect") ?? ResolveNode<Button>("BtnModeRect", "BtnModeRect");
+        _btnFlyoutLasso = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionModes/BtnModeLasso") ?? ResolveNode<Button>("BtnModeLasso", "BtnModeLasso");
+        _btnFlyoutPoly = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionModes/BtnModePoly") ?? ResolveNode<Button>("BtnModePoly", "BtnModePoly");
+
+        if (_btnFlyoutRect != null)
+        {
+            _btnFlyoutRect.Icon = _iconRect;
+            _btnFlyoutRect.Pressed += () => SelectSelectionTool(SelectionToolType.Rectangular);
+        }
+        if (_btnFlyoutLasso != null)
+        {
+            _btnFlyoutLasso.Icon = _iconLasso;
+            _btnFlyoutLasso.Pressed += () => SelectSelectionTool(SelectionToolType.Lasso);
+        }
+        if (_btnFlyoutPoly != null)
+        {
+            _btnFlyoutPoly.Icon = _iconPoly;
+            _btnFlyoutPoly.Pressed += () => SelectSelectionTool(SelectionToolType.Polygonal);
+        }
+
+        var btnInvert = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionActions/BtnInvertSelection") ?? ResolveNode<Button>("BtnInvertSelection", "BtnInvertSelection");
+        if (btnInvert != null)
+        {
+            btnInvert.Icon = _iconInvert;
+            btnInvert.Pressed += InvertSelection;
+        }
+
+        var btnClear = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionActions/BtnClearSelection") ?? ResolveNode<Button>("BtnClearSelection", "BtnClearSelection");
+        if (btnClear != null)
+        {
+            btnClear.Pressed += ClearSelection;
+        }
+
+        UpdateSelectionFlyoutActiveState();
+    }
+
+    private void UpdateSelectionFlyoutActiveState()
+    {
+        if (_btnFlyoutRect != null) _btnFlyoutRect.ButtonPressed = (_currentTool == BrushToolMode.Selection && _currentSelectionType == SelectionToolType.Rectangular);
+        if (_btnFlyoutLasso != null) _btnFlyoutLasso.ButtonPressed = (_currentTool == BrushToolMode.Selection && _currentSelectionType == SelectionToolType.Lasso);
+        if (_btnFlyoutPoly != null) _btnFlyoutPoly.ButtonPressed = (_currentTool == BrushToolMode.Selection && _currentSelectionType == SelectionToolType.Polygonal);
+    }
+
     public void CloseFlyoutIfUnpinned()
     {
         if (!IsPinned && _flyoutPanel != null && _flyoutPanel.Visible)
@@ -1049,12 +1351,24 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         UpdateButtonState(_btnToolBrush, mode == BrushToolMode.Paint);
         UpdateButtonState(_btnToolErase, mode == BrushToolMode.Erase);
         UpdateButtonState(_btnToolFill, mode == BrushToolMode.BucketFill);
+        UpdateButtonState(_btnToolSelection, mode == BrushToolMode.Selection);
         UpdateButtonState(_btnToolWand, mode == BrushToolMode.MagicWand);
         UpdateButtonState(_btnToolDecal, mode == BrushToolMode.Decal);
         UpdateButtonState(_btnToolText, mode == BrushToolMode.Text);
+        UpdateButtonState(_btnToolShape, mode == BrushToolMode.Shape);
 
         UpdateSelectTargetLabel();
         UpdateFlyoutSections(mode);
+
+        if (mode == BrushToolMode.Selection)
+        {
+            UpdateSelectionToolIcon();
+            UpdateSelectionFlyoutActiveState();
+        }
+        else if (mode == BrushToolMode.Shape)
+        {
+            SyncShapeControls();
+        }
 
         if (mode == BrushToolMode.BucketFill && _sliderBucketTolerance != null && _painter != null)
         {
@@ -1094,8 +1408,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_eraserOptions != null) _eraserOptions.Visible = (mode == BrushToolMode.Erase);
         if (_bucketFillOptions != null) _bucketFillOptions.Visible = (mode == BrushToolMode.BucketFill);
         if (_wandOptions != null) _wandOptions.Visible = (mode == BrushToolMode.MagicWand);
+        if (_selectionOptions != null) _selectionOptions.Visible = (mode == BrushToolMode.Selection);
         if (_decalOptions != null) _decalOptions.Visible = (mode == BrushToolMode.Decal);
         if (_textOptions != null) _textOptions.Visible = (mode == BrushToolMode.Text);
+        if (_shapeOptions != null) _shapeOptions.Visible = (mode == BrushToolMode.Shape);
 
         if (_lblFlyoutTitle != null)
         {
@@ -1105,9 +1421,11 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 BrushToolMode.Paint => "BRUSH OPTIONS",
                 BrushToolMode.Erase => "ERASER OPTIONS",
                 BrushToolMode.BucketFill => "BUCKET FILL",
+                BrushToolMode.Selection => "SELECTION TOOLKIT",
                 BrushToolMode.MagicWand => "MAGIC WAND MASK",
                 BrushToolMode.Decal => "DECAL STAMPER",
                 BrushToolMode.Text => "TEXT PROJECTOR",
+                BrushToolMode.Shape => "SHAPE TOOL",
                 _ => "TOOL OPTIONS"
             };
         }
@@ -1187,9 +1505,11 @@ public void UpdateTooltipsAndKeymaps()
         if (_btnToolBrush != null) _btnToolBrush.TooltipText = $"Paint Brush [{KeybindsManager.GetShortcutText("paint_brush")}]";
         if (_btnToolErase != null) _btnToolErase.TooltipText = $"Eraser [{KeybindsManager.GetShortcutText("paint_eraser")}]";
         if (_btnToolFill != null) _btnToolFill.TooltipText = $"Bucket Fill Submesh [{KeybindsManager.GetShortcutText("paint_bucket")}]";
-        if (_btnToolWand != null) _btnToolWand.TooltipText = $"Magic Wand Color Mask [{KeybindsManager.GetShortcutText("paint_wand")}]";
+        if (_btnToolSelection != null) _btnToolSelection.TooltipText = $"Selection Toolkit [M / L / P]\nLeft-click to select, right-click for modes";
+        if (_btnToolWand != null) _btnToolWand.TooltipText = $"Magic Wand Mask [{KeybindsManager.GetShortcutText("paint_wand")}]\nClick surface to sample color range";
         if (_btnToolDecal != null) _btnToolDecal.TooltipText = $"Decal Stamper [{KeybindsManager.GetShortcutText("paint_decal")}]";
         if (_btnToolText != null) _btnToolText.TooltipText = $"Text Projector [{KeybindsManager.GetShortcutText("paint_text")}]";
+        if (_btnToolShape != null) _btnToolShape.TooltipText = "Shape Tool [U]\nRectangle, Circle, Line";
         if (_btnMirror != null) _btnMirror.TooltipText = $"Mirror Symmetry [{KeybindsManager.GetShortcutText("paint_mirror")}]";
         if (_btnUndo != null) _btnUndo.TooltipText = $"Undo [{KeybindsManager.GetShortcutText("paint_undo")}]";
         if (_btnRedo != null) _btnRedo.TooltipText = $"Redo [{KeybindsManager.GetShortcutText("paint_redo")}]";
@@ -1199,9 +1519,9 @@ public void UpdateTooltipsAndKeymaps()
             _lblKeymapHint.Text = $"[{KeybindsManager.GetShortcutText("paint_brush")}] Brush   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_eraser")}] Erase   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_bucket")}] Fill   " +
-                                  $"[{KeybindsManager.GetShortcutText("paint_wand")}] Wand   " +
+                                  $"[M/L/P] Select   " +
+                                  $"[Ctrl+Shift+I] Invert   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_decal")}] Decal   " +
-                                  $"[{KeybindsManager.GetShortcutText("paint_text")}] Text   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_mirror")}] Mirror";
         }
     }
@@ -1248,6 +1568,10 @@ public void UpdateTooltipsAndKeymaps()
         {
             _chkIsolateSubmesh.SetPressedNoSignal(wand.IsolateSubmesh);
         }
+        if (_chkAntiAliasing != null)
+        {
+            _chkAntiAliasing.SetPressedNoSignal(wand.AntiAliasing);
+        }
     }
 
     public void SyncFromPainter()
@@ -1261,6 +1585,7 @@ public void UpdateTooltipsAndKeymaps()
         if (_optBrushShape != null) _optBrushShape.Select((int)_painter.BrushShape);
         if (_optEraseShape != null) _optEraseShape.Select((int)_painter.EraserShape);
         if (_optBlendMode != null) _optBlendMode.Select(_painter.BlendMode);
+        if (_chkFrontFacesOnly != null) _chkFrontFacesOnly.SetPressedNoSignal(_painter.FrontFacesOnly);
         if (_sliderBucketTolerance != null)
         {
             _sliderBucketTolerance.SetValueNoSignal(_painter.BucketFillTolerance);
@@ -1335,6 +1660,41 @@ public void UpdateTooltipsAndKeymaps()
             return;
         }
 
+        if (@event.IsActionPressed("paint_selection_invert") || (keyEvent.Keycode == Key.I && keyEvent.CtrlPressed && keyEvent.ShiftPressed))
+        {
+            InvertSelection();
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_selection_clear") || (keyEvent.Keycode == Key.D && keyEvent.CtrlPressed && !keyEvent.ShiftPressed && !keyEvent.AltPressed))
+        {
+            ClearSelection();
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_select_rect") || (keyEvent.Keycode == Key.M && !keyEvent.CtrlPressed && !keyEvent.AltPressed && !keyEvent.ShiftPressed))
+        {
+            SelectSelectionTool(SelectionToolType.Rectangular, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_select_lasso") || (keyEvent.Keycode == Key.L && !keyEvent.CtrlPressed && !keyEvent.AltPressed && !keyEvent.ShiftPressed))
+        {
+            SelectSelectionTool(SelectionToolType.Lasso, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_select_poly") || (keyEvent.Keycode == Key.P && !keyEvent.CtrlPressed && !keyEvent.AltPressed && !keyEvent.ShiftPressed))
+        {
+            SelectSelectionTool(SelectionToolType.Polygonal, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
         if (@event.IsActionPressed("paint_wand"))
         {
             SelectTool(BrushToolMode.MagicWand, forceFlyoutOpen: true);
@@ -1390,6 +1750,30 @@ public void UpdateTooltipsAndKeymaps()
             GetViewport()?.SetInputAsHandled();
             return;
         }
+
+        // Shape Tool shortcut
+        if (keyEvent.Keycode == Key.U && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+        {
+            SelectTool(BrushToolMode.Shape, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (_currentTool == BrushToolMode.Shape)
+        {
+            if (keyEvent.Keycode == Key.Enter || keyEvent.Keycode == Key.KpEnter)
+            {
+                CommitCurrentShape();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (keyEvent.Keycode == Key.Escape)
+            {
+                CancelCurrentShape();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+        }
     }
 
     private void OnPainterTargetMeshChanged(MeshInstance3D mesh, int surfaceIndex)
@@ -1430,7 +1814,114 @@ public void UpdateTooltipsAndKeymaps()
             {
                 _painter.MeshHierarchy.TargetMeshChanged -= OnPainterTargetMeshChanged;
             }
+            if (_painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged -= OnShapeToolChanged;
+                _painter.ShapeTool.ShapeCommitted -= OnShapeToolCommitted;
+                _painter.ShapeTool.ShapeCancelled -= OnShapeToolCancelled;
+            }
         }
         base._ExitTree();
+    }
+
+    public void SetShapeType(CanvasShapeType type)
+    {
+        if (_painter?.ShapeTool != null)
+        {
+            _painter.ShapeTool.ShapeType = type;
+        }
+        if (_btnShapeSquare != null) _btnShapeSquare.ButtonPressed = (type == CanvasShapeType.Square);
+        if (_btnShapeCircle != null) _btnShapeCircle.ButtonPressed = (type == CanvasShapeType.Circle);
+        if (_btnShapeLine != null) _btnShapeLine.ButtonPressed = (type == CanvasShapeType.Line);
+        TriggerShapePreviewUpdate();
+    }
+
+    public void TriggerShapePreviewUpdate()
+    {
+        if (_painter != null && _painter.ShapeTool != null)
+        {
+            _painter.LayerManager?.UpdateShapePreview(_painter.ShapeTool, _painter.BrushColor);
+        }
+        QueueCanvasRedraw();
+    }
+
+    public void CommitCurrentShape()
+    {
+        if (_painter?.ShapeTool != null && _painter.LayerManager != null)
+        {
+            _painter.ShapeTool.CommitShape(_painter.LayerManager, _painter.BrushColor, (LayerBlendMode)_painter.BlendMode, _painter.MagicWandTool);
+            QueueCanvasRedraw();
+        }
+    }
+
+    public void CancelCurrentShape()
+    {
+        if (_painter?.ShapeTool != null)
+        {
+            _painter.ShapeTool.CancelShape();
+            _painter.LayerManager?.RecompositeGpuLayers();
+            QueueCanvasRedraw();
+        }
+    }
+
+    private void OnShapeToolChanged()
+    {
+        SyncShapeControls();
+        TriggerShapePreviewUpdate();
+    }
+
+    private void OnShapeToolCommitted()
+    {
+        SyncShapeControls();
+        QueueCanvasRedraw();
+    }
+
+    private void OnShapeToolCancelled()
+    {
+        SyncShapeControls();
+        QueueCanvasRedraw();
+    }
+
+    public void SyncShapeControls()
+    {
+        if (_painter?.ShapeTool == null) return;
+        var st = _painter.ShapeTool;
+
+        if (_btnShapeSquare != null) _btnShapeSquare.ButtonPressed = (st.ShapeType == CanvasShapeType.Square);
+        if (_btnShapeCircle != null) _btnShapeCircle.ButtonPressed = (st.ShapeType == CanvasShapeType.Circle);
+        if (_btnShapeLine != null) _btnShapeLine.ButtonPressed = (st.ShapeType == CanvasShapeType.Line);
+
+        if (_optShapeFillMode != null) _optShapeFillMode.Select((int)st.FillMode);
+
+        if (_sliderStrokeWidth != null)
+        {
+            _sliderStrokeWidth.SetValueNoSignal(st.StrokeWidth);
+            if (_lblStrokeWidth != null) _lblStrokeWidth.Text = $"{Mathf.RoundToInt(st.StrokeWidth)} px";
+        }
+
+        if (_sliderShapeWidth != null)
+        {
+            _sliderShapeWidth.SetValueNoSignal(st.Width);
+            if (_lblShapeWidth != null) _lblShapeWidth.Text = $"{Mathf.RoundToInt(st.Width)} px";
+        }
+
+        if (_sliderShapeHeight != null)
+        {
+            _sliderShapeHeight.SetValueNoSignal(st.Height);
+            if (_lblShapeHeight != null) _lblShapeHeight.Text = $"{Mathf.RoundToInt(st.Height)} px";
+        }
+
+        if (_sliderShapeRot != null)
+        {
+            _sliderShapeRot.SetValueNoSignal(st.RotationDegrees);
+            if (_lblShapeRot != null) _lblShapeRot.Text = $"{Mathf.RoundToInt(st.RotationDegrees)}°";
+        }
+    }
+
+    public void QueueCanvasRedraw()
+    {
+        var uvCanvas = GetNodeOrNull<UVCanvas2DUI>("../UVCanvas2D")
+                    ?? GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI;
+        uvCanvas?.QueueCanvasRedraw();
     }
 }

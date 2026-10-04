@@ -154,7 +154,11 @@ func _create_dummy_texture() -> void:
 	dummy_fmt.height = 1
 	dummy_fmt.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
 	dummy_fmt.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	dummy_fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+	dummy_fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 	var dummy_img = Image.create(1, 1, false, Image.FORMAT_RGBAH)
 	dummy_texture_rid = rd.texture_create(dummy_fmt, RDTextureView.new(), [dummy_img.get_data()])
 
@@ -202,20 +206,43 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 
 	var base_tex_rid: RID = fallback_rid
 
+	# 1. Identify active target manager (which always maps to slot 0 for brush compute)
+	var active_mgr: OverlayAtlasManager = null
 	for item in all_managers:
 		var manager := item as OverlayAtlasManager
 		if manager == null or not is_instance_valid(manager) or manager.is_queued_for_deletion():
 			continue
-		if manager.atlas_index < 0 or manager.atlas_index >= 8:
+		if manager.get("is_active_target") == true:
+			active_mgr = manager
+			break
+
+	if active_mgr != null and active_mgr.atlas_texture_rid is RID and active_mgr.atlas_texture_rid.is_valid() and rd.texture_is_valid(active_mgr.atlas_texture_rid):
+		active_atlases[0] = active_mgr.atlas_texture_rid
+		if active_mgr.base_texture_rid is RID and active_mgr.base_texture_rid.is_valid() and rd.texture_is_valid(active_mgr.base_texture_rid):
+			base_tex_rid = active_mgr.base_texture_rid
+
+	# 2. Fill remaining slots with other managers
+	for item in all_managers:
+		var manager := item as OverlayAtlasManager
+		if manager == null or not is_instance_valid(manager) or manager.is_queued_for_deletion():
 			continue
-		if manager.atlas_texture_rid is RID and manager.atlas_texture_rid.is_valid() and rd.texture_is_valid(manager.atlas_texture_rid):
-			active_atlases[manager.atlas_index] = manager.atlas_texture_rid
-		if manager.base_texture_rid is RID and manager.base_texture_rid.is_valid() and rd.texture_is_valid(manager.base_texture_rid):
-			base_tex_rid = manager.base_texture_rid
+		if manager == active_mgr:
+			continue
+		var idx: int = manager.atlas_index
+		if active_mgr != null and idx == 0:
+			# Slot 0 is strictly reserved for active_mgr
+			continue
+		if idx >= 0 and idx < 8:
+			if manager.atlas_texture_rid is RID and manager.atlas_texture_rid.is_valid() and rd.texture_is_valid(manager.atlas_texture_rid):
+				active_atlases[idx] = manager.atlas_texture_rid
+			if (not base_tex_rid.is_valid() or base_tex_rid == fallback_rid) and manager.base_texture_rid is RID and manager.base_texture_rid.is_valid() and rd.texture_is_valid(manager.base_texture_rid):
+				base_tex_rid = manager.base_texture_rid
 
 	var uniforms: Array[RDUniform] = []
 	for i in range(8):
-		var tex_rid: RID = active_atlases[i] if (active_atlases[i] is RID and active_atlases[i].is_valid() and rd.texture_is_valid(active_atlases[i])) else fallback_rid
+		var tex_rid: RID = active_atlases[i]
+		if not (tex_rid is RID and tex_rid.is_valid() and rd.texture_is_valid(tex_rid)):
+			tex_rid = fallback_rid
 		var uniform = RDUniform.new()
 		uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 		uniform.binding = i
@@ -246,9 +273,16 @@ func get_atlas_textures(all_managers: Array[Node]) -> void:
 
 	# Create uniform set using UniformSetCacheRD to manage lifecycle across canvas resizes
 	if shader.is_valid() and fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid):
-		atlas_texture_uniform_set = UniformSetCacheRD.get_cache(shader, 2, uniforms)
-		if not atlas_texture_uniform_set.is_valid():
-			atlas_texture_uniform_set = rd.uniform_set_create(uniforms, shader, 2)
+		var all_valid := true
+		for u in uniforms:
+			for id in u.get_ids():
+				if not (id is RID and id.is_valid() and rd.texture_is_valid(id)):
+					all_valid = false
+					break
+		if all_valid:
+			atlas_texture_uniform_set = UniformSetCacheRD.get_cache(shader, 2, uniforms)
+			if not atlas_texture_uniform_set.is_valid():
+				atlas_texture_uniform_set = rd.uniform_set_create(uniforms, shader, 2)
 
 
 func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data: RenderData) -> void:
@@ -277,12 +311,27 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 		if size.x == 0 and size.y == 0:
 			return
 
-		# We can use a compute shader here.
+		var tex_width: int = size.x
+		var tex_height: int = size.y
+		var center := Vector2(float(tex_width) * 0.5, float(tex_height) * 0.5)
+		if "brush_center" in camera_brush and camera_brush.brush_center.x >= 0.0 and camera_brush.brush_center.y >= 0.0:
+			center = camera_brush.brush_center
+
+		var brush_radius: float = minf(float(tex_width), float(tex_height)) * 0.5
+		if "brush_radius" in camera_brush and camera_brush.brush_radius > 0.0:
+			brush_radius = camera_brush.brush_radius
+		brush_radius += float(camera_brush.max_bleed)
+
+		var min_x: int = maxi(0, int(center.x - brush_radius))
+		var max_x: int = mini(tex_width - 1, int(center.x + brush_radius))
+		var min_y: int = maxi(0, int(center.y - brush_radius))
+		var max_y: int = mini(tex_height - 1, int(center.y + brush_radius))
+
 		@warning_ignore("integer_division")
-		var x_groups := (size.x - 1) / 8 + 1
+		var x_groups: int = clampi(int(ceil(float(max_x - min_x + 1) / 16.0)), 1, 16)
 		@warning_ignore("integer_division")
-		var y_groups := (size.y - 1) / 8 + 1
-		var z_groups := 1
+		var y_groups: int = clampi(int(ceil(float(max_y - min_y + 1) / 16.0)), 1, 16)
+		var z_groups: int = 1
 
 		# prepare push constant
 		var linear_color := camera_brush.color.srgb_to_linear()
@@ -298,7 +347,11 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 			float(camera_brush.max_bleed),
 			float(1.0 if (camera_brush.is_erase or camera_brush.color.a < 0.0) else 0.0),
 			float(camera_brush.blend_mode),
-			float(1.0 if camera_brush.use_selection_mask else 0.0)
+			float(1.0 if camera_brush.use_selection_mask else 0.0),
+			float(min_x),
+			float(min_y),
+			float(max_x),
+			float(max_y)
 		])
 
 

@@ -54,9 +54,26 @@ custom_minimum_size = Vector2(80, 0)
 layout_mode = 2
 text = "Canvas Res:"
 
-[node name="ResolutionOption" type="OptionButton" parent="HeaderCard/VBox/HBoxRes" unique_id=1010101011]
+[node name="ResolutionLabel" type="Label" parent="HeaderCard/VBox/HBoxRes" unique_id=1010101011]
 layout_mode = 2
 size_flags_horizontal = 3
+text = "2048 x 2048"
+
+[node name="HBoxProject" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101099]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnSaveProject" type="Button" parent="HeaderCard/VBox/HBoxProject" unique_id=1010101091]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "Save Project (.dptex)..."
+
+[node name="BtnLoadProject" type="Button" parent="HeaderCard/VBox/HBoxProject" unique_id=1010101092]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "Load Project..."
 
 [node name="ActiveMeshLabel" type="Label" parent="HeaderCard/VBox" unique_id=1010101012]
 layout_mode = 2

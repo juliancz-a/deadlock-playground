@@ -28,50 +28,36 @@ namespace DeadlockPlayground.Painter
         /// </summary>
         public float EffectiveTolerance => MathF.Pow(_tolerance, 2.2f) * 0.5f;
 
+        private readonly SelectionMask _selectionMask;
+        public SelectionMask SelectionMask => _selectionMask;
+
         public Color TargetColor { get; private set; } = Colors.White;
-        public bool HasSelection { get; private set; } = false;
-        private bool _useSelectionMask = true;
+        public bool HasSelection => _selectionMask?.HasSelection ?? false;
+        public bool HasActiveSelection => (_selectionMask?.HasSelection ?? false) && (_selectionMask?.UseSelectionMask ?? false);
+
         public bool UseSelectionMask
         {
-            get => _useSelectionMask;
+            get => _selectionMask?.UseSelectionMask ?? false;
             set
             {
-                if (_useSelectionMask != value)
+                if (_selectionMask != null && _selectionMask.UseSelectionMask != value)
                 {
-                    _useSelectionMask = value;
+                    _selectionMask.UseSelectionMask = value;
                     EmitSignal(SignalName.MaskUpdated, HasActiveSelection);
                 }
             }
         }
         public bool Contiguous { get; set; } = true;
         public bool IsolateSubmesh { get; set; } = false;
+        public bool AntiAliasing { get; set; } = true;
 
-        private Rid _maskTextureRid = new();
-        public Rid SelectionMaskRid => _maskTextureRid;
+        public Rid SelectionMaskRid => _selectionMask?.MaskTextureRid ?? new Rid();
+        public Texture2Drd MaskTextureResource => _selectionMask?.MaskTextureResource;
 
-        private Texture2Drd _maskTextureResource;
-        public Texture2Drd MaskTextureResource
-        {
-            get
-            {
-                if (_maskTextureResource == null)
-                {
-                    _maskTextureResource = new Texture2Drd();
-                }
-                if (_maskTextureRid.IsValid && _maskTextureResource.TextureRdRid != _maskTextureRid)
-                {
-                    _maskTextureResource.TextureRdRid = _maskTextureRid;
-                }
-                return _maskTextureResource;
-            }
-        }
-
-        private int _currentAtlasSize = 0;
-        public int CurrentAtlasSize => _currentAtlasSize;
+        public int CurrentAtlasSize => _selectionMask?.CanvasSize ?? 2048;
 
         // CPU-side active selection mask buffer (1 byte per texel in atlas: 0 = unselected, 255 = selected)
-        private byte[] _activeAtlasMask;
-        public byte[] ActiveAtlasMask => _activeAtlasMask;
+        public byte[] ActiveAtlasMask => _selectionMask?.Buffer;
 
         public class MagicWandSeedPoint
         {
@@ -82,85 +68,47 @@ namespace DeadlockPlayground.Painter
             public MagicWandCombineMode CombineMode;
             public bool Contiguous;
             public bool IsolateSubmesh;
+            public bool AntiAliasing;
         }
 
         private readonly List<MagicWandSeedPoint> _seedPoints = new();
         public IReadOnlyList<MagicWandSeedPoint> SeedPoints => _seedPoints;
 
-        public MagicWandTool()
+        public MagicWandTool(SelectionMask selectionMask = null)
         {
+            _selectionMask = selectionMask ?? new SelectionMask(2048);
+            _selectionMask.MaskUpdated += (hasMask) => EmitSignal(SignalName.MaskUpdated, hasMask);
         }
-
-        public bool HasActiveSelection => HasSelection;
 
         public bool IsPixelSelected(int atlasX, int atlasY)
         {
-            if (!HasSelection || _activeAtlasMask == null) return true;
-            if (atlasX < 0 || atlasY < 0 || atlasX >= _currentAtlasSize || atlasY >= _currentAtlasSize) return false;
-            return _activeAtlasMask[atlasY * _currentAtlasSize + atlasX] >= 128;
+            return _selectionMask?.IsPixelSelected(atlasX, atlasY) ?? true;
         }
 
         public float GetPixelMaskValue(int atlasX, int atlasY)
         {
-            if (!HasSelection || _activeAtlasMask == null) return 1.0f;
-            if (atlasX < 0 || atlasY < 0 || atlasX >= _currentAtlasSize || atlasY >= _currentAtlasSize) return 0.0f;
-            return _activeAtlasMask[atlasY * _currentAtlasSize + atlasX] * (1.0f / 255.0f);
+            return _selectionMask?.GetPixelMaskValue(atlasX, atlasY) ?? 1.0f;
         }
 
         public bool IsUvSelected(Vector2 uv)
         {
-            if (!HasSelection || _activeAtlasMask == null || _currentAtlasSize <= 0) return true;
-            int x = Mathf.Clamp((int)(uv.X * _currentAtlasSize), 0, _currentAtlasSize - 1);
-            int y = Mathf.Clamp((int)(uv.Y * _currentAtlasSize), 0, _currentAtlasSize - 1);
+            if (_selectionMask == null || !_selectionMask.HasSelection || _selectionMask.CanvasSize <= 0) return true;
+            int x = Mathf.Clamp((int)(uv.X * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
+            int y = Mathf.Clamp((int)(uv.Y * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
             return IsPixelSelected(x, y);
         }
 
         public float GetUvMaskValue(Vector2 uv)
         {
-            if (!HasSelection || _activeAtlasMask == null || _currentAtlasSize <= 0) return 1.0f;
-            int x = Mathf.Clamp((int)(uv.X * _currentAtlasSize), 0, _currentAtlasSize - 1);
-            int y = Mathf.Clamp((int)(uv.Y * _currentAtlasSize), 0, _currentAtlasSize - 1);
+            if (_selectionMask == null || !_selectionMask.HasSelection || _selectionMask.CanvasSize <= 0) return 1.0f;
+            int x = Mathf.Clamp((int)(uv.X * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
+            int y = Mathf.Clamp((int)(uv.Y * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
             return GetPixelMaskValue(x, y);
         }
 
         private void EnsureMaskTexture(RenderingDevice rd, int atlasSize)
         {
-            if (atlasSize <= 0) atlasSize = 2048;
-
-            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid) && _currentAtlasSize == atlasSize)
-            {
-                return;
-            }
-
-            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
-            {
-                rd.FreeRid(_maskTextureRid);
-                _maskTextureRid = new Rid();
-            }
-
-            _currentAtlasSize = atlasSize;
-            _activeAtlasMask = new byte[atlasSize * atlasSize];
-
-            var fmt = new RDTextureFormat
-            {
-                Width = (uint)atlasSize,
-                Height = (uint)atlasSize,
-                Format = RenderingDevice.DataFormat.R16G16B16A16Sfloat,
-                TextureType = RenderingDevice.TextureType.Type2D,
-                UsageBits = RenderingDevice.TextureUsageBits.SamplingBit |
-                            RenderingDevice.TextureUsageBits.StorageBit |
-                            RenderingDevice.TextureUsageBits.CanUpdateBit |
-                            RenderingDevice.TextureUsageBits.CanCopyFromBit
-            };
-
-            var view = new RDTextureView();
-            byte[] zeroBytes = new byte[atlasSize * atlasSize * 8];
-            _maskTextureRid = rd.TextureCreate(fmt, view, new Godot.Collections.Array<byte[]> { zeroBytes });
-            if (_maskTextureResource != null)
-            {
-                _maskTextureResource.TextureRdRid = _maskTextureRid;
-            }
-            GD.Print($"[MagicWandTool] Created selection mask GPU texture ({atlasSize}x{atlasSize}) RID: {_maskTextureRid.Id}");
+            _selectionMask.EnsureMaskTexture(rd, atlasSize);
         }
 
         public static float GetColorDistance(Color c1, Color c2)
@@ -220,16 +168,13 @@ namespace DeadlockPlayground.Painter
 
             if (atlasSize <= 0) atlasSize = 2048;
             EnsureMaskTexture(rd, atlasSize);
-            if (!_maskTextureRid.IsValid)
+            if (!_selectionMask.MaskTextureRid.IsValid)
             {
                 GD.PrintErr("[MagicWandTool] Mask texture is not valid.");
                 return false;
             }
 
-            if (_activeAtlasMask == null || _activeAtlasMask.Length != atlasSize * atlasSize)
-            {
-                _activeAtlasMask = new byte[atlasSize * atlasSize];
-            }
+            _selectionMask.EnsureBuffer(atlasSize);
 
             if (combineMode == MagicWandCombineMode.Replace)
             {
@@ -253,13 +198,13 @@ namespace DeadlockPlayground.Painter
                     TargetColor = seedColor,
                     CombineMode = combineMode,
                     Contiguous = Contiguous,
-                    IsolateSubmesh = IsolateSubmesh
+                    IsolateSubmesh = IsolateSubmesh,
+                    AntiAliasing = AntiAliasing
                 });
             }
 
             RebuildMaskFromSeedPoints(rd, atlasSize);
 
-            HasSelection = _seedPoints.Count > 0;
             UseSelectionMask = true;
 
             EmitSignal(SignalName.ColorSampled, TargetColor);
@@ -316,11 +261,9 @@ namespace DeadlockPlayground.Painter
 
         private void RebuildMaskFromSeedPoints(RenderingDevice rd, int atlasSize)
         {
-            if (_activeAtlasMask == null || _activeAtlasMask.Length != atlasSize * atlasSize)
-            {
-                _activeAtlasMask = new byte[atlasSize * atlasSize];
-            }
-            Array.Clear(_activeAtlasMask, 0, _activeAtlasMask.Length);
+            _selectionMask.EnsureBuffer(atlasSize);
+            byte[] activeMask = _selectionMask.Buffer;
+            Array.Clear(activeMask, 0, activeMask.Length);
 
             foreach (var seed in _seedPoints)
             {
@@ -401,7 +344,7 @@ namespace DeadlockPlayground.Painter
                                 submeshMask[nIdx] = 255;
                                 q[qTail++] = nIdx;
                             }
-                            else if (dist <= softTol)
+                            else if (seed.AntiAliasing && dist <= softTol)
                             {
                                 float match = 1.0f - (dist - tol) / Math.Max(0.0001f, softTol - tol);
                                 submeshMask[nIdx] = (byte)Math.Clamp((int)(match * 255f), 1, 255);
@@ -435,7 +378,7 @@ namespace DeadlockPlayground.Painter
                                 if (py < localBB.MinY) localBB.MinY = py;
                                 if (py > localBB.MaxY) localBB.MaxY = py;
                             }
-                            else if (dist <= softTol)
+                            else if (seed.AntiAliasing && dist <= softTol)
                             {
                                 float match = 1.0f - (dist - tol) / Math.Max(0.0001f, softTol - tol);
                                 byte bMatch = (byte)Math.Clamp((int)(match * 255f), 0, 255);
@@ -468,7 +411,7 @@ namespace DeadlockPlayground.Painter
 
                 // 1-pixel morphological expansion (grow) to bridge bilinear texture seams
                 // + 1.0–1.5 px feathering filter along perimeter for smooth anti-aliased edge blending
-                if (maxSelX >= 0)
+                if (seed.AntiAliasing && maxSelX >= 0)
                 {
                     int pad = 5;
                     int dMinX = Math.Max(0, minSelX - pad);
@@ -538,76 +481,78 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
-                // Parallel bilinear blit into active atlas mask
+                // Blit into active atlas mask
                 var combineMode = seed.CombineMode;
-                byte[] activeMask = _activeAtlasMask;
+                bool isAA = seed.AntiAliasing;
                 System.Threading.Tasks.Parallel.For(0, rectH, y =>
                 {
-                    float v = ((float)y + 0.5f) / rectH * imgH - 0.5f;
-                    int y0 = Math.Clamp((int)MathF.Floor(v), 0, imgH - 1);
-                    int y1 = Math.Clamp(y0 + 1, 0, imgH - 1);
-                    float fv = Math.Clamp(v - y0, 0.0f, 1.0f);
-
                     int atlasRow = (rectY + y) * atlasSize;
 
-                    for (int x = 0; x < rectW; x++)
+                    if (!isAA)
                     {
-                        float u = ((float)x + 0.5f) / rectW * imgW - 0.5f;
-                        int x0 = Math.Clamp((int)MathF.Floor(u), 0, imgW - 1);
-                        int x1 = Math.Clamp(x0 + 1, 0, imgH - 1);
-                        float fu = Math.Clamp(u - x0, 0.0f, 1.0f);
+                        // Strict binary nearest-neighbor blit for pixel-perfect hard edges
+                        int srcY = Math.Clamp((int)(((float)y + 0.5f) / rectH * imgH), 0, imgH - 1);
+                        int srcRow = srcY * imgW;
+                        for (int x = 0; x < rectW; x++)
+                        {
+                            int srcX = Math.Clamp((int)(((float)x + 0.5f) / rectW * imgW), 0, imgW - 1);
+                            byte byteVal = submeshMask[srcRow + srcX] >= 128 ? (byte)255 : (byte)0;
+                            int atlasIdx = atlasRow + (rectX + x);
+                            if (combineMode == MagicWandCombineMode.Subtract)
+                                activeMask[atlasIdx] = (byte)Math.Max(0, activeMask[atlasIdx] - byteVal);
+                            else if (combineMode == MagicWandCombineMode.Add)
+                                activeMask[atlasIdx] = (byte)Math.Min(255, activeMask[atlasIdx] + byteVal);
+                            else
+                                activeMask[atlasIdx] = byteVal;
+                        }
+                    }
+                    else
+                    {
+                        // Parallel bilinear blit into active atlas mask for smooth antialiased boundaries
+                        float v = ((float)y + 0.5f) / rectH * imgH - 0.5f;
+                        int y0 = Math.Clamp((int)MathF.Floor(v), 0, imgH - 1);
+                        int y1 = Math.Clamp(y0 + 1, 0, imgH - 1);
+                        float fv = Math.Clamp(v - y0, 0.0f, 1.0f);
 
-                        byte m00 = submeshMask[y0 * imgW + x0];
-                        byte m10 = submeshMask[y0 * imgW + x1];
-                        byte m01 = submeshMask[y1 * imgW + x0];
-                        byte m11 = submeshMask[y1 * imgW + x1];
+                        for (int x = 0; x < rectW; x++)
+                        {
+                            float u = ((float)x + 0.5f) / rectW * imgW - 0.5f;
+                            int x0 = Math.Clamp((int)MathF.Floor(u), 0, imgW - 1);
+                            int x1 = Math.Clamp(x0 + 1, 0, imgH - 1);
+                            float fu = Math.Clamp(u - x0, 0.0f, 1.0f);
 
-                        float top = m00 + (m10 - m00) * fu;
-                        float bottom = m01 + (m11 - m01) * fu;
-                        byte byteVal = (byte)Math.Clamp((int)MathF.Round(top + (bottom - top) * fv), 0, 255);
+                            byte m00 = submeshMask[y0 * imgW + x0];
+                            byte m10 = submeshMask[y0 * imgW + x1];
+                            byte m01 = submeshMask[y1 * imgW + x0];
+                            byte m11 = submeshMask[y1 * imgW + x1];
 
-                        int atlasIdx = atlasRow + (rectX + x);
-                        if (combineMode == MagicWandCombineMode.Subtract)
-                            activeMask[atlasIdx] = (byte)Math.Max(0, activeMask[atlasIdx] - byteVal);
-                        else if (combineMode == MagicWandCombineMode.Add)
-                            activeMask[atlasIdx] = (byte)Math.Min(255, activeMask[atlasIdx] + byteVal);
-                        else
-                            activeMask[atlasIdx] = byteVal;
+                            float top = m00 + (m10 - m00) * fu;
+                            float bottom = m01 + (m11 - m01) * fu;
+                            byte byteVal = (byte)Math.Clamp((int)MathF.Round(top + (bottom - top) * fv), 0, 255);
+
+                            int atlasIdx = atlasRow + (rectX + x);
+                            if (combineMode == MagicWandCombineMode.Subtract)
+                                activeMask[atlasIdx] = (byte)Math.Max(0, activeMask[atlasIdx] - byteVal);
+                            else if (combineMode == MagicWandCombineMode.Add)
+                                activeMask[atlasIdx] = (byte)Math.Min(255, activeMask[atlasIdx] + byteVal);
+                            else
+                                activeMask[atlasIdx] = byteVal;
+                        }
                     }
                 });
             }
 
-            UploadMaskToGpu(rd, atlasSize);
+            _selectionMask.UpdateSelectionStateAndUpload();
         }
 
         private void UploadMaskToGpu(RenderingDevice rd, int atlasSize)
         {
-            if (_activeAtlasMask == null || !_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid)) return;
+            _selectionMask.UploadToGpu(rd);
+        }
 
-            byte[] uploadBytes = new byte[atlasSize * atlasSize * 8];
-            Half one = (Half)1.0f;
-            var lut = _halfLut;
-            byte[] mask = _activeAtlasMask;
-            int totalPixels = atlasSize * atlasSize;
-
-            unsafe
-            {
-                fixed (byte* pMask = mask, pUpload = uploadBytes)
-                {
-                    Half* hDst = (Half*)pUpload;
-                    for (int i = 0; i < totalPixels; i++)
-                    {
-                        Half v = lut[pMask[i]];
-                        int off = i * 4;
-                        hDst[off] = v;
-                        hDst[off + 1] = v;
-                        hDst[off + 2] = v;
-                        hDst[off + 3] = one;
-                    }
-                }
-            }
-
-            rd.TextureUpdate(_maskTextureRid, 0, uploadBytes);
+        public void InvertMask()
+        {
+            _selectionMask.Invert();
         }
 
         public void RecomputeWithTolerance(float newTolerance)
@@ -618,7 +563,7 @@ namespace DeadlockPlayground.Painter
                 var rd = RenderingServer.GetRenderingDevice();
                 if (rd != null)
                 {
-                    int size = _currentAtlasSize > 0 ? _currentAtlasSize : 2048;
+                    int size = CurrentAtlasSize > 0 ? CurrentAtlasSize : 2048;
                     RebuildMaskFromSeedPoints(rd, size);
                     EmitSignal(SignalName.MaskUpdated, true);
                 }
@@ -627,52 +572,15 @@ namespace DeadlockPlayground.Painter
 
         public void ClearMask()
         {
-            HasSelection = false;
-            _useSelectionMask = false;
             _seedPoints.Clear();
-
-            if (_activeAtlasMask != null)
-            {
-                Array.Clear(_activeAtlasMask, 0, _activeAtlasMask.Length);
-            }
-
-            var rd = RenderingServer.GetRenderingDevice();
-            if (rd != null && _maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
-            {
-                int size = _currentAtlasSize > 0 ? _currentAtlasSize : 2048;
-                byte[] zeroData = new byte[size * size * 8];
-                rd.TextureUpdate(_maskTextureRid, 0, zeroData);
-            }
-
-            if (_maskTextureResource != null && _maskTextureRid.IsValid)
-            {
-                _maskTextureResource.TextureRdRid = _maskTextureRid;
-            }
-
-            EmitSignal(SignalName.MaskUpdated, false);
+            _selectionMask.Clear();
             GD.Print("[MagicWandTool] Selection mask cleared.");
         }
 
         public void Cleanup()
         {
             _seedPoints.Clear();
-            _activeAtlasMask = null;
-
-            if (_maskTextureResource != null)
-            {
-                _maskTextureResource.TextureRdRid = new Rid();
-                _maskTextureResource = null;
-            }
-
-            var rd = RenderingServer.GetRenderingDevice();
-            if (rd != null)
-            {
-                if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
-                {
-                    rd.FreeRid(_maskTextureRid);
-                    _maskTextureRid = new Rid();
-                }
-            }
+            _selectionMask.Cleanup();
         }
     }
 }
