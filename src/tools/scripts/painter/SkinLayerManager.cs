@@ -196,7 +196,10 @@ namespace DeadlockPlayground.Painter
             int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
             rd.TextureCopy(_gpuUndoTextureRid, layer.LayerRid, Vector3.Zero, Vector3.Zero, new Vector3(atlasW, atlasH, 1), 0, 0, 0, 0);
             _hasGpuUndo = false;
-            layer.IsCpuSynced = false;
+            layer.GpuData = rd.TextureGetData(layer.LayerRid, 0);
+            layer.IsCpuSynced = true;
+            InvalidateOtherLayers();
+            RecompositeGpuLayers();
             return true;
         }
 
@@ -1354,15 +1357,44 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        private Rid _scratchUploadRid = new();
+        private int _scratchUploadW = 0;
+        private int _scratchUploadH = 0;
+        private byte[] _scratchUploadBuffer;
+
+        private void EnsureAdaptiveScratchTexture(RenderingDevice rd, int w, int h)
+        {
+            if (_scratchUploadRid.IsValid && rd.TextureIsValid(_scratchUploadRid) && _scratchUploadW == w && _scratchUploadH == h)
+                return;
+
+            if (_scratchUploadRid.IsValid && rd.TextureIsValid(_scratchUploadRid))
+            {
+                rd.FreeRid(_scratchUploadRid);
+                _scratchUploadRid = new Rid();
+            }
+
+            _scratchUploadW = w;
+            _scratchUploadH = h;
+            _scratchUploadBuffer = new byte[w * h * 8];
+
+            var fmt = new RDTextureFormat
+            {
+                Format = RenderingDevice.DataFormat.R16G16B16A16Sfloat,
+                Width = (uint)w,
+                Height = (uint)h,
+                UsageBits = RenderingDevice.TextureUsageBits.StorageBit |
+                            RenderingDevice.TextureUsageBits.SamplingBit |
+                            RenderingDevice.TextureUsageBits.CanUpdateBit |
+                            RenderingDevice.TextureUsageBits.CanCopyFromBit |
+                            RenderingDevice.TextureUsageBits.CanCopyToBit
+            };
+            var view = new RDTextureView();
+            _scratchUploadRid = rd.TextureCreate(fmt, view, new Godot.Collections.Array<byte[]> { _scratchUploadBuffer });
+        }
+
         private void UploadBufferRectChunked(RenderingDevice rd, Rid destRid, byte[] buffer, int atlasW, int atlasH, Rect2I rect)
         {
             if (rd == null || !destRid.IsValid || !rd.TextureIsValid(destRid) || buffer == null || atlasW <= 0 || atlasH <= 0) return;
-            EnsureScratchTexture(rd);
-            if (!_scratchTextureRid.IsValid || !rd.TextureIsValid(_scratchTextureRid))
-            {
-                rd.TextureUpdate(destRid, 0, buffer);
-                return;
-            }
 
             int minX = Math.Clamp(rect.Position.X, 0, atlasW - 1);
             int minY = Math.Clamp(rect.Position.Y, 0, atlasH - 1);
@@ -1372,45 +1404,37 @@ namespace DeadlockPlayground.Painter
             int h = maxY - minY;
             if (w <= 0 || h <= 0) return;
 
-            if (w <= ScratchTextureSize && h <= ScratchTextureSize)
+            // Direct update if dirty rect covers >= 50% of the entire atlas
+            if ((long)w * h >= (long)atlasW * atlasH / 2)
             {
-                int rowBytes = w * 8;
-                for (int y = 0; y < h; y++)
-                {
-                    int srcOffset = ((minY + y) * atlasW + minX) * 8;
-                    int dstOffset = (y * ScratchTextureSize) * 8;
-                    if (srcOffset + rowBytes <= buffer.Length && dstOffset + rowBytes <= _scratchBuffer.Length)
-                    {
-                        Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
-                    }
-                }
-
-                rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
-                rd.TextureCopy(_scratchTextureRid, destRid, Vector3.Zero, new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
+                rd.TextureUpdate(destRid, 0, buffer);
                 return;
             }
 
-            for (int ty = minY; ty < maxY; ty += ScratchTextureSize)
-            {
-                int tileH = Math.Min(ScratchTextureSize, maxY - ty);
-                for (int tx = minX; tx < maxX; tx += ScratchTextureSize)
-                {
-                    int tileW = Math.Min(ScratchTextureSize, maxX - tx);
-                    int rowBytes = tileW * 8;
-                    for (int y = 0; y < tileH; y++)
-                    {
-                        int srcOffset = ((ty + y) * atlasW + tx) * 8;
-                        int dstOffset = (y * ScratchTextureSize) * 8;
-                        if (srcOffset + rowBytes <= buffer.Length && dstOffset + rowBytes <= _scratchBuffer.Length)
-                        {
-                            Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
-                        }
-                    }
+            // Quantize upload dimensions to multiples of 64 to avoid RID reallocation during mouse motion jitter
+            int scratchW = Math.Min(atlasW, (w + 63) & ~63);
+            int scratchH = Math.Min(atlasH, (h + 63) & ~63);
 
-                    rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
-                    rd.TextureCopy(_scratchTextureRid, destRid, Vector3.Zero, new Vector3(tx, ty, 0), new Vector3(tileW, tileH, 1), 0, 0, 0, 0);
+            EnsureAdaptiveScratchTexture(rd, scratchW, scratchH);
+            if (!_scratchUploadRid.IsValid || !rd.TextureIsValid(_scratchUploadRid))
+            {
+                rd.TextureUpdate(destRid, 0, buffer);
+                return;
+            }
+
+            int rowBytes = w * 8;
+            for (int y = 0; y < h; y++)
+            {
+                int srcOffset = ((minY + y) * atlasW + minX) * 8;
+                int dstOffset = (y * scratchW) * 8;
+                if (srcOffset + rowBytes <= buffer.Length && dstOffset + rowBytes <= _scratchUploadBuffer.Length)
+                {
+                    Buffer.BlockCopy(buffer, srcOffset, _scratchUploadBuffer, dstOffset, rowBytes);
                 }
             }
+
+            rd.TextureUpdate(_scratchUploadRid, 0, _scratchUploadBuffer);
+            rd.TextureCopy(_scratchUploadRid, destRid, Vector3.Zero, new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
         }
 
         private static Rid _fallbackDummyTextureRid = new();
@@ -1505,6 +1529,16 @@ namespace DeadlockPlayground.Painter
         {
             if (index < 0 || index >= _layers.Count) return;
 
+            if (ActiveLayer != null && !ActiveLayer.IsCpuSynced)
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && ActiveLayer.LayerRid.IsValid && rd.TextureIsValid(ActiveLayer.LayerRid))
+                {
+                    ActiveLayer.GpuData = rd.TextureGetData(ActiveLayer.LayerRid, 0);
+                    ActiveLayer.IsCpuSynced = true;
+                }
+            }
+
             _activeLayerIndex = index;
             InvalidateOtherLayers();
             UpdateActiveLayerBinding();
@@ -1566,15 +1600,20 @@ namespace DeadlockPlayground.Painter
             public Dictionary<int, byte[]> PendingRawLayerData = new();
         }
 
-        private static byte[] CompressBuffer(byte[] raw)
+        private static byte[] CompressBuffer(byte[] raw, int length)
         {
-            if (raw == null || raw.Length == 0) return Array.Empty<byte>();
-            using var ms = new System.IO.MemoryStream();
+            if (raw == null || length <= 0) return Array.Empty<byte>();
+            using var ms = new System.IO.MemoryStream(Math.Max(65536, length / 8));
             using (var ds = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
             {
-                ds.Write(raw, 0, raw.Length);
+                ds.Write(raw, 0, length);
             }
             return ms.ToArray();
+        }
+
+        private static byte[] CompressBuffer(byte[] raw)
+        {
+            return CompressBuffer(raw, raw != null ? raw.Length : 0);
         }
 
         private static byte[] DecompressBuffer(byte[] compressed, int uncompressedLength)
@@ -1676,8 +1715,8 @@ namespace DeadlockPlayground.Painter
                     {
                         if (prevInfo.PendingRawData != null)
                         {
-                            byte[] rawCopy = new byte[prevInfo.PendingRawData.Length];
-                            Buffer.BlockCopy(prevInfo.PendingRawData, 0, rawCopy, 0, prevInfo.PendingRawData.Length);
+                            byte[] rawCopy = new byte[bufferLen];
+                            Buffer.BlockCopy(prevInfo.PendingRawData, 0, rawCopy, 0, Math.Min(bufferLen, prevInfo.PendingRawData.Length));
                             info.PendingRawData = rawCopy;
                             snap.PendingRawLayerData[i] = rawCopy;
                         }
@@ -1691,20 +1730,28 @@ namespace DeadlockPlayground.Painter
                 else
                 {
                     int layerIdx = i;
-                    byte[] rawCopy = new byte[layer.GpuData.Length];
-                    Buffer.BlockCopy(layer.GpuData, 0, rawCopy, 0, layer.GpuData.Length);
-                    info.PendingRawData = rawCopy;
-                    snap.PendingRawLayerData[layerIdx] = rawCopy;
+                    int dataLen = layer.GpuData.Length;
+                    byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(dataLen);
+                    Buffer.BlockCopy(layer.GpuData, 0, rented, 0, dataLen);
+                    info.PendingRawData = rented;
+                    snap.PendingRawLayerData[layerIdx] = rented;
 
                     System.Threading.Tasks.Task.Run(() =>
                     {
-                        var compressed = CompressBuffer(rawCopy);
-                        lock (snap)
+                        try
                         {
-                            info.CompressedData = compressed;
-                            info.PendingRawData = null;
-                            snap.CompressedLayerData[layerIdx] = compressed;
-                            snap.PendingRawLayerData.Remove(layerIdx);
+                            var compressed = CompressBuffer(rented, dataLen);
+                            lock (snap)
+                            {
+                                info.CompressedData = compressed;
+                                info.PendingRawData = null;
+                                snap.CompressedLayerData[layerIdx] = compressed;
+                                snap.PendingRawLayerData.Remove(layerIdx);
+                            }
+                        }
+                        finally
+                        {
+                            System.Buffers.ArrayPool<byte>.Shared.Return(rented);
                         }
                     });
                 }
@@ -1866,7 +1913,8 @@ namespace DeadlockPlayground.Painter
                     {
                         if (info.PendingRawData != null)
                         {
-                            rawData = (byte[])info.PendingRawData.Clone();
+                            rawData = new byte[uncompressedLen];
+                            Buffer.BlockCopy(info.PendingRawData, 0, rawData, 0, Math.Min(uncompressedLen, info.PendingRawData.Length));
                         }
                         else if (info.CompressedData != null)
                         {
@@ -1905,7 +1953,8 @@ namespace DeadlockPlayground.Painter
                     {
                         if (snapshot.PendingRawLayerData.TryGetValue(i, out var pending))
                         {
-                            rawData = (byte[])pending.Clone();
+                            rawData = new byte[uncompressedLen];
+                            Buffer.BlockCopy(pending, 0, rawData, 0, Math.Min(uncompressedLen, pending.Length));
                         }
                         else if (snapshot.CompressedLayerData.TryGetValue(i, out var compressedData))
                         {
@@ -3090,6 +3139,12 @@ namespace DeadlockPlayground.Painter
             int minY = Mathf.Clamp((int)(centerPx.Y - diag), 0, atlasH - 1);
             int maxY = Mathf.Clamp((int)(centerPx.Y + diag), 0, atlasH - 1);
 
+            bool[] submeshMask = null;
+            if (_targetMesh != null)
+            {
+                submeshMask = BuildSubmeshUvMask(_targetMesh, atlasW, atlasH, pos, size, out _);
+            }
+
             int bufferLen = atlasW * atlasH * 8;
             if (ActiveLayer != null)
             {
@@ -3107,6 +3162,8 @@ namespace DeadlockPlayground.Painter
                             int rowOffset = y * atlasW * 4;
                             for (int x = minX; x <= maxX; x++)
                             {
+                                if (submeshMask != null && (y * atlasW + x) < submeshMask.Length && !submeshMask[y * atlasW + x]) continue;
+
                                 float rx, ry;
                                 if (use3DProjection)
                                 {
@@ -3929,9 +3986,11 @@ namespace DeadlockPlayground.Painter
         private byte[] _shapePreviewBuffer;
         private byte[] _fullShapePreviewBuffer;
         private ulong _lastShapePreviewUpdateMs = 0;
+        private Rect2I? _lastShapeDirtyRect;
 
         public void CancelShapePreview()
         {
+            _lastShapeDirtyRect = null;
             SyncActiveLayerGpuTexture();
             _otherLayersDirty = true;
             RecompositeGpuLayers();
@@ -3954,23 +4013,49 @@ namespace DeadlockPlayground.Painter
                 if (!forceImmediate)
                 {
                     ulong now = Time.GetTicksMsec();
-                    if (now - _lastShapePreviewUpdateMs < 33)
+                    if (now - _lastShapePreviewUpdateMs < 16)
                     {
-                        return; // 30 FPS cap during interactive mouse drag
+                        return; // 60 FPS cap during interactive mouse drag
                     }
                     _lastShapePreviewUpdateMs = now;
                 }
+
+                int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+                int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
                 int len = layer.GpuData.Length;
                 if (_shapePreviewBuffer == null || _shapePreviewBuffer.Length != len)
                 {
                     _shapePreviewBuffer = new byte[len];
+                    Buffer.BlockCopy(layer.GpuData, 0, _shapePreviewBuffer, 0, len);
                 }
-                Buffer.BlockCopy(layer.GpuData, 0, _shapePreviewBuffer, 0, len);
 
-                int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
-                int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+                Rect2I currentBBox = shapeTool.GetBoundingBox(atlasW, atlasH);
+                Rect2I dirtyRect = _lastShapeDirtyRect.HasValue ? _lastShapeDirtyRect.Value.Merge(currentBBox) : currentBBox;
+                _lastShapeDirtyRect = currentBBox;
+
+                int minX = Math.Clamp(dirtyRect.Position.X, 0, atlasW - 1);
+                int minY = Math.Clamp(dirtyRect.Position.Y, 0, atlasH - 1);
+                int maxX = Math.Clamp(dirtyRect.End.X, 0, atlasW);
+                int maxY = Math.Clamp(dirtyRect.End.Y, 0, atlasH);
+                int w = maxX - minX;
+                int h = maxY - minY;
+                int rowBytes = w * 8;
+
+                // Restore only the dirty region rows from the base layer GPU data
+                if (rowBytes > 0)
+                {
+                    for (int y = minY; y < maxY; y++)
+                    {
+                        int offset = (y * atlasW + minX) * 8;
+                        if (offset + rowBytes <= len && offset + rowBytes <= _shapePreviewBuffer.Length)
+                        {
+                            Buffer.BlockCopy(layer.GpuData, offset, _shapePreviewBuffer, offset, rowBytes);
+                        }
+                    }
+                }
+
                 shapeTool.BlendPreview(_shapePreviewBuffer, atlasW, atlasH, color);
-                rd.TextureUpdate(layer.LayerRid, 0, _shapePreviewBuffer);
+                UploadBufferRectChunked(rd, layer.LayerRid, _shapePreviewBuffer, atlasW, atlasH, dirtyRect);
 
                 // Recomposite into full_composite_rid so 2D canvas displays real-time preview
                 var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
@@ -3978,7 +4063,8 @@ namespace DeadlockPlayground.Painter
                 {
                     if (_layers.Count <= 1)
                     {
-                        rd.TextureUpdate(fullRidVal.AsRid(), 0, _shapePreviewBuffer);
+                        // Direct GPU-to-GPU TextureCopy: 0.01ms and 0 PCIe transfer
+                        rd.TextureCopy(layer.LayerRid, fullRidVal.AsRid(), new Vector3(minX, minY, 0), new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
                     }
                     else
                     {
@@ -3986,7 +4072,24 @@ namespace DeadlockPlayground.Painter
                         {
                             _fullShapePreviewBuffer = new byte[len];
                         }
-                        Array.Clear(_fullShapePreviewBuffer, 0, len);
+
+                        // Clear only dirty region in _fullShapePreviewBuffer
+                        if (rowBytes > 0)
+                        {
+                            for (int y = minY; y < maxY; y++)
+                            {
+                                int offset = (y * atlasW + minX) * 8;
+                                if (_baseAtlasBuffer != null && offset + rowBytes <= _baseAtlasBuffer.Length)
+                                {
+                                    Buffer.BlockCopy(_baseAtlasBuffer, offset, _fullShapePreviewBuffer, offset, rowBytes);
+                                }
+                                else if (offset + rowBytes <= _fullShapePreviewBuffer.Length)
+                                {
+                                    Array.Clear(_fullShapePreviewBuffer, offset, rowBytes);
+                                }
+                            }
+                        }
+
                         for (int i = 0; i < _layers.Count; i++)
                         {
                             var l = _layers[i];
@@ -3994,10 +4097,10 @@ namespace DeadlockPlayground.Painter
                             byte[] srcData = (i == _activeLayerIndex) ? _shapePreviewBuffer : l.GpuData;
                             if (srcData != null && srcData.Length == len)
                             {
-                                BlendLayerBuffer(_fullShapePreviewBuffer, srcData, l.Opacity, l.BlendMode, _baseAtlasBuffer);
+                                BlendLayerBufferRect(_fullShapePreviewBuffer, srcData, l.Opacity, l.BlendMode, _baseAtlasBuffer, atlasW, atlasH, dirtyRect);
                             }
                         }
-                        rd.TextureUpdate(fullRidVal.AsRid(), 0, _fullShapePreviewBuffer);
+                        UploadBufferRectChunked(rd, fullRidVal.AsRid(), _fullShapePreviewBuffer, atlasW, atlasH, dirtyRect);
                     }
                 }
             }
@@ -4268,6 +4371,188 @@ namespace DeadlockPlayground.Painter
                         }
                     }
                 });
+            }
+        }
+
+        private static unsafe void BlendLayerBufferRect(byte[] dst, byte[] src, float opacity, LayerBlendMode mode, byte[] baseBuffer, int atlasW, int atlasH, Rect2I rect)
+        {
+            int minX = Math.Clamp(rect.Position.X, 0, atlasW - 1);
+            int minY = Math.Clamp(rect.Position.Y, 0, atlasH - 1);
+            int maxX = Math.Clamp(rect.End.X, 0, atlasW);
+            int maxY = Math.Clamp(rect.End.Y, 0, atlasH);
+            if (minX >= maxX || minY >= maxY) return;
+
+            fixed (byte* pDst = dst, pSrc = src, pBase = baseBuffer)
+            {
+                ulong* uSrc = (ulong*)pSrc;
+                ulong* uDst = (ulong*)pDst;
+                Half* hSrc = (Half*)pSrc;
+                Half* hDst = (Half*)pDst;
+                Half* hBase = pBase != null ? (Half*)pBase : null;
+
+                for (int y = minY; y < maxY; y++)
+                {
+                    int rowBase = y * atlasW;
+                    for (int x = minX; x < maxX; x++)
+                    {
+                        int i = rowBase + x;
+                        if (uSrc[i] == 0) continue;
+
+                        int hOffset = i * 4;
+                        float srcA = (float)hSrc[hOffset + 3] * opacity;
+                        if (srcA <= 0.0001f) continue;
+
+                        float srcR = (float)hSrc[hOffset];
+                        float srcG = (float)hSrc[hOffset + 1];
+                        float srcB = (float)hSrc[hOffset + 2];
+
+                        if (uDst[i] == 0)
+                        {
+                            float bR = hBase != null ? (float)hBase[hOffset] : 1.0f;
+                            float bG = hBase != null ? (float)hBase[hOffset + 1] : 1.0f;
+                            float bB = hBase != null ? (float)hBase[hOffset + 2] : 1.0f;
+
+                            float outR, outG, outB;
+
+                            if (mode == LayerBlendMode.Multiply)
+                            {
+                                outR = bR * srcR;
+                                outG = bG * srcG;
+                                outB = bB * srcB;
+                            }
+                            else if (mode == LayerBlendMode.Screen)
+                            {
+                                outR = 1.0f - (1.0f - bR) * (1.0f - srcR);
+                                outG = 1.0f - (1.0f - bG) * (1.0f - srcG);
+                                outB = 1.0f - (1.0f - bB) * (1.0f - srcB);
+                            }
+                            else if (mode == LayerBlendMode.Overlay)
+                            {
+                                outR = bR < 0.5f ? (2.0f * bR * srcR) : (1.0f - 2.0f * (1.0f - bR) * (1.0f - srcR));
+                                outG = bG < 0.5f ? (2.0f * bG * srcG) : (1.0f - 2.0f * (1.0f - bG) * (1.0f - srcG));
+                                outB = bB < 0.5f ? (2.0f * bB * srcB) : (1.0f - 2.0f * (1.0f - bB) * (1.0f - srcB));
+                            }
+                            else if (mode == LayerBlendMode.Darken)
+                            {
+                                outR = Mathf.Min(bR, srcR);
+                                outG = Mathf.Min(bG, srcG);
+                                outB = Mathf.Min(bB, srcB);
+                            }
+                            else if (mode == LayerBlendMode.Lighten)
+                            {
+                                outR = Mathf.Max(bR, srcR);
+                                outG = Mathf.Max(bG, srcG);
+                                outB = Mathf.Max(bB, srcB);
+                            }
+                            else if (mode == LayerBlendMode.ColorDodge)
+                            {
+                                outR = bR / Mathf.Max(1.0f - srcR, 0.001f);
+                                outG = bG / Mathf.Max(1.0f - srcG, 0.001f);
+                                outB = bB / Mathf.Max(1.0f - srcB, 0.001f);
+                            }
+                            else if (mode == LayerBlendMode.Color)
+                            {
+                                float baseLum = GetLuminance(bR, bG, bB);
+                                SetLuminance(srcR, srcG, srcB, baseLum, out outR, out outG, out outB);
+                            }
+                            else
+                            {
+                                outR = srcR;
+                                outG = srcG;
+                                outB = srcB;
+                            }
+
+                            hDst[hOffset] = (Half)outR;
+                            hDst[hOffset + 1] = (Half)outG;
+                            hDst[hOffset + 2] = (Half)outB;
+                            hDst[hOffset + 3] = (Half)srcA;
+                        }
+                        else
+                        {
+                            float dstR = (float)hDst[hOffset];
+                            float dstG = (float)hDst[hOffset + 1];
+                            float dstB = (float)hDst[hOffset + 2];
+                            float dstA = (float)hDst[hOffset + 3];
+
+                            float outA = Mathf.Clamp(srcA + dstA * (1.0f - srcA), 0.0f, 1.0f);
+                            float outR, outG, outB;
+
+                            if (mode == LayerBlendMode.Multiply)
+                            {
+                                float blendR = dstR * srcR;
+                                float blendG = dstG * srcG;
+                                float blendB = dstB * srcB;
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Screen)
+                            {
+                                float blendR = 1.0f - (1.0f - dstR) * (1.0f - srcR);
+                                float blendG = 1.0f - (1.0f - dstG) * (1.0f - srcR);
+                                float blendB = 1.0f - (1.0f - dstB) * (1.0f - srcB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Overlay)
+                            {
+                                float blendR = dstR < 0.5f ? (2.0f * dstR * srcR) : (1.0f - 2.0f * (1.0f - dstR) * (1.0f - srcR));
+                                float blendG = dstG < 0.5f ? (2.0f * dstG * srcG) : (1.0f - 2.0f * (1.0f - dstG) * (1.0f - srcG));
+                                float blendB = dstB < 0.5f ? (2.0f * dstB * srcB) : (1.0f - 2.0f * (1.0f - dstB) * (1.0f - srcB));
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Darken)
+                            {
+                                float blendR = Mathf.Min(dstR, srcR);
+                                float blendG = Mathf.Min(dstG, srcG);
+                                float blendB = Mathf.Min(dstB, srcB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Lighten)
+                            {
+                                float blendR = Mathf.Max(dstR, srcR);
+                                float blendG = Mathf.Max(dstG, srcG);
+                                float blendB = Mathf.Max(dstB, srcB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.ColorDodge)
+                            {
+                                float blendR = dstR / Mathf.Max(1.0f - srcR, 0.001f);
+                                float blendG = dstG / Mathf.Max(1.0f - srcG, 0.001f);
+                                float blendB = dstB / Mathf.Max(1.0f - srcB, 0.001f);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else if (mode == LayerBlendMode.Color)
+                            {
+                                float underLum = GetLuminance(dstR, dstG, dstB);
+                                SetLuminance(srcR, srcG, srcB, underLum, out float blendR, out float blendG, out float blendB);
+                                outR = Mathf.Lerp(dstR, blendR, srcA);
+                                outG = Mathf.Lerp(dstG, blendG, srcA);
+                                outB = Mathf.Lerp(dstB, blendB, srcA);
+                            }
+                            else
+                            {
+                                outR = (srcR * srcA + dstR * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
+                                outG = (srcG * srcA + dstG * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
+                                outB = (srcB * srcA + dstB * dstA * (1.0f - srcA)) / Mathf.Max(outA, 0.0001f);
+                            }
+
+                            hDst[hOffset] = (Half)outR;
+                            hDst[hOffset + 1] = (Half)outG;
+                            hDst[hOffset + 2] = (Half)outB;
+                            hDst[hOffset + 3] = (Half)outA;
+                        }
+                    }
+                }
             }
         }
 

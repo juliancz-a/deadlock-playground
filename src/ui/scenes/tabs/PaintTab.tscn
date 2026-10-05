@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://c8iqg3e0fyesi" path="res://ui/scripts/tabs/PaintTabUI.cs" id="1_paint"]
 
-
 [node name="PaintTab" type="VBoxContainer" unique_id=1849204999]
 anchors_preset = 15
 anchor_right = 1.0
@@ -42,9 +41,9 @@ text = "Target Mesh:"
 [node name="OptTargetMesh" type="OptionButton" parent="HeaderCard/VBox/HBoxTarget" unique_id=1010101008]
 layout_mode = 2
 size_flags_horizontal = 3
-fit_to_longest_item = false
-clip_text = true
 text_overrun_behavior = 3
+clip_text = true
+fit_to_longest_item = false
 
 [node name="HBoxRes" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101009]
 layout_mode = 2
@@ -111,9 +110,9 @@ text = "Show All"
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 11
-clip_text = true
-text_overrun_behavior = 3
 text = "Hide Accessories"
+text_overrun_behavior = 3
+clip_text = true
 
 [node name="ScrollContainer" type="ScrollContainer" parent="SubmeshCard/VBox" unique_id=1010101020]
 custom_minimum_size = Vector2(0, 180)

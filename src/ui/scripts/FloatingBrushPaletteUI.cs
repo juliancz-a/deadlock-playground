@@ -1907,6 +1907,7 @@ public void UpdateTooltipsAndKeymaps()
         {
             _painter.ShapeTool.CancelShape();
             _painter.LayerManager?.CancelShapePreview();
+            _painter.QueueSelectionOverlayRedraw();
             QueueCanvasRedraw();
         }
     }

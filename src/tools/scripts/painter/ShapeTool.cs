@@ -579,9 +579,24 @@ namespace DeadlockPlayground.Painter
             {
                 Half* hLayer = (Half*)pDst;
 
+                float invHalfW = 1.0f / MathF.Max(halfW, 0.001f);
+                float invHalfH = 1.0f / MathF.Max(halfH, 0.001f);
+                float minR = MathF.Min(halfW, halfH);
+                float maxCircleDistSq = MathF.Pow(1.0f + (strokeHalf + 1.0f) / minR, 2.0f);
+
+                Vector2 seg = LineEnd - LineStart;
+                float segLenSq = seg.LengthSquared();
+                float invSegLenSq = segLenSq > 1e-6f ? 1.0f / segLenSq : 0.0f;
+                float maxLineDistSq = (strokeHalf + 1.0f) * (strokeHalf + 1.0f);
+
+                float baseAlphaFactor = activeColor.A * layer.Opacity;
+
                 System.Threading.Tasks.Parallel.For(iMinY, iMaxY + 1, py =>
                 {
                     int rowOffset = py * atlasW * 4;
+                    float dy = (py + 0.5f) - Center.Y;
+                    float rowLx0 = (iMinX + 0.5f - Center.X) * cosR - dy * sinR;
+                    float rowLy0 = (iMinX + 0.5f - Center.X) * sinR + dy * cosR;
 
                     for (int px = iMinX; px <= iMaxX; px++)
                     {
@@ -597,25 +612,49 @@ namespace DeadlockPlayground.Painter
 
                         if (ShapeType == CanvasShapeType.Line)
                         {
-                            float dist = DistancePointToSegment(new Vector2(px + 0.5f, py + 0.5f), LineStart, LineEnd);
+                            Vector2 p = new Vector2(px + 0.5f, py + 0.5f);
+                            Vector2 v = p - LineStart;
+                            float t = Math.Clamp((v.X * seg.X + v.Y * seg.Y) * invSegLenSq, 0.0f, 1.0f);
+                            Vector2 proj = LineStart + t * seg;
+                            float distSq = (p.X - proj.X) * (p.X - proj.X) + (p.Y - proj.Y) * (p.Y - proj.Y);
+                            if (distSq > maxLineDistSq) continue;
+
+                            float dist = MathF.Sqrt(distSq);
                             float d = dist - strokeHalf;
                             coverage = Math.Clamp(0.5f - d, 0.0f, 1.0f);
                         }
                         else
                         {
-                            // Transform pixel center to local shape coordinate space
-                            float dx = (px + 0.5f) - Center.X;
-                            float dy = (py + 0.5f) - Center.Y;
-                            float lx = dx * cosR - dy * sinR;
-                            float ly = dx * sinR + dy * cosR;
+                            int colIdx = px - iMinX;
+                            float lx = rowLx0 + colIdx * cosR;
+                            float ly = rowLy0 + colIdx * sinR;
 
                             if (ShapeType == CanvasShapeType.Square)
                             {
-                                float qx = MathF.Abs(lx) - halfW;
-                                float qy = MathF.Abs(ly) - halfH;
-                                float dOut = MathF.Sqrt(MathF.Max(qx, 0.0f) * MathF.Max(qx, 0.0f) + MathF.Max(qy, 0.0f) * MathF.Max(qy, 0.0f));
-                                float dIn = MathF.Min(MathF.Max(qx, qy), 0.0f);
-                                float boxSdf = dOut + dIn;
+                                float absLx = MathF.Abs(lx);
+                                float absLy = MathF.Abs(ly);
+                                float qx = absLx - halfW;
+                                float qy = absLy - halfH;
+
+                                if (qx > strokeHalf + 0.5f || qy > strokeHalf + 0.5f) continue;
+
+                                float boxSdf;
+                                if (qx <= 0.0f && qy <= 0.0f)
+                                {
+                                    boxSdf = MathF.Max(qx, qy);
+                                }
+                                else if (qx > 0.0f && qy <= 0.0f)
+                                {
+                                    boxSdf = qx;
+                                }
+                                else if (qx <= 0.0f && qy > 0.0f)
+                                {
+                                    boxSdf = qy;
+                                }
+                                else
+                                {
+                                    boxSdf = MathF.Sqrt(qx * qx + qy * qy);
+                                }
 
                                 if (FillMode == ShapeFillMode.FillOnly)
                                 {
@@ -634,10 +673,12 @@ namespace DeadlockPlayground.Painter
                             }
                             else if (ShapeType == CanvasShapeType.Circle)
                             {
-                                float nX = lx / MathF.Max(halfW, 0.001f);
-                                float nY = ly / MathF.Max(halfH, 0.001f);
-                                float normDist = MathF.Sqrt(nX * nX + nY * nY);
-                                float minR = MathF.Min(halfW, halfH);
+                                float nX = lx * invHalfW;
+                                float nY = ly * invHalfH;
+                                float distSq = nX * nX + nY * nY;
+                                if (distSq > maxCircleDistSq) continue;
+
+                                float normDist = MathF.Sqrt(distSq);
                                 float ellipseSdf = (normDist - 1.0f) * minR;
 
                                 if (FillMode == ShapeFillMode.FillOnly)
@@ -657,24 +698,36 @@ namespace DeadlockPlayground.Painter
                             }
                         }
 
-                        float finalAlpha = coverage * activeColor.A * layer.Opacity * wandWeight;
+                        float finalAlpha = coverage * baseAlphaFactor * wandWeight;
                         if (finalAlpha <= 0.0001f) continue;
 
                         int idx = rowOffset + px * 4;
-                        float curR = (float)hLayer[idx];
-                        float curG = (float)hLayer[idx + 1];
-                        float curB = (float)hLayer[idx + 2];
                         float curA = (float)hLayer[idx + 3];
+                        if (curA <= 0.0001f)
+                        {
+                            hLayer[idx] = (Half)linCol.R;
+                            hLayer[idx + 1] = (Half)linCol.G;
+                            hLayer[idx + 2] = (Half)linCol.B;
+                            hLayer[idx + 3] = (Half)finalAlpha;
+                        }
+                        else
+                        {
+                            float curR = (float)hLayer[idx];
+                            float curG = (float)hLayer[idx + 1];
+                            float curB = (float)hLayer[idx + 2];
 
-                        float outA = Math.Clamp(finalAlpha + curA * (1.0f - finalAlpha), 0.0f, 1.0f);
-                        float outR = (outA > 0.0001f) ? (linCol.R * finalAlpha + curR * curA * (1.0f - finalAlpha)) / outA : linCol.R;
-                        float outG = (outA > 0.0001f) ? (linCol.G * finalAlpha + curG * curA * (1.0f - finalAlpha)) / outA : linCol.G;
-                        float outB = (outA > 0.0001f) ? (linCol.B * finalAlpha + curB * curA * (1.0f - finalAlpha)) / outA : linCol.B;
+                            float outA = Math.Clamp(finalAlpha + curA * (1.0f - finalAlpha), 0.0f, 1.0f);
+                            float invOutA = outA > 0.0001f ? 1.0f / outA : 1.0f;
+                            float oneMinusA = 1.0f - finalAlpha;
+                            float outR = (linCol.R * finalAlpha + curR * curA * oneMinusA) * invOutA;
+                            float outG = (linCol.G * finalAlpha + curG * curA * oneMinusA) * invOutA;
+                            float outB = (linCol.B * finalAlpha + curB * curA * oneMinusA) * invOutA;
 
-                        hLayer[idx] = (Half)outR;
-                        hLayer[idx + 1] = (Half)outG;
-                        hLayer[idx + 2] = (Half)outB;
-                        hLayer[idx + 3] = (Half)outA;
+                            hLayer[idx] = (Half)outR;
+                            hLayer[idx + 1] = (Half)outG;
+                            hLayer[idx + 2] = (Half)outB;
+                            hLayer[idx + 3] = (Half)outA;
+                        }
                     }
                 });
             }
@@ -691,6 +744,39 @@ namespace DeadlockPlayground.Painter
             ShapeCommitted?.Invoke();
             ShapeChanged?.Invoke();
             return true;
+        }
+
+        public Rect2I GetBoundingBox(int atlasW, int atlasH)
+        {
+            if (!HasActiveShape || atlasW <= 0 || atlasH <= 0) return new Rect2I(0, 0, 0, 0);
+
+            float pad = MathF.Max(StrokeWidth * 0.5f + 4.0f, 16.0f);
+            float minX = atlasW, maxX = 0, minY = atlasH, maxY = 0;
+
+            if (ShapeType == CanvasShapeType.Line)
+            {
+                minX = MathF.Min(LineStart.X, LineEnd.X) - pad;
+                maxX = MathF.Max(LineStart.X, LineEnd.X) + pad;
+                minY = MathF.Min(LineStart.Y, LineEnd.Y) - pad;
+                maxY = MathF.Max(LineStart.Y, LineEnd.Y) + pad;
+            }
+            else
+            {
+                var (tl, tr, br, bl) = GetCorners();
+                minX = MathF.Min(MathF.Min(tl.X, tr.X), MathF.Min(br.X, bl.X)) - pad;
+                maxX = MathF.Max(MathF.Max(tl.X, tr.X), MathF.Max(br.X, bl.X)) + pad;
+                minY = MathF.Min(MathF.Min(tl.Y, tr.Y), MathF.Min(br.Y, bl.Y)) - pad;
+                maxY = MathF.Max(MathF.Max(tl.Y, tr.Y), MathF.Max(br.Y, bl.Y)) + pad;
+            }
+
+            int iMinX = Math.Clamp((int)MathF.Floor(minX), 0, atlasW - 1);
+            int iMaxX = Math.Clamp((int)MathF.Ceiling(maxX), 0, atlasW - 1);
+            int iMinY = Math.Clamp((int)MathF.Floor(minY), 0, atlasH - 1);
+            int iMaxY = Math.Clamp((int)MathF.Ceiling(maxY), 0, atlasH - 1);
+
+            int rectW = Math.Max(1, iMaxX - iMinX + 1);
+            int rectH = Math.Max(1, iMaxY - iMinY + 1);
+            return new Rect2I(iMinX, iMinY, rectW, rectH);
         }
 
         public void BlendPreview(byte[] compositeBuffer, int atlasSize, Color activeColor)
@@ -744,9 +830,24 @@ namespace DeadlockPlayground.Painter
             {
                 Half* hComp = (Half*)pDst;
 
+                float invHalfW = 1.0f / MathF.Max(halfW, 0.001f);
+                float invHalfH = 1.0f / MathF.Max(halfH, 0.001f);
+                float minR = MathF.Min(halfW, halfH);
+                float maxCircleDistSq = MathF.Pow(1.0f + (strokeHalf + 1.0f) / minR, 2.0f);
+
+                Vector2 seg = LineEnd - LineStart;
+                float segLenSq = seg.LengthSquared();
+                float invSegLenSq = segLenSq > 1e-6f ? 1.0f / segLenSq : 0.0f;
+                float maxLineDistSq = (strokeHalf + 1.0f) * (strokeHalf + 1.0f);
+
+                float baseAlpha = activeColor.A;
+
                 System.Threading.Tasks.Parallel.For(iMinY, iMaxY + 1, py =>
                 {
                     int rowOffset = py * atlasW * 4;
+                    float dy = (py + 0.5f) - Center.Y;
+                    float rowLx0 = (iMinX + 0.5f - Center.X) * cosR - dy * sinR;
+                    float rowLy0 = (iMinX + 0.5f - Center.X) * sinR + dy * cosR;
 
                     for (int px = iMinX; px <= iMaxX; px++)
                     {
@@ -754,24 +855,49 @@ namespace DeadlockPlayground.Painter
 
                         if (ShapeType == CanvasShapeType.Line)
                         {
-                            float dist = DistancePointToSegment(new Vector2(px + 0.5f, py + 0.5f), LineStart, LineEnd);
+                            Vector2 p = new Vector2(px + 0.5f, py + 0.5f);
+                            Vector2 v = p - LineStart;
+                            float t = Math.Clamp((v.X * seg.X + v.Y * seg.Y) * invSegLenSq, 0.0f, 1.0f);
+                            Vector2 proj = LineStart + t * seg;
+                            float distSq = (p.X - proj.X) * (p.X - proj.X) + (p.Y - proj.Y) * (p.Y - proj.Y);
+                            if (distSq > maxLineDistSq) continue;
+
+                            float dist = MathF.Sqrt(distSq);
                             float d = dist - strokeHalf;
                             coverage = Math.Clamp(0.5f - d, 0.0f, 1.0f);
                         }
                         else
                         {
-                            float dx = (px + 0.5f) - Center.X;
-                            float dy = (py + 0.5f) - Center.Y;
-                            float lx = dx * cosR - dy * sinR;
-                            float ly = dx * sinR + dy * cosR;
+                            int colIdx = px - iMinX;
+                            float lx = rowLx0 + colIdx * cosR;
+                            float ly = rowLy0 + colIdx * sinR;
 
                             if (ShapeType == CanvasShapeType.Square)
                             {
-                                float qx = MathF.Abs(lx) - halfW;
-                                float qy = MathF.Abs(ly) - halfH;
-                                float dOut = MathF.Sqrt(MathF.Max(qx, 0.0f) * MathF.Max(qx, 0.0f) + MathF.Max(qy, 0.0f) * MathF.Max(qy, 0.0f));
-                                float dIn = MathF.Min(MathF.Max(qx, qy), 0.0f);
-                                float boxSdf = dOut + dIn;
+                                float absLx = MathF.Abs(lx);
+                                float absLy = MathF.Abs(ly);
+                                float qx = absLx - halfW;
+                                float qy = absLy - halfH;
+
+                                if (qx > strokeHalf + 0.5f || qy > strokeHalf + 0.5f) continue;
+
+                                float boxSdf;
+                                if (qx <= 0.0f && qy <= 0.0f)
+                                {
+                                    boxSdf = MathF.Max(qx, qy);
+                                }
+                                else if (qx > 0.0f && qy <= 0.0f)
+                                {
+                                    boxSdf = qx;
+                                }
+                                else if (qx <= 0.0f && qy > 0.0f)
+                                {
+                                    boxSdf = qy;
+                                }
+                                else
+                                {
+                                    boxSdf = MathF.Sqrt(qx * qx + qy * qy);
+                                }
 
                                 if (FillMode == ShapeFillMode.FillOnly)
                                 {
@@ -790,10 +916,12 @@ namespace DeadlockPlayground.Painter
                             }
                             else if (ShapeType == CanvasShapeType.Circle)
                             {
-                                float nX = lx / MathF.Max(halfW, 0.001f);
-                                float nY = ly / MathF.Max(halfH, 0.001f);
-                                float normDist = MathF.Sqrt(nX * nX + nY * nY);
-                                float minR = MathF.Min(halfW, halfH);
+                                float nX = lx * invHalfW;
+                                float nY = ly * invHalfH;
+                                float distSq = nX * nX + nY * nY;
+                                if (distSq > maxCircleDistSq) continue;
+
+                                float normDist = MathF.Sqrt(distSq);
                                 float ellipseSdf = (normDist - 1.0f) * minR;
 
                                 if (FillMode == ShapeFillMode.FillOnly)
@@ -813,24 +941,36 @@ namespace DeadlockPlayground.Painter
                             }
                         }
 
-                        float finalAlpha = coverage * activeColor.A;
+                        float finalAlpha = coverage * baseAlpha;
                         if (finalAlpha <= 0.0001f) continue;
 
                         int idx = rowOffset + px * 4;
-                        float curR = (float)hComp[idx];
-                        float curG = (float)hComp[idx + 1];
-                        float curB = (float)hComp[idx + 2];
                         float curA = (float)hComp[idx + 3];
+                        if (curA <= 0.0001f)
+                        {
+                            hComp[idx] = (Half)linCol.R;
+                            hComp[idx + 1] = (Half)linCol.G;
+                            hComp[idx + 2] = (Half)linCol.B;
+                            hComp[idx + 3] = (Half)finalAlpha;
+                        }
+                        else
+                        {
+                            float curR = (float)hComp[idx];
+                            float curG = (float)hComp[idx + 1];
+                            float curB = (float)hComp[idx + 2];
 
-                        float outA = Math.Clamp(finalAlpha + curA * (1.0f - finalAlpha), 0.0f, 1.0f);
-                        float outR = (outA > 0.0001f) ? (linCol.R * finalAlpha + curR * curA * (1.0f - finalAlpha)) / outA : linCol.R;
-                        float outG = (outA > 0.0001f) ? (linCol.G * finalAlpha + curG * curA * (1.0f - finalAlpha)) / outA : linCol.G;
-                        float outB = (outA > 0.0001f) ? (linCol.B * finalAlpha + curB * curA * (1.0f - finalAlpha)) / outA : linCol.B;
+                            float outA = Math.Clamp(finalAlpha + curA * (1.0f - finalAlpha), 0.0f, 1.0f);
+                            float invOutA = outA > 0.0001f ? 1.0f / outA : 1.0f;
+                            float oneMinusA = 1.0f - finalAlpha;
+                            float outR = (linCol.R * finalAlpha + curR * curA * oneMinusA) * invOutA;
+                            float outG = (linCol.G * finalAlpha + curG * curA * oneMinusA) * invOutA;
+                            float outB = (linCol.B * finalAlpha + curB * curA * oneMinusA) * invOutA;
 
-                        hComp[idx] = (Half)outR;
-                        hComp[idx + 1] = (Half)outG;
-                        hComp[idx + 2] = (Half)outB;
-                        hComp[idx + 3] = (Half)outA;
+                            hComp[idx] = (Half)outR;
+                            hComp[idx + 1] = (Half)outG;
+                            hComp[idx + 2] = (Half)outB;
+                            hComp[idx + 3] = (Half)outA;
+                        }
                     }
                 });
             }

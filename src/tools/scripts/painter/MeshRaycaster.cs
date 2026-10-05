@@ -194,9 +194,16 @@ namespace DeadlockPlayground.Painter
             {
                 var tri = _triangles[i];
 
-                if (cullBackfaces && tri.Normal.Dot(localDir) > 0)
+                if (cullBackfaces)
                 {
-                    continue; // Skip back-facing triangle
+                    // For curved cloth folds or single-sided geometry with smoothed vertex normals,
+                    // verify both authored normal and geometric face normal before culling,
+                    // ensuring exterior folds are never falsely skipped in favor of inner layers.
+                    Vector3 faceNormal = (tri.V1 - tri.V0).Cross(tri.V2 - tri.V0);
+                    if (tri.Normal.Dot(localDir) > 0.08f && faceNormal.Dot(localDir) > 0.001f)
+                    {
+                        continue; // Strictly back-facing triangle
+                    }
                 }
 
                 if (RayIntersectsTriangle(localOrigin, localDir, tri.V0, tri.V1, tri.V2, out float t, out float u, out float v))
@@ -220,6 +227,12 @@ namespace DeadlockPlayground.Painter
                 Vector3 localHitPos = localOrigin + localDir * closestDist;
                 Vector3 worldHitPos = meshInstance.GlobalTransform * localHitPos;
                 Vector3 worldNormal = (meshInstance.GlobalTransform.Basis * hitTri.Normal).Normalized();
+
+                // Ensure surface normal faces the incoming ray on double-sided surfaces
+                if (worldNormal.Dot(worldRayDir) > 0f)
+                {
+                    worldNormal = -worldNormal;
+                }
 
                 // Compute local UV aspect ratio compensation so circular brush stamps remain circular in 3D
                 Vector3 e1 = hitTri.V1 - hitTri.V0;
@@ -358,7 +371,7 @@ namespace DeadlockPlayground.Painter
         /// 3D world position, normal, tangents, and units per UV.
         /// Enables seamless two-way positioning between 2D canvas and 3D viewport.
         /// </summary>
-        public RaycastHitResult FindPointFromUV(MeshInstance3D meshInstance, Vector2 targetUV)
+        public RaycastHitResult FindPointFromUV(MeshInstance3D meshInstance, Vector2 targetUV, Vector3? cameraPosition = null)
         {
             var result = new RaycastHitResult { Hit = false };
             if (!_isInitialized || meshInstance == null || _triangles.Count == 0) return result;
@@ -366,6 +379,10 @@ namespace DeadlockPlayground.Painter
             int closestTriIdx = -1;
             float closestDistSq = float.MaxValue;
             float closestU = 0f, closestV = 0f, closestW = 0f;
+
+            RaycastHitResult bestCandidate = default;
+            float bestCamDistSq = float.MaxValue;
+            bool foundFacingCam = false;
 
             for (int i = 0; i < _triangles.Count; i++)
             {
@@ -428,17 +445,44 @@ namespace DeadlockPlayground.Painter
                         worldBitangent = (worldDPdv.Normalized() - worldNormal * worldNormal.Dot(worldDPdv.Normalized())).Normalized();
                     }
 
-                    result.Hit = true;
-                    result.HitUV = targetUV;
-                    result.WorldPosition = worldPos;
-                    result.WorldNormal = worldNormal;
-                    result.WorldTangent = worldTangent;
-                    result.WorldBitangent = worldBitangent;
-                    result.WorldUnitsPerU = worldUnitsPerU;
-                    result.WorldUnitsPerV = worldUnitsPerV;
-                    result.HitMesh = meshInstance;
-                    result.HitSurfaceIndex = tri.SurfaceIndex;
-                    return result;
+                    var candidate = new RaycastHitResult
+                    {
+                        Hit = true,
+                        HitUV = targetUV,
+                        WorldPosition = worldPos,
+                        WorldNormal = worldNormal,
+                        WorldTangent = worldTangent,
+                        WorldBitangent = worldBitangent,
+                        WorldUnitsPerU = worldUnitsPerU,
+                        WorldUnitsPerV = worldUnitsPerV,
+                        HitMesh = meshInstance,
+                        HitSurfaceIndex = tri.SurfaceIndex
+                    };
+
+                    if (!cameraPosition.HasValue)
+                    {
+                        return candidate;
+                    }
+
+                    Vector3 toCam = cameraPosition.Value - worldPos;
+                    float distSq = toCam.LengthSquared();
+                    bool facesCam = worldNormal.Dot(toCam) > 0.05f;
+
+                    if (facesCam)
+                    {
+                        if (!foundFacingCam || distSq < bestCamDistSq)
+                        {
+                            foundFacingCam = true;
+                            bestCamDistSq = distSq;
+                            bestCandidate = candidate;
+                        }
+                    }
+                    else if (!foundFacingCam && distSq < bestCamDistSq)
+                    {
+                        bestCamDistSq = distSq;
+                        bestCandidate = candidate;
+                    }
+                    continue;
                 }
 
                 // Track closest point on UV boundary for edge tolerance
@@ -457,6 +501,11 @@ namespace DeadlockPlayground.Painter
                     closestV = cv;
                     closestW = cw;
                 }
+            }
+
+            if (bestCandidate.Hit)
+            {
+                return bestCandidate;
             }
 
             if (!result.Hit && closestTriIdx >= 0 && closestDistSq < 0.05f * 0.05f)

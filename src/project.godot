@@ -18,6 +18,10 @@ run/max_fps=60
 boot_splash/show_image=false
 config/icon="uid://67nlgu7dndiv"
 
+[autoload]
+
+DiscordRpcService="*uid://diukumx2opmi8"
+
 [display]
 
 window/size/viewport_width=1920
@@ -33,7 +37,7 @@ project/assembly_name="Deadlock_Playground"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
+enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/discord-rpc-gd/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
 
 [file_customization]
 
