@@ -817,7 +817,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                     float aspect = 1.0f;
                     if (_painter.ProjectionGizmo.Texture != null && _painter.ProjectionGizmo.Texture.GetHeight() > 0)
                         aspect = (float)_painter.ProjectionGizmo.Texture.GetWidth() / _painter.ProjectionGizmo.Texture.GetHeight();
-                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim, baseDim / aspect) : new Vector2(baseDim * aspect, baseDim);
+                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim * aspect, baseDim) : new Vector2(baseDim, baseDim / aspect);
                 }
                 if (_lblDecalScale != null) _lblDecalScale.Text = $"{v:F2}x";
                 QueueCanvasRedraw();
@@ -959,7 +959,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                     float aspect = 1.0f;
                     if (_painter.ProjectionGizmo.Texture != null && _painter.ProjectionGizmo.Texture.GetHeight() > 0)
                         aspect = (float)_painter.ProjectionGizmo.Texture.GetWidth() / _painter.ProjectionGizmo.Texture.GetHeight();
-                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim, baseDim / aspect) : new Vector2(baseDim * aspect, baseDim);
+                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim * aspect, baseDim) : new Vector2(baseDim, baseDim / aspect);
                 }
                 if (_lblTextScale != null) _lblTextScale.Text = $"{v:F2}x";
                 QueueCanvasRedraw();

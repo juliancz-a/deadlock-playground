@@ -120,7 +120,14 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureBuffer(int canvasSize)
         {
-            EnsureBuffer(canvasSize, canvasSize);
+            if (Width > 0 && Height > 0 && (Width != Height || Width == canvasSize || Height == canvasSize))
+            {
+                EnsureBuffer(Width, Height);
+            }
+            else
+            {
+                EnsureBuffer(canvasSize, canvasSize);
+            }
         }
 
         public void EnsureMaskTexture(RenderingDevice rd, int width, int height)
@@ -176,7 +183,14 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureMaskTexture(RenderingDevice rd, int canvasSize)
         {
-            EnsureMaskTexture(rd, canvasSize, canvasSize);
+            if (Width > 0 && Height > 0 && (Width != Height || Width == canvasSize || Height == canvasSize))
+            {
+                EnsureMaskTexture(rd, Width, Height);
+            }
+            else
+            {
+                EnsureMaskTexture(rd, canvasSize, canvasSize);
+            }
         }
 
         public void EnsureSize(int width, int height)
@@ -196,7 +210,14 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureSize(int canvasSize)
         {
-            EnsureSize(canvasSize, canvasSize);
+            if (Width > 0 && Height > 0 && (Width != Height || Width == canvasSize || Height == canvasSize))
+            {
+                EnsureSize(Width, Height);
+            }
+            else
+            {
+                EnsureSize(canvasSize, canvasSize);
+            }
         }
 
         public void UpdateSelectionState()

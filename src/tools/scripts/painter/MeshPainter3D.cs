@@ -35,7 +35,20 @@ namespace DeadlockPlayground.Painter
         [Signal] public delegate void StrokeStartedEventHandler();
         [Signal] public delegate void StrokeFinishedEventHandler();
 
-        [Export] public bool IsPaintingActive { get; set; } = true;
+        private bool _isPaintingActive = true;
+        [Export] public bool IsPaintingActive
+        {
+            get => _isPaintingActive;
+            set
+            {
+                _isPaintingActive = value;
+                if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+                {
+                    _selectionOverlay3D.Visible = value;
+                    if (!value) _selectionOverlay3D.QueueRedraw();
+                }
+            }
+        }
 
         // Shape Painting Subsystem
         private readonly ShapeTool _shapeTool = new();
@@ -335,6 +348,33 @@ namespace DeadlockPlayground.Painter
             return ShapeHandleType.None;
         }
 
+        private static Basis CreateOrthonormalDecalBasis(Vector3 tangent, Vector3 normal, Vector3 bitangent, float rotationDeg)
+        {
+            if (normal.LengthSquared() < 0.001f) normal = Vector3.Up;
+            else normal = normal.Normalized();
+
+            if (tangent.LengthSquared() < 0.001f || MathF.Abs(tangent.Dot(normal)) > 0.99f)
+            {
+                Vector3 up = MathF.Abs(normal.Y) < 0.95f ? Vector3.Up : Vector3.Right;
+                tangent = normal.Cross(up).Normalized();
+            }
+            else
+            {
+                tangent = (tangent - normal * normal.Dot(tangent)).Normalized();
+            }
+
+            Vector3 cleanBitangent = tangent.Cross(normal).Normalized();
+            Basis basis = new Basis(tangent, normal, cleanBitangent);
+            if (MathF.Abs(basis.Determinant()) < 1e-4f)
+            {
+                Vector3 fallbackUp = MathF.Abs(normal.Y) < 0.95f ? Vector3.Up : Vector3.Right;
+                tangent = normal.Cross(fallbackUp).Normalized();
+                cleanBitangent = tangent.Cross(normal).Normalized();
+                basis = new Basis(tangent, normal, cleanBitangent);
+            }
+            return basis.Rotated(normal, Mathf.DegToRad(rotationDeg));
+        }
+
         private void OnProjectionGizmoChanged()
         {
             if (!_projectionGizmo.IsActive) return;
@@ -431,28 +471,15 @@ namespace DeadlockPlayground.Painter
 
             if (_previewDecalNode != null && _projectionGizmo.Has3DPlacement)
             {
-                Vector3 normal = _projectionGizmo.WorldNormal.Normalized();
-                Vector3 tangent = _projectionGizmo.WorldTangent;
-                Vector3 bitangent = _projectionGizmo.WorldBitangent;
-                if (tangent.LengthSquared() < 0.001f)
-                {
-                    Vector3 up = MathF.Abs(normal.Y) < 0.99f ? Vector3.Up : Vector3.Right;
-                    tangent = up.Cross(normal).Normalized();
-                    bitangent = normal.Cross(tangent).Normalized();
-                }
-                else
-                {
-                    tangent = tangent.Normalized();
-                    bitangent = bitangent.Normalized();
-                }
+                Basis basis = CreateOrthonormalDecalBasis(
+                    _projectionGizmo.WorldTangent,
+                    _projectionGizmo.WorldNormal,
+                    _projectionGizmo.WorldBitangent,
+                    _projectionGizmo.RotationDegrees
+                );
 
-                Basis basis = new Basis(tangent, normal, bitangent);
-                basis = basis.Rotated(normal, Mathf.DegToRad(_projectionGizmo.RotationDegrees));
-
-                var tex = _projectionGizmo.Texture;
-                float aspect = (tex != null && tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
-                float uvSpanU = (aspect >= 1.0f) ? normScale * aspect : normScale;
-                float uvSpanV = (aspect < 1.0f) ? normScale / aspect : normScale;
+                float uvSpanU = (atlasW > 0) ? _projectionGizmo.Size.X / (float)atlasW : 0.25f;
+                float uvSpanV = (atlasH > 0) ? _projectionGizmo.Size.Y / (float)atlasH : 0.25f;
                 float unitsU = (_projectionGizmo.UnitsU > 1e-4f && _projectionGizmo.UnitsU < 20.0f) ? _projectionGizmo.UnitsU : 0.5f;
                 float unitsV = (_projectionGizmo.UnitsV > 1e-4f && _projectionGizmo.UnitsV < 20.0f) ? _projectionGizmo.UnitsV : 0.5f;
                 float sizeX = uvSpanU * unitsU;
@@ -1205,8 +1232,10 @@ namespace DeadlockPlayground.Painter
 
                     _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
 
-                    int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                    Vector2 centerAtlasPx = _lastHit.HitUV * atlasSize;
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    int atlasSize = Math.Max(atlasW, atlasH);
+                    Vector2 centerAtlasPx = new Vector2(_lastHit.HitUV.X * atlasW, _lastHit.HitUV.Y * atlasH);
 
                     if (!_projectionGizmo.IsActive || isInitialClick || _projectionGizmo.IsText)
                     {
@@ -1245,8 +1274,10 @@ namespace DeadlockPlayground.Painter
 
                     _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
 
-                    int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                    Vector2 centerAtlasPx = _lastHit.HitUV * atlasSize;
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    int atlasSize = Math.Max(atlasW, atlasH);
+                    Vector2 centerAtlasPx = new Vector2(_lastHit.HitUV.X * atlasW, _lastHit.HitUV.Y * atlasH);
 
                     if (!_projectionGizmo.IsActive || isInitialClick || !_projectionGizmo.IsText)
                     {
@@ -1827,8 +1858,7 @@ namespace DeadlockPlayground.Painter
                             _previewDecalNode.LowerFade = 0.2f;
                             _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
-                            Basis basis = new Basis(tangent, normal, bitangent);
-                            basis = basis.Rotated(normal, Mathf.DegToRad(rotDeg));
+                            Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
                             _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld);
                         }
                     }
@@ -1867,8 +1897,7 @@ namespace DeadlockPlayground.Painter
                             _previewDecalNode.LowerFade = 0.2f;
                             _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
-                            Basis basis = new Basis(tangent, normal, bitangent);
-                            basis = basis.Rotated(normal, Mathf.DegToRad(rotDeg));
+                            Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
                             _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld);
                         }
                     }
@@ -1971,8 +2000,9 @@ namespace DeadlockPlayground.Painter
             {
                 _raycaster.BuildFromMesh(_currentMesh, -1);
                 _layerManager?.SetupForMesh(_currentMesh, surfaceIndex);
-                int atlasDim = _layerManager?.CanvasSize.X ?? 2048;
-                _magicWandTool?.SelectionMask?.EnsureSize(atlasDim);
+                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                _magicWandTool?.SelectionMask?.EnsureSize(atlasW, atlasH);
                 ApplyFrontFacesOnlyToMaterials();
             }
 
@@ -2303,7 +2333,7 @@ namespace DeadlockPlayground.Painter
                                 _isDraggingGizmo3D = false;
                                 _activeShapeHandle3D = ShapeHandleType.None;
                                 _shapeTool.EndHandleDrag();
-                                _layerManager?.UpdateShapePreview(_shapeTool, BrushColor);
+                                _layerManager?.UpdateShapePreview(_shapeTool, BrushColor, forceImmediate: true);
                                 _selectionOverlay3D?.QueueRedraw();
                                 GetViewport()?.SetInputAsHandled();
                                 return;
@@ -2316,7 +2346,7 @@ namespace DeadlockPlayground.Painter
                                 if (_shapeStartScreenPos.DistanceTo(_shapeCurrentScreenPos) >= 3.0f)
                                 {
                                     // Keep shape active with handles so the user can interactively move, scale, rotate
-                                    _layerManager?.UpdateShapePreview(_shapeTool, BrushColor);
+                                    _layerManager?.UpdateShapePreview(_shapeTool, BrushColor, forceImmediate: true);
                                 }
                                 else
                                 {
@@ -2831,6 +2861,15 @@ namespace DeadlockPlayground.Painter
                 _selectionOverlay3D?.QueueRedraw();
             }
 
+            if (_projectionGizmo != null && _projectionGizmo.IsActive)
+            {
+                _projectionGizmo.Deactivate();
+            }
+            _isDraggingGizmo3D = false;
+            _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+            _decalStamper?.HidePreview();
+            _textProjector?.HidePreview();
+
             if (_cursorGizmo != null)
             {
                 _cursorGizmo.Visible = false;
@@ -2842,6 +2881,11 @@ namespace DeadlockPlayground.Painter
             if (_previewDecalNode != null)
             {
                 _previewDecalNode.Visible = false;
+            }
+            if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+            {
+                _selectionOverlay3D.Visible = false;
+                _selectionOverlay3D.QueueRedraw();
             }
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
@@ -3379,7 +3423,9 @@ namespace DeadlockPlayground.Painter
                 var rd = RenderingServer.GetRenderingDevice();
                 if (rd != null)
                 {
-                    _magicWandTool.SelectionMask?.EnsureMaskTexture(rd, _magicWandTool.CurrentAtlasSize);
+                    int mw = _magicWandTool.SelectionMask?.Width ?? (_layerManager?.CanvasSize.X ?? 2048);
+                    int mh = _magicWandTool.SelectionMask?.Height ?? (_layerManager?.CanvasSize.Y ?? 2048);
+                    _magicWandTool.SelectionMask?.EnsureMaskTexture(rd, mw, mh);
                 }
                 var candRid = _magicWandTool.SelectionMaskRid;
                 if (candRid.IsValid && rd != null && rd.TextureIsValid(candRid))

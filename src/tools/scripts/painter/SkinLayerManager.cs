@@ -1401,12 +1401,18 @@ namespace DeadlockPlayground.Painter
             var rd = RenderingServer.GetRenderingDevice();
             if (rd == null) return;
 
-            int atlasSize = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
             var amSize = _activeAtlasManager.Get("atlas_size");
             if (amSize.VariantType == Variant.Type.Int && amSize.AsInt32() > 0)
             {
-                atlasSize = amSize.AsInt32();
+                atlasW = amSize.AsInt32();
+                atlasH = amSize.AsInt32();
             }
+            var amW = _activeAtlasManager.Get("atlas_width");
+            var amH = _activeAtlasManager.Get("atlas_height");
+            if (amW.VariantType == Variant.Type.Int && amW.AsInt32() > 0) atlasW = amW.AsInt32();
+            if (amH.VariantType == Variant.Type.Int && amH.AsInt32() > 0) atlasH = amH.AsInt32();
 
             var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
             var compRidVal = _activeAtlasManager.Get("composite_texture_rid");
@@ -1420,7 +1426,7 @@ namespace DeadlockPlayground.Painter
                     {
                         if (layer.BlendMode == LayerBlendMode.Normal)
                         {
-                            rd.TextureCopy(layer.LayerRid, fullRidVal.AsRid(), Vector3.Zero, Vector3.Zero, new Vector3(atlasSize, atlasSize, 1), 0, 0, 0, 0);
+                            rd.TextureCopy(layer.LayerRid, fullRidVal.AsRid(), Vector3.Zero, Vector3.Zero, new Vector3(atlasW, atlasH, 1), 0, 0, 0, 0);
                         }
                         else
                         {
@@ -2633,15 +2639,19 @@ namespace DeadlockPlayground.Painter
             Rid rid = ridVal.AsRid();
             if (!rid.IsValid || rd == null) return;
 
-            int atlasSize = (int)fillAtlasMgr.Get("atlas_size");
-            if (atlasSize <= 0) atlasSize = 2048;
+            int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            var amW = fillAtlasMgr.Get("atlas_width");
+            var amH = fillAtlasMgr.Get("atlas_height");
+            if (amW.VariantType == Variant.Type.Int && amW.AsInt32() > 0) atlasW = amW.AsInt32();
+            if (amH.VariantType == Variant.Type.Int && amH.AsInt32() > 0) atlasH = amH.AsInt32();
 
             RecordInitialSnapshot();
 
-            int startX = Mathf.Clamp((int)(pos.X * atlasSize), 0, atlasSize - 1);
-            int startY = Mathf.Clamp((int)(pos.Y * atlasSize), 0, atlasSize - 1);
-            int width = Mathf.Clamp((int)(size.X * atlasSize), 1, atlasSize - startX);
-            int height = Mathf.Clamp((int)(size.Y * atlasSize), 1, atlasSize - startY);
+            int startX = Mathf.Clamp((int)(pos.X * atlasW), 0, atlasW - 1);
+            int startY = Mathf.Clamp((int)(pos.Y * atlasH), 0, atlasH - 1);
+            int width = Mathf.Clamp((int)(size.X * atlasW), 1, atlasW - startX);
+            int height = Mathf.Clamp((int)(size.Y * atlasH), 1, atlasH - startY);
 
             Color linearCol = color.SrgbToLinear();
             Half hR = (Half)linearCol.R;
@@ -2654,7 +2664,7 @@ namespace DeadlockPlayground.Painter
             if (ActiveLayer != null)
             {
                 EnsureCpuSynced();
-                int bufferLen = atlasSize * atlasSize * 8;
+                int bufferLen = atlasW * atlasH * 8;
                 if (ActiveLayer.GpuData == null || ActiveLayer.GpuData.Length != bufferLen)
                 {
                     ActiveLayer.GpuData = new byte[bufferLen];
@@ -2686,7 +2696,7 @@ namespace DeadlockPlayground.Painter
                             for (int y = bMinY; y <= bMaxY; y++)
                             {
                                 int ay = startY + y;
-                                int rowOffset = (startY + y) * atlasSize;
+                                int rowOffset = (startY + y) * atlasW;
                                 int maskRow = y * width;
                                 for (int x = bMinX; x <= bMaxX; x++)
                                 {
@@ -2705,7 +2715,7 @@ namespace DeadlockPlayground.Painter
                             // 100% Tolerance Fast Path: Direct 64-bit store over submesh geometry with zero allocations
                             for (int y = bMinY; y <= bMaxY; y++)
                             {
-                                int rowOffset = (startY + y) * atlasSize;
+                                int rowOffset = (startY + y) * atlasW;
                                 int maskRow = y * width;
                                 for (int x = bMinX; x <= bMaxX; x++)
                                 {
@@ -2774,7 +2784,7 @@ namespace DeadlockPlayground.Painter
                                     Half* hBase = (Half*)pBase;
                                     Half* hLayer = (Half*)pDst;
 
-                                    int seedAtlasIdx = ((startY + seedLocalY) * atlasSize + (startX + seedLocalX)) * 4;
+                                    int seedAtlasIdx = ((startY + seedLocalY) * atlasW + (startX + seedLocalX)) * 4;
 
                                     float sR, sG, sB, sA;
                                     float layerA = (float)hLayer[seedAtlasIdx + 3];
@@ -2814,7 +2824,7 @@ namespace DeadlockPlayground.Painter
                                             if (fillMask[nIdx]) return;
                                             if (hasValidUvMask && !submeshUvMask[nIdx]) return;
 
-                                            int atlasIdx = ((startY + ny) * atlasSize + (startX + nx)) * 4;
+                                            int atlasIdx = ((startY + ny) * atlasW + (startX + nx)) * 4;
                                             float cR, cG, cB, cA;
                                             float pA = (float)hLayer[atlasIdx + 3];
                                             if (pA > 0.05f)
@@ -2894,7 +2904,7 @@ namespace DeadlockPlayground.Painter
 
                             for (int y = bMinY; y <= bMaxY; y++)
                             {
-                                int rowOffset = (startY + y) * atlasSize;
+                                int rowOffset = (startY + y) * atlasW;
                                 int maskRow = y * width;
                                 for (int x = bMinX; x <= bMaxX; x++)
                                 {
@@ -3003,7 +3013,7 @@ namespace DeadlockPlayground.Painter
             float cosR = Mathf.Cos(rad);
             float sinR = Mathf.Sin(rad);
 
-            bool use3DProjection = !explicitPixelSize.HasValue && decalRight.LengthSquared() > 0.001f && worldTangent.LengthSquared() > 0.001f;
+            bool use3DProjection = decalRight.LengthSquared() > 0.001f && worldTangent.LengthSquared() > 0.001f;
             Vector3 T = worldTangent * unitsU;
             Vector3 B = worldBitangent * unitsV;
 
@@ -3055,8 +3065,8 @@ namespace DeadlockPlayground.Painter
                                 {
                                     float nx = (float)(x - centerPx.X) / halfExtX;
                                     float ny = (float)(y - centerPx.Y) / halfExtY;
-                                    rx = nx * cosR - ny * sinR;
-                                    ry = nx * sinR + ny * cosR;
+                                    rx = nx * cosR + ny * sinR;
+                                    ry = -nx * sinR + ny * cosR;
                                 }
 
                                 if (Mathf.Abs(rx) > 1.0f || Mathf.Abs(ry) > 1.0f) continue;
@@ -3229,8 +3239,9 @@ namespace DeadlockPlayground.Painter
             var layer = ActiveLayer;
             if (layer == null || layer.IsLocked || !layer.IsVisible) return new Rect2I();
 
-            int atlasSize = CanvasSize.X > 0 ? CanvasSize.X : 2048;
-            int bufferLen = atlasSize * atlasSize * 8;
+            int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            int bufferLen = atlasW * atlasH * 8;
             if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
             {
                 layer.GpuData = new byte[bufferLen];
@@ -3240,10 +3251,10 @@ namespace DeadlockPlayground.Painter
             if (radius < 0.5f) radius = 0.5f;
             int intRadius = Mathf.CeilToInt(radius);
 
-            int minX = Mathf.Clamp((int)(atlasPx.X - intRadius), 0, atlasSize - 1);
-            int maxX = Mathf.Clamp((int)(atlasPx.X + intRadius), 0, atlasSize - 1);
-            int minY = Mathf.Clamp((int)(atlasPx.Y - intRadius), 0, atlasSize - 1);
-            int maxY = Mathf.Clamp((int)(atlasPx.Y + intRadius), 0, atlasSize - 1);
+            int minX = Mathf.Clamp((int)(atlasPx.X - intRadius), 0, atlasW - 1);
+            int maxX = Mathf.Clamp((int)(atlasPx.X + intRadius), 0, atlasW - 1);
+            int minY = Mathf.Clamp((int)(atlasPx.Y - intRadius), 0, atlasH - 1);
+            int maxY = Mathf.Clamp((int)(atlasPx.Y + intRadius), 0, atlasH - 1);
 
             float rSq = radius * radius;
             float hardFrac = Mathf.Clamp(hardness, 0.0f, 0.99f);
@@ -3265,7 +3276,7 @@ namespace DeadlockPlayground.Painter
                 Half* hLayer = (Half*)pDst;
                 for (int y = minY; y <= maxY; y++)
                 {
-                    int rowOffset = y * atlasSize * 4;
+                    int rowOffset = y * atlasW * 4;
                     float dy = y - atlasPx.Y;
                     float dySq = dy * dy;
                     if (shape != BrushShapeType.Square && dySq > rSq) continue;
@@ -3875,6 +3886,13 @@ namespace DeadlockPlayground.Painter
 
             if (shapeTool != null && shapeTool.HasActiveShape && layer.GpuData != null)
             {
+                // While actively dragging a handle or defining a shape, skip expensive full-texture CPU compositing and GPU uploads.
+                // 2D and 3D viewports render real-time vector overlays (DrawOverlay) at full display framerate.
+                if (shapeTool.IsDragging && !forceImmediate)
+                {
+                    return;
+                }
+
                 if (!forceImmediate)
                 {
                     ulong now = Time.GetTicksMsec();

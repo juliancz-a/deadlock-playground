@@ -150,10 +150,19 @@ namespace DeadlockPlayground.Painter
             _unitsV = unitsV;
             _hasPlacement = true;
 
-            UpdatePreviewTransform();
-            if (_previewDecal != null)
+            // When MeshPainter3D manages _previewDecalNode with ProjectionTransformGizmo,
+            // keep legacy _previewDecal hidden to avoid duplicate distorted projection.
+            if (_painter == null || _painter.ProjectionGizmo == null)
             {
-                _previewDecal.Visible = true;
+                UpdatePreviewTransform();
+                if (_previewDecal != null)
+                {
+                    _previewDecal.Visible = true;
+                }
+            }
+            else if (_previewDecal != null)
+            {
+                _previewDecal.Visible = false;
             }
 
             EmitSignal(SignalName.DecalPlaced, worldPos, uv);
@@ -163,18 +172,17 @@ namespace DeadlockPlayground.Painter
         {
             if (_previewDecal == null || !_hasPlacement) return;
 
-            // Orient decal towards normal
-            _previewDecal.GlobalPosition = _currentWorldPos + _currentNormal * 0.01f;
+            Vector3 normal = _currentNormal.LengthSquared() > 0.001f ? _currentNormal.Normalized() : Vector3.Up;
+            Vector3 up = MathF.Abs(normal.Y) < 0.95f ? Vector3.Up : Vector3.Right;
+            Vector3 right = normal.Cross(up).Normalized();
+            Vector3 forward = right.Cross(normal).Normalized();
 
-            // Construct basis oriented along normal
-            Vector3 forward = _currentNormal.Normalized();
-            Vector3 up = MathF.Abs(forward.Y) < 0.99f ? Vector3.Up : Vector3.Right;
-            Vector3 right = up.Cross(forward).Normalized();
-            up = forward.Cross(right).Normalized();
-
-            Basis basis = new Basis(right, up, forward);
-            // Apply rotation around the normal
-            basis = basis.Rotated(forward, Mathf.DegToRad(RotationDegrees));
+            Basis basis = new Basis(right, normal, forward);
+            if (MathF.Abs(basis.Determinant()) < 1e-4f)
+            {
+                basis = Basis.LookingAt(-normal, up);
+            }
+            basis = basis.Rotated(normal, Mathf.DegToRad(RotationDegrees));
 
             float size3D = DecalScale * 2.0f;
             float depth3D = Mathf.Clamp(size3D * 0.8f, 0.03f, 0.35f);

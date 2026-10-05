@@ -1352,6 +1352,7 @@ namespace DeadlockPlayground.UI
                             if (_painter.ShapeTool.IsDragging)
                             {
                                 _painter.ShapeTool.EndHandleDrag();
+                                _painter.LayerManager?.UpdateShapePreview(_painter.ShapeTool, _painter.BrushColor, forceImmediate: true);
                                 _brushPalette?.SyncShapeControls();
                                 _wireframeOverlay?.QueueRedraw();
                                 canvas.AcceptEvent();
