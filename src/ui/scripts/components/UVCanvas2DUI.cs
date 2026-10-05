@@ -1225,8 +1225,9 @@ namespace DeadlockPlayground.UI
                     if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
                     {
                         _painter.ShapeTool.CancelShape();
-                        _painter.LayerManager?.RecompositeGpuLayers();
+                        _painter.LayerManager?.CancelShapePreview();
                         _wireframeOverlay?.QueueRedraw();
+                        canvas.QueueRedraw();
                         canvas.AcceptEvent();
                         return;
                     }
@@ -1268,6 +1269,8 @@ namespace DeadlockPlayground.UI
                                 if (handle != ShapeHandleType.None)
                                 {
                                     _painter.ShapeTool.StartHandleDrag(handle, atlasPx);
+                                    _painter.LayerManager?.CancelShapePreview();
+                                    canvas.QueueRedraw();
                                     canvas.AcceptEvent();
                                     return;
                                 }
@@ -1404,9 +1407,11 @@ namespace DeadlockPlayground.UI
                 {
                     Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
                     _painter.ShapeTool.UpdateDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
+                    _painter.LayerManager?.UpdateShapePreview(_painter.ShapeTool, _painter.BrushColor);
 
                     _brushPalette?.SyncShapeControls();
                     _wireframeOverlay?.QueueRedraw();
+                    canvas.QueueRedraw();
                     canvas.AcceptEvent();
                     return;
                 }
@@ -1613,8 +1618,9 @@ namespace DeadlockPlayground.UI
                 if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
                 {
                     _painter.ShapeTool.CancelShape();
-                    _painter.LayerManager?.RecompositeGpuLayers();
+                    _painter.LayerManager?.CancelShapePreview();
                     _wireframeOverlay?.QueueRedraw();
+                    _canvasDrawArea?.QueueRedraw();
                     GetViewport()?.SetInputAsHandled();
                     return;
                 }

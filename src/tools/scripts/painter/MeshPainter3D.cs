@@ -63,6 +63,9 @@ namespace DeadlockPlayground.Painter
         private Vector2 _shapeCurrentScreenPos = Vector2.Zero;
         private Vector2 _shapeStartUV = Vector2.Zero;
         private Vector2 _shapeCurrentUV = Vector2.Zero;
+        private Vector2 _shapeSubmeshAtlasPos = Vector2.Zero;
+        private Vector2 _shapeSubmeshAtlasSize = Vector2.One;
+        private Vector2 _shapeStartAtlasUV = Vector2.Zero;
 
         // Front Faces Only / Backface Occlusion
         private bool _frontFacesOnly = true;
@@ -157,7 +160,7 @@ namespace DeadlockPlayground.Painter
                     if (_shapeTool != null && _shapeTool.HasActiveShape)
                     {
                         _shapeTool.CancelShape();
-                        _layerManager?.RecompositeGpuLayers();
+                        _layerManager?.CancelShapePreview();
                     }
                 }
 
@@ -339,6 +342,20 @@ namespace DeadlockPlayground.Painter
         private ShapeHandleType HitTest3DShapeGizmo(Vector2 screenMousePos)
         {
             if (!_shapeTool.HasActiveShape) return ShapeHandleType.None;
+            if (_shapeTool.ShapeType == CanvasShapeType.Line)
+            {
+                if (screenMousePos.DistanceTo(_gizmo3DScreenTL) <= 14.0f) return ShapeHandleType.TopLeft;
+                if (screenMousePos.DistanceTo(_gizmo3DScreenBR) <= 14.0f) return ShapeHandleType.BottomRight;
+                Vector2 ab = _gizmo3DScreenBR - _gizmo3DScreenTL;
+                float l2 = ab.LengthSquared();
+                if (l2 > 1e-4f)
+                {
+                    float t = Math.Clamp((screenMousePos - _gizmo3DScreenTL).Dot(ab) / l2, 0.0f, 1.0f);
+                    Vector2 proj = _gizmo3DScreenTL + t * ab;
+                    if (screenMousePos.DistanceTo(proj) <= 12.0f) return ShapeHandleType.Body;
+                }
+                return ShapeHandleType.None;
+            }
             if (screenMousePos.DistanceTo(_gizmo3DScreenRot) <= 14.0f) return ShapeHandleType.Rotate;
             if (screenMousePos.DistanceTo(_gizmo3DScreenTL) <= 12.0f) return ShapeHandleType.TopLeft;
             if (screenMousePos.DistanceTo(_gizmo3DScreenTR) <= 12.0f) return ShapeHandleType.TopRight;
@@ -2233,7 +2250,7 @@ namespace DeadlockPlayground.Painter
                         {
                             _isDraggingShape3D = false;
                             _shapeTool.CancelShape();
-                            _layerManager?.RecompositeGpuLayers();
+                            _layerManager?.CancelShapePreview();
                             _selectionOverlay3D?.QueueRedraw();
                             GetViewport()?.SetInputAsHandled();
                             return;
@@ -2261,7 +2278,7 @@ namespace DeadlockPlayground.Painter
                         {
                             _isDraggingShape3D = false;
                             _shapeTool.CancelShape();
-                            _layerManager?.RecompositeGpuLayers();
+                            _layerManager?.CancelShapePreview();
                             _selectionOverlay3D?.QueueRedraw();
                             GetViewport()?.SetInputAsHandled();
                             return;
@@ -2288,6 +2305,7 @@ namespace DeadlockPlayground.Painter
                                     _gizmoDragStartScreenPos = mousePos;
                                     _gizmoDragStartRot = _shapeTool.RotationDegrees;
                                     _gizmoDragStartSize = _shapeTool.Size;
+                                    _layerManager?.CancelShapePreview();
                                     GetViewport()?.SetInputAsHandled();
                                     return;
                                 }
@@ -2328,8 +2346,26 @@ namespace DeadlockPlayground.Painter
                                 _shapeStartUnitsPerU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
                                 _shapeStartUnitsPerV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
 
-                                int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                                Vector2 startAtlasPx = _shapeStartUV * atlasSize;
+                                MeshInstance3D mesh = hit.HitMesh ?? _currentMesh;
+                                _shapeSubmeshAtlasPos = Vector2.Zero;
+                                _shapeSubmeshAtlasSize = Vector2.One;
+                                if (mesh != null && mesh.MaterialOverlay is ShaderMaterial sm)
+                                {
+                                    var posVar = sm.GetShaderParameter("position_in_atlas");
+                                    var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                    {
+                                        _shapeSubmeshAtlasPos = posVar.AsVector2();
+                                        _shapeSubmeshAtlasSize = sizeVar.AsVector2();
+                                    }
+                                }
+
+                                Vector2 atlasUV = hit.HitUV * _shapeSubmeshAtlasSize + _shapeSubmeshAtlasPos;
+                                _shapeStartAtlasUV = atlasUV;
+
+                                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                                Vector2 startAtlasPx = new Vector2(atlasUV.X * atlasW, atlasUV.Y * atlasH);
                                 _shapeTool.BeginNewShape(startAtlasPx);
                                 _lastShapePreviewMs = Time.GetTicksMsec();
                                 _brushPalette?.SyncShapeControls();
@@ -2363,7 +2399,7 @@ namespace DeadlockPlayground.Painter
                                 else
                                 {
                                     _shapeTool.CancelShape();
-                                    _layerManager?.RecompositeGpuLayers();
+                                    _layerManager?.CancelShapePreview();
                                 }
                                 _selectionOverlay3D?.QueueRedraw();
                                 GetViewport()?.SetInputAsHandled();
@@ -2378,7 +2414,52 @@ namespace DeadlockPlayground.Painter
                     if (_isDraggingGizmo3D && _activeShapeHandle3D != ShapeHandleType.None)
                     {
                         Vector2 mousePos = GetViewportMousePosition();
-                        if (_activeShapeHandle3D == ShapeHandleType.Rotate)
+                        if (_shapeTool.ShapeType == CanvasShapeType.Line && (_activeShapeHandle3D == ShapeHandleType.TopLeft || _activeShapeHandle3D == ShapeHandleType.BottomRight))
+                        {
+                            var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                            if (camera != null)
+                            {
+                                Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                                Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+                                RaycastHitResult currentHit = default;
+                                if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                                    currentHit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly);
+                                if (!currentHit.Hit)
+                                    RaycastAllSubmeshes(origin, dir, out _, out currentHit, cullBackfaces: FrontFacesOnly);
+                                if (currentHit.Hit)
+                                {
+                                    MeshInstance3D curMesh = currentHit.HitMesh ?? _currentMesh;
+                                    Vector2 curAtlasUV = currentHit.HitUV;
+                                    if (curMesh != null && curMesh.MaterialOverlay is ShaderMaterial curSm)
+                                    {
+                                        var posVar = curSm.GetShaderParameter("position_in_atlas");
+                                        var sizeVar = curSm.GetShaderParameter("size_in_atlas");
+                                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                        {
+                                            curAtlasUV = curAtlasUV * sizeVar.AsVector2() + posVar.AsVector2();
+                                        }
+                                    }
+
+                                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                                    Vector2 newPt = new Vector2(curAtlasUV.X * atlasW, curAtlasUV.Y * atlasH);
+                                    if (_activeShapeHandle3D == ShapeHandleType.TopLeft) _shapeTool.LineStart = newPt;
+                                    else _shapeTool.LineEnd = newPt;
+
+                                    _shapeTool.Center = (_shapeTool.LineStart + _shapeTool.LineEnd) * 0.5f;
+                                    Vector2 diff = _shapeTool.LineEnd - _shapeTool.LineStart;
+                                    _shapeTool.Size = new Vector2(diff.Length(), _shapeTool.StrokeWidth);
+                                    _shapeTool.RotationDegrees = Mathf.RadToDeg(MathF.Atan2(diff.Y, diff.X));
+
+                                    _layerManager?.UpdateShapePreview(_shapeTool, BrushColor);
+                                    _brushPalette?.SyncShapeControls();
+                                    _selectionOverlay3D?.QueueRedraw();
+                                    GetViewport()?.SetInputAsHandled();
+                                    return;
+                                }
+                            }
+                        }
+                        else if (_activeShapeHandle3D == ShapeHandleType.Rotate)
                         {
                             Vector2 fromCenter = mousePos - _gizmo3DScreenCenter;
                             float angleRad = MathF.Atan2(fromCenter.Y, fromCenter.X) + MathF.PI * 0.5f;
@@ -2405,12 +2486,25 @@ namespace DeadlockPlayground.Painter
                                     RaycastAllSubmeshes(origin, dir, out _, out currentHit, cullBackfaces: FrontFacesOnly);
                                 if (currentHit.Hit)
                                 {
+                                    MeshInstance3D curMesh = currentHit.HitMesh ?? _currentMesh;
+                                    Vector2 curAtlasUV = currentHit.HitUV;
+                                    if (curMesh != null && curMesh.MaterialOverlay is ShaderMaterial curSm)
+                                    {
+                                        var posVar = curSm.GetShaderParameter("position_in_atlas");
+                                        var sizeVar = curSm.GetShaderParameter("size_in_atlas");
+                                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                        {
+                                            curAtlasUV = curAtlasUV * sizeVar.AsVector2() + posVar.AsVector2();
+                                        }
+                                    }
+
                                     int atlasW = _layerManager?.CanvasSize.X ?? 2048;
                                     int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
-                                    _shapeTool.Center = new Vector2(currentHit.HitUV.X * atlasW, currentHit.HitUV.Y * atlasH);
+                                    _shapeTool.Center = new Vector2(curAtlasUV.X * atlasW, curAtlasUV.Y * atlasH);
                                     _shapeStartWorldPos = currentHit.HitPositionWorld;
                                     _shapeStartWorldNormal = currentHit.HitNormal;
                                     _shapeStartUV = currentHit.HitUV;
+                                    _shapeStartAtlasUV = curAtlasUV;
                                     _layerManager?.UpdateShapePreview(_shapeTool, BrushColor);
                                     _brushPalette?.SyncShapeControls();
                                     _selectionOverlay3D?.QueueRedraw();
@@ -2458,7 +2552,18 @@ namespace DeadlockPlayground.Painter
 
                             if (currentHit.Hit)
                             {
-                                _shapeCurrentUV = currentHit.HitUV;
+                                MeshInstance3D curMesh = currentHit.HitMesh ?? _currentMesh;
+                                Vector2 curAtlasUV = currentHit.HitUV;
+                                if (curMesh != null && curMesh.MaterialOverlay is ShaderMaterial curSm)
+                                {
+                                    var posVar = curSm.GetShaderParameter("position_in_atlas");
+                                    var sizeVar = curSm.GetShaderParameter("size_in_atlas");
+                                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                    {
+                                        curAtlasUV = curAtlasUV * sizeVar.AsVector2() + posVar.AsVector2();
+                                    }
+                                }
+                                _shapeCurrentUV = curAtlasUV;
                             }
                             else
                             {
@@ -2472,9 +2577,10 @@ namespace DeadlockPlayground.Painter
                                         Vector3 deltaWorld = planePt - _shapeStartWorldPos;
                                         float deltaU = deltaWorld.Dot(_shapeStartWorldTangent) / _shapeStartUnitsPerU;
                                         float deltaV = deltaWorld.Dot(_shapeStartWorldBitangent) / _shapeStartUnitsPerV;
+                                        Vector2 deltaAtlasUV = new Vector2(deltaU, deltaV) * _shapeSubmeshAtlasSize;
                                         _shapeCurrentUV = new Vector2(
-                                            Mathf.Clamp(_shapeStartUV.X + deltaU, 0.0f, 1.0f),
-                                            Mathf.Clamp(_shapeStartUV.Y + deltaV, 0.0f, 1.0f)
+                                            Mathf.Clamp(_shapeStartAtlasUV.X + deltaAtlasUV.X, 0.0f, 1.0f),
+                                            Mathf.Clamp(_shapeStartAtlasUV.Y + deltaAtlasUV.Y, 0.0f, 1.0f)
                                         );
                                     }
                                 }
@@ -2483,15 +2589,17 @@ namespace DeadlockPlayground.Painter
                                     Vector2 screenDelta = _shapeCurrentScreenPos - _shapeStartScreenPos;
                                     float approxUvScale = 1.0f / 400.0f;
                                     _shapeCurrentUV = new Vector2(
-                                        Mathf.Clamp(_shapeStartUV.X + screenDelta.X * approxUvScale, 0.0f, 1.0f),
-                                        Mathf.Clamp(_shapeStartUV.Y + screenDelta.Y * approxUvScale, 0.0f, 1.0f)
+                                        Mathf.Clamp(_shapeStartAtlasUV.X + screenDelta.X * approxUvScale, 0.0f, 1.0f),
+                                        Mathf.Clamp(_shapeStartAtlasUV.Y + screenDelta.Y * approxUvScale, 0.0f, 1.0f)
                                     );
                                 }
                             }
 
-                            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                            Vector2 currentAtlasPx = _shapeCurrentUV * atlasSize;
+                            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                            Vector2 currentAtlasPx = new Vector2(_shapeCurrentUV.X * atlasW, _shapeCurrentUV.Y * atlasH);
                             _shapeTool.UpdateNewShapeDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
+                            _layerManager?.UpdateShapePreview(_shapeTool, BrushColor);
 
                             _brushPalette?.SyncShapeControls();
                             _selectionOverlay3D?.QueueRedraw();
@@ -2869,7 +2977,7 @@ namespace DeadlockPlayground.Painter
             {
                 _isDraggingShape3D = false;
                 _shapeTool.CancelShape();
-                _layerManager?.RecompositeGpuLayers();
+                _layerManager?.CancelShapePreview();
                 _selectionOverlay3D?.QueueRedraw();
             }
 
@@ -2925,7 +3033,7 @@ namespace DeadlockPlayground.Painter
             {
                 _isDraggingShape3D = false;
                 _shapeTool.CancelShape();
-                _layerManager?.RecompositeGpuLayers();
+                _layerManager?.CancelShapePreview();
                 _selectionOverlay3D?.QueueRedraw();
             }
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
@@ -3017,42 +3125,88 @@ namespace DeadlockPlayground.Painter
                     {
                         int atlasW = _layerManager?.CanvasSize.X ?? 2048;
                         int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
-                        Vector2 centerAtlas = _shapeTool.Center;
-                        Vector2 deltaFromStartUV = (centerAtlas / new Vector2(atlasW, atlasH)) - _shapeStartUV;
-                        Vector3 shapeCenterWorld = _shapeStartWorldPos + _shapeStartWorldTangent * (deltaFromStartUV.X * _shapeStartUnitsPerU * atlasW) + _shapeStartWorldBitangent * (deltaFromStartUV.Y * _shapeStartUnitsPerV * atlasH);
 
-                        if (!cam.IsPositionBehind(shapeCenterWorld))
+                        if (_shapeTool.ShapeType == CanvasShapeType.Line)
                         {
-                            float rad = Mathf.DegToRad(_shapeTool.RotationDegrees);
-                            float hw3D = (_shapeTool.Size.X * 0.5f) * (1.0f / atlasW) * _shapeStartUnitsPerU * atlasW;
-                            float hh3D = (_shapeTool.Size.Y * 0.5f) * (1.0f / atlasH) * _shapeStartUnitsPerV * atlasH;
-                            Vector3 right3D = (_shapeStartWorldTangent * MathF.Cos(rad) + _shapeStartWorldBitangent * MathF.Sin(rad)).Normalized() * hw3D;
-                            Vector3 down3D = (-_shapeStartWorldTangent * MathF.Sin(rad) + _shapeStartWorldBitangent * MathF.Cos(rad)).Normalized() * hh3D;
+                            Vector2 startAtlasUV = new Vector2(_shapeTool.LineStart.X / atlasW, _shapeTool.LineStart.Y / atlasH);
+                            Vector2 endAtlasUV = new Vector2(_shapeTool.LineEnd.X / atlasW, _shapeTool.LineEnd.Y / atlasH);
+                            Vector2 deltaStartSubmesh = (startAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                                MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                                MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                            );
+                            Vector2 deltaEndSubmesh = (endAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                                MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                                MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                            );
 
-                            Vector3 pTL = shapeCenterWorld - right3D - down3D;
-                            Vector3 pTR = shapeCenterWorld + right3D - down3D;
-                            Vector3 pBR = shapeCenterWorld + right3D + down3D;
-                            Vector3 pBL = shapeCenterWorld - right3D + down3D;
-                            Vector3 topCenter = shapeCenterWorld - down3D;
-                            Vector3 rotHandlePos = topCenter - down3D.Normalized() * (Mathf.Min(hw3D, hh3D) * 0.5f + 0.04f);
+                            Vector3 pStartWorld = _shapeStartWorldPos + 
+                                _shapeStartWorldTangent * (deltaStartSubmesh.X * _shapeStartUnitsPerU) + 
+                                _shapeStartWorldBitangent * (deltaStartSubmesh.Y * _shapeStartUnitsPerV);
+                            Vector3 pEndWorld = _shapeStartWorldPos + 
+                                _shapeStartWorldTangent * (deltaEndSubmesh.X * _shapeStartUnitsPerU) + 
+                                _shapeStartWorldBitangent * (deltaEndSubmesh.Y * _shapeStartUnitsPerV);
 
-                            _gizmo3DScreenTL = cam.UnprojectPosition(pTL);
-                            _gizmo3DScreenTR = cam.UnprojectPosition(pTR);
-                            _gizmo3DScreenBR = cam.UnprojectPosition(pBR);
-                            _gizmo3DScreenBL = cam.UnprojectPosition(pBL);
-                            _gizmo3DScreenCenter = cam.UnprojectPosition(shapeCenterWorld);
-                            _gizmo3DScreenRot = cam.UnprojectPosition(rotHandlePos);
-                            Vector2 sTopCenter = cam.UnprojectPosition(topCenter);
+                            if (!cam.IsPositionBehind(pStartWorld) && !cam.IsPositionBehind(pEndWorld))
+                            {
+                                _gizmo3DScreenTL = cam.UnprojectPosition(pStartWorld);
+                                _gizmo3DScreenBR = cam.UnprojectPosition(pEndWorld);
+                                _gizmo3DScreenCenter = (_gizmo3DScreenTL + _gizmo3DScreenBR) * 0.5f;
 
-                            _selectionOverlay3D.DrawPolyline(new Vector2[] { _gizmo3DScreenTL, _gizmo3DScreenTR, _gizmo3DScreenBR, _gizmo3DScreenBL, _gizmo3DScreenTL }, shapeWireColor, 1.5f, antialiased: true);
-                            _selectionOverlay3D.DrawLine(sTopCenter, _gizmo3DScreenRot, shapeWireColor, 1.2f, antialiased: true);
-                            _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, new Color(0.35f, 0.85f, 1.0f, 0.95f), filled: true);
-                            _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, Colors.White, filled: false, width: 1.5f);
-                            Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTL);
-                            Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTR);
-                            Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBR);
-                            Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBL);
-                            _selectionOverlay3D.DrawCircle(_gizmo3DScreenCenter, 4.0f, shapeWireColor, filled: true);
+                                _selectionOverlay3D.DrawLine(_gizmo3DScreenTL, _gizmo3DScreenBR, shapeWireColor, 2.0f, antialiased: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenTL, 6.0f, Colors.White, filled: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenTL, 6.0f, Colors.Black, filled: false, width: 1.5f);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenBR, 6.0f, Colors.White, filled: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenBR, 6.0f, Colors.Black, filled: false, width: 1.5f);
+                            }
+                        }
+                        else
+                        {
+                            Vector2 centerAtlas = _shapeTool.Center;
+                            Vector2 centerAtlasUV = new Vector2(centerAtlas.X / atlasW, centerAtlas.Y / atlasH);
+                            Vector2 deltaSubmeshUV = (centerAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                                MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                                MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                            );
+                            Vector3 shapeCenterWorld = _shapeStartWorldPos + 
+                                _shapeStartWorldTangent * (deltaSubmeshUV.X * _shapeStartUnitsPerU) + 
+                                _shapeStartWorldBitangent * (deltaSubmeshUV.Y * _shapeStartUnitsPerV);
+
+                            if (!cam.IsPositionBehind(shapeCenterWorld))
+                            {
+                                float rad = Mathf.DegToRad(_shapeTool.RotationDegrees);
+                                float halfSpanU = (_shapeTool.Size.X * 0.5f / atlasW) / MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f);
+                                float halfSpanV = (_shapeTool.Size.Y * 0.5f / atlasH) / MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f);
+                                float hw3D = halfSpanU * _shapeStartUnitsPerU;
+                                float hh3D = halfSpanV * _shapeStartUnitsPerV;
+
+                                Vector3 right3D = (_shapeStartWorldTangent * MathF.Cos(rad) + _shapeStartWorldBitangent * MathF.Sin(rad)).Normalized() * hw3D;
+                                Vector3 down3D = (-_shapeStartWorldTangent * MathF.Sin(rad) + _shapeStartWorldBitangent * MathF.Cos(rad)).Normalized() * hh3D;
+
+                                Vector3 pTL = shapeCenterWorld - right3D - down3D;
+                                Vector3 pTR = shapeCenterWorld + right3D - down3D;
+                                Vector3 pBR = shapeCenterWorld + right3D + down3D;
+                                Vector3 pBL = shapeCenterWorld - right3D + down3D;
+                                Vector3 topCenter = shapeCenterWorld - down3D;
+                                Vector3 rotHandlePos = topCenter - down3D.Normalized() * (Mathf.Min(hw3D, hh3D) * 0.25f + 0.04f);
+
+                                _gizmo3DScreenTL = cam.UnprojectPosition(pTL);
+                                _gizmo3DScreenTR = cam.UnprojectPosition(pTR);
+                                _gizmo3DScreenBR = cam.UnprojectPosition(pBR);
+                                _gizmo3DScreenBL = cam.UnprojectPosition(pBL);
+                                _gizmo3DScreenCenter = cam.UnprojectPosition(shapeCenterWorld);
+                                _gizmo3DScreenRot = cam.UnprojectPosition(rotHandlePos);
+                                Vector2 sTopCenter = cam.UnprojectPosition(topCenter);
+
+                                _selectionOverlay3D.DrawPolyline(new Vector2[] { _gizmo3DScreenTL, _gizmo3DScreenTR, _gizmo3DScreenBR, _gizmo3DScreenBL, _gizmo3DScreenTL }, shapeWireColor, 1.5f, antialiased: true);
+                                _selectionOverlay3D.DrawLine(sTopCenter, _gizmo3DScreenRot, shapeWireColor, 1.2f, antialiased: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, new Color(0.35f, 0.85f, 1.0f, 0.95f), filled: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, Colors.White, filled: false, width: 1.5f);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTL);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTR);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBR);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBL);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenCenter, 4.0f, shapeWireColor, filled: true);
+                            }
                         }
                     }
                 }

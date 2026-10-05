@@ -3930,6 +3930,17 @@ namespace DeadlockPlayground.Painter
         private byte[] _fullShapePreviewBuffer;
         private ulong _lastShapePreviewUpdateMs = 0;
 
+        public void CancelShapePreview()
+        {
+            SyncActiveLayerGpuTexture();
+            _otherLayersDirty = true;
+            RecompositeGpuLayers();
+            if (ActiveLayer != null)
+            {
+                ActiveLayer.IsCpuSynced = true;
+            }
+        }
+
         public void UpdateShapePreview(ShapeTool shapeTool, Color color, bool forceImmediate = false)
         {
             if (_activeAtlasManager == null || !GodotObject.IsInstanceValid(_activeAtlasManager)) return;
@@ -3940,13 +3951,6 @@ namespace DeadlockPlayground.Painter
 
             if (shapeTool != null && shapeTool.HasActiveShape && layer.GpuData != null)
             {
-                // While actively dragging a handle or defining a shape, skip expensive full-texture CPU compositing and GPU uploads.
-                // 2D and 3D viewports render real-time vector overlays (DrawOverlay) at full display framerate.
-                if (shapeTool.IsDragging && !forceImmediate)
-                {
-                    return;
-                }
-
                 if (!forceImmediate)
                 {
                     ulong now = Time.GetTicksMsec();
@@ -4272,6 +4276,7 @@ namespace DeadlockPlayground.Painter
             if (index < 0 || index >= _layers.Count) return;
 
             _layers[index].SetVisibility(visible);
+            _otherLayersDirty = true;
             ApplyOverlayParametersToMeshes();
             RecompositeGpuLayers();
             NotifyStackChanged();

@@ -1906,7 +1906,7 @@ public void UpdateTooltipsAndKeymaps()
         if (_painter?.ShapeTool != null)
         {
             _painter.ShapeTool.CancelShape();
-            _painter.LayerManager?.RecompositeGpuLayers();
+            _painter.LayerManager?.CancelShapePreview();
             QueueCanvasRedraw();
         }
     }
