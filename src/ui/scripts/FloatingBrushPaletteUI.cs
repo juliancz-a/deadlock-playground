@@ -810,7 +810,17 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                     _decalStamper.DecalScale = (float)v;
                     _decalStamper.UpdatePreviewTransform();
                 }
+                if (_painter != null && _painter.ProjectionGizmo.IsActive && !_painter.ProjectionGizmo.IsText)
+                {
+                    int atlasSize = _painter.LayerManager?.CanvasSize.X ?? 2048;
+                    float baseDim = (float)v * atlasSize;
+                    float aspect = 1.0f;
+                    if (_painter.ProjectionGizmo.Texture != null && _painter.ProjectionGizmo.Texture.GetHeight() > 0)
+                        aspect = (float)_painter.ProjectionGizmo.Texture.GetWidth() / _painter.ProjectionGizmo.Texture.GetHeight();
+                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim, baseDim / aspect) : new Vector2(baseDim * aspect, baseDim);
+                }
                 if (_lblDecalScale != null) _lblDecalScale.Text = $"{v:F2}x";
+                QueueCanvasRedraw();
             };
         }
 
@@ -823,7 +833,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                     _decalStamper.RotationDegrees = (float)v;
                     _decalStamper.UpdatePreviewTransform();
                 }
+                if (_painter != null && _painter.ProjectionGizmo.IsActive && !_painter.ProjectionGizmo.IsText)
+                {
+                    _painter.ProjectionGizmo.RotationDegrees = (float)v;
+                }
                 if (_lblDecalRot != null) _lblDecalRot.Text = $"{Mathf.RoundToInt(v)}°";
+                QueueCanvasRedraw();
             };
         }
 
@@ -831,7 +846,14 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         {
             _btnBakeDecal.Pressed += () =>
             {
-                if (_decalStamper != null && _decalStamper.BakeToActiveLayer())
+                if (_painter != null && _painter.ProjectionGizmo.IsActive && !_painter.ProjectionGizmo.IsText)
+                {
+                    if (_painter.CommitProjectionGizmo())
+                    {
+                        EmitSignal(SignalName.DecalBaked);
+                    }
+                }
+                else if (_decalStamper != null && _decalStamper.BakeToActiveLayer())
                 {
                     EmitSignal(SignalName.DecalBaked);
                 }
@@ -930,7 +952,17 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             _sliderTextScale.ValueChanged += (v) =>
             {
                 if (_textProjector != null) _textProjector.TextScale = (float)v;
+                if (_painter != null && _painter.ProjectionGizmo.IsActive && _painter.ProjectionGizmo.IsText)
+                {
+                    int atlasSize = _painter.LayerManager?.CanvasSize.X ?? 2048;
+                    float baseDim = (float)v * atlasSize;
+                    float aspect = 1.0f;
+                    if (_painter.ProjectionGizmo.Texture != null && _painter.ProjectionGizmo.Texture.GetHeight() > 0)
+                        aspect = (float)_painter.ProjectionGizmo.Texture.GetWidth() / _painter.ProjectionGizmo.Texture.GetHeight();
+                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim, baseDim / aspect) : new Vector2(baseDim * aspect, baseDim);
+                }
                 if (_lblTextScale != null) _lblTextScale.Text = $"{v:F2}x";
+                QueueCanvasRedraw();
             };
         }
 
@@ -939,7 +971,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             _sliderTextRot.ValueChanged += (v) =>
             {
                 if (_textProjector != null) _textProjector.RotationDegrees = (float)v;
+                if (_painter != null && _painter.ProjectionGizmo.IsActive && _painter.ProjectionGizmo.IsText)
+                {
+                    _painter.ProjectionGizmo.RotationDegrees = (float)v;
+                }
                 if (_lblTextRot != null) _lblTextRot.Text = $"{Mathf.RoundToInt(v)}°";
+                QueueCanvasRedraw();
             };
         }
 
@@ -963,7 +1000,14 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         {
             _btnBakeText.Pressed += () =>
             {
-                if (_textProjector != null && _textProjector.BakeToActiveLayer())
+                if (_painter != null && _painter.ProjectionGizmo.IsActive && _painter.ProjectionGizmo.IsText)
+                {
+                    if (_painter.CommitProjectionGizmo())
+                    {
+                        EmitSignal(SignalName.DecalBaked);
+                    }
+                }
+                else if (_textProjector != null && _textProjector.BakeToActiveLayer())
                 {
                     EmitSignal(SignalName.DecalBaked);
                 }
@@ -1921,11 +1965,36 @@ public void UpdateTooltipsAndKeymaps()
         }
     }
 
+    public void SyncProjectionControls()
+    {
+        if (_painter?.ProjectionGizmo == null || !_painter.ProjectionGizmo.IsActive) return;
+
+        int atlasSize = _painter.LayerManager?.CanvasSize.X ?? 2048;
+        float normScale = _painter.ProjectionGizmo.NormalizedScale(atlasSize);
+        float rot = _painter.ProjectionGizmo.RotationDegrees;
+
+        if (_painter.ProjectionGizmo.IsText)
+        {
+            if (_sliderTextScale != null) _sliderTextScale.SetValueNoSignal(normScale);
+            if (_lblTextScale != null) _lblTextScale.Text = $"{normScale:F2}x";
+            if (_sliderTextRot != null) _sliderTextRot.SetValueNoSignal(rot);
+            if (_lblTextRot != null) _lblTextRot.Text = $"{Mathf.RoundToInt(rot)}°";
+        }
+        else
+        {
+            if (_sliderDecalScale != null) _sliderDecalScale.SetValueNoSignal(normScale);
+            if (_lblDecalScale != null) _lblDecalScale.Text = $"{normScale:F2}x";
+            if (_sliderDecalRot != null) _sliderDecalRot.SetValueNoSignal(rot);
+            if (_lblDecalRot != null) _lblDecalRot.Text = $"{Mathf.RoundToInt(rot)}°";
+        }
+    }
+
     public void QueueCanvasRedraw()
     {
         var uvCanvas = GetNodeOrNull<UVCanvas2DUI>("../UVCanvas2D")
                     ?? GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI;
         uvCanvas?.QueueCanvasRedraw();
+        _painter?.Queue3DOverlayRedraw();
     }
 
     public bool IsMouseOverPalette(Vector2 globalMouse)

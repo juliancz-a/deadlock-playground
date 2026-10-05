@@ -22,7 +22,9 @@ namespace DeadlockPlayground.Painter
     {
         public event Action<bool> MaskUpdated;
 
-        public int CanvasSize { get; private set; } = 2048;
+        public int Width { get; private set; } = 2048;
+        public int Height { get; private set; } = 2048;
+        public int CanvasSize => Math.Max(Width, Height);
 
         // CPU-side active selection mask buffer (1 byte per texel in atlas: 0 = unselected, 255 = selected)
         private byte[] _buffer;
@@ -47,15 +49,17 @@ namespace DeadlockPlayground.Painter
         public SelectionToolType CurrentToolType { get; set; } = SelectionToolType.Rectangular;
 
         private Rid _maskTextureRid = new();
-        private int _maskTextureSize = 0;
+        private int _maskTextureWidth = 0;
+        private int _maskTextureHeight = 0;
+
         public Rid MaskTextureRid
         {
             get
             {
                 var rd = RenderingServer.GetRenderingDevice();
-                if (rd != null && (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid) || _maskTextureSize != CanvasSize))
+                if (rd != null && (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid) || _maskTextureWidth != Width || _maskTextureHeight != Height))
                 {
-                    EnsureMaskTexture(rd, CanvasSize);
+                    EnsureMaskTexture(rd, Width, Height);
                 }
                 return _maskTextureRid;
             }
@@ -67,9 +71,9 @@ namespace DeadlockPlayground.Painter
             get
             {
                 var rd = RenderingServer.GetRenderingDevice();
-                if (rd != null && (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid) || _maskTextureSize != CanvasSize))
+                if (rd != null && (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid) || _maskTextureWidth != Width || _maskTextureHeight != Height))
                 {
-                    EnsureMaskTexture(rd, CanvasSize);
+                    EnsureMaskTexture(rd, Width, Height);
                 }
                 if (_maskTextureResource == null)
                 {
@@ -96,28 +100,36 @@ namespace DeadlockPlayground.Painter
             return lut;
         }
 
-        public SelectionMask(int canvasSize = 2048)
+        public SelectionMask(int width = 2048, int height = 2048)
         {
-            EnsureBuffer(canvasSize);
+            EnsureBuffer(width, height);
         }
 
-        public void EnsureBuffer(int canvasSize)
+        public void EnsureBuffer(int width, int height)
         {
-            if (canvasSize < 512) canvasSize = 512;
-            if (_buffer == null || CanvasSize != canvasSize || _buffer.Length != canvasSize * canvasSize)
+            if (width < 256) width = 256;
+            if (height < 256) height = 256;
+            if (_buffer == null || Width != width || Height != height || _buffer.Length != width * height)
             {
-                CanvasSize = canvasSize;
-                _buffer = new byte[canvasSize * canvasSize];
+                Width = width;
+                Height = height;
+                _buffer = new byte[width * height];
                 HasSelection = false;
             }
         }
 
-        public void EnsureMaskTexture(RenderingDevice rd, int canvasSize)
+        public void EnsureBuffer(int canvasSize)
         {
-            if (canvasSize < 512) canvasSize = 512;
-            EnsureBuffer(canvasSize);
+            EnsureBuffer(canvasSize, canvasSize);
+        }
 
-            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid) && _maskTextureSize == canvasSize)
+        public void EnsureMaskTexture(RenderingDevice rd, int width, int height)
+        {
+            if (width < 256) width = 256;
+            if (height < 256) height = 256;
+            EnsureBuffer(width, height);
+
+            if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid) && _maskTextureWidth == width && _maskTextureHeight == height)
             {
                 return;
             }
@@ -126,19 +138,21 @@ namespace DeadlockPlayground.Painter
             {
                 _maskTextureResource.TextureRdRid = new Rid();
                 _maskTextureRid = new Rid();
-                _maskTextureSize = 0;
+                _maskTextureWidth = 0;
+                _maskTextureHeight = 0;
             }
             else if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid))
             {
                 rd.FreeRid(_maskTextureRid);
                 _maskTextureRid = new Rid();
-                _maskTextureSize = 0;
+                _maskTextureWidth = 0;
+                _maskTextureHeight = 0;
             }
 
             var fmt = new RDTextureFormat
             {
-                Width = (uint)canvasSize,
-                Height = (uint)canvasSize,
+                Width = (uint)width,
+                Height = (uint)height,
                 Format = RenderingDevice.DataFormat.R16G16B16A16Sfloat,
                 TextureType = RenderingDevice.TextureType.Type2D,
                 UsageBits = RenderingDevice.TextureUsageBits.SamplingBit |
@@ -149,28 +163,40 @@ namespace DeadlockPlayground.Painter
             };
 
             var view = new RDTextureView();
-            byte[] zeroBytes = new byte[canvasSize * canvasSize * 8];
+            byte[] zeroBytes = new byte[width * height * 8];
             var dataArray = new Godot.Collections.Array<byte[]> { zeroBytes };
             _maskTextureRid = rd.TextureCreate(fmt, view, dataArray);
-            _maskTextureSize = canvasSize;
+            _maskTextureWidth = width;
+            _maskTextureHeight = height;
             if (_maskTextureResource != null)
             {
                 _maskTextureResource.TextureRdRid = _maskTextureRid;
             }
         }
 
-        public void EnsureSize(int canvasSize)
+        public void EnsureMaskTexture(RenderingDevice rd, int canvasSize)
         {
-            if (canvasSize < 512) canvasSize = 512;
-            if (CanvasSize != canvasSize || _buffer == null || _buffer.Length != canvasSize * canvasSize || _maskTextureSize != canvasSize)
+            EnsureMaskTexture(rd, canvasSize, canvasSize);
+        }
+
+        public void EnsureSize(int width, int height)
+        {
+            if (width < 256) width = 256;
+            if (height < 256) height = 256;
+            if (Width != width || Height != height || _buffer == null || _buffer.Length != width * height || _maskTextureWidth != width || _maskTextureHeight != height)
             {
-                EnsureBuffer(canvasSize);
+                EnsureBuffer(width, height);
                 var rd = RenderingServer.GetRenderingDevice();
                 if (rd != null)
                 {
-                    EnsureMaskTexture(rd, canvasSize);
+                    EnsureMaskTexture(rd, width, height);
                 }
             }
+        }
+
+        public void EnsureSize(int canvasSize)
+        {
+            EnsureSize(canvasSize, canvasSize);
         }
 
         public void UpdateSelectionState()
@@ -197,15 +223,16 @@ namespace DeadlockPlayground.Painter
             rd ??= RenderingServer.GetRenderingDevice();
             if (rd == null) return;
 
-            int size = CanvasSize;
-            EnsureMaskTexture(rd, size);
+            int w = Width;
+            int h = Height;
+            EnsureMaskTexture(rd, w, h);
             if (!_maskTextureRid.IsValid || !rd.TextureIsValid(_maskTextureRid)) return;
 
-            byte[] uploadBytes = new byte[size * size * 8];
+            byte[] uploadBytes = new byte[w * h * 8];
             Half one = (Half)1.0f;
             var lut = _halfLut;
             byte[] mask = _buffer;
-            int totalPixels = size * size;
+            int totalPixels = w * h;
 
             unsafe
             {
@@ -230,31 +257,32 @@ namespace DeadlockPlayground.Painter
         public bool IsPixelSelected(int x, int y)
         {
             if (!HasSelection || _buffer == null) return true;
-            if (x < 0 || y < 0 || x >= CanvasSize || y >= CanvasSize) return false;
-            return _buffer[y * CanvasSize + x] >= 128;
+            if (x < 0 || y < 0 || x >= Width || y >= Height) return false;
+            return _buffer[y * Width + x] >= 128;
         }
 
         public float GetPixelMaskValue(int x, int y)
         {
             if (!HasSelection || _buffer == null) return 1.0f;
-            if (x < 0 || y < 0 || x >= CanvasSize || y >= CanvasSize) return 0.0f;
-            return _buffer[y * CanvasSize + x] * (1.0f / 255.0f);
+            if (x < 0 || y < 0 || x >= Width || y >= Height) return 0.0f;
+            return _buffer[y * Width + x] * (1.0f / 255.0f);
         }
 
         public void RasterizeRect(Vector2 p1, Vector2 p2, SelectionCombineMode mode)
         {
-            int size = CanvasSize;
-            EnsureBuffer(size);
+            int w = Width;
+            int h = Height;
+            EnsureBuffer(w, h);
 
             int xStart = (int)MathF.Round(MathF.Min(p1.X, p2.X));
             int xEnd   = (int)MathF.Round(MathF.Max(p1.X, p2.X));
             int yStart = (int)MathF.Round(MathF.Min(p1.Y, p2.Y));
             int yEnd   = (int)MathF.Round(MathF.Max(p1.Y, p2.Y));
 
-            int minX = Math.Clamp(xStart, 0, size - 1);
-            int maxX = Math.Clamp(xEnd, 0, size - 1);
-            int minY = Math.Clamp(yStart, 0, size - 1);
-            int maxY = Math.Clamp(yEnd, 0, size - 1);
+            int minX = Math.Clamp(xStart, 0, w - 1);
+            int maxX = Math.Clamp(xEnd, 0, w - 1);
+            int minY = Math.Clamp(yStart, 0, h - 1);
+            int maxY = Math.Clamp(yEnd, 0, h - 1);
 
             if (minX > maxX) (minX, maxX) = (maxX, minX);
             if (minY > maxY) (minY, maxY) = (maxY, minY);
@@ -267,7 +295,7 @@ namespace DeadlockPlayground.Painter
 
             for (int y = minY; y <= maxY; y++)
             {
-                int row = y * size;
+                int row = y * w;
                 for (int x = minX; x <= maxX; x++)
                 {
                     int idx = row + x;
@@ -287,8 +315,9 @@ namespace DeadlockPlayground.Painter
         {
             if (points == null || points.Count < 3) return;
 
-            int size = CanvasSize;
-            EnsureBuffer(size);
+            int w = Width;
+            int h = Height;
+            EnsureBuffer(w, h);
 
             // 1. Calculate bounding box
             float minXF = float.MaxValue, maxXF = float.MinValue;
@@ -302,10 +331,10 @@ namespace DeadlockPlayground.Painter
                 if (pt.Y > maxYF) maxYF = pt.Y;
             }
 
-            int minX = Math.Clamp((int)MathF.Floor(minXF), 0, size - 1);
-            int maxX = Math.Clamp((int)MathF.Ceiling(maxXF), 0, size - 1);
-            int minY = Math.Clamp((int)MathF.Floor(minYF), 0, size - 1);
-            int maxY = Math.Clamp((int)MathF.Ceiling(maxYF), 0, size - 1);
+            int minX = Math.Clamp((int)MathF.Floor(minXF), 0, w - 1);
+            int maxX = Math.Clamp((int)MathF.Ceiling(maxXF), 0, w - 1);
+            int minY = Math.Clamp((int)MathF.Floor(minYF), 0, h - 1);
+            int maxY = Math.Clamp((int)MathF.Ceiling(maxYF), 0, h - 1);
 
             if (minX > maxX || minY > maxY) return;
 
@@ -341,11 +370,11 @@ namespace DeadlockPlayground.Painter
 
                 xIntersects.Sort();
 
-                int rowOffset = y * size;
+                int rowOffset = y * w;
                 for (int k = 0; k < xIntersects.Count - 1; k += 2)
                 {
-                    int startX = Math.Clamp((int)MathF.Round(xIntersects[k]), 0, size - 1);
-                    int endX = Math.Clamp((int)MathF.Round(xIntersects[k + 1]) - 1, 0, size - 1);
+                    int startX = Math.Clamp((int)MathF.Round(xIntersects[k]), 0, w - 1);
+                    int endX = Math.Clamp((int)MathF.Round(xIntersects[k + 1]) - 1, 0, w - 1);
 
                     for (int x = startX; x <= endX; x++)
                     {
@@ -375,11 +404,12 @@ namespace DeadlockPlayground.Painter
 
         private void DrawBresenhamLine(Vector2 p0, Vector2 p1, byte val)
         {
-            int size = CanvasSize;
-            int x0 = Math.Clamp((int)MathF.Round(p0.X), 0, size - 1);
-            int y0 = Math.Clamp((int)MathF.Round(p0.Y), 0, size - 1);
-            int x1 = Math.Clamp((int)MathF.Round(p1.X), 0, size - 1);
-            int y1 = Math.Clamp((int)MathF.Round(p1.Y), 0, size - 1);
+            int w = Width;
+            int h = Height;
+            int x0 = Math.Clamp((int)MathF.Round(p0.X), 0, w - 1);
+            int y0 = Math.Clamp((int)MathF.Round(p0.Y), 0, h - 1);
+            int x1 = Math.Clamp((int)MathF.Round(p1.X), 0, w - 1);
+            int y1 = Math.Clamp((int)MathF.Round(p1.Y), 0, h - 1);
 
             int dx = Math.Abs(x1 - x0);
             int dy = Math.Abs(y1 - y0);
@@ -389,7 +419,7 @@ namespace DeadlockPlayground.Painter
 
             while (true)
             {
-                _buffer[y0 * size + x0] = val;
+                _buffer[y0 * w + x0] = val;
                 if (x0 == x1 && y0 == y1) break;
                 int e2 = 2 * err;
                 if (e2 > -dy)
@@ -407,12 +437,13 @@ namespace DeadlockPlayground.Painter
 
         private void ApplyEdgeFeathering(int minX, int minY, int maxX, int maxY)
         {
-            int size = CanvasSize;
+            int w = Width;
+            int h = Height;
             int pad = 3;
             int dMinX = Math.Max(0, minX - pad);
-            int dMaxX = Math.Min(size - 1, maxX + pad);
+            int dMaxX = Math.Min(w - 1, maxX + pad);
             int dMinY = Math.Max(0, minY - pad);
-            int dMaxY = Math.Min(size - 1, maxY + pad);
+            int dMaxY = Math.Min(h - 1, maxY + pad);
 
             int bW = dMaxX - dMinX + 1;
             int bH = dMaxY - dMinY + 1;
@@ -424,13 +455,13 @@ namespace DeadlockPlayground.Painter
             // Horizontal pass
             for (int py = dMinY; py <= dMaxY; py++)
             {
-                int row = py * size;
+                int row = py * w;
                 int bRow = (py - dMinY) * bW;
                 for (int px = dMinX; px <= dMaxX; px++)
                 {
                     float left = (px > 0) ? buf[row + px - 1] : buf[row + px];
                     float center = buf[row + px];
-                    float right = (px < size - 1) ? buf[row + px + 1] : buf[row + px];
+                    float right = (px < w - 1) ? buf[row + px + 1] : buf[row + px];
                     hBlur[bRow + (px - dMinX)] = (left + 2.0f * center + right) * 0.25f;
                 }
             }
@@ -438,9 +469,9 @@ namespace DeadlockPlayground.Painter
             // Vertical pass
             for (int py = dMinY; py <= dMaxY; py++)
             {
-                int row = py * size;
-                int bPrevRow = Math.Max(0, py - dMinY - 1) * bW;
+                int row = py * w;
                 int bRow = (py - dMinY) * bW;
+                int bPrevRow = Math.Max(0, py - dMinY - 1) * bW;
                 int bNextRow = Math.Min(bH - 1, py - dMinY + 1) * bW;
 
                 for (int px = dMinX; px <= dMaxX; px++)
@@ -468,8 +499,9 @@ namespace DeadlockPlayground.Painter
 
         public void Invert()
         {
-            int size = CanvasSize;
-            EnsureBuffer(size);
+            int w = Width;
+            int h = Height;
+            EnsureBuffer(w, h);
 
             byte[] buf = _buffer;
             int len = buf.Length;
@@ -484,7 +516,8 @@ namespace DeadlockPlayground.Painter
 
         public void Clear()
         {
-            int size = CanvasSize;
+            int w = Width;
+            int h = Height;
             if (_buffer != null)
             {
                 Array.Clear(_buffer, 0, _buffer.Length);
@@ -495,12 +528,18 @@ namespace DeadlockPlayground.Painter
             GD.Print("[SelectionMask] Selection cleared.");
         }
 
-        public void SetBuffer(byte[] newBuffer, int size)
+        public void SetBuffer(byte[] newBuffer, int width, int height)
         {
             if (newBuffer == null) return;
-            CanvasSize = size;
+            Width = width;
+            Height = height;
             _buffer = (byte[])newBuffer.Clone();
             UpdateSelectionStateAndUpload();
+        }
+
+        public void SetBuffer(byte[] newBuffer, int size)
+        {
+            SetBuffer(newBuffer, size, size);
         }
 
         public void UpdateSelectionStateAndUpload()
@@ -512,9 +551,10 @@ namespace DeadlockPlayground.Painter
 
         public Image ToImage()
         {
-            int size = CanvasSize;
-            EnsureBuffer(size);
-            var img = Image.CreateEmpty(size, size, false, Image.Format.R8);
+            int w = Width;
+            int h = Height;
+            EnsureBuffer(w, h);
+            var img = Image.CreateEmpty(w, h, false, Image.Format.R8);
             byte[] data = img.GetData();
             System.Buffer.BlockCopy(_buffer, 0, data, 0, _buffer.Length);
             return img;
@@ -523,8 +563,9 @@ namespace DeadlockPlayground.Painter
         public void FromImage(Image img)
         {
             if (img == null) return;
-            int size = img.GetWidth();
-            EnsureBuffer(size);
+            int w = img.GetWidth();
+            int h = img.GetHeight();
+            EnsureBuffer(w, h);
 
             if (img.GetFormat() != Image.Format.R8)
             {
@@ -541,7 +582,8 @@ namespace DeadlockPlayground.Painter
         public void Cleanup()
         {
             _buffer = null;
-            _maskTextureSize = 0;
+            _maskTextureWidth = 0;
+            _maskTextureHeight = 0;
             if (_maskTextureResource != null)
             {
                 if (_maskTextureResource.TextureRdRid.IsValid)

@@ -12,6 +12,7 @@ namespace DeadlockPlayground.Painter
         public Vector3 WorldNormal;
         public float Distance;
         public int TriangleIndex;
+        public MeshInstance3D HitMesh;
         public int HitSurfaceIndex;
         public Vector2 UvAspectScale;
         public Vector3 WorldTangent;
@@ -349,6 +350,161 @@ namespace DeadlockPlayground.Painter
 
             t = edge2.Dot(qvec) * invDet;
             return t > 1e-5f;
+        }
+
+        /// <summary>
+        /// Evaluates a 2D UV coordinate against the mesh geometry and returns the corresponding
+        /// 3D world position, normal, tangents, and units per UV.
+        /// Enables seamless two-way positioning between 2D canvas and 3D viewport.
+        /// </summary>
+        public RaycastHitResult FindPointFromUV(MeshInstance3D meshInstance, Vector2 targetUV)
+        {
+            var result = new RaycastHitResult { Hit = false };
+            if (!_isInitialized || meshInstance == null || _triangles.Count == 0) return result;
+
+            int closestTriIdx = -1;
+            float closestDistSq = float.MaxValue;
+            float closestU = 0f, closestV = 0f, closestW = 0f;
+
+            for (int i = 0; i < _triangles.Count; i++)
+            {
+                var tri = _triangles[i];
+                Vector2 uv0 = tri.UV0;
+                Vector2 uv1 = tri.UV1;
+                Vector2 uv2 = tri.UV2;
+
+                Vector2 v0 = uv1 - uv0;
+                Vector2 v1 = uv2 - uv0;
+                Vector2 v2 = targetUV - uv0;
+
+                float d00 = v0.Dot(v0);
+                float d01 = v0.Dot(v1);
+                float d11 = v1.Dot(v1);
+                float d20 = v2.Dot(v0);
+                float d21 = v2.Dot(v1);
+
+                float denom = d00 * d11 - d01 * d01;
+                if (MathF.Abs(denom) < 1e-9f) continue;
+
+                float invDenom = 1.0f / denom;
+                float v = (d11 * d20 - d01 * d21) * invDenom;
+                float w = (d00 * d21 - d01 * d20) * invDenom;
+                float u = 1.0f - v - w;
+
+                const float eps = -0.015f;
+                if (u >= eps && v >= eps && w >= eps)
+                {
+                    u = Math.Clamp(u, 0.0f, 1.0f);
+                    v = Math.Clamp(v, 0.0f, 1.0f);
+                    w = Math.Clamp(w, 0.0f, 1.0f);
+                    float sum = u + v + w;
+                    if (sum > 0.0001f) { u /= sum; v /= sum; w /= sum; }
+
+                    Vector3 localPos = u * tri.V0 + v * tri.V1 + w * tri.V2;
+                    Vector3 localNormal = tri.Normal;
+                    Vector3 worldPos = meshInstance.GlobalTransform * localPos;
+                    Vector3 worldNormal = (meshInstance.GlobalTransform.Basis * localNormal).Normalized();
+
+                    Vector3 e1 = tri.V1 - tri.V0;
+                    Vector3 e2 = tri.V2 - tri.V0;
+                    Vector2 duv1 = tri.UV1 - tri.UV0;
+                    Vector2 duv2 = tri.UV2 - tri.UV0;
+                    float det = duv1.X * duv2.Y - duv2.X * duv1.Y;
+                    Vector3 worldTangent = Vector3.Zero;
+                    Vector3 worldBitangent = Vector3.Zero;
+                    float worldUnitsPerU = 1.0f;
+                    float worldUnitsPerV = 1.0f;
+
+                    if (MathF.Abs(det) > 1e-7f)
+                    {
+                        Vector3 dPdu = (e1 * duv2.Y - e2 * duv1.Y) / det;
+                        Vector3 dPdv = (e2 * duv1.X - e1 * duv2.X) / det;
+                        Vector3 worldDPdu = meshInstance.GlobalTransform.Basis * dPdu;
+                        Vector3 worldDPdv = meshInstance.GlobalTransform.Basis * dPdv;
+                        worldUnitsPerU = worldDPdu.Length();
+                        worldUnitsPerV = worldDPdv.Length();
+                        worldTangent = (worldDPdu.Normalized() - worldNormal * worldNormal.Dot(worldDPdu.Normalized())).Normalized();
+                        worldBitangent = (worldDPdv.Normalized() - worldNormal * worldNormal.Dot(worldDPdv.Normalized())).Normalized();
+                    }
+
+                    result.Hit = true;
+                    result.HitUV = targetUV;
+                    result.WorldPosition = worldPos;
+                    result.WorldNormal = worldNormal;
+                    result.WorldTangent = worldTangent;
+                    result.WorldBitangent = worldBitangent;
+                    result.WorldUnitsPerU = worldUnitsPerU;
+                    result.WorldUnitsPerV = worldUnitsPerV;
+                    result.HitMesh = meshInstance;
+                    result.HitSurfaceIndex = tri.SurfaceIndex;
+                    return result;
+                }
+
+                // Track closest point on UV boundary for edge tolerance
+                float cu = Math.Clamp(u, 0.0f, 1.0f);
+                float cv = Math.Clamp(v, 0.0f, 1.0f);
+                float cw = Math.Clamp(w, 0.0f, 1.0f);
+                float csum = cu + cv + cw;
+                if (csum > 0.0001f) { cu /= csum; cv /= csum; cw /= csum; }
+                Vector2 clampedUV = cu * tri.UV0 + cv * tri.UV1 + cw * tri.UV2;
+                float dSq = targetUV.DistanceSquaredTo(clampedUV);
+                if (dSq < closestDistSq)
+                {
+                    closestDistSq = dSq;
+                    closestTriIdx = i;
+                    closestU = cu;
+                    closestV = cv;
+                    closestW = cw;
+                }
+            }
+
+            if (!result.Hit && closestTriIdx >= 0 && closestDistSq < 0.05f * 0.05f)
+            {
+                var tri = _triangles[closestTriIdx];
+                float u = closestU;
+                float v = closestV;
+                float w = closestW;
+                Vector3 localPos = u * tri.V0 + v * tri.V1 + w * tri.V2;
+                Vector3 localNormal = tri.Normal;
+                Vector3 worldPos = meshInstance.GlobalTransform * localPos;
+                Vector3 worldNormal = (meshInstance.GlobalTransform.Basis * localNormal).Normalized();
+
+                Vector3 e1 = tri.V1 - tri.V0;
+                Vector3 e2 = tri.V2 - tri.V0;
+                Vector2 duv1 = tri.UV1 - tri.UV0;
+                Vector2 duv2 = tri.UV2 - tri.UV0;
+                float det = duv1.X * duv2.Y - duv2.X * duv1.Y;
+                Vector3 worldTangent = Vector3.Zero;
+                Vector3 worldBitangent = Vector3.Zero;
+                float worldUnitsPerU = 1.0f;
+                float worldUnitsPerV = 1.0f;
+
+                if (MathF.Abs(det) > 1e-7f)
+                {
+                    Vector3 dPdu = (e1 * duv2.Y - e2 * duv1.Y) / det;
+                    Vector3 dPdv = (e2 * duv1.X - e1 * duv2.X) / det;
+                    Vector3 worldDPdu = meshInstance.GlobalTransform.Basis * dPdu;
+                    Vector3 worldDPdv = meshInstance.GlobalTransform.Basis * dPdv;
+                    worldUnitsPerU = worldDPdu.Length();
+                    worldUnitsPerV = worldDPdv.Length();
+                    worldTangent = (worldDPdu.Normalized() - worldNormal * worldNormal.Dot(worldDPdu.Normalized())).Normalized();
+                    worldBitangent = (worldDPdv.Normalized() - worldNormal * worldNormal.Dot(worldDPdv.Normalized())).Normalized();
+                }
+
+                result.Hit = true;
+                result.HitUV = targetUV;
+                result.WorldPosition = worldPos;
+                result.WorldNormal = worldNormal;
+                result.WorldTangent = worldTangent;
+                result.WorldBitangent = worldBitangent;
+                result.WorldUnitsPerU = worldUnitsPerU;
+                result.WorldUnitsPerV = worldUnitsPerV;
+                result.HitMesh = meshInstance;
+                result.HitSurfaceIndex = tri.SurfaceIndex;
+                return result;
+            }
+
+            return result;
         }
     }
 }

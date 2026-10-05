@@ -35,13 +35,78 @@ namespace DeadlockPlayground.Painter
         public event Action ShapeCommitted;
         public event Action ShapeCancelled;
 
-        public CanvasShapeType ShapeType { get; set; } = CanvasShapeType.Square;
-        public ShapeFillMode FillMode { get; set; } = ShapeFillMode.FillOnly;
-        public float StrokeWidth { get; set; } = 6.0f;
+        private CanvasShapeType _shapeType = CanvasShapeType.Square;
+        private ShapeFillMode _fillMode = ShapeFillMode.FillOnly;
+        private float _strokeWidth = 6.0f;
+        private Vector2 _center = new Vector2(1024, 1024);
+        private Vector2 _size = new Vector2(250, 250);
+        private float _rotationDegrees = 0.0f;
+
+        public CanvasShapeType ShapeType
+        {
+            get => _shapeType;
+            set
+            {
+                if (_shapeType != value)
+                {
+                    _shapeType = value;
+                    ShapeChanged?.Invoke();
+                }
+            }
+        }
+
+        public ShapeFillMode FillMode
+        {
+            get => _fillMode;
+            set
+            {
+                if (_fillMode != value)
+                {
+                    _fillMode = value;
+                    ShapeChanged?.Invoke();
+                }
+            }
+        }
+
+        public float StrokeWidth
+        {
+            get => _strokeWidth;
+            set
+            {
+                if (MathF.Abs(_strokeWidth - value) > 0.001f)
+                {
+                    _strokeWidth = value;
+                    ShapeChanged?.Invoke();
+                }
+            }
+        }
 
         // Interactive transform in 2D atlas pixel coordinates
-        public Vector2 Center { get; set; } = new Vector2(1024, 1024);
-        public Vector2 Size { get; set; } = new Vector2(250, 250);
+        public Vector2 Center
+        {
+            get => _center;
+            set
+            {
+                if (_center != value)
+                {
+                    _center = value;
+                    ShapeChanged?.Invoke();
+                }
+            }
+        }
+
+        public Vector2 Size
+        {
+            get => _size;
+            set
+            {
+                if (_size != value)
+                {
+                    _size = value;
+                    ShapeChanged?.Invoke();
+                }
+            }
+        }
 
         public float Width
         {
@@ -55,7 +120,18 @@ namespace DeadlockPlayground.Painter
             set => Size = new Vector2(Size.X, value);
         }
 
-        public float RotationDegrees { get; set; } = 0.0f;
+        public float RotationDegrees
+        {
+            get => _rotationDegrees;
+            set
+            {
+                if (MathF.Abs(_rotationDegrees - value) > 0.001f)
+                {
+                    _rotationDegrees = value;
+                    ShapeChanged?.Invoke();
+                }
+            }
+        }
 
         // Line-specific endpoints (in atlas px)
         public Vector2 LineStart { get; set; } = Vector2.Zero;
@@ -161,7 +237,7 @@ namespace DeadlockPlayground.Painter
         {
             if (!HasActiveShape) return ShapeHandleType.None;
 
-            float hitRadius = 12.0f / MathF.Max(zoom, 0.001f);
+            float hitRadius = MathF.Max(14.0f / MathF.Max(zoom, 0.001f), 8.0f);
             float hitRadiusSq = hitRadius * hitRadius;
 
             if (ShapeType == CanvasShapeType.Line)
@@ -448,8 +524,9 @@ namespace DeadlockPlayground.Painter
             var layer = layerManager.ActiveLayer;
             if (layer.IsLocked || !layer.IsVisible) return false;
 
-            int atlasSize = layerManager.CanvasSize.X > 0 ? layerManager.CanvasSize.X : 2048;
-            int bufferLen = atlasSize * atlasSize * 8;
+            int atlasW = layerManager.CanvasSize.X > 0 ? layerManager.CanvasSize.X : 2048;
+            int atlasH = layerManager.CanvasSize.Y > 0 ? layerManager.CanvasSize.Y : 2048;
+            int bufferLen = atlasW * atlasH * 8;
 
             if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
             {
@@ -460,7 +537,7 @@ namespace DeadlockPlayground.Painter
 
             // Calculate conservative Axis-Aligned Bounding Box (AABB) in atlas pixels
             float pad = MathF.Max(StrokeWidth * 0.5f + 4.0f, 16.0f);
-            float minX = atlasSize, maxX = 0, minY = atlasSize, maxY = 0;
+            float minX = atlasW, maxX = 0, minY = atlasH, maxY = 0;
 
             if (ShapeType == CanvasShapeType.Line)
             {
@@ -478,10 +555,10 @@ namespace DeadlockPlayground.Painter
                 maxY = MathF.Max(MathF.Max(tl.Y, tr.Y), MathF.Max(br.Y, bl.Y)) + pad;
             }
 
-            int iMinX = Math.Clamp((int)MathF.Floor(minX), 0, atlasSize - 1);
-            int iMaxX = Math.Clamp((int)MathF.Ceiling(maxX), 0, atlasSize - 1);
-            int iMinY = Math.Clamp((int)MathF.Floor(minY), 0, atlasSize - 1);
-            int iMaxY = Math.Clamp((int)MathF.Ceiling(maxY), 0, atlasSize - 1);
+            int iMinX = Math.Clamp((int)MathF.Floor(minX), 0, atlasW - 1);
+            int iMaxX = Math.Clamp((int)MathF.Ceiling(maxX), 0, atlasW - 1);
+            int iMinY = Math.Clamp((int)MathF.Floor(minY), 0, atlasH - 1);
+            int iMaxY = Math.Clamp((int)MathF.Ceiling(maxY), 0, atlasH - 1);
 
             int rectW = iMaxX - iMinX + 1;
             int rectH = iMaxY - iMinY + 1;
@@ -504,7 +581,7 @@ namespace DeadlockPlayground.Painter
 
                 System.Threading.Tasks.Parallel.For(iMinY, iMaxY + 1, py =>
                 {
-                    int rowOffset = py * atlasSize * 4;
+                    int rowOffset = py * atlasW * 4;
 
                     for (int px = iMinX; px <= iMaxX; px++)
                     {
@@ -616,13 +693,18 @@ namespace DeadlockPlayground.Painter
             return true;
         }
 
-        public unsafe void BlendPreview(byte[] compositeBuffer, int atlasSize, Color activeColor)
+        public void BlendPreview(byte[] compositeBuffer, int atlasSize, Color activeColor)
         {
-            if (!HasActiveShape || compositeBuffer == null || compositeBuffer.Length < atlasSize * atlasSize * 8) return;
+            BlendPreview(compositeBuffer, atlasSize, atlasSize, activeColor);
+        }
+
+        public unsafe void BlendPreview(byte[] compositeBuffer, int atlasW, int atlasH, Color activeColor)
+        {
+            if (!HasActiveShape || compositeBuffer == null || compositeBuffer.Length < atlasW * atlasH * 8) return;
 
             // Calculate conservative Axis-Aligned Bounding Box (AABB) in atlas pixels
             float pad = MathF.Max(StrokeWidth * 0.5f + 4.0f, 16.0f);
-            float minX = atlasSize, maxX = 0, minY = atlasSize, maxY = 0;
+            float minX = atlasW, maxX = 0, minY = atlasH, maxY = 0;
 
             if (ShapeType == CanvasShapeType.Line)
             {
@@ -640,10 +722,10 @@ namespace DeadlockPlayground.Painter
                 maxY = MathF.Max(MathF.Max(tl.Y, tr.Y), MathF.Max(br.Y, bl.Y)) + pad;
             }
 
-            int iMinX = Math.Clamp((int)MathF.Floor(minX), 0, atlasSize - 1);
-            int iMaxX = Math.Clamp((int)MathF.Ceiling(maxX), 0, atlasSize - 1);
-            int iMinY = Math.Clamp((int)MathF.Floor(minY), 0, atlasSize - 1);
-            int iMaxY = Math.Clamp((int)MathF.Ceiling(maxY), 0, atlasSize - 1);
+            int iMinX = Math.Clamp((int)MathF.Floor(minX), 0, atlasW - 1);
+            int iMaxX = Math.Clamp((int)MathF.Ceiling(maxX), 0, atlasW - 1);
+            int iMinY = Math.Clamp((int)MathF.Floor(minY), 0, atlasH - 1);
+            int iMaxY = Math.Clamp((int)MathF.Ceiling(maxY), 0, atlasH - 1);
 
             int rectW = iMaxX - iMinX + 1;
             int rectH = iMaxY - iMinY + 1;
@@ -664,7 +746,7 @@ namespace DeadlockPlayground.Painter
 
                 System.Threading.Tasks.Parallel.For(iMinY, iMaxY + 1, py =>
                 {
-                    int rowOffset = py * atlasSize * 4;
+                    int rowOffset = py * atlasW * 4;
 
                     for (int px = iMinX; px <= iMaxX; px++)
                     {

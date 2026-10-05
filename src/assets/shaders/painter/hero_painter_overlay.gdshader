@@ -3,6 +3,7 @@ render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
 
 uniform sampler2D overlay_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D active_layer_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D overlay_above_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D g_tColor : source_color, filter_linear_mipmap, hint_default_white; // Base diffuse/AO
 uniform sampler2D selection_mask : hint_default_transparent, filter_linear, repeat_disable;
 uniform vec2 position_in_atlas;
@@ -232,6 +233,22 @@ void fragment() {
 				paint = vec4(out_rgb, out_a);
 			} else {
 				paint = vec4(blended_active, active_paint.a);
+			}
+		}
+
+		vec4 above_paint = smooth_bicubic
+			? sample_bicubic_smooth(overlay_above_texture, v_atlas_uv, min_atlas, max_atlas)
+			: sample_bilinear_smooth(overlay_above_texture, clamped_uv, min_atlas, max_atlas);
+
+		if (above_paint.a > 0.0001) {
+			if (paint.a > 0.0001) {
+				float out_a = clamp(above_paint.a + paint.a * (1.0 - above_paint.a), 0.0, 1.0);
+				vec3 out_rgb = (out_a > 0.0001)
+					? (above_paint.rgb * above_paint.a + paint.rgb * paint.a * (1.0 - above_paint.a)) / out_a
+					: above_paint.rgb;
+				paint = vec4(out_rgb, out_a);
+			} else {
+				paint = above_paint;
 			}
 		}
 

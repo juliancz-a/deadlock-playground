@@ -107,17 +107,17 @@ namespace DeadlockPlayground.Painter
 
         public bool IsUvSelected(Vector2 uv)
         {
-            if (_selectionMask == null || !_selectionMask.HasSelection || _selectionMask.CanvasSize <= 0) return true;
-            int x = Mathf.Clamp((int)(uv.X * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
-            int y = Mathf.Clamp((int)(uv.Y * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
+            if (_selectionMask == null || !_selectionMask.HasSelection || _selectionMask.Width <= 0 || _selectionMask.Height <= 0) return true;
+            int x = Mathf.Clamp((int)(uv.X * _selectionMask.Width), 0, _selectionMask.Width - 1);
+            int y = Mathf.Clamp((int)(uv.Y * _selectionMask.Height), 0, _selectionMask.Height - 1);
             return IsPixelSelected(x, y);
         }
 
         public float GetUvMaskValue(Vector2 uv)
         {
-            if (_selectionMask == null || !_selectionMask.HasSelection || _selectionMask.CanvasSize <= 0) return 1.0f;
-            int x = Mathf.Clamp((int)(uv.X * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
-            int y = Mathf.Clamp((int)(uv.Y * _selectionMask.CanvasSize), 0, _selectionMask.CanvasSize - 1);
+            if (_selectionMask == null || !_selectionMask.HasSelection || _selectionMask.Width <= 0 || _selectionMask.Height <= 0) return 1.0f;
+            int x = Mathf.Clamp((int)(uv.X * _selectionMask.Width), 0, _selectionMask.Width - 1);
+            int y = Mathf.Clamp((int)(uv.Y * _selectionMask.Height), 0, _selectionMask.Height - 1);
             return GetPixelMaskValue(x, y);
         }
 
@@ -307,23 +307,24 @@ namespace DeadlockPlayground.Painter
             SkinLayerManager layerMgr,
             float tol,
             byte[] newMask,
-            int atlasSize,
+            int atlasW,
+            int atlasH,
             out Color sampledColor)
         {
-            seedX = Math.Clamp(seedX, 0, atlasSize - 1);
-            seedY = Math.Clamp(seedY, 0, atlasSize - 1);
+            seedX = Math.Clamp(seedX, 0, atlasW - 1);
+            seedY = Math.Clamp(seedY, 0, atlasH - 1);
 
             sampledColor = layerMgr.GetVisibleColorAtAtlasPx(seedX, seedY);
 
             byte[] baseBuf = layerMgr.BaseAtlasBuffer;
-            if (baseBuf == null || !layerMgr.HasPopulatedBaseAtlasBuffer || baseBuf.Length < atlasSize * atlasSize * 8)
+            if (baseBuf == null || !layerMgr.HasPopulatedBaseAtlasBuffer || baseBuf.Length < atlasW * atlasH * 8)
             {
                 layerMgr.RebuildBaseAtlasBuffer();
                 baseBuf = layerMgr.BaseAtlasBuffer;
             }
             byte[] compBuf = layerMgr.CompositeBuffer;
 
-            int totalPixels = atlasSize * atlasSize;
+            int totalPixels = atlasW * atlasH;
 
             byte targetR = (byte)Math.Clamp((int)(sampledColor.R * 255.0f), 0, 255);
             byte targetG = (byte)Math.Clamp((int)(sampledColor.G * 255.0f), 0, 255);
@@ -331,14 +332,14 @@ namespace DeadlockPlayground.Painter
 
             float softTol = tol * 1.50f;
 
-            int minSelX = atlasSize, maxSelX = -1, minSelY = atlasSize, maxSelY = -1;
+            int minSelX = atlasW, maxSelX = -1, minSelY = atlasH, maxSelY = -1;
 
             unsafe
             {
                 fixed (byte* pBase = baseBuf, pComp = compBuf)
                 {
-                    Half* hBase = (pBase != null && baseBuf.Length >= atlasSize * atlasSize * 8) ? (Half*)pBase : null;
-                    Half* hComp = (pComp != null && compBuf != null && compBuf.Length >= atlasSize * atlasSize * 8) ? (Half*)pComp : null;
+                    Half* hBase = (pBase != null && baseBuf.Length >= atlasW * atlasH * 8) ? (Half*)pBase : null;
+                    Half* hComp = (pComp != null && compBuf != null && compBuf.Length >= atlasW * atlasH * 8) ? (Half*)pComp : null;
                     ushort* uBase = (ushort*)hBase;
                     ushort* uComp = (ushort*)hComp;
                     var halfLut = s_halfToSrgbByte;
@@ -397,20 +398,20 @@ namespace DeadlockPlayground.Painter
 
                         bool IsMatch(int x, int y)
                         {
-                            int pOff = (y * atlasSize + x) * 4;
+                            int pOff = (y * atlasW + x) * 4;
                             GetPixelRgb(pOff, out byte r, out byte g, out byte b);
                             return GetByteColorDistance(r, g, b, targetR, targetG, targetB) <= tol;
                         }
 
                         bool IsVisited(int x, int y)
                         {
-                            int p = y * atlasSize + x;
+                            int p = y * atlasW + x;
                             return (visitedBits[p >> 6] & (1UL << (p & 63))) != 0;
                         }
 
                         void MarkSelected(int x, int y)
                         {
-                            int p = y * atlasSize + x;
+                            int p = y * atlasW + x;
                             visitedBits[p >> 6] |= (1UL << (p & 63));
                             newMask[p] = 255;
                             if (x < minSelX) minSelX = x;
@@ -427,7 +428,7 @@ namespace DeadlockPlayground.Painter
                         while (xLeft > 0 && IsMatch(xLeft - 1, seedY))
                             xLeft--;
                         int xRight = seedX;
-                        while (xRight < atlasSize - 1 && IsMatch(xRight + 1, seedY))
+                        while (xRight < atlasW - 1 && IsMatch(xRight + 1, seedY))
                             xRight++;
 
                         for (int x = xLeft; x <= xRight; x++)
@@ -435,14 +436,14 @@ namespace DeadlockPlayground.Painter
 
                         if (seedY > 0)
                             queue.Enqueue((seedY, xLeft, xRight, -1));
-                        if (seedY < atlasSize - 1)
+                        if (seedY < atlasH - 1)
                             queue.Enqueue((seedY, xLeft, xRight, 1));
 
                         while (queue.Count > 0)
                         {
                             var (y, xl, xr, dy) = queue.Dequeue();
                             int ny = y + dy;
-                            if (ny < 0 || ny >= atlasSize) continue;
+                            if (ny < 0 || ny >= atlasH) continue;
 
                             int curX = xl;
                             while (curX <= xr)
@@ -454,18 +455,18 @@ namespace DeadlockPlayground.Painter
                                         newLeft--;
 
                                     int newRight = curX;
-                                    while (newRight < atlasSize - 1 && !IsVisited(newRight + 1, ny) && IsMatch(newRight + 1, ny))
+                                    while (newRight < atlasW - 1 && !IsVisited(newRight + 1, ny) && IsMatch(newRight + 1, ny))
                                         newRight++;
 
                                     for (int x = newLeft; x <= newRight; x++)
                                         MarkSelected(x, ny);
 
-                                    if (newLeft < xl && y >= 0 && y < atlasSize)
+                                    if (newLeft < xl && y >= 0 && y < atlasH)
                                         queue.Enqueue((ny, newLeft, xl - 1, -dy));
-                                    if (newRight > xr && y >= 0 && y < atlasSize)
+                                    if (newRight > xr && y >= 0 && y < atlasH)
                                         queue.Enqueue((ny, xr + 1, newRight, -dy));
 
-                                    if (ny + dy >= 0 && ny + dy < atlasSize)
+                                    if (ny + dy >= 0 && ny + dy < atlasH)
                                         queue.Enqueue((ny, newLeft, newRight, dy));
 
                                     curX = newRight + 1;
@@ -481,11 +482,11 @@ namespace DeadlockPlayground.Painter
                     {
                         // Non-contiguous: Parallel evaluate across entire atlas buffer
                         object bbLock = new object();
-                        System.Threading.Tasks.Parallel.For(0, atlasSize, () => (MinX: atlasSize, MaxX: -1, MinY: atlasSize, MaxY: -1), (py, state, localBB) =>
+                        System.Threading.Tasks.Parallel.For(0, atlasH, () => (MinX: atlasW, MaxX: -1, MinY: atlasH, MaxY: -1), (py, state, localBB) =>
                         {
-                            int row = py * atlasSize;
+                            int row = py * atlasW;
                             int pRow = row * 4;
-                            for (int px = 0; px < atlasSize; px++)
+                            for (int px = 0; px < atlasW; px++)
                             {
                                 int pOff = pRow + px * 4;
                                 GetPixelRgb(pOff, out byte r, out byte g, out byte b);
@@ -537,25 +538,25 @@ namespace DeadlockPlayground.Painter
             {
                 int pad = 4;
                 int dMinX = Math.Max(0, minSelX - pad);
-                int dMaxX = Math.Min(atlasSize - 1, maxSelX + pad);
+                int dMaxX = Math.Min(atlasW - 1, maxSelX + pad);
                 int dMinY = Math.Max(0, minSelY - pad);
-                int dMaxY = Math.Min(atlasSize - 1, maxSelY + pad);
+                int dMaxY = Math.Min(atlasH - 1, maxSelY + pad);
 
                 byte[] dilated = new byte[totalPixels];
                 Array.Copy(newMask, dilated, totalPixels);
 
                 for (int py = dMinY; py <= dMaxY; py++)
                 {
-                    int row = py * atlasSize;
+                    int row = py * atlasW;
                     for (int px = dMinX; px <= dMaxX; px++)
                     {
                         int idx = row + px;
                         if (newMask[idx] >= 128) continue;
 
                         bool hasNeighbor = (px > 0 && newMask[idx - 1] >= 128) ||
-                                           (px < atlasSize - 1 && newMask[idx + 1] >= 128) ||
-                                           (py > 0 && newMask[idx - atlasSize] >= 128) ||
-                                           (py < atlasSize - 1 && newMask[idx + atlasSize] >= 128);
+                                           (px < atlasW - 1 && newMask[idx + 1] >= 128) ||
+                                           (py > 0 && newMask[idx - atlasW] >= 128) ||
+                                           (py < atlasH - 1 && newMask[idx + atlasW] >= 128);
 
                         if (hasNeighbor)
                         {
@@ -571,20 +572,20 @@ namespace DeadlockPlayground.Painter
 
                 for (int py = dMinY; py <= dMaxY; py++)
                 {
-                    int row = py * atlasSize;
+                    int row = py * atlasW;
                     int bRow = (py - dMinY) * bW;
                     for (int px = dMinX; px <= dMaxX; px++)
                     {
                         float left = (px > 0) ? dilated[row + px - 1] : dilated[row + px];
                         float center = dilated[row + px];
-                        float right = (px < atlasSize - 1) ? dilated[row + px + 1] : dilated[row + px];
+                        float right = (px < atlasW - 1) ? dilated[row + px + 1] : dilated[row + px];
                         hBlur[bRow + (px - dMinX)] = (left + 2.0f * center + right) * 0.25f;
                     }
                 }
 
                 for (int py = dMinY; py <= dMaxY; py++)
                 {
-                    int row = py * atlasSize;
+                    int row = py * atlasW;
                     int bRow = (py - dMinY) * bW;
                     int bPrevRow = Math.Max(0, py - dMinY - 1) * bW;
                     int bNextRow = Math.Min(bH - 1, py - dMinY + 1) * bW;
@@ -612,12 +613,13 @@ namespace DeadlockPlayground.Painter
             var rd = RenderingServer.GetRenderingDevice();
             if (rd == null) return false;
 
-            int atlasSize = layerMgr.CanvasSize.X > 0 ? layerMgr.CanvasSize.X : 2048;
-            _selectionMask.EnsureSize(atlasSize);
+            int atlasW = layerMgr.CanvasSize.X > 0 ? layerMgr.CanvasSize.X : 2048;
+            int atlasH = layerMgr.CanvasSize.Y > 0 ? layerMgr.CanvasSize.Y : 2048;
+            _selectionMask.EnsureSize(atlasW, atlasH);
             if (!_selectionMask.MaskTextureRid.IsValid) return false;
 
-            seedX = Math.Clamp(seedX, 0, atlasSize - 1);
-            seedY = Math.Clamp(seedY, 0, atlasSize - 1);
+            seedX = Math.Clamp(seedX, 0, atlasW - 1);
+            seedY = Math.Clamp(seedY, 0, atlasH - 1);
 
             _lastAtlasSeedX = seedX;
             _lastAtlasSeedY = seedY;
@@ -630,19 +632,19 @@ namespace DeadlockPlayground.Painter
             }
             _atlasSeedHistory.Add(new AtlasSeedHistoryItem { SeedX = seedX, SeedY = seedY, CombineMode = combineMode });
 
-            int totalPixels = atlasSize * atlasSize;
+            int totalPixels = atlasW * atlasH;
             byte[] activeMask = _selectionMask.Buffer;
 
             if (combineMode == MagicWandCombineMode.Replace)
             {
                 Array.Clear(activeMask, 0, activeMask.Length);
-                EvaluateAtlasSeed(seedX, seedY, layerMgr, EffectiveTolerance, activeMask, atlasSize, out var sampledColor);
+                EvaluateAtlasSeed(seedX, seedY, layerMgr, EffectiveTolerance, activeMask, atlasW, atlasH, out var sampledColor);
                 TargetColor = sampledColor;
             }
             else
             {
                 byte[] newMask = new byte[totalPixels];
-                EvaluateAtlasSeed(seedX, seedY, layerMgr, EffectiveTolerance, newMask, atlasSize, out var sampledColor);
+                EvaluateAtlasSeed(seedX, seedY, layerMgr, EffectiveTolerance, newMask, atlasW, atlasH, out var sampledColor);
                 TargetColor = sampledColor;
 
                 if (combineMode == MagicWandCombineMode.Add)
@@ -669,7 +671,14 @@ namespace DeadlockPlayground.Painter
 
         private void RebuildMaskFromSeedPoints(RenderingDevice rd, int atlasSize)
         {
-            _selectionMask.EnsureBuffer(atlasSize);
+            int w = _selectionMask.Width > 0 ? _selectionMask.Width : atlasSize;
+            int h = _selectionMask.Height > 0 ? _selectionMask.Height : atlasSize;
+            RebuildMaskFromSeedPoints(rd, w, h);
+        }
+
+        private void RebuildMaskFromSeedPoints(RenderingDevice rd, int atlasW, int atlasH)
+        {
+            _selectionMask.EnsureBuffer(atlasW, atlasH);
             byte[] activeMask = _selectionMask.Buffer;
             Array.Clear(activeMask, 0, activeMask.Length);
 
@@ -688,10 +697,10 @@ namespace DeadlockPlayground.Painter
                 int seedX = Math.Clamp((int)(seed.HitUV.X * imgW), 0, imgW - 1);
                 int seedY = Math.Clamp((int)(seed.HitUV.Y * imgH), 0, imgH - 1);
 
-                int rectX = Math.Clamp((int)(seed.SubmeshRect.Position.X * atlasSize), 0, atlasSize - 1);
-                int rectY = Math.Clamp((int)(seed.SubmeshRect.Position.Y * atlasSize), 0, atlasSize - 1);
-                int rectW = Math.Clamp((int)(seed.SubmeshRect.Size.X * atlasSize), 1, atlasSize - rectX);
-                int rectH = Math.Clamp((int)(seed.SubmeshRect.Size.Y * atlasSize), 1, atlasSize - rectY);
+                int rectX = Math.Clamp((int)(seed.SubmeshRect.Position.X * atlasW), 0, atlasW - 1);
+                int rectY = Math.Clamp((int)(seed.SubmeshRect.Position.Y * atlasH), 0, atlasH - 1);
+                int rectW = Math.Clamp((int)(seed.SubmeshRect.Size.X * atlasW), 1, atlasW - rectX);
+                int rectH = Math.Clamp((int)(seed.SubmeshRect.Size.Y * atlasH), 1, atlasH - rectY);
 
                 byte[] rawImg = img.GetData();
                 byte[] submeshMask = new byte[imgW * imgH];
@@ -894,7 +903,7 @@ namespace DeadlockPlayground.Painter
                 bool isAA = seed.AntiAliasing;
                 System.Threading.Tasks.Parallel.For(0, rectH, y =>
                 {
-                    int atlasRow = (rectY + y) * atlasSize;
+                    int atlasRow = (rectY + y) * atlasW;
 
                     if (!isAA)
                     {
@@ -968,9 +977,10 @@ namespace DeadlockPlayground.Painter
             Tolerance = newTolerance;
             if (_lastLayerManager != null && _atlasSeedHistory.Count > 0)
             {
-                int atlasSize = _lastLayerManager.CanvasSize.X > 0 ? _lastLayerManager.CanvasSize.X : 2048;
-                _selectionMask.EnsureSize(atlasSize);
-                int totalPixels = atlasSize * atlasSize;
+                int atlasW = _lastLayerManager.CanvasSize.X > 0 ? _lastLayerManager.CanvasSize.X : 2048;
+                int atlasH = _lastLayerManager.CanvasSize.Y > 0 ? _lastLayerManager.CanvasSize.Y : 2048;
+                _selectionMask.EnsureSize(atlasW, atlasH);
+                int totalPixels = atlasW * atlasH;
                 byte[] activeMask = _selectionMask.Buffer;
                 Array.Clear(activeMask, 0, activeMask.Length);
 
@@ -982,14 +992,14 @@ namespace DeadlockPlayground.Painter
                     var item = _atlasSeedHistory[i];
                     if (item.CombineMode == MagicWandCombineMode.Replace && i == 0)
                     {
-                        EvaluateAtlasSeed(item.SeedX, item.SeedY, _lastLayerManager, tol, activeMask, atlasSize, out var sc);
+                        EvaluateAtlasSeed(item.SeedX, item.SeedY, _lastLayerManager, tol, activeMask, atlasW, atlasH, out var sc);
                         TargetColor = sc;
                     }
                     else
                     {
                         tempSeedBuf ??= new byte[totalPixels];
                         Array.Clear(tempSeedBuf, 0, tempSeedBuf.Length);
-                        EvaluateAtlasSeed(item.SeedX, item.SeedY, _lastLayerManager, tol, tempSeedBuf, atlasSize, out var sc);
+                        EvaluateAtlasSeed(item.SeedX, item.SeedY, _lastLayerManager, tol, tempSeedBuf, atlasW, atlasH, out var sc);
                         TargetColor = sc;
 
                         if (item.CombineMode == MagicWandCombineMode.Add || item.CombineMode == MagicWandCombineMode.Replace)

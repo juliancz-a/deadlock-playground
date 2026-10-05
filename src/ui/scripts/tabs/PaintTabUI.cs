@@ -600,7 +600,7 @@ public partial class PaintTabUI : VBoxContainer
             {
                 if (_layerManager == null) return;
                 int idx = _layerManager.ActiveLayerIndex;
-                if (idx > 0) _layerManager.MoveLayer(idx, idx - 1);
+                if (idx >= 0 && idx < _layerManager.Layers.Count - 1) _layerManager.MoveLayer(idx, idx + 1);
             };
         }
         if (_btnMoveDown != null)
@@ -609,7 +609,7 @@ public partial class PaintTabUI : VBoxContainer
             {
                 if (_layerManager == null) return;
                 int idx = _layerManager.ActiveLayerIndex;
-                if (idx >= 0 && idx < _layerManager.Layers.Count - 1) _layerManager.MoveLayer(idx, idx + 1);
+                if (idx > 0) _layerManager.MoveLayer(idx, idx - 1);
             };
         }
 
@@ -1034,7 +1034,7 @@ public partial class PaintTabUI : VBoxContainer
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 TooltipText = $"Material: {group.MaterialKey}"
             };
-            titleLabel.AddThemeFontSizeOverride("font_size", 11);
+            titleLabel.AddThemeFontSizeOverride("font_size", 12);
 
             var badgeLabel = new Label
             {
@@ -1221,7 +1221,7 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         var layers = _layerManager.Layers;
-        for (int i = 0; i < layers.Count; i++)
+        for (int i = layers.Count - 1; i >= 0; i--)
         {
             int layerIndex = i;
             var layer = layers[i];

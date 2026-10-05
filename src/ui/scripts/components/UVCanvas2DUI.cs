@@ -543,6 +543,11 @@ namespace DeadlockPlayground.UI
             {
                 _painter.StrokeFinished -= OnPainterStrokeFinished;
                 _painter.StrokeFinished += OnPainterStrokeFinished;
+                if (_painter.ProjectionGizmo != null)
+                {
+                    _painter.ProjectionGizmo.GizmoChanged -= QueueCanvasRedraw;
+                    _painter.ProjectionGizmo.GizmoChanged += QueueCanvasRedraw;
+                }
             }
 
             if (_layerManager != null)
@@ -954,8 +959,10 @@ namespace DeadlockPlayground.UI
                         _selectionOverlayMat.SetShaderParameter("show_stencil_pattern", showPattern);
                         if (_hasSubmeshRect)
                         {
-                            _selectionOverlayMat.SetShaderParameter("submesh_pos", _cachedSubmeshAtlasRect.Position / atlasW);
-                            _selectionOverlayMat.SetShaderParameter("submesh_size", _cachedSubmeshAtlasRect.Size / atlasW);
+                            Vector2 submeshNormPos = new Vector2(_cachedSubmeshAtlasRect.Position.X / atlasW, _cachedSubmeshAtlasRect.Position.Y / atlasH);
+                            Vector2 submeshNormSize = new Vector2(_cachedSubmeshAtlasRect.Size.X / atlasW, _cachedSubmeshAtlasRect.Size.Y / atlasH);
+                            _selectionOverlayMat.SetShaderParameter("submesh_pos", submeshNormPos);
+                            _selectionOverlayMat.SetShaderParameter("submesh_size", submeshNormSize);
                         }
                     }
                 }
@@ -976,14 +983,16 @@ namespace DeadlockPlayground.UI
 
         private void OnDrawWireframeOverlay(Control overlay)
         {
-            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-            if (atlasSize <= 0) atlasSize = 2048;
+            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+            if (atlasW <= 0) atlasW = 2048;
+            if (atlasH <= 0) atlasH = 2048;
 
             // Set 2D transform to local atlas pixel coordinates
             overlay.DrawSetTransform(_pan, 0.0f, new Vector2(_zoom, _zoom));
 
             // Atlas bounds border
-            overlay.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), new Color(0.35f, 0.40f, 0.50f, 0.85f), filled: false, width: 2.0f / _zoom);
+            overlay.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasW, atlasH)), new Color(0.35f, 0.40f, 0.50f, 0.85f), filled: false, width: 2.0f / _zoom);
 
             // Active submesh highlight border
             if (_hasSubmeshRect)
@@ -1059,6 +1068,12 @@ namespace DeadlockPlayground.UI
             {
                 _painter.ShapeTool.DrawOverlay(overlay, _pan, _zoom, _painter.BrushColor);
             }
+
+            // Active decal and text projection transform gizmo overlay
+            if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+            {
+                _painter.ProjectionGizmo.DrawOverlay(overlay, _pan, _zoom);
+            }
         }
 
         private void OnDrawCursorOverlay(Control overlay)
@@ -1120,6 +1135,7 @@ namespace DeadlockPlayground.UI
                 }
                 else if (_painter.ToolMode == BrushToolMode.Decal)
                 {
+                    if (_painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive) return;
                     var decalTex = _painter.DecalStamper?.DecalTexture;
                     if (decalTex != null)
                     {
@@ -1143,6 +1159,7 @@ namespace DeadlockPlayground.UI
                 }
                 else if (_painter.ToolMode == BrushToolMode.Text)
                 {
+                    if (_painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive) return;
                     var textTex = _painter.TextProjector?.CurrentTexture;
                     if (textTex != null)
                     {
@@ -1213,6 +1230,15 @@ namespace DeadlockPlayground.UI
                         canvas.AcceptEvent();
                         return;
                     }
+                    if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+                    {
+                        _painter.ProjectionGizmo.Deactivate();
+                        _painter.DecalStamper?.HidePreview();
+                        _wireframeOverlay?.QueueRedraw();
+                        _cursorOverlay?.QueueRedraw();
+                        canvas.AcceptEvent();
+                        return;
+                    }
                 }
                 else if (mb.ButtonIndex == MouseButton.Left)
                 {
@@ -1238,7 +1264,7 @@ namespace DeadlockPlayground.UI
                         {
                             if (_painter.ShapeTool.HasActiveShape)
                             {
-                                var handle = _painter.ShapeTool.HitTest(atlasPx, 10.0f / _zoom);
+                                var handle = _painter.ShapeTool.HitTest(atlasPx, _zoom);
                                 if (handle != ShapeHandleType.None)
                                 {
                                     _painter.ShapeTool.StartHandleDrag(handle, atlasPx);
@@ -1255,7 +1281,59 @@ namespace DeadlockPlayground.UI
                             return;
                         }
 
-                        if (IsAtlasPxInBounds(atlasPx, atlasSize))
+                        if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null)
+                        {
+                            if (_painter.ProjectionGizmo.IsActive)
+                            {
+                                var handle = _painter.ProjectionGizmo.HitTest(atlasPx, _zoom);
+                                if (handle != ProjectionGizmoHandle.None)
+                                {
+                                    _painter.ProjectionGizmo.StartHandleDrag(handle, atlasPx);
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+
+                            // Place new projection
+                            if (_painter.ToolMode == BrushToolMode.Decal)
+                            {
+                                var decalTex = _painter.DecalStamper?.DecalTexture;
+                                if (decalTex != null)
+                                {
+                                    float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                                    float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                                    _painter.ProjectionGizmo.Activate(atlasPx, decalTex, scale, rot, isText: false, atlasSize);
+                                    _painter.ProjectionGizmo.Is3DProjection = false;
+                                    _painter.ProjectionGizmo.StartHandleDrag(ProjectionGizmoHandle.Body, atlasPx);
+                                    _brushPalette?.SyncProjectionControls();
+                                    _wireframeOverlay?.QueueRedraw();
+                                    _cursorOverlay?.QueueRedraw();
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+                            else if (_painter.ToolMode == BrushToolMode.Text)
+                            {
+                                var textTex = _painter.TextProjector?.CurrentTexture;
+                                if (textTex != null)
+                                {
+                                    float rot = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                                    float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                                    _painter.ProjectionGizmo.Activate(atlasPx, textTex, scale, rot, isText: true, atlasSize);
+                                    _painter.ProjectionGizmo.Is3DProjection = false;
+                                    _painter.ProjectionGizmo.StartHandleDrag(ProjectionGizmoHandle.Body, atlasPx);
+                                    _brushPalette?.SyncProjectionControls();
+                                    _wireframeOverlay?.QueueRedraw();
+                                    _cursorOverlay?.QueueRedraw();
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+                        }
+
+                        int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                        int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                        if (IsAtlasPxInBounds(atlasPx, atlasW, atlasH))
                         {
                             HandleToolClick(atlasPx);
                         }
@@ -1275,6 +1353,18 @@ namespace DeadlockPlayground.UI
                             {
                                 _painter.ShapeTool.EndHandleDrag();
                                 _brushPalette?.SyncShapeControls();
+                                _wireframeOverlay?.QueueRedraw();
+                                canvas.AcceptEvent();
+                                return;
+                            }
+                        }
+
+                        if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null)
+                        {
+                            if (_painter.ProjectionGizmo.IsDragging)
+                            {
+                                _painter.ProjectionGizmo.EndHandleDrag();
+                                _brushPalette?.SyncProjectionControls();
                                 _wireframeOverlay?.QueueRedraw();
                                 canvas.AcceptEvent();
                                 return;
@@ -1315,6 +1405,17 @@ namespace DeadlockPlayground.UI
                     _painter.ShapeTool.UpdateDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
 
                     _brushPalette?.SyncShapeControls();
+                    _wireframeOverlay?.QueueRedraw();
+                    canvas.AcceptEvent();
+                    return;
+                }
+
+                if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsDragging)
+                {
+                    Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
+                    _painter.ProjectionGizmo.UpdateHandleDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
+
+                    _brushPalette?.SyncProjectionControls();
                     _wireframeOverlay?.QueueRedraw();
                     canvas.AcceptEvent();
                     return;
@@ -1397,8 +1498,9 @@ namespace DeadlockPlayground.UI
                 float diffY = MathF.Abs(p2.Y - p1.Y);
                 if (diffX >= 1.0f || diffY >= 1.0f)
                 {
-                    int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                    _painter?.SelectionMask?.EnsureSize(atlasSize);
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    _painter?.SelectionMask?.EnsureSize(atlasW, atlasH);
                     _painter?.SelectionMask?.RasterizeRect(p1, p2, combineMode);
                     _painter?.SyncSelectionMaskState();
                     _brushPalette?.UpdateWandUI();
@@ -1412,8 +1514,9 @@ namespace DeadlockPlayground.UI
                 _lassoPoints.Add(atlasPx);
                 if (_lassoPoints.Count >= 3)
                 {
-                    int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                    _painter?.SelectionMask?.EnsureSize(atlasSize);
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    _painter?.SelectionMask?.EnsureSize(atlasW, atlasH);
                     _painter?.SelectionMask?.RasterizePolygon(_lassoPoints, combineMode);
                     _painter?.SyncSelectionMaskState();
                     _brushPalette?.UpdateWandUI();
@@ -1451,8 +1554,9 @@ namespace DeadlockPlayground.UI
         {
             if (_polyPoints.Count >= 3)
             {
-                int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-                _painter?.SelectionMask?.EnsureSize(atlasSize);
+                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                _painter?.SelectionMask?.EnsureSize(atlasW, atlasH);
                 _painter?.SelectionMask?.RasterizePolygon(_polyPoints, combineMode);
                 _painter?.SyncSelectionMaskState();
                 _brushPalette?.UpdateWandUI();
@@ -1491,6 +1595,14 @@ namespace DeadlockPlayground.UI
 
             if (key.Keycode == Key.Escape)
             {
+                if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+                {
+                    _painter.ProjectionGizmo.Deactivate();
+                    _painter.DecalStamper?.HidePreview();
+                    _wireframeOverlay?.QueueRedraw();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
                 if (_isBuildingPoly || _isSelecting)
                 {
                     CancelSelection();
@@ -1509,6 +1621,14 @@ namespace DeadlockPlayground.UI
 
             if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter)
             {
+                if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+                {
+                    _painter.CommitProjectionGizmo();
+                    _wireframeOverlay?.QueueRedraw();
+                    _canvasDrawArea?.QueueRedraw();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
                 if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
                 {
                     _painter.ShapeTool.CommitShape(_layerManager, _painter.BrushColor, (LayerBlendMode)_painter.BlendMode, _painter.MagicWandTool);
@@ -1591,40 +1711,24 @@ namespace DeadlockPlayground.UI
             }
             else if (mode == BrushToolMode.Decal)
             {
-                Vector2 uv = new Vector2(
-                    Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
-                    Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
-                );
-                var active = _meshHierarchy?.ActiveTarget;
-                if (active != null && active.Mesh != null)
+                var decalTex = _painter.DecalStamper?.DecalTexture;
+                if (decalTex != null)
                 {
-                    var decalTex = _painter.DecalStamper?.DecalTexture;
-                    if (decalTex != null)
-                    {
-                        float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
-                        float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
-                        _layerManager.StampDecalToAtlas(uv, decalTex, rot, scale, _painter.MagicWandTool);
-                        _canvasDrawArea?.QueueRedraw();
-                    }
+                    float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                    float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                    _painter.ProjectionGizmo?.Activate(atlasPx, decalTex, scale, rot, isText: false, currentSubmeshWidth);
+                    _wireframeOverlay?.QueueRedraw();
                 }
             }
             else if (mode == BrushToolMode.Text)
             {
-                Vector2 uv = new Vector2(
-                    Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
-                    Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
-                );
-                var active = _meshHierarchy?.ActiveTarget;
-                if (active != null && active.Mesh != null)
+                var textTex = _painter.TextProjector?.CurrentTexture;
+                if (textTex != null)
                 {
-                    var textTex = _painter.TextProjector?.CurrentTexture;
-                    if (textTex != null)
-                    {
-                        float rot = _painter.TextProjector?.RotationDegrees ?? 0.0f;
-                        float scale = _painter.TextProjector?.TextScale ?? 0.25f;
-                        _layerManager.StampDecalToAtlas(uv, textTex, rot, scale, _painter.MagicWandTool);
-                        _canvasDrawArea?.QueueRedraw();
-                    }
+                    float rot = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                    float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                    _painter.ProjectionGizmo?.Activate(atlasPx, textTex, scale, rot, isText: true, currentSubmeshWidth);
+                    _wireframeOverlay?.QueueRedraw();
                 }
             }
         }
@@ -1679,9 +1783,9 @@ namespace DeadlockPlayground.UI
             return (screenPos - _pan) / _zoom;
         }
 
-        private bool IsAtlasPxInBounds(Vector2 atlasPx, int atlasSize)
+        private bool IsAtlasPxInBounds(Vector2 atlasPx, int atlasW, int atlasH)
         {
-            return atlasPx.X >= 0 && atlasPx.Y >= 0 && atlasPx.X < atlasSize && atlasPx.Y < atlasSize;
+            return atlasPx.X >= 0 && atlasPx.Y >= 0 && atlasPx.X < atlasW && atlasPx.Y < atlasH;
         }
 
         private void ZoomAtPoint(Vector2 mousePos, float factor)
@@ -1704,16 +1808,18 @@ namespace DeadlockPlayground.UI
                 return;
             }
 
-            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-            if (atlasSize <= 0) atlasSize = 2048;
+            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+            if (atlasW <= 0) atlasW = 2048;
+            if (atlasH <= 0) atlasH = 2048;
             _layerManager?.EnsureCpuSynced();
 
             float margin = 20.0f;
             float availW = Mathf.Max(viewSize.X - margin * 2.0f, 10.0f);
             float availH = Mathf.Max(viewSize.Y - margin * 2.0f, 10.0f);
 
-            _zoom = Mathf.Clamp(Mathf.Min(availW / atlasSize, availH / atlasSize), 0.05f, 40.0f);
-            Vector2 scaledSize = new Vector2(atlasSize, atlasSize) * _zoom;
+            _zoom = Mathf.Clamp(Mathf.Min(availW / atlasW, availH / atlasH), 0.05f, 40.0f);
+            Vector2 scaledSize = new Vector2(atlasW, atlasH) * _zoom;
             _pan = (viewSize - scaledSize) * 0.5f;
             _lastDrawAreaSize = viewSize;
             _hasInitialFit = true;

@@ -177,10 +177,10 @@ namespace DeadlockPlayground.Painter
             basis = basis.Rotated(forward, Mathf.DegToRad(RotationDegrees));
 
             float size3D = DecalScale * 2.0f;
-            float depth3D = Mathf.Max(1.0f, size3D * 2.0f);
-            _previewDecal.NormalFade = 0.0f;
-            _previewDecal.UpperFade = 0.0f;
-            _previewDecal.LowerFade = 0.0f;
+            float depth3D = Mathf.Clamp(size3D * 0.8f, 0.03f, 0.35f);
+            _previewDecal.NormalFade = 0.45f;
+            _previewDecal.UpperFade = 0.2f;
+            _previewDecal.LowerFade = 0.2f;
             _previewDecal.Transform = new Transform3D(basis, _currentWorldPos);
             _previewDecal.Size = new Vector3(size3D, depth3D, size3D);
         }
