@@ -181,6 +181,12 @@ public partial class PaintModExportPanelUI : PanelContainer
             return;
         }
 
+        // Reconcile dirty state based on actual paint presence across submeshes
+        if (_layerManager != null && _meshHierarchy != null)
+        {
+            _meshHierarchy.ReconcileDirtyStates(_layerManager);
+        }
+
         // Bake composite on main thread before opening modal (if layerManager is active)
         Image preBakedAtlas = null;
         if (_layerManager != null)

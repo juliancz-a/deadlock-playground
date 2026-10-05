@@ -478,19 +478,22 @@ namespace DeadlockPlayground.Painter
                     _projectionGizmo.RotationDegrees
                 );
 
+                _projectionGizmo.DecalRight = basis.Column0.Normalized();
+                _projectionGizmo.DecalDown = basis.Column2.Normalized();
+
                 float uvSpanU = (atlasW > 0) ? _projectionGizmo.Size.X / (float)atlasW : 0.25f;
                 float uvSpanV = (atlasH > 0) ? _projectionGizmo.Size.Y / (float)atlasH : 0.25f;
                 float unitsU = (_projectionGizmo.UnitsU > 1e-4f && _projectionGizmo.UnitsU < 20.0f) ? _projectionGizmo.UnitsU : 0.5f;
                 float unitsV = (_projectionGizmo.UnitsV > 1e-4f && _projectionGizmo.UnitsV < 20.0f) ? _projectionGizmo.UnitsV : 0.5f;
                 float sizeX = uvSpanU * unitsU;
                 float sizeZ = uvSpanV * unitsV;
-                float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.8f, 0.03f, 0.35f);
+                float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 1.5f, 0.20f, 1.5f);
 
                 _previewDecalNode.NormalFade = 0.45f;
-                _previewDecalNode.UpperFade = 0.2f;
-                _previewDecalNode.LowerFade = 0.2f;
+                _previewDecalNode.UpperFade = 0.3f;
+                _previewDecalNode.LowerFade = 0.3f;
                 _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
-                _previewDecalNode.Transform = new Transform3D(basis, _projectionGizmo.WorldPos);
+                _previewDecalNode.Transform = new Transform3D(basis, _projectionGizmo.WorldPos + _projectionGizmo.WorldNormal * (depthY * 0.25f));
                 _previewDecalNode.Visible = true;
             }
 
@@ -956,7 +959,7 @@ namespace DeadlockPlayground.Painter
 
             Color paintColor = isErase 
                 ? new Color(1, 1, 1, BrushFlow) 
-                : new Color(BrushColor.R, BrushColor.G, BrushColor.B, Mathf.Clamp(BrushColor.A * layerOpacity, 0.01f, 1.0f));
+                : new Color(BrushColor.R, BrushColor.G, BrushColor.B, Mathf.Clamp(BrushColor.A, 0.01f, 1.0f));
 
             if (force || _lastBrushColor != paintColor || _lastToolMode != ToolMode)
             {
@@ -1118,6 +1121,15 @@ namespace DeadlockPlayground.Painter
             var camera = _worldViewport?.GetCamera3D() ?? _camera;
 
             EnsureSelectionOverlay3D();
+
+            if (_selectionOverlay3D != null && _selectionOverlay3D.Visible)
+            {
+                if (((ToolMode == BrushToolMode.Decal || ToolMode == BrushToolMode.Text) && _projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement) ||
+                    (ToolMode == BrushToolMode.Shape && (_isDraggingShape3D || (_shapeTool != null && _shapeTool.HasActiveShape))))
+                {
+                    _selectionOverlay3D.QueueRedraw();
+                }
+            }
 
             bool canPaintLayer = _layerManager?.ActiveLayer != null && !_layerManager.ActiveLayer.IsLocked && _layerManager.ActiveLayer.IsVisible;
             bool isPainting = IsPaintingActive && canPaintLayer && isLeftDown && _lastHit.Hit 
@@ -1848,18 +1860,18 @@ namespace DeadlockPlayground.Painter
 
                             float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
                             float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
-                            float uvSpanU = (aspect >= 1.0f) ? scale * aspect : scale;
-                            float uvSpanV = (aspect < 1.0f) ? scale / aspect : scale;
+                            float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                            float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
                             float sizeX = uvSpanU * unitsU;
                             float sizeZ = uvSpanV * unitsV;
-                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.8f, 0.03f, 0.35f);
+                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 1.5f, 0.20f, 1.5f);
                             _previewDecalNode.NormalFade = 0.45f;
-                            _previewDecalNode.UpperFade = 0.2f;
-                            _previewDecalNode.LowerFade = 0.2f;
+                            _previewDecalNode.UpperFade = 0.3f;
+                            _previewDecalNode.LowerFade = 0.3f;
                             _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
                             Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
-                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld);
+                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.25f));
                         }
                     }
                     else if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
@@ -1887,18 +1899,18 @@ namespace DeadlockPlayground.Painter
 
                             float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
                             float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
-                            float uvSpanU = (aspect >= 1.0f) ? scale * aspect : scale;
-                            float uvSpanV = (aspect < 1.0f) ? scale / aspect : scale;
+                            float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                            float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
                             float sizeX = uvSpanU * unitsU;
                             float sizeZ = uvSpanV * unitsV;
-                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.8f, 0.03f, 0.35f);
+                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 1.5f, 0.20f, 1.5f);
                             _previewDecalNode.NormalFade = 0.45f;
-                            _previewDecalNode.UpperFade = 0.2f;
-                            _previewDecalNode.LowerFade = 0.2f;
+                            _previewDecalNode.UpperFade = 0.3f;
+                            _previewDecalNode.LowerFade = 0.3f;
                             _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
                             Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
-                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld);
+                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.25f));
                         }
                     }
                     else if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
@@ -3377,19 +3389,34 @@ namespace DeadlockPlayground.Painter
 
         public void ExecuteMagicWandSelection(RaycastHitResult hit, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
         {
-            if (_currentMesh == null || _layerManager == null || _magicWandTool == null) return;
-            int atlasSize = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
-            int seedX = Math.Clamp((int)(hit.HitUV.X * atlasSize), 0, atlasSize - 1);
-            int seedY = Math.Clamp((int)(hit.HitUV.Y * atlasSize), 0, atlasSize - 1);
+            if (_layerManager == null || _magicWandTool == null) return;
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+
+            Vector2 atlasUv = hit.HitUV;
+            MeshInstance3D mesh = hit.HitMesh ?? _currentMesh;
+            if (mesh != null && mesh.MaterialOverlay is ShaderMaterial sm)
+            {
+                var posVar = sm.GetShaderParameter("position_in_atlas");
+                var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                {
+                    atlasUv = atlasUv * sizeVar.AsVector2() + posVar.AsVector2();
+                }
+            }
+
+            int seedX = Math.Clamp((int)(atlasUv.X * atlasW), 0, atlasW - 1);
+            int seedY = Math.Clamp((int)(atlasUv.Y * atlasH), 0, atlasH - 1);
             ExecuteMagicWandAtPixel(seedX, seedY, combineMode);
         }
 
         public void ExecuteMagicWandSelectionAtlasPx(Vector2 atlasPx, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
         {
             if (_layerManager == null || _magicWandTool == null) return;
-            int atlasSize = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
-            int seedX = Math.Clamp((int)atlasPx.X, 0, atlasSize - 1);
-            int seedY = Math.Clamp((int)atlasPx.Y, 0, atlasSize - 1);
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+            int seedX = Math.Clamp((int)atlasPx.X, 0, atlasW - 1);
+            int seedY = Math.Clamp((int)atlasPx.Y, 0, atlasH - 1);
             ExecuteMagicWandAtPixel(seedX, seedY, combineMode);
         }
 

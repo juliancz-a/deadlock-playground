@@ -806,6 +806,20 @@ namespace DeadlockPlayground.Painter
             return _submeshes.FindAll(s => s.IsDirty);
         }
 
+        public void ReconcileDirtyStates(SkinLayerManager layerManager)
+        {
+            if (layerManager == null || _submeshes == null) return;
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null) continue;
+                string matKey = layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex);
+                if (!layerManager.HasAnyPaint(matKey))
+                {
+                    sm.IsDirty = false;
+                }
+            }
+        }
+
         public SubmeshNodeInfo FindSubmesh(MeshInstance3D mesh)
         {
             if (mesh == null) return null;

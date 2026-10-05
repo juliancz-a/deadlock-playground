@@ -118,11 +118,11 @@ namespace DeadlockPlayground.Painter
 
             if (aspect >= 1.0f)
             {
-                Size = new Vector2(basePixelDim * aspect, basePixelDim);
+                Size = new Vector2(basePixelDim, basePixelDim / aspect);
             }
             else
             {
-                Size = new Vector2(basePixelDim, basePixelDim / aspect);
+                Size = new Vector2(basePixelDim * aspect, basePixelDim);
             }
 
             GizmoChanged?.Invoke();

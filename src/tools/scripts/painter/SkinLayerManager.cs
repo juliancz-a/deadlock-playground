@@ -108,6 +108,42 @@ namespace DeadlockPlayground.Painter
 
         public void InvalidateOtherLayers() => _otherLayersDirty = true;
 
+        public bool HasAnyPaint(string matKey = null)
+        {
+            if (string.IsNullOrEmpty(matKey)) matKey = _activeMaterialKey;
+
+            // If querying the currently active material, inspect the live active layers directly!
+            if (!string.IsNullOrEmpty(matKey) && !string.IsNullOrEmpty(_activeMaterialKey) &&
+                string.Equals(matKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_layers != null && _layers.Count > 0)
+                {
+                    EnsureCpuSynced();
+                    foreach (var l in _layers)
+                    {
+                        if (l != null && !l.IsBlank()) return true;
+                    }
+                }
+                return false;
+            }
+
+            // For inactive materials, query their saved context
+            if (!string.IsNullOrEmpty(matKey) && _materialContexts.TryGetValue(matKey, out var ctx) && ctx != null)
+            {
+                return ctx.HasAnyPaint();
+            }
+
+            if (_layers != null && _layers.Count > 0)
+            {
+                EnsureCpuSynced();
+                foreach (var l in _layers)
+                {
+                    if (l != null && !l.IsBlank()) return true;
+                }
+            }
+            return false;
+        }
+
         private Rid _gpuUndoTextureRid = new();
         private int _gpuUndoWidth = 0;
         private int _gpuUndoHeight = 0;
@@ -942,6 +978,11 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
+            if (_targetMesh != null && MeshHierarchy != null)
+            {
+                MeshHierarchy.ReconcileDirtyStates(this);
+            }
+
             NotifyLayerRemoved(index);
             NotifyLayerSelected(_activeLayerIndex);
             NotifyStackChanged();
@@ -1117,7 +1158,7 @@ namespace DeadlockPlayground.Painter
                     var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
                     if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
                     {
-                        if (_layers.Count <= 1 && layer.BlendMode == LayerBlendMode.Normal)
+                        if (_layers.Count <= 1 && layer.BlendMode == LayerBlendMode.Normal && layer.Opacity >= 0.999f)
                         {
                             rd.TextureCopy(_scratchTextureRid, fullRidVal.AsRid(), Vector3.Zero, new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
                         }
@@ -1226,7 +1267,7 @@ namespace DeadlockPlayground.Painter
                         var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
                         if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
                         {
-                            if (_layers.Count <= 1 && layer.BlendMode == LayerBlendMode.Normal)
+                            if (_layers.Count <= 1 && layer.BlendMode == LayerBlendMode.Normal && layer.Opacity >= 0.999f)
                             {
                                 rd.TextureCopy(_scratchTextureRid, fullRidVal.AsRid(), Vector3.Zero, new Vector3(tx, ty, 0), new Vector3(tileW, tileH, 1), 0, 0, 0, 0);
                             }
@@ -1313,9 +1354,9 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        private void UploadBufferRectChunked(RenderingDevice rd, Rid destRid, byte[] buffer, int atlasSize, Rect2I rect)
+        private void UploadBufferRectChunked(RenderingDevice rd, Rid destRid, byte[] buffer, int atlasW, int atlasH, Rect2I rect)
         {
-            if (rd == null || !destRid.IsValid || !rd.TextureIsValid(destRid) || buffer == null) return;
+            if (rd == null || !destRid.IsValid || !rd.TextureIsValid(destRid) || buffer == null || atlasW <= 0 || atlasH <= 0) return;
             EnsureScratchTexture(rd);
             if (!_scratchTextureRid.IsValid || !rd.TextureIsValid(_scratchTextureRid))
             {
@@ -1323,10 +1364,10 @@ namespace DeadlockPlayground.Painter
                 return;
             }
 
-            int minX = Math.Clamp(rect.Position.X, 0, atlasSize - 1);
-            int minY = Math.Clamp(rect.Position.Y, 0, atlasSize - 1);
-            int maxX = Math.Clamp(rect.End.X, 0, atlasSize);
-            int maxY = Math.Clamp(rect.End.Y, 0, atlasSize);
+            int minX = Math.Clamp(rect.Position.X, 0, atlasW - 1);
+            int minY = Math.Clamp(rect.Position.Y, 0, atlasH - 1);
+            int maxX = Math.Clamp(rect.End.X, 0, atlasW);
+            int maxY = Math.Clamp(rect.End.Y, 0, atlasH);
             int w = maxX - minX;
             int h = maxY - minY;
             if (w <= 0 || h <= 0) return;
@@ -1336,9 +1377,12 @@ namespace DeadlockPlayground.Painter
                 int rowBytes = w * 8;
                 for (int y = 0; y < h; y++)
                 {
-                    int srcOffset = ((minY + y) * atlasSize + minX) * 8;
+                    int srcOffset = ((minY + y) * atlasW + minX) * 8;
                     int dstOffset = (y * ScratchTextureSize) * 8;
-                    Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                    if (srcOffset + rowBytes <= buffer.Length && dstOffset + rowBytes <= _scratchBuffer.Length)
+                    {
+                        Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                    }
                 }
 
                 rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
@@ -1355,9 +1399,12 @@ namespace DeadlockPlayground.Painter
                     int rowBytes = tileW * 8;
                     for (int y = 0; y < tileH; y++)
                     {
-                        int srcOffset = ((ty + y) * atlasSize + tx) * 8;
+                        int srcOffset = ((ty + y) * atlasW + tx) * 8;
                         int dstOffset = (y * ScratchTextureSize) * 8;
-                        Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                        if (srcOffset + rowBytes <= buffer.Length && dstOffset + rowBytes <= _scratchBuffer.Length)
+                        {
+                            Buffer.BlockCopy(buffer, srcOffset, _scratchBuffer, dstOffset, rowBytes);
+                        }
                     }
 
                     rd.TextureUpdate(_scratchTextureRid, 0, _scratchBuffer);
@@ -1424,13 +1471,13 @@ namespace DeadlockPlayground.Painter
                 {
                     if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
                     {
-                        if (layer.BlendMode == LayerBlendMode.Normal)
+                        if (layer.BlendMode == LayerBlendMode.Normal && layer.Opacity >= 0.999f)
                         {
                             rd.TextureCopy(layer.LayerRid, fullRidVal.AsRid(), Vector3.Zero, Vector3.Zero, new Vector3(atlasW, atlasH, 1), 0, 0, 0, 0);
                         }
                         else
                         {
-                            // Blend with base atlas buffer so 2D canvas displays non-normal blend modes accurately
+                            // Blend with base atlas buffer so 2D canvas displays non-normal blend modes or lower opacity accurately
                             layer.IsCpuSynced = false;
                             EnsureCpuSynced();
                             RecompositeGpuLayers();
@@ -2690,9 +2737,9 @@ namespace DeadlockPlayground.Painter
                     {
                         ulong* uLayer = (ulong*)pDst;
 
-                        if (useMask)
+                        if (useMask && tolerance >= 0.99f)
                         {
-                            // Fill matching mask pixels strictly within bounded submesh geometry
+                            // 100% Tolerance Fast Path with Selection: Fill matching mask pixels strictly within bounded submesh geometry
                             for (int y = bMinY; y <= bMaxY; y++)
                             {
                                 int ay = startY + y;
@@ -2710,7 +2757,7 @@ namespace DeadlockPlayground.Painter
                                 }
                             }
                         }
-                        else if (tolerance >= 0.99f)
+                        else if (!useMask && tolerance >= 0.99f)
                         {
                             // 100% Tolerance Fast Path: Direct 64-bit store over submesh geometry with zero allocations
                             for (int y = bMinY; y <= bMaxY; y++)
@@ -2740,6 +2787,12 @@ namespace DeadlockPlayground.Painter
                             {
                                 seedLocalX = uvBounds.Position.X + uvBounds.Size.X / 2;
                                 seedLocalY = uvBounds.Position.Y + uvBounds.Size.Y / 2;
+                            }
+
+                            if (useMask && wandTool.GetPixelMaskValue(startX + seedLocalX, startY + seedLocalY) < 0.5f)
+                            {
+                                // Seed is outside the active selection mask: nothing to fill
+                                return;
                             }
 
                             if (hasValidUvMask && !submeshUvMask[seedLocalY * width + seedLocalX])
@@ -2823,6 +2876,7 @@ namespace DeadlockPlayground.Painter
                                             int nIdx = ny * width + nx;
                                             if (fillMask[nIdx]) return;
                                             if (hasValidUvMask && !submeshUvMask[nIdx]) return;
+                                            if (useMask && wandTool.GetPixelMaskValue(startX + nx, startY + ny) < 0.5f) return;
 
                                             int atlasIdx = ((startY + ny) * atlasW + (startX + nx)) * 4;
                                             float cR, cG, cB, cA;
@@ -2888,7 +2942,7 @@ namespace DeadlockPlayground.Painter
                                             if (nx >= 0 && nx < width && ny >= 0 && ny < height)
                                             {
                                                 int nIdx = ny * width + nx;
-                                                if (!hasValidUvMask || submeshUvMask[nIdx])
+                                                if ((!hasValidUvMask || submeshUvMask[nIdx]) && (!useMask || wandTool.GetPixelMaskValue(startX + nx, startY + ny) >= 0.5f))
                                                 {
                                                     dilatedMask[nIdx] = true;
                                                 }
@@ -2908,7 +2962,7 @@ namespace DeadlockPlayground.Painter
                                 int maskRow = y * width;
                                 for (int x = bMinX; x <= bMaxX; x++)
                                 {
-                                    if (dilatedMask[maskRow + x])
+                                    if (dilatedMask[maskRow + x] && (!useMask || wandTool.GetPixelMaskValue(startX + x, startY + y) >= 0.5f))
                                     {
                                         uLayer[rowOffset + (startX + x)] = colorVal;
                                     }
@@ -3000,8 +3054,8 @@ namespace DeadlockPlayground.Painter
             else
             {
                 float aspect = (float)dW / dH;
-                float spanU = (aspect >= 1.0f) ? scale * aspect : scale;
-                float spanV = (aspect < 1.0f) ? scale / aspect : scale;
+                float spanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                float spanV = (aspect >= 1.0f) ? scale / aspect : scale;
                 halfExtX = (spanU * size.X * atlasW) * 0.5f;
                 halfExtY = (spanV * size.Y * atlasH) * 0.5f;
             }
@@ -3847,13 +3901,13 @@ namespace DeadlockPlayground.Painter
             {
                 if (dirtyRect.HasValue && dirtyRect.Value.Size.X > 0 && dirtyRect.Value.Size.Y > 0)
                 {
-                    if (_layers.Count <= 1 && active != null && active.BlendMode == LayerBlendMode.Normal && active.LayerRid.IsValid && rd.TextureIsValid(active.LayerRid))
+                    if (_layers.Count <= 1 && active != null && active.BlendMode == LayerBlendMode.Normal && active.Opacity >= 0.999f && active.LayerRid.IsValid && rd.TextureIsValid(active.LayerRid))
                     {
                         rd.TextureCopy(active.LayerRid, fullRidVal.AsRid(), Vector3.Zero, Vector3.Zero, new Vector3(atlasW, atlasH, 1), 0, 0, 0, 0);
                     }
                     else
                     {
-                        UploadBufferRectChunked(rd, fullRidVal.AsRid(), _compositeBuffer, atlasW, dirtyRect.Value);
+                        UploadBufferRectChunked(rd, fullRidVal.AsRid(), _compositeBuffer, atlasW, atlasH, dirtyRect.Value);
                     }
                 }
                 else
@@ -4245,23 +4299,72 @@ namespace DeadlockPlayground.Painter
             NotifyStackChanged();
         }
 
+        public Image BakeCompositeImageForSubmesh(SubmeshNodeInfo submesh)
+        {
+            if (submesh == null) return BakeCompositeImage();
+            string matKey = !string.IsNullOrEmpty(submesh.OriginalVmatPath) ? submesh.OriginalVmatPath.ToLowerInvariant().Trim() : null;
+            if (string.IsNullOrEmpty(matKey) && submesh.Mesh != null)
+            {
+                matKey = GetMaterialKey(submesh.Mesh, submesh.SurfaceIndex);
+            }
+            return BakeCompositeImageForMaterial(matKey, submesh.Mesh, submesh.SurfaceIndex);
+        }
+
+        public Image BakeCompositeImageForMaterial(string matKey, MeshInstance3D mesh = null, int surfaceIndex = 0)
+        {
+            if (string.IsNullOrEmpty(matKey) && mesh != null)
+            {
+                matKey = GetMaterialKey(mesh, surfaceIndex);
+            }
+
+            // 1. If this is the currently active material, ensure CPU/GPU sync and recomposite
+            if (!string.IsNullOrEmpty(matKey) && !string.IsNullOrEmpty(_activeMaterialKey) &&
+                string.Equals(matKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureCpuSynced();
+                RecompositeGpuLayers();
+                return BakeAtlasImageFromManager(_activeAtlasManager, CanvasSize.X, CanvasSize.Y);
+            }
+
+            // 2. If it's an inactive material, check if we have an existing atlas manager
+            Node targetAtlas = null;
+            if (!string.IsNullOrEmpty(matKey) && _perMaterialAtlasManagers.TryGetValue(matKey, out var subAtlas) &&
+                subAtlas != null && GodotObject.IsInstanceValid(subAtlas))
+            {
+                targetAtlas = subAtlas;
+            }
+
+            if (targetAtlas != null)
+            {
+                var img = BakeAtlasImageFromManager(targetAtlas, CanvasSize.X, CanvasSize.Y);
+                if (img != null && !img.IsEmpty()) return img;
+            }
+
+            // 3. Fallback: If atlas was evicted or inactive, composite directly from persisted MaterialPaintingContext
+            if (!string.IsNullOrEmpty(matKey) && _materialContexts.TryGetValue(matKey, out var ctx) && ctx != null && ctx.Layers.Count > 0)
+            {
+                return BakeCompositeImageFromLayers(ctx.Layers, ctx.CanvasSize.X > 0 ? ctx.CanvasSize.X : 2048, ctx.CanvasSize.Y > 0 ? ctx.CanvasSize.Y : 2048);
+            }
+
+            // 4. Fallback to active manager
+            return BakeCompositeImage();
+        }
+
         public Image BakeCompositeImage(int surfaceIndex = -1)
         {
-            EnsureCpuSynced();
-            Node targetAtlas = _activeAtlasManager;
             if (surfaceIndex >= 0 && MeshHierarchy != null && surfaceIndex < MeshHierarchy.Submeshes.Count)
             {
-                var mesh = MeshHierarchy.Submeshes[surfaceIndex].Mesh;
-                if (mesh != null)
+                var sub = MeshHierarchy.Submeshes[surfaceIndex];
+                if (sub != null)
                 {
-                    string matKey = GetMaterialKey(mesh, surfaceIndex);
-                    if (_perMaterialAtlasManagers.TryGetValue(matKey, out var submeshAtlas))
-                    {
-                        targetAtlas = submeshAtlas;
-                    }
+                    return BakeCompositeImageForSubmesh(sub);
                 }
             }
-            else if (targetAtlas == null && _perMaterialAtlasManagers.Count > 0)
+
+            EnsureCpuSynced();
+            RecompositeGpuLayers();
+            Node targetAtlas = _activeAtlasManager;
+            if (targetAtlas == null && _perMaterialAtlasManagers.Count > 0)
             {
                 foreach (var mgr in _perMaterialAtlasManagers.Values)
                 {
@@ -4273,51 +4376,166 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
+            return BakeAtlasImageFromManager(targetAtlas, CanvasSize.X, CanvasSize.Y);
+        }
+
+        private Image BakeAtlasImageFromManager(Node targetAtlas, int fallbackW = 2048, int fallbackH = 2048)
+        {
             if (targetAtlas != null && GodotObject.IsInstanceValid(targetAtlas))
             {
                 var rd = RenderingServer.GetRenderingDevice();
-                var ridVal = targetAtlas.Get("atlas_texture_rid");
-                if (ridVal.VariantType == Variant.Type.Rid)
+                var fullRidVal = targetAtlas.Get("full_composite_rid");
+                Rid rid = (fullRidVal.VariantType == Variant.Type.Rid) ? fullRidVal.AsRid() : new Rid();
+                if (!rid.IsValid || rd == null || !rd.TextureIsValid(rid))
                 {
-                    Rid rid = ridVal.AsRid();
-                    if (rid.IsValid && rd != null)
+                    var ridVal = targetAtlas.Get("atlas_texture_rid");
+                    rid = (ridVal.VariantType == Variant.Type.Rid) ? ridVal.AsRid() : new Rid();
+                }
+
+                if (rid.IsValid && rd != null && rd.TextureIsValid(rid))
+                {
+                    byte[] data = rd.TextureGetData(rid, 0);
+
+                    int atlasW = fallbackW > 0 ? fallbackW : 2048;
+                    int atlasH = fallbackH > 0 ? fallbackH : 2048;
+                    var amW = targetAtlas.Get("atlas_width");
+                    var amH = targetAtlas.Get("atlas_height");
+                    if (amW.VariantType == Variant.Type.Int && amW.AsInt32() > 0) atlasW = amW.AsInt32();
+                    if (amH.VariantType == Variant.Type.Int && amH.AsInt32() > 0) atlasH = amH.AsInt32();
+                    else if (targetAtlas.HasMethod("get_native_atlas_width") && targetAtlas.HasMethod("get_native_atlas_height"))
                     {
-                        byte[] data = rd.TextureGetData(rid, 0);
-                        int size = (int)targetAtlas.Get("atlas_size");
-                        if (data != null && data.Length > 0 && size > 0)
+                        atlasW = (int)targetAtlas.Call("get_native_atlas_width");
+                        atlasH = (int)targetAtlas.Call("get_native_atlas_height");
+                    }
+                    else
+                    {
+                        var sz = targetAtlas.Get("atlas_size");
+                        if (sz.VariantType == Variant.Type.Int && sz.AsInt32() > 0) { atlasW = sz.AsInt32(); atlasH = atlasW; }
+                    }
+
+                    if (data != null && data.Length > 0 && atlasW > 0 && atlasH > 0)
+                    {
+                        if (data.Length != atlasW * atlasH * 8)
                         {
-                            byte[] cleanData = (byte[])data.Clone();
-                            unsafe
+                            if (data.Length == atlasW * atlasW * 8) atlasH = atlasW;
+                            else if (data.Length == atlasH * atlasH * 8) atlasW = atlasH;
+                        }
+
+                        byte[] cleanData = (byte[])data.Clone();
+                        unsafe
+                        {
+                            fixed (byte* pClean = cleanData)
                             {
-                                fixed (byte* pClean = cleanData)
+                                Half* h = (Half*)pClean;
+                                int count = cleanData.Length / 8;
+                                for (int i = 0; i < count; i++)
                                 {
-                                    Half* h = (Half*)pClean;
-                                    int count = cleanData.Length / 8;
-                                    for (int i = 0; i < count; i++)
-                                    {
-                                        int off = i * 4;
-                                        float r = (float)h[off];
-                                        float g = (float)h[off + 1];
-                                        float b = (float)h[off + 2];
-                                        float a = Mathf.Clamp((float)h[off + 3], 0.0f, 1.0f);
-                                        Color lin = new Color(r, g, b, a);
-                                        Color srgb = lin.LinearToSrgb();
-                                        h[off] = (Half)srgb.R;
-                                        h[off + 1] = (Half)srgb.G;
-                                        h[off + 2] = (Half)srgb.B;
-                                        h[off + 3] = (Half)a;
-                                    }
+                                    int off = i * 4;
+                                    float r = (float)h[off];
+                                    float g = (float)h[off + 1];
+                                    float b = (float)h[off + 2];
+                                    float a = Mathf.Clamp((float)h[off + 3], 0.0f, 1.0f);
+                                    Color lin = new Color(r, g, b, a);
+                                    Color srgb = lin.LinearToSrgb();
+                                    h[off] = (Half)srgb.R;
+                                    h[off + 1] = (Half)srgb.G;
+                                    h[off + 2] = (Half)srgb.B;
+                                    h[off + 3] = (Half)a;
                                 }
                             }
-                            var img = Image.CreateFromData(size, size, false, Image.Format.Rgbah, cleanData);
-                            img.Convert(Image.Format.Rgba8);
-                            return img;
                         }
+                        var img = Image.CreateFromData(atlasW, atlasH, false, Image.Format.Rgbah, cleanData);
+                        img.Convert(Image.Format.Rgba8);
+                        return img;
                     }
                 }
             }
 
             return null;
+        }
+
+        private Image BakeCompositeImageFromLayers(List<SkinLayer> layers, int width, int height)
+        {
+            if (layers == null || layers.Count == 0 || width <= 0 || height <= 0) return null;
+            int bufferLen = width * height * 8;
+            byte[] comp = new byte[bufferLen];
+            var rd = RenderingServer.GetRenderingDevice();
+
+            foreach (var layer in layers)
+            {
+                if (layer == null || !layer.IsVisible || layer.Opacity <= 0.001f) continue;
+                if (!layer.IsCpuSynced && layer.LayerRid.IsValid && rd != null && rd.TextureIsValid(layer.LayerRid))
+                {
+                    layer.GpuData = rd.TextureGetData(layer.LayerRid, 0);
+                    layer.IsCpuSynced = true;
+                }
+                if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
+                {
+                    layer.DecompressGpuData(bufferLen);
+                }
+                if (layer.GpuData == null || layer.GpuData.Length != bufferLen) continue;
+
+                unsafe
+                {
+                    fixed (byte* pDst = comp, pSrc = layer.GpuData)
+                    {
+                        Half* hDst = (Half*)pDst;
+                        Half* hSrc = (Half*)pSrc;
+                        int count = bufferLen / 8;
+                        float op = layer.Opacity;
+                        for (int i = 0; i < count; i++)
+                        {
+                            int off = i * 4;
+                            float sA = (float)hSrc[off + 3] * op;
+                            if (sA <= 0.001f) continue;
+
+                            float dR = (float)hDst[off];
+                            float dG = (float)hDst[off + 1];
+                            float dB = (float)hDst[off + 2];
+                            float dA = (float)hDst[off + 3];
+
+                            float sR = (float)hSrc[off];
+                            float sG = (float)hSrc[off + 1];
+                            float sB = (float)hSrc[off + 2];
+
+                            float outA = Mathf.Clamp(sA + dA * (1.0f - sA), 0f, 1f);
+                            if (outA > 0f)
+                            {
+                                hDst[off] = (Half)((sR * sA + dR * dA * (1.0f - sA)) / outA);
+                                hDst[off + 1] = (Half)((sG * sA + dG * dA * (1.0f - sA)) / outA);
+                                hDst[off + 2] = (Half)((sB * sA + dB * dA * (1.0f - sA)) / outA);
+                                hDst[off + 3] = (Half)outA;
+                            }
+                        }
+                    }
+                }
+            }
+
+            unsafe
+            {
+                fixed (byte* pDst = comp)
+                {
+                    Half* h = (Half*)pDst;
+                    int count = bufferLen / 8;
+                    for (int i = 0; i < count; i++)
+                    {
+                        int off = i * 4;
+                        float r = (float)h[off];
+                        float g = (float)h[off + 1];
+                        float b = (float)h[off + 2];
+                        float a = Mathf.Clamp((float)h[off + 3], 0f, 1f);
+                        Color srgb = new Color(r, g, b, a).LinearToSrgb();
+                        h[off] = (Half)srgb.R;
+                        h[off + 1] = (Half)srgb.G;
+                        h[off + 2] = (Half)srgb.B;
+                        h[off + 3] = (Half)a;
+                    }
+                }
+            }
+
+            var img = Image.CreateFromData(width, height, false, Image.Format.Rgbah, comp);
+            img.Convert(Image.Format.Rgba8);
+            return img;
         }
 
         private ImageTexture BakeCompositeImageTexture(Node atlasMgr)
@@ -4337,10 +4555,26 @@ namespace DeadlockPlayground.Painter
             if (!rid.IsValid || !rd.TextureIsValid(rid)) return null;
 
             byte[] data = rd.TextureGetData(rid, 0);
-            int size = (int)atlasMgr.Get("atlas_size");
-            if (data == null || data.Length == 0 || size <= 0) return null;
 
-            var img = Image.CreateFromData(size, size, false, Image.Format.Rgbah, data);
+            int atlasW = 2048, atlasH = 2048;
+            var amW = atlasMgr.Get("atlas_width");
+            var amH = atlasMgr.Get("atlas_height");
+            if (amW.VariantType == Variant.Type.Int && amW.AsInt32() > 0) atlasW = amW.AsInt32();
+            if (amH.VariantType == Variant.Type.Int && amH.AsInt32() > 0) atlasH = amH.AsInt32();
+            else
+            {
+                int size = (int)atlasMgr.Get("atlas_size");
+                if (size > 0) { atlasW = size; atlasH = size; }
+            }
+
+            if (data == null || data.Length == 0 || atlasW <= 0 || atlasH <= 0) return null;
+            if (data.Length != atlasW * atlasH * 8)
+            {
+                if (data.Length == atlasW * atlasW * 8) atlasH = atlasW;
+                else if (data.Length == atlasH * atlasH * 8) atlasW = atlasH;
+            }
+
+            var img = Image.CreateFromData(atlasW, atlasH, false, Image.Format.Rgbah, data);
             return ImageTexture.CreateFromImage(img);
         }
 

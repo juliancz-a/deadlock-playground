@@ -278,6 +278,7 @@ namespace DeadlockPlayground.Painter
                 }
 
                 result.Hit = true;
+                result.HitMesh = meshInstance;
                 result.HitUV = interpolatedUV;
                 result.WorldPosition = worldHitPos;
                 result.WorldNormal = worldNormal;

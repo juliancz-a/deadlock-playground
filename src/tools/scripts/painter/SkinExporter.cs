@@ -50,6 +50,12 @@ namespace DeadlockPlayground.Painter
         public string CsdkPath { get; set; } = "";
         public string ResourceCompilerPath { get; set; } = "";
         public Image PreBakedAtlas { get; set; } // Pre-extracted on Godot main thread
+        public Dictionary<int, Image> PreBakedAtlasesBySurface { get; set; } = new();
+        public Dictionary<int, Image> PreExtractedBaseImages { get; set; } = new();
+        public Dictionary<int, (Vector2 pos, Vector2 size)> SubmeshAtlasRects { get; set; } = new();
+        public Dictionary<string, Image> PreBakedAtlasesBySubmesh { get; set; } = new();
+        public Dictionary<string, Image> PreExtractedBaseImagesBySubmesh { get; set; } = new();
+        public Dictionary<string, (Vector2 pos, Vector2 size)> SubmeshAtlasRectsBySubmesh { get; set; } = new();
     }
 
     public class SkinExportResult
@@ -98,6 +104,71 @@ namespace DeadlockPlayground.Painter
                 result.Success = false;
                 result.ErrorMessage = "Export configuration is null.";
                 return result;
+            }
+
+            // Pre-extract all textures, materials, and atlas rects on the Godot MAIN THREAD before entering worker thread
+            var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && s.IsDirty).ToList();
+            if (candidateSubmeshes == null || candidateSubmeshes.Count == 0)
+            {
+                candidateSubmeshes = config.TargetSubmeshes ?? new List<SubmeshNodeInfo>();
+            }
+
+            foreach (var submesh in candidateSubmeshes)
+            {
+                if (submesh == null) continue;
+                int sIdx = submesh.SurfaceIndex;
+                string subKey = ResolveSubmeshKey(submesh);
+
+                if (!config.PreBakedAtlasesBySubmesh.ContainsKey(subKey))
+                {
+                    var baked = _layerManager?.BakeCompositeImageForSubmesh(submesh);
+                    if (baked != null && !baked.IsEmpty())
+                    {
+                        config.PreBakedAtlasesBySubmesh[subKey] = baked;
+                        config.PreBakedAtlasesBySurface[sIdx] = baked;
+                    }
+                    else if (config.PreBakedAtlas != null && !config.PreBakedAtlas.IsEmpty())
+                    {
+                        config.PreBakedAtlasesBySubmesh[subKey] = config.PreBakedAtlas;
+                        config.PreBakedAtlasesBySurface[sIdx] = config.PreBakedAtlas;
+                    }
+                }
+
+                if (!config.PreExtractedBaseImagesBySubmesh.ContainsKey(subKey) && submesh.Mesh != null)
+                {
+                    var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
+                           ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
+                           ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
+                           ?? submesh.Mesh.MaterialOverride;
+
+                    if (mat != null)
+                    {
+                        var baseTex = SkinLayerManager.ExtractBaseTexture(mat);
+                        if (baseTex != null)
+                        {
+                            var bImg = baseTex.GetImage();
+                            if (bImg != null && !bImg.IsEmpty())
+                            {
+                                if (bImg.IsCompressed()) bImg.Decompress();
+                                var dup = (Image)bImg.Duplicate();
+                                config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
+                                config.PreExtractedBaseImages[sIdx] = dup;
+                            }
+                        }
+                    }
+                }
+
+                if (!config.SubmeshAtlasRectsBySubmesh.ContainsKey(subKey) && submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
+                {
+                    var posVar = sm.GetShaderParameter("position_in_atlas");
+                    var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                    {
+                        var rect = (posVar.AsVector2(), sizeVar.AsVector2());
+                        config.SubmeshAtlasRectsBySubmesh[subKey] = rect;
+                        config.SubmeshAtlasRects[sIdx] = rect;
+                    }
+                }
             }
 
             return await Task.Run(() =>
@@ -268,7 +339,7 @@ namespace DeadlockPlayground.Painter
 
                         progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {submesh.DisplayName} composite -> {pngFileName}..."));
 
-                        Image submeshImage = ExtractAndBlendSubmeshImage(config.PreBakedAtlas, submesh, config.Resolution);
+                        Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution);
                         if (submeshImage == null)
                         {
                             string err = $"Failed to extract image for submesh '{submesh.DisplayName}'.";
@@ -563,68 +634,139 @@ namespace DeadlockPlayground.Painter
             return $"{heroCodename.ToLowerInvariant()}_{cleanMesh}";
         }
 
-        private static Image ExtractAndBlendSubmeshImage(Image atlasImage, SubmeshNodeInfo submesh, int targetRes)
+        public static string ResolveSubmeshKey(SubmeshNodeInfo sm)
         {
-            if (atlasImage == null) return null;
+            if (sm == null) return string.Empty;
+            if (!string.IsNullOrEmpty(sm.DisplayName)) return sm.DisplayName;
+            if (!string.IsNullOrEmpty(sm.RawName)) return sm.RawName;
+            if (sm.Mesh != null) return $"{sm.Mesh.Name}_{sm.SurfaceIndex}";
+            return sm.SurfaceIndex.ToString();
+        }
+
+        private static Image ExtractAndBlendSubmeshImage(ModExportConfig config, SubmeshNodeInfo submesh, int targetRes)
+        {
+            if (config == null || submesh == null) return null;
+
+            string subKey = ResolveSubmeshKey(submesh);
+            Image atlasImage = null;
+            if (config.PreBakedAtlasesBySubmesh.TryGetValue(subKey, out var subAtlas) && subAtlas != null && !subAtlas.IsEmpty())
+            {
+                atlasImage = subAtlas;
+            }
+            else if (config.PreBakedAtlasesBySurface.TryGetValue(submesh.SurfaceIndex, out var surfaceAtlas) && surfaceAtlas != null && !surfaceAtlas.IsEmpty())
+            {
+                atlasImage = surfaceAtlas;
+            }
+            else if (config.PreBakedAtlas != null && !config.PreBakedAtlas.IsEmpty())
+            {
+                atlasImage = config.PreBakedAtlas;
+            }
+
+            if (atlasImage == null || atlasImage.IsEmpty()) return null;
 
             Image isolatedImage = atlasImage;
 
             // Check if submesh is assigned an atlas rectangle
-            if (submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
+            Vector2 pos = Vector2.Zero;
+            Vector2 size = Vector2.One;
+            if (config.SubmeshAtlasRectsBySubmesh.TryGetValue(subKey, out var subRect))
+            {
+                pos = subRect.pos;
+                size = subRect.size;
+            }
+            else if (config.SubmeshAtlasRects.TryGetValue(submesh.SurfaceIndex, out var atlasRect))
+            {
+                pos = atlasRect.pos;
+                size = atlasRect.size;
+            }
+            else if (submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
             {
                 var posVar = sm.GetShaderParameter("position_in_atlas");
                 var sizeVar = sm.GetShaderParameter("size_in_atlas");
-
                 if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
                 {
-                    Vector2 pos = posVar.AsVector2();
-                    Vector2 size = sizeVar.AsVector2();
-
-                    if (size.X > 0 && size.Y > 0 && (size.X < 0.999f || size.Y < 0.999f))
-                    {
-                        int px = Mathf.Clamp(Mathf.RoundToInt(pos.X * atlasImage.GetWidth()), 0, atlasImage.GetWidth() - 1);
-                        int py = Mathf.Clamp(Mathf.RoundToInt(pos.Y * atlasImage.GetHeight()), 0, atlasImage.GetHeight() - 1);
-                        int pw = Mathf.Clamp(Mathf.RoundToInt(size.X * atlasImage.GetWidth()), 1, atlasImage.GetWidth() - px);
-                        int ph = Mathf.Clamp(Mathf.RoundToInt(size.Y * atlasImage.GetHeight()), 1, atlasImage.GetHeight() - py);
-
-                        isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
-                    }
+                    pos = posVar.AsVector2();
+                    size = sizeVar.AsVector2();
                 }
             }
 
-            // Extract base texture from submesh material to composite under paint strokes
-            Texture2D baseTex = null;
-            if (submesh.Mesh != null)
+            if (size.X > 0 && size.Y > 0 && (size.X < 0.999f || size.Y < 0.999f))
             {
-                var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
-                       ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
-                       ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
-                       ?? submesh.Mesh.MaterialOverride;
+                int px = Mathf.Clamp(Mathf.RoundToInt(pos.X * atlasImage.GetWidth()), 0, atlasImage.GetWidth() - 1);
+                int py = Mathf.Clamp(Mathf.RoundToInt(pos.Y * atlasImage.GetHeight()), 0, atlasImage.GetHeight() - 1);
+                int pw = Mathf.Clamp(Mathf.RoundToInt(size.X * atlasImage.GetWidth()), 1, atlasImage.GetWidth() - px);
+                int ph = Mathf.Clamp(Mathf.RoundToInt(size.Y * atlasImage.GetHeight()), 1, atlasImage.GetHeight() - py);
 
-                if (mat != null)
-                {
-                    baseTex = SkinLayerManager.ExtractBaseTexture(mat);
-                }
+                isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
             }
 
-            int exportWidth = targetRes > 0 ? targetRes : 2048;
-            int exportHeight = targetRes > 0 ? targetRes : 2048;
-
+            // Retrieve pre-extracted base texture image
             Image baseImg = null;
-            if (baseTex != null)
+            if (config.PreExtractedBaseImagesBySubmesh.TryGetValue(subKey, out var subBase) && subBase != null && !subBase.IsEmpty())
             {
-                baseImg = baseTex.GetImage();
-                if (baseImg != null)
+                baseImg = subBase;
+            }
+            else if (config.PreExtractedBaseImages.TryGetValue(submesh.SurfaceIndex, out var preBase) && preBase != null && !preBase.IsEmpty())
+            {
+                baseImg = preBase;
+            }
+
+            int exportWidth = 2048;
+            int exportHeight = 2048;
+
+            if (baseImg != null && !baseImg.IsEmpty())
+            {
+                int baseW = baseImg.GetWidth();
+                int baseH = baseImg.GetHeight();
+                if (targetRes > 0)
                 {
-                    if (baseImg.IsCompressed())
+                    if (baseW >= baseH)
                     {
-                        baseImg.Decompress();
+                        exportWidth = targetRes;
+                        exportHeight = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * baseH / baseW));
                     }
-                    // Retain native full dimensions if base texture is high-res (e.g. 2048x2048)
-                    exportWidth = Mathf.Max(exportWidth, baseImg.GetWidth());
-                    exportHeight = Mathf.Max(exportHeight, baseImg.GetHeight());
+                    else
+                    {
+                        exportHeight = targetRes;
+                        exportWidth = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * baseW / baseH));
+                    }
+                }
+                else
+                {
+                    exportWidth = baseW;
+                    exportHeight = baseH;
                 }
             }
+            else if (isolatedImage != null && !isolatedImage.IsEmpty())
+            {
+                int isoW = isolatedImage.GetWidth();
+                int isoH = isolatedImage.GetHeight();
+                if (targetRes > 0)
+                {
+                    if (isoW >= isoH)
+                    {
+                        exportWidth = targetRes;
+                        exportHeight = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * isoH / isoW));
+                    }
+                    else
+                    {
+                        exportHeight = targetRes;
+                        exportWidth = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * isoW / isoH));
+                    }
+                }
+                else
+                {
+                    exportWidth = isoW;
+                    exportHeight = isoH;
+                }
+            }
+            else
+            {
+                exportWidth = targetRes > 0 ? targetRes : 2048;
+                exportHeight = targetRes > 0 ? targetRes : 2048;
+            }
+
+            if (isolatedImage == null || isolatedImage.IsEmpty()) return null;
 
             // Ensure isolated painted region matches target dimensions without blur
             var finalImage = (Image)isolatedImage.Duplicate();
@@ -639,7 +781,7 @@ namespace DeadlockPlayground.Painter
             finalImage.Convert(Image.Format.Rgba8);
 
             // Composite over base texture if present
-            if (baseImg != null)
+            if (baseImg != null && !baseImg.IsEmpty())
             {
                 var baseUnscaled = (Image)baseImg.Duplicate();
                 baseUnscaled.Convert(Image.Format.Rgba8);
@@ -652,44 +794,47 @@ namespace DeadlockPlayground.Painter
                 byte[] paintData = finalImage.GetData();
                 byte[] baseData = baseUnscaled.GetData();
 
-                int pixelCount = exportWidth * exportHeight;
-                for (int i = 0; i < pixelCount; i++)
+                if (paintData != null && baseData != null && paintData.Length >= exportWidth * exportHeight * 4 && baseData.Length >= exportWidth * exportHeight * 4)
                 {
-                    int idx = i * 4;
-                    float pA = paintData[idx + 3] / 255.0f;
-                    if (pA <= 0.001f)
+                    int pixelCount = exportWidth * exportHeight;
+                    for (int i = 0; i < pixelCount; i++)
                     {
-                        // 1:1 unpainted: exact raw base texels byte-for-byte!
-                        paintData[idx] = baseData[idx];
-                        paintData[idx + 1] = baseData[idx + 1];
-                        paintData[idx + 2] = baseData[idx + 2];
-                        // Preserve Valve's original Alpha channel (cavity AO, tint, fabric spec) byte-for-byte
-                        paintData[idx + 3] = baseData[idx + 3];
-                    }
-                    else if (pA < 0.999f)
-                    {
-                        float bR = baseData[idx];
-                        float bG = baseData[idx + 1];
-                        float bB = baseData[idx + 2];
+                        int idx = i * 4;
+                        float pA = paintData[idx + 3] / 255.0f;
+                        if (pA <= 0.001f)
+                        {
+                            // 1:1 unpainted: exact raw base texels byte-for-byte!
+                            paintData[idx] = baseData[idx];
+                            paintData[idx + 1] = baseData[idx + 1];
+                            paintData[idx + 2] = baseData[idx + 2];
+                            // Preserve Valve's original Alpha channel (cavity AO, tint, fabric spec) byte-for-byte
+                            paintData[idx + 3] = baseData[idx + 3];
+                        }
+                        else if (pA < 0.999f)
+                        {
+                            float bR = baseData[idx];
+                            float bG = baseData[idx + 1];
+                            float bB = baseData[idx + 2];
 
-                        float pR = paintData[idx];
-                        float pG = paintData[idx + 1];
-                        float pB = paintData[idx + 2];
+                            float pR = paintData[idx];
+                            float pG = paintData[idx + 1];
+                            float pB = paintData[idx + 2];
 
-                        paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
-                        paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
-                        paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
-                        // Preserve Valve's original Alpha channel byte-for-byte
-                        paintData[idx + 3] = baseData[idx + 3];
+                            paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
+                            paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
+                            paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
+                            // Preserve Valve's original Alpha channel byte-for-byte
+                            paintData[idx + 3] = baseData[idx + 3];
+                        }
+                        else
+                        {
+                            // Full paint opacity replaces RGB but retains authentic base alpha channel
+                            paintData[idx + 3] = baseData[idx + 3];
+                        }
                     }
-                    else
-                    {
-                        // Full paint opacity replaces RGB but retains authentic base alpha channel
-                        paintData[idx + 3] = baseData[idx + 3];
-                    }
+
+                    finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
-
-                finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
             }
 
             return finalImage;
