@@ -3133,7 +3133,7 @@ namespace DeadlockPlayground.Painter
             float submeshW = size.X * atlasW;
             float submeshH = size.Y * atlasH;
 
-            float diag = Mathf.Sqrt(halfExtX * halfExtX + halfExtY * halfExtY) * 1.5f;
+            float diag = Mathf.Sqrt(halfExtX * halfExtX + halfExtY * halfExtY) * 2.5f;
             int minX = Mathf.Clamp((int)(centerPx.X - diag), 0, atlasW - 1);
             int maxX = Mathf.Clamp((int)(centerPx.X + diag), 0, atlasW - 1);
             int minY = Mathf.Clamp((int)(centerPx.Y - diag), 0, atlasH - 1);
@@ -3162,7 +3162,7 @@ namespace DeadlockPlayground.Painter
                             int rowOffset = y * atlasW * 4;
                             for (int x = minX; x <= maxX; x++)
                             {
-                                if (submeshMask != null && (y * atlasW + x) < submeshMask.Length && !submeshMask[y * atlasW + x]) continue;
+                                // Submesh mask is bypassed when no Magic Wand selection mask is active to prevent clipping on surface relief, folds, and seams
 
                                 float rx, ry;
                                 if (use3DProjection)
@@ -3985,125 +3985,23 @@ namespace DeadlockPlayground.Painter
 
         private byte[] _shapePreviewBuffer;
         private byte[] _fullShapePreviewBuffer;
-        private ulong _lastShapePreviewUpdateMs = 0;
-        private Rect2I? _lastShapeDirtyRect;
 
         public void CancelShapePreview()
         {
-            _lastShapeDirtyRect = null;
-            SyncActiveLayerGpuTexture();
-            _otherLayersDirty = true;
-            RecompositeGpuLayers();
-            if (ActiveLayer != null)
-            {
-                ActiveLayer.IsCpuSynced = true;
-            }
+                if (_shapePreviewBuffer != null)
+                {
+                    _shapePreviewBuffer = null;
+                }
+                if (_fullShapePreviewBuffer != null)
+                {
+                    _fullShapePreviewBuffer = null;
+                }
         }
 
         public void UpdateShapePreview(ShapeTool shapeTool, Color color, bool forceImmediate = false)
         {
-            if (_activeAtlasManager == null || !GodotObject.IsInstanceValid(_activeAtlasManager)) return;
-
-            var rd = RenderingServer.GetRenderingDevice();
-            var layer = ActiveLayer;
-            if (layer == null || !layer.LayerRid.IsValid || rd == null || !rd.TextureIsValid(layer.LayerRid)) return;
-
-            if (shapeTool != null && shapeTool.HasActiveShape && layer.GpuData != null)
-            {
-                if (!forceImmediate)
-                {
-                    ulong now = Time.GetTicksMsec();
-                    if (now - _lastShapePreviewUpdateMs < 16)
-                    {
-                        return; // 60 FPS cap during interactive mouse drag
-                    }
-                    _lastShapePreviewUpdateMs = now;
-                }
-
-                int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
-                int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
-                int len = layer.GpuData.Length;
-                if (_shapePreviewBuffer == null || _shapePreviewBuffer.Length != len)
-                {
-                    _shapePreviewBuffer = new byte[len];
-                    Buffer.BlockCopy(layer.GpuData, 0, _shapePreviewBuffer, 0, len);
-                }
-
-                Rect2I currentBBox = shapeTool.GetBoundingBox(atlasW, atlasH);
-                Rect2I dirtyRect = _lastShapeDirtyRect.HasValue ? _lastShapeDirtyRect.Value.Merge(currentBBox) : currentBBox;
-                _lastShapeDirtyRect = currentBBox;
-
-                int minX = Math.Clamp(dirtyRect.Position.X, 0, atlasW - 1);
-                int minY = Math.Clamp(dirtyRect.Position.Y, 0, atlasH - 1);
-                int maxX = Math.Clamp(dirtyRect.End.X, 0, atlasW);
-                int maxY = Math.Clamp(dirtyRect.End.Y, 0, atlasH);
-                int w = maxX - minX;
-                int h = maxY - minY;
-                int rowBytes = w * 8;
-
-                // Restore only the dirty region rows from the base layer GPU data
-                if (rowBytes > 0)
-                {
-                    for (int y = minY; y < maxY; y++)
-                    {
-                        int offset = (y * atlasW + minX) * 8;
-                        if (offset + rowBytes <= len && offset + rowBytes <= _shapePreviewBuffer.Length)
-                        {
-                            Buffer.BlockCopy(layer.GpuData, offset, _shapePreviewBuffer, offset, rowBytes);
-                        }
-                    }
-                }
-
-                shapeTool.BlendPreview(_shapePreviewBuffer, atlasW, atlasH, color);
-                UploadBufferRectChunked(rd, layer.LayerRid, _shapePreviewBuffer, atlasW, atlasH, dirtyRect);
-
-                // Recomposite into full_composite_rid so 2D canvas displays real-time preview
-                var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
-                if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid)
-                {
-                    if (_layers.Count <= 1)
-                    {
-                        // Direct GPU-to-GPU TextureCopy: 0.01ms and 0 PCIe transfer
-                        rd.TextureCopy(layer.LayerRid, fullRidVal.AsRid(), new Vector3(minX, minY, 0), new Vector3(minX, minY, 0), new Vector3(w, h, 1), 0, 0, 0, 0);
-                    }
-                    else
-                    {
-                        if (_fullShapePreviewBuffer == null || _fullShapePreviewBuffer.Length != len)
-                        {
-                            _fullShapePreviewBuffer = new byte[len];
-                        }
-
-                        // Clear only dirty region in _fullShapePreviewBuffer
-                        if (rowBytes > 0)
-                        {
-                            for (int y = minY; y < maxY; y++)
-                            {
-                                int offset = (y * atlasW + minX) * 8;
-                                if (_baseAtlasBuffer != null && offset + rowBytes <= _baseAtlasBuffer.Length)
-                                {
-                                    Buffer.BlockCopy(_baseAtlasBuffer, offset, _fullShapePreviewBuffer, offset, rowBytes);
-                                }
-                                else if (offset + rowBytes <= _fullShapePreviewBuffer.Length)
-                                {
-                                    Array.Clear(_fullShapePreviewBuffer, offset, rowBytes);
-                                }
-                            }
-                        }
-
-                        for (int i = 0; i < _layers.Count; i++)
-                        {
-                            var l = _layers[i];
-                            if (!l.IsVisible) continue;
-                            byte[] srcData = (i == _activeLayerIndex) ? _shapePreviewBuffer : l.GpuData;
-                            if (srcData != null && srcData.Length == len)
-                            {
-                                BlendLayerBufferRect(_fullShapePreviewBuffer, srcData, l.Opacity, l.BlendMode, _baseAtlasBuffer, atlasW, atlasH, dirtyRect);
-                            }
-                        }
-                        UploadBufferRectChunked(rd, fullRidVal.AsRid(), _fullShapePreviewBuffer, atlasW, atlasH, dirtyRect);
-                    }
-                }
-            }
+          // Zero-Cost: No rasterizamos en CPU ni saturamos PCIe durante el arrastre interactivo.
+          // La previsualización 2D se gestiona vectorialmente en UVCanvas2DUI y la 3D mediante Decal en MeshPainter3D.
         }
 
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]

@@ -76,6 +76,10 @@ namespace DeadlockPlayground.Painter
                 if (MathF.Abs(_strokeWidth - value) > 0.001f)
                 {
                     _strokeWidth = value;
+                    if (_shapeType == CanvasShapeType.Line)
+                    {
+                        _size = new Vector2(_size.X, _strokeWidth);
+                    }
                     ShapeChanged?.Invoke();
                 }
             }

@@ -846,11 +846,23 @@ theme_override_font_sizes/font_size = 11
 text = "0°"
 horizontal_alignment = 2
 
-[node name="BtnBakeDecal" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2071959394]
+[node name="DecalActionsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2071959393]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnBakeDecal" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/DecalActionsRow" unique_id=2071959394]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-text = "Bake Decal to Layer"
+size_flags_horizontal = 3
+text = "Commit (Enter)"
+
+[node name="BtnCancelDecal" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/DecalActionsRow" unique_id=2071959395]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Cancel (Esc)"
 
 [node name="TextOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=993992569]
 unique_name_in_owner = true
@@ -1061,11 +1073,23 @@ tooltip_text = "Flip text vertically"
 toggle_mode = true
 text = "Flip V"
 
-[node name="BtnBakeText" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=528249225]
+[node name="TextActionsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=528249224]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnBakeText" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextActionsRow" unique_id=528249225]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-text = "Bake Text to Layer"
+size_flags_horizontal = 3
+text = "Commit (Enter)"
+
+[node name="BtnCancelText" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextActionsRow" unique_id=528249226]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Cancel (Esc)"
 
 [node name="ShapeOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1409135799]
 unique_name_in_owner = true
@@ -1156,7 +1180,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = 1.0
-max_value = 64.0
+max_value = 256.0
 value = 6.0
 
 [node name="LblStrokeWidth" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/StrokeWidthRow" unique_id=46847893]

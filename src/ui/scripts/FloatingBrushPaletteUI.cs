@@ -47,6 +47,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnFlyoutRect;
     private Button _btnFlyoutLasso;
     private Button _btnFlyoutPoly;
+    private Button _btnClearSelection;
     private Control _selectionOptions;
 
     // Flyout container & title
@@ -125,6 +126,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private HSlider _sliderDecalRot;
     private Label _lblDecalRot;
     private Button _btnBakeDecal;
+    private Button _btnCancelDecal;
     private FileDialog _decalFileDialog;
 
     // Text controls
@@ -144,6 +146,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnFlipH;
     private Button _btnFlipV;
     private Button _btnBakeText;
+    private Button _btnCancelText;
     private FileDialog _textFileDialog;
 
     // State
@@ -423,6 +426,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _sliderDecalRot = ResolveNode<HSlider>("SliderDecalRot", "SliderDecalRot");
         _lblDecalRot = ResolveNode<Label>("LblDecalRot", "LblDecalRot");
         _btnBakeDecal = ResolveNode<Button>("BtnBakeDecal", "BtnBakeDecal");
+        _btnCancelDecal = ResolveNode<Button>("BtnCancelDecal", "BtnCancelDecal");
         _decalFileDialog = ResolveNode<FileDialog>("DecalFileDialog", "DecalFileDialog");
         if (_decalFileDialog != null)
         {
@@ -454,6 +458,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _btnFlipH = ResolveNode<Button>("BtnFlipH", "BtnFlipH");
         _btnFlipV = ResolveNode<Button>("BtnFlipV", "BtnFlipV");
         _btnBakeText = ResolveNode<Button>("BtnBakeText", "BtnBakeText");
+        _btnCancelText = ResolveNode<Button>("BtnCancelText", "BtnCancelText");
         _textFileDialog = ResolveNode<FileDialog>("TextFileDialog", "TextFileDialog");
         if (_textFileDialog != null)
         {
@@ -528,6 +533,9 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         }
 
         BuildSelectionFlyoutControls();
+        if (_sliderStrokeWidth != null) _sliderStrokeWidth.MaxValue = 256.0f;
+        SyncShapeControls();
+        SyncProjectionControls();
     }
 
     private void ConnectEvents()
@@ -857,7 +865,14 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 {
                     EmitSignal(SignalName.DecalBaked);
                 }
+                SyncProjectionControls();
+                QueueCanvasRedraw();
             };
+        }
+
+        if (_btnCancelDecal != null)
+        {
+            _btnCancelDecal.Pressed += CancelProjectionGizmo;
         }
 
         // Text Projector
@@ -1011,7 +1026,14 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 {
                     EmitSignal(SignalName.DecalBaked);
                 }
+                SyncProjectionControls();
+                QueueCanvasRedraw();
             };
+        }
+
+        if (_btnCancelText != null)
+        {
+            _btnCancelText.Pressed += CancelProjectionGizmo;
         }
 
         // Shape Tool events
@@ -1342,10 +1364,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             btnInvert.Pressed += InvertSelection;
         }
 
-        var btnClear = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionActions/BtnClearSelection") ?? ResolveNode<Button>("BtnClearSelection", "BtnClearSelection");
-        if (btnClear != null)
+        _btnClearSelection = _selectionOptions.GetNodeOrNull<Button>("HBoxSelectionActions/BtnClearSelection") ?? ResolveNode<Button>("BtnClearSelection", "BtnClearSelection");
+        if (_btnClearSelection != null)
         {
-            btnClear.Pressed += ClearSelection;
+            _btnClearSelection.Pressed += ClearSelection;
         }
 
         UpdateSelectionFlyoutActiveState();
@@ -1619,6 +1641,18 @@ public void UpdateTooltipsAndKeymaps()
         {
             _chkAntiAliasing.SetPressedNoSignal(wand.AntiAliasing);
         }
+
+        bool hasMask = (wand?.HasSelection == true) || (_painter?.SelectionMask?.HasSelection == true);
+        if (_btnClearMask != null)
+        {
+            _btnClearMask.Disabled = !hasMask;
+            _btnClearMask.Modulate = hasMask ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+        if (_btnClearSelection != null)
+        {
+            _btnClearSelection.Disabled = !hasMask;
+            _btnClearSelection.Modulate = hasMask ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
     }
 
     public void SyncFromPainter()
@@ -1888,6 +1922,8 @@ public void UpdateTooltipsAndKeymaps()
         if (_painter != null && _painter.ShapeTool != null)
         {
             _painter.LayerManager?.UpdateShapePreview(_painter.ShapeTool, _painter.BrushColor);
+            _painter.Update3DShapeDecalAndSync();
+            _painter.QueueSelectionOverlayRedraw();
         }
         QueueCanvasRedraw();
     }
@@ -1903,11 +1939,22 @@ public void UpdateTooltipsAndKeymaps()
 
     public void CancelCurrentShape()
     {
+        _painter?.CancelActiveShapePreview();
         if (_painter?.ShapeTool != null)
         {
             _painter.ShapeTool.CancelShape();
             _painter.LayerManager?.CancelShapePreview();
             _painter.QueueSelectionOverlayRedraw();
+            QueueCanvasRedraw();
+        }
+    }
+
+    public void CancelProjectionGizmo()
+    {
+        if (_painter != null)
+        {
+            _painter.CancelActiveProjectionGizmo();
+            SyncProjectionControls();
             QueueCanvasRedraw();
         }
     }
@@ -1932,6 +1979,18 @@ public void UpdateTooltipsAndKeymaps()
 
     public void SyncShapeControls()
     {
+        bool hasActiveShape = _painter?.ShapeTool != null && _painter.ShapeTool.HasActiveShape;
+        if (_btnCancelShape != null)
+        {
+            _btnCancelShape.Disabled = !hasActiveShape;
+            _btnCancelShape.Modulate = hasActiveShape ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+        if (_btnCommitShape != null)
+        {
+            _btnCommitShape.Disabled = !hasActiveShape;
+            _btnCommitShape.Modulate = hasActiveShape ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+
         if (_painter?.ShapeTool == null) return;
         var st = _painter.ShapeTool;
 
@@ -1968,7 +2027,33 @@ public void UpdateTooltipsAndKeymaps()
 
     public void SyncProjectionControls()
     {
-        if (_painter?.ProjectionGizmo == null || !_painter.ProjectionGizmo.IsActive) return;
+        bool hasProj = _painter?.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive;
+        bool hasDecal = hasProj && !_painter.ProjectionGizmo.IsText;
+        bool hasText = hasProj && _painter.ProjectionGizmo.IsText;
+
+        if (_btnCancelDecal != null)
+        {
+            _btnCancelDecal.Disabled = !hasDecal;
+            _btnCancelDecal.Modulate = hasDecal ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+        if (_btnBakeDecal != null)
+        {
+            _btnBakeDecal.Disabled = !hasDecal;
+            _btnBakeDecal.Modulate = hasDecal ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+
+        if (_btnCancelText != null)
+        {
+            _btnCancelText.Disabled = !hasText;
+            _btnCancelText.Modulate = hasText ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+        if (_btnBakeText != null)
+        {
+            _btnBakeText.Disabled = !hasText;
+            _btnBakeText.Modulate = hasText ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+
+        if (!hasProj) return;
 
         int atlasSize = _painter.LayerManager?.CanvasSize.X ?? 2048;
         float normScale = _painter.ProjectionGizmo.NormalizedScale(atlasSize);

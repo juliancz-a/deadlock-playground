@@ -506,6 +506,11 @@ namespace DeadlockPlayground.UI
         public void Setup(SkinLayerManager layerManager, MeshPainter3D painter, HeroMeshHierarchy hierarchy, FloatingBrushPaletteUI palette)
         {
             // Unsubscribe previous
+            if (_painter != null && _painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged -= QueueCanvasRedraw;
+            }
+
             if (_layerManager != null)
             {
                 _layerManager.StackChanged -= OnStackChanged;
@@ -538,7 +543,12 @@ namespace DeadlockPlayground.UI
             {
                 _painter.MagicWandTool.MaskUpdated += OnMagicWandMaskUpdated;
             }
-
+            
+            if (_painter != null && _painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged += QueueCanvasRedraw;
+            }
+            
             if (_painter != null)
             {
                 _painter.StrokeFinished -= OnPainterStrokeFinished;
@@ -1224,8 +1234,9 @@ namespace DeadlockPlayground.UI
                     }
                     if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
                     {
-                        _painter.ShapeTool.CancelShape();
+                       _painter.ShapeTool.CancelShape();
                         _painter.LayerManager?.CancelShapePreview();
+                        if (_painter.FindChild("PainterLiveShapeDecalPreview", true, false) is Decal d) d.Visible = false;
                         _wireframeOverlay?.QueueRedraw();
                         canvas.QueueRedraw();
                         canvas.AcceptEvent();
@@ -1278,6 +1289,7 @@ namespace DeadlockPlayground.UI
 
                             // Start defining new shape
                             _painter.ShapeTool.BeginNewShape(atlasPx);
+                            _painter.IsShapeOriginatedIn3D = false;
                             _brushPalette?.SyncShapeControls();
                             _wireframeOverlay?.QueueRedraw();
                             canvas.AcceptEvent();
@@ -1291,6 +1303,7 @@ namespace DeadlockPlayground.UI
                                 var handle = _painter.ProjectionGizmo.HitTest(atlasPx, _zoom);
                                 if (handle != ProjectionGizmoHandle.None)
                                 {
+                                    _painter.ProjectionGizmo.Is3DProjection = false;
                                     _painter.ProjectionGizmo.StartHandleDrag(handle, atlasPx);
                                     canvas.AcceptEvent();
                                     return;
@@ -1354,8 +1367,8 @@ namespace DeadlockPlayground.UI
                         {
                             if (_painter.ShapeTool.IsDragging)
                             {
-                                _painter.ShapeTool.EndHandleDrag();
-                                _painter.LayerManager?.UpdateShapePreview(_painter.ShapeTool, _painter.BrushColor, forceImmediate: true);
+                               _painter.ShapeTool.EndHandleDrag();
+                                _painter.SyncShapeFrom2DCanvas(); // Sincroniza al soltar
                                 _brushPalette?.SyncShapeControls();
                                 _wireframeOverlay?.QueueRedraw();
                                 canvas.AcceptEvent();
@@ -1407,11 +1420,12 @@ namespace DeadlockPlayground.UI
                 {
                     Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
                     _painter.ShapeTool.UpdateDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
-                    _painter.LayerManager?.UpdateShapePreview(_painter.ShapeTool, _painter.BrushColor);
+
+                    // Sincronizar el Decal 3D con la posición del canvas 2D
+                    _painter.SyncShapeFrom2DCanvas();
 
                     _brushPalette?.SyncShapeControls();
                     _wireframeOverlay?.QueueRedraw();
-                    canvas.QueueRedraw();
                     canvas.AcceptEvent();
                     return;
                 }
