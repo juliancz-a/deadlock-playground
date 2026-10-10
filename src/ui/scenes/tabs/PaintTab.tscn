@@ -66,7 +66,7 @@ theme_override_constants/separation = 6
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 11
-text = "Save Project (.dptex)..."
+text = "Save Project (.dpp)..."
 
 [node name="BtnLoadProject" type="Button" parent="HeaderCard/VBox/HBoxProject" unique_id=1010101092]
 layout_mode = 2

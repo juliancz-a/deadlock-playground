@@ -325,10 +325,10 @@ public partial class PaintTabUI : VBoxContainer
         {
             _saveProjectDialog = new FileDialog
             {
-                Title = "Save Deadlock Playground Project (.dptex)",
+                Title = "Save Deadlock Playground Project (.dpp)",
                 FileMode = FileDialog.FileModeEnum.SaveFile,
                 Access = FileDialog.AccessEnum.Filesystem,
-                Filters = new string[] { "*.dptex ; Deadlock Playground Project" },
+                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)", "*.dptex ; Legacy Project (*.dptex)" },
                 UseNativeDialog = false,
                 Transient = true,
                 Exclusive = true
@@ -336,9 +336,9 @@ public partial class PaintTabUI : VBoxContainer
             _saveProjectDialog.FileSelected += (path) =>
             {
                 if (string.IsNullOrWhiteSpace(path)) return;
-                if (!path.EndsWith(".dptex", StringComparison.OrdinalIgnoreCase))
+                if (!path.EndsWith(".dpp", StringComparison.OrdinalIgnoreCase) && !path.EndsWith(".dptex", StringComparison.OrdinalIgnoreCase))
                 {
-                    path += ".dptex";
+                    path += ".dpp";
                 }
                 string heroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "") : "hero";
                 string meshName = _meshHierarchy?.ActiveTarget?.RawName ?? "body";
@@ -350,6 +350,7 @@ public partial class PaintTabUI : VBoxContainer
                 {
                     if (_lblExportStatus != null) _lblExportStatus.Text = $"Saved project: {System.IO.Path.GetFileName(path)}";
                     GD.Print($"[PaintTabUI] Saved project: {path}");
+                    _studioUI?.ShowToast($"Project Exported: {System.IO.Path.GetFileName(path)}", path);
                 }
                 else
                 {
@@ -361,7 +362,7 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         string defaultHeroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant() : "project";
-        _saveProjectDialog.CurrentFile = $"{defaultHeroName}_skin.dptex";
+        _saveProjectDialog.CurrentFile = $"{defaultHeroName}_skin.dpp";
         _saveProjectDialog.PopupCentered(new Vector2I(750, 500));
     }
 
@@ -371,10 +372,10 @@ public partial class PaintTabUI : VBoxContainer
         {
             _loadProjectDialog = new FileDialog
             {
-                Title = "Load Deadlock Playground Project (.dptex)",
+                Title = "Load Deadlock Playground Project (.dpp)",
                 FileMode = FileDialog.FileModeEnum.OpenFile,
                 Access = FileDialog.AccessEnum.Filesystem,
-                Filters = new string[] { "*.dptex ; Deadlock Playground Project" },
+                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)", "*.dptex ; Legacy Project (*.dptex)" },
                 UseNativeDialog = false,
                 Transient = true,
                 Exclusive = true
@@ -457,55 +458,80 @@ public partial class PaintTabUI : VBoxContainer
             || IsRenameDialogOpen;
     }
 
-    private void ExecuteLoadProject(string path)
+    private async void ExecuteLoadProject(string path)
     {
         var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
                         ?? GetTree().Root.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
 
-        var res = ProjectFileManager.LoadProject(path, _layerManager, quickPalette);
-        if (res.Success)
+        string fileName = System.IO.Path.GetFileName(path);
+        _studioUI?.ShowLoading(true, $"Loading project {fileName}...");
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+        try
         {
-            // Sync resolution label
-            UpdateCanvasResolutionLabel();
-
-            // Sync layers list UI
-            RefreshLayersListUI();
-
-            // Reselect active layer
-            if (_layerManager.ActiveLayer != null)
+            var res = ProjectFileManager.LoadProject(path, _layerManager, _meshHierarchy, quickPalette);
+            if (res.Success)
             {
-                OnLayerSelected(_layerManager.ActiveLayerIndex);
-            }
+                // Sync resolution label
+                UpdateCanvasResolutionLabel();
 
-            // Ensure submesh target
-            if (_meshHierarchy?.ActiveTarget != null)
+                // Select target submesh from manifest
+                if (res.Manifest != null && !string.IsNullOrEmpty(res.Manifest.TargetMeshSlot) && _meshHierarchy?.Submeshes != null)
+                {
+                    for (int i = 0; i < _meshHierarchy.Submeshes.Count; i++)
+                    {
+                        var sm = _meshHierarchy.Submeshes[i];
+                        if (string.Equals(sm.RawName, res.Manifest.TargetMeshSlot, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(sm.DisplayName, res.Manifest.TargetMeshSlot, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(sm.Mesh?.Name.ToString(), res.Manifest.TargetMeshSlot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _meshHierarchy.SelectTarget(sm, sm.SurfaceIndex);
+                            break;
+                        }
+                    }
+                }
+                else if (_meshHierarchy?.ActiveTarget != null)
+                {
+                    _meshHierarchy.SelectTarget(_meshHierarchy.ActiveTarget, _meshHierarchy.ActiveTarget.SurfaceIndex);
+                }
+
+                // Sync layers list UI
+                RefreshLayersListUI();
+
+                // Reselect active layer
+                if (_layerManager.ActiveLayer != null)
+                {
+                    OnLayerSelected(_layerManager.ActiveLayerIndex);
+                }
+
+                _painter?.SyncSelectionMaskState();
+                _painter?.SyncCameraBrushProperties(true);
+                _layerManager?.ApplyOverlayParametersToMeshes();
+
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                uvCanvas?.UpdateResolutionLabel();
+                uvCanvas?.RebuildWireframe();
+                uvCanvas?.QueueRedraw();
+
+                if (_brushPalette != null)
+                {
+                    _brushPalette.SyncFromPainter();
+                    _brushPalette.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+                }
+
+                if (_lblExportStatus != null) _lblExportStatus.Text = $"Loaded project: {fileName}";
+                GD.Print($"[PaintTabUI] Successfully loaded project from {path}");
+            }
+            else
             {
-                _meshHierarchy.SelectTarget(_meshHierarchy.ActiveTarget, _meshHierarchy.ActiveTarget.SurfaceIndex);
+                if (_lblExportStatus != null) _lblExportStatus.Text = $"Error: {res.ErrorMessage}";
+                GD.PrintErr($"[PaintTabUI] Error loading project: {res.ErrorMessage}");
             }
-
-            _painter?.SyncSelectionMaskState();
-            _painter?.SyncCameraBrushProperties(true);
-            _layerManager?.ApplyOverlayParametersToMeshes();
-
-            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
-                        ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
-            uvCanvas?.UpdateResolutionLabel();
-            uvCanvas?.RebuildWireframe();
-            uvCanvas?.QueueRedraw();
-
-            if (_brushPalette != null)
-            {
-                _brushPalette.SyncFromPainter();
-                _brushPalette.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
-            }
-
-            if (_lblExportStatus != null) _lblExportStatus.Text = $"Loaded project: {System.IO.Path.GetFileName(path)}";
-            GD.Print($"[PaintTabUI] Successfully loaded project from {path}");
         }
-        else
+        finally
         {
-            if (_lblExportStatus != null) _lblExportStatus.Text = $"Error: {res.ErrorMessage}";
-            GD.PrintErr($"[PaintTabUI] Error loading project: {res.ErrorMessage}");
+            _studioUI?.ShowLoading(false);
         }
     }
 

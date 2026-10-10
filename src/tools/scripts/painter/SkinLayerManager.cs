@@ -2318,7 +2318,7 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        private void SaveActiveContext()
+        public void SaveActiveContext()
         {
             if (string.IsNullOrEmpty(_activeMaterialKey)) return;
 
@@ -2365,6 +2365,184 @@ namespace DeadlockPlayground.Painter
             }
             ctx.RedoStack.Clear();
             ctx.BaseAtlasBuffer = _baseAtlasBuffer;
+        }
+
+        public struct MaterialContextData
+        {
+            public string MaterialKey;
+            public string SlotName;
+            public Vector2I CanvasSize;
+            public int ActiveLayerIndex;
+            public List<SkinLayer> Layers;
+            public bool IsActive;
+        }
+
+        public List<MaterialContextData> GetAllMaterialContextsForExport(string activeSlotName = "body")
+        {
+            SaveActiveContext();
+
+            var result = new List<MaterialContextData>();
+            var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kvp in _materialContexts)
+            {
+                var ctx = kvp.Value;
+                if (ctx == null || string.IsNullOrEmpty(ctx.MaterialKey)) continue;
+
+                seenKeys.Add(ctx.MaterialKey);
+                bool isActive = string.Equals(ctx.MaterialKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase);
+
+                string slot = GetSlotNameForMaterialKey(ctx.MaterialKey) ?? (isActive ? activeSlotName : "submesh");
+
+                result.Add(new MaterialContextData
+                {
+                    MaterialKey = ctx.MaterialKey,
+                    SlotName = slot,
+                    CanvasSize = ctx.CanvasSize.X > 0 ? ctx.CanvasSize : CanvasSize,
+                    ActiveLayerIndex = ctx.ActiveLayerIndex,
+                    Layers = isActive ? _layers : ctx.Layers,
+                    IsActive = isActive
+                });
+            }
+
+            if (!seenKeys.Contains(_activeMaterialKey ?? "") && _layers.Count > 0)
+            {
+                result.Add(new MaterialContextData
+                {
+                    MaterialKey = _activeMaterialKey ?? "body",
+                    SlotName = activeSlotName,
+                    CanvasSize = CanvasSize,
+                    ActiveLayerIndex = _activeLayerIndex,
+                    Layers = _layers,
+                    IsActive = true
+                });
+            }
+
+            return result;
+        }
+
+        public string GetSlotNameForMaterialKey(string materialKey)
+        {
+            if (string.IsNullOrEmpty(materialKey)) return null;
+            foreach (var kvp in _meshToMaterialKey)
+            {
+                if (string.Equals(kvp.Value, materialKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (kvp.Key != null && GodotObject.IsInstanceValid(kvp.Key))
+                    {
+                        return kvp.Key.Name.ToString();
+                    }
+                }
+            }
+            return null;
+        }
+
+        public void RestoreMaterialContext(string materialKey, Vector2I canvasSize, List<SkinLayer> layers, int activeLayerIndex, bool isActiveTarget)
+        {
+            if (string.IsNullOrEmpty(materialKey)) materialKey = "body";
+            int w = canvasSize.X > 0 ? canvasSize.X : 2048;
+            int h = canvasSize.Y > 0 ? canvasSize.Y : 2048;
+            int bufferLen = w * h * 8;
+            var rd = RenderingServer.GetRenderingDevice();
+
+            foreach (var l in layers)
+            {
+                if (l.GpuData == null || l.GpuData.Length != bufferLen)
+                {
+                    l.GpuData = new byte[bufferLen];
+                }
+                l.IsCpuSynced = true;
+                if (rd != null)
+                {
+                    if (!l.LayerRid.IsValid || !rd.TextureIsValid(l.LayerRid))
+                    {
+                        l.LayerRid = CreateLayerGpuTexture(w, h, l.GpuData);
+                    }
+                    else
+                    {
+                        rd.TextureUpdate(l.LayerRid, 0, l.GpuData);
+                    }
+                }
+            }
+
+            if (!_materialContexts.TryGetValue(materialKey, out var ctx) || ctx == null)
+            {
+                ctx = new MaterialPaintingContext { MaterialKey = materialKey };
+                _materialContexts[materialKey] = ctx;
+            }
+
+            ctx.MaterialKey = materialKey;
+            ctx.CanvasSize = new Vector2I(w, h);
+            ctx.Layers.Clear();
+            ctx.Layers.AddRange(layers);
+            ctx.ActiveLayerIndex = Math.Clamp(activeLayerIndex, 0, Math.Max(0, layers.Count - 1));
+            ctx.UndoStack.Clear();
+            ctx.RedoStack.Clear();
+
+            if (isActiveTarget)
+            {
+                _currentContext = ctx;
+                CanvasSize = ctx.CanvasSize;
+                _layers.Clear();
+                _layers.AddRange(ctx.Layers);
+                _activeLayerIndex = ctx.ActiveLayerIndex;
+                _activeMaterialKey = materialKey;
+                _otherLayersDirty = true;
+                _hasPopulatedBaseAtlasBuffer = false;
+                RebuildBaseAtlasBuffer();
+                UpdateActiveLayerBinding();
+                RecompositeGpuLayers();
+            }
+            else
+            {
+                RecompositeInactiveContext(ctx);
+            }
+        }
+
+        private void RecompositeInactiveContext(MaterialPaintingContext ctx)
+        {
+            if (ctx == null || ctx.Layers == null || ctx.Layers.Count == 0) return;
+            var rd = RenderingServer.GetRenderingDevice();
+            if (rd == null) return;
+
+            int cW = ctx.CanvasSize.X > 0 ? ctx.CanvasSize.X : 2048;
+            int cH = ctx.CanvasSize.Y > 0 ? ctx.CanvasSize.Y : 2048;
+            int bLen = cW * cH * 8;
+            byte[] inactiveComp = new byte[bLen];
+            foreach (var remLayer in ctx.Layers)
+            {
+                if (remLayer.IsVisible && remLayer.GpuData != null && remLayer.GpuData.Length == bLen)
+                {
+                    BlendLayerBuffer(inactiveComp, remLayer.GpuData, remLayer.Opacity, remLayer.BlendMode, ctx.BaseAtlasBuffer);
+                }
+            }
+
+            Node atlasMgr = null;
+            if (_perMaterialAtlasManagers.TryGetValue(ctx.MaterialKey, out atlasMgr) && atlasMgr != null && GodotObject.IsInstanceValid(atlasMgr))
+            {
+                var fRid = atlasMgr.Get("full_composite_rid");
+                if (fRid.VariantType == Variant.Type.Rid && fRid.AsRid().IsValid && rd.TextureIsValid(fRid.AsRid()))
+                {
+                    rd.TextureUpdate(fRid.AsRid(), 0, inactiveComp);
+                }
+                var fullRes = atlasMgr.Get("full_composite_resource");
+                if (fullRes.VariantType == Variant.Type.Object && fullRes.AsGodotObject() is Texture2D fTex)
+                {
+                    ctx.BakedCompositeTexture = fTex;
+                }
+            }
+        }
+
+        public void EnsureAllSubmeshAtlases(HeroMeshHierarchy meshHierarchy)
+        {
+            if (meshHierarchy == null || meshHierarchy.Submeshes == null) return;
+            foreach (var sub in meshHierarchy.Submeshes)
+            {
+                if (sub?.Mesh != null && GodotObject.IsInstanceValid(sub.Mesh))
+                {
+                    EnsureSubmeshAtlas(sub.Mesh);
+                }
+            }
         }
 
         private void SwitchToContext(string targetMaterialKey, MeshInstance3D targetMesh)
