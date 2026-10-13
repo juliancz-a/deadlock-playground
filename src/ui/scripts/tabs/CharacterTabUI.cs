@@ -7,6 +7,8 @@ using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Addons;
 using DeadlockPlayground.UI;
 
+using DeadlockPlayground.Particles;
+
 public partial class CharacterTabUI : VBoxContainer
 {
     [Signal] public delegate void CharacterRequestedEventHandler(string internalId);
@@ -19,6 +21,7 @@ public partial class CharacterTabUI : VBoxContainer
     [Export] private Container _submeshContainer;
     [Export] private Button _btnShowAll;
     [Export] private Button _btnHideAccessories;
+    [Export] private Button _btnBrowseParticles;
     [Export] private VpkLoaderTest _vpkLoader;
 
     public class SubmeshItem
@@ -40,6 +43,24 @@ public partial class CharacterTabUI : VBoxContainer
         _updateHeroOptionButton ??= GetNodeOrNull<OptionButton>("HeroSelectGroup/UpdateHeroOptionButton")
                                   ?? GetNodeOrNull<OptionButton>("HeroSelectGroup/HeroOptionButton2");
         _heroOptionButton ??= GetNodeOrNull<OptionButton>("HeroSelectGroup/HeroOptionButton");
+
+        _btnBrowseParticles ??= GetNodeOrNull<Button>("HeroSelectGroup/BtnBrowseParticles")
+                             ?? GetNodeOrNull<Button>("SubmeshHeader/HBoxButtons/BtnBrowseParticles")
+                             ?? FindChild("BtnBrowseParticles", true, false) as Button;
+
+        if (_btnBrowseParticles == null)
+        {
+            var heroGroup = GetNodeOrNull<VBoxContainer>("HeroSelectGroup") ?? this;
+            _btnBrowseParticles = new Button
+            {
+                Name = "BtnBrowseParticles",
+                Text = "Browse Particles",
+                Icon = GD.Load<Texture2D>("res://assets/icons/sparkles.svg"),
+                CustomMinimumSize = new Vector2(0, 32),
+                SizeFlagsHorizontal = SizeFlags.Fill
+            };
+            heroGroup.AddChild(_btnBrowseParticles);
+        }
 
         ConnectEvents();
 
@@ -76,6 +97,7 @@ public partial class CharacterTabUI : VBoxContainer
     {
         if (_btnShowAll != null) _btnShowAll.Disabled = !enabled;
         if (_btnHideAccessories != null) _btnHideAccessories.Disabled = !enabled;
+        if (_btnBrowseParticles != null) _btnBrowseParticles.Disabled = !enabled;
         if (_submeshContainer != null)
         {
             _submeshContainer.Modulate = enabled ? Colors.White : new Color(1, 1, 1, 0.4f);
@@ -152,6 +174,104 @@ public partial class CharacterTabUI : VBoxContainer
         if (_btnHideAccessories != null)
         {
             _btnHideAccessories.Pressed += HideAccessories;
+        }
+
+        if (_btnBrowseParticles != null)
+        {
+            _btnBrowseParticles.Pressed += OnBrowseParticlesPressed;
+        }
+    }
+
+    private async void OnBrowseParticlesPressed()
+    {
+        string heroName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName 
+                       ?? _vpkLoader?.HeroName 
+                       ?? "Dynamo";
+
+        var service = HeroParticleService.Instance;
+        await service.EnsureLoadedAsync();
+        var groups = service.GetHeroAbilities(heroName);
+
+        var modalsLayer = GetTree()?.Root?.FindChild("ModalsLayer", true, false) as Control;
+        var modal = modalsLayer?.FindChild("ParticlePickerModal", true, false) as ParticlePickerModalUI;
+        if (modal == null && modalsLayer != null)
+        {
+            modal = new ParticlePickerModalUI { Name = "ParticlePickerModal" };
+            modalsLayer.AddChild(modal);
+            modal.ParticleSelected += OnParticleSelectedFromModal;
+            modal.ModalClosed += () =>
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                studioUI?.UpdateModalsState();
+            };
+        }
+
+        if (modal != null)
+        {
+            modal.OpenForHero(heroName, groups);
+            var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                        ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+            studioUI?.UpdateModalsState();
+        }
+    }
+
+    private void OnParticleSelectedFromModal(string vpcfPath, string variantName, string abilityKey)
+    {
+        if (_vpkLoader == null) return;
+
+        // 1. Resolve or create ParticleStage3D in world viewport
+        var worldViewport = GetTree()?.Root?.FindChild("WorldViewport", true, false) as SubViewport;
+        var stage = worldViewport?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
+        if (stage == null && worldViewport != null)
+        {
+            stage = new ParticleStage3D();
+            worldViewport.AddChild(stage);
+        }
+
+        // 2. Connect to Player Tab timeline & Paint Tab before loading
+        var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI;
+        if (playerTab != null && stage != null)
+        {
+            playerTab.SetParticleStage(stage);
+        }
+
+        var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
+        if (paintTab != null && stage != null)
+        {
+            paintTab.SetParticleStage(stage);
+        }
+
+        if (stage != null)
+        {
+            var fileLoader = _vpkLoader.GetOrCreateFileLoader();
+            stage.LoadParticle(vpcfPath, variantName, abilityKey, _vpkLoader.CurrentHeroNode, fileLoader);
+        }
+
+        // 3. Resolve or create ActiveParticleBadgeUI inside 3D ViewportArea
+        var viewportArea = GetTree()?.Root?.FindChild("ViewportArea", true, false) as Control;
+        var badge = viewportArea?.FindChild("ActiveParticleBadge", true, false) as ActiveParticleBadgeUI;
+        if (badge == null && viewportArea != null)
+        {
+            badge = new ActiveParticleBadgeUI { Name = "ActiveParticleBadge" };
+            viewportArea.AddChild(badge);
+            badge.UnloadRequested += () => stage?.UnloadActiveParticle();
+        }
+        if (badge != null)
+        {
+            badge.SetAnchorsPreset(Control.LayoutPreset.TopRight);
+            badge.AnchorLeft = 1.0f;
+            badge.AnchorRight = 1.0f;
+            badge.AnchorTop = 0.0f;
+            badge.AnchorBottom = 0.0f;
+            badge.GrowHorizontal = Control.GrowDirection.Begin;
+            badge.GrowVertical = Control.GrowDirection.End;
+            badge.OffsetLeft = -340;
+            badge.OffsetTop = 16;
+            badge.OffsetRight = -20;
+            badge.OffsetBottom = 52;
+            badge.ZIndex = 50;
+            badge.ShowBadge(_vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? "Hero", abilityKey, variantName);
         }
     }
 

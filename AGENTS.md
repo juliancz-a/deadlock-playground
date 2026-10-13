@@ -44,6 +44,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
 | **Hero Materials & Shaders Guide** | [docs/hero_materials_and_shaders_guide.md](file:///d:/GameDev/deadlock-playground/docs/hero_materials_and_shaders_guide.md) | Per-hero material configurations (Infernus, Lady Geist, Ivy, Lash, Mirage, Vindicta, Viscous, Wraith), outline masks, CSB color matrices, and past material collision bug fixes. |
 | **Mod Export Pipeline** | [docs/mod_export_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/mod_export_pipeline.md) | In-place VTEX interception architecture, headless `resourcecompiler.exe` invocation, automated VPK packaging, and collision-free slot allocation (`VpkIndexResolver`). |
 | **Valve / VRF Renderer Reference** | [docs/vrf_deadlock_renderer_reference.md](file:///d:/GameDev/deadlock-playground/docs/vrf_deadlock_renderer_reference.md) | Valve's Deadlock NPR toon lighting math (`citadel.slang`), `NprGain`, `NprToonDiffuse`, `NprSteppedSpecular`, and VRF shader decoding rules. |
+| **Hero Particle Editor System** | [docs/hero_particle_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_particle_editor_system.md) | VData indexing, particle picker modal, 3D stage lifecycle, Pose Tab simulation scrubbing, and 2D particle texture repainting. |
 
 ---
 

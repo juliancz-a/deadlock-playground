@@ -55,6 +55,34 @@ public partial class VpkLoaderTest : Node3D
     private ValveResourceFormat.Resource _currentVrfResource;
     private Model _currentVrfModel;
     private IFileLoader _currentFileLoader;
+    public IFileLoader CurrentFileLoader => _currentFileLoader;
+
+    public IFileLoader GetOrCreateFileLoader()
+    {
+        if (_currentFileLoader != null) return _currentFileLoader;
+
+        if (File.Exists(VpkPath))
+        {
+            var basePkg = new Package();
+            basePkg.Read(VpkPath);
+            IFileLoader baseLoader = new GameFileLoader(basePkg, "");
+
+            if (!string.IsNullOrEmpty(AddonVpkPath) && File.Exists(AddonVpkPath))
+            {
+                var addonPkg = new Package();
+                addonPkg.Read(AddonVpkPath);
+                IFileLoader addonLoader = new GameFileLoader(addonPkg, "");
+                _currentFileLoader = new DualLayerGameFileLoader(addonLoader, baseLoader);
+            }
+            else
+            {
+                _currentFileLoader = baseLoader;
+            }
+        }
+
+        return _currentFileLoader;
+    }
+
     public List<DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo> CurrentHeroAnimations { get; private set; } = new();
 
     public Godot.Animation DecodeAnimation(DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info, Skeleton3D skeleton, AnimationPlayer animPlayer)
@@ -482,6 +510,7 @@ public partial class VpkLoaderTest : Node3D
             {
                 DeadlockAnimLoader.ClearAnimationLibrary(animPlayer);
             }
+            DeadlockPlayground.Particles.ModelAttachmentRegistry.ClearHeroAttachments(_currentHeroNode);
             DeadlockAnimLoader.ClearHeroPoses(_currentHeroNode);
             DisposeNodeRecursively(_currentHeroNode);
             _currentHeroNode.GetParent()?.RemoveChild(_currentHeroNode);
@@ -494,6 +523,12 @@ public partial class VpkLoaderTest : Node3D
         _currentVrfResource = null;
         _currentVrfModel = null;
         _currentFileLoader = null;
+
+        // Unload active particle effect and badge
+        var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+        stage?.UnloadActiveParticle();
+        var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+        badge?.HideBadge();
 
         // Clean texture cache so reloading a hero or switching heroes never accesses disposed texture objects
         Source2MaterialHelper.cleanCache();
@@ -584,6 +619,9 @@ public partial class VpkLoaderTest : Node3D
 			modelScene.Name = $"Hero_{hero}";
 
 			_currentHeroNode = modelScene;
+
+			// Register authoritative Model Attachments for data-driven particle sockets
+			DeadlockPlayground.Particles.ModelAttachmentRegistry.RegisterAttachments(modelScene, vrfModel);
 
 			AddChild(modelScene);
 			GD.Print($"¡Héroe '{hero}' instanciado en el Viewport con éxito!");

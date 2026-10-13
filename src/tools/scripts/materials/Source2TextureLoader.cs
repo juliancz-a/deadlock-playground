@@ -7,6 +7,7 @@ using SteamDatabase.ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using ValveResourceFormat.Serialization.KeyValues;
+using ValveResourceFormat.IO;
 using SkiaSharp;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 
@@ -197,7 +198,53 @@ public static class Source2TextureLoader
             return null;
         }
 
-        var texture = (ValveResourceFormat.ResourceTypes.Texture)resource.DataBlock;
+        return DecodeTextureToGodot((ValveResourceFormat.ResourceTypes.Texture)resource.DataBlock, vtexInternalPath, maxDimension, forceOpaque);
+    }
+
+    /// <summary>
+    /// Extracts a .vtex_c file from an IFileLoader into a Godot ImageTexture.
+    /// </summary>
+    public static ImageTexture ExtractVtexToGodot(IFileLoader fileLoader, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = false)
+    {
+        if (fileLoader == null || string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
+
+        if (vtexInternalPath.StartsWith("resource:", StringComparison.OrdinalIgnoreCase))
+        {
+            vtexInternalPath = vtexInternalPath.Substring(9);
+        }
+        vtexInternalPath = vtexInternalPath.Trim('"', '\'', ' ');
+
+        string searchRoute = vtexInternalPath.Replace('\\', '/');
+        if (!searchRoute.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+        {
+            searchRoute += "_c";
+        }
+
+        ValveResourceFormat.Resource resource = null;
+        try
+        {
+            resource = fileLoader.LoadFile(searchRoute) ?? fileLoader.LoadFileCompiled(searchRoute);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[TextureLoader] Error loading {searchRoute} via fileLoader: {ex.Message}");
+        }
+
+        if (resource == null) return null;
+        using (resource)
+        {
+            if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture texture)
+            {
+                return null;
+            }
+
+            return DecodeTextureToGodot(texture, vtexInternalPath, maxDimension, forceOpaque);
+        }
+    }
+
+    public static ImageTexture DecodeTextureToGodot(ValveResourceFormat.ResourceTypes.Texture texture, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = false)
+    {
+        if (texture == null) return null;
 
         uint maxMip = texture.NumMipLevels > 0 ? (uint)(texture.NumMipLevels - 1) : 0;
         uint mipLevel = 0;
@@ -505,5 +552,86 @@ public static class Source2TextureLoader
         }
 
         return entry;
+    }
+
+    /// <summary>
+    /// Extracts all sprite sheet sequence bounding rectangles from a compiled .vtex_c texture.
+    /// </summary>
+    public static Vector4[] ExtractSpriteSheetSequences(
+        string vtexPath,
+        IFileLoader fileLoader,
+        Package basePackage = null,
+        Package addonPackage = null)
+    {
+        if (string.IsNullOrWhiteSpace(vtexPath)) return Array.Empty<Vector4>();
+
+        string searchPath = vtexPath.Replace('\\', '/');
+        if (!searchPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) searchPath += "_c";
+
+        ValveResourceFormat.Resource res = null;
+        try
+        {
+            if (fileLoader != null)
+            {
+                res = fileLoader.LoadFile(searchPath) ?? fileLoader.LoadFileCompiled(searchPath);
+            }
+
+            if (res == null && addonPackage != null)
+            {
+                var entry = FindVtexEntry(addonPackage, searchPath);
+                if (entry != null)
+                {
+                    addonPackage.ReadEntry(entry, out var bytes);
+                    res = new ValveResourceFormat.Resource();
+                    res.Read(new MemoryStream(bytes));
+                }
+            }
+
+            if (res == null && basePackage != null)
+            {
+                var entry = FindVtexEntry(basePackage, searchPath);
+                if (entry != null)
+                {
+                    basePackage.ReadEntry(entry, out var bytes);
+                    res = new ValveResourceFormat.Resource();
+                    res.Read(new MemoryStream(bytes));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[TextureLoader] Error reading spritesheet metadata ({vtexPath}): {ex.Message}");
+        }
+
+        if (res != null)
+        {
+            using (res)
+            {
+                if (res.DataBlock is ValveResourceFormat.ResourceTypes.Texture vTex)
+                {
+                    var sheet = vTex.GetSpriteSheetData();
+                    if (sheet != null && sheet.Sequences.Length > 0)
+                    {
+                        var rects = new Vector4[sheet.Sequences.Length];
+                        for (int i = 0; i < sheet.Sequences.Length; i++)
+                        {
+                            var seq = sheet.Sequences[i];
+                            if (seq.Frames.Length > 0 && seq.Frames[0].Images.Length > 0)
+                            {
+                                var img = seq.Frames[0].Images[0];
+                                rects[i] = new Vector4(img.UncroppedMin.X, img.UncroppedMin.Y, img.UncroppedMax.X, img.UncroppedMax.Y);
+                            }
+                            else
+                            {
+                                rects[i] = new Vector4(0f, 0f, 1f, 1f);
+                            }
+                        }
+                        return rects;
+                    }
+                }
+            }
+        }
+
+        return Array.Empty<Vector4>();
     }
 }

@@ -319,7 +319,7 @@ custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
-text = "Pose"
+text = "Player"
 
 [node name="SceneButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1164696300]
 custom_minimum_size = Vector2(0, 30)

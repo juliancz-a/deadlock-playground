@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.UI;
+using DeadlockPlayground.Particles;
 
 public partial class PaintTabUI : VBoxContainer
 {
@@ -21,6 +22,7 @@ public partial class PaintTabUI : VBoxContainer
     private TextProjector _textProjector;
     private HeroMeshHierarchy _meshHierarchy;
     private SkinExporter _exporter;
+    private ParticleStage3D _particleStage;
 
     private Node3D _currentHero;
     private StudioUIManager _studioUI;
@@ -1234,7 +1236,138 @@ public partial class PaintTabUI : VBoxContainer
             });
         }
 
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            AppendParticleTexturesGroup();
+        }
+
         UpdateSubmeshRowHighlights();
+    }
+
+    public void SetParticleStage(ParticleStage3D stage)
+    {
+        if (_particleStage != null)
+        {
+            _particleStage.ParticleLoaded -= OnParticleStageLoaded;
+            _particleStage.ParticleUnloaded -= OnParticleStageUnloaded;
+        }
+
+        _particleStage = stage;
+        if (_particleStage != null)
+        {
+            _particleStage.ParticleLoaded += OnParticleStageLoaded;
+            _particleStage.ParticleUnloaded += OnParticleStageUnloaded;
+        }
+
+        RefreshSubmeshListUI();
+    }
+
+    private void OnParticleStageLoaded(string vpcfPath, string variantName, string abilityName)
+    {
+        RefreshSubmeshListUI();
+    }
+
+    private void OnParticleStageUnloaded()
+    {
+        RefreshSubmeshListUI();
+    }
+
+    private void AppendParticleTexturesGroup()
+    {
+        if (_particleStage == null || !_particleStage.HasActiveParticle || _submeshListContainer == null) return;
+        var textures = _particleStage.GetActiveTextures();
+        if (textures.Count == 0) return;
+
+        EnsureGroupHeaderStyle();
+
+        var groupContainer = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        groupContainer.AddThemeConstantOverride("separation", 2);
+
+        var headerPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
+
+        var headerRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        headerRow.AddThemeConstantOverride("separation", 6);
+
+        var iconSparkles = new TextureRect
+        {
+            Texture = GD.Load<Texture2D>("res://assets/icons/sparkles.svg"),
+            CustomMinimumSize = new Vector2(16, 16),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            Modulate = new Color(0.95f, 0.85f, 0.40f, 1.0f)
+        };
+        headerRow.AddChild(iconSparkles);
+
+        var titleLabel = new Label
+        {
+            Text = "Particle Textures",
+            SizeFlagsHorizontal = SizeFlags.ExpandFill
+        };
+        titleLabel.AddThemeFontSizeOverride("font_size", 12);
+        headerRow.AddChild(titleLabel);
+
+        var badgeLabel = new Label
+        {
+            Text = $"[{textures.Count}]",
+            Modulate = new Color(0.65f, 0.68f, 0.72f),
+            SizeFlagsVertical = SizeFlags.ShrinkCenter
+        };
+        badgeLabel.AddThemeFontSizeOverride("font_size", 10);
+        headerRow.AddChild(badgeLabel);
+
+        headerPanel.AddChild(headerRow);
+        groupContainer.AddChild(headerPanel);
+
+        var childrenContainer = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        childrenContainer.AddThemeConstantOverride("separation", 4);
+
+        foreach (var (vtexPath, imageTex) in textures)
+        {
+            var row = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            row.AddThemeConstantOverride("separation", 6);
+
+            var texLabel = new Label
+            {
+                Text = System.IO.Path.GetFileName(vtexPath),
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                TooltipText = vtexPath
+            };
+            texLabel.AddThemeFontSizeOverride("font_size", 11);
+            row.AddChild(texLabel);
+
+            var paintBtn = new Button
+            {
+                Text = "Paint",
+                CustomMinimumSize = new Vector2(50, 22),
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+            paintBtn.AddThemeFontSizeOverride("font_size", 10);
+
+            string localPath = vtexPath;
+            var localTex = imageTex;
+            paintBtn.Pressed += () =>
+            {
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                if (uvCanvas != null)
+                {
+                    uvCanvas.OpenParticleTexture(localPath, localTex, (updatedImage) =>
+                    {
+                        _particleStage?.UpdateParticleTexture(localPath, updatedImage);
+                    });
+                }
+            };
+            row.AddChild(paintBtn);
+
+            childrenContainer.AddChild(row);
+        }
+
+        groupContainer.AddChild(childrenContainer);
+        _submeshListContainer.AddChild(groupContainer);
     }
 
     private void RefreshLayersListUI()

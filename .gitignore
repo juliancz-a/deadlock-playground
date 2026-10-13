@@ -7,4 +7,5 @@ src/.godot/
 tools/inspector
 src/tools/inspector
 docs/
-
+tools/
+scratch_out/

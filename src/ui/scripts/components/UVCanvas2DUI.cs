@@ -577,9 +577,39 @@ namespace DeadlockPlayground.UI
             CallDeferred(nameof(FitToView));
         }
 
+        private string _activeParticleTexturePath = null;
+        private Action<Image> _onParticleTextureUpdated = null;
+
+        public void OpenParticleTexture(string vtexPath, ImageTexture texture, Action<Image> onTextureUpdated)
+        {
+            _activeParticleTexturePath = vtexPath;
+            _onParticleTextureUpdated = onTextureUpdated;
+
+            if (_lblTitle != null)
+            {
+                _lblTitle.Text = $"Particle: {System.IO.Path.GetFileName(vtexPath)}";
+            }
+
+            if (_baseTextureRect != null && texture != null)
+            {
+                _baseTextureRect.Texture = texture;
+            }
+
+            SetVisibleState(true);
+            FitToView();
+        }
+
         private void OnPainterStrokeFinished()
         {
             QueueCanvasRedraw();
+            if (_onParticleTextureUpdated != null && _layerManager != null)
+            {
+                var baked = _layerManager.BakeCompositeImage();
+                if (baked != null)
+                {
+                    _onParticleTextureUpdated.Invoke(baked);
+                }
+            }
         }
 
         private void OnMagicWandMaskUpdated(bool hasActiveMask)

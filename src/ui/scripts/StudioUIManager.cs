@@ -31,7 +31,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private CharacterTabUI _tabCharacter;
     [Export] private BonesTabUI _tabBones;
     [Export] private CameraTabUI _tabCamera;
-    [Export] private PoseTabUI _tabPose;
+    [Export] private PlayerTabUI _tabPlayer;
     [Export] private SceneTabUI _tabScene;
     [Export] private EffectsTabUI _tabEffects;
     [Export] private LightingTabUI _tabLighting;
@@ -322,7 +322,7 @@ public partial class StudioUIManager : CanvasLayer
 
         if (@event.IsActionPressed("bones_reset_pose", exactMatch: true))
         {
-            _tabPose?.ResetAllPoses();
+            _tabPlayer?.ResetAllPoses();
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -393,7 +393,7 @@ public partial class StudioUIManager : CanvasLayer
         _tabCharacter ??= _tabContentContainer?.GetNodeOrNull<CharacterTabUI>("CharacterTab");
         _tabBones ??= _tabContentContainer?.GetNodeOrNull<BonesTabUI>("BonesTab");
         _tabCamera ??= _tabContentContainer?.GetNodeOrNull<CameraTabUI>("CameraTab");
-        _tabPose ??= _tabContentContainer?.GetNodeOrNull<PoseTabUI>("PoseTab");
+        _tabPlayer ??= _tabContentContainer?.GetNodeOrNull<PlayerTabUI>("PoseTab");
         _tabScene ??= _tabContentContainer?.GetNodeOrNull<SceneTabUI>("SceneTab");
         _tabEffects ??= _tabContentContainer?.GetNodeOrNull<EffectsTabUI>("EffectsTab");
         _tabLighting ??= _tabContentContainer?.GetNodeOrNull<LightingTabUI>("LightingTab");
@@ -541,7 +541,7 @@ public partial class StudioUIManager : CanvasLayer
             _tabCharacter,
             _tabBones,
             _tabCamera,
-            _tabPose,
+            _tabPlayer,
             _tabScene,
             _tabEffects,
             _tabLighting,
@@ -904,7 +904,7 @@ public partial class StudioUIManager : CanvasLayer
         if (skeleton != null)
         {
             _tabBones?.SetSkeleton(skeleton);
-            _tabPose?.SetSkeleton(skeleton);
+            _tabPlayer?.SetSkeleton(skeleton);
 
             ProceduralClothSolver.Conform(skeleton);
 
@@ -950,7 +950,7 @@ public partial class StudioUIManager : CanvasLayer
 
         if (animPlayer != null)
         {
-            _tabPose?.SetAnimationPlayer(animPlayer);
+            _tabPlayer?.SetAnimationPlayer(animPlayer);
         }
     }
 
@@ -1068,8 +1068,8 @@ public partial class StudioUIManager : CanvasLayer
         _tabPaint?.Painter?.ResetSession();
         _tabBones?.SetSkeleton(null);
         _tabBones?.SetIKManager(null);
-        _tabPose?.SetSkeleton(null);
-        _tabPose?.SetAnimationPlayer(null);
+        _tabPlayer?.SetSkeleton(null);
+        _tabPlayer?.SetAnimationPlayer(null);
         UpdateCharacterDependencyState(false);
     }
 
@@ -1109,6 +1109,8 @@ public partial class StudioUIManager : CanvasLayer
 
     public bool IsAnyModalOpen()
     {
+        var particleModal = _modalsLayer?.FindChild("ParticlePickerModal", true, false) as Control;
+
         return (_settingsModal != null && _settingsModal.Visible)
             || (_feedbackModal != null && _feedbackModal.Visible)
             || (_aboutModal != null && _aboutModal.Visible)
@@ -1116,7 +1118,8 @@ public partial class StudioUIManager : CanvasLayer
             || (_loadingOverlay != null && _loadingOverlay.Visible)
             || (_gameFolderDialog != null && _gameFolderDialog.Visible)
             || (_saveFolderDialog != null && _saveFolderDialog.Visible)
-            || (_fallbackPathDialog != null && _fallbackPathDialog.Visible);
+            || (_fallbackPathDialog != null && _fallbackPathDialog.Visible)
+            || (particleModal != null && particleModal.Visible);
     }
 
     public void UpdateModalsState()
