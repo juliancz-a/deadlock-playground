@@ -260,6 +260,8 @@ public partial class PlayerTabUI : VBoxContainer
         var actionButtons = GetNodeOrNull<Control>("TransportGroup/ActionButtons");
         if (actionButtons != null) actionButtons.Visible = false;
 
+        _particleStage.SetLooping(_isLooping);
+
         if (_timelineSlider != null)
         {
             _timelineSlider.MinValue = 0.0;
@@ -857,6 +859,12 @@ public partial class PlayerTabUI : VBoxContainer
     private void OnLoopToggled(bool looping)
     {
         _isLooping = looping;
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            _particleStage.SetLooping(looping);
+            return;
+        }
+
         if (_animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
         {
             var anim = _animPlayer.GetAnimation(_activeAnimName);

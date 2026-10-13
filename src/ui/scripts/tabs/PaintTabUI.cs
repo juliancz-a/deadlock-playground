@@ -2,6 +2,7 @@ using Godot;
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.UI;
@@ -23,6 +24,7 @@ public partial class PaintTabUI : VBoxContainer
     private HeroMeshHierarchy _meshHierarchy;
     private SkinExporter _exporter;
     private ParticleStage3D _particleStage;
+    private VBoxContainer _particleTexturesGroupContainer;
 
     private Node3D _currentHero;
     private StudioUIManager _studioUI;
@@ -125,8 +127,9 @@ public partial class PaintTabUI : VBoxContainer
     private Label _lblLayerOpacity;
     private ConfirmationDialog _renameLayerDialog;
     private LineEdit _renameLayerInput;
-    private int _layerIndexToRename = -1;
     public static bool IsRenameDialogOpen { get; private set; }
+    private int _layerIndexToRename = -1;
+    private string _activeParticleVtexPath = null;
 
     private StyleBoxFlat _renameBtnNormalStyle;
     private StyleBoxFlat _renameBtnHoverStyle;
@@ -749,7 +752,12 @@ public partial class PaintTabUI : VBoxContainer
         // 1. Scan submesh hierarchy (generates UV2 unwraps)
         _meshHierarchy?.ScanHero(heroNode);
 
-        if (_painter != null && _painter.IsPaintingActive)
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            _meshHierarchy?.HideAll();
+            HideAllMeshesRecursive(heroNode);
+        }
+        else if (_painter != null && _painter.IsPaintingActive)
         {
             CacheCharacterPose();
             ResetCharacterPose();
@@ -903,11 +911,23 @@ public partial class PaintTabUI : VBoxContainer
     {
         if (_meshHierarchy == null) return;
         var active = _meshHierarchy.ActiveTarget;
+        var stage = GetOrCreateParticleStage();
+        bool hasParticleActive = stage != null && stage.HasActiveParticle;
+        bool isPaintingParticle = hasParticleActive && !string.IsNullOrEmpty(_activeParticleVtexPath);
+
+        if (isPaintingParticle && _lblActiveMesh != null)
+        {
+            _lblActiveMesh.Text = $"Target: Particle ({System.IO.Path.GetFileName(_activeParticleVtexPath)})";
+        }
+        else if (hasParticleActive && _lblActiveMesh != null)
+        {
+            _lblActiveMesh.Text = "Target: Active VFX";
+        }
 
         foreach (var groupRow in _materialGroupRows)
         {
             bool isGroupActive = false;
-            if (groupRow.Group != null && active != null)
+            if (!hasParticleActive && !isPaintingParticle && groupRow.Group != null && active != null)
             {
                 isGroupActive = groupRow.Group.Submeshes.Contains(active);
             }
@@ -930,7 +950,7 @@ public partial class PaintTabUI : VBoxContainer
             {
                 if (row.SelectBtn != null && GodotObject.IsInstanceValid(row.SelectBtn))
                 {
-                    row.SelectBtn.Modulate = (row.Submesh == active)
+                    row.SelectBtn.Modulate = (!hasParticleActive && !isPaintingParticle && row.Submesh == active)
                         ? new Color(1.0f, 0.85f, 0.4f, 1.0f)
                         : Colors.White;
                 }
@@ -1011,10 +1031,12 @@ public partial class PaintTabUI : VBoxContainer
                 }
             }
             UpdateSubmeshRowHighlights();
+            UpdateParticleTexturesGroup();
             return;
         }
 
         // Full rebuild needed
+        _particleTexturesGroupContainer = null;
         foreach (Node child in _submeshListContainer.GetChildren())
         {
             child.QueueFree();
@@ -1084,6 +1106,8 @@ public partial class PaintTabUI : VBoxContainer
             var localGroup = group;
             paintBtn.Pressed += () =>
             {
+                _activeParticleVtexPath = null;
+                UpdateParticleTexturesGroup();
                 SubmeshNodeInfo target = null;
                 foreach (var s in localGroup.Submeshes)
                 {
@@ -1236,11 +1260,7 @@ public partial class PaintTabUI : VBoxContainer
             });
         }
 
-        if (_particleStage != null && _particleStage.HasActiveParticle)
-        {
-            AppendParticleTexturesGroup();
-        }
-
+        UpdateParticleTexturesGroup();
         UpdateSubmeshRowHighlights();
     }
 
@@ -1260,28 +1280,92 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         RefreshSubmeshListUI();
+        UpdateParticleTexturesGroup();
+    }
+
+    private ParticleStage3D GetOrCreateParticleStage()
+    {
+        if (_particleStage != null && GodotObject.IsInstanceValid(_particleStage)) return _particleStage;
+        var worldViewport = GetTree()?.Root?.FindChild("WorldViewport", true, false) as SubViewport;
+        var stage = worldViewport?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
+        if (stage != null)
+        {
+            SetParticleStage(stage);
+        }
+        return stage;
     }
 
     private void OnParticleStageLoaded(string vpcfPath, string variantName, string abilityName)
     {
+        _activeParticleVtexPath = null;
+        var stage = GetOrCreateParticleStage();
+        if (stage != null && stage.GetActiveTextures().Count > 0)
+        {
+            _activeParticleVtexPath = stage.GetActiveTextures().Keys.FirstOrDefault();
+        }
         RefreshSubmeshListUI();
+        UpdateParticleTexturesGroup();
+        UpdateSubmeshRowHighlights();
+        UpdateCanvasResolutionLabel();
     }
 
     private void OnParticleStageUnloaded()
     {
+        _activeParticleVtexPath = null;
+        UpdateParticleTexturesGroup();
         RefreshSubmeshListUI();
+        UpdateSubmeshRowHighlights();
+        if (_lblActiveMesh != null)
+        {
+            string displayName = _meshHierarchy?.ActiveTarget?.DisplayName ?? "None";
+            _lblActiveMesh.Text = $"Target: {displayName}";
+        }
+        UpdateCanvasResolutionLabel();
     }
 
-    private void AppendParticleTexturesGroup()
+    private void UpdateParticleTexturesGroup()
     {
-        if (_particleStage == null || !_particleStage.HasActiveParticle || _submeshListContainer == null) return;
-        var textures = _particleStage.GetActiveTextures();
-        if (textures.Count == 0) return;
+        if (_submeshListContainer == null) return;
+
+        var stage = GetOrCreateParticleStage();
+        if (stage == null || !stage.HasActiveParticle)
+        {
+            if (_particleTexturesGroupContainer != null && GodotObject.IsInstanceValid(_particleTexturesGroupContainer))
+            {
+                _particleTexturesGroupContainer.QueueFree();
+                _particleTexturesGroupContainer = null;
+            }
+            return;
+        }
+
+        var textures = stage.GetActiveTextures();
+        if (textures.Count == 0)
+        {
+            if (_particleTexturesGroupContainer != null && GodotObject.IsInstanceValid(_particleTexturesGroupContainer))
+            {
+                _particleTexturesGroupContainer.QueueFree();
+                _particleTexturesGroupContainer = null;
+            }
+            return;
+        }
 
         EnsureGroupHeaderStyle();
 
-        var groupContainer = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        groupContainer.AddThemeConstantOverride("separation", 2);
+        if (_particleTexturesGroupContainer == null || !GodotObject.IsInstanceValid(_particleTexturesGroupContainer) || _particleTexturesGroupContainer.GetParent() != _submeshListContainer)
+        {
+            _particleTexturesGroupContainer = new VBoxContainer
+            {
+                Name = "ParticleMaterialsGroup",
+                SizeFlagsHorizontal = SizeFlags.ExpandFill
+            };
+            _particleTexturesGroupContainer.AddThemeConstantOverride("separation", 2);
+            _submeshListContainer.AddChild(_particleTexturesGroupContainer);
+        }
+
+        foreach (Node child in _particleTexturesGroupContainer.GetChildren())
+        {
+            child.QueueFree();
+        }
 
         var headerPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
@@ -1302,7 +1386,7 @@ public partial class PaintTabUI : VBoxContainer
 
         var titleLabel = new Label
         {
-            Text = "Particle Textures",
+            Text = "Particle Materials",
             SizeFlagsHorizontal = SizeFlags.ExpandFill
         };
         titleLabel.AddThemeFontSizeOverride("font_size", 12);
@@ -1318,7 +1402,7 @@ public partial class PaintTabUI : VBoxContainer
         headerRow.AddChild(badgeLabel);
 
         headerPanel.AddChild(headerRow);
-        groupContainer.AddChild(headerPanel);
+        _particleTexturesGroupContainer.AddChild(headerPanel);
 
         var childrenContainer = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         childrenContainer.AddThemeConstantOverride("separation", 4);
@@ -1339,11 +1423,15 @@ public partial class PaintTabUI : VBoxContainer
             texLabel.AddThemeFontSizeOverride("font_size", 11);
             row.AddChild(texLabel);
 
+            bool isThisParticlePainting = !string.IsNullOrEmpty(_activeParticleVtexPath) &&
+                string.Equals(_activeParticleVtexPath, vtexPath, StringComparison.OrdinalIgnoreCase);
+
             var paintBtn = new Button
             {
-                Text = "Paint",
-                CustomMinimumSize = new Vector2(50, 22),
-                SizeFlagsVertical = SizeFlags.ShrinkCenter
+                Text = isThisParticlePainting ? "Painting" : "Paint",
+                CustomMinimumSize = new Vector2(56, 22),
+                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                Modulate = isThisParticlePainting ? new Color(1.0f, 0.85f, 0.4f, 1.0f) : Colors.White
             };
             paintBtn.AddThemeFontSizeOverride("font_size", 10);
 
@@ -1351,13 +1439,18 @@ public partial class PaintTabUI : VBoxContainer
             var localTex = imageTex;
             paintBtn.Pressed += () =>
             {
+                _activeParticleVtexPath = localPath;
+                UpdateSubmeshRowHighlights();
+                UpdateParticleTexturesGroup();
+
                 var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
                             ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
                 if (uvCanvas != null)
                 {
                     uvCanvas.OpenParticleTexture(localPath, localTex, (updatedImage) =>
                     {
-                        _particleStage?.UpdateParticleTexture(localPath, updatedImage);
+                        var st = GetOrCreateParticleStage();
+                        st?.UpdateParticleTexture(localPath, updatedImage);
                     });
                 }
             };
@@ -1366,8 +1459,7 @@ public partial class PaintTabUI : VBoxContainer
             childrenContainer.AddChild(row);
         }
 
-        groupContainer.AddChild(childrenContainer);
-        _submeshListContainer.AddChild(groupContainer);
+        _particleTexturesGroupContainer.AddChild(childrenContainer);
     }
 
     private void RefreshLayersListUI()
@@ -1644,12 +1736,28 @@ public partial class PaintTabUI : VBoxContainer
     {
         CacheCharacterPose();
         ResetCharacterPose();
+        var pStage = GetOrCreateParticleStage();
+        bool hasParticleActive = pStage != null && pStage.HasActiveParticle;
+
         if (_meshHierarchy != null)
         {
             _meshHierarchy.IsPaintingModeActive = true;
             _meshHierarchy.ApplyToonShading(false);
 
-            if (_hasCachedPaintVisibility && _cachedPaintSubmeshVisibility != null)
+            if (hasParticleActive)
+            {
+                // Task D.3: Do NOT show character mesh when switching to Paint tab with active particle
+                _meshHierarchy.HideAll();
+                if (_currentHero != null)
+                {
+                    HideAllMeshesRecursive(_currentHero);
+                }
+                if (string.IsNullOrEmpty(_activeParticleVtexPath) && pStage.GetActiveTextures().Count > 0)
+                {
+                    _activeParticleVtexPath = pStage.GetActiveTextures().Keys.FirstOrDefault();
+                }
+            }
+            else if (_hasCachedPaintVisibility && _cachedPaintSubmeshVisibility != null)
             {
                 _meshHierarchy.RestoreVisibilityState(_cachedPaintSubmeshVisibility, _cachedPaintPreSoloVisibility, _cachedPaintSoloedSubmesh);
             }
@@ -1664,14 +1772,20 @@ public partial class PaintTabUI : VBoxContainer
             _brushPalette.SyncFromPainter();
         }
         _layerManager?.RebuildBaseAtlasBuffer();
+        UpdateParticleTexturesGroup();
+        UpdateSubmeshRowHighlights();
+        UpdateCanvasResolutionLabel();
     }
 
     public void OnTabDeactivated()
     {
+        var stage = GetOrCreateParticleStage();
+        bool hasActiveParticle = stage != null && stage.HasActiveParticle;
+
         if (_meshHierarchy != null)
         {
             _meshHierarchy.IsPaintingModeActive = false;
-            if (UserSettings.ToonEnabled)
+            if (UserSettings.ToonEnabled && !hasActiveParticle)
             {
                 _meshHierarchy.ApplyToonShading(true);
             }
@@ -1690,13 +1804,16 @@ public partial class PaintTabUI : VBoxContainer
         }
         _decalStamper?.HidePreview();
 
-        // 2. Restore character tab mesh visibility onto the character model
-        if (_currentHero != null && GodotObject.IsInstanceValid(_currentHero))
+        // 2. Restore character tab mesh visibility onto the character model ONLY if no active particle
+        if (!hasActiveParticle)
         {
-            RestoreCharacterTabMeshVisibility(_currentHero);
-        }
+            if (_currentHero != null && GodotObject.IsInstanceValid(_currentHero))
+            {
+                RestoreCharacterTabMeshVisibility(_currentHero);
+            }
 
-        RestoreCharacterPose();
+            RestoreCharacterPose();
+        }
     }
 
     private void RestoreCharacterTabMeshVisibility(Node node)
@@ -1742,6 +1859,19 @@ public partial class PaintTabUI : VBoxContainer
         foreach (Node child in node.GetChildren())
         {
             RestoreCharacterTabMeshVisibility(child);
+        }
+    }
+
+    private static void HideAllMeshesRecursive(Node node)
+    {
+        if (node == null) return;
+        if (node is MeshInstance3D mi)
+        {
+            mi.Visible = false;
+        }
+        foreach (Node child in node.GetChildren())
+        {
+            HideAllMeshesRecursive(child);
         }
     }
 

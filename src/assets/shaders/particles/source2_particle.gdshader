@@ -15,8 +15,6 @@ uniform int u_seq_count = 0;
 // UV transform controls from m_TextureControls (ScaleU, ScaleV, OffsetU, OffsetV)
 uniform vec4 u_uv_transform = vec4(1.0, 1.0, 0.0, 0.0);
 
-uniform bool is_refract = false;
-
 // Debug mode: 0=normal, 1=alpha (vec3(a)), 2=raw tex.rgb, 3=raw tex.a, 4=vtx color, 5=zero albedo (decisive test)
 uniform int u_debug_mode = 0;
 
@@ -73,53 +71,38 @@ void fragment() {
     vec3 vtx_linear = srgb_to_linear(COLOR.rgb);
     vec3 const_linear = srgb_to_linear(constant_color.rgb);
 
-    if (is_refract) {
-        // Source 2 Refraction Shockwave (warp_noise10 normal map ripple in explode_warp).
-        // Tangent-space normal map has flat unperturbed surface at (0.5, 0.5, 1.0).
-        // Filter out DXT compression noise (disp < 0.06) and extract expanding ripple wave:
-        vec2 disp = tex.rg - vec2(0.5);
-        float ripple = smoothstep(0.06, 0.25, length(disp) * 2.5);
-        float a = ripple * constant_color.a * COLOR.a;
+    // Compute texture luminance (Rec. 601, matching Source 2 LUMA_601)
+    float tex_luma = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+
+    // For additive textures where alpha is constant 1.0 (e.g. DXT1 flares, lightning arcs with opaque alpha),
+    // derive alpha from luminance so the black quad background is completely transparent and adds 0 light.
+    float effective_alpha = tex.a;
+    if (tex.a > 0.98 && tex_luma < 0.98) {
+        effective_alpha = smoothstep(0.05, 0.30, tex_luma);
+    }
+
+    vec3 rgb = tex.rgb * const_linear * vtx_linear * inst_overbright;
+    float a = effective_alpha * constant_color.a * COLOR.a;
+
+    if (u_debug_mode == 1) {
+        ALBEDO = vec3(a);
+        ALPHA = 1.0;
+    } else if (u_debug_mode == 2) {
+        ALBEDO = tex.rgb;
+        ALPHA = 1.0;
+    } else if (u_debug_mode == 3) {
+        ALBEDO = vec3(tex.a);
+        ALPHA = 1.0;
+    } else if (u_debug_mode == 4) {
+        ALBEDO = COLOR.rgb;
+        ALPHA = 1.0;
+    } else if (u_debug_mode == 5) {
+        discard;
+    } else {
         if (a <= 0.005) {
             discard;
         }
-        vec3 rgb = const_linear * vtx_linear * inst_overbright;
         ALBEDO = rgb;
         ALPHA = a;
-    } else {
-        // Compute texture luminance (Rec. 601, matching Source 2 LUMA_601)
-        float tex_luma = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
-
-        // For additive textures where alpha is constant 1.0 (e.g. DXT1 flares, lightning arcs with opaque alpha),
-        // derive alpha from luminance so the black quad background is completely transparent and adds 0 light.
-        float effective_alpha = tex.a;
-        if (tex.a > 0.98 && tex_luma < 0.98) {
-            effective_alpha = smoothstep(0.05, 0.30, tex_luma);
-        }
-
-        vec3 rgb = tex.rgb * const_linear * vtx_linear * inst_overbright;
-        float a = effective_alpha * constant_color.a * COLOR.a;
-
-        if (u_debug_mode == 1) {
-            ALBEDO = vec3(a);
-            ALPHA = 1.0;
-        } else if (u_debug_mode == 2) {
-            ALBEDO = tex.rgb;
-            ALPHA = 1.0;
-        } else if (u_debug_mode == 3) {
-            ALBEDO = vec3(tex.a);
-            ALPHA = 1.0;
-        } else if (u_debug_mode == 4) {
-            ALBEDO = COLOR.rgb;
-            ALPHA = 1.0;
-        } else if (u_debug_mode == 5) {
-            discard;
-        } else {
-            if (a <= 0.005) {
-                discard;
-            }
-            ALBEDO = rgb;
-            ALPHA = a;
-        }
     }
 }

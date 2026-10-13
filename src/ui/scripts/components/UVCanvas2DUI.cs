@@ -593,9 +593,19 @@ namespace DeadlockPlayground.UI
             if (_baseTextureRect != null && texture != null)
             {
                 _baseTextureRect.Texture = texture;
+                _baseTextureRect.Material = null;
             }
 
+            if (_paintOverlayRect != null)
+            {
+                _paintOverlayRect.Material = null;
+            }
+
+            _layerManager?.SetupForStandaloneTexture("particle:" + vtexPath, texture);
+
             SetVisibleState(true);
+            UpdateResolutionLabel();
+            RebuildWireframe();
             FitToView();
         }
 
@@ -771,6 +781,12 @@ namespace DeadlockPlayground.UI
 
         private void OnTargetMeshChanged(MeshInstance3D mesh, int surfaceIndex)
         {
+            _activeParticleTexturePath = null;
+            _onParticleTextureUpdated = null;
+            if (_lblTitle != null && mesh != null)
+            {
+                _lblTitle.Text = $"UV Map - {mesh.Name}";
+            }
             UpdateResolutionLabel();
             RebuildWireframe();
             FitToView();
@@ -796,6 +812,8 @@ namespace DeadlockPlayground.UI
             _cachedBoundaryMesh = null;
             _cachedAllWireMesh = null;
             _hasSubmeshRect = false;
+
+            if (!string.IsNullOrEmpty(_activeParticleTexturePath)) return;
 
             if (_meshHierarchy == null) return;
             var active = _meshHierarchy.ActiveTarget;
@@ -950,11 +968,19 @@ namespace DeadlockPlayground.UI
                     _baseTextureRect.Size = new Vector2(atlasW, atlasH);
                     _baseTextureRect.TextureFilter = TextureFilterEnum.Nearest;
                     _baseTextureRect.Texture = baseTex;
-                    if (_baseTextureRect.Material != _baseTextureMat && _baseTextureMat != null)
+                    bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
+                    if (!isStandalone)
                     {
-                        _baseTextureRect.Material = _baseTextureMat;
+                        if (_baseTextureRect.Material != _baseTextureMat && _baseTextureMat != null)
+                        {
+                            _baseTextureRect.Material = _baseTextureMat;
+                        }
+                        _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
                     }
-                    _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
+                    else
+                    {
+                        _baseTextureRect.Material = null;
+                    }
                 }
             }
 
@@ -971,9 +997,17 @@ namespace DeadlockPlayground.UI
                     _paintOverlayRect.Size = new Vector2(atlasW, atlasH);
                     _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
                     _paintOverlayRect.Texture = atlasTex;
-                    if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
+                    bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
+                    if (!isStandalone)
                     {
-                        _paintOverlayRect.Material = _paintOverlayMat;
+                        if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
+                        {
+                            _paintOverlayRect.Material = _paintOverlayMat;
+                        }
+                    }
+                    else
+                    {
+                        _paintOverlayRect.Material = null;
                     }
                 }
             }
@@ -1429,6 +1463,15 @@ namespace DeadlockPlayground.UI
                             _layerManager?.Finish2DStroke(_totalStrokeDirtyRect);
                             _totalStrokeDirtyRect = default;
                             canvas.QueueRedraw();
+
+                            if (_onParticleTextureUpdated != null && _layerManager != null)
+                            {
+                                var baked = _layerManager.BakeCompositeImage();
+                                if (baked != null)
+                                {
+                                    _onParticleTextureUpdated.Invoke(baked);
+                                }
+                            }
                         }
                     }
                 }

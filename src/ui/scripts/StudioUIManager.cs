@@ -596,12 +596,21 @@ public partial class StudioUIManager : CanvasLayer
         {
             _tabPaint?.OnTabDeactivated();
             if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
+            var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+            bool hasActiveParticle = stage != null && stage.HasActiveParticle;
+
+            var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+            badge?.SetPaintingMode(false);
+
             if (_exportPanel != null)
             {
-                _exportPanel.Visible = true;
-                _exportPanel.SetFramingOverlayVisible(true);
+                _exportPanel.Visible = !hasActiveParticle;
+                _exportPanel.SetFramingOverlayVisible(!hasActiveParticle);
             }
-            _currentSkeletonGizmoManager?.SetGizmoEnabled(true);
+            if (!hasActiveParticle)
+            {
+                _currentSkeletonGizmoManager?.SetGizmoEnabled(true);
+            }
             _tabShading?.SetPaintingModeActive(false);
 
             if (_uvCanvasPanel != null) _uvCanvasPanel.Visible = false;
@@ -618,6 +627,9 @@ public partial class StudioUIManager : CanvasLayer
                 _tabPaint?.SetCurrentHero(hero);
             }
             _tabPaint?.OnTabActivated();
+
+            var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+            badge?.SetPaintingMode(true);
 
             // Disable IK when entering paint mode
             _currentIKManager?.SetMasterIKEnabled(false);
@@ -1110,6 +1122,9 @@ public partial class StudioUIManager : CanvasLayer
     public bool IsAnyModalOpen()
     {
         var particleModal = _modalsLayer?.FindChild("ParticlePickerModal", true, false) as Control;
+        var heroModal = _modalsLayer?.FindChild("HeroPickerModal", true, false) as Control;
+        var extraModelModal = _modalsLayer?.FindChild("ExtraModelPickerModal", true, false) as Control;
+        var modModal = _modalsLayer?.FindChild("ModPickerModal", true, false) as Control;
 
         return (_settingsModal != null && _settingsModal.Visible)
             || (_feedbackModal != null && _feedbackModal.Visible)
@@ -1119,7 +1134,10 @@ public partial class StudioUIManager : CanvasLayer
             || (_gameFolderDialog != null && _gameFolderDialog.Visible)
             || (_saveFolderDialog != null && _saveFolderDialog.Visible)
             || (_fallbackPathDialog != null && _fallbackPathDialog.Visible)
-            || (particleModal != null && particleModal.Visible);
+            || (particleModal != null && particleModal.Visible)
+            || (heroModal != null && heroModal.Visible)
+            || (extraModelModal != null && extraModelModal.Visible)
+            || (modModal != null && modModal.Visible);
     }
 
     public void UpdateModalsState()

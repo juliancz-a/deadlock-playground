@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://cyy83uh7loppl" path="res://ui/scripts/tabs/CharacterTabUI.cs" id="1_char"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_cxjk5"]
 
-[node name="CharacterTab" type="VBoxContainer" unique_id=848590226 node_paths=PackedStringArray("_updateHeroOptionButton", "_heroOptionButton", "_optAddonMods", "_lblAddonDetails", "_submeshContainer", "_btnShowAll", "_btnHideAccessories")]
+[node name="CharacterTab" type="VBoxContainer" unique_id=848590226 node_paths=PackedStringArray("_submeshContainer", "_partsLabel", "_btnShowAll", "_btnHideAccessories", "_btnBrowseHeroGallery", "_btnExtraModels", "_btnBrowseModGallery", "_btnBrowseParticles", "_btnCloseParticle", "_btnRestoreCharacter", "_secondaryActionButtons", "_texHeroGallery", "_texModGallery", "_texExtraModels", "_texParticles")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -13,73 +13,214 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 12
 script = ExtResource("1_char")
-_updateHeroOptionButton = NodePath("HeroSelectGroup/UpdateHeroOptionButton")
-_heroOptionButton = NodePath("HeroSelectGroup/HeroOptionButton")
-_optAddonMods = NodePath("HeroSelectGroup/AddonOptionButton")
-_lblAddonDetails = NodePath("HeroSelectGroup/AddonDetailsLabel")
 _submeshContainer = NodePath("SubmeshPanel/ScrollContainer/SubmeshContainer")
+_partsLabel = NodePath("SubmeshHeader/PartsLabel")
 _btnShowAll = NodePath("SubmeshHeader/HBoxButtons/BtnShowAll")
 _btnHideAccessories = NodePath("SubmeshHeader/HBoxButtons/BtnHideAccessories")
+_btnBrowseHeroGallery = NodePath("HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery")
+_btnBrowseModGallery = NodePath("HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery")
+_secondaryActionButtons = NodePath("HeroSelectGroup/SecondaryActionButtons")
+_btnExtraModels = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnExtraModels")
+_btnBrowseParticles = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles")
+_btnCloseParticle = NodePath("HeroSelectGroup/ContextualActionButtons/BtnCloseParticle")
+_btnRestoreCharacter = NodePath("HeroSelectGroup/ContextualActionButtons/BtnRestoreCharacter")
+_texHeroGallery = NodePath("HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery/Margin/VBox/TexHeroGallery")
+_texModGallery = NodePath("HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery/Margin/VBox/TexModGallery")
+_texExtraModels = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnExtraModels/Margin/VBox/TexExtraModels")
+_texParticles = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles/Margin/VBox/TexParticles")
 
 [node name="HeroSelectGroup" type="VBoxContainer" parent="." unique_id=183166962]
 layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="PrimaryActionButtons" type="HBoxContainer" parent="HeroSelectGroup" unique_id=739281041]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnBrowseHeroGallery" type="Button" parent="HeroSelectGroup/PrimaryActionButtons" unique_id=739281042]
+custom_minimum_size = Vector2(0, 115)
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Open rich visual gallery to select characters and variants"
+
+[node name="Margin" type="MarginContainer" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery/Margin"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 1
+theme_override_constants/separation = 6
+
+[node name="TexHeroGallery" type="TextureRect" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="LblHeroGallery" type="Label" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery/Margin/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_fonts/font = ExtResource("2_cxjk5")
+theme_override_font_sizes/font_size = 11
+text = "HERO GALLERY..."
+horizontal_alignment = 1
+
+[node name="BtnBrowseModGallery" type="Button" parent="HeroSelectGroup/PrimaryActionButtons" unique_id=739281045]
+custom_minimum_size = Vector2(0, 115)
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Open visual gallery of installed character model and texture mods"
+
+[node name="Margin" type="MarginContainer" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery/Margin"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 1
+theme_override_constants/separation = 6
+
+[node name="TexModGallery" type="TextureRect" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="LblModGallery" type="Label" parent="HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery/Margin/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_fonts/font = ExtResource("2_cxjk5")
+theme_override_font_sizes/font_size = 11
+text = "MOD GALLERY..."
+horizontal_alignment = 1
+
+[node name="SecondaryActionButtons" type="HBoxContainer" parent="HeroSelectGroup" unique_id=739281044]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnExtraModels" type="Button" parent="HeroSelectGroup/SecondaryActionButtons" unique_id=739281043]
+custom_minimum_size = Vector2(0, 85)
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Browse ability-specific and auxiliary 3D models (summons, turrets, dragon)"
+
+[node name="Margin" type="MarginContainer" parent="HeroSelectGroup/SecondaryActionButtons/BtnExtraModels"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
+
+[node name="VBox" type="VBoxContainer" parent="HeroSelectGroup/SecondaryActionButtons/BtnExtraModels/Margin"]
+layout_mode = 2
+mouse_filter = 2
+alignment = 1
 theme_override_constants/separation = 4
 
-[node name="UpdateHeroLabel" type="RichTextLabel" parent="HeroSelectGroup" unique_id=1439922209]
+[node name="TexExtraModels" type="TextureRect" parent="HeroSelectGroup/SecondaryActionButtons/BtnExtraModels/Margin/VBox"]
 layout_mode = 2
-size_flags_vertical = 4
-theme_type_variation = &"TitleLabel"
-theme_override_colors/default_color = Color(0.9372549, 0.87058824, 0.7490196, 1)
-theme_override_fonts/normal_font = ExtResource("2_cxjk5")
-theme_override_font_sizes/normal_font_size = 18
-bbcode_enabled = true
-text = "[color=#E0DD16]NEW [/color]CHARACTERS MODELS"
-fit_content = true
+size_flags_vertical = 3
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
 
-[node name="UpdateHeroOptionButton" type="OptionButton" parent="HeroSelectGroup" unique_id=845928530]
-custom_minimum_size = Vector2(0, 32)
+[node name="LblExtraModels" type="Label" parent="HeroSelectGroup/SecondaryActionButtons/BtnExtraModels/Margin/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_fonts/font = ExtResource("2_cxjk5")
+theme_override_font_sizes/font_size = 10
+text = "EXTRA MODELS..."
+horizontal_alignment = 1
+
+[node name="BtnBrowseParticles" type="Button" parent="HeroSelectGroup/SecondaryActionButtons" unique_id=739281046]
+custom_minimum_size = Vector2(0, 85)
 layout_mode = 2
 size_flags_horizontal = 3
-text_overrun_behavior = 3
-clip_text = true
-fit_to_longest_item = false
-search_bar_enabled = true
+tooltip_text = "Browse and select particle systems for this hero"
 
-[node name="HeroLabel" type="Label" parent="HeroSelectGroup" unique_id=558308242]
+[node name="Margin" type="MarginContainer" parent="HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
+
+[node name="VBox" type="VBoxContainer" parent="HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles/Margin"]
 layout_mode = 2
-theme_type_variation = &"TitleLabel"
-text = "Character Models"
+mouse_filter = 2
+alignment = 1
+theme_override_constants/separation = 4
 
-[node name="HeroOptionButton" type="OptionButton" parent="HeroSelectGroup" unique_id=631588507]
-custom_minimum_size = Vector2(0, 32)
+[node name="TexParticles" type="TextureRect" parent="HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="LblBrowseParticles" type="Label" parent="HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles/Margin/VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_fonts/font = ExtResource("2_cxjk5")
+theme_override_font_sizes/font_size = 10
+text = "BROWSE VFX..."
+horizontal_alignment = 1
+
+[node name="ContextualActionButtons" type="VBoxContainer" parent="HeroSelectGroup" unique_id=739281047]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BtnCloseParticle" type="Button" parent="HeroSelectGroup/ContextualActionButtons" unique_id=739281048]
+visible = false
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
-text_overrun_behavior = 3
-clip_text = true
-fit_to_longest_item = false
-search_bar_enabled = true
+text = "Close Particle Effect"
+tooltip_text = "Unload currently active particle VFX and restore hero meshes"
 
-[node name="AddonLabel" type="Label" parent="HeroSelectGroup" unique_id=477641126]
-layout_mode = 2
-theme_type_variation = &"TitleLabel"
-text = "Modded Character Models"
-
-[node name="AddonOptionButton" type="OptionButton" parent="HeroSelectGroup" unique_id=1269741063]
-custom_minimum_size = Vector2(0, 32)
+[node name="BtnRestoreCharacter" type="Button" parent="HeroSelectGroup/ContextualActionButtons" unique_id=739281049]
+visible = false
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
-text_overrun_behavior = 3
-clip_text = true
-fit_to_longest_item = false
-
-[node name="AddonDetailsLabel" type="RichTextLabel" parent="HeroSelectGroup" unique_id=490486138]
-layout_mode = 2
-theme_override_font_sizes/normal_font_size = 11
-bbcode_enabled = true
-text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]"
-fit_content = true
-scroll_active = false
-autowrap_mode = 2
+text = "Restore Base Character"
+tooltip_text = "Unload extra model and restore primary character model"
 
 [node name="HSeparator1" type="HSeparator" parent="." unique_id=274751755]
 layout_mode = 2

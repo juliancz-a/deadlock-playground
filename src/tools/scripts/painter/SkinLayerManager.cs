@@ -96,6 +96,8 @@ namespace DeadlockPlayground.Painter
 
         // The atlas manager for the currently active paint target (null if no target selected).
         private Node _activeAtlasManager;
+        private Texture2D _standaloneBaseTexture;
+        private ImageTexture _standaloneCompositeTexture;
         /// <summary>Returns the OverlayAtlasManager for the currently selected paint target submesh.</summary>
         public Node AtlasManager => _activeAtlasManager;
 
@@ -1354,6 +1356,11 @@ namespace DeadlockPlayground.Painter
                         }
                     }
                 }
+            }
+
+            if (_activeAtlasManager == null && _standaloneCompositeTexture != null)
+            {
+                UpdateStandaloneComposite(dirtyRect);
             }
         }
 
@@ -2636,8 +2643,112 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        public void SetupForStandaloneTexture(string identifier, Texture2D texture)
+        {
+            if (string.IsNullOrWhiteSpace(identifier)) return;
+
+            SaveActiveContext();
+            _targetMesh = null;
+            _activeAtlasManager = null;
+            _activeMaterialKey = identifier;
+
+            int w = texture?.GetWidth() ?? 512;
+            int h = texture?.GetHeight() ?? 512;
+            if (w < 64) w = 512;
+            if (h < 64) h = 512;
+            CanvasSize = new Vector2I(w, h);
+            int bufferLen = w * h * 8;
+
+            if (_materialContexts.TryGetValue(identifier, out var ctx) && ctx != null)
+            {
+                _currentContext = ctx;
+                _layers.Clear();
+                _layers.AddRange(ctx.Layers);
+                _activeLayerIndex = Math.Clamp(ctx.ActiveLayerIndex, 0, Math.Max(0, _layers.Count - 1));
+                _undoStack.Clear();
+                _undoStack.AddRange(ctx.UndoStack);
+                _redoStack.Clear();
+                _baseAtlasBuffer = ctx.BaseAtlasBuffer;
+                _hasPopulatedBaseAtlasBuffer = true;
+            }
+            else
+            {
+                _layers.Clear();
+                _undoStack.Clear();
+                _redoStack.Clear();
+                _hasGpuUndo = false;
+                _activeLayerIndex = 0;
+
+                _baseAtlasBuffer = new byte[bufferLen];
+                if (texture != null)
+                {
+                    var img = texture.GetImage();
+                    if (img != null)
+                    {
+                        if (img.IsCompressed()) img.Decompress();
+                        if (img.GetWidth() != w || img.GetHeight() != h)
+                        {
+                            img.Resize(w, h);
+                        }
+                        img.Convert(Image.Format.Rgba8);
+                        byte[] raw = img.GetData();
+                        if (raw != null && raw.Length == w * h * 4)
+                        {
+                            unsafe
+                            {
+                                fixed (byte* pDst = _baseAtlasBuffer, pSrc = raw)
+                                {
+                                    Half* hDst = (Half*)pDst;
+                                    for (int i = 0; i < w * h; i++)
+                                    {
+                                        int srcOff = i * 4;
+                                        int dstOff = i * 4;
+                                        hDst[dstOff] = (Half)s_srgb8ToLinear[pSrc[srcOff]];
+                                        hDst[dstOff + 1] = (Half)s_srgb8ToLinear[pSrc[srcOff + 1]];
+                                        hDst[dstOff + 2] = (Half)s_srgb8ToLinear[pSrc[srcOff + 2]];
+                                        hDst[dstOff + 3] = (Half)(pSrc[srcOff + 3] / 255.0f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _hasPopulatedBaseAtlasBuffer = true;
+
+                AddNewLayer("Paint Layer 1");
+
+                ctx = new MaterialPaintingContext
+                {
+                    MaterialKey = identifier,
+                    CanvasSize = CanvasSize,
+                    Layers = new List<SkinLayer>(_layers),
+                    ActiveLayerIndex = 0,
+                    BaseAtlasBuffer = _baseAtlasBuffer,
+                    UndoStack = new List<LayerPaintSnapshot>(_undoStack),
+                    RedoStack = new List<LayerPaintSnapshot>(_redoStack)
+                };
+                _materialContexts[identifier] = ctx;
+                _currentContext = ctx;
+            }
+
+            _standaloneBaseTexture = texture;
+            var emptyImg = Image.CreateEmpty(w, h, false, Image.Format.Rgba8);
+            _standaloneCompositeTexture = ImageTexture.CreateFromImage(emptyImg);
+
+            _otherLayersDirty = true;
+            RecompositeGpuLayers();
+            UpdateStandaloneComposite();
+            RecordInitialSnapshot();
+            NotifyStackChanged();
+            NotifyLayerSelected(_activeLayerIndex);
+            GD.Print($"[SkinLayerManager] SetupForStandaloneTexture: '{identifier}' ({w}x{h})");
+        }
+
         public void SetPaintTargetMesh(MeshInstance3D targetMesh)
         {
+            _standaloneBaseTexture = null;
+            _standaloneCompositeTexture = null;
+
             if (targetMesh == null || !GodotObject.IsInstanceValid(targetMesh))
             {
                 _targetMesh = null;
@@ -3424,6 +3535,10 @@ namespace DeadlockPlayground.Painter
                     return t2d;
                 }
             }
+            if (_standaloneCompositeTexture != null)
+            {
+                return _standaloneCompositeTexture;
+            }
             return null;
         }
 
@@ -3455,7 +3570,25 @@ namespace DeadlockPlayground.Painter
                     }
                 }
             }
+            if (_standaloneBaseTexture != null)
+            {
+                return _standaloneBaseTexture;
+            }
             return null;
+        }
+
+        public void UpdateStandaloneComposite(Rect2I? dirtyRect = null)
+        {
+            if (_activeAtlasManager != null || _standaloneCompositeTexture == null) return;
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 512;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 512;
+            if (_layers == null || _layers.Count == 0) return;
+
+            var baked = BakeCompositeImageFromLayers(_layers, w, h);
+            if (baked != null && !baked.IsEmpty())
+            {
+                _standaloneCompositeTexture.SetImage(baked);
+            }
         }
 
         public byte[] CompositeBuffer => _compositeBuffer;
@@ -3734,6 +3867,11 @@ namespace DeadlockPlayground.Painter
                 SyncActiveLayerGpuTexture();
                 RecompositeGpuLayers();
                 RecordUndoSnapshot(_activeLayerIndex);
+            }
+
+            if (_activeAtlasManager == null && _standaloneCompositeTexture != null)
+            {
+                UpdateStandaloneComposite(strokeDirtyRect);
             }
 
             if (_targetMesh != null && MeshHierarchy != null)
@@ -4742,7 +4880,18 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            return BakeAtlasImageFromManager(targetAtlas, CanvasSize.X, CanvasSize.Y);
+            if (targetAtlas != null)
+            {
+                var img = BakeAtlasImageFromManager(targetAtlas, CanvasSize.X, CanvasSize.Y);
+                if (img != null && !img.IsEmpty()) return img;
+            }
+
+            if (_layers != null && _layers.Count > 0)
+            {
+                return BakeCompositeImageFromLayers(_layers, CanvasSize.X, CanvasSize.Y);
+            }
+
+            return null;
         }
 
         private Image BakeAtlasImageFromManager(Node targetAtlas, int fallbackW = 2048, int fallbackH = 2048)
@@ -4825,6 +4974,10 @@ namespace DeadlockPlayground.Painter
             if (layers == null || layers.Count == 0 || width <= 0 || height <= 0) return null;
             int bufferLen = width * height * 8;
             byte[] comp = new byte[bufferLen];
+            if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
+            {
+                Buffer.BlockCopy(_baseAtlasBuffer, 0, comp, 0, bufferLen);
+            }
             var rd = RenderingServer.GetRenderingDevice();
 
             foreach (var layer in layers)

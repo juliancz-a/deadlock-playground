@@ -8,20 +8,28 @@ using DeadlockPlayground.Addons;
 using DeadlockPlayground.UI;
 
 using DeadlockPlayground.Particles;
+using DeadlockPlayground.Painter;
+using DeadlockPlayground.Materials;
 
 public partial class CharacterTabUI : VBoxContainer
 {
     [Signal] public delegate void CharacterRequestedEventHandler(string internalId);
 
-    [Export] private OptionButton _updateHeroOptionButton;
-
-    [Export] private OptionButton _heroOptionButton;
-    [Export] private OptionButton _optAddonMods;
-    [Export] private RichTextLabel _lblAddonDetails;
     [Export] private Container _submeshContainer;
+    [Export] private Label _partsLabel;
     [Export] private Button _btnShowAll;
     [Export] private Button _btnHideAccessories;
     [Export] private Button _btnBrowseParticles;
+    [Export] private Button _btnBrowseHeroGallery;
+    [Export] private Button _btnExtraModels;
+    [Export] private Button _btnBrowseModGallery;
+    [Export] private Button _btnCloseParticle;
+    [Export] private Button _btnRestoreCharacter;
+    [Export] private Control _secondaryActionButtons;
+    [Export] private TextureRect _texHeroGallery;
+    [Export] private TextureRect _texModGallery;
+    [Export] private TextureRect _texExtraModels;
+    [Export] private TextureRect _texParticles;
     [Export] private VpkLoaderTest _vpkLoader;
 
     public class SubmeshItem
@@ -33,34 +41,54 @@ public partial class CharacterTabUI : VBoxContainer
         public CheckBox CheckBoxWidget { get; set; }
     }
 
+    public class ParticleHierarchyItem
+    {
+        public ParticleMultiMeshRenderer Renderer { get; set; }
+        public string DisplayName { get; set; }
+        public CheckBox CheckBoxWidget { get; set; }
+    }
+
     private readonly List<SubmeshItem> _submeshes = new();
-    private readonly List<DeadlockHeroEntry> _selectableHeroes = new();
-    private readonly List<DeadlockHeroEntry> _selectableUpdateHeroes = new();
+    private readonly List<ParticleHierarchyItem> _particleHierarchyItems = new();
     private readonly List<AddonModInfo> _addonMods = new();
+    private Node3D _currentHeroNode;
+    private bool _isParticleHierarchyMode = false;
+    private bool _hasConnectedParticleStage = false;
+    private bool _artworkLoaded = false;
 
     public override void _Ready()
     {
-        _updateHeroOptionButton ??= GetNodeOrNull<OptionButton>("HeroSelectGroup/UpdateHeroOptionButton")
-                                  ?? GetNodeOrNull<OptionButton>("HeroSelectGroup/HeroOptionButton2");
-        _heroOptionButton ??= GetNodeOrNull<OptionButton>("HeroSelectGroup/HeroOptionButton");
+        _partsLabel ??= GetNodeOrNull<Label>("SubmeshHeader/PartsLabel")
+                     ?? FindChild("PartsLabel", true, false) as Label;
 
-        _btnBrowseParticles ??= GetNodeOrNull<Button>("HeroSelectGroup/BtnBrowseParticles")
+        _btnCloseParticle ??= GetNodeOrNull<Button>("HeroSelectGroup/ContextualActionButtons/BtnCloseParticle")
+                           ?? FindChild("BtnCloseParticle", true, false) as Button;
+
+        _btnRestoreCharacter ??= GetNodeOrNull<Button>("HeroSelectGroup/ContextualActionButtons/BtnRestoreCharacter")
+                              ?? FindChild("BtnRestoreCharacter", true, false) as Button;
+
+        _btnBrowseHeroGallery ??= GetNodeOrNull<Button>("HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery")
+                               ?? FindChild("BtnBrowseHeroGallery", true, false) as Button;
+
+        _btnBrowseModGallery ??= GetNodeOrNull<Button>("HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery")
+                              ?? FindChild("BtnBrowseModGallery", true, false) as Button;
+
+        _secondaryActionButtons ??= GetNodeOrNull<Control>("HeroSelectGroup/SecondaryActionButtons")
+                                 ?? FindChild("SecondaryActionButtons", true, false) as Control;
+
+        _btnExtraModels ??= GetNodeOrNull<Button>("HeroSelectGroup/SecondaryActionButtons/BtnExtraModels")
+                         ?? FindChild("BtnExtraModels", true, false) as Button;
+
+        _btnBrowseParticles ??= GetNodeOrNull<Button>("HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles")
                              ?? GetNodeOrNull<Button>("SubmeshHeader/HBoxButtons/BtnBrowseParticles")
                              ?? FindChild("BtnBrowseParticles", true, false) as Button;
 
-        if (_btnBrowseParticles == null)
-        {
-            var heroGroup = GetNodeOrNull<VBoxContainer>("HeroSelectGroup") ?? this;
-            _btnBrowseParticles = new Button
-            {
-                Name = "BtnBrowseParticles",
-                Text = "Browse Particles",
-                Icon = GD.Load<Texture2D>("res://assets/icons/sparkles.svg"),
-                CustomMinimumSize = new Vector2(0, 32),
-                SizeFlagsHorizontal = SizeFlags.Fill
-            };
-            heroGroup.AddChild(_btnBrowseParticles);
-        }
+        _texHeroGallery ??= FindChild("TexHeroGallery", true, false) as TextureRect;
+        _texModGallery ??= FindChild("TexModGallery", true, false) as TextureRect;
+        _texExtraModels ??= FindChild("TexExtraModels", true, false) as TextureRect;
+        _texParticles ??= FindChild("TexParticles", true, false) as TextureRect;
+
+        CallDeferred(nameof(LoadActionButtonsArtwork));
 
         ConnectEvents();
 
@@ -71,8 +99,13 @@ public partial class CharacterTabUI : VBoxContainer
                       ?? GetTree().Root.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
         }
 
-        PopulateAddonDropdown();
-        PopulateHeroDropdowns();
+        UpdateContextualButtonsVisibility();
+
+        var stage = GetOrCreateParticleStage();
+        if (stage != null && stage.HasActiveParticle)
+        {
+            PopulateParticleHierarchy(stage);
+        }
 
         if (_vpkLoader != null)
         {
@@ -98,72 +131,35 @@ public partial class CharacterTabUI : VBoxContainer
         if (_btnShowAll != null) _btnShowAll.Disabled = !enabled;
         if (_btnHideAccessories != null) _btnHideAccessories.Disabled = !enabled;
         if (_btnBrowseParticles != null) _btnBrowseParticles.Disabled = !enabled;
+        if (_btnExtraModels != null) _btnExtraModels.Disabled = !enabled && _vpkLoader?.CurrentHeroNode == null;
         if (_submeshContainer != null)
         {
             _submeshContainer.Modulate = enabled ? Colors.White : new Color(1, 1, 1, 0.4f);
         }
     }
 
-    public void PopulateHeroDropdown()
-    {
-        PopulateHeroDropdowns();
-    }
-
-    public void PopulateHeroDropdown(OptionButton heroOptionButton)
-    {
-        if (heroOptionButton == null) return;
-        HeroSelectionUI.PopulateDropdown(heroOptionButton, _selectableHeroes);
-    }
-
-    public void PopulateHeroDropdowns()
-    {
-        if (_updateHeroOptionButton != null)
-        {
-            HeroSelectionUI.PopulateUpdateHeroesDropdown(_updateHeroOptionButton, _selectableUpdateHeroes);
-            if (_updateHeroOptionButton.ItemCount > 0)
-            {
-                _updateHeroOptionButton.Select(0);
-            }
-        }
-
-        if (_heroOptionButton != null)
-        {
-            if (_updateHeroOptionButton != null)
-            {
-                HeroSelectionUI.PopulateStandardHeroesDropdown(_heroOptionButton, _selectableHeroes);
-            }
-            else
-            {
-                HeroSelectionUI.PopulateDropdown(_heroOptionButton, _selectableHeroes);
-            }
-
-            if (_heroOptionButton.ItemCount > 0)
-            {
-                _heroOptionButton.Select(0);
-            }
-        }
-
-        if (_vpkLoader?.LastLoadedHeroEntry != null)
-        {
-            SyncHeroDropdownToHero(_vpkLoader.LastLoadedHeroEntry);
-        }
-    }
-
     private void ConnectEvents()
     {
-        if (_updateHeroOptionButton != null)
+        if (_btnCloseParticle != null)
         {
-            _updateHeroOptionButton.ItemSelected += OnUpdateHeroSelected;
+            _btnCloseParticle.Pressed += () =>
+            {
+                var stage = GetOrCreateParticleStage();
+                stage?.UnloadActiveParticle();
+                UpdateContextualButtonsVisibility();
+            };
         }
 
-        if (_heroOptionButton != null)
+        if (_btnRestoreCharacter != null)
         {
-            _heroOptionButton.ItemSelected += OnStandardHeroSelected;
-        }
-
-        if (_optAddonMods != null)
-        {
-            _optAddonMods.ItemSelected += OnAddonSelected;
+            _btnRestoreCharacter.Pressed += async () =>
+            {
+                if (_vpkLoader != null && _vpkLoader.BaseHeroEntry != null)
+                {
+                    await _vpkLoader.LoadHeroModelAsync(_vpkLoader.BaseHeroEntry);
+                    UpdateContextualButtonsVisibility();
+                }
+            };
         }
 
         if (_btnShowAll != null)
@@ -176,10 +172,338 @@ public partial class CharacterTabUI : VBoxContainer
             _btnHideAccessories.Pressed += HideAccessories;
         }
 
+        if (_btnBrowseHeroGallery != null)
+        {
+            _btnBrowseHeroGallery.Pressed += OpenHeroPickerModal;
+        }
+
+        if (_btnExtraModels != null)
+        {
+            _btnExtraModels.Pressed += OpenExtraModelModal;
+        }
+
+        if (_btnBrowseModGallery != null)
+        {
+            _btnBrowseModGallery.Pressed += OpenModPickerModal;
+        }
+
         if (_btnBrowseParticles != null)
         {
             _btnBrowseParticles.Pressed += OnBrowseParticlesPressed;
         }
+    }
+
+    public void OpenHeroPickerModal()
+    {
+        var modalsLayer = GetTree()?.Root?.FindChild("ModalsLayer", true, false) as Control;
+        var modal = modalsLayer?.FindChild("HeroPickerModal", true, false) as HeroPickerModalUI;
+        if (modal == null && modalsLayer != null)
+        {
+            modal = new HeroPickerModalUI { Name = "HeroPickerModal" };
+            modalsLayer.AddChild(modal);
+            modal.HeroSelected += OnHeroSelectedFromModal;
+            modal.ModalClosed += () =>
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                studioUI?.UpdateModalsState();
+            };
+        }
+
+        if (modal != null)
+        {
+            var basePkg = _vpkLoader?.GetOrCreateBasePackage();
+            modal.Open(basePkg, _vpkLoader?.LastLoadedHeroEntry?.InternalCodename);
+            var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                        ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+            studioUI?.UpdateModalsState();
+        }
+    }
+
+    private async void OnHeroSelectedFromModal(string heroCodename, string vmdlPath, string displayName)
+    {
+        if (_vpkLoader == null) return;
+        var entry = DeadlockHeroCatalog.GetByCodename(heroCodename) ?? DeadlockHeroCatalog.ResolveHero(heroCodename);
+        if (entry != null)
+        {
+            await _vpkLoader.LoadHeroModelAsync(entry);
+        }
+        else
+        {
+            await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroCodename, displayName);
+        }
+        UpdateContextualButtonsVisibility();
+    }
+
+    public void OpenExtraModelModal()
+    {
+        var modalsLayer = GetTree()?.Root?.FindChild("ModalsLayer", true, false) as Control;
+        var modal = modalsLayer?.FindChild("ExtraModelPickerModal", true, false) as ExtraModelPickerModalUI;
+        if (modal == null && modalsLayer != null)
+        {
+            modal = new ExtraModelPickerModalUI { Name = "ExtraModelPickerModal" };
+            modalsLayer.AddChild(modal);
+            modal.ExtraModelSelected += OnExtraModelSelectedFromModal;
+            modal.ModalClosed += () =>
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                studioUI?.UpdateModalsState();
+            };
+        }
+
+        if (modal != null)
+        {
+            var basePkg = _vpkLoader?.GetOrCreateBasePackage();
+            var heroEntry = _vpkLoader?.LastLoadedHeroEntry 
+                         ?? DeadlockHeroCatalog.ResolveHero(_vpkLoader?.HeroName ?? "")
+                         ?? DeadlockHeroCatalog.ResolveHero("Dynamo");
+            modal.OpenForHero(basePkg, heroEntry, _vpkLoader?.LastLoadedVmdlPath);
+            var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                        ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+            studioUI?.UpdateModalsState();
+        }
+    }
+
+    private async void OnExtraModelSelectedFromModal(string vmdlPath, string displayName)
+    {
+        if (_vpkLoader == null || string.IsNullOrEmpty(vmdlPath)) return;
+        string heroKey = _vpkLoader.HeroName ?? "Hero";
+        await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroKey, displayName);
+        UpdateContextualButtonsVisibility();
+    }
+
+    public void OpenModPickerModal()
+    {
+        var modalsLayer = GetTree()?.Root?.FindChild("ModalsLayer", true, false) as Control;
+        var modal = modalsLayer?.FindChild("ModPickerModal", true, false) as ModPickerModalUI;
+        if (modal == null && modalsLayer != null)
+        {
+            modal = new ModPickerModalUI { Name = "ModPickerModal" };
+            modalsLayer.AddChild(modal);
+            modal.ModSelected += OnModSelectedFromModal;
+            modal.ModalClosed += () =>
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                studioUI?.UpdateModalsState();
+            };
+        }
+
+        if (modal != null)
+        {
+            string addonsDir = GetResolvedAddonsDir();
+            var detected = !string.IsNullOrEmpty(addonsDir) && Directory.Exists(addonsDir)
+                ? DeadlockAddonScanner.ScanAddons(addonsDir)
+                : new List<AddonModInfo>();
+
+            modal.Open(detected, _vpkLoader?.AddonVpkPath);
+            var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                        ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+            studioUI?.UpdateModalsState();
+        }
+    }
+
+    private async void OnModSelectedFromModal(string modFilePath, string modDisplayTitle, bool isVanilla)
+    {
+        if (_vpkLoader == null) return;
+
+        if (isVanilla || string.IsNullOrEmpty(modFilePath))
+        {
+            // Vanilla
+            _vpkLoader.SetActiveAddon(null, null);
+            await _vpkLoader.ReloadCurrentHeroAsync();
+            UpdateContextualButtonsVisibility();
+            return;
+        }
+
+        var mod = _addonMods.FirstOrDefault(m => m.FilePath.Equals(modFilePath, StringComparison.OrdinalIgnoreCase))
+               ?? new AddonModInfo
+               {
+                   FilePath = modFilePath,
+                   DisplayTitle = modDisplayTitle,
+                   FileName = System.IO.Path.GetFileName(modFilePath)
+               };
+
+        _vpkLoader.SetActiveAddon(mod.FilePath, mod);
+        await _vpkLoader.LoadAddonModelAsync(mod);
+        UpdateContextualButtonsVisibility();
+    }
+
+    private ParticleStage3D GetOrCreateParticleStage()
+    {
+        var worldViewport = GetTree()?.Root?.FindChild("WorldViewport", true, false) as SubViewport;
+        var stage = worldViewport?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
+        if (stage == null && worldViewport != null)
+        {
+            stage = new ParticleStage3D();
+            worldViewport.AddChild(stage);
+        }
+
+        if (stage != null && !_hasConnectedParticleStage)
+        {
+            _hasConnectedParticleStage = true;
+            stage.ParticleLoaded += OnParticleLoaded;
+            stage.ParticleUnloaded += OnParticleUnloaded;
+        }
+
+        return stage;
+    }
+
+    private void OnParticleLoaded(string vpcfPath, string variantName, string abilityName)
+    {
+        UpdateContextualButtonsVisibility();
+        var stage = GetOrCreateParticleStage();
+        if (stage != null)
+        {
+            PopulateParticleHierarchy(stage);
+        }
+    }
+
+    private void OnParticleUnloaded()
+    {
+        UpdateContextualButtonsVisibility();
+        _isParticleHierarchyMode = false;
+        _particleHierarchyItems.Clear();
+
+        if (_partsLabel != null)
+        {
+            _partsLabel.Text = "Submesh Visibility";
+        }
+        if (_btnShowAll != null)
+        {
+            _btnShowAll.Text = "Show All";
+        }
+        if (_btnHideAccessories != null)
+        {
+            _btnHideAccessories.Text = "Hide Accessories";
+        }
+
+        if (_currentHeroNode != null && GodotObject.IsInstanceValid(_currentHeroNode))
+        {
+            ClearSubmeshes();
+            CollectSubmeshesRecursive(_currentHeroNode);
+            PopulateSubmeshList();
+            SetControlsEnabled(true);
+        }
+        else
+        {
+            ClearSubmeshes();
+            SetControlsEnabled(false);
+        }
+    }
+
+    public void PopulateParticleHierarchy(ParticleStage3D stage)
+    {
+        if (stage == null || !stage.HasActiveParticle) return;
+
+        _isParticleHierarchyMode = true;
+        _particleHierarchyItems.Clear();
+
+        if (_partsLabel != null)
+        {
+            _partsLabel.Text = "Particle Hierarchy";
+        }
+        if (_btnShowAll != null)
+        {
+            _btnShowAll.Text = "Show All";
+        }
+        if (_btnHideAccessories != null)
+        {
+            _btnHideAccessories.Text = "Hide All";
+        }
+
+        if (_submeshContainer != null)
+        {
+            foreach (Node child in _submeshContainer.GetChildren())
+            {
+                child.QueueFree();
+            }
+        }
+
+        string rootBase = stage.ActiveRootDefinition?.VpcfPath?.GetFile()?.GetBaseName() ?? "";
+
+        foreach (var renderer in stage.Renderers)
+        {
+            if (renderer == null || !GodotObject.IsInstanceValid(renderer)) continue;
+
+            string baseName = renderer.Instance?.Definition?.VpcfPath?.GetFile()?.GetBaseName() ?? renderer.Name.ToString();
+            string displayName;
+            if (!string.IsNullOrEmpty(rootBase) && baseName.StartsWith(rootBase, StringComparison.OrdinalIgnoreCase) && baseName.Length > rootBase.Length)
+            {
+                displayName = baseName.Substring(rootBase.Length);
+            }
+            else
+            {
+                displayName = baseName;
+            }
+
+            string rType = renderer.RendererDef?.ClassName?.Replace("C_OP_", "")?.Replace("Render", "") ?? "";
+            if (!string.IsNullOrEmpty(rType))
+            {
+                displayName += $" ({rType})";
+            }
+
+            var item = new ParticleHierarchyItem
+            {
+                Renderer = renderer,
+                DisplayName = displayName
+            };
+
+            var row = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            row.AddThemeConstantOverride("separation", 6);
+
+            var cb = new CheckBox
+            {
+                ButtonPressed = renderer.VisibleAndEmitting,
+                TooltipText = "Toggle child particle system visibility & emission",
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+
+            var localRenderer = renderer;
+            cb.Toggled += (pressed) =>
+            {
+                if (localRenderer != null && GodotObject.IsInstanceValid(localRenderer))
+                {
+                    localRenderer.VisibleAndEmitting = pressed;
+                }
+            };
+
+            var btnWrapper = new Control
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.Fill,
+                CustomMinimumSize = new Vector2(0, 28),
+                ClipContents = true
+            };
+
+            var nameBtn = new Button
+            {
+                Text = displayName,
+                Alignment = HorizontalAlignment.Left,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                TooltipText = displayName
+            };
+            nameBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            nameBtn.AddThemeFontSizeOverride("font_size", 11);
+            nameBtn.Pressed += () =>
+            {
+                cb.ButtonPressed = !cb.ButtonPressed;
+            };
+
+            btnWrapper.AddChild(nameBtn);
+            row.AddChild(cb);
+            row.AddChild(btnWrapper);
+
+            item.CheckBoxWidget = cb;
+            _particleHierarchyItems.Add(item);
+
+            _submeshContainer?.AddChild(row);
+        }
+
+        SetControlsEnabled(true);
     }
 
     private async void OnBrowseParticlesPressed()
@@ -221,13 +545,7 @@ public partial class CharacterTabUI : VBoxContainer
         if (_vpkLoader == null) return;
 
         // 1. Resolve or create ParticleStage3D in world viewport
-        var worldViewport = GetTree()?.Root?.FindChild("WorldViewport", true, false) as SubViewport;
-        var stage = worldViewport?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
-        if (stage == null && worldViewport != null)
-        {
-            stage = new ParticleStage3D();
-            worldViewport.AddChild(stage);
-        }
+        var stage = GetOrCreateParticleStage();
 
         // 2. Connect to Player Tab timeline & Paint Tab before loading
         var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI;
@@ -245,7 +563,8 @@ public partial class CharacterTabUI : VBoxContainer
         if (stage != null)
         {
             var fileLoader = _vpkLoader.GetOrCreateFileLoader();
-            stage.LoadParticle(vpcfPath, variantName, abilityKey, _vpkLoader.CurrentHeroNode, fileLoader);
+            var basePkg = _vpkLoader.GetOrCreateBasePackage();
+            stage.LoadParticle(vpcfPath, variantName, abilityKey, _vpkLoader.CurrentHeroNode, fileLoader, basePkg);
         }
 
         // 3. Resolve or create ActiveParticleBadgeUI inside 3D ViewportArea
@@ -256,32 +575,16 @@ public partial class CharacterTabUI : VBoxContainer
             badge = new ActiveParticleBadgeUI { Name = "ActiveParticleBadge" };
             viewportArea.AddChild(badge);
             badge.UnloadRequested += () => stage?.UnloadActiveParticle();
+            badge.BrowseRequested += OnBrowseParticlesPressed;
         }
         if (badge != null)
         {
-            badge.SetAnchorsPreset(Control.LayoutPreset.TopRight);
-            badge.AnchorLeft = 1.0f;
-            badge.AnchorRight = 1.0f;
-            badge.AnchorTop = 0.0f;
-            badge.AnchorBottom = 0.0f;
-            badge.GrowHorizontal = Control.GrowDirection.Begin;
-            badge.GrowVertical = Control.GrowDirection.End;
-            badge.OffsetLeft = -340;
-            badge.OffsetTop = 16;
-            badge.OffsetRight = -20;
-            badge.OffsetBottom = 52;
-            badge.ZIndex = 50;
             badge.ShowBadge(_vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? "Hero", abilityKey, variantName);
         }
     }
 
-    public void PopulateAddonDropdown()
+    public string GetResolvedAddonsDir()
     {
-        if (_optAddonMods == null) return;
-
-        _optAddonMods.Clear();
-        _addonMods.Clear();
-
         string addonsDir = null;
         if (_vpkLoader != null && !string.IsNullOrEmpty(_vpkLoader.VpkPath))
         {
@@ -302,284 +605,104 @@ public partial class CharacterTabUI : VBoxContainer
             }
         }
 
-        if (!string.IsNullOrEmpty(addonsDir))
+        return addonsDir;
+    }
+
+    public void PopulateAddonDropdown()
+    {
+        // Redundant dropdown removed, kept for backward compatibility with StudioUIManager
+    }
+
+    public void LoadActionButtonsArtwork()
+    {
+        if (_artworkLoaded) return;
+        var basePkg = _vpkLoader?.GetOrCreateBasePackage();
+        if (basePkg == null) return;
+
+        try
         {
-            ScanAndPopulateAddons(addonsDir);
+            if (_texHeroGallery != null)
+            {
+                var tex = Source2TextureLoader.GetOrLoadTexture(basePkg, "panorama/images/main_menu/play/card_play_subject_psd.vtex_c", forceOpaque: false);
+                if (tex != null) _texHeroGallery.Texture = tex;
+            }
+
+            if (_texModGallery != null)
+            {
+                var tex = Source2TextureLoader.GetOrLoadTexture(basePkg, "panorama/images/main_menu/play/card_custom_subject_psd.vtex_c", forceOpaque: false);
+                if (tex != null) _texModGallery.Texture = tex;
+            }
+
+            if (_texParticles != null)
+            {
+                var tex = Source2TextureLoader.GetOrLoadTexture(basePkg, "panorama/images/main_menu/play/card_roster_subject_psd.vtex_c", forceOpaque: false);
+                if (tex != null) _texParticles.Texture = tex;
+            }
+
+            if (_texExtraModels != null)
+            {
+                var tex = Source2TextureLoader.GetOrLoadTexture(basePkg, "panorama/images/heroes/guns/bookworm_gun_psd.vtex_c", forceOpaque: false);
+                if (tex != null) _texExtraModels.Texture = tex;
+            }
+
+            if (_texHeroGallery?.Texture != null || _texModGallery?.Texture != null)
+            {
+                _artworkLoaded = true;
+                GD.Print("[CharacterTabUI] Action buttons artwork loaded successfully.");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharacterTabUI] Failed to load action buttons artwork: {ex.Message}");
+        }
+    }
+
+    private void UpdateContextualButtonsVisibility()
+    {
+        var stage = GetOrCreateParticleStage();
+        bool hasParticle = stage != null && stage.HasActiveParticle;
+        if (_btnCloseParticle != null && GodotObject.IsInstanceValid(_btnCloseParticle))
+        {
+            _btnCloseParticle.Visible = hasParticle;
+        }
+
+        bool hasExtraModel = _vpkLoader != null && _vpkLoader.IsExtraModelLoaded;
+        if (_btnRestoreCharacter != null && GodotObject.IsInstanceValid(_btnRestoreCharacter))
+        {
+            _btnRestoreCharacter.Visible = hasExtraModel;
+        }
+
+        bool hasHero = _currentHeroNode != null || (_vpkLoader != null && _vpkLoader.CurrentHeroNode != null);
+        if (_secondaryActionButtons != null && GodotObject.IsInstanceValid(_secondaryActionButtons))
+        {
+            _secondaryActionButtons.Visible = hasHero;
         }
         else
         {
-            SetNoAddonsAvailableUI();
-        }
-    }
-
-    private void SetNoAddonsAvailableUI()
-    {
-        if (_optAddonMods == null) return;
-
-        _optAddonMods.Clear();
-        _addonMods.Clear();
-        _optAddonMods.AddItem("No modded character models available", -1);
-        _optAddonMods.SetItemDisabled(0, true);
-        _optAddonMods.Disabled = true;
-
-        if (_lblAddonDetails != null)
-        {
-            _lblAddonDetails.Text = "[color=#777777]No modded character packages found in citadel/addons/[/color]";
-        }
-    }
-
-    private void ScanAndPopulateAddons(string addonsDir)
-    {
-        var detected = DeadlockAddonScanner.ScanAddons(addonsDir);
-
-        if (detected.Count == 0)
-        {
-            SetNoAddonsAvailableUI();
-            GD.Print($"[CharacterTab] Scanned addons in '{addonsDir}': no modded character models found.");
-            return;
-        }
-
-        _optAddonMods.Disabled = false;
-        _optAddonMods.Clear();
-        _addonMods.Clear();
-
-        // Default entry: "None (Vanilla)" (Index 0)
-        _optAddonMods.AddItem("None (Vanilla)", 0);
-
-        foreach (var mod in detected)
-        {
-            int currentId = _addonMods.Count + 1;
-            _addonMods.Add(mod);
-            _optAddonMods.AddItem(mod.DisplayTitle, currentId);
-        }
-
-        _optAddonMods.Select(0);
-        if (_lblAddonDetails != null)
-        {
-            _lblAddonDetails.Text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]";
-        }
-
-        GD.Print($"[CharacterTab] Scanned addons in '{addonsDir}': {detected.Count} modded character models found.");
-    }
-
-    private async void OnAddonSelected(long index)
-    {
-        if (_optAddonMods == null) return;
-        int id = _optAddonMods.GetItemId((int)index);
-
-        if (id <= 0 || id - 1 >= _addonMods.Count)
-        {
-            GD.Print("[CharacterTab] Addon selected: None (Vanilla)");
-            _vpkLoader?.SetActiveAddon(null, null);
-
-            if (_lblAddonDetails != null)
+            if (_btnExtraModels != null && GodotObject.IsInstanceValid(_btnExtraModels))
             {
-                _lblAddonDetails.Text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]";
+                _btnExtraModels.Visible = hasHero;
             }
-
-            // If a character was loaded, restore its vanilla model/textures
-            if (_vpkLoader != null)
+            if (_btnBrowseParticles != null && GodotObject.IsInstanceValid(_btnBrowseParticles))
             {
-                GD.Print("[CharacterTab] Restoring vanilla model/textures...");
-                await _vpkLoader.ReloadCurrentHeroAsync();
+                _btnBrowseParticles.Visible = hasHero;
             }
-
-            SyncHeroDropdownToCurrent();
-            return;
-        }
-
-        var mod = _addonMods[id - 1];
-        GD.Print($"[CharacterTab] Addon selected: {mod.DisplayTitle} ({mod.FilePath})");
-        _vpkLoader?.SetActiveAddon(mod.FilePath, mod);
-
-        // Update details label with subtle grey VPK filename
-        string heroName = !string.IsNullOrEmpty(mod.DetectedHeroDisplayName) ? mod.DetectedHeroDisplayName : "Custom Character";
-        string typeText = mod.ModType == AddonModType.FullModel ? $"{heroName} Model" : $"{heroName} Texture Mod";
-        if (_lblAddonDetails != null)
-        {
-            _lblAddonDetails.Text = $"[color=#dcdcdc]{typeText}[/color]  [color=#777777]—[/color]  [color=#8a8a8a]{mod.FileName}[/color]";
-        }
-
-        // Case 1: Full Model Mod -> Load addon model directly without needing prior vanilla model
-        if (mod.ModType == AddonModType.FullModel || mod.ModelEntries.Count > 0)
-        {
-            GD.Print($"[CharacterTab] Loading Full Model addon directly: {mod.DisplayTitle}...");
-            if (!string.IsNullOrEmpty(mod.DetectedHeroCodename))
-            {
-                SyncHeroDropdownToHeroCodename(mod.DetectedHeroCodename);
-            }
-
-            if (_vpkLoader != null)
-            {
-                await _vpkLoader.LoadAddonModelAsync(mod);
-            }
-            return;
-        }
-
-        // Case 2: Texture-Only Mod -> Load base hero model with injected addon textures
-        if (mod.ModType == AddonModType.TextureOnly)
-        {
-            if (!string.IsNullOrEmpty(mod.DetectedHeroCodename))
-            {
-                var catalogEntry = DeadlockHeroCatalog.ResolveHero(mod.DetectedHeroCodename);
-                if (catalogEntry != null)
-                {
-                    GD.Print($"[CharacterTab] Loading target hero '{catalogEntry.DisplayName}' with textures from '{mod.FileName}'...");
-                    SyncHeroDropdownToHero(catalogEntry);
-
-                    if (_vpkLoader != null)
-                    {
-                        await _vpkLoader.LoadHeroModelAsync(catalogEntry);
-                    }
-                    return;
-                }
-            }
-
-            // Fallback: If a character is currently loaded, reload it with updated textures
-            if (_vpkLoader != null && (_vpkLoader.LastLoadedHeroEntry != null || !string.IsNullOrEmpty(_vpkLoader.LastLoadedVmdlPath)))
-            {
-                GD.Print("[CharacterTab] Reloading current character with texture mod...");
-                await _vpkLoader.ReloadCurrentHeroAsync();
-            }
-        }
-    }
-
-    private async void OnUpdateHeroSelected(long index)
-    {
-        if (_updateHeroOptionButton == null) return;
-        int id = _updateHeroOptionButton.GetItemId((int)index);
-        if (id < 0 || id >= _selectableUpdateHeroes.Count) return;
-
-        // Reset the standard hero dropdown to placeholder
-        if (_heroOptionButton != null && _heroOptionButton.ItemCount > 0)
-        {
-            _heroOptionButton.Select(0);
-        }
-
-        var entry = _selectableUpdateHeroes[id];
-        await LoadSelectedHeroAsync(entry);
-    }
-
-    private async void OnStandardHeroSelected(long index)
-    {
-        if (_heroOptionButton == null) return;
-        int id = _heroOptionButton.GetItemId((int)index);
-        if (id < 0 || id >= _selectableHeroes.Count) return;
-
-        // Reset the update hero dropdown to placeholder
-        if (_updateHeroOptionButton != null && _updateHeroOptionButton.ItemCount > 0)
-        {
-            _updateHeroOptionButton.Select(0);
-        }
-
-        var entry = _selectableHeroes[id];
-        await LoadSelectedHeroAsync(entry);
-    }
-
-    private async System.Threading.Tasks.Task LoadSelectedHeroAsync(DeadlockHeroEntry entry)
-    {
-        if (entry == null) return;
-
-        GD.Print($"[CharacterTab] Loading hero: {entry.DisplayName} ({entry.InternalCodename}) from {entry.VmdlRelativePath}");
-        EmitSignal(SignalName.CharacterRequested, entry.InternalCodename);
-
-        // If active addon is a full model replacement, reset addon selector to Vanilla so it doesn't conflict
-        if (_vpkLoader != null && _vpkLoader.ActiveAddonInfo != null && _vpkLoader.ActiveAddonInfo.ModType == AddonModType.FullModel)
-        {
-            _vpkLoader.SetActiveAddon(null, null);
-            if (_optAddonMods != null && !_optAddonMods.Disabled)
-            {
-                _optAddonMods.Select(0);
-            }
-            if (_lblAddonDetails != null)
-            {
-                _lblAddonDetails.Text = "[color=#888888]Vanilla Assets (pak01_dir.vpk)[/color]";
-            }
-        }
-
-        if (_vpkLoader != null)
-        {
-            await _vpkLoader.LoadHeroModelAsync(entry);
-        }
-    }
-
-    private void SelectOptionByItemId(OptionButton optionButton, int targetId)
-    {
-        if (optionButton == null) return;
-        for (int i = 0; i < optionButton.ItemCount; i++)
-        {
-            if (optionButton.GetItemId(i) == targetId)
-            {
-                optionButton.Select(i);
-                return;
-            }
-        }
-    }
-
-    private void SyncHeroDropdownToHero(DeadlockHeroEntry hero)
-    {
-        if (hero == null) return;
-
-        // 1. Check if the hero matches an entry in the update heroes dropdown
-        if (_updateHeroOptionButton != null)
-        {
-            for (int i = 0; i < _selectableUpdateHeroes.Count; i++)
-            {
-                var entry = _selectableUpdateHeroes[i];
-                if (entry.InternalCodename.Equals(hero.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
-                    entry.DisplayName.Equals(hero.DisplayName, StringComparison.OrdinalIgnoreCase) ||
-                    (!string.IsNullOrEmpty(hero.WipAlias) && entry.InternalCodename.Equals(hero.WipAlias, StringComparison.OrdinalIgnoreCase)))
-                {
-                    SelectOptionByItemId(_updateHeroOptionButton, i);
-                    if (_heroOptionButton != null && _heroOptionButton.ItemCount > 0)
-                    {
-                        _heroOptionButton.Select(0);
-                    }
-                    return;
-                }
-            }
-        }
-
-        // 2. Check if the hero matches an entry in the standard heroes dropdown
-        if (_heroOptionButton != null)
-        {
-            for (int i = 0; i < _selectableHeroes.Count; i++)
-            {
-                var entry = _selectableHeroes[i];
-                if (entry.InternalCodename.Equals(hero.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
-                    entry.DisplayName.Equals(hero.DisplayName, StringComparison.OrdinalIgnoreCase))
-                {
-                    SelectOptionByItemId(_heroOptionButton, i);
-                    if (_updateHeroOptionButton != null && _updateHeroOptionButton.ItemCount > 0)
-                    {
-                        _updateHeroOptionButton.Select(0);
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    private void SyncHeroDropdownToHeroCodename(string codename)
-    {
-        if (string.IsNullOrEmpty(codename)) return;
-        var hero = DeadlockHeroCatalog.ResolveHero(codename);
-        if (hero != null)
-        {
-            SyncHeroDropdownToHero(hero);
-        }
-    }
-
-    private void SyncHeroDropdownToCurrent()
-    {
-        if (_vpkLoader?.LastLoadedHeroEntry != null)
-        {
-            SyncHeroDropdownToHero(_vpkLoader.LastLoadedHeroEntry);
         }
     }
 
     public void SetHero(Node3D heroNode)
     {
+        _currentHeroNode = heroNode;
+        UpdateContextualButtonsVisibility();
+        LoadActionButtonsArtwork();
+
+        var stage = GetOrCreateParticleStage();
+        if (stage != null && stage.HasActiveParticle)
+        {
+            PopulateParticleHierarchy(stage);
+            return;
+        }
+
         ClearSubmeshes();
         if (heroNode == null)
         {
@@ -594,6 +717,8 @@ public partial class CharacterTabUI : VBoxContainer
 
     public void ClearSubmeshes()
     {
+        _currentHeroNode = null;
+        UpdateContextualButtonsVisibility();
         if (_submeshContainer != null)
         {
             foreach (Node child in _submeshContainer.GetChildren())
@@ -602,15 +727,34 @@ public partial class CharacterTabUI : VBoxContainer
             }
         }
         _submeshes.Clear();
+        _particleHierarchyItems.Clear();
         SetControlsEnabled(false);
     }
 
     private void CollectSubmeshesRecursive(Node node)
     {
+        if (node == null) return;
+        if (node is BoneAttachment3D) return;
+
         if (node is MeshInstance3D mi && mi.Mesh != null)
         {
             string rawName = mi.Name.ToString();
+            if (rawName.StartsWith("@") || rawName.StartsWith(".")) return;
+
+            if (!HeroMeshHierarchy.IsAuthenticHeroMesh(mi))
+            {
+                return;
+            }
+
             string lowerName = rawName.ToLowerInvariant();
+            if (lowerName.Contains("tipvisual") || lowerName.Contains("polevisual") ||
+                lowerName.Contains("visual") || lowerName.Contains("wireframe") ||
+                lowerName.Contains("marker") || lowerName.Contains("gizmo") ||
+                lowerName.Contains("preview") || lowerName.Contains("picker") ||
+                lowerName.Contains("handle"))
+            {
+                return;
+            }
 
             // Skip internal split surfaces created by HeroMeshHierarchy so only high-level submeshes appear
             if (mi.HasMeta("ParentCompositeMesh") || lowerName.Contains("_surf_"))
@@ -618,8 +762,6 @@ public partial class CharacterTabUI : VBoxContainer
                 return;
             }
 
-            // Skip bone markers and gizmos
-            if (!lowerName.Contains("marker") && !lowerName.Contains("gizmo") && !lowerName.Contains("preview"))
             {
                 bool isAcc = lowerName.Contains("acc") ||
                              lowerName.Contains("prop") ||
@@ -763,6 +905,19 @@ public partial class CharacterTabUI : VBoxContainer
 
     public void ShowAll()
     {
+        if (_isParticleHierarchyMode)
+        {
+            foreach (var item in _particleHierarchyItems)
+            {
+                if (item.Renderer != null && GodotObject.IsInstanceValid(item.Renderer))
+                {
+                    item.Renderer.VisibleAndEmitting = true;
+                }
+                if (item.CheckBoxWidget != null) item.CheckBoxWidget.ButtonPressed = true;
+            }
+            return;
+        }
+
         foreach (var item in _submeshes)
         {
             if (item.Mesh != null && GodotObject.IsInstanceValid(item.Mesh))
@@ -796,6 +951,19 @@ public partial class CharacterTabUI : VBoxContainer
 
     public void HideAccessories()
     {
+        if (_isParticleHierarchyMode)
+        {
+            foreach (var item in _particleHierarchyItems)
+            {
+                if (item.Renderer != null && GodotObject.IsInstanceValid(item.Renderer))
+                {
+                    item.Renderer.VisibleAndEmitting = false;
+                }
+                if (item.CheckBoxWidget != null) item.CheckBoxWidget.ButtonPressed = false;
+            }
+            return;
+        }
+
         foreach (var item in _submeshes)
         {
             if (item.Mesh != null && GodotObject.IsInstanceValid(item.Mesh))

@@ -39,6 +39,8 @@ public partial class VpkLoaderTest : Node3D
 
 	public string ActiveAddonVpkPath => AddonVpkPath;
 	public DeadlockHeroEntry LastLoadedHeroEntry { get; private set; }
+	public DeadlockHeroEntry BaseHeroEntry { get; private set; }
+	public bool IsExtraModelLoaded { get; private set; }
 	public string LastLoadedVmdlPath { get; private set; }
 	public string LastLoadedHeroKey { get; private set; }
 	public string LastLoadedDisplayName { get; private set; }
@@ -57,14 +59,35 @@ public partial class VpkLoaderTest : Node3D
     private IFileLoader _currentFileLoader;
     public IFileLoader CurrentFileLoader => _currentFileLoader;
 
+    private Package _basePackage;
+
+    public Package GetOrCreateBasePackage()
+    {
+        if (_basePackage != null) return _basePackage;
+        if (File.Exists(VpkPath))
+        {
+            try
+            {
+                _basePackage = new Package();
+                _basePackage.Read(VpkPath);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[VpkLoader] Failed to read base package '{VpkPath}': {ex.Message}");
+                _basePackage?.Dispose();
+                _basePackage = null;
+            }
+        }
+        return _basePackage;
+    }
+
     public IFileLoader GetOrCreateFileLoader()
     {
         if (_currentFileLoader != null) return _currentFileLoader;
 
-        if (File.Exists(VpkPath))
+        var basePkg = GetOrCreateBasePackage();
+        if (basePkg != null)
         {
-            var basePkg = new Package();
-            basePkg.Read(VpkPath);
             IFileLoader baseLoader = new GameFileLoader(basePkg, "");
 
             if (!string.IsNullOrEmpty(AddonVpkPath) && File.Exists(AddonVpkPath))
@@ -185,12 +208,32 @@ public partial class VpkLoaderTest : Node3D
 	{
 		if (entry == null) return null;
 		LastLoadedHeroEntry = entry;
+		BaseHeroEntry = entry;
+		IsExtraModelLoaded = false;
 		LastLoadedVmdlPath = entry.VmdlRelativePath;
 		LastLoadedHeroKey = entry.InternalCodename;
 		LastLoadedDisplayName = entry.DisplayName;
 		HeroName = entry.InternalCodename;
 		HeroModelName = Path.GetFileNameWithoutExtension(entry.VmdlRelativePath);
 		return await LoadModelInternalAsync(entry.VmdlRelativePath, entry.InternalCodename, entry.DisplayName);
+	}
+
+	/// <summary>
+	/// Loads an extra or ability-specific 3D model (e.g. bookworm_dragon.vmdl_c, summons, turrets).
+	/// Cleans up any previously loaded model, displays the extra model in the 3D viewport,
+	/// and emits HeroLoaded to automatically populate Painter Tab and Submesh Visibility.
+	/// </summary>
+	public async Task<Node3D> LoadExtraModelAsync(string vmdlPath, string heroKey, string displayName)
+	{
+		if (string.IsNullOrEmpty(vmdlPath)) return null;
+		LastLoadedVmdlPath = vmdlPath;
+		LastLoadedHeroKey = heroKey ?? Path.GetFileNameWithoutExtension(vmdlPath);
+		LastLoadedDisplayName = displayName ?? Path.GetFileNameWithoutExtension(vmdlPath);
+		LastLoadedHeroEntry = null;
+		IsExtraModelLoaded = true;
+		HeroName = LastLoadedHeroKey;
+		HeroModelName = Path.GetFileNameWithoutExtension(vmdlPath);
+		return await LoadModelInternalAsync(vmdlPath, LastLoadedHeroKey, LastLoadedDisplayName);
 	}
 
 	public async Task LoadHeroAsync(string hero, string model)

@@ -1002,6 +1002,24 @@ namespace DeadlockPlayground.Painter
             NotifyHierarchyChanged();
         }
 
+        public void HideAll()
+        {
+            _isAnySoloed = false;
+            _preSoloVisibility.Clear();
+
+            foreach (var s in _submeshes)
+            {
+                s.IsSoloed = false;
+                if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
+                {
+                    s.Mesh.Visible = false;
+                    _preSoloVisibility[s.Mesh] = false;
+                    s.Mesh.Layers &= ~(1u << 20);
+                }
+            }
+            NotifyHierarchyChanged();
+        }
+
         public void CacheVisibilityState(out Dictionary<string, bool> visMap, out Dictionary<string, bool> preSoloMap, out string soloedRawName)
         {
             visMap = new Dictionary<string, bool>();
