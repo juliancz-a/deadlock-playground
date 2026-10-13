@@ -210,10 +210,12 @@ public partial class ParticlePickerModalUI : PanelContainer
         {
             Text = "Select a particle effect to load...",
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MaxLinesVisible = 2
         };
-        _lblSelectedDetails.AddThemeColorOverride("font_color", new Color(0.6f, 0.65f, 0.75f, 1.0f));
-        _lblSelectedDetails.AddThemeFontSizeOverride("font_size", 12);
+        _lblSelectedDetails.AddThemeColorOverride("font_color", new Color(0.82f, 0.85f, 0.90f, 1.0f));
+        _lblSelectedDetails.AddThemeFontSizeOverride("font_size", 13);
         footer.AddChild(_lblSelectedDetails);
 
         _btnCancel = new Button

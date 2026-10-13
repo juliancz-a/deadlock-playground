@@ -46,6 +46,8 @@ public partial class PaintTabUI : VBoxContainer
     private Dictionary<string, bool> _cachedPaintPreSoloVisibility = null;
     private string _cachedPaintSoloedSubmesh = null;
     private bool _hasCachedPaintVisibility = false;
+    public bool IsTabActive { get; private set; } = false;
+    private bool _wasShowingParticle = false;
 
     private class SubmeshRowUI
     {
@@ -983,8 +985,12 @@ public partial class PaintTabUI : VBoxContainer
             groups = _meshHierarchy.MaterialGroups;
         }
 
-        // Check if existing rows can be updated in-place
-        bool canUpdateInPlace = (_materialGroupRows.Count == groups.Count);
+        var stage = GetOrCreateParticleStage();
+        bool hasParticle = stage != null && stage.HasActiveParticle;
+
+        // Check if existing rows can be updated in-place (must not be transitioning to/from particle mode)
+        bool canUpdateInPlace = (_materialGroupRows.Count == groups.Count) && !hasParticle && !_wasShowingParticle;
+        _wasShowingParticle = hasParticle;
         if (canUpdateInPlace)
         {
             for (int g = 0; g < groups.Count; g++)
@@ -1046,45 +1052,50 @@ public partial class PaintTabUI : VBoxContainer
 
         EnsureGroupHeaderStyle();
 
-        foreach (var group in groups)
+        var colusFont = PlaygroundThemeHelper.GetFontColus();
+
+        if (!hasParticle)
         {
-            var groupContainer = new VBoxContainer
+            foreach (var group in groups)
             {
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
-            };
-            groupContainer.AddThemeConstantOverride("separation", 2);
+                var groupContainer = new VBoxContainer
+                {
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                };
+                groupContainer.AddThemeConstantOverride("separation", 2);
 
-            var headerPanel = new PanelContainer
-            {
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
-            };
-            headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
+                var headerPanel = new PanelContainer
+                {
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                };
+                headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
 
-            var headerRow = new HBoxContainer
-            {
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
-            };
-            headerRow.AddThemeConstantOverride("separation", 6);
+                var headerRow = new HBoxContainer
+                {
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                };
+                headerRow.AddThemeConstantOverride("separation", 6);
 
-            var toggleBtn = new Button
-            {
-                Text = group.IsExpanded ? "▼" : "▶",
-                Flat = true,
-                CustomMinimumSize = new Vector2(22, 22),
-                TooltipText = "Expand/Collapse material group",
-                SizeFlagsVertical = SizeFlags.ShrinkCenter
-            };
-            toggleBtn.AddThemeFontSizeOverride("font_size", 10);
+                var toggleBtn = new Button
+                {
+                    Text = group.IsExpanded ? "▼" : "▶",
+                    Flat = true,
+                    CustomMinimumSize = new Vector2(22, 22),
+                    TooltipText = "Expand/Collapse material group",
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                };
+                toggleBtn.AddThemeFontSizeOverride("font_size", 10);
 
-            var titleLabel = new Label
-            {
-                Text = group.DisplayName,
-                SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                ClipText = true,
-                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                TooltipText = $"Material: {group.MaterialKey}"
-            };
-            titleLabel.AddThemeFontSizeOverride("font_size", 12);
+                var titleLabel = new Label
+                {
+                    Text = group.DisplayName,
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    ClipText = true,
+                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                    TooltipText = $"Material: {group.MaterialKey}"
+                };
+                if (colusFont != null) titleLabel.AddThemeFontOverride("font", colusFont);
+                titleLabel.AddThemeFontSizeOverride("font_size", 12);
 
             var badgeLabel = new Label
             {
@@ -1259,6 +1270,7 @@ public partial class PaintTabUI : VBoxContainer
                 SubmeshRows = groupSubmeshRows
             });
         }
+        }
 
         UpdateParticleTexturesGroup();
         UpdateSubmeshRowHighlights();
@@ -1301,12 +1313,30 @@ public partial class PaintTabUI : VBoxContainer
         var stage = GetOrCreateParticleStage();
         if (stage != null && stage.GetActiveTextures().Count > 0)
         {
-            _activeParticleVtexPath = stage.GetActiveTextures().Keys.FirstOrDefault();
+            var firstPair = stage.GetActiveTextures().First();
+            _activeParticleVtexPath = firstPair.Key;
+
+            if (IsTabActive && IsVisibleInTree())
+            {
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                if (uvCanvas != null)
+                {
+                    uvCanvas.OpenParticleTexture(firstPair.Key, firstPair.Value, (updatedImage) =>
+                    {
+                        stage.UpdateParticleTexture(firstPair.Key, updatedImage);
+                    });
+                }
+            }
         }
         RefreshSubmeshListUI();
         UpdateParticleTexturesGroup();
         UpdateSubmeshRowHighlights();
         UpdateCanvasResolutionLabel();
+        if (_lblActiveMesh != null)
+        {
+            _lblActiveMesh.Text = $"Particle: {System.IO.Path.GetFileName(_activeParticleVtexPath ?? vpcfPath)}";
+        }
     }
 
     private void OnParticleStageUnloaded()
@@ -1315,12 +1345,58 @@ public partial class PaintTabUI : VBoxContainer
         UpdateParticleTexturesGroup();
         RefreshSubmeshListUI();
         UpdateSubmeshRowHighlights();
+
+        if (IsTabActive && IsVisibleInTree())
+        {
+            var activeTarget = _meshHierarchy?.ActiveTarget;
+            if (activeTarget != null && activeTarget.Mesh != null)
+            {
+                _layerManager?.SetPaintTargetMesh(activeTarget.Mesh);
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                uvCanvas?.SetPaintActive(true);
+            }
+        }
+
         if (_lblActiveMesh != null)
         {
             string displayName = _meshHierarchy?.ActiveTarget?.DisplayName ?? "None";
             _lblActiveMesh.Text = $"Target: {displayName}";
         }
         UpdateCanvasResolutionLabel();
+    }
+
+    private static bool IsSharedParticleTexture(string vtexPath, string heroName = null, string abilityName = null)
+    {
+        if (string.IsNullOrEmpty(vtexPath)) return true;
+        string norm = vtexPath.Replace("\\", "/").ToLowerInvariant();
+        if (!string.IsNullOrEmpty(heroName) && norm.Contains(heroName.ToLowerInvariant())) return false;
+        if (!string.IsNullOrEmpty(abilityName) && norm.Contains(abilityName.ToLowerInvariant())) return false;
+
+        if (norm.Contains("/ring/") || norm.Contains("/spark/") || norm.Contains("/sparks/") ||
+            norm.Contains("/smoke/") || norm.Contains("/glow/") || norm.Contains("/beam/") ||
+            norm.Contains("/generic/") || norm.Contains("/warp/") || norm.Contains("/lens_flare/") ||
+            norm.Contains("/fire/") || norm.Contains("/vistasmokev1/") || norm.Contains("/shockwave") ||
+            norm.Contains("particle_ring") || norm.Contains("particle_glow") || norm.Contains("particle_spark") ||
+            norm.Contains("particle_smoke") || norm.Contains("particle_flare"))
+        {
+            return true;
+        }
+
+        if (norm.Contains("/heroes/") || norm.Contains("/abilities/") || norm.Contains("/characters/"))
+        {
+            return false;
+        }
+
+        int particleIdx = norm.IndexOf("materials/particle/");
+        if (particleIdx >= 0)
+        {
+            string sub = norm.Substring(particleIdx + "materials/particle/".Length);
+            if (!sub.Contains("/"))
+                return true;
+        }
+
+        return false;
     }
 
     private void UpdateParticleTexturesGroup()
@@ -1339,7 +1415,7 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         var textures = stage.GetActiveTextures();
-        if (textures.Count == 0)
+        if (textures.Count == 0 && stage.Renderers.Count == 0)
         {
             if (_particleTexturesGroupContainer != null && GodotObject.IsInstanceValid(_particleTexturesGroupContainer))
             {
@@ -1367,6 +1443,9 @@ public partial class PaintTabUI : VBoxContainer
             child.QueueFree();
         }
 
+        var colus = PlaygroundThemeHelper.GetFontColus();
+
+        // 1. Particle Materials / Textures Section
         var headerPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
 
@@ -1389,7 +1468,8 @@ public partial class PaintTabUI : VBoxContainer
             Text = "Particle Materials",
             SizeFlagsHorizontal = SizeFlags.ExpandFill
         };
-        titleLabel.AddThemeFontSizeOverride("font_size", 12);
+        if (colus != null) titleLabel.AddThemeFontOverride("font", colus);
+        titleLabel.AddThemeFontSizeOverride("font_size", 13);
         headerRow.AddChild(titleLabel);
 
         var badgeLabel = new Label
@@ -1409,6 +1489,8 @@ public partial class PaintTabUI : VBoxContainer
 
         foreach (var (vtexPath, imageTex) in textures)
         {
+            bool isShared = IsSharedParticleTexture(vtexPath, stage.ActiveVariantName, stage.ActiveAbilityName);
+
             var row = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             row.AddThemeConstantOverride("separation", 6);
 
@@ -1420,8 +1502,22 @@ public partial class PaintTabUI : VBoxContainer
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 TooltipText = vtexPath
             };
+            if (colus != null) texLabel.AddThemeFontOverride("font", colus);
             texLabel.AddThemeFontSizeOverride("font_size", 11);
             row.AddChild(texLabel);
+
+            if (isShared)
+            {
+                var sharedBadge = new Label
+                {
+                    Text = "[Shared]",
+                    Modulate = new Color(0.45f, 0.70f, 0.95f, 0.9f),
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    TooltipText = "Shared / Global game effect texture (used across heroes)"
+                };
+                sharedBadge.AddThemeFontSizeOverride("font_size", 9);
+                row.AddChild(sharedBadge);
+            }
 
             bool isThisParticlePainting = !string.IsNullOrEmpty(_activeParticleVtexPath) &&
                 string.Equals(_activeParticleVtexPath, vtexPath, StringComparison.OrdinalIgnoreCase);
@@ -1460,6 +1556,247 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         _particleTexturesGroupContainer.AddChild(childrenContainer);
+
+        // 2. Individual Particle Emitters Section
+        _particleTexturesGroupContainer.AddChild(new HSeparator());
+
+        var paramHeaderPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        paramHeaderPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
+        var paramHeaderRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        paramHeaderRow.AddThemeConstantOverride("separation", 6);
+
+        var iconGear = new TextureRect
+        {
+            Texture = GD.Load<Texture2D>("res://assets/at-icons/cog.svg") ?? GD.Load<Texture2D>("res://assets/icons/sparkles.svg"),
+            CustomMinimumSize = new Vector2(16, 16),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            Modulate = new Color(0.40f, 0.75f, 1.0f, 1.0f)
+        };
+        paramHeaderRow.AddChild(iconGear);
+
+        var paramTitle = new Label
+        {
+            Text = "Particle Emitters",
+            SizeFlagsHorizontal = SizeFlags.ExpandFill
+        };
+        if (colus != null) paramTitle.AddThemeFontOverride("font", colus);
+        paramTitle.AddThemeFontSizeOverride("font_size", 13);
+        paramHeaderRow.AddChild(paramTitle);
+
+        var countBadge = new Label
+        {
+            Text = $"[{stage.Renderers.Count}]",
+            Modulate = new Color(0.65f, 0.68f, 0.72f),
+            SizeFlagsVertical = SizeFlags.ShrinkCenter
+        };
+        countBadge.AddThemeFontSizeOverride("font_size", 10);
+        paramHeaderRow.AddChild(countBadge);
+
+        paramHeaderPanel.AddChild(paramHeaderRow);
+        _particleTexturesGroupContainer.AddChild(paramHeaderPanel);
+
+        var paramVBox = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        paramVBox.AddThemeConstantOverride("separation", 6);
+
+        string rootBase = stage.ActiveRootDefinition?.VpcfPath?.GetFile()?.GetBaseName() ?? "";
+
+        for (int i = 0; i < stage.Renderers.Count; i++)
+        {
+            int rIdx = i;
+            var renderer = stage.Renderers[i];
+            if (renderer == null || !GodotObject.IsInstanceValid(renderer)) continue;
+
+            string baseName = renderer.Instance?.Definition?.VpcfPath?.GetFile()?.GetBaseName() ?? renderer.Name.ToString();
+            string emitterName;
+            if (!string.IsNullOrEmpty(rootBase) && baseName.StartsWith(rootBase, StringComparison.OrdinalIgnoreCase) && baseName.Length > rootBase.Length)
+            {
+                emitterName = baseName.Substring(rootBase.Length).TrimStart('_');
+            }
+            else
+            {
+                emitterName = baseName;
+            }
+
+            string rType = renderer.RendererDef?.ClassName?.Replace("C_OP_", "")?.Replace("Render", "") ?? "";
+            if (!string.IsNullOrEmpty(rType))
+            {
+                emitterName += $" ({rType})";
+            }
+            if (string.IsNullOrWhiteSpace(emitterName))
+            {
+                emitterName = $"Emitter {i + 1}";
+            }
+
+            var card = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            var cardStyle = new StyleBoxFlat
+            {
+                BgColor = new Color(0.10f, 0.12f, 0.15f, 0.7f),
+                CornerRadiusTopLeft = 4,
+                CornerRadiusTopRight = 4,
+                CornerRadiusBottomLeft = 4,
+                CornerRadiusBottomRight = 4,
+                ContentMarginLeft = 6,
+                ContentMarginRight = 6,
+                ContentMarginTop = 4,
+                ContentMarginBottom = 4
+            };
+            card.AddThemeStyleboxOverride("panel", cardStyle);
+
+            var cardContent = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            cardContent.AddThemeConstantOverride("separation", 4);
+
+            var headRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            headRow.AddThemeConstantOverride("separation", 6);
+
+            var visCb = new CheckBox
+            {
+                ButtonPressed = renderer.VisibleAndEmitting,
+                TooltipText = "Toggle emitter visibility",
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+            var localRenderer = renderer;
+            visCb.Toggled += (vis) =>
+            {
+                stage.SetRendererVisibility(rIdx, vis);
+            };
+            headRow.AddChild(visCb);
+
+            var nameLbl = new Label
+            {
+                Text = emitterName,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                TooltipText = renderer.Name.ToString()
+            };
+            if (colus != null) nameLbl.AddThemeFontOverride("font", colus);
+            nameLbl.AddThemeFontSizeOverride("font_size", 11);
+            headRow.AddChild(nameLbl);
+
+            var tintPicker = new ColorPickerButton
+            {
+                CustomMinimumSize = new Vector2(36, 20),
+                Color = localRenderer.CustomTintColor,
+                TooltipText = "Emitter Tint Color",
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+            headRow.AddChild(tintPicker);
+
+            var toggleDetailsBtn = new Button
+            {
+                Text = "▼",
+                Flat = true,
+                CustomMinimumSize = new Vector2(20, 20),
+                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                TooltipText = "Show/Hide Emitter Controls"
+            };
+            toggleDetailsBtn.AddThemeFontSizeOverride("font_size", 9);
+            headRow.AddChild(toggleDetailsBtn);
+
+            cardContent.AddChild(headRow);
+
+            var detailsBox = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            detailsBox.AddThemeConstantOverride("separation", 4);
+
+            toggleDetailsBtn.Pressed += () =>
+            {
+                detailsBox.Visible = !detailsBox.Visible;
+                toggleDetailsBtn.Text = detailsBox.Visible ? "▼" : "▶";
+            };
+
+            // Size Slider Row
+            var sizeRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            sizeRow.AddThemeConstantOverride("separation", 6);
+            var sizeLbl = new Label { Text = "Size:", CustomMinimumSize = new Vector2(40, 0) };
+            sizeLbl.AddThemeFontSizeOverride("font_size", 10);
+            sizeRow.AddChild(sizeLbl);
+
+            var sizeValLbl = new Label { Text = $"{localRenderer.CustomSizeScale:F1}x", CustomMinimumSize = new Vector2(32, 0) };
+            sizeValLbl.AddThemeFontSizeOverride("font_size", 10);
+
+            var sizeSlider = new HSlider
+            {
+                MinValue = 0.1,
+                MaxValue = 5.0,
+                Step = 0.05,
+                Value = localRenderer.CustomSizeScale,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+            sizeSlider.ValueChanged += (v) =>
+            {
+                float s = (float)v;
+                sizeValLbl.Text = $"{s:F1}x";
+                stage.SetRendererCustomSizeScale(rIdx, s);
+            };
+            sizeRow.AddChild(sizeSlider);
+            sizeRow.AddChild(sizeValLbl);
+            detailsBox.AddChild(sizeRow);
+
+            // Opacity Slider Row
+            var alphaRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            alphaRow.AddThemeConstantOverride("separation", 6);
+            var alphaLbl = new Label { Text = "Alpha:", CustomMinimumSize = new Vector2(40, 0) };
+            alphaLbl.AddThemeFontSizeOverride("font_size", 10);
+            alphaRow.AddChild(alphaLbl);
+
+            var alphaValLbl = new Label { Text = $"{Mathf.RoundToInt(localRenderer.CustomAlphaScale * 100)}%", CustomMinimumSize = new Vector2(32, 0) };
+            alphaValLbl.AddThemeFontSizeOverride("font_size", 10);
+
+            var alphaSlider = new HSlider
+            {
+                MinValue = 0.0,
+                MaxValue = 1.0,
+                Step = 0.02,
+                Value = localRenderer.CustomAlphaScale,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                SizeFlagsVertical = SizeFlags.ShrinkCenter
+            };
+            alphaSlider.ValueChanged += (v) =>
+            {
+                float a = (float)v;
+                alphaValLbl.Text = $"{Mathf.RoundToInt(a * 100)}%";
+                stage.SetRendererCustomAlphaScale(rIdx, a);
+            };
+            alphaRow.AddChild(alphaSlider);
+            alphaRow.AddChild(alphaValLbl);
+            detailsBox.AddChild(alphaRow);
+
+            tintPicker.ColorChanged += (newCol) =>
+            {
+                stage.SetRendererCustomTint(rIdx, newCol);
+            };
+
+            cardContent.AddChild(detailsBox);
+            card.AddChild(cardContent);
+            paramVBox.AddChild(card);
+        }
+
+        var resetAllBtn = new Button
+        {
+            Text = "Reset All Emitters",
+            CustomMinimumSize = new Vector2(0, 24),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill
+        };
+        resetAllBtn.AddThemeFontSizeOverride("font_size", 10);
+        resetAllBtn.Pressed += () =>
+        {
+            for (int i = 0; i < stage.Renderers.Count; i++)
+            {
+                stage.SetRendererCustomTint(i, Colors.White);
+                stage.SetRendererCustomSizeScale(i, 1.0f);
+                stage.SetRendererCustomAlphaScale(i, 1.0f);
+                stage.SetRendererVisibility(i, true);
+            }
+            stage.SetParticleColor(Colors.White);
+            stage.SetParticleRadius(1.0f);
+            UpdateParticleTexturesGroup();
+        };
+        paramVBox.AddChild(resetAllBtn);
+
+        _particleTexturesGroupContainer.AddChild(paramVBox);
     }
 
     private void RefreshLayersListUI()
@@ -1734,6 +2071,7 @@ public partial class PaintTabUI : VBoxContainer
 
     public void OnTabActivated()
     {
+        IsTabActive = true;
         CacheCharacterPose();
         ResetCharacterPose();
         var pStage = GetOrCreateParticleStage();
@@ -1779,6 +2117,7 @@ public partial class PaintTabUI : VBoxContainer
 
     public void OnTabDeactivated()
     {
+        IsTabActive = false;
         var stage = GetOrCreateParticleStage();
         bool hasActiveParticle = stage != null && stage.HasActiveParticle;
 

@@ -130,8 +130,9 @@ public partial class CharacterTabUI : VBoxContainer
     {
         if (_btnShowAll != null) _btnShowAll.Disabled = !enabled;
         if (_btnHideAccessories != null) _btnHideAccessories.Disabled = !enabled;
-        if (_btnBrowseParticles != null) _btnBrowseParticles.Disabled = !enabled;
-        if (_btnExtraModels != null) _btnExtraModels.Disabled = !enabled && _vpkLoader?.CurrentHeroNode == null;
+        bool hasHeroOrModel = enabled || _currentHeroNode != null || _vpkLoader?.CurrentHeroNode != null;
+        if (_btnBrowseParticles != null) _btnBrowseParticles.Disabled = !hasHeroOrModel;
+        if (_btnExtraModels != null) _btnExtraModels.Disabled = !hasHeroOrModel;
         if (_submeshContainer != null)
         {
             _submeshContainer.Modulate = enabled ? Colors.White : new Color(1, 1, 1, 0.4f);
@@ -297,6 +298,9 @@ public partial class CharacterTabUI : VBoxContainer
                 ? DeadlockAddonScanner.ScanAddons(addonsDir)
                 : new List<AddonModInfo>();
 
+            _addonMods.Clear();
+            _addonMods.AddRange(detected);
+
             modal.Open(detected, _vpkLoader?.AddonVpkPath);
             var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
                         ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
@@ -318,6 +322,7 @@ public partial class CharacterTabUI : VBoxContainer
         }
 
         var mod = _addonMods.FirstOrDefault(m => m.FilePath.Equals(modFilePath, StringComparison.OrdinalIgnoreCase))
+               ?? (File.Exists(modFilePath) ? DeadlockAddonScanner.InspectAddonPackage(modFilePath) : null)
                ?? new AddonModInfo
                {
                    FilePath = modFilePath,
@@ -379,17 +384,24 @@ public partial class CharacterTabUI : VBoxContainer
             _btnHideAccessories.Text = "Hide Accessories";
         }
 
-        if (_currentHeroNode != null && GodotObject.IsInstanceValid(_currentHeroNode))
+        var hero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (hero != null && GodotObject.IsInstanceValid(hero))
         {
-            ClearSubmeshes();
+            _currentHeroNode = hero;
+            ClearSubmeshes(clearHeroNode: false);
             CollectSubmeshesRecursive(_currentHeroNode);
             PopulateSubmeshList();
             SetControlsEnabled(true);
         }
         else
         {
-            ClearSubmeshes();
+            ClearSubmeshes(clearHeroNode: true);
             SetControlsEnabled(false);
+        }
+
+        if (_btnBrowseParticles != null)
+        {
+            _btnBrowseParticles.Disabled = false;
         }
     }
 
@@ -717,7 +729,15 @@ public partial class CharacterTabUI : VBoxContainer
 
     public void ClearSubmeshes()
     {
-        _currentHeroNode = null;
+        ClearSubmeshes(false);
+    }
+
+    public void ClearSubmeshes(bool clearHeroNode)
+    {
+        if (clearHeroNode)
+        {
+            _currentHeroNode = null;
+        }
         UpdateContextualButtonsVisibility();
         if (_submeshContainer != null)
         {
@@ -728,7 +748,7 @@ public partial class CharacterTabUI : VBoxContainer
         }
         _submeshes.Clear();
         _particleHierarchyItems.Clear();
-        SetControlsEnabled(false);
+        SetControlsEnabled(_currentHeroNode != null || _vpkLoader?.CurrentHeroNode != null);
     }
 
     private void CollectSubmeshesRecursive(Node node)

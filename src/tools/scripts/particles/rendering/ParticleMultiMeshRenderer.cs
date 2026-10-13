@@ -223,6 +223,26 @@ public partial class ParticleMultiMeshRenderer : Node3D
         }
     }
 
+    public Color CustomTintColor { get; set; } = Colors.White;
+    public float CustomAlphaScale { get; set; } = 1.0f;
+    public float CustomSizeScale { get; set; } = 1.0f;
+
+    public void SetCustomTint(Color color)
+    {
+        CustomTintColor = new Color(color.R, color.G, color.B, 1.0f);
+        CustomAlphaScale = color.A;
+        if (_material != null)
+        {
+            _material.SetShaderParameter("constant_color", color);
+            _material.SetShaderParameter("tail_color_scale", new Vector3(color.R, color.G, color.B));
+        }
+    }
+
+    public void SetConstantColor(Color color)
+    {
+        SetCustomTint(color);
+    }
+
     public bool VisibleAndEmitting
     {
         get => Visible;
@@ -334,7 +354,7 @@ public partial class ParticleMultiMeshRenderer : Node3D
                 // radius = min(particleRadius, constrainRadiusToLengthRatio * length)
                 float particleRadius = p.Radius * radScale;
                 float radius = MathF.Min(particleRadius, trailsDef.ConstrainRadiusToLengthRatio * len);
-                float width = Mathf.Max(0.005f, radius * 2.0f);
+                float width = Mathf.Max(0.005f, radius * 2.0f * CustomSizeScale);
 
                 // Ribbon axis AxisU = normalize(cross(dir, camPos - center)), evaluated per instance
                 Vector3 center = p.Position + (dir * (len * 0.5f));
@@ -353,8 +373,13 @@ public partial class ParticleMultiMeshRenderer : Node3D
                 var xform = new Transform3D(basis, p.Position);
 
                 _multiMesh.SetInstanceTransform(activeCount, xform);
-                // Pass raw vertex colors; gamma-to-linear is executed once in shader
-                var col = new Color(p.Color.R, p.Color.G, p.Color.B, p.Alpha);
+                // Modulate vertex colors by custom emitter tint and alpha
+                var col = new Color(
+                    p.Color.R * CustomTintColor.R,
+                    p.Color.G * CustomTintColor.G,
+                    p.Color.B * CustomTintColor.B,
+                    p.Alpha * CustomAlphaScale
+                );
                 _multiMesh.SetInstanceColor(activeCount, col);
                 _multiMesh.SetInstanceCustomData(activeCount, new Color(
                     p.Age / p.Lifetime,
@@ -423,7 +448,7 @@ public partial class ParticleMultiMeshRenderer : Node3D
                 ref readonly var p = ref particles[i];
                 if (!p.IsAlive) continue;
 
-                float size = Mathf.Max(0.005f, p.Radius * 2.0f * radScale);
+                float size = Mathf.Max(0.005f, p.Radius * 2.0f * radScale * CustomSizeScale);
                 var basis = billboardBasis.Rotated(billboardBasis.Z, p.Rotation).Scaled(new Vector3(size, size, size));
                 var xform = new Transform3D(basis, p.Position);
 
@@ -432,8 +457,13 @@ public partial class ParticleMultiMeshRenderer : Node3D
                     : p.SequenceIndex;
 
                 _multiMesh.SetInstanceTransform(activeCount, xform);
-                // Fix 5.1: Pass raw vertex colors; gamma-to-linear is executed once in shader
-                var col = new Color(p.Color.R, p.Color.G, p.Color.B, p.Alpha);
+                // Modulate vertex colors by custom emitter tint and alpha
+                var col = new Color(
+                    p.Color.R * CustomTintColor.R,
+                    p.Color.G * CustomTintColor.G,
+                    p.Color.B * CustomTintColor.B,
+                    p.Alpha * CustomAlphaScale
+                );
                 _multiMesh.SetInstanceColor(activeCount, col);
                 _multiMesh.SetInstanceCustomData(activeCount, new Color(
                     p.Age / p.Lifetime,

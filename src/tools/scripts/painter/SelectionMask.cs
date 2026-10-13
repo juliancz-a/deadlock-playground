@@ -107,8 +107,8 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureBuffer(int width, int height)
         {
-            if (width < 256) width = 256;
-            if (height < 256) height = 256;
+            if (width < 16) width = 16;
+            if (height < 16) height = 16;
             if (_buffer == null || Width != width || Height != height || _buffer.Length != width * height)
             {
                 Width = width;
@@ -132,8 +132,8 @@ namespace DeadlockPlayground.Painter
 
         public void EnsureMaskTexture(RenderingDevice rd, int width, int height)
         {
-            if (width < 256) width = 256;
-            if (height < 256) height = 256;
+            if (width < 16) width = 16;
+            if (height < 16) height = 16;
             EnsureBuffer(width, height);
 
             if (_maskTextureRid.IsValid && rd.TextureIsValid(_maskTextureRid) && _maskTextureWidth == width && _maskTextureHeight == height)

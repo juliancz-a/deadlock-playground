@@ -406,7 +406,23 @@ public partial class ParticleStage3D : Node3D
 
         if (_loadedTextures.TryGetValue(vtexPath, out var tex) && tex != null)
         {
-            tex.Update(newImage);
+            // Fix: Mipmap configuration must match ImageTexture
+            if (tex.HasMipmaps() && !newImage.HasMipmaps())
+            {
+                newImage.GenerateMipmaps();
+            }
+
+            if (tex.GetWidth() == newImage.GetWidth() &&
+                tex.GetHeight() == newImage.GetHeight() &&
+                tex.GetFormat() == newImage.GetFormat() &&
+                tex.HasMipmaps() == newImage.HasMipmaps())
+            {
+                tex.Update(newImage);
+            }
+            else
+            {
+                tex.SetImage(newImage);
+            }
         }
         else
         {
@@ -420,6 +436,7 @@ public partial class ParticleStage3D : Node3D
                 }
             }
         }
+        RenderImmediate();
     }
 
     public IReadOnlyDictionary<string, ImageTexture> GetActiveTextures()
@@ -428,6 +445,109 @@ public partial class ParticleStage3D : Node3D
     }
 
     public IReadOnlyList<ParticleMultiMeshRenderer> Renderers => _renderers;
+
+    public void SetRendererCustomTint(int index, Color color)
+    {
+        if (index >= 0 && index < _renderers.Count)
+        {
+            var r = _renderers[index];
+            if (IsInstanceValid(r))
+            {
+                r.SetCustomTint(color);
+                RenderImmediate();
+            }
+        }
+    }
+
+    public void SetRendererCustomSizeScale(int index, float scale)
+    {
+        if (index >= 0 && index < _renderers.Count)
+        {
+            var r = _renderers[index];
+            if (IsInstanceValid(r))
+            {
+                r.CustomSizeScale = scale;
+                RenderImmediate();
+            }
+        }
+    }
+
+    public void SetRendererCustomAlphaScale(int index, float alpha)
+    {
+        if (index >= 0 && index < _renderers.Count)
+        {
+            var r = _renderers[index];
+            if (IsInstanceValid(r))
+            {
+                r.CustomAlphaScale = alpha;
+                RenderImmediate();
+            }
+        }
+    }
+
+    public void SetRendererVisibility(int index, bool visible)
+    {
+        if (index >= 0 && index < _renderers.Count)
+        {
+            var r = _renderers[index];
+            if (IsInstanceValid(r))
+            {
+                r.VisibleAndEmitting = visible;
+                RenderImmediate();
+            }
+        }
+    }
+
+    public Color GetParticleColor()
+    {
+        return ActiveRootDefinition?.ConstantColor ?? Colors.White;
+    }
+
+    public void SetParticleColor(Color color)
+    {
+        if (ActiveRootDefinition != null)
+        {
+            ActiveRootDefinition.ConstantColor = color;
+            if (_simulator != null)
+            {
+                foreach (var inst in _simulator.Instances)
+                {
+                    inst.Definition.ConstantColor = color;
+                    inst.OverrideActiveParticlesColor(color);
+                }
+            }
+            foreach (var r in _renderers)
+            {
+                if (IsInstanceValid(r))
+                {
+                    r.SetConstantColor(color);
+                }
+            }
+            RenderImmediate();
+        }
+    }
+
+    public float GetParticleRadius()
+    {
+        return ActiveRootDefinition?.ConstantRadius ?? 1.0f;
+    }
+
+    public void SetParticleRadius(float radius)
+    {
+        if (ActiveRootDefinition != null)
+        {
+            ActiveRootDefinition.ConstantRadius = radius;
+            if (_simulator != null)
+            {
+                foreach (var inst in _simulator.Instances)
+                {
+                    inst.Definition.ConstantRadius = radius;
+                    inst.OverrideActiveParticlesRadius(radius);
+                }
+            }
+            RenderImmediate();
+        }
+    }
 
     // --- Deterministic Playback API ---
 

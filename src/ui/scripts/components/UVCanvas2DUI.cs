@@ -603,6 +603,10 @@ namespace DeadlockPlayground.UI
 
             _layerManager?.SetupForStandaloneTexture("particle:" + vtexPath, texture);
 
+            int pW = texture?.GetWidth() ?? 512;
+            int pH = texture?.GetHeight() ?? 512;
+            _painter?.MagicWandTool?.SelectionMask?.EnsureBuffer(pW, pH);
+
             SetVisibleState(true);
             UpdateResolutionLabel();
             RebuildWireframe();
@@ -644,6 +648,20 @@ namespace DeadlockPlayground.UI
 
         public void SetVisibleState(bool isVisible)
         {
+            if (isVisible)
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                if (studioUI != null && studioUI.CurrentTabIndex != 8)
+                {
+                    // 2D UV canvas dock strictly lives inside the Painter tab (tab 8)
+                    Visible = false;
+                    if (_resizeGrip != null) _resizeGrip.Visible = false;
+                    EmitSignal(SignalName.VisibilityToggled, false);
+                    return;
+                }
+            }
+
             Visible = isVisible;
             if (_resizeGrip != null)
             {
@@ -1757,15 +1775,31 @@ namespace DeadlockPlayground.UI
             }
             else if (mode == BrushToolMode.BucketFill)
             {
-                Vector2 uv = new Vector2(
-                    Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
-                    Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
-                );
-                var active = _meshHierarchy?.ActiveTarget;
-                if (active != null && active.Mesh != null)
+                if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
                 {
-                    _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, uv, _painter.MagicWandTool, _painter.BucketFillTolerance);
+                    _layerManager?.FillActiveLayer2D(_painter.BrushColor, _painter.MagicWandTool);
                     _canvasDrawArea?.QueueRedraw();
+                    if (_onParticleTextureUpdated != null && _layerManager != null)
+                    {
+                        var baked = _layerManager.BakeCompositeImage();
+                        if (baked != null)
+                        {
+                            _onParticleTextureUpdated.Invoke(baked);
+                        }
+                    }
+                }
+                else
+                {
+                    Vector2 uv = new Vector2(
+                        Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
+                        Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
+                    );
+                    var active = _meshHierarchy?.ActiveTarget;
+                    if (active != null && active.Mesh != null)
+                    {
+                        _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, uv, _painter.MagicWandTool, _painter.BucketFillTolerance);
+                        _canvasDrawArea?.QueueRedraw();
+                    }
                 }
             }
             else if (mode == BrushToolMode.Eyedropper)

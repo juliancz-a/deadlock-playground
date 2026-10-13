@@ -38,7 +38,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="BtnBrowseHeroGallery" type="Button" parent="HeroSelectGroup/PrimaryActionButtons" unique_id=739281042]
-custom_minimum_size = Vector2(0, 115)
+custom_minimum_size = Vector2(0, 135)
 layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Open rich visual gallery to select characters and variants"
@@ -73,12 +73,12 @@ stretch_mode = 5
 layout_mode = 2
 mouse_filter = 2
 theme_override_fonts/font = ExtResource("2_cxjk5")
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 12
 text = "HERO GALLERY..."
 horizontal_alignment = 1
 
 [node name="BtnBrowseModGallery" type="Button" parent="HeroSelectGroup/PrimaryActionButtons" unique_id=739281045]
-custom_minimum_size = Vector2(0, 115)
+custom_minimum_size = Vector2(0, 135)
 layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Open visual gallery of installed character model and texture mods"
@@ -113,7 +113,7 @@ stretch_mode = 5
 layout_mode = 2
 mouse_filter = 2
 theme_override_fonts/font = ExtResource("2_cxjk5")
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 12
 text = "MOD GALLERY..."
 horizontal_alignment = 1
 
@@ -123,7 +123,7 @@ layout_mode = 2
 theme_override_constants/separation = 8
 
 [node name="BtnExtraModels" type="Button" parent="HeroSelectGroup/SecondaryActionButtons" unique_id=739281043]
-custom_minimum_size = Vector2(0, 85)
+custom_minimum_size = Vector2(0, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Browse ability-specific and auxiliary 3D models (summons, turrets, dragon)"
@@ -158,12 +158,12 @@ stretch_mode = 5
 layout_mode = 2
 mouse_filter = 2
 theme_override_fonts/font = ExtResource("2_cxjk5")
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 11
 text = "EXTRA MODELS..."
 horizontal_alignment = 1
 
 [node name="BtnBrowseParticles" type="Button" parent="HeroSelectGroup/SecondaryActionButtons" unique_id=739281046]
-custom_minimum_size = Vector2(0, 85)
+custom_minimum_size = Vector2(0, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Browse and select particle systems for this hero"
@@ -198,7 +198,7 @@ stretch_mode = 5
 layout_mode = 2
 mouse_filter = 2
 theme_override_fonts/font = ExtResource("2_cxjk5")
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 11
 text = "BROWSE VFX..."
 horizontal_alignment = 1
 

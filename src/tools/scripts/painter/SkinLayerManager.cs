@@ -100,6 +100,8 @@ namespace DeadlockPlayground.Painter
         private ImageTexture _standaloneCompositeTexture;
         /// <summary>Returns the OverlayAtlasManager for the currently selected paint target submesh.</summary>
         public Node AtlasManager => _activeAtlasManager;
+        public Node ActiveAtlasManager => _activeAtlasManager;
+        public bool IsStandaloneTextureMode => _standaloneBaseTexture != null;
 
         private Node3D _currentHero;
         public Node3D CurrentHero => _currentHero;
@@ -793,17 +795,20 @@ namespace DeadlockPlayground.Painter
         {
         }
 
-        public SkinLayer AddNewLayer(string name = null)
+        public SkinLayer AddNewLayer(string name = null, byte[] initialData = null)
         {
             RecordUndoSnapshot();
             EnsureShadersLoaded();
             string layerName = name ?? $"Paint Layer {_layers.Count + 1}";
             var newLayer = new SkinLayer();
             newLayer.Initialize(layerName, CanvasSize, isLocked: false, _compositeShader, _dabShader, null);
-            newLayer.GpuData = new byte[CanvasSize.X * CanvasSize.Y * 8];
-            newLayer.LayerRid = CreateLayerGpuTexture(CanvasSize.X, CanvasSize.Y, null);
+            byte[] layerBytes = (initialData != null && initialData.Length == CanvasSize.X * CanvasSize.Y * 8)
+                ? (byte[])initialData.Clone()
+                : new byte[CanvasSize.X * CanvasSize.Y * 8];
+            newLayer.GpuData = layerBytes;
+            newLayer.LayerRid = CreateLayerGpuTexture(CanvasSize.X, CanvasSize.Y, initialData != null ? layerBytes : null);
             var rd = RenderingServer.GetRenderingDevice();
-            if (rd != null && newLayer.LayerRid.IsValid)
+            if (rd != null && newLayer.LayerRid.IsValid && initialData == null)
             {
                 rd.TextureClear(newLayer.LayerRid, new Color(0, 0, 0, 0), 0, 1, 0, 1);
             }
@@ -2679,7 +2684,7 @@ namespace DeadlockPlayground.Painter
                 _hasGpuUndo = false;
                 _activeLayerIndex = 0;
 
-                _baseAtlasBuffer = new byte[bufferLen];
+                byte[] initialSpriteData = new byte[bufferLen];
                 if (texture != null)
                 {
                     var img = texture.GetImage();
@@ -2696,7 +2701,7 @@ namespace DeadlockPlayground.Painter
                         {
                             unsafe
                             {
-                                fixed (byte* pDst = _baseAtlasBuffer, pSrc = raw)
+                                fixed (byte* pDst = initialSpriteData, pSrc = raw)
                                 {
                                     Half* hDst = (Half*)pDst;
                                     for (int i = 0; i < w * h; i++)
@@ -2713,9 +2718,11 @@ namespace DeadlockPlayground.Painter
                         }
                     }
                 }
+                // Base buffer remains transparent so the eraser tool can carve directly into the particle sprite
+                _baseAtlasBuffer = new byte[bufferLen];
                 _hasPopulatedBaseAtlasBuffer = true;
 
-                AddNewLayer("Paint Layer 1");
+                AddNewLayer("Particle Base", initialData: initialSpriteData);
 
                 ctx = new MaterialPaintingContext
                 {
@@ -2984,6 +2991,68 @@ namespace DeadlockPlayground.Painter
             }
 
             return dilated;
+        }
+
+        public void FillActiveLayer2D(Color color, MagicWandTool wandTool = null)
+        {
+            if (_layers == null || _activeLayerIndex < 0 || _activeLayerIndex >= _layers.Count) return;
+            var layer = _layers[_activeLayerIndex];
+            if (layer == null || layer.IsLocked || !layer.IsVisible) return;
+
+            int w = CanvasSize.X;
+            int h = CanvasSize.Y;
+            int bufferLen = w * h * 8;
+
+            EnsureCpuSynced();
+            RecordInitialSnapshot();
+
+            if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
+            {
+                layer.DecompressGpuData(bufferLen);
+            }
+            if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
+            {
+                layer.GpuData = new byte[bufferLen];
+            }
+
+            Color linear = color.SrgbToLinear();
+            Half r = (Half)linear.R;
+            Half g = (Half)linear.G;
+            Half b = (Half)linear.B;
+            Half a = (Half)linear.A;
+
+            bool hasSelection = wandTool != null && wandTool.HasActiveSelection;
+            byte[] maskBuf = hasSelection ? wandTool.ActiveAtlasMask : null;
+
+            unsafe
+            {
+                fixed (byte* pBuf = layer.GpuData)
+                {
+                    Half* hBuf = (Half*)pBuf;
+                    for (int i = 0; i < w * h; i++)
+                    {
+                        if (hasSelection && maskBuf != null && i < maskBuf.Length)
+                        {
+                            byte mVal = maskBuf[i];
+                            if (mVal < 128) continue;
+                        }
+
+                        int off = i * 4;
+                        hBuf[off] = r;
+                        hBuf[off + 1] = g;
+                        hBuf[off + 2] = b;
+                        hBuf[off + 3] = a;
+                    }
+                }
+            }
+
+            layer.IsCpuSynced = true;
+            layer.CompressedGpuData = null;
+            _otherLayersDirty = true;
+            UpdateActiveLayerGpuTextureThrottled(new Rect2I(0, 0, w, h));
+            RecompositeGpuLayers();
+            UpdateStandaloneComposite();
+            NotifyStackChanged();
         }
 
         public void FillSubmesh(MeshInstance3D mesh, Color color, Vector2? hitUv = null, MagicWandTool wandTool = null, float tolerance = 0.5f)
@@ -4868,7 +4937,7 @@ namespace DeadlockPlayground.Painter
             EnsureCpuSynced();
             RecompositeGpuLayers();
             Node targetAtlas = _activeAtlasManager;
-            if (targetAtlas == null && _perMaterialAtlasManagers.Count > 0)
+            if (_standaloneBaseTexture == null && targetAtlas == null && _perMaterialAtlasManagers.Count > 0)
             {
                 foreach (var mgr in _perMaterialAtlasManagers.Values)
                 {

@@ -573,6 +573,8 @@ public partial class StudioUIManager : CanvasLayer
         }
     }
 
+    public int CurrentTabIndex => _currentTabIndex;
+
     public void SwitchTab(int tabIndex)
     {
         int prevTab = _currentTabIndex;

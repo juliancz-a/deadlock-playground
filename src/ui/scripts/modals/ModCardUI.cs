@@ -66,10 +66,10 @@ public partial class ModCardUI : PanelContainer
             }
             else if (mod != null)
             {
-                _lblTitle.Text = mod.DisplayTitle;
                 string heroName = !string.IsNullOrEmpty(mod.DetectedHeroDisplayName) ? mod.DetectedHeroDisplayName : "Custom Hero";
                 string typeName = mod.ModType == AddonModType.FullModel ? "Model Mod" : "Texture Mod";
-                _lblHero.Text = $"{heroName} • {typeName}";
+                _lblTitle.Text = heroName;
+                _lblHero.Text = typeName;
                 _lblFilename.Text = mod.FileName;
 
                 _lblTag.Text = typeName;
@@ -213,7 +213,7 @@ public partial class ModCardUI : PanelContainer
         _tagPanel.AddThemeStyleboxOverride("panel", tagStyle);
 
         _lblTag = new Label { Text = "Mod" };
-        _lblTag.AddThemeFontSizeOverride("font_size", 9);
+        _lblTag.AddThemeFontSizeOverride("font_size", 10);
         _tagPanel.AddChild(_lblTag);
         thumbPanel.AddChild(_tagPanel);
 
@@ -224,7 +224,12 @@ public partial class ModCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblTitle.AddThemeFontSizeOverride("font_size", 12);
+        var colusFont = PlaygroundThemeHelper.GetFontColus();
+        if (colusFont != null)
+        {
+            _lblTitle.AddThemeFontOverride("font", colusFont);
+        }
+        _lblTitle.AddThemeFontSizeOverride("font_size", 14);
         _lblTitle.AddThemeColorOverride("font_color", Colors.White);
         vbox.AddChild(_lblTitle);
 
@@ -235,8 +240,8 @@ public partial class ModCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblHero.AddThemeFontSizeOverride("font_size", 10);
-        _lblHero.AddThemeColorOverride("font_color", new Color(0.60f, 0.65f, 0.72f, 1.0f));
+        _lblHero.AddThemeFontSizeOverride("font_size", 12);
+        _lblHero.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.82f, 1.0f));
         vbox.AddChild(_lblHero);
 
         _lblFilename = new Label
@@ -246,8 +251,8 @@ public partial class ModCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblFilename.AddThemeFontSizeOverride("font_size", 9);
-        _lblFilename.AddThemeColorOverride("font_color", new Color(0.45f, 0.50f, 0.58f, 1.0f));
+        _lblFilename.AddThemeFontSizeOverride("font_size", 11);
+        _lblFilename.AddThemeColorOverride("font_color", new Color(0.55f, 0.60f, 0.68f, 1.0f));
         vbox.AddChild(_lblFilename);
 
         if (ModInfo != null || IsVanilla)

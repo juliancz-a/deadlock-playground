@@ -79,6 +79,29 @@ public class ParticleSystemInstance
         }
     }
 
+    public void OverrideActiveParticlesColor(Color color)
+    {
+        for (int i = 0; i < _maxParticles; i++)
+        {
+            if (_particles[i].IsAlive)
+            {
+                _particles[i].Color = color;
+                _particles[i].Alpha = color.A;
+            }
+        }
+    }
+
+    public void OverrideActiveParticlesRadius(float radius)
+    {
+        for (int i = 0; i < _maxParticles; i++)
+        {
+            if (_particles[i].IsAlive)
+            {
+                _particles[i].Radius = radius;
+            }
+        }
+    }
+
     public void TriggerEndCap()
     {
         if (IsEndCap)

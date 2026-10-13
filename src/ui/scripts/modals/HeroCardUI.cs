@@ -299,7 +299,7 @@ public partial class HeroCardUI : PanelContainer
         {
             Text = "Hero"
         };
-        _lblTag.AddThemeFontSizeOverride("font_size", 9);
+        _lblTag.AddThemeFontSizeOverride("font_size", 10);
         _tagPanel.AddChild(_lblTag);
         _thumbPanel.AddChild(_tagPanel);
 
@@ -311,7 +311,12 @@ public partial class HeroCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblName.AddThemeFontSizeOverride("font_size", 12);
+        var colusFont = PlaygroundThemeHelper.GetFontColus();
+        if (colusFont != null)
+        {
+            _lblName.AddThemeFontOverride("font", colusFont);
+        }
+        _lblName.AddThemeFontSizeOverride("font_size", 14);
         _lblName.AddThemeColorOverride("font_color", Colors.White);
         vbox.AddChild(_lblName);
 
@@ -323,8 +328,8 @@ public partial class HeroCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblCodename.AddThemeFontSizeOverride("font_size", 10);
-        _lblCodename.AddThemeColorOverride("font_color", new Color(0.60f, 0.65f, 0.72f, 1.0f));
+        _lblCodename.AddThemeFontSizeOverride("font_size", 12);
+        _lblCodename.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f, 1.0f));
         vbox.AddChild(_lblCodename);
 
         if (Hero != null)

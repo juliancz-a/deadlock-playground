@@ -123,6 +123,7 @@ public partial class VpkLoaderTest : Node3D
 	{
 		AddonVpkPath = addonVpkPath ?? "";
 		ActiveAddonInfo = modInfo;
+		_currentFileLoader = null;
 		GD.Print($"[VpkLoader] Active Addon set to: {(string.IsNullOrEmpty(AddonVpkPath) ? "None (Vanilla)" : Path.GetFileName(AddonVpkPath))}");
 	}
 
@@ -147,13 +148,29 @@ public partial class VpkLoaderTest : Node3D
 
 		SetActiveAddon(modInfo.FilePath, modInfo);
 
-		// If texture-only mod with detected hero, load the corresponding hero from catalog
-		if (modInfo.ModType == AddonModType.TextureOnly && !string.IsNullOrEmpty(modInfo.DetectedHeroCodename))
+		// If package info is incomplete, inspect package directly to populate model and texture entries
+		if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && File.Exists(modInfo.FilePath))
 		{
-			var catalogEntry = DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename);
+			var inspected = DeadlockAddonScanner.InspectAddonPackage(modInfo.FilePath);
+			if (inspected != null)
+			{
+				modInfo = inspected;
+				ActiveAddonInfo = inspected;
+			}
+		}
+
+		// If texture-only mod with detected hero, load the corresponding hero from catalog
+		if (modInfo.ModType == AddonModType.TextureOnly)
+		{
+			var catalogEntry = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
+				? (DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename) ?? DeadlockHeroCatalog.ResolveHero(modInfo.DetectedHeroCodename))
+				: null;
+
+			catalogEntry ??= BaseHeroEntry;
+
 			if (catalogEntry != null)
 			{
-				GD.Print($"[VpkLoader] Loading base hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
+				GD.Print($"[VpkLoader] Loading hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
 				return await LoadHeroModelAsync(catalogEntry);
 			}
 		}
@@ -167,6 +184,16 @@ public partial class VpkLoaderTest : Node3D
 
 		if (string.IsNullOrEmpty(targetRoute))
 		{
+			var fallbackHero = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
+				? (DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename) ?? DeadlockHeroCatalog.ResolveHero(modInfo.DetectedHeroCodename))
+				: null;
+
+			if (fallbackHero != null)
+			{
+				GD.Print($"[VpkLoader] No .vmdl_c in addon '{modInfo.FileName}', applying textures to hero '{fallbackHero.DisplayName}'...");
+				return await LoadHeroModelAsync(fallbackHero);
+			}
+
 			GD.PrintErr($"[VpkLoader] No .vmdl_c found in addon '{modInfo.FileName}' to load.");
 			return null;
 		}

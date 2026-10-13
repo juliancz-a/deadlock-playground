@@ -145,10 +145,13 @@ public partial class ExtraModelPickerModalUI : PanelContainer
         _lblSelectedInfo = new Label
         {
             Text = "Select an extra model to load...",
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MaxLinesVisible = 2
         };
-        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 12);
-        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.75f, 0.78f, 0.84f, 1.0f));
+        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 13);
+        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.82f, 0.85f, 0.90f, 1.0f));
         footer.AddChild(_lblSelectedInfo);
 
         _btnCancel = new Button
