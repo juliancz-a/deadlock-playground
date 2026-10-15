@@ -776,12 +776,16 @@ public partial class StudioUIManager : CanvasLayer
             if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
         }
-        else if (tabIndex == 8)
+      else if (tabIndex == 8)
         {
             var hero = GetVpkLoader()?.CurrentHeroNode;
             if (hero != null && _tabPaint?.CurrentHero == null)
             {
                 _tabPaint?.SetCurrentHero(hero);
+            }
+            if (_uvCanvasPanel != null)
+            {
+                _uvCanvasPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.Painter, _tabPaint?.MeshHierarchy, _tabPaint?.BrushPalette);
             }
             _tabPaint?.OnTabActivated();
 
@@ -815,7 +819,6 @@ public partial class StudioUIManager : CanvasLayer
 
             if (_uvCanvasPanel != null)
             {
-                _uvCanvasPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.Painter, _tabPaint?.MeshHierarchy, _tabPaint?.BrushPalette);
                 _uvCanvasPanel.SetPaintActive(_uvCanvasUserWantsOpen);
             }
             if (_painterKeymapBadge != null)

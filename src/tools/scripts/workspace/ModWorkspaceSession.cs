@@ -138,6 +138,21 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("tint_color_rgba")]
         public float[] TintColorRgba { get; set; } = new float[] { 1f, 1f, 1f, 1f };
 
+        [JsonPropertyName("has_random_color")]
+        public bool HasRandomColor { get; set; } = false;
+
+        [JsonPropertyName("color_min_rgb")]
+        public float[] ColorMinRgb { get; set; } = null;
+
+        [JsonPropertyName("color_max_rgb")]
+        public float[] ColorMaxRgb { get; set; } = null;
+
+        [JsonPropertyName("has_color_fade")]
+        public bool HasColorFade { get; set; } = false;
+
+        [JsonPropertyName("color_fade_rgb")]
+        public float[] ColorFadeRgb { get; set; } = null;
+
         [JsonPropertyName("size_scale")]
         public float SizeScale { get; set; } = 1.0f;
 
@@ -576,6 +591,28 @@ namespace DeadlockPlayground.Workspace
             return null;
         }
 
+        public WorkspaceMaterialEntry FindMaterialEntryForTexture(string vtexPath)
+        {
+            if (string.IsNullOrEmpty(vtexPath)) return null;
+            string norm = vtexPath.Replace('\\', '/').Trim();
+            foreach (var hero in Manifest.Heroes.Values)
+            {
+                foreach (var asset in hero.Assets)
+                {
+                    foreach (var mat in asset.Materials)
+                    {
+                        if (string.Equals(mat.MaterialPath?.Replace('\\', '/')?.Trim(), norm, StringComparison.OrdinalIgnoreCase) ||
+                            mat.Textures.ContainsKey(vtexPath) ||
+                            mat.Textures.ContainsKey(norm))
+                        {
+                            return mat;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
         public Image GetStagedTexture(string vtexPath)
         {
             if (string.IsNullOrEmpty(vtexPath)) return null;
@@ -803,15 +840,17 @@ namespace DeadlockPlayground.Workspace
         public void StageRawLayerImage(string layerKey, string fileName, Image layerImg)
         {
             if (layerImg == null || layerImg.IsEmpty()) return;
+            Directory.CreateDirectory(TexturesDir);
             var copy = (Image)layerImg.Duplicate();
+            if (copy.HasMipmaps()) copy.ClearMipmaps();
             string normKey = layerKey.Replace('\\', '/').Trim().ToLowerInvariant();
             _stagedImagesInMemory[normKey] = (Image)copy.Duplicate();
             _stagedImagesInMemory[fileName.ToLowerInvariant()] = (Image)copy.Duplicate();
             string diskPath = Path.Combine(TexturesDir, fileName);
-            Task.Run(() => { try { copy.SavePng(diskPath); } catch { } });
+            copy.SavePng(diskPath);
         }
 
-        public bool PackageProject(string targetZipOrDirPath)
+       public bool PackageProject(string targetZipOrDirPath)
         {
             try
             {
@@ -843,6 +882,25 @@ namespace DeadlockPlayground.Workspace
                                     if (memImg.HasMipmaps()) memImg.ClearMipmaps();
                                     Directory.CreateDirectory(Path.GetDirectoryName(fullDiskPath));
                                     memImg.SavePng(fullDiskPath);
+                                }
+                            }
+                        }
+
+                        foreach (var mat in asset.Materials)
+                        {
+                            if (mat.Layers == null) continue;
+                            foreach (var le in mat.Layers)
+                            {
+                                if (string.IsNullOrEmpty(le.LayerPngRelPath)) continue;
+                                string fullLayerDisk = Path.Combine(SessionDir, le.LayerPngRelPath);
+                                if (!File.Exists(fullLayerDisk))
+                                {
+                                    string fn = Path.GetFileName(le.LayerPngRelPath).ToLowerInvariant();
+                                    if (_stagedImagesInMemory.TryGetValue(fn, out var lMem) && lMem != null && !lMem.IsEmpty())
+                                    {
+                                        Directory.CreateDirectory(Path.GetDirectoryName(fullLayerDisk));
+                                        lMem.SavePng(fullLayerDisk);
+                                    }
                                 }
                             }
                         }

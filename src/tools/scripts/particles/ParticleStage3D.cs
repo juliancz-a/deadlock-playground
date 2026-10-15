@@ -33,7 +33,19 @@ public partial class ParticleStage3D : Node3D
     private readonly Dictionary<string, ImageTexture> _vanillaTextures = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Image> _pendingModifiedTextures = new(StringComparer.OrdinalIgnoreCase);
     private Color _vanillaConstantColor = Colors.White;
+
+    private struct VanillaEmitterColorState
+    {
+        public Color ConstantColor;
+        public bool HasRandomColor;
+        public Color ColorMin;
+        public Color ColorMax;
+        public bool HasColorFade;
+        public Color ColorFade;
+    }
+    private readonly Dictionary<ParticleMultiMeshRenderer, VanillaEmitterColorState> _vanillaEmitterStates = new();
     private readonly Dictionary<ParticleMultiMeshRenderer, Color> _vanillaEmitterColors = new();
+    private readonly HashSet<int> _modifiedEmitterIndices = new();
     private bool _hasParticleEdits = false;
 
     private IFileLoader _currentFileLoader;
@@ -124,8 +136,9 @@ public partial class ParticleStage3D : Node3D
         _currentBasePackage = basePackage;
         _currentAddonPackage = addonPackage;
         _currentHeroNode = heroNode;
-        _vanillaEmitterColors.Clear(); 
-        _pendingModifiedTextures.Clear(); 
+        _vanillaEmitterStates.Clear();
+        _modifiedEmitterIndices.Clear();
+        _pendingModifiedTextures.Clear();
         _hasParticleEdits = false;
 
         if (!string.IsNullOrEmpty(ownerHeroId))
@@ -188,44 +201,53 @@ public partial class ParticleStage3D : Node3D
             // 4. Instantiate a MultiMesh renderer for each renderer definition in the system
             if (item.Def.Renderers.Count == 0)
             {
-                // Orchestrator / child-only system (e.g. root time_wall_charge, light): do not instantiate fallback renderers
                 continue;
             }
 
             for (int rIdx = 0; rIdx < item.Def.Renderers.Count; rIdx++)
+            {
+                var rDef = item.Def.Renderers[rIdx];
+                Texture2D tex = null;
+                Vector4[] seqRects = null;
+
+                string texPath = rDef.PrimaryTexturePath;
+                if (!string.IsNullOrEmpty(texPath))
                 {
-                    var rDef = item.Def.Renderers[rIdx];
-                    Texture2D tex = null;
-                    Vector4[] seqRects = null;
-
-                    string texPath = rDef.PrimaryTexturePath;
-                    if (!string.IsNullOrEmpty(texPath))
-                    {
-                        tex = LoadOrGetTexture(texPath, fileLoader, basePackage, addonPackage);
-                        seqRects = Source2TextureLoader.ExtractSpriteSheetSequences(texPath, fileLoader, basePackage, addonPackage);
-                    }
-
-                    if (tex == null)
-                    {
-                        tex = GetFallbackParticleTexture();
-                    }
-
-                    Texture2D noiseTex = null;
-                    if (rDef is RenderModelsDef)
-                    {
-                        noiseTex = tex;
-                    }
-
-                    var renderer = new ParticleMultiMeshRenderer(inst, rDef, tex, seqRects, noiseTex);
-                    renderer.Name = $"Renderer_{inst.Definition.VpcfPath.GetFile().GetBaseName()}_{rIdx}_{rDef.ClassName}";
-                    Color initialCol = inst.Definition.ConstantColor;
-                    _vanillaEmitterColors[renderer] = initialCol;
-                    renderer.SetCustomTint(initialCol);
-                    AddChild(renderer);
-                    _renderers.Add(renderer);
-                    _vanillaEmitterColors[renderer] = inst.Definition.ConstantColor;
-                    _hasParticleEdits = false;
+                    tex = LoadOrGetTexture(texPath, fileLoader, basePackage, addonPackage);
+                    seqRects = Source2TextureLoader.ExtractSpriteSheetSequences(texPath, fileLoader, basePackage, addonPackage);
                 }
+
+                if (tex == null)
+                {
+                    tex = GetFallbackParticleTexture();
+                }
+
+                Texture2D noiseTex = null;
+                if (rDef is RenderModelsDef)
+                {
+                    noiseTex = tex;
+                }
+
+                var renderer = new ParticleMultiMeshRenderer(inst, rDef, tex, seqRects, noiseTex);
+                renderer.Name = $"Renderer_{inst.Definition.VpcfPath.GetFile().GetBaseName()}_{rIdx}_{rDef.ClassName}";
+
+                var randInit = inst.Definition.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+                var fadeOp = inst.Definition.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+
+                _vanillaEmitterStates[renderer] = new VanillaEmitterColorState
+                {
+                    ConstantColor = inst.Definition.ConstantColor,
+                    HasRandomColor = randInit != null,
+                    ColorMin = randInit?.ColorMin ?? Colors.White,
+                    ColorMax = randInit?.ColorMax ?? Colors.White,
+                    HasColorFade = fadeOp != null,
+                    ColorFade = fadeOp?.ColorFade ?? Colors.White
+                };
+
+                renderer.SetCustomTint(Colors.White);
+                AddChild(renderer);
+                _renderers.Add(renderer);
+            }
         }
 
         float calculatedDuration = ParticleHierarchyDefinitionLoader.CalculateDuration(ActiveRootDefinition);
@@ -402,6 +424,13 @@ public partial class ParticleStage3D : Node3D
         return null;
     }
 
+    public ImageTexture GetVanillaTexture(string vtexPath)
+    {
+        if (!string.IsNullOrEmpty(vtexPath) && _vanillaTextures.TryGetValue(vtexPath, out var tex))
+            return tex;
+        return null;
+    }
+
     public static Texture2D GetFallbackParticleTexture()
     {
         if (_fallbackParticleTexture != null) return _fallbackParticleTexture;
@@ -505,21 +534,36 @@ public partial class ParticleStage3D : Node3D
                 ? _currentHeroNode.Name.ToString().Replace("Hero_", "").ToLowerInvariant() 
                 : "particles");
 
-        // Stage immediately in memory and disk so ExportModDialog & SkinExporter always find it
         ModWorkspaceSession.Instance.StageTexture(
             heroId,
             heroId,
             "ParticleVFX",
             ActiveVpcfPath,
-            ActiveVpcfPath,
+            vtexPath,
             System.IO.Path.GetFileName(vtexPath),
             vtexPath,
             cleanImgForExport);
+
+        var layerMgr = DeadlockPlayground.Painter.SkinLayerManager.Instance;
+        if (layerMgr != null)
+        {
+            var stagedLayers = layerMgr.StageMaterialLayersToWorkspace("particle:" + vtexPath, vtexPath);
+            var matEntry = ModWorkspaceSession.Instance.FindMaterialEntryForTexture(vtexPath);
+            if (matEntry != null && stagedLayers.Count > 0)
+            {
+                matEntry.Layers = stagedLayers;
+                matEntry.ActiveLayerIndex = layerMgr.ActiveLayerIndex;
+                matEntry.Width = cleanImgForExport.GetWidth();
+                matEntry.Height = cleanImgForExport.GetHeight();
+                ModWorkspaceSession.Instance.SaveManifest();
+            }
+        }
     }
 
-   public void RestoreAllVanillaOverrides()
+public void RestoreAllVanillaOverrides()
     {
         _hasParticleEdits = false;
+        _modifiedEmitterIndices.Clear();
         _pendingModifiedTextures.Clear();
 
         if (ActiveRootDefinition != null)
@@ -532,19 +576,29 @@ public partial class ParticleStage3D : Node3D
             var r = _renderers[i];
             if (IsInstanceValid(r))
             {
-                Color origInstCol = _vanillaEmitterColors.TryGetValue(r, out var c) ? c : Colors.White;
-                if (r.Instance?.Definition != null)
+                if (_vanillaEmitterStates.TryGetValue(r, out var st) && r.Instance?.Definition != null)
                 {
-                    r.Instance.Definition.ConstantColor = origInstCol;
+                    var def = r.Instance.Definition;
+                    def.ConstantColor = st.ConstantColor;
+                    var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+                    if (randInit != null && st.HasRandomColor)
+                    {
+                        randInit.ColorMin = st.ColorMin;
+                        randInit.ColorMax = st.ColorMax;
+                    }
+                    var fadeOp = def.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+                    if (fadeOp != null && st.HasColorFade)
+                    {
+                        fadeOp.ColorFade = st.ColorFade;
+                    }
                 }
                 r.VisibleAndEmitting = true;
-                r.SetCustomTint(origInstCol);
+                r.SetCustomTint(Colors.White);
                 r.CustomSizeScale = 1.0f;
                 r.CustomAlphaScale = 1.0f;
             }
         }
 
-        // Reiniciar simulación para que las partículas vivas tomen su color y radio original del .vpcf
         _simulator?.Reset();
 
         foreach (var (vtexPath, vanillaTex) in _vanillaTextures)
@@ -625,12 +679,14 @@ public partial class ParticleStage3D : Node3D
 
     public void SetRendererCustomTint(int index, Color color)
     {
-        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
             if (IsInstanceValid(r))
             {
+                if (r.CustomTintColor.IsEqualApprox(color)) return;
+                _hasParticleEdits = true;
+                _modifiedEmitterIndices.Add(index);
                 r.SetCustomTint(color);
                 RenderImmediate();
                 FlushOverridesToWorkspace();
@@ -640,12 +696,14 @@ public partial class ParticleStage3D : Node3D
 
     public void SetRendererCustomSizeScale(int index, float scale)
     {
-        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
             if (IsInstanceValid(r))
             {
+                if (Mathf.Abs(r.CustomSizeScale - scale) < 0.005f) return;
+                _hasParticleEdits = true;
+                _modifiedEmitterIndices.Add(index);
                 r.CustomSizeScale = scale;
                 RenderImmediate();
                 FlushOverridesToWorkspace();
@@ -655,12 +713,14 @@ public partial class ParticleStage3D : Node3D
 
     public void SetRendererCustomAlphaScale(int index, float alpha)
     {
-        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
             if (IsInstanceValid(r))
             {
+                if (Mathf.Abs(r.CustomAlphaScale - alpha) < 0.005f) return;
+                _hasParticleEdits = true;
+                _modifiedEmitterIndices.Add(index);
                 r.CustomAlphaScale = alpha;
                 RenderImmediate();
                 FlushOverridesToWorkspace();
@@ -670,12 +730,14 @@ public partial class ParticleStage3D : Node3D
 
     public void SetRendererVisibility(int index, bool visible)
     {
-        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
             if (IsInstanceValid(r))
             {
+                if (r.VisibleAndEmitting == visible) return;
+                _hasParticleEdits = true;
+                _modifiedEmitterIndices.Add(index);
                 r.VisibleAndEmitting = visible;
                 RenderImmediate();
                 FlushOverridesToWorkspace();
@@ -756,15 +818,35 @@ public partial class ParticleStage3D : Node3D
                     string emName = !string.IsNullOrEmpty(r.Name) ? r.Name.ToString() : $"Emitter_{i}";
                     if (pOverrides.Emitters.TryGetValue(emName, out var emData))
                     {
+                        _modifiedEmitterIndices.Add(i);
                         r.VisibleAndEmitting = emData.Visible;
-                        if (emData.TintColorRgba != null && emData.TintColorRgba.Length >= 4)
-                        {
-                            r.SetCustomTint(new Color(emData.TintColorRgba[0], emData.TintColorRgba[1], emData.TintColorRgba[2], emData.TintColorRgba[3]));
-                        }
                         r.CustomSizeScale = emData.SizeScale;
                         r.CustomAlphaScale = emData.AlphaScale;
+
+                        var def = r.Instance?.Definition;
+                        if (def != null)
+                        {
+                            if (emData.TintColorRgba != null && emData.TintColorRgba.Length >= 3)
+                            {
+                                float a = emData.TintColorRgba.Length >= 4 ? emData.TintColorRgba[3] : 1f;
+                                def.ConstantColor = new Color(emData.TintColorRgba[0], emData.TintColorRgba[1], emData.TintColorRgba[2], a);
+                            }
+                            var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+                            if (randInit != null && emData.ColorMinRgb?.Length >= 3 && emData.ColorMaxRgb?.Length >= 3)
+                            {
+                                randInit.ColorMin = new Color(emData.ColorMinRgb[0], emData.ColorMinRgb[1], emData.ColorMinRgb[2], 1f);
+                                randInit.ColorMax = new Color(emData.ColorMaxRgb[0], emData.ColorMaxRgb[1], emData.ColorMaxRgb[2], 1f);
+                            }
+                            var fadeOp = def.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+                            if (fadeOp != null && emData.ColorFadeRgb?.Length >= 3)
+                            {
+                                fadeOp.ColorFade = new Color(emData.ColorFadeRgb[0], emData.ColorFadeRgb[1], emData.ColorFadeRgb[2], 1f);
+                            }
+                        }
+                        r.SetCustomTint(Colors.White);
                     }
                 }
+                _simulator?.Reset();
                 GD.Print($"[ParticleStage3D] Restored staged particle overrides for '{ActiveVpcfPath}' from workspace session.");
             }
 
@@ -778,7 +860,7 @@ public partial class ParticleStage3D : Node3D
 
     public void FlushOverridesToWorkspace()
     {
-       if (!HasActiveParticle) return;
+        if (!HasActiveParticle) return;
         if (!_hasParticleEdits && _pendingModifiedTextures.Count == 0 && !ModWorkspaceSession.Instance.HasStagedModifications(ActiveVpcfPath))
         {
             return;
@@ -806,27 +888,49 @@ public partial class ParticleStage3D : Node3D
                 AlphaScale = 1.0f
             };
 
+            var prevOverrides = ModWorkspaceSession.Instance.GetParticleOverrides(ActiveVpcfPath);
+
             for (int i = 0; i < _renderers.Count; i++)
             {
                 var r = _renderers[i];
                 if (!GodotObject.IsInstanceValid(r)) continue;
                 string emName = !string.IsNullOrEmpty(r.Name) ? r.Name.ToString() : $"Emitter_{i}";
+
+                bool wasPreviouslyModified = prevOverrides?.Emitters != null && prevOverrides.Emitters.ContainsKey(emName);
+                if (!_modifiedEmitterIndices.Contains(i) && !wasPreviouslyModified)
+                {
+                    continue;
+                }
+
+                var def = r.Instance?.Definition;
+                var randInit = def?.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+                var fadeOp = def?.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+                Color cCol = def?.ConstantColor ?? Colors.White;
+
                 overrides.Emitters[emName] = new EmitterOverrideData
                 {
-                    ChildVpcfPath = r.Instance?.Definition?.VpcfPath ?? ActiveVpcfPath,
+                    ChildVpcfPath = def?.VpcfPath ?? ActiveVpcfPath,
                     Visible = r.VisibleAndEmitting,
-                    TintColorRgba = new float[] { r.CustomTintColor.R, r.CustomTintColor.G, r.CustomTintColor.B, 1f },
+                    TintColorRgba = new float[] { cCol.R, cCol.G, cCol.B, cCol.A },
+                    HasRandomColor = randInit != null,
+                    ColorMinRgb = randInit != null ? new float[] { randInit.ColorMin.R, randInit.ColorMin.G, randInit.ColorMin.B } : null,
+                    ColorMaxRgb = randInit != null ? new float[] { randInit.ColorMax.R, randInit.ColorMax.G, randInit.ColorMax.B } : null,
+                    HasColorFade = fadeOp != null,
+                    ColorFadeRgb = fadeOp != null ? new float[] { fadeOp.ColorFade.R, fadeOp.ColorFade.G, fadeOp.ColorFade.B } : null,
                     SizeScale = r.CustomSizeScale,
                     AlphaScale = r.CustomAlphaScale
                 };
             }
 
-            ModWorkspaceSession.Instance.StageParticleOverrides(
-                heroId,
-                heroId,
-                ActiveVpcfPath,
-                ActiveVariantName ?? System.IO.Path.GetFileName(ActiveVpcfPath),
-                overrides);
+            if (overrides.Emitters.Count > 0)
+            {
+                ModWorkspaceSession.Instance.StageParticleOverrides(
+                    heroId,
+                    heroId,
+                    ActiveVpcfPath,
+                    ActiveVariantName ?? System.IO.Path.GetFileName(ActiveVpcfPath),
+                    overrides);
+            }
 
             foreach (var (vtex, img) in _pendingModifiedTextures)
             {
@@ -835,16 +939,80 @@ public partial class ParticleStage3D : Node3D
                     heroId,
                     "ParticleVFX",
                     ActiveVpcfPath,
-                    ActiveVpcfPath,
+                    vtex,
                     System.IO.Path.GetFileName(vtex),
                     vtex,
                     img);
+
+                var layerMgr = DeadlockPlayground.Painter.SkinLayerManager.Instance;
+                if (layerMgr != null)
+                {
+                    var stagedLayers = layerMgr.StageMaterialLayersToWorkspace("particle:" + vtex, vtex);
+                    var matEntry = ModWorkspaceSession.Instance.FindMaterialEntryForTexture(vtex);
+                    if (matEntry != null && stagedLayers.Count > 0)
+                    {
+                        matEntry.Layers = stagedLayers;
+                        matEntry.Width = img.GetWidth();
+                        matEntry.Height = img.GetHeight();
+                        ModWorkspaceSession.Instance.SaveManifest();
+                    }
+                }
             }
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[ParticleStage3D] Error flushing overrides to workspace: {ex.Message}");
         }
+    }
+
+    public void SetRendererConstantColor(int index, Color color)
+    {
+        if (index < 0 || index >= _renderers.Count) return;
+        var r = _renderers[index];
+        var def = r?.Instance?.Definition;
+        if (def == null || def.ConstantColor.IsEqualApprox(color)) return;
+
+        _hasParticleEdits = true;
+        _modifiedEmitterIndices.Add(index);
+        def.ConstantColor = color;
+        r.SetCustomTint(Colors.White);
+        _simulator?.Reset();
+        RenderImmediate();
+        FlushOverridesToWorkspace();
+    }
+
+    public void SetRendererRandomColor(int index, Color colorMin, Color colorMax)
+    {
+        if (index < 0 || index >= _renderers.Count) return;
+        var r = _renderers[index];
+        var randInit = r?.Instance?.Definition?.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+        if (randInit == null) return;
+        if (randInit.ColorMin.IsEqualApprox(colorMin) && randInit.ColorMax.IsEqualApprox(colorMax)) return;
+
+        _hasParticleEdits = true;
+        _modifiedEmitterIndices.Add(index);
+        randInit.ColorMin = colorMin;
+        randInit.ColorMax = colorMax;
+        r.SetCustomTint(Colors.White);
+        _simulator?.Reset();
+        RenderImmediate();
+        FlushOverridesToWorkspace();
+    }
+
+    public void SetRendererColorFade(int index, Color colorFade)
+    {
+        if (index < 0 || index >= _renderers.Count) return;
+        var r = _renderers[index];
+        var fadeOp = r?.Instance?.Definition?.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+        if (fadeOp == null || fadeOp.ColorFade.IsEqualApprox(colorFade)) return;
+
+        _hasParticleEdits = true;
+        _modifiedEmitterIndices.Add(index);
+        fadeOp.ColorFade = colorFade;
+        r.SetCustomTint(Colors.White);
+        _simulator?.Reset();
+        RenderImmediate();
+        FlushOverridesToWorkspace();
     }
 
     public float GetParticleRadius()
@@ -1026,5 +1194,47 @@ public partial class ParticleStage3D : Node3D
             }
         }
         _hiddenHeroMeshes.Clear();
+    }
+
+public void ResetEmitterParametersOnly()
+    {
+        _modifiedEmitterIndices.Clear();
+
+        if (ActiveRootDefinition != null)
+        {
+            ActiveRootDefinition.ConstantColor = _vanillaConstantColor;
+        }
+
+        for (int i = 0; i < _renderers.Count; i++)
+        {
+            var r = _renderers[i];
+            if (IsInstanceValid(r))
+            {
+                if (_vanillaEmitterStates.TryGetValue(r, out var st) && r.Instance?.Definition != null)
+                {
+                    var def = r.Instance.Definition;
+                    def.ConstantColor = st.ConstantColor;
+                    var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+                    if (randInit != null && st.HasRandomColor)
+                    {
+                        randInit.ColorMin = st.ColorMin;
+                        randInit.ColorMax = st.ColorMax;
+                    }
+                    var fadeOp = def.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+                    if (fadeOp != null && st.HasColorFade)
+                    {
+                        fadeOp.ColorFade = st.ColorFade;
+                    }
+                }
+                r.VisibleAndEmitting = true;
+                r.SetCustomTint(Colors.White);
+                r.CustomSizeScale = 1.0f;
+                r.CustomAlphaScale = 1.0f;
+            }
+        }
+
+        _simulator?.Reset();
+        RenderImmediate();
+        FlushOverridesToWorkspace();
     }
 }

@@ -606,6 +606,7 @@ namespace DeadlockPlayground.UI
         {
             _activeParticleTexturePath = vtexPath;
             _onParticleTextureUpdated = onTextureUpdated;
+            _layerManager ??= SkinLayerManager.Instance;
 
             if (_lblTitle != null)
             {
@@ -731,14 +732,20 @@ namespace DeadlockPlayground.UI
                 _resizeGrip.Visible = isVisible;
                 if (isVisible) UpdateGripTransform();
             }
-            EmitSignal(SignalName.VisibilityToggled, isVisible);
-            if (isVisible)
+          if (isVisible)
             {
-                _layerManager?.EnsureCpuSynced();
-                _layerManager?.RecompositeGpuLayers();
+                if (_layerManager != null && !_layerManager.IsStandaloneTextureMode)
+                {
+                    _layerManager.EnsureCpuSynced();
+                    _layerManager.RecompositeGpuLayers();
+                    _layerManager.RebuildBaseAtlasBuffer();
+                }
+                else
+                {
+                    _layerManager?.UpdateStandaloneComposite();
+                }
                 EnforcePanelWidthLimits();
                 CallDeferred(nameof(EnforcePanelWidthLimits));
-                _layerManager?.RebuildBaseAtlasBuffer();
                 RebuildWireframe();
                 UpdateResolutionLabel();
                 if (!_hasInitialFit)

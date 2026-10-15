@@ -718,13 +718,15 @@ public partial class PaintTabUI : VBoxContainer
             };
         }
 
-        if (_optLayerBlend != null)
+     if (_optLayerBlend != null)
         {
             _optLayerBlend.ItemSelected += (idx) =>
             {
                 if (_layerManager == null) return;
+                if (_layerManager.ActiveLayer != null && _layerManager.ActiveLayer.BlendMode == (LayerBlendMode)idx) return;
                 _layerManager.SetLayerBlendMode(_layerManager.ActiveLayerIndex, (LayerBlendMode)idx);
                 _painter?.SyncCameraBrushProperties(force: true);
+                RegisterActiveStrokeMetadata();
             };
         }
 
@@ -733,9 +735,11 @@ public partial class PaintTabUI : VBoxContainer
             _sliderLayerOpacity.ValueChanged += (val) =>
             {
                 if (_layerManager == null) return;
+                if (_layerManager.ActiveLayer != null && Mathf.Abs(_layerManager.ActiveLayer.Opacity - (float)val) < 0.005f) return;
                 _layerManager.SetLayerOpacity(_layerManager.ActiveLayerIndex, (float)val);
                 if (_lblLayerOpacity != null) _lblLayerOpacity.Text = $"{Mathf.RoundToInt(val * 100)}%";
                 _painter?.SyncCameraBrushProperties(force: true);
+                RegisterActiveStrokeMetadata();
             };
         }
 
@@ -2273,7 +2277,6 @@ public partial class PaintTabUI : VBoxContainer
                 TooltipText = "Emitter Tint Color",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
-            headRow.AddChild(tintPicker);
 
             var toggleDetailsBtn = new Button
             {
@@ -2296,6 +2299,85 @@ public partial class PaintTabUI : VBoxContainer
                 detailsBox.Visible = !detailsBox.Visible;
                 toggleDetailsBtn.Text = detailsBox.Visible ? "▼" : "▶";
             };
+
+            var def = localRenderer.Instance?.Definition;
+            var randColInit = def?.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+            var colFadeOp = def?.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+
+            var colorsRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            colorsRow.AddThemeConstantOverride("separation", 8);
+
+            if (randColInit != null)
+            {
+                // Este .vpcf usa C_INIT_RandomColor -> Mostrar Color Min y Color Max
+                var lblMin = new Label { Text = "Min:" };
+                lblMin.AddThemeFontSizeOverride("font_size", 10);
+                var pickerMin = new ColorPickerButton
+                {
+                    CustomMinimumSize = new Vector2(32, 20),
+                    Color = randColInit.ColorMin,
+                    EditAlpha = false,
+                    TooltipText = "Random Color Min (C_INIT_RandomColor)"
+                };
+
+                var lblMax = new Label { Text = "Max:" };
+                lblMax.AddThemeFontSizeOverride("font_size", 10);
+                var pickerMax = new ColorPickerButton
+                {
+                    CustomMinimumSize = new Vector2(32, 20),
+                    Color = randColInit.ColorMax,
+                    EditAlpha = false,
+                    TooltipText = "Random Color Max (C_INIT_RandomColor)"
+                };
+
+                pickerMin.ColorChanged += (c) => stage.SetRendererRandomColor(rIdx, c, pickerMax.Color);
+                pickerMax.ColorChanged += (c) => stage.SetRendererRandomColor(rIdx, pickerMin.Color, c);
+
+                colorsRow.AddChild(lblMin);
+                colorsRow.AddChild(pickerMin);
+                colorsRow.AddChild(lblMax);
+                colorsRow.AddChild(pickerMax);
+            }
+            else if (def != null)
+            {
+                // Este .vpcf NO usa C_INIT_RandomColor -> Mostrar Constant Color
+                var lblConst = new Label { Text = "Color:" };
+                lblConst.AddThemeFontSizeOverride("font_size", 10);
+                var pickerConst = new ColorPickerButton
+                {
+                    CustomMinimumSize = new Vector2(36, 20),
+                    Color = def.ConstantColor,
+                    EditAlpha = false,
+                    TooltipText = "Constant Color (m_ConstantColor)"
+                };
+                pickerConst.ColorChanged += (c) => stage.SetRendererConstantColor(rIdx, c);
+
+                colorsRow.AddChild(lblConst);
+                colorsRow.AddChild(pickerConst);
+            }
+
+            if (colFadeOp != null)
+            {
+                // Este .vpcf tiene C_OP_ColorInterpolate -> Mostrar Fade Color
+                var lblFade = new Label { Text = "Fade:" };
+                lblFade.AddThemeFontSizeOverride("font_size", 10);
+                var pickerFade = new ColorPickerButton
+                {
+                    CustomMinimumSize = new Vector2(32, 20),
+                    Color = colFadeOp.ColorFade,
+                    EditAlpha = false,
+                    TooltipText = "Interpolate Fade Color (C_OP_ColorInterpolate)"
+                };
+                pickerFade.ColorChanged += (c) => stage.SetRendererColorFade(rIdx, c);
+
+                colorsRow.AddChild(lblFade);
+                colorsRow.AddChild(pickerFade);
+            }
+
+            if (colorsRow.GetChildCount() > 0)
+            {
+                detailsBox.AddChild(colorsRow);
+            }
 
             // Size Slider Row
             var sizeRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
@@ -2374,12 +2456,7 @@ public partial class PaintTabUI : VBoxContainer
         resetAllBtn.AddThemeFontSizeOverride("font_size", 10);
         resetAllBtn.Pressed += () =>
         {
-            stage.RestoreAllVanillaOverrides();
-            if (!string.IsNullOrEmpty(stage.ActiveVpcfPath))
-            {
-                string pOwner = stage.ActiveOwnerHeroId ?? _currentHeroId;
-                ModWorkspaceSession.Instance.RemoveAsset(pOwner, stage.ActiveVpcfPath);
-            }
+            stage.ResetEmitterParametersOnly();
             UpdateParticleTexturesGroup();
         };
         paramVBox.AddChild(resetAllBtn);
@@ -2698,12 +2775,15 @@ public partial class PaintTabUI : VBoxContainer
         }
        if (_painter != null)
         {
-            _painter.IsPaintingActive = true;
-            _layerManager?.UpdateActiveLayerBinding();
-            _layerManager?.ApplyOverlayParametersToMeshes();
-            if (_painter.CameraBrush != null && GodotObject.IsInstanceValid(_painter.CameraBrush))
+            _painter.IsPaintingActive = !hasParticleActive;
+            if (!hasParticleActive)
             {
-                _painter.CameraBrush.Call("get_atlas_textures");
+                _layerManager?.UpdateActiveLayerBinding();
+                _layerManager?.ApplyOverlayParametersToMeshes();
+                if (_painter.CameraBrush != null && GodotObject.IsInstanceValid(_painter.CameraBrush))
+                {
+                    _painter.CameraBrush.Call("get_atlas_textures");
+                }
             }
         }
         if (_brushPalette != null)
@@ -2711,16 +2791,21 @@ public partial class PaintTabUI : VBoxContainer
             _brushPalette.Visible = true;
             _brushPalette.SyncFromPainter();
         }
-        _layerManager?.RebuildBaseAtlasBuffer();
+        if (!hasParticleActive)
+        {
+            _layerManager?.RebuildBaseAtlasBuffer();
+        }
         RefreshSubmeshListUI();
         UpdateParticleTexturesGroup();
         UpdateSubmeshRowHighlights();
+        RefreshLayersListUI();
         UpdateCanvasResolutionLabel();
     }
 
     public void OnTabDeactivated()
     {
         IsTabActive = false;
+        _layerManager?.SaveActiveContext();
         var stage = GetOrCreateParticleStage();
         bool hasActiveParticle = stage != null && stage.HasActiveParticle;
 

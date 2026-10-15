@@ -549,15 +549,7 @@ namespace DeadlockPlayground.Painter
                             foreach (var em in pOverrides.Emitters.Values)
                             {
                                 string targetVpcf = !string.IsNullOrEmpty(em.ChildVpcfPath) ? em.ChildVpcfPath : asset.VpkPath;
-                                if (string.IsNullOrEmpty(targetVpcf)) continue;
-
-                                bool isModified = !em.Visible ||
-                                                  Math.Abs(em.SizeScale - 1.0f) > 0.01f ||
-                                                  Math.Abs(em.AlphaScale - 1.0f) > 0.01f ||
-                                                  (em.TintColorRgba != null && em.TintColorRgba.Length >= 3 &&
-                                                   (Math.Abs(em.TintColorRgba[0] - 1f) > 0.01f || Math.Abs(em.TintColorRgba[1] - 1f) > 0.01f || Math.Abs(em.TintColorRgba[2] - 1f) > 0.01f));
-
-                                if (isModified)
+                                if (!string.IsNullOrEmpty(targetVpcf))
                                 {
                                     vpcfTargets[targetVpcf] = em;
                                 }
@@ -592,6 +584,12 @@ namespace DeadlockPlayground.Painter
 
                                 string vpcfFileName = Path.GetFileName(normVpcf);
                                 string fullVpcfContentPath = Path.Combine(vpcfContentDir, vpcfFileName);
+                                // Asegurar que todas las texturas referenciadas en el .vpcf existan en gameStagingRoot para que resourcecompiler.exe no falle
+                                foreach (System.Text.RegularExpressions.Match texMatch in System.Text.RegularExpressions.Regex.Matches(kv3Text, @"resource:""([^""]+\.vtex)"""))
+                                {
+                                    string refVtexC = FormatVtexCResource(texMatch.Groups[1].Value);
+                                    EnsureTextureStagedInGameTree(gameStagingRoot, refVtexC, baseVpkPackage);
+                                }
                                 File.WriteAllText(fullVpcfContentPath, kv3Text);
 
                                 progress?.Report(new ExportProgressReport(0.82f, $"[INFO] Compiling modified particle definition: {vpcfFileName}..."));
@@ -1399,11 +1397,21 @@ namespace DeadlockPlayground.Painter
 ";
         }
 
-        private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
+    private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
         {
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
-            // 1. Si el usuario ocultó este emisor (Visible = false), ponemos m_nMaxParticles = 0
+            // 1. Asegurar que m_ForceGenerators = [  ] esté presente (como en los .vpcf_c vanilla)
+            if (!kv3Text.Contains("m_ForceGenerators"))
+            {
+                int renderersIdx = kv3Text.IndexOf("m_Renderers", StringComparison.Ordinal);
+                if (renderersIdx > 0)
+                {
+                    kv3Text = kv3Text.Insert(renderersIdx, "m_ForceGenerators = [  ]\n\t");
+                }
+            }
+
+            // 2. Si el usuario ocultó este emisor (Visible = false), ponemos m_nMaxParticles = 0
             if (!ov.Visible)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_nMaxParticles\s*=\s*\d+"))
@@ -1418,37 +1426,60 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 2. Si cambió el TintColor o el AlphaScale, inyectamos/actualizamos m_ConstantColor = [ R, G, B, A ]
+           // 3a. m_ConstantColor + AlphaScale
             if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
             {
-                bool tintChanged = Math.Abs(ov.TintColorRgba[0] - 1f) > 0.01f ||
-                                   Math.Abs(ov.TintColorRgba[1] - 1f) > 0.01f ||
-                                   Math.Abs(ov.TintColorRgba[2] - 1f) > 0.01f ||
-                                   Math.Abs(ov.AlphaScale - 1f) > 0.01f;
-                if (tintChanged)
-                {
-                    int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
-                    int g = Math.Clamp((int)MathF.Round(ov.TintColorRgba[1] * 255f), 0, 255);
-                    int b = Math.Clamp((int)MathF.Round(ov.TintColorRgba[2] * 255f), 0, 255);
-                    int a = Math.Clamp((int)MathF.Round(ov.AlphaScale * 255f), 0, 255);
-                    string colorBlock = $"m_ConstantColor = [ {r}, {g}, {b}, {a} ]";
+                int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
+                int g = Math.Clamp((int)MathF.Round(ov.TintColorRgba[1] * 255f), 0, 255);
+                int b = Math.Clamp((int)MathF.Round(ov.TintColorRgba[2] * 255f), 0, 255);
+                int a = Math.Clamp((int)MathF.Round(ov.AlphaScale * 255f), 0, 255);
+                string rgbaBlock = $"[ {r}, {g}, {b}, {a} ]";
 
-                    if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]"))
-                    {
-                        kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]", colorBlock);
-                    }
-                    else
-                    {
-                        int braceIdx = kv3Text.IndexOf('{');
-                        if (braceIdx >= 0)
-                            kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\t{colorBlock}");
-                    }
+                if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]"))
+                {
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]", $"m_ConstantColor = {rgbaBlock}");
+                }
+                else
+                {
+                    int braceIdx = kv3Text.IndexOf('{');
+                    if (braceIdx >= 0)
+                        kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_ConstantColor = {rgbaBlock}");
                 }
             }
 
-            // 3. Si cambió SizeScale, escalamos m_flConstantRadius
+            // 3b. C_INIT_RandomColor: m_ColorMin y m_ColorMax independientes!
+            if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
+            {
+                if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
+                {
+                    int rMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[0] * 255f), 0, 255);
+                    int gMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[1] * 255f), 0, 255);
+                    int bMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[2] * 255f), 0, 255);
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorMin\s*=\s*\[[^\]]*\]", $"m_ColorMin = [ {rMin}, {gMin}, {bMin} ]");
+                }
+                if (ov.ColorMaxRgb != null && ov.ColorMaxRgb.Length >= 3)
+                {
+                    int rMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[0] * 255f), 0, 255);
+                    int gMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[1] * 255f), 0, 255);
+                    int bMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[2] * 255f), 0, 255);
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorMax\s*=\s*\[[^\]]*\]", $"m_ColorMax = [ {rMax}, {gMax}, {bMax} ]");
+                }
+            }
+
+            // 3c. C_OP_ColorInterpolate: m_ColorFade independiente!
+            if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
+            {
+                int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
+                int gFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[1] * 255f), 0, 255);
+                int bFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[2] * 255f), 0, 255);
+                kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorFade\s*=\s*\[[^\]]*\]", $"m_ColorFade = [ {rFade}, {gFade}, {bFade} ]");
+            }
+
+            // 4. Si cambió SizeScale, escalamos m_flConstantRadius e inyectamos/escalamos m_flRadiusScale en el Renderer
             if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f)
             {
+                string scaleStr = ov.SizeScale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
+
                 var match = System.Text.RegularExpressions.Regex.Match(kv3Text, @"m_flConstantRadius\s*=\s*([0-9\.]+)");
                 if (match.Success && float.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float baseRad))
                 {
@@ -1462,6 +1493,15 @@ namespace DeadlockPlayground.Painter
                     int braceIdx = kv3Text.IndexOf('{');
                     if (braceIdx >= 0)
                         kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_flConstantRadius = {(5.0f * ov.SizeScale).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
+                }
+
+                // Inyectar m_flRadiusScale en el primer Renderer si no lo tiene, para que escale incluso cuando C_INIT_InitFloat pisa el radio
+                if (!kv3Text.Contains("m_flRadiusScale"))
+                {
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(
+                        kv3Text,
+                        @"(_class\s*=\s*""C_OP_Render(?:Sprites|Trails)"")",
+                        $"$1\n\t\t\tm_flRadiusScale = {scaleStr}");
                 }
             }
 
