@@ -4,8 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DeadlockPlayground.Catalog;
-using ValvePak;
-
+using SteamDatabase.ValvePak;
 namespace DeadlockPlayground.UI;
 
 /// <summary>

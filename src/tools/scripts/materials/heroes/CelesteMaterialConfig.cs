@@ -1,6 +1,6 @@
 using System;
 using Godot;
-using ValvePak;
+using SteamDatabase.ValvePak;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 

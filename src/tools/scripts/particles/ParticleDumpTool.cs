@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using ValvePak;
+using SteamDatabase.ValvePak;
 using ValveKeyValue;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
@@ -479,7 +479,7 @@ public static class ParticleDumpTool
             sb.AppendLine("=== Embedded Meshes ===");
             try
             {
-                foreach (var (mesh, meshIndex, meshName, _) in mdl.GetEmbeddedMeshes())
+                foreach (var (mesh, meshIndex, meshName) in mdl.GetEmbeddedMeshes())
                 {
                     sb.AppendLine($"  Mesh [{meshIndex}]: {meshName}");
                     var sceneObjects = mesh.Data.GetArray("m_sceneObjects");

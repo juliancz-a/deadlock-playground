@@ -43,12 +43,12 @@ public class ViscousMaterialConfig : IHeroMaterialConfig
         return false;
     }
 
-    public Godot.Material TryCreateCustomMaterial(ValvePak.Package package, string vmatPath, string meshName)
+    public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName)
     {
         return TryCreateCustomMaterial(package, vmatPath, meshName, null);
     }
 
-    public Godot.Material TryCreateCustomMaterial(ValvePak.Package package, string vmatPath, string meshName, ValvePak.Package addonPackage)
+    public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName, SteamDatabase.ValvePak.Package addonPackage)
     {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
         string meshLower = meshName?.ToLowerInvariant() ?? "";

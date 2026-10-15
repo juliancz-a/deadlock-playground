@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Godot;
-using ValvePak;
+using SteamDatabase.ValvePak;
 using DeadlockPlayground.Catalog;
 
 namespace DeadlockPlayground.Addons

@@ -34,10 +34,10 @@ public class VindictaMaterialConfig : IHeroMaterialConfig
         return null;
     }
 
-    public Godot.Material TryCreateCustomMaterial(ValvePak.Package package, string vmatPath, string meshName)
+    public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName)
         => TryCreateCustomMaterial(package, vmatPath, meshName, null);
 
-    public Godot.Material TryCreateCustomMaterial(ValvePak.Package package, string vmatPath, string meshName, ValvePak.Package addonPackage)
+    public Godot.Material TryCreateCustomMaterial(SteamDatabase.ValvePak.Package package, string vmatPath, string meshName, SteamDatabase.ValvePak.Package addonPackage)
     {
         string mLower = meshName?.ToLowerInvariant() ?? "";
         string vLower = vmatPath?.ToLowerInvariant() ?? "";

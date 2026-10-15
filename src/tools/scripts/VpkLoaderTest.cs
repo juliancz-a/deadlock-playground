@@ -1,6 +1,4 @@
-#pragma warning disable CS0618
 using Godot;
-using ValvePak;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -14,6 +12,7 @@ using DeadlockPlayground.Tools;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Addons;
+using SteamDatabase.ValvePak;
 
 public partial class VpkLoaderTest : Node3D
 {
@@ -433,7 +432,7 @@ public partial class VpkLoaderTest : Node3D
 							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name)))
 							.ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>();
+						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
 
 						// Idle clips (take up to 4, prioritized)
 						if (categorized.TryGetValue("Idle", out var idles))
@@ -651,7 +650,7 @@ public partial class VpkLoaderTest : Node3D
 			return map;
 		}
 
-		foreach (var (mesh, meshIndex, meshName, _) in model.GetEmbeddedMeshes())
+		foreach (var (mesh, meshIndex, meshName) in model.GetEmbeddedMeshes())
 		{
 			var materials = new List<string>();
 

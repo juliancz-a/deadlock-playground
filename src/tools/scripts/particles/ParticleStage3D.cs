@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Workspace;
-using ValvePak;
+using SteamDatabase.ValvePak;
 using ValveResourceFormat.IO;
 
 namespace DeadlockPlayground.Particles;
