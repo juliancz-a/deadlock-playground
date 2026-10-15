@@ -43,7 +43,12 @@ public partial class ParticleMultiMeshRenderer : Node3D
         string rName = _rendererDef != null ? _rendererDef.ClassName : "Default";
         Name = $"Renderer_{instance.Definition.VpcfPath.GetFile().GetBaseName()}_{rName}";
 
+        Color baseCol = instance.Definition.ConstantColor;
+        CustomTintColor = new Color(baseCol.R, baseCol.G, baseCol.B, 1.0f);
+        CustomAlphaScale = baseCol.A;
+
         BuildMultiMesh(texture, noiseTexture);
+        SetCustomTint(baseCol);
     }
 
     private static Shader GetSpriteShader()

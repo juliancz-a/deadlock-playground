@@ -22,9 +22,10 @@ Always consult this guide before implementing new features, modifying shaders, a
 | **UI Theme** | `res://assets/themes/PlaygroundTheme.tres` | Global custom theme applied in `src/project.godot`. |
 
 ### Primary NuGet Dependencies
-- **`ValveResourceFormat` (`20.0.6980`)**: Reverse-engineered Source 2 parser by SteamDatabase. Ingests compiled `.vmdl_c` (models), `.vmat_c` (materials), `.vtex_c` (textures), and `.vanim_c` (animations) from Deadlock's `pak01_dir.vpk`.
-- **`ValvePak` (`5.0.2.177`)**: Reads, indexes, extracts, and packages Source 2 VPK archives (`pak01_dir.vpk` and mod `pak##_dir.vpk` files).
-- **`ValveKeyValue` (`0.70.0.499`)**: High-speed KeyValues3 (KV3) deserializer/serializer used in material analysis and mod packaging.
+- **`ValveResourceFormat` (`20.0.7461`)**: Reverse-engineered Source 2 parser by SteamDatabase (local nupkg compiled from commit `d53ad1c63`). Ingests compiled `.vmdl_c`, `.vmat_c`, `.vtex_c`, `.vanim_c`, supporting Source 2 KV3 uint32 constants (`datatype: 26 (0x1A) / 27`).
+- **`ValvePak` (`6.0.0.182`)**: Reads, indexes, extracts, and packages Source 2 VPK archives (`pak01_dir.vpk` and mod `pak##_dir.vpk` files). Uses namespace `ValvePak`.
+- **`ValveKeyValue` (`0.71.0.528`)**: High-speed KeyValues3 (KV3) deserializer/serializer used in material analysis and mod packaging.
+- **`nuget.config` Global Cache**: Configured to `globalPackagesFolder="D:\GameDev\.nuget_packages"` to store all packages on Drive D and prevent filling Drive C.
 
 ### Active Godot Plugins
 - **`Gizmo3DSharp`** (`res://addons/Gizmo3DSharp/`): Interactive 3D bone manipulator for character posing.

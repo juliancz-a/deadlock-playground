@@ -109,6 +109,8 @@ extends Node3D
 ## Whether the brush is currently drawing.
 @export var drawing: bool = false:
 	set(value):
+		if drawing == value:
+			return
 		drawing = value
 		if viewport:
 			viewport.render_target_update_mode = SubViewport.UpdateMode.UPDATE_ALWAYS if drawing else SubViewport.UpdateMode.UPDATE_DISABLED

@@ -7,6 +7,7 @@ using DeadlockPlayground.Painter;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Particles;
+using DeadlockPlayground.Workspace;
 
 public partial class PaintTabUI : VBoxContainer
 {
@@ -27,6 +28,10 @@ public partial class PaintTabUI : VBoxContainer
     private VBoxContainer _particleTexturesGroupContainer;
 
     private Node3D _currentHero;
+    private string _currentHeroId = "";
+    private string _currentHeroDisplayName = "";
+    private bool _currentHeroIsExtra = false;
+    private string _currentHeroVmdlPath = "";
     private StudioUIManager _studioUI;
 
     private struct CachedBoneTransform
@@ -230,6 +235,17 @@ public partial class PaintTabUI : VBoxContainer
         _decalStamper.Setup(_worldViewport, _layerManager, _painter);
         _textProjector.Setup(_worldViewport, _layerManager, _painter);
 
+        _painter.StrokeFinished += () =>
+        {
+            RegisterActiveStrokeMetadata();
+            if (_layerManager != null)
+            {
+                _brushPalette?.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+            }
+        };
+        _decalStamper.DecalBaked += () => RegisterActiveStrokeMetadata();
+        _textProjector.TextBaked += () => RegisterActiveStrokeMetadata();
+
         if (_brushPalette != null)
         {
             _brushPalette.Setup(_painter, _decalStamper, _textProjector);
@@ -238,6 +254,7 @@ public partial class PaintTabUI : VBoxContainer
                 if (_layerManager != null && _layerManager.CanUndo)
                 {
                     _layerManager.Undo();
+                    RegisterActiveStrokeMetadata();
                 }
             };
             _brushPalette.RedoRequested += () =>
@@ -245,15 +262,25 @@ public partial class PaintTabUI : VBoxContainer
                 if (_layerManager != null && _layerManager.CanRedo)
                 {
                     _layerManager.Redo();
+                    RegisterActiveStrokeMetadata();
                 }
             };
-            _brushPalette.ClearRequested += () => _layerManager?.ClearCurrentLayer();
+            _brushPalette.ClearRequested += () =>
+            {
+                _layerManager?.ClearCurrentLayer();
+                RegisterActiveStrokeMetadata();
+            };
             _brushPalette.BlendModeChanged += (mode) =>
             {
                 _layerManager?.SetOverlayBlendMode(mode);
                 _painter?.SyncCameraBrushProperties(force: true);
+                RegisterActiveStrokeMetadata();
             };
-            _brushPalette.FillRequested += (color) => _layerManager?.FillCurrentSubmesh(color, null, _painter?.MagicWandTool, _painter != null ? _painter.BucketFillTolerance : 0.5f);
+            _brushPalette.FillRequested += (color) =>
+            {
+                _layerManager?.FillCurrentSubmesh(color, null, _painter?.MagicWandTool, _painter != null ? _painter.BucketFillTolerance : 0.5f);
+                RegisterActiveStrokeMetadata();
+            };
         }
     }
 
@@ -335,41 +362,36 @@ public partial class PaintTabUI : VBoxContainer
                 Title = "Save Deadlock Playground Project (.dpp)",
                 FileMode = FileDialog.FileModeEnum.SaveFile,
                 Access = FileDialog.AccessEnum.Filesystem,
-                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)", "*.dptex ; Legacy Project (*.dptex)" },
-                UseNativeDialog = false,
-                Transient = true,
-                Exclusive = true
+                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)" },
+                UseNativeDialog = true
             };
             _saveProjectDialog.FileSelected += (path) =>
             {
                 if (string.IsNullOrWhiteSpace(path)) return;
-                if (!path.EndsWith(".dpp", StringComparison.OrdinalIgnoreCase) && !path.EndsWith(".dptex", StringComparison.OrdinalIgnoreCase))
+                if (!path.EndsWith(".dpp", StringComparison.OrdinalIgnoreCase))
                 {
                     path += ".dpp";
                 }
-                string heroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "") : "hero";
-                string meshName = _meshHierarchy?.ActiveTarget?.RawName ?? "body";
-                var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
-                                ?? GetTree().Root.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
 
-                var res = ProjectFileManager.SaveProject(path, _layerManager, heroName, meshName, quickPalette);
-                if (res.Success)
+                FlushActiveChangesToWorkspace(true);
+                bool ok = ModWorkspaceSession.Instance.PackageProject(path);
+                if (ok)
                 {
                     if (_lblExportStatus != null) _lblExportStatus.Text = $"Saved project: {System.IO.Path.GetFileName(path)}";
-                    GD.Print($"[PaintTabUI] Saved project: {path}");
-                    _studioUI?.ShowToast($"Project Exported: {System.IO.Path.GetFileName(path)}", path);
+                    _studioUI?.ShowToast($"Project Saved: {System.IO.Path.GetFileName(path)}", path);
                 }
                 else
                 {
-                    if (_lblExportStatus != null) _lblExportStatus.Text = $"Error: {res.ErrorMessage}";
-                    GD.PrintErr($"[PaintTabUI] Error saving project: {res.ErrorMessage}");
+                    if (_lblExportStatus != null) _lblExportStatus.Text = "Error saving project.";
                 }
             };
             AddChild(_saveProjectDialog);
         }
 
-        string defaultHeroName = _currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant() : "project";
-        _saveProjectDialog.CurrentFile = $"{defaultHeroName}_skin.dpp";
+        string defaultHeroName = !string.IsNullOrEmpty(_currentHeroId)
+            ? _currentHeroId
+            : (_currentHero != null ? _currentHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant() : "workspace");
+        _saveProjectDialog.CurrentFile = $"{defaultHeroName}_project.dpp";
         _saveProjectDialog.PopupCentered(new Vector2I(750, 500));
     }
 
@@ -382,14 +404,12 @@ public partial class PaintTabUI : VBoxContainer
                 Title = "Load Deadlock Playground Project (.dpp)",
                 FileMode = FileDialog.FileModeEnum.OpenFile,
                 Access = FileDialog.AccessEnum.Filesystem,
-                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)", "*.dptex ; Legacy Project (*.dptex)" },
-                UseNativeDialog = false,
-                Transient = true,
-                Exclusive = true
+                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)" },
+                UseNativeDialog = true
             };
             _loadProjectDialog.FileSelected += (path) =>
             {
-                HandleProjectFileSelected(path);
+                ExecuteLoadProject(path);
             };
             AddChild(_loadProjectDialog);
         }
@@ -465,10 +485,9 @@ public partial class PaintTabUI : VBoxContainer
             || IsRenameDialogOpen;
     }
 
-    private async void ExecuteLoadProject(string path)
+    public async void ExecuteLoadProject(string path)
     {
-        var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
-                        ?? GetTree().Root.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return;
 
         string fileName = System.IO.Path.GetFileName(path);
         _studioUI?.ShowLoading(true, $"Loading project {fileName}...");
@@ -476,65 +495,82 @@ public partial class PaintTabUI : VBoxContainer
 
         try
         {
-            var res = ProjectFileManager.LoadProject(path, _layerManager, _meshHierarchy, quickPalette);
-            if (res.Success)
+            // 1. Purgar estado sucio en memoria ANTES de descomprimir o recargar el héroe,
+            _lastRegisteredDirtyMatKey = null;
+            _flushedMaterialKeys.Clear();
+            if (_meshHierarchy?.Submeshes != null)
             {
-                // Sync resolution label
-                UpdateCanvasResolutionLabel();
+                foreach (var sm in _meshHierarchy.Submeshes)
+                    sm.IsDirty = false;
+            }
+            _layerManager?.ClearAllLayers();
 
-                // Select target submesh from manifest
-                if (res.Manifest != null && !string.IsNullOrEmpty(res.Manifest.TargetMeshSlot) && _meshHierarchy?.Submeshes != null)
+            // 2. Descomprimir el proyecto limpio en el workspace
+            if (!ModWorkspaceSession.Instance.UnpackProject(path))
+            {
+                if (_lblExportStatus != null) _lblExportStatus.Text = "Error: Failed to unpack .dpp project";
+                return;
+            }
+
+            var manifest = ModWorkspaceSession.Instance.Manifest;
+            string targetHero = manifest?.LastActiveHeroId;
+            string targetPath = manifest?.LastActiveAssetPath;
+            string targetType = manifest?.LastActiveAssetType;
+
+            // Si no había LastActiveHeroId, tomar el primer héroe del manifiesto
+            if (string.IsNullOrEmpty(targetHero) && manifest?.Heroes != null && manifest.Heroes.Count > 0)
+            {
+                var firstHero = manifest.Heroes.Values.First();
+                targetHero = firstHero.HeroId;
+                var firstAsset = firstHero.Assets.FirstOrDefault();
+                if (firstAsset != null)
                 {
-                    for (int i = 0; i < _meshHierarchy.Submeshes.Count; i++)
+                    targetPath = firstAsset.VpkPath;
+                    targetType = firstAsset.Category;
+                }
+            }
+
+            var vpkLoader = GetVpkLoader();
+            if (vpkLoader != null && !string.IsNullOrEmpty(targetHero))
+            {
+                var stage = GetOrCreateParticleStage();
+                if (stage != null && stage.HasActiveParticle)
+                {
+                    stage.UnloadActiveParticle();
+                }
+
+                if (targetType == "ExtraModel" && !string.IsNullOrEmpty(targetPath))
+                {
+                    await vpkLoader.LoadExtraModelAsync(targetPath, targetHero, System.IO.Path.GetFileNameWithoutExtension(targetPath));
+                }
+                else
+                {
+                    var catEntry = DeadlockPlayground.Catalog.DeadlockHeroCatalog.GetByCodename(targetHero)
+                                ?? DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(targetHero);
+                    if (catEntry != null)
                     {
-                        var sm = _meshHierarchy.Submeshes[i];
-                        if (string.Equals(sm.RawName, res.Manifest.TargetMeshSlot, StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(sm.DisplayName, res.Manifest.TargetMeshSlot, StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(sm.Mesh?.Name.ToString(), res.Manifest.TargetMeshSlot, StringComparison.OrdinalIgnoreCase))
-                        {
-                            _meshHierarchy.SelectTarget(sm, sm.SurfaceIndex);
-                            break;
-                        }
+                        await vpkLoader.LoadHeroModelAsync(catEntry);
+                    }
+                    else
+                    {
+                        await vpkLoader.LoadHeroAsync(targetHero, targetHero);
+                    }
+
+                    if (targetType == "ParticleVFX" && !string.IsNullOrEmpty(targetPath))
+                    {
+                        var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
+                        charTab?.LoadParticleDirectly(targetPath, ownerHeroId: targetHero);
                     }
                 }
-                else if (_meshHierarchy?.ActiveTarget != null)
-                {
-                    _meshHierarchy.SelectTarget(_meshHierarchy.ActiveTarget, _meshHierarchy.ActiveTarget.SurfaceIndex);
-                }
-
-                // Sync layers list UI
-                RefreshLayersListUI();
-
-                // Reselect active layer
-                if (_layerManager.ActiveLayer != null)
-                {
-                    OnLayerSelected(_layerManager.ActiveLayerIndex);
-                }
-
-                _painter?.SyncSelectionMaskState();
-                _painter?.SyncCameraBrushProperties(true);
-                _layerManager?.ApplyOverlayParametersToMeshes();
-
-                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
-                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
-                uvCanvas?.UpdateResolutionLabel();
-                uvCanvas?.RebuildWireframe();
-                uvCanvas?.QueueRedraw();
-
-                if (_brushPalette != null)
-                {
-                    _brushPalette.SyncFromPainter();
-                    _brushPalette.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
-                }
-
-                if (_lblExportStatus != null) _lblExportStatus.Text = $"Loaded project: {fileName}";
-                GD.Print($"[PaintTabUI] Successfully loaded project from {path}");
             }
-            else
-            {
-                if (_lblExportStatus != null) _lblExportStatus.Text = $"Error: {res.ErrorMessage}";
-                GD.PrintErr($"[PaintTabUI] Error loading project: {res.ErrorMessage}");
-            }
+
+            ModWorkspaceSession.Instance.HasUnsavedChanges = false;
+            if (_lblExportStatus != null) _lblExportStatus.Text = $"Loaded project: {fileName}";
+            _studioUI?.ShowToast($"Project Loaded: {fileName}");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PaintTabUI] Error loading project: {ex.Message}");
         }
         finally
         {
@@ -557,9 +593,27 @@ public partial class PaintTabUI : VBoxContainer
             {
                 RefreshLayersListUI();
                 _brushPalette?.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+
+                if (_layerManager.IsStandaloneTextureMode && !string.IsNullOrEmpty(_activeParticleVtexPath)
+                    && _layerManager.HasPaintStrokes())
+                {
+                    var st = GetOrCreateParticleStage();
+                    var baked = _layerManager.BakeCompositeImage();
+                    if (st != null && baked != null)
+                    {
+                        st.UpdateParticleTexture(_activeParticleVtexPath, baked);
+                    }
+                    var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                                ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                    uvCanvas?.QueueCanvasRedraw();
+                }
             };
             _layerManager.LayerSelected += OnLayerSelected;
         }
+
+        // Workspace session synchronization events
+        ModWorkspaceSession.Instance.OnAssetDiscarded += OnWorkspaceAssetDiscarded;
+        ModWorkspaceSession.Instance.OnWorkspaceCleared += OnWorkspaceCleared;
 
         // Header controls
         if (_optTargetMesh != null)
@@ -589,7 +643,22 @@ public partial class PaintTabUI : VBoxContainer
         // Submesh Actions
         if (_btnShowAllMeshes != null)
         {
-            _btnShowAllMeshes.Pressed += () => _meshHierarchy?.ShowAll();
+            _btnShowAllMeshes.Pressed += () =>
+            {
+                var pStage = GetOrCreateParticleStage();
+                if (pStage != null && pStage.HasActiveParticle)
+                {
+                    for (int i = 0; i < pStage.Renderers.Count; i++)
+                    {
+                        pStage.SetRendererVisibility(i, true);
+                    }
+                    UpdateParticleTexturesGroup();
+                }
+                else
+                {
+                    _meshHierarchy?.ShowAll();
+                }
+            };
         }
         if (_btnHideAccMeshes != null)
         {
@@ -610,10 +679,13 @@ public partial class PaintTabUI : VBoxContainer
                 if (Input.IsKeyPressed(Key.Shift))
                 {
                     _layerManager.DeleteActiveLayerAcrossAllMaterials();
+                    ModWorkspaceSession.Instance.CleanupTempSession();
                 }
                 else
                 {
+                    string matKey = _layerManager.ActiveMaterialKey;
                     _layerManager.DeleteActiveLayer();
+                    CheckAndUnregisterIfMaterialClean(matKey);
                 }
             };
             _btnDeleteLayer.GuiInput += (ev) =>
@@ -736,11 +808,18 @@ public partial class PaintTabUI : VBoxContainer
 
     public void SetHero(Node3D heroNode)
     {
+        if (_currentHero != null && _currentHero != heroNode)
+        {
+            FlushActiveChangesToWorkspace(true);
+        }
+
         _currentHero = heroNode;
         _hasCachedPaintVisibility = false;
         _cachedPaintSubmeshVisibility = null;
         _cachedPaintPreSoloVisibility = null;
         _cachedPaintSoloedSubmesh = null;
+        _lastRegisteredDirtyMatKey = null;
+        _flushedMaterialKeys.Clear();
 
         if (heroNode == null)
         {
@@ -805,6 +884,478 @@ public partial class PaintTabUI : VBoxContainer
         {
             _brushPalette.SyncFromPainter();
         }
+
+        var vpkLoader = GetVpkLoader();
+        _currentHeroId = vpkLoader?.LastLoadedHeroEntry?.InternalCodename 
+                      ?? vpkLoader?.BaseHeroEntry?.InternalCodename 
+                      ?? vpkLoader?.LastLoadedHeroKey 
+                      ?? heroName.ToLowerInvariant();
+        _currentHeroDisplayName = vpkLoader?.LastLoadedHeroEntry?.DisplayName 
+                               ?? vpkLoader?.BaseHeroEntry?.DisplayName 
+                               ?? vpkLoader?.LastLoadedDisplayName 
+                               ?? _currentHeroId;
+        _currentHeroIsExtra = vpkLoader?.IsExtraModelLoaded ?? false;
+
+        string catalogVmdl = vpkLoader?.LastLoadedVmdlPath
+                          ?? vpkLoader?.LastLoadedHeroEntry?.VmdlRelativePath
+                          ?? vpkLoader?.BaseHeroEntry?.VmdlRelativePath
+                          ?? DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(_currentHeroId)?.VmdlRelativePath;
+
+        if (string.IsNullOrEmpty(catalogVmdl))
+        {
+            string heroFolder = SkinExporter.ResolveHeroInternalFolder(_currentHeroId, _meshHierarchy?.Submeshes?.ToList());
+            catalogVmdl = $"{heroFolder}/{_currentHeroId}.vmdl_c";
+        }
+        _currentHeroVmdlPath = catalogVmdl;
+
+        RestoreStagedTexturesFromWorkspace(_currentHeroId);
+    }
+
+
+    private VpkLoaderTest _cachedVpkLoader;
+    private VpkLoaderTest GetVpkLoader()
+    {
+        if (_cachedVpkLoader == null || !GodotObject.IsInstanceValid(_cachedVpkLoader))
+        {
+            _cachedVpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+        }
+        return _cachedVpkLoader;
+    }
+    private string _lastRegisteredDirtyMatKey = null;
+
+    public void RegisterActiveStrokeMetadata()
+    {
+        try
+        {
+            if (_layerManager == null) return;
+            _layerManager.SetActiveContextHasPaintStrokes(true);
+
+            string matKey = _layerManager.ActiveMaterialKey;
+            _flushedMaterialKeys.Remove(matKey ?? "");
+
+            if (_meshHierarchy != null)
+            {
+                if (!string.IsNullOrEmpty(matKey))
+                {
+                    _meshHierarchy.MarkMaterialDirty(matKey, _layerManager);
+                }
+                else if (_layerManager.TargetMesh != null)
+                {
+                    _meshHierarchy.MarkSubmeshDirty(_layerManager.TargetMesh);
+                }
+            }
+
+            UpdateSubmeshRowHighlights();
+
+            if (_particleStage != null && _particleStage.HasActiveParticle && !string.IsNullOrEmpty(_activeParticleVtexPath))
+            {
+                string pHeroId = !string.IsNullOrEmpty(_particleStage.ActiveOwnerHeroId)
+                    ? _particleStage.ActiveOwnerHeroId
+                    : (!string.IsNullOrEmpty(_currentHeroId) ? _currentHeroId : "particles");
+                string pHeroDisplay = !string.IsNullOrEmpty(_currentHeroDisplayName) ? _currentHeroDisplayName : pHeroId;
+
+                ModWorkspaceSession.Instance.RegisterPendingModifiedTexture(
+                    pHeroId,
+                    pHeroDisplay,
+                    "ParticleVFX",
+                    _particleStage.ActiveVpcfPath,
+                    _activeParticleVtexPath,
+                    System.IO.Path.GetFileName(_activeParticleVtexPath),
+                    _activeParticleVtexPath);
+            }
+            else if (_currentHero != null && _meshHierarchy != null)
+            {
+                string heroId = !string.IsNullOrEmpty(_currentHeroId) ? _currentHeroId : _currentHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant();
+                string heroDisplayName = !string.IsNullOrEmpty(_currentHeroDisplayName) ? _currentHeroDisplayName : heroId;
+                bool isExtra = _currentHeroIsExtra;
+                string category = isExtra ? "ExtraModel" : "CharacterModel";
+                string ownerPath = !string.IsNullOrEmpty(_currentHeroVmdlPath) ? _currentHeroVmdlPath : $"models/heroes_staging/{heroId}/{heroId}.vmdl_c";
+
+                foreach (var sm in _meshHierarchy.Submeshes)
+                {
+                    if (sm.IsDirty && sm.Mesh != null)
+                    {
+                        string smMatKey = _layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex);
+                        if (string.IsNullOrEmpty(matKey) || string.Equals(smMatKey, matKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string vtexPath = sm.OriginalColorVtexCPath ?? sm.OriginalVmatPath;
+                            ModWorkspaceSession.Instance.RegisterPendingModifiedTexture(
+                                heroId,
+                                heroDisplayName,
+                                category,
+                                ownerPath,
+                                sm.OriginalVmatPath,
+                                sm.DisplayName,
+                                vtexPath);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PaintTabUI] Error registering active stroke metadata: {ex.Message}");
+        }
+    }
+
+    public void FlushActiveChangesToWorkspace(bool syncDisk = true)
+    {
+        try
+        {
+            if (syncDisk)
+            {
+                ExecuteWorkspaceFlush();
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PaintTabUI] Error triggering workspace flush: {ex.Message}");
+        }
+    }
+
+    private readonly HashSet<string> _flushedMaterialKeys = new(StringComparer.OrdinalIgnoreCase);
+
+  private void ExecuteWorkspaceFlush()
+    {
+        try
+        {
+            int flushedCount = 0;
+            string toastSubtitle = "";
+
+            // 1. Flush character model / extra model paint changes
+            if (_currentHero != null && _meshHierarchy != null && _layerManager != null)
+            {
+                _layerManager.SaveActiveContext();
+                _meshHierarchy.ReconcileDirtyStates(_layerManager);
+                var dirtySubmeshes = _meshHierarchy.Submeshes.Where(s => s.IsDirty).ToList();
+                if (dirtySubmeshes.Count > 0)
+                {
+                    string heroId = !string.IsNullOrEmpty(_currentHeroId)
+                        ? _currentHeroId
+                        : _currentHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant();
+                    string heroDisplayName = !string.IsNullOrEmpty(_currentHeroDisplayName)
+                        ? _currentHeroDisplayName
+                        : heroId;
+                    bool isExtra = _currentHeroIsExtra;
+                    string category = isExtra ? "ExtraModel" : "CharacterModel";
+                    string ownerPath = !string.IsNullOrEmpty(_currentHeroVmdlPath)
+                        ? _currentHeroVmdlPath
+                        : $"models/heroes_staging/{heroId}/{heroId}.vmdl_c";
+                    toastSubtitle = heroDisplayName;
+
+                    var processedMatKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var sm in dirtySubmeshes)
+                    {
+                        string matKey = _layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex);
+                        if (!string.IsNullOrEmpty(matKey) && !processedMatKeys.Add(matKey))
+                        {
+                            continue; // Already baked this material!
+                        }
+                        if (!string.IsNullOrEmpty(matKey) && _flushedMaterialKeys.Contains(matKey))
+                        {
+                            continue; // Already flushed to disk and no new strokes since!
+                        }
+
+                        var baked = _layerManager.BakeCompositeImageForSubmesh(sm);
+                        if (baked != null && !baked.IsEmpty())
+                        {
+                            string vtexPath = sm.OriginalColorVtexCPath ?? sm.OriginalVmatPath;
+                            ModWorkspaceSession.Instance.StageTexture(
+                                heroId,
+                                heroDisplayName,
+                                category,
+                                ownerPath,
+                                sm.OriginalVmatPath,
+                                sm.DisplayName,
+                                vtexPath,
+                                baked);
+
+                            // Guardar también las capas individuales con su BlendMode, Opacity y Visibilidad
+                            var stagedLayers = _layerManager.StageMaterialLayersToWorkspace(matKey, vtexPath);
+                            if (stagedLayers.Count > 0 && ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(heroId, out var hE))
+                            {
+                                var aE = hE.Assets.FirstOrDefault(a => string.Equals(a.VpkPath, ownerPath, StringComparison.OrdinalIgnoreCase));
+                                var mE = aE?.Materials.FirstOrDefault(m => string.Equals(m.MaterialPath, sm.OriginalVmatPath, StringComparison.OrdinalIgnoreCase));
+                                if (mE != null)
+                                {
+                                    mE.Layers = stagedLayers;
+                                    mE.ActiveLayerIndex = _layerManager.ActiveLayerIndex;
+                                    mE.Width = baked.GetWidth();
+                                    mE.Height = baked.GetHeight();
+                                }
+                                ModWorkspaceSession.Instance.SaveManifest();
+                            }
+
+                            if (!string.IsNullOrEmpty(matKey)) _flushedMaterialKeys.Add(matKey);
+                            flushedCount++;
+                        }
+                    }
+                }
+            }
+
+            // 2. Flush particle VFX changes
+            if (_particleStage != null && _particleStage.HasActiveParticle)
+            {
+                _particleStage.FlushOverridesToWorkspace();
+            }
+
+            if (flushedCount > 0)
+            {
+                _studioUI?.ShowToast($"Workspace Saved ({flushedCount} material{(flushedCount > 1 ? "s" : "")})", toastSubtitle);
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PaintTabUI] Error executing workspace flush: {ex.Message}");
+        }
+    }
+
+    private void RestoreStagedTexturesFromWorkspace(string heroId)
+    {
+        if (string.IsNullOrEmpty(heroId) || _layerManager == null || _meshHierarchy == null) return;
+        try
+        {
+            var session = ModWorkspaceSession.Instance;
+            if (!session.Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry == null) return;
+
+            // Ensure all submeshes have their atlas managers allocated so GPU RIDs exist
+            _layerManager.EnsureAllSubmeshAtlases(_meshHierarchy);
+
+            bool anyRestored = false;
+            foreach (var asset in heroEntry.Assets)
+            {
+                if (asset.Category == "ParticleVFX") continue;
+                foreach (var (vtexPath, relPath) in asset.ModifiedTextures)
+                {
+                    var stagedImg = session.GetStagedTexture(vtexPath);
+                    if (stagedImg == null || stagedImg.IsEmpty()) continue;
+
+                    string normVtex = vtexPath.Replace('\\', '/').Trim('/');
+                    string vtexBase = Path.GetFileNameWithoutExtension(normVtex);
+                    if (vtexBase.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                        vtexBase = Path.GetFileNameWithoutExtension(vtexBase);
+
+                    var targetSubmesh = _meshHierarchy.Submeshes.FirstOrDefault(s =>
+                    {
+                        if (string.Equals(s.OriginalColorVtexCPath, vtexPath, StringComparison.OrdinalIgnoreCase)) return true;
+                        if (string.Equals(s.OriginalVmatPath, vtexPath, StringComparison.OrdinalIgnoreCase)) return true;
+
+                        string sVmat = s.OriginalVmatPath?.Replace('\\', '/')?.Trim('/');
+                        if (!string.IsNullOrEmpty(sVmat))
+                        {
+                            if (sVmat.Equals(normVtex, StringComparison.OrdinalIgnoreCase)) return true;
+                            string vmatBase = Path.GetFileNameWithoutExtension(sVmat);
+                            if (vmatBase.Equals(vtexBase, StringComparison.OrdinalIgnoreCase) ||
+                                vtexBase.StartsWith(vmatBase, StringComparison.OrdinalIgnoreCase) ||
+                                vmatBase.StartsWith(vtexBase, StringComparison.OrdinalIgnoreCase))
+                                return true;
+                        }
+
+                        string sColor = s.OriginalColorVtexCPath?.Replace('\\', '/')?.Trim('/');
+                        if (!string.IsNullOrEmpty(sColor))
+                        {
+                            if (sColor.Equals(normVtex, StringComparison.OrdinalIgnoreCase)) return true;
+                            string colorBase = Path.GetFileNameWithoutExtension(sColor);
+                            if (colorBase.Equals(vtexBase, StringComparison.OrdinalIgnoreCase)) return true;
+                        }
+
+                        if (!string.IsNullOrEmpty(s.DisplayName))
+                        {
+                            string dispClean = s.DisplayName.Replace(" ", "_").ToLowerInvariant();
+                            if (vtexBase.ToLowerInvariant().Contains(dispClean) || dispClean.Contains(vtexBase.ToLowerInvariant()))
+                                return true;
+                        }
+
+                        return false;
+                    });
+
+                    if (targetSubmesh != null && targetSubmesh.Mesh != null)
+                    {
+                        string matKey = _layerManager.GetMaterialKey(targetSubmesh.Mesh, targetSubmesh.SurfaceIndex);
+
+                        // Ensure all submeshes sharing this material have their atlas linked and are marked dirty
+                        foreach (var sub in _meshHierarchy.Submeshes)
+                        {
+                            if (sub.Mesh != null && string.Equals(_layerManager.GetMaterialKey(sub.Mesh, sub.SurfaceIndex), matKey, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _layerManager.EnsureSubmeshAtlas(sub.Mesh);
+                                sub.IsDirty = true;
+                            }
+                        }
+
+                        var matEntry = asset.Materials.FirstOrDefault(m =>
+                            string.Equals(m.MaterialPath, targetSubmesh.OriginalVmatPath, StringComparison.OrdinalIgnoreCase) ||
+                            m.Textures.ContainsKey(vtexPath));
+
+                        int defaultW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+                        int defaultH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+                        int w = (matEntry != null && matEntry.Width > 0) ? matEntry.Width : (stagedImg.GetWidth() > 0 ? stagedImg.GetWidth() : defaultW);
+                        int h = (matEntry != null && matEntry.Height > 0) ? matEntry.Height : (stagedImg.GetHeight() > 0 ? stagedImg.GetHeight() : defaultH);
+
+                        var restoredLayers = new List<SkinLayer>();
+
+                        Vector2I resVec = new Vector2I(w, h);
+                        if (matEntry != null && matEntry.Layers != null && matEntry.Layers.Count > 0)
+                        {
+                            for (int lIdx = 0; lIdx < matEntry.Layers.Count; lIdx++)
+                            {
+                                var le = matEntry.Layers[lIdx];
+                                string layerKey = $"{vtexPath}__layer_{lIdx}";
+                                var lImg = session.GetStagedTexture(layerKey) ?? stagedImg;
+
+                                var sl = new SkinLayer();
+                                sl.Initialize(le.Name ?? $"Paint Layer {lIdx + 1}", resVec, le.Locked, null, null, null);
+                                sl.SetOpacity(le.Opacity);
+                                sl.SetVisibility(le.Visible);
+                                sl.SetBlendMode((LayerBlendMode)le.BlendMode);
+                                sl.IsLocked = le.Locked;
+                                sl.GpuData = ProjectFileManager.ImageToLayerGpuData(lImg, w, h);
+                                sl.IsCpuSynced = true;
+                                restoredLayers.Add(sl);
+                            }
+                        }
+                        else
+                        {
+                            var restoredLayer = new SkinLayer();
+                            restoredLayer.Initialize("Paint Layer 1", resVec, false, null, null, null);
+                            restoredLayer.GpuData = ProjectFileManager.ImageToLayerGpuData(stagedImg, w, h);
+                            restoredLayer.IsCpuSynced = true;
+                            restoredLayers.Add(restoredLayer);
+                        }
+
+                        bool isActiveTarget = string.Equals(_layerManager.ActiveMaterialKey, matKey, StringComparison.OrdinalIgnoreCase);
+                        int activeIdx = matEntry != null ? Math.Clamp(matEntry.ActiveLayerIndex, 0, Math.Max(0, restoredLayers.Count - 1)) : 0;
+                        _layerManager.RestoreMaterialContext(matKey, new Vector2I(w, h), restoredLayers, activeIdx, isActiveTarget);
+                        _flushedMaterialKeys.Add(matKey);
+
+                        anyRestored = true;
+                    }
+                }
+            }
+
+            if (anyRestored)
+            {
+                _layerManager.ApplyOverlayParametersToMeshes();
+                RefreshSubmeshListUI();
+                UpdateSubmeshRowHighlights();
+                RefreshLayersListUI();
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                uvCanvas?.QueueCanvasRedraw();
+                GD.Print($"[PaintTabUI] Restored staged textures and layers for '{heroId}' from workspace session.");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PaintTabUI] Error restoring staged textures: {ex.Message}");
+        }
+    }
+
+    private void OnWorkspaceAssetDiscarded(string heroId, string assetOrMatPath)
+    {
+
+        _lastRegisteredDirtyMatKey = null;
+        _flushedMaterialKeys.Clear();
+        _layerManager?.ResetMaterialContext(assetOrMatPath);
+
+        bool matchesOwner = false;
+        var vpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+        if (string.Equals(vpkLoader?.LastLoadedVmdlPath, assetOrMatPath, StringComparison.OrdinalIgnoreCase))
+        {
+            matchesOwner = true;
+        }
+
+        if (_meshHierarchy != null)
+        {
+            foreach (var sub in _meshHierarchy.Submeshes)
+            {
+                if (matchesOwner ||
+                    string.Equals(sub.OriginalVmatPath, assetOrMatPath, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sub.OriginalColorVtexCPath, assetOrMatPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _layerManager?.ResetMaterialContext(sub.OriginalVmatPath);
+                    if (!string.IsNullOrEmpty(sub.OriginalColorVtexCPath))
+                    {
+                        _layerManager?.ResetMaterialContext(sub.OriginalColorVtexCPath);
+                    }
+                    sub.IsDirty = false;
+                }
+            }
+        }
+
+        var pStage = GetOrCreateParticleStage();
+        if (pStage != null && pStage.HasActiveParticle)
+        {
+            pStage.RestoreAllVanillaOverrides();
+        }
+
+        RefreshSubmeshListUI();
+        UpdateSubmeshRowHighlights();
+        RefreshLayersListUI();
+    }
+
+    private void OnWorkspaceCleared()
+    {
+        _lastRegisteredDirtyMatKey = null;
+        _flushedMaterialKeys.Clear();
+        if (_meshHierarchy != null)
+        {
+            foreach (var sub in _meshHierarchy.Submeshes)
+            {
+                _layerManager?.ResetMaterialContext(sub.OriginalVmatPath);
+                if (!string.IsNullOrEmpty(sub.OriginalColorVtexCPath))
+                {
+                    _layerManager?.ResetMaterialContext(sub.OriginalColorVtexCPath);
+                }
+                sub.IsDirty = false;
+            }
+        }
+
+        var pStage = GetOrCreateParticleStage();
+        if (pStage != null && pStage.HasActiveParticle)
+        {
+            pStage.RestoreAllVanillaOverrides();
+        }
+
+        RefreshSubmeshListUI();
+        UpdateSubmeshRowHighlights();
+        RefreshLayersListUI();
+    }
+
+    private void CheckAndUnregisterIfMaterialClean(string matKey)
+    {
+        if (string.IsNullOrEmpty(matKey) || _layerManager == null) return;
+
+        bool anyNonBlank = false;
+        foreach (var l in _layerManager.Layers)
+        {
+            if (l != null && !l.IsBlank()) { anyNonBlank = true; break; }
+        }
+
+        if (!anyNonBlank)
+        {
+            _layerManager.SetActiveContextHasPaintStrokes(false);
+            _meshHierarchy?.ClearMaterialDirty(matKey, _layerManager);
+            _lastRegisteredDirtyMatKey = null;
+            _flushedMaterialKeys.Remove(matKey);
+
+            
+
+            string ownerPath = _currentHeroVmdlPath;
+            if (_meshHierarchy != null)
+            {
+                foreach (var sm in _meshHierarchy.Submeshes)
+                {
+                    string smKey = _layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex);
+                    if (string.Equals(smKey, matKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        sm.IsDirty = false;
+                        ModWorkspaceSession.Instance.RemoveMaterial(_currentHeroId ?? "", ownerPath, sm.OriginalVmatPath);
+                    }
+                }
+            }
+            UpdateSubmeshRowHighlights();
+        }
     }
 
     private void PopulateTargetDropdown()
@@ -840,6 +1391,7 @@ public partial class PaintTabUI : VBoxContainer
 
     public void ClearHero()
     {
+        FlushActiveChangesToWorkspace(true);
         _currentHero = null;
         _hasCachedPose = false;
         _cachedBonePoses.Clear();
@@ -851,6 +1403,8 @@ public partial class PaintTabUI : VBoxContainer
         _cachedPaintSoloedSubmesh = null;
         _materialGroupRows.Clear();
         _submeshRows.Clear();
+        _flushedMaterialKeys.Clear();
+        _lastRegisteredDirtyMatKey = null;
         if (_submeshListContainer != null)
         {
             foreach (Node child in _submeshListContainer.GetChildren())
@@ -909,7 +1463,7 @@ public partial class PaintTabUI : VBoxContainer
         UpdateCanvasResolutionLabel();
     }
 
-    private void UpdateSubmeshRowHighlights()
+    public void UpdateSubmeshRowHighlights()
     {
         if (_meshHierarchy == null) return;
         var active = _meshHierarchy.ActiveTarget;
@@ -960,7 +1514,7 @@ public partial class PaintTabUI : VBoxContainer
         }
     }
 
-    private void RefreshSubmeshListUI()
+    public void RefreshSubmeshListUI()
     {
         if (_submeshListContainer == null || _meshHierarchy == null) return;
 
@@ -975,7 +1529,10 @@ public partial class PaintTabUI : VBoxContainer
                 }
             }
             _layerManager.ApplyOverlayParametersToMeshes();
-            _layerManager.RebuildBaseAtlasBuffer();
+            if (!_layerManager.HasPopulatedBaseAtlasBuffer)
+            {
+                _layerManager.RebuildBaseAtlasBuffer();
+            }
         }
 
         var groups = _meshHierarchy.MaterialGroups;
@@ -1036,6 +1593,7 @@ public partial class PaintTabUI : VBoxContainer
                     sRow.SoloBtn.Text = sub.IsSoloed ? "[Solo]" : "Solo";
                 }
             }
+            if (_btnHideAccMeshes != null) _btnHideAccMeshes.Visible = !hasParticle;
             UpdateSubmeshRowHighlights();
             UpdateParticleTexturesGroup();
             return;
@@ -1051,6 +1609,8 @@ public partial class PaintTabUI : VBoxContainer
         _submeshRows.Clear();
 
         EnsureGroupHeaderStyle();
+
+        if (_btnHideAccMeshes != null) _btnHideAccMeshes.Visible = !hasParticle;
 
         var colusFont = PlaygroundThemeHelper.GetFontColus();
 
@@ -1329,6 +1889,7 @@ public partial class PaintTabUI : VBoxContainer
                 }
             }
         }
+        if (_btnHideAccMeshes != null) _btnHideAccMeshes.Visible = false;
         RefreshSubmeshListUI();
         UpdateParticleTexturesGroup();
         UpdateSubmeshRowHighlights();
@@ -1341,22 +1902,33 @@ public partial class PaintTabUI : VBoxContainer
 
     private void OnParticleStageUnloaded()
     {
+        _particleStage?.FlushOverridesToWorkspace();
         _activeParticleVtexPath = null;
+        if (_btnHideAccMeshes != null) _btnHideAccMeshes.Visible = true;
+
+        if (_currentHero != null && GodotObject.IsInstanceValid(_currentHero))
+        {
+            ShowAllMeshesRecursive(_currentHero);
+        }
+        _meshHierarchy?.ShowAll();
+
+        //Exit standalone particle texture mode and restore active character material in 2D Canvas & LayerManager
+        var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                    ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+        uvCanvas?.CloseParticleTextureMode();
+
+        var activeTarget = _meshHierarchy?.ActiveTarget ?? (_meshHierarchy?.Submeshes.Count > 0 ? _meshHierarchy.Submeshes[0] : null);
+        if (activeTarget != null && activeTarget.Mesh != null)
+        {
+            _meshHierarchy.SelectTarget(activeTarget, activeTarget.SurfaceIndex);
+            _layerManager?.SetPaintTargetMesh(activeTarget.Mesh);
+            _painter?.SetTargetMesh(activeTarget.Mesh, activeTarget.SurfaceIndex);
+        }
+
         UpdateParticleTexturesGroup();
         RefreshSubmeshListUI();
         UpdateSubmeshRowHighlights();
-
-        if (IsTabActive && IsVisibleInTree())
-        {
-            var activeTarget = _meshHierarchy?.ActiveTarget;
-            if (activeTarget != null && activeTarget.Mesh != null)
-            {
-                _layerManager?.SetPaintTargetMesh(activeTarget.Mesh);
-                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
-                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
-                uvCanvas?.SetPaintActive(true);
-            }
-        }
+        RefreshLayersListUI();
 
         if (_lblActiveMesh != null)
         {
@@ -1364,6 +1936,25 @@ public partial class PaintTabUI : VBoxContainer
             _lblActiveMesh.Text = $"Target: {displayName}";
         }
         UpdateCanvasResolutionLabel();
+    }
+
+    private static void ShowAllMeshesRecursive(Node node)
+    {
+        if (node == null) return;
+        string nName = node.Name.ToString();
+        if (nName == "SkeletonGizmoManager" || nName == "BoneLayerManager" || nName == "CharacterIKManager")
+        {
+            return;
+        }
+        if (node is MeshInstance3D mi && !mi.HasMeta("IsHiddenComposite") && HeroMeshHierarchy.IsAuthenticHeroMesh(mi))
+        {
+            bool userVis = mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : true;
+            mi.Visible = userVis;
+        }
+        foreach (Node child in node.GetChildren())
+        {
+            ShowAllMeshesRecursive(child);
+        }
     }
 
     private static bool IsSharedParticleTexture(string vtexPath, string heroName = null, string abilityName = null)
@@ -1783,15 +2374,12 @@ public partial class PaintTabUI : VBoxContainer
         resetAllBtn.AddThemeFontSizeOverride("font_size", 10);
         resetAllBtn.Pressed += () =>
         {
-            for (int i = 0; i < stage.Renderers.Count; i++)
+            stage.RestoreAllVanillaOverrides();
+            if (!string.IsNullOrEmpty(stage.ActiveVpcfPath))
             {
-                stage.SetRendererCustomTint(i, Colors.White);
-                stage.SetRendererCustomSizeScale(i, 1.0f);
-                stage.SetRendererCustomAlphaScale(i, 1.0f);
-                stage.SetRendererVisibility(i, true);
+                string pOwner = stage.ActiveOwnerHeroId ?? _currentHeroId;
+                ModWorkspaceSession.Instance.RemoveAsset(pOwner, stage.ActiveVpcfPath);
             }
-            stage.SetParticleColor(Colors.White);
-            stage.SetParticleRadius(1.0f);
             UpdateParticleTexturesGroup();
         };
         paramVBox.AddChild(resetAllBtn);
@@ -1933,6 +2521,7 @@ public partial class PaintTabUI : VBoxContainer
             }
             else if (id == 1)
             {
+                CheckAndUnregisterIfMaterialClean(_layerManager.ActiveMaterialKey);
                 _layerManager.DeleteLayer(targetIdx);
             }
             else if (id == 2)
@@ -2082,27 +2671,40 @@ public partial class PaintTabUI : VBoxContainer
             _meshHierarchy.IsPaintingModeActive = true;
             _meshHierarchy.ApplyToonShading(false);
 
-            if (hasParticleActive)
+           if (hasParticleActive)
             {
-                // Task D.3: Do NOT show character mesh when switching to Paint tab with active particle
                 _meshHierarchy.HideAll();
                 if (_currentHero != null)
                 {
                     HideAllMeshesRecursive(_currentHero);
                 }
-                if (string.IsNullOrEmpty(_activeParticleVtexPath) && pStage.GetActiveTextures().Count > 0)
+                var activeTextures = pStage.GetActiveTextures();
+                if (activeTextures.Count > 0)
                 {
-                    _activeParticleVtexPath = pStage.GetActiveTextures().Keys.FirstOrDefault();
+                    if (string.IsNullOrEmpty(_activeParticleVtexPath) || !activeTextures.ContainsKey(_activeParticleVtexPath))
+                    {
+                        _activeParticleVtexPath = activeTextures.Keys.First();
+                    }
+                    string targetVtex = _activeParticleVtexPath;
+                    var targetTex = activeTextures[targetVtex];
+                    var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                                ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                    uvCanvas?.OpenParticleTexture(targetVtex, targetTex, (updatedImage) =>
+                    {
+                        pStage.UpdateParticleTexture(targetVtex, updatedImage);
+                    });
                 }
             }
-            else if (_hasCachedPaintVisibility && _cachedPaintSubmeshVisibility != null)
-            {
-                _meshHierarchy.RestoreVisibilityState(_cachedPaintSubmeshVisibility, _cachedPaintPreSoloVisibility, _cachedPaintSoloedSubmesh);
-            }
         }
-        if (_painter != null)
+       if (_painter != null)
         {
             _painter.IsPaintingActive = true;
+            _layerManager?.UpdateActiveLayerBinding();
+            _layerManager?.ApplyOverlayParametersToMeshes();
+            if (_painter.CameraBrush != null && GodotObject.IsInstanceValid(_painter.CameraBrush))
+            {
+                _painter.CameraBrush.Call("get_atlas_textures");
+            }
         }
         if (_brushPalette != null)
         {
@@ -2110,6 +2712,7 @@ public partial class PaintTabUI : VBoxContainer
             _brushPalette.SyncFromPainter();
         }
         _layerManager?.RebuildBaseAtlasBuffer();
+        RefreshSubmeshListUI();
         UpdateParticleTexturesGroup();
         UpdateSubmeshRowHighlights();
         UpdateCanvasResolutionLabel();
@@ -2345,18 +2948,29 @@ public partial class PaintTabUI : VBoxContainer
     private ExportModDialog _modDialogInstance;
     private ExportProgressDialog _progressDialogInstance;
 
-    public void OpenExportModDialog()
+    public void OpenExportModDialog(string overrideHeroCodename = null, string overrideHeroDisplayName = null)
     {
         if (_layerManager == null) return;
-        var preBaked = _layerManager.BakeCompositeImage();
+        FlushActiveChangesToWorkspace(true);
 
-        string heroCodename = _currentHero != null && _currentHero.HasMeta("HeroCodename")
-            ? _currentHero.GetMeta("HeroCodename").AsString()
-            : _currentHero?.Name.ToString().Replace("Hero_", "").ToLowerInvariant() ?? "hero";
+        string activeHeroCodename = !string.IsNullOrEmpty(_currentHeroId)
+            ? _currentHeroId
+            : (_currentHero != null && _currentHero.HasMeta("HeroCodename")
+                ? _currentHero.GetMeta("HeroCodename").AsString()
+                : _currentHero?.Name.ToString().Replace("Hero_", "").ToLowerInvariant() ?? "hero");
 
-        string heroDisplayName = _currentHero != null && _currentHero.HasMeta("HeroDisplayName")
-            ? _currentHero.GetMeta("HeroDisplayName").AsString()
-            : char.ToUpperInvariant(heroCodename[0]) + heroCodename.Substring(1);
+        string activeHeroDisplay = !string.IsNullOrEmpty(_currentHeroDisplayName)
+            ? _currentHeroDisplayName
+            : (_currentHero != null && _currentHero.HasMeta("HeroDisplayName")
+                ? _currentHero.GetMeta("HeroDisplayName").AsString()
+                : char.ToUpperInvariant(activeHeroCodename[0]) + activeHeroCodename.Substring(1));
+
+        string heroCodename = !string.IsNullOrEmpty(overrideHeroCodename) ? overrideHeroCodename : activeHeroCodename;
+        string heroDisplayName = !string.IsNullOrEmpty(overrideHeroDisplayName) ? overrideHeroDisplayName : activeHeroDisplay;
+
+        bool isExportingCurrentActiveHero = string.Equals(heroCodename, activeHeroCodename, StringComparison.OrdinalIgnoreCase);
+        var preBaked = isExportingCurrentActiveHero ? _layerManager.BakeCompositeImage() : null;
+        var submeshesToPass = isExportingCurrentActiveHero ? _meshHierarchy?.Submeshes : new List<SubmeshNodeInfo>();
 
         var pathManager = new GamePathManager();
         pathManager.LoadConfig();
@@ -2377,7 +2991,7 @@ public partial class PaintTabUI : VBoxContainer
 
         if (_modDialogInstance != null)
         {
-            _modDialogInstance.Setup(heroCodename, heroDisplayName, _meshHierarchy?.Submeshes, preBaked, pathManager);
+            _modDialogInstance.Setup(heroCodename, heroDisplayName, submeshesToPass, preBaked, pathManager);
             _modDialogInstance.Visible = true;
         }
     }

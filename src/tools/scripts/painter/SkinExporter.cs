@@ -7,11 +7,12 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Workspace;
 
 namespace DeadlockPlayground.Painter
 {
@@ -56,6 +57,7 @@ namespace DeadlockPlayground.Painter
         public Dictionary<string, Image> PreBakedAtlasesBySubmesh { get; set; } = new();
         public Dictionary<string, Image> PreExtractedBaseImagesBySubmesh { get; set; } = new();
         public Dictionary<string, (Vector2 pos, Vector2 size)> SubmeshAtlasRectsBySubmesh { get; set; } = new();
+        public HashSet<string> ExcludedAssetVpkPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class SkinExportResult
@@ -286,9 +288,18 @@ namespace DeadlockPlayground.Painter
                     submeshesToExport = config.TargetSubmeshes.Where(s => s.IsSelected).ToList();
                 }
 
-                if (submeshesToExport.Count == 0)
+                var workspaceSession = ModWorkspaceSession.Instance;
+                var workspaceAssets = new List<DeadlockPlayground.Workspace.WorkspaceAssetEntry>();
+                if (workspaceSession != null && workspaceSession.Manifest.Heroes.TryGetValue(config.HeroCodename, out var targetHeroEntry) && targetHeroEntry != null)
                 {
-                    string err = "No modified submeshes selected for compilation. Base game submeshes were left untouched.";
+                    workspaceAssets.AddRange(targetHeroEntry.Assets);
+                }                
+                int workspaceTexCount = workspaceAssets.Sum(a => a.ModifiedTextures.Count);
+                int workspaceVpcfCount = workspaceAssets.Count(a => a.Category == "ParticleVFX" && !string.IsNullOrEmpty(a.ParticleOverridesFile));
+
+                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0)
+                {
+                    string err = "No modified submeshes or workspace assets selected for compilation. Base game submeshes were left untouched.";
                     progress?.Report(new ExportProgressReport(0.15f, $"[WARNING] {err}", ExportLogLevel.Warning));
                     result.Success = false;
                     result.ErrorMessage = err;
@@ -322,8 +333,8 @@ namespace DeadlockPlayground.Painter
                     // =========================================================================
                     ct.ThrowIfCancellationRequested();
                     progress?.Report(new ExportProgressReport(0.15f, $"[INFO] Baking {submeshesToExport.Count} composite texture(s) ({config.Resolution}x{config.Resolution})..."));
-
                     var stagedTextures = new List<(string materialName, string pngPath, string vtexPath, string originalVtexCPath)>();
+                    var processedHeroVtexCPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     foreach (var submesh in submeshesToExport)
                     {
@@ -332,6 +343,11 @@ namespace DeadlockPlayground.Painter
                         string matName = ResolveSubmeshMaterialName(submesh, config.HeroCodename);
                         string originalColorVtexC = ResolveOriginalColorVtexCPath(submesh, config.HeroCodename, baseVpkPackage);
 
+                        if (!processedHeroVtexCPaths.Add(originalColorVtexC))
+                        {
+                            progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping duplicate material export for submesh '{submesh.DisplayName}' (shares {Path.GetFileName(originalColorVtexC)})"));
+                            continue;
+                        }
                         progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {originalColorVtexC}"));
 
                         string pngFileName = $"{matName}_color.png";
@@ -370,7 +386,84 @@ namespace DeadlockPlayground.Painter
                         stagedTextures.Add((matName, fullPngPath, fullVtexPath, originalColorVtexC));
                     }
 
-                    progress?.Report(new ExportProgressReport(0.35f, $"[SUCCESS] All {stagedTextures.Count} custom textures staged successfully.", ExportLogLevel.Success));
+                    // =========================================================================
+                    // STEP B.2: Incorporate Multi-Asset Workspace Staged Textures
+                    // =========================================================================
+                    try
+                    {
+                        var existingVtexPaths = new HashSet<string>(stagedTextures.Select(t => t.originalVtexCPath), StringComparer.OrdinalIgnoreCase);
+
+                        foreach (var asset in workspaceAssets)
+                        {
+                            if (config.ExcludedAssetVpkPaths != null &&
+                                (config.ExcludedAssetVpkPaths.Contains(asset.VpkPath) || (!string.IsNullOrEmpty(asset.OwnerAssetPath) && config.ExcludedAssetVpkPaths.Contains(asset.OwnerAssetPath))))
+                            {
+                                continue;
+                            }
+
+                            foreach (var (vtexKey, relPath) in asset.ModifiedTextures)
+                            {
+                                if (existingVtexPaths.Contains(vtexKey)) continue;
+
+                                string stagedPngFull = Path.Combine(workspaceSession.SessionDir, relPath);
+                                var inMemImg = workspaceSession.GetStagedTexture(vtexKey);
+                                if (!File.Exists(stagedPngFull) && (inMemImg == null || inMemImg.IsEmpty())) continue;
+
+                                string normVtex = vtexKey.Replace('\\', '/').TrimStart('/');
+                                if (normVtex.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    normVtex = normVtex.Substring("particle:".Length).TrimStart('/');
+                                }
+                                string assetFolder = Path.GetDirectoryName(normVtex)?.Replace('\\', '/');
+                                if (string.IsNullOrEmpty(assetFolder)) assetFolder = "materials/particle";
+
+                                string assetContentDir = Path.Combine(contentStagingRoot, assetFolder);
+                                Directory.CreateDirectory(assetContentDir);
+
+                                string baseName = Path.GetFileNameWithoutExtension(normVtex);
+                                if (baseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    baseName = baseName.Substring(0, baseName.Length - 2);
+                                }
+
+                                string targetPngFileName = $"{baseName}.png";
+                                string targetPngFull = Path.Combine(assetContentDir, targetPngFileName);
+                                if (File.Exists(stagedPngFull))
+                                {
+                                    File.Copy(stagedPngFull, targetPngFull, true);
+                                }
+                                else if (inMemImg != null)
+                                {
+                                    if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
+                                    inMemImg.SavePng(targetPngFull);
+                                }
+
+                                string targetVtexFileName = $"{baseName}.vtex";
+                                string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
+                                string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
+                                string vtexDesc = GenerateSource2DmxVtex(relPng);
+                                File.WriteAllText(targetVtexFull, vtexDesc);
+
+                                string targetCompiledVtexCPath = normVtex;
+                                if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    targetCompiledVtexCPath += "_c";
+                                }
+
+                                stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
+                                existingVtexPaths.Add(vtexKey);
+                                existingVtexPaths.Add(targetCompiledVtexCPath);
+
+                                progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {vtexKey}"));
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[SkinExporter] Notice: Non-fatal error collecting workspace textures: {ex.Message}");
+                    }
+
+                    progress?.Report(new ExportProgressReport(0.38f, $"[SUCCESS] All {stagedTextures.Count} custom texture(s) staged successfully across workspace.", ExportLogLevel.Success));
 
                     // =========================================================================
                     // STEP C: Compile Source 2 Textures via Headless resourcecompiler.exe (40% -> 85%)
@@ -405,7 +498,7 @@ namespace DeadlockPlayground.Painter
                         int vtexExitCode = RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vtexArgs), progress, ct, vtexProgress + 0.05f);
 
                         // Exact file match without wildcards to avoid prefix collisions
-                        string expectedVtexFileName = $"{matName}_color.vtex_c";
+                        string expectedVtexFileName = $"{Path.GetFileNameWithoutExtension(vtexPath)}.vtex_c";
                         string expectedVtexC = LocateEmittedFile(gameMaterialsDir, contentMaterialsDir, expectedVtexFileName, gameStagingRoot, contentStagingRoot);
                         bool vtexEmitted = !string.IsNullOrEmpty(expectedVtexC) && File.Exists(expectedVtexC);
 
@@ -434,6 +527,92 @@ namespace DeadlockPlayground.Painter
 
                     progress?.Report(new ExportProgressReport(0.85f, $"[SUCCESS] All {totalTextures} texture(s) compiled successfully to .vtex_c.", ExportLogLevel.Success));
 
+                    // =========================================================================
+                    // STEP C.2: Stage & Compile Modified Particle Systems (.vpcf -> .vpcf_c)
+                    // =========================================================================
+                    if (baseVpkPackage != null)
+                    {
+                        foreach (var asset in workspaceAssets)
+                        {
+                            if (asset.Category != "ParticleVFX" || string.IsNullOrEmpty(asset.ParticleOverridesFile)) continue;
+                            if (config.ExcludedAssetVpkPaths != null &&
+                                (config.ExcludedAssetVpkPaths.Contains(asset.VpkPath) || (!string.IsNullOrEmpty(asset.OwnerAssetPath) && config.ExcludedAssetVpkPaths.Contains(asset.OwnerAssetPath))))
+                            {
+                                continue;
+                            }
+
+                            var pOverrides = workspaceSession.GetStagedParticleOverrides(asset.VpkPath);
+                            if (pOverrides == null || pOverrides.Emitters == null || pOverrides.Emitters.Count == 0) continue;
+
+                            // Agrupar overrides por cada archivo .vpcf hijo (ej. chrono_time_wall_charge_beams.vpcf)
+                            var vpcfTargets = new Dictionary<string, EmitterOverrideData>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var em in pOverrides.Emitters.Values)
+                            {
+                                string targetVpcf = !string.IsNullOrEmpty(em.ChildVpcfPath) ? em.ChildVpcfPath : asset.VpkPath;
+                                if (string.IsNullOrEmpty(targetVpcf)) continue;
+
+                                bool isModified = !em.Visible ||
+                                                  Math.Abs(em.SizeScale - 1.0f) > 0.01f ||
+                                                  Math.Abs(em.AlphaScale - 1.0f) > 0.01f ||
+                                                  (em.TintColorRgba != null && em.TintColorRgba.Length >= 3 &&
+                                                   (Math.Abs(em.TintColorRgba[0] - 1f) > 0.01f || Math.Abs(em.TintColorRgba[1] - 1f) > 0.01f || Math.Abs(em.TintColorRgba[2] - 1f) > 0.01f));
+
+                                if (isModified)
+                                {
+                                    vpcfTargets[targetVpcf] = em;
+                                }
+                            }
+
+                            foreach (var (rawVpcfPath, emOverride) in vpcfTargets)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                string normVpcf = rawVpcfPath.Replace('\\', '/').TrimStart('/');
+                                if (normVpcf.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    normVpcf = normVpcf[..^2];
+                                string compiledVpcfPath = normVpcf + "_c";
+
+                                var vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
+                                if (vpkEntry == null) continue;
+
+                                baseVpkPackage.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
+                                using var vrfRes = new ValveResourceFormat.Resource();
+                                using var ms = new MemoryStream(rawVpcfBytes);
+                                vrfRes.Read(ms);
+
+                                string kv3Text = vrfRes.DataBlock?.ToString();
+                                if (string.IsNullOrEmpty(kv3Text)) continue;
+
+                                // Aplicar modificaciones al texto KV3 del .vpcf
+                                kv3Text = ApplyOverridesToVpcfKv3Text(kv3Text, emOverride);
+
+                                string vpcfFolder = Path.GetDirectoryName(normVpcf)?.Replace('\\', '/') ?? "particles";
+                                string vpcfContentDir = Path.Combine(contentStagingRoot, vpcfFolder);
+                                string vpcfGameDir = Path.Combine(gameStagingRoot, vpcfFolder);
+                                Directory.CreateDirectory(vpcfContentDir);
+
+                                string vpcfFileName = Path.GetFileName(normVpcf);
+                                string fullVpcfContentPath = Path.Combine(vpcfContentDir, vpcfFileName);
+                                File.WriteAllText(fullVpcfContentPath, kv3Text);
+
+                                progress?.Report(new ExportProgressReport(0.82f, $"[INFO] Compiling modified particle definition: {vpcfFileName}..."));
+
+                                var vpcfArgs = new List<string>
+                                {
+                                    "-i", $"\"{fullVpcfContentPath.Replace('\\', '/')}\"",
+                                    "-nop4"
+                                };
+                                RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vpcfArgs), progress, ct, 0.83f);
+
+                                string expectedVpcfCName = vpcfFileName + "_c";
+                                string emittedVpcfC = LocateEmittedFile(vpcfGameDir, vpcfContentDir, expectedVpcfCName, gameStagingRoot, contentStagingRoot);
+                                if (!string.IsNullOrEmpty(emittedVpcfC) && File.Exists(emittedVpcfC))
+                                {
+                                    compiledOutputFiles.Add((emittedVpcfC, compiledVpcfPath));
+                                    progress?.Report(new ExportProgressReport(0.84f, $"[SUCCESS] Compiled particle: {expectedVpcfCName}", ExportLogLevel.Success));
+                                }
+                            }
+                        }
+                    }
                     // =========================================================================
                     // STEP D: Package Intercepted VTEX Binaries into VPK Archive (85% -> 100%)
                     // =========================================================================
@@ -1218,6 +1397,75 @@ namespace DeadlockPlayground.Painter
 	""m_bNoLod"" ""bool"" ""0""
 }
 ";
+        }
+
+        private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
+        {
+            if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
+
+            // 1. Si el usuario ocultó este emisor (Visible = false), ponemos m_nMaxParticles = 0
+            if (!ov.Visible)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_nMaxParticles\s*=\s*\d+"))
+                {
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_nMaxParticles\s*=\s*\d+", "m_nMaxParticles = 0");
+                }
+                else
+                {
+                    int braceIdx = kv3Text.IndexOf('{');
+                    if (braceIdx >= 0)
+                        kv3Text = kv3Text.Insert(braceIdx + 1, "\n\tm_nMaxParticles = 0");
+                }
+            }
+
+            // 2. Si cambió el TintColor o el AlphaScale, inyectamos/actualizamos m_ConstantColor = [ R, G, B, A ]
+            if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
+            {
+                bool tintChanged = Math.Abs(ov.TintColorRgba[0] - 1f) > 0.01f ||
+                                   Math.Abs(ov.TintColorRgba[1] - 1f) > 0.01f ||
+                                   Math.Abs(ov.TintColorRgba[2] - 1f) > 0.01f ||
+                                   Math.Abs(ov.AlphaScale - 1f) > 0.01f;
+                if (tintChanged)
+                {
+                    int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
+                    int g = Math.Clamp((int)MathF.Round(ov.TintColorRgba[1] * 255f), 0, 255);
+                    int b = Math.Clamp((int)MathF.Round(ov.TintColorRgba[2] * 255f), 0, 255);
+                    int a = Math.Clamp((int)MathF.Round(ov.AlphaScale * 255f), 0, 255);
+                    string colorBlock = $"m_ConstantColor = [ {r}, {g}, {b}, {a} ]";
+
+                    if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]"))
+                    {
+                        kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]", colorBlock);
+                    }
+                    else
+                    {
+                        int braceIdx = kv3Text.IndexOf('{');
+                        if (braceIdx >= 0)
+                            kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\t{colorBlock}");
+                    }
+                }
+            }
+
+            // 3. Si cambió SizeScale, escalamos m_flConstantRadius
+            if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f)
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(kv3Text, @"m_flConstantRadius\s*=\s*([0-9\.]+)");
+                if (match.Success && float.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float baseRad))
+                {
+                    float newRad = baseRad * ov.SizeScale;
+                    kv3Text = kv3Text.Substring(0, match.Index) +
+                              $"m_flConstantRadius = {newRad.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}" +
+                              kv3Text.Substring(match.Index + match.Length);
+                }
+                else
+                {
+                    int braceIdx = kv3Text.IndexOf('{');
+                    if (braceIdx >= 0)
+                        kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_flConstantRadius = {(5.0f * ov.SizeScale).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
+                }
+            }
+
+            return kv3Text;
         }
 
         private static int RunCompilerProcess(

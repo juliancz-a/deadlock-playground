@@ -1,8 +1,10 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DeadlockPlayground.Materials;
-using SteamDatabase.ValvePak;
+using DeadlockPlayground.Workspace;
+using ValvePak;
 using ValveResourceFormat.IO;
 
 namespace DeadlockPlayground.Particles;
@@ -16,15 +18,23 @@ public partial class ParticleStage3D : Node3D
     [Signal] public delegate void ParticleLoadedEventHandler(string vpcfPath, string variantName, string abilityName);
     [Signal] public delegate void ParticleUnloadedEventHandler();
 
+    public static event Action<bool> OnParticleActiveStateChanged;
+
     public string ActiveVpcfPath { get; private set; }
     public string ActiveVariantName { get; private set; }
     public string ActiveAbilityName { get; private set; }
+    public string ActiveOwnerHeroId { get; set; } = "";
     public ParticleSystemDefinition ActiveRootDefinition { get; private set; }
 
     private CpuParticleSimulator _simulator;
     private readonly List<ParticleMultiMeshRenderer> _renderers = new();
     private readonly List<Node> _spawnedMountNodes = new();
     private readonly Dictionary<string, ImageTexture> _loadedTextures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ImageTexture> _vanillaTextures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Image> _pendingModifiedTextures = new(StringComparer.OrdinalIgnoreCase);
+    private Color _vanillaConstantColor = Colors.White;
+    private readonly Dictionary<ParticleMultiMeshRenderer, Color> _vanillaEmitterColors = new();
+    private bool _hasParticleEdits = false;
 
     private IFileLoader _currentFileLoader;
     private Package _currentBasePackage;
@@ -56,6 +66,14 @@ public partial class ParticleStage3D : Node3D
     {
         Name = "ParticleStage3D";
         _simulator = new CpuParticleSimulator();
+        ModWorkspaceSession.Instance.OnAssetDiscarded += OnWorkspaceAssetDiscarded;
+        ModWorkspaceSession.Instance.OnWorkspaceCleared += OnWorkspaceCleared;
+    }
+
+    public override void _ExitTree()
+    {
+        ModWorkspaceSession.Instance.OnAssetDiscarded -= OnWorkspaceAssetDiscarded;
+        ModWorkspaceSession.Instance.OnWorkspaceCleared -= OnWorkspaceCleared;
     }
 
     public override void _Process(double delta)
@@ -91,7 +109,8 @@ public partial class ParticleStage3D : Node3D
         Node3D heroNode,
         IFileLoader fileLoader,
         Package basePackage = null,
-        Package addonPackage = null)
+        Package addonPackage = null,
+        string ownerHeroId = null)
     {
         // 1. Clean up existing active particle
         UnloadActiveParticle();
@@ -105,6 +124,31 @@ public partial class ParticleStage3D : Node3D
         _currentBasePackage = basePackage;
         _currentAddonPackage = addonPackage;
         _currentHeroNode = heroNode;
+        _vanillaEmitterColors.Clear(); 
+        _pendingModifiedTextures.Clear(); 
+        _hasParticleEdits = false;
+
+        if (!string.IsNullOrEmpty(ownerHeroId))
+        {
+            ActiveOwnerHeroId = ownerHeroId;
+        }
+        else
+        {
+            string existingOwner = ModWorkspaceSession.Instance.GetParticleOwnerHeroId(vpcfPath);
+            if (!string.IsNullOrEmpty(existingOwner))
+            {
+                ActiveOwnerHeroId = existingOwner;
+            }
+            else if (heroNode != null && !string.IsNullOrEmpty(heroNode.Name))
+            {
+                ActiveOwnerHeroId = heroNode.Name.ToString().Replace("Hero_", "").ToLowerInvariant();
+            }
+            else
+            {
+                ActiveOwnerHeroId = "particles";
+            }
+        }
+
         HideHeroMeshes(heroNode);
 
         GD.Print($"[ParticleStage3D] Loading deterministic CPU particle hierarchy for '{abilityName} - {variantName}' ({vpcfPath})...");
@@ -122,6 +166,8 @@ public partial class ParticleStage3D : Node3D
             GD.PrintErr($"[ParticleStage3D] Failed to load particle definition hierarchy for {vpcfPath}");
             return;
         }
+
+        _vanillaConstantColor = ActiveRootDefinition.ConstantColor;
 
         // 3. Build simulator instance hierarchy
         _simulator = new CpuParticleSimulator();
@@ -172,8 +218,13 @@ public partial class ParticleStage3D : Node3D
 
                     var renderer = new ParticleMultiMeshRenderer(inst, rDef, tex, seqRects, noiseTex);
                     renderer.Name = $"Renderer_{inst.Definition.VpcfPath.GetFile().GetBaseName()}_{rIdx}_{rDef.ClassName}";
+                    Color initialCol = inst.Definition.ConstantColor;
+                    _vanillaEmitterColors[renderer] = initialCol;
+                    renderer.SetCustomTint(initialCol);
                     AddChild(renderer);
                     _renderers.Add(renderer);
+                    _vanillaEmitterColors[renderer] = inst.Definition.ConstantColor;
+                    _hasParticleEdits = false;
                 }
         }
 
@@ -181,11 +232,12 @@ public partial class ParticleStage3D : Node3D
         _simulator.SetDuration(calculatedDuration);
         GD.Print($"[ParticleStage3D] Dynamic system duration calculated: {calculatedDuration:F2}s");
 
-        _simulator.Reset();
-        _simulator.Play();
+        // 6. Restore any staged overrides or painted textures from workspace session
+        RestoreFromWorkspaceSession();
 
-        // 6. Emit loaded signal
+        // 7. Emit loaded signal and notify global state
         EmitSignal(SignalName.ParticleLoaded, ActiveVpcfPath, ActiveVariantName, ActiveAbilityName);
+        OnParticleActiveStateChanged?.Invoke(true);
     }
 
     private void SyncControlPoints()
@@ -394,6 +446,18 @@ public partial class ParticleStage3D : Node3D
         if (tex != null)
         {
             _loadedTextures[vtexPath] = tex;
+            if (!_vanillaTextures.ContainsKey(vtexPath))
+            {
+                var img = tex.GetImage();
+                if (img != null)
+                {
+                    _vanillaTextures[vtexPath] = ImageTexture.CreateFromImage((Image)img.Duplicate());
+                }
+                else
+                {
+                    _vanillaTextures[vtexPath] = tex;
+                }
+            }
             return tex;
         }
 
@@ -404,39 +468,152 @@ public partial class ParticleStage3D : Node3D
     {
         if (string.IsNullOrEmpty(vtexPath) || newImage == null) return;
 
-        if (_loadedTextures.TryGetValue(vtexPath, out var tex) && tex != null)
-        {
-            // Fix: Mipmap configuration must match ImageTexture
-            if (tex.HasMipmaps() && !newImage.HasMipmaps())
-            {
-                newImage.GenerateMipmaps();
-            }
+        _hasParticleEdits = true;
 
-            if (tex.GetWidth() == newImage.GetWidth() &&
-                tex.GetHeight() == newImage.GetHeight() &&
-                tex.GetFormat() == newImage.GetFormat() &&
-                tex.HasMipmaps() == newImage.HasMipmaps())
-            {
-                tex.Update(newImage);
-            }
-            else
-            {
-                tex.SetImage(newImage);
-            }
-        }
-        else
+        // Guardamos copia limpia SIN mipmaps para exportar a PNG sin errores!
+        var cleanImgForExport = (Image)newImage.Duplicate();
+        if (cleanImgForExport.HasMipmaps())
         {
-            var newTex = ImageTexture.CreateFromImage(newImage);
-            _loadedTextures[vtexPath] = newTex;
-            foreach (var renderer in _renderers)
+            cleanImgForExport.ClearMipmaps();
+        }
+        _pendingModifiedTextures[vtexPath] = cleanImgForExport;
+
+        var mipImg = (Image)cleanImgForExport.Duplicate();
+        mipImg.GenerateMipmaps();
+
+        var newTex = ImageTexture.CreateFromImage(mipImg);
+        _loadedTextures[vtexPath] = newTex;
+        foreach (var renderer in _renderers)
+        {
+            if (IsInstanceValid(renderer))
             {
-                if (IsInstanceValid(renderer))
+                string rTexPath = renderer.RendererDef?.PrimaryTexturePath;
+                if (!string.IsNullOrEmpty(rTexPath) && 
+                    (string.Equals(rTexPath, vtexPath, StringComparison.OrdinalIgnoreCase) || 
+                    rTexPath.EndsWith(vtexPath, StringComparison.OrdinalIgnoreCase) || 
+                    vtexPath.EndsWith(rTexPath, StringComparison.OrdinalIgnoreCase)))
                 {
                     renderer.SetTexture(newTex);
                 }
             }
         }
         RenderImmediate();
+
+        string heroId = !string.IsNullOrEmpty(ActiveOwnerHeroId)
+            ? ActiveOwnerHeroId
+            : (!string.IsNullOrEmpty(_currentHeroNode?.Name) 
+                ? _currentHeroNode.Name.ToString().Replace("Hero_", "").ToLowerInvariant() 
+                : "particles");
+
+        // Stage immediately in memory and disk so ExportModDialog & SkinExporter always find it
+        ModWorkspaceSession.Instance.StageTexture(
+            heroId,
+            heroId,
+            "ParticleVFX",
+            ActiveVpcfPath,
+            ActiveVpcfPath,
+            System.IO.Path.GetFileName(vtexPath),
+            vtexPath,
+            cleanImgForExport);
+    }
+
+   public void RestoreAllVanillaOverrides()
+    {
+        _hasParticleEdits = false;
+        _pendingModifiedTextures.Clear();
+
+        if (ActiveRootDefinition != null)
+        {
+            ActiveRootDefinition.ConstantColor = _vanillaConstantColor;
+        }
+
+        for (int i = 0; i < _renderers.Count; i++)
+        {
+            var r = _renderers[i];
+            if (IsInstanceValid(r))
+            {
+                Color origInstCol = _vanillaEmitterColors.TryGetValue(r, out var c) ? c : Colors.White;
+                if (r.Instance?.Definition != null)
+                {
+                    r.Instance.Definition.ConstantColor = origInstCol;
+                }
+                r.VisibleAndEmitting = true;
+                r.SetCustomTint(origInstCol);
+                r.CustomSizeScale = 1.0f;
+                r.CustomAlphaScale = 1.0f;
+            }
+        }
+
+        // Reiniciar simulación para que las partículas vivas tomen su color y radio original del .vpcf
+        _simulator?.Reset();
+
+        foreach (var (vtexPath, vanillaTex) in _vanillaTextures)
+        {
+            if (vanillaTex != null)
+            {
+                _loadedTextures[vtexPath] = vanillaTex;
+                foreach (var renderer in _renderers)
+                {
+                    if (IsInstanceValid(renderer))
+                    {
+                        string rTexPath = renderer.RendererDef?.PrimaryTexturePath;
+                        if (!string.IsNullOrEmpty(rTexPath) && 
+                            (string.Equals(rTexPath, vtexPath, StringComparison.OrdinalIgnoreCase) || 
+                             rTexPath.EndsWith(vtexPath, StringComparison.OrdinalIgnoreCase) || 
+                             vtexPath.EndsWith(rTexPath, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            renderer.SetTexture(vanillaTex);
+                        }
+                    }
+                }
+
+                DeadlockPlayground.Painter.SkinLayerManager.Instance?.ResetMaterialContext("particle:" + vtexPath);
+                DeadlockPlayground.Painter.SkinLayerManager.Instance?.ResetMaterialContext(vtexPath);
+            }
+        }
+
+        RenderImmediate();
+
+        var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as DeadlockPlayground.UI.UVCanvas2DUI
+                    ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+        if (uvCanvas != null && !string.IsNullOrEmpty(uvCanvas.ActiveParticleTexturePath))
+        {
+            if (_vanillaTextures.TryGetValue(uvCanvas.ActiveParticleTexturePath, out var vTex) && vTex != null)
+            {
+                uvCanvas.OpenParticleTexture(uvCanvas.ActiveParticleTexturePath, vTex, (img) => UpdateParticleTexture(uvCanvas.ActiveParticleTexturePath, img));
+            }
+        }
+    }
+
+    private void OnWorkspaceAssetDiscarded(string heroId, string vpkPath)
+    {
+        if (string.IsNullOrEmpty(vpkPath)) return;
+
+        bool matchesVpcf = string.Equals(ActiveVpcfPath, vpkPath, StringComparison.OrdinalIgnoreCase);
+        bool matchesTexture = false;
+        foreach (var k in _loadedTextures.Keys)
+        {
+            if (string.Equals(k, vpkPath, StringComparison.OrdinalIgnoreCase) || 
+                k.EndsWith(vpkPath, StringComparison.OrdinalIgnoreCase) || 
+                vpkPath.EndsWith(k, StringComparison.OrdinalIgnoreCase))
+            {
+                matchesTexture = true;
+                break;
+            }
+        }
+
+        if (matchesVpcf || matchesTexture)
+        {
+            RestoreAllVanillaOverrides();
+        }
+    }
+
+    private void OnWorkspaceCleared()
+    {
+        if (HasActiveParticle)
+        {
+            RestoreAllVanillaOverrides();
+        }
     }
 
     public IReadOnlyDictionary<string, ImageTexture> GetActiveTextures()
@@ -448,6 +625,7 @@ public partial class ParticleStage3D : Node3D
 
     public void SetRendererCustomTint(int index, Color color)
     {
+        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
@@ -455,12 +633,14 @@ public partial class ParticleStage3D : Node3D
             {
                 r.SetCustomTint(color);
                 RenderImmediate();
+                FlushOverridesToWorkspace();
             }
         }
     }
 
     public void SetRendererCustomSizeScale(int index, float scale)
     {
+        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
@@ -468,12 +648,14 @@ public partial class ParticleStage3D : Node3D
             {
                 r.CustomSizeScale = scale;
                 RenderImmediate();
+                FlushOverridesToWorkspace();
             }
         }
     }
 
     public void SetRendererCustomAlphaScale(int index, float alpha)
     {
+        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
@@ -481,12 +663,14 @@ public partial class ParticleStage3D : Node3D
             {
                 r.CustomAlphaScale = alpha;
                 RenderImmediate();
+                FlushOverridesToWorkspace();
             }
         }
     }
 
     public void SetRendererVisibility(int index, bool visible)
     {
+        _hasParticleEdits = true;
         if (index >= 0 && index < _renderers.Count)
         {
             var r = _renderers[index];
@@ -494,6 +678,7 @@ public partial class ParticleStage3D : Node3D
             {
                 r.VisibleAndEmitting = visible;
                 RenderImmediate();
+                FlushOverridesToWorkspace();
             }
         }
     }
@@ -505,6 +690,7 @@ public partial class ParticleStage3D : Node3D
 
     public void SetParticleColor(Color color)
     {
+        _hasParticleEdits = true;
         if (ActiveRootDefinition != null)
         {
             ActiveRootDefinition.ConstantColor = color;
@@ -524,6 +710,140 @@ public partial class ParticleStage3D : Node3D
                 }
             }
             RenderImmediate();
+            FlushOverridesToWorkspace();
+        }
+    }
+
+    private void RestoreFromWorkspaceSession()
+    {
+        if (string.IsNullOrEmpty(ActiveVpcfPath)) return;
+        try
+        {
+            var session = ModWorkspaceSession.Instance;
+            foreach (var vtexPath in _loadedTextures.Keys.ToList())
+            {
+                var stagedImg = session.GetStagedTexture(vtexPath);
+                if (stagedImg != null && !stagedImg.IsEmpty())
+                {
+                    if (!stagedImg.HasMipmaps()) stagedImg.GenerateMipmaps();
+                    var newTex = ImageTexture.CreateFromImage(stagedImg);
+                    _loadedTextures[vtexPath] = newTex;
+                    foreach (var renderer in _renderers)
+                    {
+                        if (IsInstanceValid(renderer))
+                        {
+                            string rTexPath = renderer.RendererDef?.PrimaryTexturePath;
+                            if (!string.IsNullOrEmpty(rTexPath) && 
+                                (string.Equals(rTexPath, vtexPath, StringComparison.OrdinalIgnoreCase) || 
+                                 rTexPath.EndsWith(vtexPath, StringComparison.OrdinalIgnoreCase) || 
+                                 vtexPath.EndsWith(rTexPath, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                renderer.SetTexture(newTex);
+                            }
+                        }
+                    }
+                    GD.Print($"[ParticleStage3D] Restored staged texture for '{vtexPath}' from workspace session.");
+                }
+            }
+
+            var pOverrides = session.GetParticleOverrides(ActiveVpcfPath);
+            if (pOverrides != null && pOverrides.Emitters != null)
+            {
+                for (int i = 0; i < _renderers.Count; i++)
+                {
+                    var r = _renderers[i];
+                    if (!GodotObject.IsInstanceValid(r)) continue;
+                    string emName = !string.IsNullOrEmpty(r.Name) ? r.Name.ToString() : $"Emitter_{i}";
+                    if (pOverrides.Emitters.TryGetValue(emName, out var emData))
+                    {
+                        r.VisibleAndEmitting = emData.Visible;
+                        if (emData.TintColorRgba != null && emData.TintColorRgba.Length >= 4)
+                        {
+                            r.SetCustomTint(new Color(emData.TintColorRgba[0], emData.TintColorRgba[1], emData.TintColorRgba[2], emData.TintColorRgba[3]));
+                        }
+                        r.CustomSizeScale = emData.SizeScale;
+                        r.CustomAlphaScale = emData.AlphaScale;
+                    }
+                }
+                GD.Print($"[ParticleStage3D] Restored staged particle overrides for '{ActiveVpcfPath}' from workspace session.");
+            }
+
+            RenderImmediate();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ParticleStage3D] Error restoring workspace session: {ex.Message}");
+        }
+    }
+
+    public void FlushOverridesToWorkspace()
+    {
+       if (!HasActiveParticle) return;
+        if (!_hasParticleEdits && _pendingModifiedTextures.Count == 0 && !ModWorkspaceSession.Instance.HasStagedModifications(ActiveVpcfPath))
+        {
+            return;
+        }
+        try
+        {
+            string heroId = !string.IsNullOrEmpty(ActiveOwnerHeroId)
+                ? ActiveOwnerHeroId
+                : ModWorkspaceSession.Instance.GetParticleOwnerHeroId(ActiveVpcfPath);
+
+            if (string.IsNullOrEmpty(heroId))
+            {
+                heroId = !string.IsNullOrEmpty(_currentHeroNode?.Name) 
+                    ? _currentHeroNode.Name.ToString().Replace("Hero_", "").ToLowerInvariant() 
+                    : "particles";
+            }
+
+            var overrides = new WorkspaceParticleOverrides
+            {
+                VpcfPath = ActiveVpcfPath,
+                ConstantColorRgba = ActiveRootDefinition != null
+                    ? new float[] { ActiveRootDefinition.ConstantColor.R, ActiveRootDefinition.ConstantColor.G, ActiveRootDefinition.ConstantColor.B, ActiveRootDefinition.ConstantColor.A }
+                    : new float[] { 1f, 1f, 1f, 1f },
+                RadiusScale = 1.0f,
+                AlphaScale = 1.0f
+            };
+
+            for (int i = 0; i < _renderers.Count; i++)
+            {
+                var r = _renderers[i];
+                if (!GodotObject.IsInstanceValid(r)) continue;
+                string emName = !string.IsNullOrEmpty(r.Name) ? r.Name.ToString() : $"Emitter_{i}";
+                overrides.Emitters[emName] = new EmitterOverrideData
+                {
+                    ChildVpcfPath = r.Instance?.Definition?.VpcfPath ?? ActiveVpcfPath,
+                    Visible = r.VisibleAndEmitting,
+                    TintColorRgba = new float[] { r.CustomTintColor.R, r.CustomTintColor.G, r.CustomTintColor.B, 1f },
+                    SizeScale = r.CustomSizeScale,
+                    AlphaScale = r.CustomAlphaScale
+                };
+            }
+
+            ModWorkspaceSession.Instance.StageParticleOverrides(
+                heroId,
+                heroId,
+                ActiveVpcfPath,
+                ActiveVariantName ?? System.IO.Path.GetFileName(ActiveVpcfPath),
+                overrides);
+
+            foreach (var (vtex, img) in _pendingModifiedTextures)
+            {
+                ModWorkspaceSession.Instance.StageTexture(
+                    heroId,
+                    heroId,
+                    "ParticleVFX",
+                    ActiveVpcfPath,
+                    ActiveVpcfPath,
+                    System.IO.Path.GetFileName(vtex),
+                    vtex,
+                    img);
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ParticleStage3D] Error flushing overrides to workspace: {ex.Message}");
         }
     }
 
@@ -659,6 +979,7 @@ public partial class ParticleStage3D : Node3D
         ActiveVpcfPath = null;
         ActiveVariantName = null;
         ActiveAbilityName = null;
+        ActiveOwnerHeroId = "";
         ActiveRootDefinition = null;
 
         var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
@@ -667,6 +988,7 @@ public partial class ParticleStage3D : Node3D
         RestoreHeroMeshes();
 
         EmitSignal(SignalName.ParticleUnloaded);
+        OnParticleActiveStateChanged?.Invoke(false);
     }
 
     private void HideHeroMeshes(Node heroNode)
@@ -674,9 +996,13 @@ public partial class ParticleStage3D : Node3D
         _hiddenHeroMeshes.Clear();
         if (heroNode == null) return;
 
-        void CollectMeshes(Node parent)
+      void CollectMeshes(Node parent)
         {
-            if (parent is MeshInstance3D mesh && mesh.Visible)
+            string pName = parent.Name.ToString();
+            if (pName == "SkeletonGizmoManager" || pName == "BoneLayerManager" || pName == "CharacterIKManager")
+                return;
+
+            if (parent is MeshInstance3D mesh && mesh.Visible && DeadlockPlayground.Painter.HeroMeshHierarchy.IsAuthenticHeroMesh(mesh))
             {
                 mesh.Visible = false;
                 _hiddenHeroMeshes.Add(mesh);

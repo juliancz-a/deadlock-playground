@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Materials;
-using SteamDatabase.ValvePak;
+using ValvePak;
 
 namespace DeadlockPlayground.UI;
 

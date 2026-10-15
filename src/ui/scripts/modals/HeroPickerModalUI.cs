@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DeadlockPlayground.Catalog;
-using SteamDatabase.ValvePak;
+using ValvePak;
 
 namespace DeadlockPlayground.UI;
 

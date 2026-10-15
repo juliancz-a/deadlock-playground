@@ -109,8 +109,7 @@ func get_native_atlas_size_vec() -> Vector2i:
 ## Sized independently in width and height to next power-of-two (generic non-square support).
 ## The mesh receives position_in_atlas=(0,0) and size_in_atlas=(1,1) — no packing, no downscaling.
 func apply_single_mesh(mesh_instance: MeshInstance3D, native_w: int, native_h: int) -> void:
-	if not mesh_instance or not is_instance_valid(mesh_instance):
-		push_error("OverlayAtlasManager.apply_single_mesh: invalid mesh_instance")
+	if not mesh_instance or not is_instance_valid(mesh_instance) or not mesh_instance.mesh or mesh_instance.mesh.get_surface_count() == 0:
 		return
 
 	# Compute power-of-two for width and height independently
@@ -152,8 +151,7 @@ func apply_single_mesh(mesh_instance: MeshInstance3D, native_w: int, native_h: i
 
 ## Applies the existing overlay texture and shader configuration of this atlas manager to an additional mesh sharing this material.
 func apply_to_mesh(mesh_instance: MeshInstance3D) -> void:
-	if not mesh_instance or not is_instance_valid(mesh_instance):
-		push_error("OverlayAtlasManager.apply_to_mesh: invalid mesh_instance")
+	if not mesh_instance or not is_instance_valid(mesh_instance) or not mesh_instance.mesh or mesh_instance.mesh.get_surface_count() == 0:
 		return
 
 	var overlay_material := ShaderMaterial.new()

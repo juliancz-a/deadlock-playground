@@ -58,8 +58,8 @@ namespace DeadlockPlayground.UI
         private WireframeDisplayMode _wireframeMode = WireframeDisplayMode.Outlines;
         private float _wireframeOpacity = 0.5f;
         private bool _showBaseTexture = true;
-        private ArrayMesh _cachedBoundaryMesh = null;
-        private ArrayMesh _cachedAllWireMesh = null;
+        private Vector2[] _cachedBoundaryPoints = null;
+        private Vector2[] _cachedAllWirePoints = null;
         private Rect2 _cachedSubmeshAtlasRect = default;
         private bool _hasSubmeshRect = false;
 
@@ -79,6 +79,7 @@ namespace DeadlockPlayground.UI
         public bool IsResizingWidth => _isResizingWidth;
 
         private TextureRect _baseTextureRect = null;
+        private Button _btnResetParticle = null;
         private ShaderMaterial _baseTextureMat = null;
         private TextureRect _paintOverlayRect = null;
         private ShaderMaterial _paintOverlayMat = null;
@@ -293,6 +294,26 @@ namespace DeadlockPlayground.UI
 
             _btnWireOpacity = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnWireOpacity")
                            ?? FindChild("BtnWireOpacity", true, false) as Button;
+
+            var hBox = GetNodeOrNull<HBoxContainer>("VBoxContainer/Header/Margin/HBox")
+                    ?? FindChild("HBox", true, false) as HBoxContainer;
+            if (hBox != null)
+            {
+                _btnResetParticle = new Button
+                {
+                    Name = "BtnResetParticle",
+                    Text = "Reset to Original",
+                    TooltipText = "Reset particle texture to the original clean VPK texture",
+                    Visible = false,
+                    CustomMinimumSize = new Vector2(110, 24)
+                };
+                _btnResetParticle.Pressed += OnResetParticlePressed;
+                hBox.AddChild(_btnResetParticle);
+                if (_btnClose != null)
+                {
+                    hBox.MoveChild(_btnResetParticle, _btnClose.GetIndex());
+                }
+            }
 
             _viewportContainer = GetNodeOrNull<SubViewportContainer>("VBoxContainer/ViewportContainer")
                               ?? FindChild("ViewportContainer", true, false) as SubViewportContainer;
@@ -578,6 +599,7 @@ namespace DeadlockPlayground.UI
         }
 
         private string _activeParticleTexturePath = null;
+        public string ActiveParticleTexturePath => _activeParticleTexturePath;
         private Action<Image> _onParticleTextureUpdated = null;
 
         public void OpenParticleTexture(string vtexPath, ImageTexture texture, Action<Image> onTextureUpdated)
@@ -590,10 +612,16 @@ namespace DeadlockPlayground.UI
                 _lblTitle.Text = $"Particle: {System.IO.Path.GetFileName(vtexPath)}";
             }
 
-            if (_baseTextureRect != null && texture != null)
+            if (_baseTextureRect != null)
             {
+                _baseTextureRect.Visible = false;
                 _baseTextureRect.Texture = texture;
                 _baseTextureRect.Material = null;
+            }
+
+            if (_btnResetParticle != null)
+            {
+                _btnResetParticle.Visible = true;
             }
 
             if (_paintOverlayRect != null)
@@ -611,6 +639,41 @@ namespace DeadlockPlayground.UI
             UpdateResolutionLabel();
             RebuildWireframe();
             FitToView();
+        }
+
+        public void CloseParticleTextureMode()
+        {
+            _activeParticleTexturePath = null;
+            _onParticleTextureUpdated = null;
+            if (_btnResetParticle != null)
+            {
+                _btnResetParticle.Visible = false;
+            }
+            if (_baseTextureRect != null && _baseTextureMat != null)
+            {
+                _baseTextureRect.Material = _baseTextureMat;
+            }
+            if (_paintOverlayRect != null && _paintOverlayMat != null)
+            {
+                _paintOverlayRect.Material = _paintOverlayMat;
+            }
+            UpdateResolutionLabel();
+            RebuildWireframe();
+            FitToView();
+            QueueCanvasRedraw();
+        }
+
+        private void OnResetParticlePressed()
+        {
+            if (string.IsNullOrEmpty(_activeParticleTexturePath)) return;
+            _layerManager?.ResetStandaloneToOriginalVpkTexture();
+            var baked = _layerManager?.BakeCompositeImage();
+            if (baked != null && _onParticleTextureUpdated != null)
+            {
+                _onParticleTextureUpdated.Invoke(baked);
+            }
+            QueueCanvasRedraw();
+            _cursorOverlay?.QueueRedraw();
         }
 
         private void OnPainterStrokeFinished()
@@ -786,6 +849,16 @@ namespace DeadlockPlayground.UI
                     _optBlendMode.Select(bMode);
                 }
             }
+            if (_onParticleTextureUpdated != null && _layerManager != null &&
+                !string.IsNullOrEmpty(_activeParticleTexturePath) && _layerManager.HasPaintStrokes())
+            {
+                var baked = _layerManager.BakeCompositeImage();
+                if (baked != null)
+                {
+                    _onParticleTextureUpdated.Invoke(baked);
+             }
+         }
+            _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
             _canvasDrawArea?.QueueRedraw();
         }
 
@@ -801,6 +874,10 @@ namespace DeadlockPlayground.UI
         {
             _activeParticleTexturePath = null;
             _onParticleTextureUpdated = null;
+            if (_btnResetParticle != null)
+            {
+                _btnResetParticle.Visible = false;
+            }
             if (_lblTitle != null && mesh != null)
             {
                 _lblTitle.Text = $"UV Map - {mesh.Name}";
@@ -827,8 +904,8 @@ namespace DeadlockPlayground.UI
 
         public void RebuildWireframe()
         {
-            _cachedBoundaryMesh = null;
-            _cachedAllWireMesh = null;
+            _cachedBoundaryPoints = null;
+            _cachedAllWirePoints = null;
             _hasSubmeshRect = false;
 
             if (!string.IsNullOrEmpty(_activeParticleTexturePath)) return;
@@ -938,8 +1015,8 @@ namespace DeadlockPlayground.UI
                 }
             }
 
-            _cachedAllWireMesh = BuildLineMesh(allPoints);
-            _cachedBoundaryMesh = BuildLineMesh(boundaryPoints);
+            _cachedAllWirePoints = allPoints.Count >= 2 ? allPoints.ToArray() : null;
+            _cachedBoundaryPoints = boundaryPoints.Count >= 2 ? boundaryPoints.ToArray() : null;
         }
 
         private static ArrayMesh BuildLineMesh(List<Vector2> points)
@@ -977,7 +1054,8 @@ namespace DeadlockPlayground.UI
             var baseTex = _layerManager?.GetBaseTextureResource();
             if (_baseTextureRect != null)
             {
-                bool showBase = _showBaseTexture && baseTex != null && GodotObject.IsInstanceValid(baseTex);
+                bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
+                bool showBase = !isStandalone && _showBaseTexture && baseTex != null && GodotObject.IsInstanceValid(baseTex);
                 _baseTextureRect.Visible = showBase;
                 if (showBase)
                 {
@@ -986,7 +1064,6 @@ namespace DeadlockPlayground.UI
                     _baseTextureRect.Size = new Vector2(atlasW, atlasH);
                     _baseTextureRect.TextureFilter = TextureFilterEnum.Nearest;
                     _baseTextureRect.Texture = baseTex;
-                    bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
                     if (!isStandalone)
                     {
                         if (_baseTextureRect.Material != _baseTextureMat && _baseTextureMat != null)
@@ -1092,15 +1169,14 @@ namespace DeadlockPlayground.UI
                 overlay.DrawRect(_cachedSubmeshAtlasRect, new Color(0.96f, 0.77f, 0.26f, 0.95f), filled: false, width: 2.0f / _zoom);
             }
 
-            // Static GPU cached UV wireframe overlay (draws in a single GPU draw call)
             if (_wireframeMode != WireframeDisplayMode.Off)
             {
-                var mesh = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryMesh : _cachedAllWireMesh;
-                if (mesh != null)
+                var pts = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryPoints : _cachedAllWirePoints;
+                if (pts != null && pts.Length >= 2)
                 {
                     float baseAlpha = (_wireframeMode == WireframeDisplayMode.Outlines) ? 0.85f : 0.40f;
                     Color wireColor = new Color(0.85f, 0.88f, 0.95f, baseAlpha * _wireframeOpacity);
-                    overlay.DrawMesh(mesh, null, Transform2D.Identity, wireColor);
+                    overlay.DrawMultiline(pts, wireColor);
                 }
             }
 
@@ -1475,12 +1551,21 @@ namespace DeadlockPlayground.UI
                             _isPainting = false;
                             if (_accumulated2DDirtyRect.Size.X > 0)
                             {
-                                _layerManager?.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                                if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                                {
+                                    _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                                }
+                                else
+                                {
+                                    _layerManager?.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                                }
                                 _accumulated2DDirtyRect = default;
                             }
                             _layerManager?.Finish2DStroke(_totalStrokeDirtyRect);
+                            _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                             _totalStrokeDirtyRect = default;
                             canvas.QueueRedraw();
+                            _cursorOverlay?.QueueRedraw();
 
                             if (_onParticleTextureUpdated != null && _layerManager != null)
                             {
@@ -1489,6 +1574,20 @@ namespace DeadlockPlayground.UI
                                 {
                                     _onParticleTextureUpdated.Invoke(baked);
                                 }
+                            }
+                            else
+                            {
+                                if (_meshHierarchy != null && _layerManager != null)
+                                {
+                                    _meshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+                                }
+                                else if (_layerManager?.TargetMesh != null && _meshHierarchy != null)
+                                {
+                                    _meshHierarchy.MarkSubmeshDirty(_layerManager.TargetMesh);
+                                }
+                                var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                                             ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                                paintTab?.RegisterActiveStrokeMetadata();
                             }
                         }
                     }
@@ -1550,6 +1649,7 @@ namespace DeadlockPlayground.UI
                     {
                         _lastCanvasRedrawMs = nowMs;
                         canvas.QueueRedraw();
+                        _cursorOverlay?.QueueRedraw();
                     }
                     return;
                 }
@@ -1736,6 +1836,9 @@ namespace DeadlockPlayground.UI
                 if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
                 {
                     _painter.CommitProjectionGizmo();
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
                     _wireframeOverlay?.QueueRedraw();
                     _canvasDrawArea?.QueueRedraw();
                     GetViewport()?.SetInputAsHandled();
@@ -1744,6 +1847,9 @@ namespace DeadlockPlayground.UI
                 if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
                 {
                     _painter.ShapeTool.CommitShape(_layerManager, _painter.BrushColor, (LayerBlendMode)_painter.BlendMode, _painter.MagicWandTool);
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
                     _wireframeOverlay?.QueueRedraw();
                     GetViewport()?.SetInputAsHandled();
                     return;
@@ -1764,14 +1870,22 @@ namespace DeadlockPlayground.UI
                 _lastAtlasPx = atlasPx;
                 _accumulated2DDirtyRect = default;
                 _layerManager.EnsureCpuSynced();
-                _layerManager.RecordInitialSnapshot();
+                _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
 
                 var shape = (mode == BrushToolMode.Erase) ? _painter.EraserShape : _painter.BrushShape;
                 var brushTex = _painter.GetBrushTexture(shape);
                 var dirtyRect = _layerManager.PaintDab2D(atlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool, shape, brushTex);
                 _totalStrokeDirtyRect = dirtyRect;
-                _layerManager.UpdateActiveLayerGpuTextureThrottled(dirtyRect);
+                if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                {
+                    _layerManager?.UpdateStandaloneComposite(dirtyRect);
+                }
+                else
+                {
+                    _layerManager?.UpdateActiveLayerGpuTextureThrottled(dirtyRect);
+                }
                 _canvasDrawArea?.QueueRedraw();
+                _cursorOverlay?.QueueRedraw();
             }
             else if (mode == BrushToolMode.BucketFill)
             {
@@ -1804,6 +1918,7 @@ namespace DeadlockPlayground.UI
             }
             else if (mode == BrushToolMode.Eyedropper)
             {
+                _layerManager.EnsureCpuCompositeBufferSynced();
                 byte[] compBuf = _layerManager.CompositeBuffer;
                 if (compBuf != null && compBuf.Length >= currentSubmeshWidth * currentSubmeshHeight * 8)
                 {
@@ -1882,7 +1997,14 @@ namespace DeadlockPlayground.UI
                     var merged = _accumulated2DDirtyRect.Merge(dirtyRect);
                     if (merged.Size.X > 512 || merged.Size.Y > 512)
                     {
-                        _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                        if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                        {
+                            _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                        }
+                        else
+                        {
+                            _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                        }
                         _accumulated2DDirtyRect = dirtyRect;
                         _lastStrokeRecompositeMs = Time.GetTicksMsec();
                     }
@@ -1900,7 +2022,14 @@ namespace DeadlockPlayground.UI
                 if (nowMs - _lastStrokeRecompositeMs >= 25)
                 {
                     _lastStrokeRecompositeMs = nowMs;
-                    _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                    if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                    {
+                        _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                    }
+                    else
+                    {
+                        _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                    }
                     _accumulated2DDirtyRect = default;
                 }
             }
@@ -1940,7 +2069,6 @@ namespace DeadlockPlayground.UI
             int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
             if (atlasW <= 0) atlasW = 2048;
             if (atlasH <= 0) atlasH = 2048;
-            _layerManager?.EnsureCpuSynced();
 
             float margin = 20.0f;
             float availW = Mathf.Max(viewSize.X - margin * 2.0f, 10.0f);

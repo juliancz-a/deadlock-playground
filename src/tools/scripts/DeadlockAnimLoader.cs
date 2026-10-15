@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
 using ValveResourceFormat.ResourceTypes;
@@ -41,7 +41,7 @@ public static class DeadlockAnimLoader
         public float Fps { get; set; } = 30f;
         public float Duration { get; set; } = 0.1f;
         public bool IsLooping { get; set; }
-        public ValveResourceFormat.ResourceTypes.ModelAnimation.Animation VrfAnimation { get; set; }
+        public AnimationBase VrfAnimation { get; set; }
     }
 
     private static readonly Dictionary<int, Dictionary<string, PoseData>> _heroPosesCache = new();
@@ -72,7 +72,7 @@ public static class DeadlockAnimLoader
         }
 
         // 1. Gather all animations (embedded + referenced anim groups + external weapon/included clips)
-        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> allAnimations;
+        List<AnimationBase> allAnimations;
         try
         {
             allAnimations = vrfModel.GetAllAnimations(fileLoader).ToList();
@@ -80,7 +80,7 @@ public static class DeadlockAnimLoader
         catch (Exception ex)
         {
             GD.PrintErr($"[AnimLoader] Error retrieving model animations: {ex.Message}");
-            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>().ToList();
+            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<AnimationBase>().ToList();
         }
 
         // Also check any external referenced anim groups not resolved yet
@@ -432,7 +432,7 @@ public static class DeadlockAnimLoader
         var result = new List<AnimSequenceInfo>();
         if (vrfModel == null || fileLoader == null) return result;
 
-        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> allAnimations;
+        List<AnimationBase> allAnimations;
         try
         {
             allAnimations = vrfModel.GetAllAnimations(fileLoader).ToList();
@@ -440,7 +440,7 @@ public static class DeadlockAnimLoader
         catch (Exception ex)
         {
             GD.PrintErr($"[AnimLoader] Error retrieving model animations: {ex.Message}");
-            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>().ToList();
+            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<AnimationBase>().ToList();
         }
 
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -906,10 +906,10 @@ public static class DeadlockAnimLoader
         }
     }
 
-    private static List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> FilterPoses(
-        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> rawAnims)
+    private static List<AnimationBase> FilterPoses(
+        List<AnimationBase> rawAnims)
     {
-        var result = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
+        var result = new List<AnimationBase>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var anim in rawAnims)

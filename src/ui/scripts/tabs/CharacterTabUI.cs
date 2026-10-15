@@ -269,8 +269,21 @@ public partial class CharacterTabUI : VBoxContainer
     private async void OnExtraModelSelectedFromModal(string vmdlPath, string displayName)
     {
         if (_vpkLoader == null || string.IsNullOrEmpty(vmdlPath)) return;
-        string heroKey = _vpkLoader.HeroName ?? "Hero";
-        await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroKey, displayName);
+
+        string baseVmdl = _vpkLoader.BaseHeroEntry?.VmdlRelativePath?.Replace('\\', '/');
+        string normSelected = vmdlPath.Replace('\\', '/');
+        bool isBaseCharacter = (!string.IsNullOrEmpty(baseVmdl) && normSelected.Equals(baseVmdl, StringComparison.OrdinalIgnoreCase))
+                            || (displayName != null && displayName.Contains("(Base Character)", StringComparison.OrdinalIgnoreCase));
+
+        if (isBaseCharacter && _vpkLoader.BaseHeroEntry != null)
+        {
+            await _vpkLoader.LoadHeroModelAsync(_vpkLoader.BaseHeroEntry);
+        }
+        else
+        {
+            string heroKey = _vpkLoader.HeroName ?? "Hero";
+            await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroKey, displayName);
+        }
         UpdateContextualButtonsVisibility();
     }
 
@@ -422,7 +435,7 @@ public partial class CharacterTabUI : VBoxContainer
         }
         if (_btnHideAccessories != null)
         {
-            _btnHideAccessories.Text = "Hide All";
+            _btnHideAccessories.Visible = false;
         }
 
         if (_submeshContainer != null)
@@ -554,6 +567,18 @@ public partial class CharacterTabUI : VBoxContainer
 
     private void OnParticleSelectedFromModal(string vpcfPath, string variantName, string abilityKey)
     {
+        LoadParticleInternal(vpcfPath, variantName, abilityKey, null);
+    }
+
+    public void LoadParticleDirectly(string vpcfPath, string variantName = null, string abilityKey = null, string ownerHeroId = null)
+    {
+        variantName ??= System.IO.Path.GetFileNameWithoutExtension(vpcfPath);
+        abilityKey ??= "Custom";
+        LoadParticleInternal(vpcfPath, variantName, abilityKey, ownerHeroId);
+    }
+
+    private void LoadParticleInternal(string vpcfPath, string variantName, string abilityKey, string ownerHeroId)
+    {
         if (_vpkLoader == null) return;
 
         // 1. Resolve or create ParticleStage3D in world viewport
@@ -576,7 +601,7 @@ public partial class CharacterTabUI : VBoxContainer
         {
             var fileLoader = _vpkLoader.GetOrCreateFileLoader();
             var basePkg = _vpkLoader.GetOrCreateBasePackage();
-            stage.LoadParticle(vpcfPath, variantName, abilityKey, _vpkLoader.CurrentHeroNode, fileLoader, basePkg);
+            stage.LoadParticle(vpcfPath, variantName, abilityKey, _vpkLoader.CurrentHeroNode, fileLoader, basePkg, null, ownerHeroId);
         }
 
         // 3. Resolve or create ActiveParticleBadgeUI inside 3D ViewportArea
@@ -676,6 +701,11 @@ public partial class CharacterTabUI : VBoxContainer
         if (_btnCloseParticle != null && GodotObject.IsInstanceValid(_btnCloseParticle))
         {
             _btnCloseParticle.Visible = hasParticle;
+        }
+
+        if (_btnHideAccessories != null && GodotObject.IsInstanceValid(_btnHideAccessories))
+        {
+            _btnHideAccessories.Visible = !hasParticle;
         }
 
         bool hasExtraModel = _vpkLoader != null && _vpkLoader.IsExtraModelLoaded;
@@ -925,8 +955,16 @@ public partial class CharacterTabUI : VBoxContainer
 
     public void ShowAll()
     {
-        if (_isParticleHierarchyMode)
+        var stage = GetOrCreateParticleStage();
+        if (_isParticleHierarchyMode || (stage != null && stage.HasActiveParticle))
         {
+            if (stage != null)
+            {
+                for (int i = 0; i < stage.Renderers.Count; i++)
+                {
+                    stage.SetRendererVisibility(i, true);
+                }
+            }
             foreach (var item in _particleHierarchyItems)
             {
                 if (item.Renderer != null && GodotObject.IsInstanceValid(item.Renderer))
@@ -971,16 +1009,9 @@ public partial class CharacterTabUI : VBoxContainer
 
     public void HideAccessories()
     {
-        if (_isParticleHierarchyMode)
+        var stage = GetOrCreateParticleStage();
+        if (_isParticleHierarchyMode || (stage != null && stage.HasActiveParticle))
         {
-            foreach (var item in _particleHierarchyItems)
-            {
-                if (item.Renderer != null && GodotObject.IsInstanceValid(item.Renderer))
-                {
-                    item.Renderer.VisibleAndEmitting = false;
-                }
-                if (item.CheckBoxWidget != null) item.CheckBoxWidget.ButtonPressed = false;
-            }
             return;
         }
 

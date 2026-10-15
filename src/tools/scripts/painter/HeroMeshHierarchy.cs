@@ -801,6 +801,45 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        public void MarkMaterialDirty(string matKey, SkinLayerManager layerManager = null)
+        {
+            if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
+            string normKey = matKey.ToLowerInvariant().Trim();
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null || sm.IsDirty) continue;
+                string smMatKey = layerManager != null ? layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) : null;
+                if ((!string.IsNullOrEmpty(smMatKey) && string.Equals(smMatKey, normKey, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(sm.MaterialName, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sm.OriginalVmatPath, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(sm.DisplayName) && normKey.Contains(sm.DisplayName.ToLowerInvariant())) ||
+                    (!string.IsNullOrEmpty(sm.OriginalVmatPath) && normKey.Contains(System.IO.Path.GetFileNameWithoutExtension(sm.OriginalVmatPath).ToLowerInvariant())))
+                {
+                    sm.IsDirty = true;
+                    sm.IsSelected = true;
+                }
+            }
+        }
+
+        public void ClearMaterialDirty(string matKey, SkinLayerManager layerManager = null)
+        {
+            if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
+            string normKey = matKey.ToLowerInvariant().Trim();
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null) continue;
+                string smMatKey = layerManager != null ? layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) : null;
+                if ((!string.IsNullOrEmpty(smMatKey) && string.Equals(smMatKey, normKey, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(sm.MaterialName, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sm.OriginalVmatPath, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(sm.OriginalVmatPath) && normKey.Contains(System.IO.Path.GetFileNameWithoutExtension(sm.OriginalVmatPath).ToLowerInvariant())))
+                {
+                    sm.IsDirty = false;
+                }
+            }
+            NotifyHierarchyChanged();
+        }
+
         public List<SubmeshNodeInfo> GetDirtySubmeshes()
         {
             return _submeshes.FindAll(s => s.IsDirty);
@@ -813,10 +852,11 @@ namespace DeadlockPlayground.Painter
             {
                 if (sm.Mesh == null) continue;
                 string matKey = layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex);
-                if (!layerManager.HasAnyPaint(matKey))
+                if (layerManager.HasPaintStrokes(matKey))
                 {
-                    sm.IsDirty = false;
+                    sm.IsDirty = true;
                 }
+                // Never overwrite sm.IsDirty back to false if it was already true!
             }
         }
 

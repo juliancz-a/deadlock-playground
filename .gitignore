@@ -4,6 +4,7 @@ src/.godot/
 /android/
 
 # Development tools, inspection utilities, and debug scripts
+scratch/
 tools/inspector
 src/tools/inspector
 docs/
@@ -11,3 +12,10 @@ scratch_out
 tools/dump_out
 tools/tools
 tools/dump_runner
+
+# Build output & IDE artifacts
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo

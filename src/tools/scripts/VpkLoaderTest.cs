@@ -1,6 +1,6 @@
 #pragma warning disable CS0618
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -234,6 +234,9 @@ public partial class VpkLoaderTest : Node3D
 	public async Task<Node3D> LoadHeroModelAsync(DeadlockHeroEntry entry)
 	{
 		if (entry == null) return null;
+		// 1. Cleanup and flush previous hero before overwriting hero metadata
+		CleanupCurrentHero();
+
 		LastLoadedHeroEntry = entry;
 		BaseHeroEntry = entry;
 		IsExtraModelLoaded = false;
@@ -253,6 +256,9 @@ public partial class VpkLoaderTest : Node3D
 	public async Task<Node3D> LoadExtraModelAsync(string vmdlPath, string heroKey, string displayName)
 	{
 		if (string.IsNullOrEmpty(vmdlPath)) return null;
+		// 1. Cleanup and flush previous hero before overwriting hero metadata
+		CleanupCurrentHero();
+
 		LastLoadedVmdlPath = vmdlPath;
 		LastLoadedHeroKey = heroKey ?? Path.GetFileNameWithoutExtension(vmdlPath);
 		LastLoadedDisplayName = displayName ?? Path.GetFileNameWithoutExtension(vmdlPath);
@@ -427,7 +433,7 @@ public partial class VpkLoaderTest : Node3D
 							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name)))
 							.ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
+						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>();
 
 						// Idle clips (take up to 4, prioritized)
 						if (categorized.TryGetValue("Idle", out var idles))
@@ -565,6 +571,10 @@ public partial class VpkLoaderTest : Node3D
 
     private void CleanupCurrentHero()
     {
+        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                     ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+        paintTab?.FlushActiveChangesToWorkspace(true);
+
         EmitSignal(SignalName.HeroUnloaded);
 
         if (_currentPoseEditor != null)
@@ -641,7 +651,7 @@ public partial class VpkLoaderTest : Node3D
 			return map;
 		}
 
-		foreach (var (mesh, meshIndex, meshName) in model.GetEmbeddedMeshes())
+		foreach (var (mesh, meshIndex, meshName, _) in model.GetEmbeddedMeshes())
 		{
 			var materials = new List<string>();
 

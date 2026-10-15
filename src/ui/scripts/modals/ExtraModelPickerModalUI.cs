@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DeadlockPlayground.Catalog;
-using SteamDatabase.ValvePak;
+using ValvePak;
 
 namespace DeadlockPlayground.UI;
 
@@ -209,17 +209,15 @@ public partial class ExtraModelPickerModalUI : PanelContainer
         foreach (var entry in entries)
         {
             var card = new ExtraModelCardUI();
-            card.Setup(entry);
+            bool isLoaded = (!string.IsNullOrEmpty(currentLoadedVmdl) && entry.VmdlPath.Equals(currentLoadedVmdl, StringComparison.OrdinalIgnoreCase))
+                         || (string.IsNullOrEmpty(currentLoadedVmdl) && entry.IsMainHeroModel);
+            card.Setup(entry, isActiveModel: isLoaded);
             card.CardSelected += OnCardSelected;
             card.CardDoubleClicked += OnCardDoubleClicked;
             _flowCards.AddChild(card);
             _spawnedCards.Add(card);
 
-            if (!string.IsNullOrEmpty(currentLoadedVmdl) && entry.VmdlPath.Equals(currentLoadedVmdl, StringComparison.OrdinalIgnoreCase))
-            {
-                SelectCard(card);
-            }
-            else if (string.IsNullOrEmpty(currentLoadedVmdl) && entry.IsMainHeroModel)
+            if (isLoaded)
             {
                 SelectCard(card);
             }
@@ -345,8 +343,15 @@ public partial class ExtraModelPickerModalUI : PanelContainer
         if (_selectedCard != null && _selectedCard.Entry != null)
         {
             _selectedCard.IsSelected = true;
-            _btnSelect.Disabled = false;
-            _lblSelectedInfo.Text = $"Selected: {_selectedCard.Entry.DisplayTitle}\nPath: {_selectedCard.Entry.VmdlPath}";
+            _btnSelect.Disabled = _selectedCard.IsDisabled;
+            if (_selectedCard.IsDisabled)
+            {
+                _lblSelectedInfo.Text = $"Already Active: {_selectedCard.Entry.DisplayTitle}\nPath: {_selectedCard.Entry.VmdlPath}";
+            }
+            else
+            {
+                _lblSelectedInfo.Text = $"Selected: {_selectedCard.Entry.DisplayTitle}\nPath: {_selectedCard.Entry.VmdlPath}";
+            }
         }
         else
         {
@@ -371,7 +376,7 @@ public partial class ExtraModelPickerModalUI : PanelContainer
 
     private void ConfirmSelection()
     {
-        if (_selectedCard != null && _selectedCard.Entry != null)
+        if (_selectedCard != null && _selectedCard.Entry != null && !_selectedCard.IsDisabled)
         {
             EmitSignal(SignalName.ExtraModelSelected, _selectedCard.Entry.VmdlPath, _selectedCard.Entry.DisplayTitle);
             CloseModal();

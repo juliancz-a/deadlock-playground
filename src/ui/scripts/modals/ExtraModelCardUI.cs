@@ -28,10 +28,22 @@ public partial class ExtraModelCardUI : PanelContainer
 
     private bool _isSelected = false;
     private bool _isHovered = false;
+    private bool _isDisabled = false;
 
     private StyleBoxFlat _styleNormal;
     private StyleBoxFlat _styleHover;
     private StyleBoxFlat _styleSelected;
+
+    public bool IsDisabled
+    {
+        get => _isDisabled;
+        set
+        {
+            _isDisabled = value;
+            MouseFilter = _isDisabled ? MouseFilterEnum.Stop : MouseFilterEnum.Stop;
+            Modulate = _isDisabled ? new Color(0.7f, 0.7f, 0.75f, 0.75f) : Colors.White;
+        }
+    }
 
     public bool IsSelected
     {
@@ -53,7 +65,7 @@ public partial class ExtraModelCardUI : PanelContainer
         UpdateCardStyle();
     }
 
-    public void Setup(ExtraModelEntry entry)
+    public void Setup(ExtraModelEntry entry, bool isActiveModel = false)
     {
         Entry = entry;
         if (_lblTitle != null && entry != null)
@@ -63,13 +75,19 @@ public partial class ExtraModelCardUI : PanelContainer
 
             if (entry.IsMainHeroModel)
             {
-                _lblTag.Text = "Main Model";
-                _lblTag.Modulate = new Color(0.40f, 0.75f, 1.0f, 1.0f);
+                _lblTag.Text = isActiveModel ? "Main Model (ACTIVE)" : "Main Model";
+                _lblTag.Modulate = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.40f, 0.75f, 1.0f, 1.0f);
             }
             else
             {
-                _lblTag.Text = "Ability / Extra Model";
-                _lblTag.Modulate = new Color(0.95f, 0.85f, 0.35f, 1.0f);
+                _lblTag.Text = isActiveModel ? "Extra Model (ACTIVE)" : "Ability / Extra Model";
+                _lblTag.Modulate = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.95f, 0.85f, 0.35f, 1.0f);
+            }
+
+            if (isActiveModel)
+            {
+                IsDisabled = true;
+                TooltipText = $"{entry.DisplayTitle} is already active.";
             }
         }
     }
@@ -250,7 +268,7 @@ public partial class ExtraModelCardUI : PanelContainer
     {
         if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
         {
-            if (mb.DoubleClick)
+            if (mb.DoubleClick && !_isDisabled)
             {
                 EmitSignal(SignalName.CardDoubleClicked, this);
             }

@@ -98,7 +98,7 @@ public partial class ActiveParticleBadgeUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             SizeFlagsVertical = SizeFlags.ShrinkCenter
         };
-        _lblHeader.AddThemeFontSizeOverride("font_size", 11);
+        _lblHeader.AddThemeFontSizeOverride("font_size", 13);
         _lblHeader.AddThemeColorOverride("font_color", new Color(0.85f, 0.75f, 0.55f, 1.0f));
         headerRow.AddChild(_lblHeader);
 
@@ -113,7 +113,7 @@ public partial class ActiveParticleBadgeUI : PanelContainer
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             SizeFlagsHorizontal = SizeFlags.ExpandFill
         };
-        _lblHeroAbility.AddThemeFontSizeOverride("font_size", 13);
+        _lblHeroAbility.AddThemeFontSizeOverride("font_size", 15);
         _lblHeroAbility.AddThemeColorOverride("font_color", Colors.White);
         rootVbox.AddChild(_lblHeroAbility);
 
@@ -143,6 +143,7 @@ public partial class ActiveParticleBadgeUI : PanelContainer
             CustomMinimumSize = new Vector2(0, 28)
         };
         _btnBrowse.AddThemeFontSizeOverride("font_size", 11);
+        _btnBrowse.AddThemeConstantOverride("icon_max_width", 14);
         _btnBrowse.Pressed += () => EmitSignal(SignalName.BrowseRequested);
         buttonsRow.AddChild(_btnBrowse);
 

@@ -87,8 +87,8 @@ public partial class SkeletonGizmoManager : Node3D
             _uiManager.OnXRayToggled += SetupDots;
             _uiManager.OnLinesToggled += SetupLines;
             _uiManager.OnBoneSelectedFromUI += SelectBone;
-            SetupDots(_uiManager.IsXRayEnabled);
-            SetupLines(_uiManager.IsLinesEnabled);
+            SetupDots(_isGizmoEnabled && _uiManager.IsXRayEnabled);
+            SetupLines(_isGizmoEnabled && _uiManager.IsLinesEnabled);
         }
     }
 
@@ -131,8 +131,8 @@ public partial class SkeletonGizmoManager : Node3D
 
         if (UIManager != null)
         {
-            SetupDots(UIManager.IsXRayEnabled);
-            SetupLines(UIManager.IsLinesEnabled);
+            SetupDots(_isGizmoEnabled && (UIManager?.IsXRayEnabled ?? false));
+            SetupLines(_isGizmoEnabled && (UIManager?.IsLinesEnabled ?? false));
         }
     }
 
@@ -344,21 +344,21 @@ public partial class SkeletonGizmoManager : Node3D
         TargetSkeleton.AddChild(_skeletonMeshInstance);
     }
 
-    private void SetupLines(bool enabled)
-    {
-        if (GodotObject.IsInstanceValid(_skeletonMeshInstance))
+        private void SetupLines(bool enabled)
         {
-            _skeletonMeshInstance.Visible = enabled;
+            if (GodotObject.IsInstanceValid(_skeletonMeshInstance))
+            {
+                _skeletonMeshInstance.Visible = _isGizmoEnabled && enabled;
+            }
         }
-    }
 
-    private void SetupDots(bool enabled)
-    {
-        _areDotsGloballyEnabled = enabled;
-        if (_boneLayerManager == null || !GodotObject.IsInstanceValid(_boneLayerManager)) return;
+        private void SetupDots(bool enabled)
+        {
+            _areDotsGloballyEnabled = enabled;
+            if (_boneLayerManager == null || !GodotObject.IsInstanceValid(_boneLayerManager)) return;
 
-        _boneLayerManager.SetXRayActive(enabled);
-    }
+            _boneLayerManager.SetXRayActive(_isGizmoEnabled && enabled);
+        }
 
     public override void _Process(double delta)
     {

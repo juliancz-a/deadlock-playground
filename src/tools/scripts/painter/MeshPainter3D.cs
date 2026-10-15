@@ -225,6 +225,8 @@ namespace DeadlockPlayground.Painter
 
         // Submesh Selection Outline Gizmo
         private MeshInstance3D _selectionOutlineMesh;
+        private MeshInstance3D _lastOutlinedMeshInstance;
+        private Mesh _lastOutlinedMeshResource;
         private ShaderMaterial _outlineMaskMat;
         private ShaderMaterial _outlineEdgeMat;
 
@@ -256,7 +258,19 @@ namespace DeadlockPlayground.Painter
         private int _debugFrameCount = 0;
 
         // 3D Oriented Ring Cursor Gizmo
-        private MeshInstance3D _cursorGizmo;
+        private Node3D _cursorGizmo;
+        private MeshInstance3D _cursorRingMesh;
+
+        // CameraBrush property caching to prevent redundant per-frame reflection calls
+        private bool _lastIsErase = false;
+        private bool _lastUseMask = false;
+        private Rid _lastMaskRid = new();
+        private Vector2I _lastResolution = new(256, 256);
+        private int _lastMinBleed = 0;
+        private int _lastMaxBleed = 0;
+        private Vector2 _lastBrushCenter = new(-1, -1);
+        private float _lastBrushRadius = -1f;
+
         private StandardMaterial3D _cursorMaterial;
         private Sprite3D _eyedropperSprite;
         private TorusMesh _cursorTorusMesh;
@@ -468,7 +482,8 @@ namespace DeadlockPlayground.Painter
             var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
                         ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
             uvCanvas?.QueueCanvasRedraw();
-
+            
+            if (success) EmitSignal(SignalName.StrokeFinished);
             return success;
         }
     
@@ -822,7 +837,7 @@ namespace DeadlockPlayground.Painter
                 _selectionOverlay3D?.QueueRedraw();
                 _brushPalette?.SyncProjectionControls();
             }
-
+            EmitSignal(SignalName.StrokeFinished);
             return success;
         }
 
@@ -1220,10 +1235,14 @@ namespace DeadlockPlayground.Painter
             }
 
             bool isErase = ToolMode == BrushToolMode.Erase;
-            _cameraBrush.Set("is_erase", isErase);
-            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            if (force || isErase != _lastIsErase)
             {
-                _mirrorCameraBrush.Set("is_erase", isErase);
+                _cameraBrush.Set("is_erase", isErase);
+                if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                {
+                    _mirrorCameraBrush.Set("is_erase", isErase);
+                }
+                _lastIsErase = isErase;
             }
 
             float layerOpacity = _layerManager?.ActiveLayer?.Opacity ?? 1.0f;
@@ -1294,37 +1313,59 @@ namespace DeadlockPlayground.Painter
             Vector2 brushCenter = new Vector2(128.0f, 128.0f);
             float brushRadius = 128.0f;
 
-            _cameraBrush.Set("min_bleed", minBleed);
-            _cameraBrush.Set("max_bleed", maxBleed);
-            if (!((Vector2I)_cameraBrush.Get("resolution")).Equals(brushRes))
+            if (force || minBleed != _lastMinBleed)
+            {
+                _cameraBrush.Set("min_bleed", minBleed);
+                _lastMinBleed = minBleed;
+            }
+            if (force || maxBleed != _lastMaxBleed)
+            {
+                _cameraBrush.Set("max_bleed", maxBleed);
+                _lastMaxBleed = maxBleed;
+            }
+            if (force || brushRes != _lastResolution)
             {
                 _cameraBrush.Set("resolution", brushRes);
+                _lastResolution = brushRes;
             }
-            _cameraBrush.Set("brush_center", brushCenter);
-            _cameraBrush.Set("brush_radius", brushRadius);
+            if (force || brushCenter != _lastBrushCenter)
+            {
+                _cameraBrush.Set("brush_center", brushCenter);
+                _lastBrushCenter = brushCenter;
+            }
+            if (force || Math.Abs(brushRadius - _lastBrushRadius) > 0.001f)
+            {
+                _cameraBrush.Set("brush_radius", brushRadius);
+                _lastBrushRadius = brushRadius;
+            }
 
             bool useMask = _magicWandTool != null && _magicWandTool.HasSelection;
-            _cameraBrush.Set("use_selection_mask", useMask);
+            if (force || useMask != _lastUseMask)
+            {
+                _cameraBrush.Set("use_selection_mask", useMask);
+                _lastUseMask = useMask;
+            }
             Rid maskRid = (useMask && _magicWandTool.SelectionMaskRid.IsValid) ? _magicWandTool.SelectionMaskRid : new Rid();
             var rd = RenderingServer.GetRenderingDevice();
             if (maskRid.IsValid && rd != null && !rd.TextureIsValid(maskRid))
             {
                 maskRid = new Rid();
             }
-            _cameraBrush.Set("selection_mask_rid", maskRid);
+            if (force || maskRid != _lastMaskRid)
+            {
+                _cameraBrush.Set("selection_mask_rid", maskRid);
+                _lastMaskRid = maskRid;
+            }
 
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
-                _mirrorCameraBrush.Set("min_bleed", minBleed);
-                _mirrorCameraBrush.Set("max_bleed", maxBleed);
-                if (!((Vector2I)_mirrorCameraBrush.Get("resolution")).Equals(brushRes))
-                {
-                    _mirrorCameraBrush.Set("resolution", brushRes);
-                }
-                _mirrorCameraBrush.Set("brush_center", brushCenter);
-                _mirrorCameraBrush.Set("brush_radius", brushRadius);
-                _mirrorCameraBrush.Set("use_selection_mask", useMask);
-                _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
+                if (force || minBleed != _lastMinBleed) _mirrorCameraBrush.Set("min_bleed", minBleed);
+                if (force || maxBleed != _lastMaxBleed) _mirrorCameraBrush.Set("max_bleed", maxBleed);
+                if (force || brushRes != _lastResolution) _mirrorCameraBrush.Set("resolution", brushRes);
+                if (force || brushCenter != _lastBrushCenter) _mirrorCameraBrush.Set("brush_center", brushCenter);
+                if (force || Math.Abs(brushRadius - _lastBrushRadius) > 0.001f) _mirrorCameraBrush.Set("brush_radius", brushRadius);
+                if (force || useMask != _lastUseMask) _mirrorCameraBrush.Set("use_selection_mask", useMask);
+                if (force || maskRid != _lastMaskRid) _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
             }
         }
 
@@ -1410,6 +1451,15 @@ namespace DeadlockPlayground.Painter
 
             var camera = _worldViewport?.GetCamera3D() ?? _camera;
 
+            bool isParticleMode = _layerManager != null && _layerManager.IsStandaloneTextureMode;
+            if (isParticleMode)
+            {
+                if (_cursorGizmo != null) _cursorGizmo.Visible = false;
+                if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush)) _cameraBrush.Set("drawing", false);
+                if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush)) _mirrorCameraBrush.Set("drawing", false);
+                return;
+            }
+
             bool canPaintLayer = _layerManager?.ActiveLayer != null && !_layerManager.ActiveLayer.IsLocked && _layerManager.ActiveLayer.IsVisible;
             bool isPainting = IsPaintingActive && canPaintLayer && isLeftDown && _lastHit.Hit 
                 && ToolMode != BrushToolMode.Eyedropper 
@@ -1461,6 +1511,10 @@ namespace DeadlockPlayground.Painter
                             _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool, BucketFillTolerance);
                         }
                     }
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
@@ -1737,12 +1791,9 @@ namespace DeadlockPlayground.Painter
                 _cursorSplatterMesh = CreateSplatterGizmoMesh();
                 _cursorGrungeMesh = CreateGrungeGizmoMesh();
 
-                _cursorGizmo = new MeshInstance3D
+                _cursorGizmo = new Node3D
                 {
-                    Name = "BrushCursorRingGizmo",
-                    Mesh = _cursorTorusMesh,
-                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                    Layers = 1 | 2,
+                    Name = "BrushCursorRootGizmo",
                     Visible = false
                 };
 
@@ -1755,7 +1806,17 @@ namespace DeadlockPlayground.Painter
                     Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                     CullMode = BaseMaterial3D.CullModeEnum.Disabled
                 };
-                _cursorGizmo.MaterialOverride = _cursorMaterial;
+
+                _cursorRingMesh = new MeshInstance3D
+                {
+                    Name = "BrushCursorRingGizmo",
+                    Mesh = _cursorTorusMesh,
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                    Layers = 1 | 2,
+                    Visible = false,
+                    MaterialOverride = _cursorMaterial
+                };
+                _cursorGizmo.AddChild(_cursorRingMesh);
 
                 _eyedropperSprite = new Sprite3D
                 {
@@ -2108,7 +2169,7 @@ namespace DeadlockPlayground.Painter
                 if (ToolMode == BrushToolMode.MagicWand || ToolMode == BrushToolMode.Selection || ToolMode == BrushToolMode.Shape)
                 {
                     _cursorGizmo.Visible = false;
-                    _cursorGizmo.Mesh = null;
+                    if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                 }
                 else
                 {
@@ -2165,14 +2226,18 @@ namespace DeadlockPlayground.Painter
 
                 if (ToolMode == BrushToolMode.Eyedropper)
                 {
-                    _cursorGizmo.Mesh = null;
+                    if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = true;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
                 }
                 else if (ToolMode == BrushToolMode.SelectSubmesh)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = _cursorTorusMesh;
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
@@ -2180,15 +2245,19 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
-                    _cursorGizmo.Mesh = null;
                     _cursorGizmo.Visible = false;
+                    if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
                 }
                 else if (ToolMode == BrushToolMode.Decal)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = _cursorTorusMesh;
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.35f, 0.85f, 1.0f, 0.95f);
@@ -2227,7 +2296,11 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.Text)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = _cursorTorusMesh;
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.85f, 0.45f, 1.0f, 0.95f);
@@ -2267,7 +2340,11 @@ namespace DeadlockPlayground.Painter
                 else
                 {
                     BrushShapeType activeShape = (ToolMode == BrushToolMode.Erase) ? EraserShape : BrushShape;
-                    _cursorGizmo.Mesh = GetGizmoMeshForShape(activeShape);
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = GetGizmoMeshForShape(activeShape);
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
@@ -2287,6 +2364,7 @@ namespace DeadlockPlayground.Painter
             else
             {
                 _cursorGizmo.Visible = false;
+                if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                 if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
                 {
                     _previewDecalNode.Visible = false;
@@ -2408,7 +2486,7 @@ namespace DeadlockPlayground.Painter
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
                     Layers = 1,
                     Visible = false,
-                    MaterialOverride = _outlineMaskMat
+                    MaterialOverride = null
                 };
             }
 
@@ -2430,13 +2508,25 @@ namespace DeadlockPlayground.Painter
             EnsureSelectionOutline();
             if (_selectionOutlineMesh == null || !GodotObject.IsInstanceValid(_selectionOutlineMesh)) return;
 
-            if (IsPaintingActive && _currentMesh != null && GodotObject.IsInstanceValid(_currentMesh) && _currentMesh.IsInsideTree())
+            var stage = _worldViewport?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D
+                     ?? GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+            bool hasParticle = stage != null && stage.HasActiveParticle;
+
+           if (IsPaintingActive && !hasParticle && _currentMesh != null && GodotObject.IsInstanceValid(_currentMesh) && _currentMesh.IsInsideTree() && _currentMesh.Mesh != null && _currentMesh.Mesh.GetSurfaceCount() > 0)
             {
-                _selectionOutlineMesh.Visible = true;
-                _selectionOutlineMesh.Mesh = _currentMesh.Mesh;
-                _selectionOutlineMesh.Skin = _currentMesh.Skin;
-                _selectionOutlineMesh.Skeleton = _currentMesh.Skeleton;
+                if (_lastOutlinedMeshInstance != _currentMesh || _lastOutlinedMeshResource != _currentMesh.Mesh)
+                {
+                    _lastOutlinedMeshInstance = _currentMesh;
+                    _lastOutlinedMeshResource = _currentMesh.Mesh;
+                    _selectionOutlineMesh.Mesh = _currentMesh.Mesh;
+                    _selectionOutlineMesh.Skin = _currentMesh.Skin;
+                    _selectionOutlineMesh.Skeleton = _currentMesh.Skeleton;
+                    _selectionOutlineMesh.MaterialOverride = _outlineMaskMat;
+                }
+
                 _selectionOutlineMesh.GlobalTransform = _currentMesh.GlobalTransform;
+
+                if (!_selectionOutlineMesh.Visible) _selectionOutlineMesh.Visible = true;
 
                 bool isHidden = !_currentMesh.Visible;
                 _outlineMaskMat?.SetShaderParameter("is_mesh_hidden", isHidden);
@@ -2444,7 +2534,14 @@ namespace DeadlockPlayground.Painter
             }
             else
             {
-                _selectionOutlineMesh.Visible = false;
+                if (_selectionOutlineMesh.Visible || _selectionOutlineMesh.Mesh != null)
+                {
+                    _selectionOutlineMesh.Visible = false;
+                    _selectionOutlineMesh.MaterialOverride = null;
+                    _selectionOutlineMesh.Mesh = null;
+                    _lastOutlinedMeshInstance = null;
+                    _lastOutlinedMeshResource = null;
+                }
             }
         }
 
@@ -2536,6 +2633,10 @@ namespace DeadlockPlayground.Painter
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
@@ -2567,7 +2668,7 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-public override void _Input(InputEvent @event)
+        public override void _Input(InputEvent @event)
         {
             if (!IsPaintingActive) return;
 
@@ -2602,6 +2703,7 @@ public override void _Input(InputEvent @event)
                             else
                             {
                                 _shapeTool.CommitShape(_layerManager, BrushColor, (LayerBlendMode)BlendMode, _magicWandTool);
+                                EmitSignal(SignalName.StrokeFinished);
                             }
 
                             _isShapeOriginatedIn3D = false;
@@ -3365,7 +3467,11 @@ public override void _Input(InputEvent @event)
                 _layerManager.SyncGpuStrokeToComposite();
             }
 
-            if (_currentMesh != null && MeshHierarchy != null)
+            if (_layerManager != null && !string.IsNullOrEmpty(_layerManager.ActiveMaterialKey) && MeshHierarchy != null)
+            {
+                MeshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+            }
+            else if (_currentMesh != null && MeshHierarchy != null)
             {
                 MeshHierarchy.MarkSubmeshDirty(_currentMesh);
             }
@@ -3403,10 +3509,13 @@ public override void _Input(InputEvent @event)
             if (_cursorGizmo != null)
             {
                 _cursorGizmo.Visible = false;
+                if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
             }
             if (_selectionOutlineMesh != null)
             {
                 _selectionOutlineMesh.Visible = false;
+                _selectionOutlineMesh.MaterialOverride = null;
+                _selectionOutlineMesh.Mesh = null;
             }
             if (_previewDecalNode != null)
             {
@@ -4189,11 +4298,7 @@ public override void _Input(InputEvent @event)
         {
             if (_layerManager == null || _magicWandTool == null) return;
 
-            _layerManager.EnsureCpuSynced();
-            if (_layerManager.BaseAtlasBuffer == null)
-            {
-                _layerManager.RebuildBaseAtlasBuffer();
-            }
+            _layerManager.EnsureCpuCompositeBufferSynced();
 
             if (_magicWandTool.GenerateMaskFromAtlas(seedX, seedY, _layerManager, combineMode))
             {
@@ -4421,6 +4526,7 @@ public override void _Input(InputEvent @event)
             {
                 _cursorGizmo.QueueFree();
                 _cursorGizmo = null;
+                _cursorRingMesh = null;
             }
             if (_selectionOutlineMesh != null && GodotObject.IsInstanceValid(_selectionOutlineMesh))
             {

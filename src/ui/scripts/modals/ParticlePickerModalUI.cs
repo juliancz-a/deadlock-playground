@@ -355,6 +355,7 @@ public partial class ParticlePickerModalUI : PanelContainer
                 var variantItem = _abilityTree.CreateItem(groupItem);
                 variantItem.SetText(0, p.VariantName);
                 variantItem.SetIcon(0, _iconSparkles);
+                variantItem.SetIconMaxWidth(0, 14);
                 variantItem.SetMetadata(0, p.VpcfPath);
             }
         }

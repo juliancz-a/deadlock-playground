@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DeadlockPlayground.Painter;
+using DeadlockPlayground.Workspace;
 
 public partial class ExportModDialog : CanvasLayer
 {
@@ -35,6 +36,8 @@ public partial class ExportModDialog : CanvasLayer
     private string _heroDisplayName = "Hero";
     private List<SubmeshNodeInfo> _allSubmeshes = new();
     private readonly Dictionary<CheckBox, SubmeshNodeInfo> _submeshCheckboxes = new();
+    private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _extraModelCheckboxes = new();
+    private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _particleCheckboxes = new();
     private Image _preBakedAtlas;
     private GamePathManager _pathManager;
     private bool _isBrowsingCsdk = false;
@@ -339,24 +342,43 @@ public partial class ExportModDialog : CanvasLayer
             child.QueueFree();
         }
         _submeshCheckboxes.Clear();
+        _extraModelCheckboxes.Clear();
+        _particleCheckboxes.Clear();
 
-        if (_allSubmeshes.Count == 0)
+        var session = ModWorkspaceSession.Instance;
+        var characterModelAssets = new List<WorkspaceAssetEntry>();
+        var extraModelAssets = new List<WorkspaceAssetEntry>();
+        var particleAssets = new List<WorkspaceAssetEntry>();
+
+        if (session != null && session.Manifest != null)
         {
-            var emptyLbl = new Label
+            if (session.Manifest.Heroes.TryGetValue(_heroCodename, out var currentHeroEntry) && currentHeroEntry != null)
             {
-                Text = "No submeshes found. Default body will be exported."
-            };
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f));
-            _submeshChecklistContainer.AddChild(emptyLbl);
-            return;
+                foreach (var asset in currentHeroEntry.Assets)
+                {
+                    if (asset.Category == "CharacterModel") characterModelAssets.Add(asset);
+                    else if (asset.Category == "ExtraModel") extraModelAssets.Add(asset);
+                    else if (asset.Category == "ParticleVFX") particleAssets.Add(asset);
+                }
+            }
         }
 
-        foreach (var submesh in _allSubmeshes)
+        void AddSectionHeader(string title, Color color)
+        {
+            var header = new Label
+            {
+                Text = title
+            };
+            header.AddThemeFontSizeOverride("font_size", 12);
+            header.AddThemeColorOverride("font_color", color);
+            _submeshChecklistContainer.AddChild(header);
+        }
+
+        void AddSubmeshRow(SubmeshNodeInfo submesh, bool isPreChecked)
         {
             var hbox = new HBoxContainer();
             hbox.AddThemeConstantOverride("separation", 8);
 
-            bool isPreChecked = submesh.IsDirty;
             submesh.IsSelected = isPreChecked;
 
             var chk = new CheckBox
@@ -366,7 +388,6 @@ public partial class ExportModDialog : CanvasLayer
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
 
-            // Badge indicator for dirty state
             var lblStatusBadge = new Label
             {
                 Text = submesh.IsDirty ? "[MODIFIED]" : "[UNMODIFIED]"
@@ -394,7 +415,6 @@ public partial class ExportModDialog : CanvasLayer
             hbox.AddChild(chk);
             hbox.AddChild(lblStatusBadge);
 
-            // Badge indicator if it has authentic original material
             if (!string.IsNullOrEmpty(submesh.OriginalVmatPath))
             {
                 var lblBadge = new Label
@@ -407,6 +427,164 @@ public partial class ExportModDialog : CanvasLayer
             }
 
             _submeshChecklistContainer.AddChild(hbox);
+        }
+
+        // Section 1: Hero Model Submeshes
+        AddSectionHeader("👤 Hero Model Submeshes", new Color(0.9f, 0.8f, 0.45f));
+        var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
+        bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0;
+
+        if (dirtySubmeshes.Count > 0)
+        {
+            foreach (var sm in dirtySubmeshes)
+            {
+                AddSubmeshRow(sm, true);
+            }
+        }
+        else if (characterModelAssets.Count > 0)
+        {
+            foreach (var charAsset in characterModelAssets)
+            {
+                var hbox = new HBoxContainer();
+                hbox.AddThemeConstantOverride("separation", 8);
+                int texCount = charAsset.ModifiedTextures.Count;
+                var chk = new CheckBox
+                {
+                    Text = $"{charAsset.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
+                    ButtonPressed = true,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+                _extraModelCheckboxes[chk] = charAsset;
+                hbox.AddChild(chk);
+                hbox.AddChild(lblStatusBadge);
+                _submeshChecklistContainer.AddChild(hbox);
+            }
+        }
+        else if (hasOtherWorkspaceMods)
+        {
+            var emptyLbl = new Label
+            {
+                Text = "   (No character model submeshes modified)"
+            };
+            emptyLbl.AddThemeFontSizeOverride("font_size", 11);
+            emptyLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
+            _submeshChecklistContainer.AddChild(emptyLbl);
+        }
+        else if (_allSubmeshes.Count > 0)
+        {
+            foreach (var sm in _allSubmeshes)
+            {
+                AddSubmeshRow(sm, false);
+            }
+        }
+        else
+        {
+            var emptyLbl = new Label
+            {
+                Text = "   No submeshes found. Default body will be exported."
+            };
+            emptyLbl.AddThemeFontSizeOverride("font_size", 11);
+            emptyLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
+            _submeshChecklistContainer.AddChild(emptyLbl);
+        }
+
+        // Section 2: Extra Models
+        if (extraModelAssets.Count > 0)
+        {
+            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
+            _submeshChecklistContainer.AddChild(spacer);
+
+            AddSectionHeader("🗡️ Extra Models", new Color(0.4f, 0.75f, 0.95f));
+
+            foreach (var extra in extraModelAssets)
+            {
+                var hbox = new HBoxContainer();
+                hbox.AddThemeConstantOverride("separation", 8);
+
+                int texCount = extra.ModifiedTextures.Count;
+                var chk = new CheckBox
+                {
+                    Text = $"{extra.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
+                    ButtonPressed = true,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+
+                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+
+                chk.Toggled += (pressed) =>
+                {
+                    lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
+                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.4f, 0.9f, 0.5f) : new Color(0.5f, 0.55f, 0.65f));
+                };
+
+                _extraModelCheckboxes[chk] = extra;
+                hbox.AddChild(chk);
+                hbox.AddChild(lblStatusBadge);
+
+                string modelFile = Path.GetFileName(extra.OwnerAssetPath);
+                if (!string.IsNullOrEmpty(modelFile))
+                {
+                    var lblBadge = new Label { Text = modelFile };
+                    lblBadge.AddThemeFontSizeOverride("font_size", 10);
+                    lblBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.65f, 0.85f));
+                    hbox.AddChild(lblBadge);
+                }
+
+                _submeshChecklistContainer.AddChild(hbox);
+            }
+        }
+
+        // Section 3: Particle VFX
+        if (particleAssets.Count > 0)
+        {
+            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
+            _submeshChecklistContainer.AddChild(spacer);
+
+            AddSectionHeader("✨ Particle VFX", new Color(0.85f, 0.5f, 0.95f));
+
+            foreach (var part in particleAssets)
+            {
+                var hbox = new HBoxContainer();
+                hbox.AddThemeConstantOverride("separation", 8);
+
+                int texCount = part.ModifiedTextures.Count;
+                var chk = new CheckBox
+                {
+                    Text = $"{part.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
+                    ButtonPressed = true,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+
+                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+
+                chk.Toggled += (pressed) =>
+                {
+                    lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
+                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.4f, 0.9f, 0.5f) : new Color(0.5f, 0.55f, 0.65f));
+                };
+
+                _particleCheckboxes[chk] = part;
+                hbox.AddChild(chk);
+                hbox.AddChild(lblStatusBadge);
+
+                string vpcfFile = Path.GetFileName(part.OwnerAssetPath);
+                if (!string.IsNullOrEmpty(vpcfFile))
+                {
+                    var lblBadge = new Label { Text = vpcfFile };
+                    lblBadge.AddThemeFontSizeOverride("font_size", 10);
+                    lblBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.65f, 0.85f));
+                    hbox.AddChild(lblBadge);
+                }
+
+                _submeshChecklistContainer.AddChild(hbox);
+            }
         }
     }
 
@@ -460,14 +638,37 @@ public partial class ExportModDialog : CanvasLayer
             }
         }
 
-        if (selectedSubmeshes.Count == 0)
+        int totalSelectedCount = selectedSubmeshes.Count;
+        int totalExtraSelected = _extraModelCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
+        int totalParticlesSelected = _particleCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
+        int totalItems = totalSelectedCount + totalExtraSelected + totalParticlesSelected;
+
+        if (totalItems == 0 && ModWorkspaceSession.Instance.GetTotalModifiedCount() == 0)
         {
             if (_lblTargetVpkInfo != null)
             {
-                _lblTargetVpkInfo.Text = "⚠ No modified submeshes selected! Please check at least one submesh.";
+                _lblTargetVpkInfo.Text = "⚠ No modified assets or submeshes selected! Please check at least one item.";
                 _lblTargetVpkInfo.Modulate = Colors.Salmon;
             }
             return;
+        }
+
+        var excludedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in _extraModelCheckboxes)
+        {
+            if (!kvp.Key.ButtonPressed)
+            {
+                if (!string.IsNullOrEmpty(kvp.Value.VpkPath)) excludedPaths.Add(kvp.Value.VpkPath);
+                if (!string.IsNullOrEmpty(kvp.Value.OwnerAssetPath)) excludedPaths.Add(kvp.Value.OwnerAssetPath);
+            }
+        }
+        foreach (var kvp in _particleCheckboxes)
+        {
+            if (!kvp.Key.ButtonPressed)
+            {
+                if (!string.IsNullOrEmpty(kvp.Value.VpkPath)) excludedPaths.Add(kvp.Value.VpkPath);
+                if (!string.IsNullOrEmpty(kvp.Value.OwnerAssetPath)) excludedPaths.Add(kvp.Value.OwnerAssetPath);
+            }
         }
 
         int resolution = 2048;
@@ -506,7 +707,8 @@ public partial class ExportModDialog : CanvasLayer
             DeadlockGamePath = _pathManager?.CurrentGamePath ?? "",
             ResourceCompilerPath = compilerPath,
             CsdkPath = csdkPath,
-            PreBakedAtlas = _preBakedAtlas
+            PreBakedAtlas = _preBakedAtlas,
+            ExcludedAssetVpkPaths = excludedPaths
         };
 
         // Persist paths to user config
