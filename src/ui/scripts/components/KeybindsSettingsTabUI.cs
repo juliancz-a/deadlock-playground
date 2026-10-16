@@ -187,14 +187,14 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
                 ThemeTypeVariation = "HeaderSmall"
             };
             titleLbl.AddThemeColorOverride("font_color", new Color(0.92f, 0.93f, 0.95f));
-            titleLbl.AddThemeFontSizeOverride("font_size", 13);
+            titleLbl.AddThemeFontSizeOverride("font_size", 14);
 
             var descLbl = new Label
             {
                 Text = binding.Description
             };
-            descLbl.AddThemeColorOverride("font_color", new Color(0.6f, 0.62f, 0.68f));
-            descLbl.AddThemeFontSizeOverride("font_size", 11);
+            descLbl.AddThemeColorOverride("font_color", new Color(0.75f, 0.78f, 0.85f));
+            descLbl.AddThemeFontSizeOverride("font_size", 13);
 
             vboxText.AddChild(titleLbl);
             vboxText.AddChild(descLbl);

@@ -69,7 +69,7 @@ public partial class ChangelogModalUI : PanelContainer
         if (_btnDiscord != null)
         {
             _btnDiscord.Pressed += OnDiscordClicked;
-            _btnDiscord.Text = $"💬 Discord: {_discordUsername}";
+            _btnDiscord.Text = $"Discord: {_discordUsername}";
             _btnDiscord.TooltipText = $"Click to copy Discord username: {_discordUsername}";
         }
 

@@ -31,7 +31,7 @@ public partial class VpkLoaderTest : Node3D
 	public PackedScene PoseEditorScene;
 	
 	[Export]
-	public string VpkPath = @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk";
+	public string VpkPath = "";
 
 	[Export]
 	public string AddonVpkPath { get; set; } = "";
@@ -60,9 +60,24 @@ public partial class VpkLoaderTest : Node3D
 
     private Package _basePackage;
 
+    public void EnsureVpkPathResolved()
+    {
+        if (!string.IsNullOrEmpty(VpkPath) && File.Exists(VpkPath))
+        {
+            return;
+        }
+
+        string resolved = DeadlockPlayground.Particles.HeroParticleService.ResolveVpkPath();
+        if (!string.IsNullOrEmpty(resolved) && File.Exists(resolved))
+        {
+            VpkPath = resolved;
+        }
+    }
+
     public Package GetOrCreateBasePackage()
     {
         if (_basePackage != null) return _basePackage;
+        EnsureVpkPathResolved();
         if (File.Exists(VpkPath))
         {
             try
@@ -295,6 +310,8 @@ public partial class VpkLoaderTest : Node3D
 
 		// 1. Cleanup old hero completely
 		CleanupCurrentHero();
+
+		EnsureVpkPathResolved();
 
 		if (!File.Exists(VpkPath))
 		{

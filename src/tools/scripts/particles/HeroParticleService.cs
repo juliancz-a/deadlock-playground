@@ -69,14 +69,18 @@ public class HeroParticleService
 
                 if (cachedIndex != null && cachedIndex.Heroes != null && cachedIndex.Heroes.Count > 0)
                 {
-                    // Ensure cache contains canonical aliases (Grey Talon, Paradox, Dynamo)
-                    if (cachedIndex.Heroes.ContainsKey("Grey Talon") || cachedIndex.Heroes.ContainsKey("Paradox"))
+                    // Ensure cache contains canonical aliases AND updated heroes (Violet, Deadman Danny)
+                    bool hasViolet = cachedIndex.Heroes.ContainsKey("Violet") || cachedIndex.Heroes.ContainsKey("artist");
+                    bool hasDeadman = cachedIndex.Heroes.ContainsKey("Deadman Danny") || cachedIndex.Heroes.ContainsKey("airheart");
+
+                    if ((cachedIndex.Heroes.ContainsKey("Grey Talon") || cachedIndex.Heroes.ContainsKey("Paradox"))
+                        && hasViolet && hasDeadman)
                     {
                         GD.Print($"[HeroParticleService] Loaded particle index from cache ({cachedIndex.Heroes.Count} heroes) in < 15 ms.");
                         return cachedIndex;
                     }
 
-                    GD.Print("[HeroParticleService] Stale cache without canonical hero aliases detected. Re-indexing...");
+                    GD.Print("[HeroParticleService] Stale cache without Violet / Deadman Danny detected. Re-indexing...");
                 }
             }
             catch (Exception ex)
@@ -85,29 +89,97 @@ public class HeroParticleService
             }
         }
 
-        // 2. Locate abilities.vdata_c
-        string vdataPath = ResolveVdataPath(explicitPath);
-
-        HeroParticleIndex freshIndex = null;
-        if (!string.IsNullOrEmpty(vdataPath) && File.Exists(vdataPath))
+        // 2. Open VPK if available
+        string vpkPath = ResolveVpkPath();
+        Package package = null;
+        if (!string.IsNullOrEmpty(vpkPath) && File.Exists(vpkPath))
         {
-            GD.Print($"[HeroParticleService] Indexing particles from file: {vdataPath}");
-            freshIndex = FastVDataParticleIndexer.ParseFromFile(vdataPath);
+            try
+            {
+                package = new Package();
+                package.Read(vpkPath);
+                EnsureHeroMetadataInitialized(package);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[HeroParticleService] Failed to open VPK package at {vpkPath}: {ex.Message}");
+                package?.Dispose();
+                package = null;
+            }
         }
         else
         {
-            // Try extracting from Deadlock VPK
-            freshIndex = TryExtractFromVpk();
+            EnsureHeroMetadataInitialized();
         }
 
-        if (freshIndex == null)
+        // 3. Locate abilities.vdata_c
+        HeroParticleIndex baseIndex = null;
+        if (package != null)
         {
-            GD.PrintErr("[HeroParticleService] Could not locate abilities.vdata_c in docs, game path, or VPK.");
-            freshIndex = new HeroParticleIndex(new Dictionary<string, IReadOnlyList<AbilityParticleGroup>>());
-            return freshIndex;
+            try
+            {
+                var entry = package.FindEntry("scripts/abilities.vdata_c");
+                if (entry != null)
+                {
+                    package.ReadEntry(entry, out byte[] data);
+                    using var stream = new MemoryStream(data);
+                    baseIndex = FastVDataParticleIndexer.ParseFromStream(stream);
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[HeroParticleService] Could not parse abilities.vdata_c from VPK: {ex.Message}");
+            }
         }
 
-        // 3. Save to cache
+        if (baseIndex == null)
+        {
+            string vdataPath = ResolveVdataPath(explicitPath);
+            if (!string.IsNullOrEmpty(vdataPath) && File.Exists(vdataPath))
+            {
+                GD.Print($"[HeroParticleService] Indexing particles from file: {vdataPath}");
+                baseIndex = FastVDataParticleIndexer.ParseFromFile(vdataPath);
+            }
+        }
+
+        // 4. Supplement index with VPK loose particle discovery (particles/abilities/...)
+        // This ensures heroes without vdata ability entries (like Violet / artist and Deadman Danny / airheart)
+        // have all their particles cleanly mapped into ability groups.
+        var heroesMap = new Dictionary<string, List<AbilityParticleGroup>>(StringComparer.OrdinalIgnoreCase);
+
+        if (baseIndex != null && baseIndex.Heroes != null)
+        {
+            foreach (var kvp in baseIndex.Heroes)
+            {
+                heroesMap[kvp.Key] = new List<AbilityParticleGroup>(kvp.Value);
+            }
+        }
+
+        if (package != null)
+        {
+            try
+            {
+                SupplementFromVpkEntries(package, heroesMap);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[HeroParticleService] Failed to supplement particles from VPK entries: {ex.Message}");
+            }
+            finally
+            {
+                package.Dispose();
+            }
+        }
+
+        var resultHeroes = new Dictionary<string, IReadOnlyList<AbilityParticleGroup>>(heroesMap.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in heroesMap)
+        {
+            resultHeroes[kvp.Key] = kvp.Value;
+        }
+
+        var freshIndex = new HeroParticleIndex(resultHeroes);
+
+        // 5. Save to cache
         try
         {
             string cacheDir = Path.GetDirectoryName(globalCachePath);
@@ -131,6 +203,192 @@ public class HeroParticleService
         return freshIndex;
     }
 
+    public static string ResolveGameRootPath()
+    {
+        var pathManager = new GamePathManager();
+        pathManager.LoadConfig();
+
+        if (!string.IsNullOrEmpty(pathManager.CurrentGamePath) && Directory.Exists(pathManager.CurrentGamePath))
+        {
+            return pathManager.CurrentGamePath;
+        }
+
+        try
+        {
+            string auto = pathManager.AutoDetectDeadlockPathAsync().GetAwaiter().GetResult();
+            if (!string.IsNullOrEmpty(auto) && Directory.Exists(auto))
+            {
+                return auto;
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    public static string ResolveVpkPath()
+    {
+        string gameRoot = ResolveGameRootPath();
+        if (!string.IsNullOrEmpty(gameRoot))
+        {
+            string p = Path.Combine(gameRoot, "game", "citadel", "pak01_dir.vpk");
+            if (File.Exists(p)) return p;
+        }
+
+        return null;
+    }
+
+    private static void SupplementFromVpkEntries(Package package, Dictionary<string, List<AbilityParticleGroup>> heroesMap)
+    {
+        if (package == null || !package.Entries.TryGetValue("vpcf_c", out var vpcfEntries))
+        {
+            return;
+        }
+
+        // Track already known vpcf paths for each hero to avoid duplicates
+        var knownPathsByHero = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (heroKey, groups) in heroesMap)
+        {
+            if (!knownPathsByHero.TryGetValue(heroKey, out var set))
+            {
+                set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                knownPathsByHero[heroKey] = set;
+            }
+            foreach (var g in groups)
+            {
+                foreach (var p in g.Particles)
+                {
+                    set.Add(p.VpcfPath);
+                }
+            }
+        }
+
+        // Temporary accumulator: heroKey -> abilityKey -> list of ParticleEntry
+        var newHeroAbilities = new Dictionary<string, Dictionary<string, List<ParticleEntry>>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in vpcfEntries)
+        {
+            string dir = entry.DirectoryName.Replace('\\', '/').Trim('/');
+            if (!dir.StartsWith("particles/abilities/", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string rel = dir.Substring("particles/abilities/".Length).TrimStart('/');
+            string[] parts = rel.Split('/');
+            if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0]))
+                continue;
+
+            string heroFolder = parts[0].ToLowerInvariant();
+            string resolvedDisplay = ResolveDisplayName(heroFolder);
+            string heroKey = !string.IsNullOrEmpty(resolvedDisplay) ? resolvedDisplay : heroFolder;
+
+            string vpcfPath = $"{dir}/{entry.FileName}.vpcf";
+
+            if (knownPathsByHero.TryGetValue(heroKey, out var heroKnown) && heroKnown.Contains(vpcfPath))
+            {
+                continue;
+            }
+
+            string abilityKey = DeriveAbilityKey(entry.FileName, heroFolder);
+            string variantName = DeriveVariantName(entry.FileName, heroFolder);
+
+            if (!newHeroAbilities.TryGetValue(heroKey, out var abilityDict))
+            {
+                abilityDict = new Dictionary<string, List<ParticleEntry>>(StringComparer.OrdinalIgnoreCase);
+                newHeroAbilities[heroKey] = abilityDict;
+            }
+
+            if (!abilityDict.TryGetValue(abilityKey, out var particleList))
+            {
+                particleList = new List<ParticleEntry>();
+                abilityDict[abilityKey] = particleList;
+            }
+
+            particleList.Add(new ParticleEntry(variantName, vpcfPath));
+        }
+
+        // Merge accumulated particles into heroesMap
+        foreach (var (heroKey, abilityDict) in newHeroAbilities)
+        {
+            if (!heroesMap.TryGetValue(heroKey, out var existingGroups))
+            {
+                existingGroups = new List<AbilityParticleGroup>();
+                heroesMap[heroKey] = existingGroups;
+            }
+
+            foreach (var (abilityKey, particles) in abilityDict)
+            {
+                var matchGroup = existingGroups.FirstOrDefault(g => g.AbilityKey.Equals(abilityKey, StringComparison.OrdinalIgnoreCase));
+                if (matchGroup != null)
+                {
+                    var merged = new List<ParticleEntry>(matchGroup.Particles);
+                    merged.AddRange(particles);
+                    existingGroups.Remove(matchGroup);
+                    existingGroups.Add(new AbilityParticleGroup(matchGroup.AbilityKey, matchGroup.LocalizationToken, merged));
+                }
+                else
+                {
+                    existingGroups.Add(new AbilityParticleGroup(abilityKey, $"#{abilityKey}", particles));
+                }
+            }
+
+            // Also mirror under technical/internal aliases if missing (e.g. "artist", "airheart")
+            if (s_aliasMap.TryGetValue(heroKey, out var aliases))
+            {
+                foreach (var a in aliases)
+                {
+                    if (!heroesMap.ContainsKey(a))
+                    {
+                        heroesMap[a] = existingGroups;
+                    }
+                }
+            }
+        }
+    }
+
+    private static string DeriveAbilityKey(string filename, string heroFolder)
+    {
+        string name = filename;
+        if (name.StartsWith(heroFolder + "_", StringComparison.OrdinalIgnoreCase))
+        {
+            name = name.Substring(heroFolder.Length + 1);
+        }
+
+        string[] tokens = name.Split('_');
+        if (tokens.Length >= 2)
+        {
+            string two = $"{tokens[0]}_{tokens[1]}".ToLowerInvariant();
+            if (two is "air_dash" or "backblast_cone" or "chimera_mark" or "still_life" or "heavy_melee" or "flow_state" or "buff_flow" or "rocket_explo" or "rocket_explosion")
+            {
+                return $"{heroFolder}_{two}";
+            }
+        }
+
+        string primary = tokens.Length > 0 ? tokens[0].ToLowerInvariant() : "general";
+        return $"{heroFolder}_{primary}";
+    }
+
+    private static string DeriveVariantName(string filename, string heroFolder)
+    {
+        string name = filename;
+        if (name.StartsWith(heroFolder + "_", StringComparison.OrdinalIgnoreCase))
+        {
+            name = name.Substring(heroFolder.Length + 1);
+        }
+
+        string[] tokens = name.Replace('_', ' ').Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 0) return "Default";
+
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            if (tokens[i].Length > 0)
+            {
+                tokens[i] = char.ToUpperInvariant(tokens[i][0]) + tokens[i][1..].ToLowerInvariant();
+            }
+        }
+
+        return string.Join(" ", tokens);
+    }
+
     private string ResolveVdataPath(string explicitPath)
     {
         if (!string.IsNullOrEmpty(explicitPath) && File.Exists(explicitPath))
@@ -145,53 +403,7 @@ public class HeroParticleService
             return docsRelative;
         }
 
-        string directPath = @"d:\GameDev\deadlock-playground\docs\abilities.vdata_c";
-        if (File.Exists(directPath))
-        {
-            return directPath;
-        }
-
         return null;
-    }
-
-    private HeroParticleIndex TryExtractFromVpk()
-    {
-        var pathManager = new GamePathManager();
-        pathManager.LoadConfig();
-
-        string vpkPath = null;
-        if (!string.IsNullOrEmpty(pathManager.CurrentGamePath))
-        {
-            vpkPath = Path.Combine(pathManager.CurrentGamePath, "game", "citadel", "pak01_dir.vpk");
-        }
-
-        if (string.IsNullOrEmpty(vpkPath) || !File.Exists(vpkPath))
-        {
-            vpkPath = @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk";
-        }
-
-        if (!File.Exists(vpkPath))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var package = new Package();
-            package.Read(vpkPath);
-
-            var entry = package.FindEntry("scripts/abilities.vdata_c");
-            if (entry == null) return null;
-
-            package.ReadEntry(entry, out byte[] data);
-            using var stream = new MemoryStream(data);
-            return FastVDataParticleIndexer.ParseFromStream(stream);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[HeroParticleService] Failed to extract from VPK: {ex.Message}");
-            return null;
-        }
     }
 
     private static readonly Dictionary<string, string> s_displayNameMap = new(StringComparer.OrdinalIgnoreCase);
@@ -231,7 +443,8 @@ public class HeroParticleService
         RegisterHeroMapping("Paige", "bookworm", "Hero Bookworm");
         RegisterHeroMapping("Billy", "punkgoat", "Hero PunkGoat");
         RegisterHeroMapping("Solomon", "chessmaster", "Hero ChessMaster");
-        RegisterHeroMapping("Violet", "artist", "Hero Artist");
+        RegisterHeroMapping("Violet", "artist", "Hero Artist", "Hero Violet");
+        RegisterHeroMapping("Deadman Danny", "deadman_danny", "deadpack", "airheart", "Hero Deadman Danny", "Hero Airheart", "Hero Deadpack");
         RegisterHeroMapping("Apollo", "fencer", "Hero Fencer");
         RegisterHeroMapping("Celeste", "unicorn", "Hero Unicorn");
         RegisterHeroMapping("Graves", "necro", "Hero Necro");
@@ -301,11 +514,11 @@ public class HeroParticleService
 
         if (vdataBytes == null)
         {
-            string defaultVpk = @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\pak01_dir.vpk";
-            if (File.Exists(defaultVpk))
+            string vpkPath = ResolveVpkPath();
+            if (!string.IsNullOrEmpty(vpkPath) && File.Exists(vpkPath))
             {
                 using var pkg = new Package();
-                pkg.Read(defaultVpk);
+                pkg.Read(vpkPath);
                 var entry = pkg.FindEntry("scripts/heroes.vdata_c");
                 if (entry != null)
                 {
@@ -362,10 +575,13 @@ public class HeroParticleService
 
     private static void ParseLocalizationTokens()
     {
+        string gameRoot = ResolveGameRootPath();
+        if (string.IsNullOrEmpty(gameRoot)) return;
+
         string[] potentialPaths = new[]
         {
-            @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\resource\localization\citadel_english.txt",
-            @"E:\SteamLibrary\steamapps\common\Deadlock\game\citadel\resource\citadel_english.txt"
+            Path.Combine(gameRoot, "game", "citadel", "resource", "localization", "citadel_english.txt"),
+            Path.Combine(gameRoot, "game", "citadel", "resource", "citadel_english.txt")
         };
 
         foreach (var p in potentialPaths)

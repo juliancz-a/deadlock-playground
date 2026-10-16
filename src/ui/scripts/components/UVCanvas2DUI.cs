@@ -608,11 +608,6 @@ namespace DeadlockPlayground.UI
             _onParticleTextureUpdated = onTextureUpdated;
             _layerManager ??= SkinLayerManager.Instance;
 
-            if (_lblTitle != null)
-            {
-                _lblTitle.Text = $"Particle: {System.IO.Path.GetFileName(vtexPath)}";
-            }
-
             if (_baseTextureRect != null)
             {
                 _baseTextureRect.Visible = false;
@@ -886,10 +881,6 @@ namespace DeadlockPlayground.UI
             if (_btnResetParticle != null)
             {
                 _btnResetParticle.Visible = false;
-            }
-            if (_lblTitle != null && mesh != null)
-            {
-                _lblTitle.Text = $"UV Map - {mesh.Name}";
             }
             UpdateResolutionLabel();
             RebuildWireframe();

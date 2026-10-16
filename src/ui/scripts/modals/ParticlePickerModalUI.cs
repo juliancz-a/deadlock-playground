@@ -159,13 +159,16 @@ public partial class ParticlePickerModalUI : PanelContainer
         leftVbox.AddThemeConstantOverride("separation", 6);
         split.AddChild(leftVbox);
 
+        var colus = PlaygroundThemeHelper.GetFontColus();
+
         var lblTreeHeader = new Label
         {
             Text = "Abilities & Sets",
             SizeFlagsHorizontal = SizeFlags.Fill
         };
-        lblTreeHeader.AddThemeFontSizeOverride("font_size", 13);
-        lblTreeHeader.AddThemeColorOverride("font_color", new Color(0.7f, 0.75f, 0.85f, 1.0f));
+        if (colus != null) lblTreeHeader.AddThemeFontOverride("font", colus);
+        lblTreeHeader.AddThemeFontSizeOverride("font_size", 14);
+        lblTreeHeader.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.98f, 1.0f));
         leftVbox.AddChild(lblTreeHeader);
 
         _abilityTree = new Tree
@@ -891,7 +894,10 @@ public partial class ParticlePickerModalUI : PanelContainer
                      .Replace("Synth ", "Pocket ")
                      .Replace("Digger ", "Mo & Krill ")
                      .Replace("Astro ", "Holliday ")
-                     .Replace("Nano ", "Calico ");
+                     .Replace("Nano ", "Calico ")
+                     .Replace("Artist ", "Violet ")
+                     .Replace("Airheart ", "Deadman Danny ")
+                     .Replace("Deadpack ", "Deadman Danny ");
 
         return title;
     }

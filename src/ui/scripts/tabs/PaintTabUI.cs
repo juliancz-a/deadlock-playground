@@ -8,6 +8,7 @@ using DeadlockPlayground.Materials;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Particles;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Catalog;
 
 public partial class PaintTabUI : VBoxContainer
 {
@@ -1648,7 +1649,7 @@ public partial class PaintTabUI : VBoxContainer
                     TooltipText = "Expand/Collapse material group",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter
                 };
-                toggleBtn.AddThemeFontSizeOverride("font_size", 10);
+                toggleBtn.AddThemeFontSizeOverride("font_size", 12);
 
                 var titleLabel = new Label
                 {
@@ -1659,24 +1660,24 @@ public partial class PaintTabUI : VBoxContainer
                     TooltipText = $"Material: {group.MaterialKey}"
                 };
                 if (colusFont != null) titleLabel.AddThemeFontOverride("font", colusFont);
-                titleLabel.AddThemeFontSizeOverride("font_size", 12);
+                titleLabel.AddThemeFontSizeOverride("font_size", 14);
 
             var badgeLabel = new Label
             {
                 Text = $"[{group.Submeshes.Count} {(group.Submeshes.Count == 1 ? "mesh" : "meshes")}]",
-                Modulate = new Color(0.65f, 0.68f, 0.72f),
+                Modulate = new Color(0.72f, 0.76f, 0.82f),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
-            badgeLabel.AddThemeFontSizeOverride("font_size", 10);
+            badgeLabel.AddThemeFontSizeOverride("font_size", 12);
 
             var paintBtn = new Button
             {
                 Text = "Paint",
-                CustomMinimumSize = new Vector2(52, 22),
+                CustomMinimumSize = new Vector2(56, 24),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
                 TooltipText = $"Paint material group '{group.DisplayName}'"
             };
-            paintBtn.AddThemeFontSizeOverride("font_size", 10);
+            paintBtn.AddThemeFontSizeOverride("font_size", 12);
 
             var localGroup = group;
             paintBtn.Pressed += () =>
@@ -1961,37 +1962,96 @@ public partial class PaintTabUI : VBoxContainer
         }
     }
 
-    private static bool IsSharedParticleTexture(string vtexPath, string heroName = null, string abilityName = null)
+    private static bool IsSharedParticleTexture(
+        string vtexPath,
+        string heroId = null,
+        string abilityName = null,
+        string activeVpcfPath = null,
+        DeadlockHeroEntry heroEntry = null)
     {
         if (string.IsNullOrEmpty(vtexPath)) return true;
         string norm = vtexPath.Replace("\\", "/").ToLowerInvariant();
-        if (!string.IsNullOrEmpty(heroName) && norm.Contains(heroName.ToLowerInvariant())) return false;
-        if (!string.IsNullOrEmpty(abilityName) && norm.Contains(abilityName.ToLowerInvariant())) return false;
 
-        if (norm.Contains("/ring/") || norm.Contains("/spark/") || norm.Contains("/sparks/") ||
-            norm.Contains("/smoke/") || norm.Contains("/glow/") || norm.Contains("/beam/") ||
-            norm.Contains("/generic/") || norm.Contains("/warp/") || norm.Contains("/lens_flare/") ||
-            norm.Contains("/fire/") || norm.Contains("/vistasmokev1/") || norm.Contains("/shockwave") ||
-            norm.Contains("particle_ring") || norm.Contains("particle_glow") || norm.Contains("particle_spark") ||
-            norm.Contains("particle_smoke") || norm.Contains("particle_flare"))
+        // 1. Gather all hero aliases and identifying tokens for the current active hero
+        var heroTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (heroEntry != null)
         {
-            return true;
+            if (!string.IsNullOrWhiteSpace(heroEntry.InternalCodename)) heroTokens.Add(heroEntry.InternalCodename);
+            if (!string.IsNullOrWhiteSpace(heroEntry.DisplayName)) heroTokens.Add(heroEntry.DisplayName);
+            if (!string.IsNullOrWhiteSpace(heroEntry.WipAlias)) heroTokens.Add(heroEntry.WipAlias);
         }
 
-        if (norm.Contains("/heroes/") || norm.Contains("/abilities/") || norm.Contains("/characters/"))
+        if (!string.IsNullOrWhiteSpace(heroId))
         {
-            return false;
+            heroTokens.Add(heroId);
+            var resolved = DeadlockHeroCatalog.ResolveHero(heroId);
+            if (resolved != null)
+            {
+                heroTokens.Add(resolved.InternalCodename);
+                heroTokens.Add(resolved.DisplayName);
+                if (!string.IsNullOrWhiteSpace(resolved.WipAlias)) heroTokens.Add(resolved.WipAlias);
+            }
+            string display = HeroParticleService.ResolveDisplayName(heroId);
+            if (!string.IsNullOrWhiteSpace(display)) heroTokens.Add(display);
         }
 
-        int particleIdx = norm.IndexOf("materials/particle/");
-        if (particleIdx >= 0)
+        if (!string.IsNullOrWhiteSpace(activeVpcfPath))
         {
-            string sub = norm.Substring(particleIdx + "materials/particle/".Length);
-            if (!sub.Contains("/"))
-                return true;
+            string cleanVpcf = activeVpcfPath.Replace("\\", "/").ToLowerInvariant();
+            if (cleanVpcf.StartsWith("particles/abilities/"))
+            {
+                string rel = cleanVpcf.Substring("particles/abilities/".Length);
+                string heroFolder = rel.Split('/')[0];
+                if (!string.IsNullOrWhiteSpace(heroFolder))
+                {
+                    heroTokens.Add(heroFolder);
+                    var resolved = DeadlockHeroCatalog.ResolveHero(heroFolder);
+                    if (resolved != null)
+                    {
+                        heroTokens.Add(resolved.InternalCodename);
+                        heroTokens.Add(resolved.DisplayName);
+                        if (!string.IsNullOrWhiteSpace(resolved.WipAlias)) heroTokens.Add(resolved.WipAlias);
+                    }
+                    string display = HeroParticleService.ResolveDisplayName(heroFolder);
+                    if (!string.IsNullOrWhiteSpace(display)) heroTokens.Add(display);
+                }
+            }
         }
 
-        return false;
+        // Clean ability name
+        if (!string.IsNullOrWhiteSpace(abilityName))
+        {
+            string cleanAbility = abilityName.ToLowerInvariant();
+            if (cleanAbility.StartsWith("citadel_ability_")) cleanAbility = cleanAbility.Substring(16);
+            else if (cleanAbility.StartsWith("ability_")) cleanAbility = cleanAbility.Substring(8);
+            if (!string.IsNullOrWhiteSpace(cleanAbility))
+            {
+                heroTokens.Add(cleanAbility);
+            }
+        }
+
+        // 2. Check if the texture belongs to this hero
+        foreach (var token in heroTokens)
+        {
+            string t = token.Trim().ToLowerInvariant();
+            if (t.Length < 3) continue;
+
+            if (norm.Contains($"/{t}/") || norm.Contains($"/{t}_") || norm.Contains($"_{t}_") ||
+                norm.Contains($"_{t}.") || norm.Contains($"/{t}."))
+            {
+                return false; // Property of this hero!
+            }
+
+            if (norm.Contains($"/abilities/{t}") || norm.Contains($"/heroes/{t}") ||
+                norm.Contains($"/heroes_staging/{t}") || norm.Contains($"/heroes_wip/{t}"))
+            {
+                return false; // Property of this hero!
+            }
+        }
+
+        // 3. Any texture that is NOT property of the hero is marked as shared or global
+        return true;
     }
 
     private void UpdateParticleTexturesGroup()
@@ -2064,16 +2124,16 @@ public partial class PaintTabUI : VBoxContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill
         };
         if (colus != null) titleLabel.AddThemeFontOverride("font", colus);
-        titleLabel.AddThemeFontSizeOverride("font_size", 13);
+        titleLabel.AddThemeFontSizeOverride("font_size", 14);
         headerRow.AddChild(titleLabel);
 
         var badgeLabel = new Label
         {
             Text = $"[{textures.Count}]",
-            Modulate = new Color(0.65f, 0.68f, 0.72f),
+            Modulate = new Color(0.72f, 0.76f, 0.82f),
             SizeFlagsVertical = SizeFlags.ShrinkCenter
         };
-        badgeLabel.AddThemeFontSizeOverride("font_size", 10);
+        badgeLabel.AddThemeFontSizeOverride("font_size", 12);
         headerRow.AddChild(badgeLabel);
 
         headerPanel.AddChild(headerRow);
@@ -2082,9 +2142,16 @@ public partial class PaintTabUI : VBoxContainer
         var childrenContainer = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         childrenContainer.AddThemeConstantOverride("separation", 4);
 
+        var vpkLoader = GetVpkLoader();
+
         foreach (var (vtexPath, imageTex) in textures)
         {
-            bool isShared = IsSharedParticleTexture(vtexPath, stage.ActiveVariantName, stage.ActiveAbilityName);
+            bool isShared = IsSharedParticleTexture(
+                vtexPath,
+                stage.ActiveOwnerHeroId ?? vpkLoader?.HeroName,
+                stage.ActiveAbilityName,
+                stage.ActiveVpcfPath,
+                vpkLoader?.LastLoadedHeroEntry);
 
             var row = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             row.AddThemeConstantOverride("separation", 6);
@@ -2098,20 +2165,55 @@ public partial class PaintTabUI : VBoxContainer
                 TooltipText = vtexPath
             };
             if (colus != null) texLabel.AddThemeFontOverride("font", colus);
-            texLabel.AddThemeFontSizeOverride("font_size", 11);
+            texLabel.AddThemeFontSizeOverride("font_size", 13);
             row.AddChild(texLabel);
 
             if (isShared)
             {
+                var sharedContainer = new HBoxContainer
+                {
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                };
+                sharedContainer.AddThemeConstantOverride("separation", 4);
+
                 var sharedBadge = new Label
                 {
-                    Text = "[Shared]",
-                    Modulate = new Color(0.45f, 0.70f, 0.95f, 0.9f),
+                    Text = "[SHARED]",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                    TooltipText = "Shared / Global game effect texture (used across heroes)"
+                    TooltipText = "⚠️ Shared Global Material\nThis texture is used globally across heroes and environment effects in Deadlock.\nModifying it will affect all heroes and abilities that use it in-game."
                 };
-                sharedBadge.AddThemeFontSizeOverride("font_size", 9);
-                row.AddChild(sharedBadge);
+                if (colus != null) sharedBadge.AddThemeFontOverride("font", colus);
+                sharedBadge.AddThemeFontSizeOverride("font_size", 11);
+                sharedBadge.AddThemeColorOverride("font_color", new Color(1.0f, 0.28f, 0.28f, 1.0f)); // Danger red/coral
+                sharedContainer.AddChild(sharedBadge);
+
+                var infoBtn = new Button
+                {
+                    Icon = GD.Load<Texture2D>("res://assets/at-icons/info.svg"),
+                    CustomMinimumSize = new Vector2(18, 18),
+                    Flat = true,
+                    FocusMode = Control.FocusModeEnum.None,
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    Modulate = new Color(1.0f, 0.45f, 0.45f, 1.0f),
+                    TooltipText = "⚠️ Shared Global Material\nThis texture is NOT exclusive to this hero.\nClick to learn what shared materials mean in Deadlock."
+                };
+
+                string capturedPath = vtexPath;
+                infoBtn.Pressed += () =>
+                {
+                    var dialog = new AcceptDialog
+                    {
+                        Title = "Shared Texture Warning",
+                        DialogText = $"⚠️ SHARED GLOBAL MATERIAL\n\nTexture:\n{capturedPath}\n\nThis texture is a global game effect asset shared across multiple heroes and environmental systems in Deadlock.\n\nModifying or repainting this texture will alter its visual appearance across ALL heroes and abilities that reference it in-game, not just the currently selected hero."
+                    };
+                    dialog.Confirmed += () => dialog.QueueFree();
+                    dialog.Canceled += () => dialog.QueueFree();
+                    AddChild(dialog);
+                    dialog.PopupCentered();
+                };
+                sharedContainer.AddChild(infoBtn);
+
+                row.AddChild(sharedContainer);
             }
 
             bool isThisParticlePainting = !string.IsNullOrEmpty(_activeParticleVtexPath) &&
@@ -2120,11 +2222,11 @@ public partial class PaintTabUI : VBoxContainer
             var paintBtn = new Button
             {
                 Text = isThisParticlePainting ? "Painting" : "Paint",
-                CustomMinimumSize = new Vector2(56, 22),
+                CustomMinimumSize = new Vector2(60, 24),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
                 Modulate = isThisParticlePainting ? new Color(1.0f, 0.85f, 0.4f, 1.0f) : Colors.White
             };
-            paintBtn.AddThemeFontSizeOverride("font_size", 10);
+            paintBtn.AddThemeFontSizeOverride("font_size", 12);
 
             string localPath = vtexPath;
             var localTex = imageTex;

@@ -82,7 +82,7 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 16
 text = "EXPORT DEADLOCK MOD (.VPK)"
 
 [node name="HSeparator1" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987123405]
@@ -95,16 +95,20 @@ layout_mode = 2
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 14
 text = "Target Hero:"
 
 [node name="LblHeroValue" type="Label" parent="DialogPanel/Margin/VBox/HBoxHero" unique_id=987123408]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_colors/font_color = Color(0.45, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 14
 text = "Hero"
 
 [node name="LblSubmeshes" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123416]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+theme_override_colors/font_color = Color(0.937255, 0.870588, 0.74902, 1)
+theme_override_fonts/font = ExtResource("2_colus")
 theme_override_font_sizes/font_size = 14
 text = "Target Submeshes to Compile & Package:"
 
@@ -128,11 +132,14 @@ layout_mode = 2
 [node name="LblCompiler" type="Label" parent="DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler" unique_id=987123452]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Compiler (.exe):"
 
 [node name="TxtCompilerPath" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler" unique_id=987123453]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
 placeholder_text = "Path to resourcecompiler.exe"
 
 [node name="BtnBrowseCompilerPath" type="Button" parent="DialogPanel/Margin/VBox/VBoxCompiler/HBoxCompiler" unique_id=987123454]
@@ -142,8 +149,8 @@ text = "Browse..."
 [node name="LblCompilerStatus" type="Label" parent="DialogPanel/Margin/VBox/VBoxCompiler" unique_id=987123455]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.75, 0.4, 1)
-theme_override_fonts/font = ExtResource("3_2b2w5")
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Checking resourcecompiler.exe..."
 
 [node name="HBoxCsdk" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123422]
@@ -152,11 +159,14 @@ layout_mode = 2
 [node name="LblCsdk" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123423]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "CSDK Root (Opt):"
 
 [node name="TxtCsdkPath" type="LineEdit" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123424]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
 placeholder_text = "Optional root folder (auto-derived if empty)"
 
 [node name="BtnBrowseCsdkPath" type="Button" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123425]
@@ -170,15 +180,16 @@ theme_override_constants/separation = 8
 [node name="LblCsdkDownload" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123471]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.78, 0.35, 1)
-theme_override_fonts/font = ExtResource("3_2b2w5")
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "CSDK12 is needed to compile"
 
 [node name="BtnDownloadCsdk" type="Button" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123472]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.35, 0.85, 1, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 12
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_csdk")
 text = "  Download CSDK12  "
 
@@ -192,10 +203,14 @@ theme_override_constants/separation = 4
 [node name="ChkInstallCitadel" type="CheckBox" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123428]
 layout_mode = 2
 button_pressed = true
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 14
 text = "Install directly to Deadlock "
 
 [node name="ChkCustomFolder" type="CheckBox" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123429]
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 14
 text = "Export .vpk to custom directory..."
 
 [node name="CustomFolderContainer" type="VBoxContainer" parent="DialogPanel/Margin/VBox/VBoxInstall" unique_id=987123430]
@@ -209,12 +224,14 @@ layout_mode = 2
 [node name="LblFolder" type="Label" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder" unique_id=987123445]
 custom_minimum_size = Vector2(85, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Folder:"
 
 [node name="TxtCustomFolder" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder" unique_id=987123431]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
 placeholder_text = "Select custom output folder..."
 
 [node name="BtnBrowseCustomFolder" type="Button" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFolder" unique_id=987123432]
@@ -227,26 +244,29 @@ layout_mode = 2
 [node name="LblModName" type="Label" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName" unique_id=987123410]
 custom_minimum_size = Vector2(85, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "File Name:"
 
 [node name="TxtModName" type="LineEdit" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName" unique_id=987123411]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
 text = "Hero_Skin"
 placeholder_text = "e.g. Infernus_Skin"
 
 [node name="LblVpkExt" type="Label" parent="DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName" unique_id=987123447]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 0.9)
-theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 1)
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = ".vpk"
 
 [node name="LblTargetVpkInfo" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123433]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.4, 0.9, 0.5, 1)
-theme_override_fonts/font = ExtResource("3_2b2w5")
-theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Will be installed as: pak01_dir.vpk"
 
 [node name="HBoxButtons" type="HBoxContainer" parent="DialogPanel/Margin/VBox" unique_id=987123434]
@@ -258,19 +278,23 @@ alignment = 2
 [node name="BtnCancel" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987123435]
 custom_minimum_size = Vector2(90, 32)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Cancel"
 
 [node name="BtnConfirmExport" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987123436]
 custom_minimum_size = Vector2(160, 32)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 14
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_confirm")
 text = "Confirm & Export"
 
 [node name="LblCommunityModWarning" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987123438]
 visible = false
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.72, 0.35, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.98, 0.82, 0.45, 1)
+theme_override_font_sizes/font_size = 12
 text = "⚠ This contains painted textures over a third-party community mod. Intended strictly for personal use. If you plan to share or redistribute this package, make sure to review and respect the original creator's license and permissions."
 autowrap_mode = 3
 
