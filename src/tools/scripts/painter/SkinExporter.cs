@@ -574,6 +574,13 @@ namespace DeadlockPlayground.Painter
                                 string kv3Text = vrfRes.DataBlock?.ToString();
                                 if (string.IsNullOrEmpty(kv3Text)) continue;
 
+                                // Check if the emitter override actually introduces meaningful modifications compared to vanilla KV3
+                                if (!HasMeaningfulVpcfOverrides(kv3Text, emOverride))
+                                {
+                                    GD.Print($"[SkinExporter] Skipping untouched particle definition: {normVpcf}");
+                                    continue;
+                                }
+
                                 // Aplicar modificaciones al texto KV3 del .vpcf
                                 kv3Text = ApplyOverridesToVpcfKv3Text(kv3Text, emOverride);
 
@@ -585,28 +592,44 @@ namespace DeadlockPlayground.Painter
                                 string vpcfFileName = Path.GetFileName(normVpcf);
                                 string fullVpcfContentPath = Path.Combine(vpcfContentDir, vpcfFileName);
                                 // Asegurar que todas las texturas referenciadas en el .vpcf existan en gameStagingRoot para que resourcecompiler.exe no falle
-                                foreach (System.Text.RegularExpressions.Match texMatch in System.Text.RegularExpressions.Regex.Matches(kv3Text, @"resource:""([^""]+\.vtex)"""))
+                                foreach (System.Text.RegularExpressions.Match resMatch in System.Text.RegularExpressions.Regex.Matches(kv3Text, @"resource:""([^""]+)"""))
                                 {
-                                    string refVtexC = FormatVtexCResource(texMatch.Groups[1].Value);
-                                    EnsureTextureStagedInGameTree(gameStagingRoot, refVtexC, baseVpkPackage);
+                                    string rawDep = resMatch.Groups[1].Value.Replace('\\', '/').Trim().TrimStart('/');
+                                    string compiledDep = rawDep.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? rawDep : rawDep + "_c";
+                                    EnsureTextureStagedInGameTree(gameStagingRoot, compiledDep, baseVpkPackage);
                                 }
                                 File.WriteAllText(fullVpcfContentPath, kv3Text);
+
+                                string expectedVpcfCName = vpcfFileName + "_c";
+                                string stagingGameVpcfC = Path.Combine(vpcfGameDir, expectedVpcfCName);
+                                if (File.Exists(stagingGameVpcfC))
+                                {
+                                    try { File.Delete(stagingGameVpcfC); } catch { }
+                                }
 
                                 progress?.Report(new ExportProgressReport(0.82f, $"[INFO] Compiling modified particle definition: {vpcfFileName}..."));
 
                                 var vpcfArgs = new List<string>
                                 {
                                     "-i", $"\"{fullVpcfContentPath.Replace('\\', '/')}\"",
-                                    "-nop4"
+                                    "-nop4",
+                                    "-v"
                                 };
-                                RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vpcfArgs), progress, ct, 0.83f);
+                                int exitCode = RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vpcfArgs), progress, ct, 0.83f);
 
-                                string expectedVpcfCName = vpcfFileName + "_c";
                                 string emittedVpcfC = LocateEmittedFile(vpcfGameDir, vpcfContentDir, expectedVpcfCName, gameStagingRoot, contentStagingRoot);
-                                if (!string.IsNullOrEmpty(emittedVpcfC) && File.Exists(emittedVpcfC))
+                                if (exitCode == 0 && !string.IsNullOrEmpty(emittedVpcfC) && File.Exists(emittedVpcfC))
                                 {
                                     compiledOutputFiles.Add((emittedVpcfC, compiledVpcfPath));
                                     progress?.Report(new ExportProgressReport(0.84f, $"[SUCCESS] Compiled particle: {expectedVpcfCName}", ExportLogLevel.Success));
+                                }
+                                else
+                                {
+                                    string err = $"resourcecompiler.exe failed (exit code {exitCode}) while compiling particle '{vpcfFileName}'. Check compiler log for details.";
+                                    progress?.Report(new ExportProgressReport(0.84f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                    result.Success = false;
+                                    result.ErrorMessage = err;
+                                    return result;
                                 }
                             }
                         }
@@ -1397,8 +1420,155 @@ namespace DeadlockPlayground.Painter
 ";
         }
 
-    private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
+        private static int FindRootOpeningBrace(string text)
         {
+            if (string.IsNullOrEmpty(text)) return -1;
+            int headerEnd = text.IndexOf("-->", StringComparison.Ordinal);
+            return headerEnd >= 0 ? text.IndexOf('{', headerEnd) : text.IndexOf('{');
+        }
+
+        private static bool HasMeaningfulVpcfOverrides(string kv3Text, EmitterOverrideData ov)
+        {
+            if (string.IsNullOrEmpty(kv3Text) || ov == null) return false;
+
+            // 1. Visibility toggle
+            if (!ov.Visible) return true;
+
+            // 2. Custom Size scale (vanilla is 1.0f)
+            if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f) return true;
+
+            // 3. Custom Alpha scale (vanilla is 1.0f)
+            if (Math.Abs(ov.AlphaScale - 1.0f) > 0.01f) return true;
+
+            // 4. Constant Color / Tint
+            if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
+            {
+                int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
+                int g = Math.Clamp((int)MathF.Round(ov.TintColorRgba[1] * 255f), 0, 255);
+                int b = Math.Clamp((int)MathF.Round(ov.TintColorRgba[2] * 255f), 0, 255);
+
+                var colMatch = System.Text.RegularExpressions.Regex.Match(
+                    kv3Text,
+                    @"m_ConstantColor\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*(\d+))?\s*\]");
+                if (colMatch.Success)
+                {
+                    int baseR = int.Parse(colMatch.Groups[1].Value);
+                    int baseG = int.Parse(colMatch.Groups[2].Value);
+                    int baseB = int.Parse(colMatch.Groups[3].Value);
+                    if (Math.Abs(r - baseR) > 1 || Math.Abs(g - baseG) > 1 || Math.Abs(b - baseB) > 1)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    // If the particle has no m_ConstantColor in vanilla, it defaults to pure white [255, 255, 255].
+                    // If the user picked a different tint color, it's a modification!
+                    if (r < 250 || g < 250 || b < 250)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // 5. C_INIT_RandomColor
+            if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
+            {
+                if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
+                {
+                    int rMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[0] * 255f), 0, 255);
+                    int gMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[1] * 255f), 0, 255);
+                    int bMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[2] * 255f), 0, 255);
+                    var minMatch = System.Text.RegularExpressions.Regex.Match(
+                        kv3Text,
+                        @"m_ColorMin\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]");
+                    if (minMatch.Success)
+                    {
+                        int baseR = int.Parse(minMatch.Groups[1].Value);
+                        int baseG = int.Parse(minMatch.Groups[2].Value);
+                        int baseB = int.Parse(minMatch.Groups[3].Value);
+                        if (Math.Abs(rMin - baseR) > 1 || Math.Abs(gMin - baseG) > 1 || Math.Abs(bMin - baseB) > 1)
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                if (ov.ColorMaxRgb != null && ov.ColorMaxRgb.Length >= 3)
+                {
+                    int rMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[0] * 255f), 0, 255);
+                    int gMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[1] * 255f), 0, 255);
+                    int bMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[2] * 255f), 0, 255);
+                    var maxMatch = System.Text.RegularExpressions.Regex.Match(
+                        kv3Text,
+                        @"m_ColorMax\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]");
+                    if (maxMatch.Success)
+                    {
+                        int baseR = int.Parse(maxMatch.Groups[1].Value);
+                        int baseG = int.Parse(maxMatch.Groups[2].Value);
+                        int baseB = int.Parse(maxMatch.Groups[3].Value);
+                        if (Math.Abs(rMax - baseR) > 1 || Math.Abs(gMax - baseG) > 1 || Math.Abs(bMax - baseB) > 1)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // 6. C_OP_ColorInterpolate
+            if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
+            {
+                int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
+                int gFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[1] * 255f), 0, 255);
+                int bFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[2] * 255f), 0, 255);
+                var fadeMatch = System.Text.RegularExpressions.Regex.Match(
+                    kv3Text,
+                    @"m_ColorFade\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]");
+                if (fadeMatch.Success)
+                {
+                    int baseR = int.Parse(fadeMatch.Groups[1].Value);
+                    int baseG = int.Parse(fadeMatch.Groups[2].Value);
+                    int baseB = int.Parse(fadeMatch.Groups[3].Value);
+                    if (Math.Abs(rFade - baseR) > 1 || Math.Abs(gFade - baseG) > 1 || Math.Abs(bFade - baseB) > 1)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
+        {
+
+            if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
+
+            // 0. Sanear propiedades exclusivas de Deadlock vpcf61 que causan [FAIL] en bin_cs2/resourcecompiler.exe (ej. explode_warp, explode_elec)
+            string[] incompatibleCs2Keys = new[]
+            {
+                @"^\s*m_NamedValue\s*=\s*""""\s*\r?\n",
+                @"^\s*m_nRandomSeed\s*=\s*-?\d+\s*\r?\n",
+                @"^\s*m_nNoiseInputVectorAttribute\s*=\s*\d+\s*\r?\n",
+                @"^\s*m_flNoCameraFallback\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_bUseBoundsCenter\s*=\s*(?:true|false)\s*\r?\n",
+                @"^\s*m_flNotchedRangeMin\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_flNotchedRangeMax\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_flNotchedOutputOutside\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_flNotchedOutputInside\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_nRoundType\s*=\s*""[^""]*""\s*\r?\n",
+                @"^\s*m_nRefractBlurType\s*=\s*""[^""]*""\s*\r?\n"
+            };
+
+            foreach (var pattern in incompatibleCs2Keys)
+            {
+                kv3Text = System.Text.RegularExpressions.Regex.Replace(
+                    kv3Text,
+                    pattern,
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.Multiline);
+            }
+
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
             // 1. Asegurar que m_ForceGenerators = [  ] esté presente (como en los .vpcf_c vanilla)
@@ -1420,7 +1590,7 @@ namespace DeadlockPlayground.Painter
                 }
                 else
                 {
-                    int braceIdx = kv3Text.IndexOf('{');
+                    int braceIdx = FindRootOpeningBrace(kv3Text);
                     if (braceIdx >= 0)
                         kv3Text = kv3Text.Insert(braceIdx + 1, "\n\tm_nMaxParticles = 0");
                 }
@@ -1441,7 +1611,7 @@ namespace DeadlockPlayground.Painter
                 }
                 else
                 {
-                    int braceIdx = kv3Text.IndexOf('{');
+                    int braceIdx = FindRootOpeningBrace(kv3Text);
                     if (braceIdx >= 0)
                         kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_ConstantColor = {rgbaBlock}");
                 }
@@ -1490,7 +1660,7 @@ namespace DeadlockPlayground.Painter
                 }
                 else
                 {
-                    int braceIdx = kv3Text.IndexOf('{');
+                    int braceIdx = FindRootOpeningBrace(kv3Text);
                     if (braceIdx >= 0)
                         kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_flConstantRadius = {(5.0f * ov.SizeScale).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
                 }

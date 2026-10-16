@@ -844,6 +844,15 @@ public void RestoreAllVanillaOverrides()
                             }
                         }
                         r.SetCustomTint(Colors.White);
+
+                        if (IsEmitterModified(r))
+                        {
+                            _modifiedEmitterIndices.Add(i);
+                        }
+                        else
+                        {
+                            _modifiedEmitterIndices.Remove(i);
+                        }
                     }
                 }
                 _simulator?.Reset();
@@ -856,6 +865,39 @@ public void RestoreAllVanillaOverrides()
         {
             GD.PrintErr($"[ParticleStage3D] Error restoring workspace session: {ex.Message}");
         }
+    }
+
+    public bool IsEmitterModified(ParticleMultiMeshRenderer r)
+    {
+        if (r == null || !GodotObject.IsInstanceValid(r)) return false;
+
+        // 1. Check custom scales/tints/visibility
+        if (!r.VisibleAndEmitting) return true;
+        if (MathF.Abs(r.CustomSizeScale - 1.0f) > 0.005f) return true;
+        if (MathF.Abs(r.CustomAlphaScale - 1.0f) > 0.005f) return true;
+        if (!r.CustomTintColor.IsEqualApprox(Colors.White)) return true;
+
+        // 2. Check definition colors against vanilla baseline
+        if (_vanillaEmitterStates.TryGetValue(r, out var vanilla) && r.Instance?.Definition != null)
+        {
+            var def = r.Instance.Definition;
+            if (!def.ConstantColor.IsEqualApprox(vanilla.ConstantColor)) return true;
+
+            var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+            if (randInit != null && vanilla.HasRandomColor)
+            {
+                if (!randInit.ColorMin.IsEqualApprox(vanilla.ColorMin)) return true;
+                if (!randInit.ColorMax.IsEqualApprox(vanilla.ColorMax)) return true;
+            }
+
+            var fadeOp = def.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+            if (fadeOp != null && vanilla.HasColorFade)
+            {
+                if (!fadeOp.ColorFade.IsEqualApprox(vanilla.ColorFade)) return true;
+            }
+        }
+
+        return false;
     }
 
     public void FlushOverridesToWorkspace()
@@ -888,19 +930,18 @@ public void RestoreAllVanillaOverrides()
                 AlphaScale = 1.0f
             };
 
-            var prevOverrides = ModWorkspaceSession.Instance.GetParticleOverrides(ActiveVpcfPath);
-
             for (int i = 0; i < _renderers.Count; i++)
             {
                 var r = _renderers[i];
                 if (!GodotObject.IsInstanceValid(r)) continue;
                 string emName = !string.IsNullOrEmpty(r.Name) ? r.Name.ToString() : $"Emitter_{i}";
 
-                bool wasPreviouslyModified = prevOverrides?.Emitters != null && prevOverrides.Emitters.ContainsKey(emName);
-                if (!_modifiedEmitterIndices.Contains(i) && !wasPreviouslyModified)
+                if (!IsEmitterModified(r))
                 {
+                    _modifiedEmitterIndices.Remove(i);
                     continue;
                 }
+                _modifiedEmitterIndices.Add(i);
 
                 var def = r.Instance?.Definition;
                 var randInit = def?.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
@@ -930,6 +971,13 @@ public void RestoreAllVanillaOverrides()
                     ActiveVpcfPath,
                     ActiveVariantName ?? System.IO.Path.GetFileName(ActiveVpcfPath),
                     overrides);
+            }
+            else
+            {
+                if (_pendingModifiedTextures.Count == 0 && ModWorkspaceSession.Instance.GetParticleOverrides(ActiveVpcfPath) != null)
+                {
+                    ModWorkspaceSession.Instance.RemoveAsset(heroId, ActiveVpcfPath);
+                }
             }
 
             foreach (var (vtex, img) in _pendingModifiedTextures)
