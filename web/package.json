@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",
     "@tabler/icons": "^3.29.0",
     "astro": "^5.4.1",
     "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.0"
   }
 }
