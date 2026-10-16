@@ -1,0 +1,42 @@
+{
+  "latestVersion": "1.0.1",
+  "publishedAt": "2026-09-29T00:00:00Z",
+  "title": "Version 1.0.1 — New Heroes & Topbar Menu",
+  "markdown": "### Version 1.0.1 — New Heroes\n\n#### New Content:\n* Added support for 6 new update heroes from `models/heroes_wip/`:\n  - Violet\n  - Baba\n  - Deadman Danny\n  - Nurse Harrow\n  - Ratking\n  - Solomon\n* Highlighted the new WIP roster in the Hero Selection menu with dedicated badges.\n* Added update topbar menu and changelog viewing modal.",
+  "history": [
+    {
+      "version": "1.0.1",
+      "date": "September 29, 2026",
+      "title": "Version 1.0.1 — New Heroes & Topbar Menu",
+      "badge": "Latest Release",
+      "badgeType": "gold",
+      "videoUrl": "https://www.youtube.com/watch?v=O7x7LGm_FOs",
+      "highlights": [
+        "Added support for 6 new update heroes from models/heroes_wip/: Violet, Baba, Deadman Danny, Nurse Harrow, Ratking, and Solomon.",
+        "Highlighted the new WIP roster in the Hero Selection menu with dedicated badges.",
+        "Added update topbar menu and changelog viewing modal."
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "September 27, 2026",
+      "title": "Version 1.0.0 — Initial Public Release",
+      "badge": "Initial Release",
+      "badgeType": "sage",
+      "videoUrl": "https://www.youtube.com/watch?v=0GgRUHwB0ek",
+      "highlights": [
+        "Native Valve pak01_dir.vpk archive reader and Source 2 binary parser (.vmdl_c, .vmat_c, .vtex_c, .vanim_c).",
+        "Real-time 3D CameraBrush texture painting and 2D UV canvas dock with non-destructive multi-layer stack.",
+        "Skeletal FK/IK posing suite with Gizmo3DSharp and procedural cloth simulation (Position-Based Dynamics).",
+        "Bespoke shaders for Infernus, Lady Geist, Viscous, Vindicta, Lash, Wraith and more heroes.",
+        "One-click direct mod export pipeline compiling custom skins into pak##_dir.vpk files directly in Citadel addons."
+      ]
+    }
+  ],
+  "links": {
+    "website": "https://deadlock-playground.pages.dev",
+    "github": "https://github.com/juliancz-a/deadlock-playground",
+    "releases": "https://github.com/juliancz-a/deadlock-playground/releases",
+    "gamebanana": "https://gamebanana.com/tools/24316"
+  }
+}

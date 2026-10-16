@@ -19,3 +19,8 @@ tools/dump_runner
 .vs/
 *.user
 *.suo
+*.github/
+*.vscode/
+
+#web
+*/node_modules/

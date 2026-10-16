@@ -1,0 +1,689 @@
+---
+import Icon from './Icon.astro';
+import changelogData from '../data/changelog.json';
+
+const currentVersion = `v${changelogData.latestVersion}`;
+---
+
+<header class="app-topbar">
+  <!-- Left Brand Info -->
+  <div class="topbar-left">
+    <a href="#" class="brand-link" data-tab-target="overview">
+      <img src="/logo.svg" alt="Deadlock Playground Logo" class="brand-logo" />
+      <div class="brand-text">
+        <span class="brand-title font-display">DEADLOCK PLAYGROUND</span>
+        <span class="brand-subtitle">Source 2 Modding & Inspection Suite</span>
+      </div>
+    </a>
+    <span class="badge badge-sage" id="topbarVersionBadge">{currentVersion}</span>
+  </div>
+
+  <!-- Center Desktop Navigation Tabs -->
+  <nav class="topbar-center desktop-only" id="navTabs">
+    <button class="nav-tab active" data-tab="overview">
+      <Icon name="info-circle" size={17} />
+      <span>About</span>
+    </button>
+    <button class="nav-tab" data-tab="showcase">
+      <Icon name="photo" size={17} />
+      <span>Showcase</span>
+      <span class="tab-chip">Screenshots & Videos</span>
+    </button>
+    <button class="nav-tab" data-tab="changelog">
+      <Icon name="history" size={17} />
+      <span>Changelog</span>
+      <span class="tab-indicator pulse-dot"></span>
+    </button>
+    <button class="nav-tab" data-tab="download">
+      <Icon name="download" size={17} />
+      <span>Download</span>
+    </button>
+  </nav>
+
+  <!-- Right Desktop Quick Links -->
+  <div class="topbar-right desktop-only">
+    <div class="quick-links">
+      <!-- GameBanana Button with official logo -->
+      <a 
+        href="https://gamebanana.com/tools/24316" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="icon-btn gb-btn" 
+        title="View on GameBanana"
+      >
+        <img src="/logo_gamebanana.jpg" alt="GameBanana" class="gb-logo-img" />
+      </a>
+
+      <!-- Discord Copy Username Button -->
+      <button 
+        id="discordCopyBtn" 
+        class="icon-btn discord-btn" 
+        title="Click to copy Discord username: juliancz_"
+        data-discord="juliancz_"
+      >
+        <Icon name="brand-discord" size={18} />
+        <span class="discord-tooltip" id="discordTooltip">Copy Discord</span>
+      </button>
+
+      <!-- GitHub Link -->
+      <a 
+        href="https://github.com/juliancz-a/deadlock-playground" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="icon-btn" 
+        title="GitHub Repository & Source"
+      >
+        <Icon name="brand-github" size={18} />
+      </a>
+    </div>
+
+    <a 
+      href="https://github.com/juliancz-a/deadlock-playground/releases/latest" 
+      target="_blank" 
+      rel="noopener noreferrer" 
+      class="btn-primary btn-nav-download"
+    >
+      <Icon name="download" size={16} />
+      <span>Download {currentVersion}</span>
+    </a>
+  </div>
+
+  <!-- Mobile Controls (Hamburger & Quick Download) -->
+  <div class="topbar-mobile mobile-only">
+    <a 
+      href="https://github.com/juliancz-a/deadlock-playground/releases/latest" 
+      target="_blank" 
+      rel="noopener noreferrer" 
+      class="btn-primary btn-mobile-dl"
+      title={`Download ${currentVersion}`}
+    >
+      <Icon name="download" size={15} />
+      <span>{currentVersion}</span>
+    </a>
+
+    <button 
+      id="hamburgerBtn" 
+      class="hamburger-btn" 
+      aria-label="Toggle navigation menu"
+      aria-expanded="false"
+    >
+      <span class="hamburger-icon" id="hamburgerIcon">
+        <Icon name="menu-2" size={22} />
+      </span>
+      <span class="close-icon" id="closeIcon" style="display: none;">
+        <Icon name="x" size={22} />
+      </span>
+    </button>
+  </div>
+</header>
+
+<!-- Mobile Drawer Backdrop Overlay -->
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+
+<!-- Mobile Navigation Dropdown Drawer -->
+<div class="mobile-drawer" id="mobileDrawer">
+  <div class="drawer-content">
+    <nav class="mobile-nav-list">
+      <button class="mobile-nav-item active" data-mobile-tab="overview">
+        <Icon name="info-circle" size={18} />
+        <span>About Deadlock Playground</span>
+      </button>
+      <button class="mobile-nav-item" data-mobile-tab="showcase">
+        <Icon name="photo" size={18} />
+        <span>Feature Showcase & Videos</span>
+        <span class="tab-chip">New</span>
+      </button>
+      <button class="mobile-nav-item" data-mobile-tab="changelog">
+        <Icon name="history" size={18} />
+        <span>Changelog & Updates</span>
+        <span class="tab-indicator pulse-dot"></span>
+      </button>
+      <button class="mobile-nav-item" data-mobile-tab="download">
+        <Icon name="download" size={18} />
+        <span>Download & Requirements</span>
+      </button>
+    </nav>
+
+    <div class="drawer-divider"></div>
+
+    <div class="drawer-links-row">
+      <a 
+        href="https://gamebanana.com/tools/24316" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="drawer-link-btn"
+      >
+        <img src="/logo_gamebanana.jpg" alt="GameBanana" class="drawer-gb-img" />
+        <span>GameBanana</span>
+      </a>
+
+      <button 
+        id="mobileDiscordBtn" 
+        class="drawer-link-btn" 
+        data-discord="juliancz_"
+      >
+        <Icon name="brand-discord" size={18} color="#818cf8" />
+        <span id="mobileDiscordText">Discord: juliancz_</span>
+      </button>
+
+      <a 
+        href="https://github.com/juliancz-a/deadlock-playground" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="drawer-link-btn"
+      >
+        <Icon name="brand-github" size={18} />
+        <span>GitHub</span>
+      </a>
+    </div>
+
+    <div class="drawer-cta">
+      <a 
+        href="https://github.com/juliancz-a/deadlock-playground/releases/latest" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="btn-primary btn-drawer-download"
+      >
+        <Icon name="download" size={18} />
+        <span>Download Deadlock Playground {currentVersion}</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<style>
+  .app-topbar {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 58px;
+    background: var(--dl-bg-sidebar);
+    border-bottom: 1px solid var(--dl-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    z-index: 100;
+    flex-shrink: 0;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .brand-logo {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 6px rgba(114, 148, 127, 0.4));
+    flex-shrink: 0;
+  }
+
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .brand-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    color: var(--dl-accent-brass);
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  .brand-subtitle {
+    font-size: 0.68rem;
+    color: var(--dl-text-dim);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  /* Desktop Nav Tabs */
+  .topbar-center {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--dl-bg-main);
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--dl-border);
+  }
+
+  .nav-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    color: var(--dl-text-muted);
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 0.825rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+  }
+
+  .nav-tab:hover {
+    color: var(--dl-text-primary);
+    background: var(--dl-bg-card);
+  }
+
+  .nav-tab.active {
+    background: var(--dl-bg-panel);
+    color: var(--dl-accent-brass);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--dl-border-light);
+  }
+
+  .tab-chip {
+    font-size: 0.65rem;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(114, 148, 127, 0.2);
+    color: var(--dl-accent-sage);
+    font-weight: 700;
+  }
+
+  .tab-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--dl-accent-gold);
+    display: inline-block;
+  }
+
+  /* Desktop Right */
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .quick-links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .icon-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: var(--dl-bg-card);
+    border: 1px solid var(--dl-border);
+    color: var(--dl-text-secondary);
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+
+  .icon-btn:hover {
+    background: var(--dl-bg-card-hover);
+    border-color: var(--dl-accent-sage);
+    color: var(--dl-accent-brass);
+    transform: translateY(-1px);
+  }
+
+  .gb-logo-img {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    object-fit: cover;
+  }
+
+  .discord-btn {
+    color: #818cf8;
+  }
+  .discord-btn:hover {
+    border-color: #818cf8;
+    color: #a5b4fc;
+  }
+
+  .discord-tooltip {
+    position: absolute;
+    bottom: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #111827;
+    border: 1px solid var(--dl-border-light);
+    color: var(--dl-text-primary);
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 60;
+  }
+  .discord-btn:hover .discord-tooltip {
+    opacity: 1;
+  }
+
+  /* Mobile Controls */
+  .mobile-only {
+    display: none;
+  }
+
+  .topbar-mobile {
+    align-items: center;
+    gap: 10px;
+  }
+
+  .btn-mobile-dl {
+    padding: 6px 12px;
+    font-size: 0.775rem;
+    gap: 5px;
+  }
+
+  .hamburger-btn {
+    width: 36px;
+    height: 36px;
+    background: var(--dl-bg-card);
+    border: 1px solid var(--dl-border);
+    border-radius: 6px;
+    color: var(--dl-text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+  .hamburger-btn:hover {
+    background: var(--dl-bg-card-hover);
+    border-color: var(--dl-accent-sage);
+  }
+
+  /* Mobile Backdrop Overlay */
+  .drawer-backdrop {
+    display: none;
+    position: fixed;
+    top: 58px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 90;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+
+  .drawer-backdrop.active {
+    display: block;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Mobile Drawer Dropdown */
+  .mobile-drawer {
+    position: fixed;
+    top: 58px;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    background: var(--dl-bg-sidebar);
+    border-bottom: 1px solid var(--dl-border-light);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
+    max-height: 0;
+    opacity: 0;
+    pointer-events: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, padding 0.25s ease;
+    z-index: 95;
+    padding: 0 16px;
+  }
+
+  .mobile-drawer.open {
+    max-height: calc(100dvh - 58px);
+    opacity: 1;
+    pointer-events: auto;
+    padding: 16px;
+  }
+
+  .drawer-content {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .mobile-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--dl-bg-card);
+    border: 1px solid var(--dl-border);
+    border-radius: 6px;
+    color: var(--dl-text-secondary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-align: left;
+    transition: all 0.15s ease;
+  }
+
+  .mobile-nav-item:hover {
+    background: var(--dl-bg-card-hover);
+    color: var(--dl-accent-brass);
+    border-color: var(--dl-border-light);
+  }
+
+  .mobile-nav-item.active {
+    background: var(--dl-bg-panel);
+    border-color: var(--dl-accent-sage);
+    color: var(--dl-accent-brass);
+  }
+
+  .drawer-divider {
+    height: 1px;
+    background: var(--dl-border);
+  }
+
+  .drawer-links-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .drawer-link-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--dl-bg-main);
+    border: 1px solid var(--dl-border);
+    border-radius: 6px;
+    padding: 8px 6px;
+    color: var(--dl-text-secondary);
+    font-size: 0.775rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+  .drawer-link-btn:hover {
+    border-color: var(--dl-accent-sage);
+    color: var(--dl-text-primary);
+  }
+
+  .drawer-gb-img {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    object-fit: cover;
+  }
+
+  .btn-drawer-download {
+    width: 100%;
+    justify-content: center;
+    padding: 10px;
+    font-size: 0.875rem;
+  }
+
+  /* Responsive Breakpoint (<= 860px) */
+  @media (max-width: 860px) {
+    .desktop-only {
+      display: none !important;
+    }
+    .mobile-only {
+      display: flex !important;
+    }
+    .brand-subtitle {
+      display: none;
+    }
+    .brand-title {
+      font-size: 0.95rem;
+    }
+    .app-topbar {
+      padding: 0 14px;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .btn-mobile-dl span {
+      display: none;
+    }
+    .btn-mobile-dl {
+      padding: 6px 10px;
+    }
+    #topbarVersionBadge {
+      display: none;
+    }
+  }
+
+  @media (max-width: 380px) {
+    .drawer-links-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  // Discord copy username handler
+  const discordBtn = document.getElementById('discordCopyBtn');
+  const tooltip = document.getElementById('discordTooltip');
+  const mobileDiscordBtn = document.getElementById('mobileDiscordBtn');
+  const mobileDiscordText = document.getElementById('mobileDiscordText');
+
+  function handleDiscordCopy(btn: HTMLElement | null, textElem: HTMLElement | null, defaultText: string) {
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const username = btn.getAttribute('data-discord') || 'juliancz_';
+      navigator.clipboard.writeText(username).then(() => {
+        if (textElem) {
+          textElem.textContent = `Copied: ${username}!`;
+          textElem.style.color = '#72947f';
+          setTimeout(() => {
+            textElem.textContent = defaultText;
+            textElem.style.color = '';
+          }, 2200);
+        }
+      });
+    });
+  }
+
+  handleDiscordCopy(discordBtn, tooltip, 'Copy Discord');
+  handleDiscordCopy(mobileDiscordBtn, mobileDiscordText, 'Discord: juliancz_');
+
+  // Hamburger Menu Drawer Controller
+  const hamburgerBtn = document.getElementById('hamburgerBtn');
+  const mobileDrawer = document.getElementById('mobileDrawer');
+  const drawerBackdrop = document.getElementById('drawerBackdrop');
+  const hamburgerIcon = document.getElementById('hamburgerIcon');
+  const closeIcon = document.getElementById('closeIcon');
+
+  function toggleMobileMenu() {
+    if (!mobileDrawer || !hamburgerBtn) return;
+    const isOpen = mobileDrawer.classList.toggle('open');
+    if (drawerBackdrop) {
+      drawerBackdrop.classList.toggle('active', isOpen);
+    }
+    // Prevent background scrolling while the mobile menu drawer is open
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+    hamburgerBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (hamburgerIcon) hamburgerIcon.style.display = isOpen ? 'none' : 'inline-block';
+    if (closeIcon) closeIcon.style.display = isOpen ? 'inline-block' : 'none';
+  }
+
+  function closeMobileMenu() {
+    if (!mobileDrawer || !hamburgerBtn) return;
+    mobileDrawer.classList.remove('open');
+    if (drawerBackdrop) {
+      drawerBackdrop.classList.remove('active');
+    }
+    document.body.style.overflow = '';
+    hamburgerBtn.setAttribute('aria-expanded', 'false');
+    if (hamburgerIcon) hamburgerIcon.style.display = 'inline-block';
+    if (closeIcon) closeIcon.style.display = 'none';
+  }
+
+  if (hamburgerBtn) {
+    hamburgerBtn.addEventListener('click', toggleMobileMenu);
+  }
+
+  if (drawerBackdrop) {
+    drawerBackdrop.addEventListener('click', closeMobileMenu);
+  }
+
+  // Mobile Drawer Tab Switcher
+  const mobileNavItems = document.querySelectorAll('.mobile-nav-item');
+  mobileNavItems.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.getAttribute('data-mobile-tab');
+      if (tabId) {
+        // Trigger desktop nav tab click to synchronize state
+        const targetDesktopTab = document.querySelector(`.nav-tab[data-tab="${tabId}"]`) as HTMLElement;
+        if (targetDesktopTab) {
+          targetDesktopTab.click();
+        }
+        // Update active class on mobile list
+        mobileNavItems.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        closeMobileMenu();
+      }
+    });
+  });
+
+  // Close drawer when clicking outside or pressing Escape
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (mobileDrawer?.classList.contains('open') && 
+        !mobileDrawer.contains(target) && 
+        !hamburgerBtn?.contains(target)) {
+      closeMobileMenu();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMobileMenu();
+  });
+</script>

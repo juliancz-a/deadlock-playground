@@ -1,0 +1,237 @@
+---
+import Icon from './Icon.astro';
+import changelogData from '../data/changelog.json';
+
+const currentVersion = `v${changelogData.latestVersion}`;
+---
+
+<div id="inspectModal" class="modal-backdrop" style="display: none;">
+  <div class="modal-card card-panel">
+    <div class="modal-header">
+      <div class="header-left">
+        <span id="modalCategory" class="badge badge-sage">Category</span>
+        <h3 id="modalTitle" class="modal-title font-heading">Feature Title</h3>
+      </div>
+      <button id="modalCloseBtn" class="close-btn" title="Close">
+        <Icon name="x" size={18} />
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Full-Resolution Screenshot Preview -->
+      <div class="modal-preview-frame">
+        <img id="modalScreenshotImg" src="" alt="Feature Screenshot" class="modal-screenshot" />
+      </div>
+
+      <!-- Feature Deep Dive -->
+      <div class="modal-details-box">
+        <h4 class="font-heading">Technical Architecture & In-Engine Capability</h4>
+        <p id="modalDetailsText">Detailed description goes here...</p>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="footer-left">
+        <span class="badge badge-gold">Deadlock Playground {currentVersion}</span>
+      </div>
+      <button id="modalCloseBottomBtn" class="btn-secondary">
+        <span>Close Preview</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .modal-card {
+    width: 960px;
+    max-width: 100%;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.85);
+    border: 1px solid var(--dl-border-light);
+  }
+
+  .modal-header {
+    padding: 14px 20px;
+    background: var(--dl-bg-panel);
+    border-bottom: 1px solid var(--dl-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .modal-title {
+    font-size: 1.25rem;
+    color: var(--dl-accent-brass);
+  }
+
+  .close-btn {
+    background: transparent;
+    border: none;
+    color: var(--dl-text-muted);
+    padding: 6px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .close-btn:hover {
+    color: var(--dl-text-primary);
+    background: var(--dl-bg-card-hover);
+  }
+
+  .modal-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  .modal-preview-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #090e0c;
+    border: 1px solid var(--dl-border);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-screenshot {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #090e0c;
+  }
+
+  .modal-details-box {
+    background: var(--dl-bg-main);
+    padding: 14px 18px;
+    border-radius: 6px;
+    border: 1px solid var(--dl-border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .modal-details-box h4 {
+    font-size: 0.85rem;
+    color: var(--dl-accent-sage);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .modal-details-box p {
+    font-size: 0.875rem;
+    color: var(--dl-text-secondary);
+    line-height: 1.5;
+  }
+
+  .modal-footer {
+    padding: 12px 20px;
+    background: var(--dl-bg-panel);
+    border-top: 1px solid var(--dl-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  @media (max-width: 600px) {
+    .modal-backdrop {
+      padding: 10px;
+    }
+    .modal-card {
+      max-height: 96vh;
+    }
+    .modal-header, .modal-footer {
+      padding: 10px 14px;
+    }
+    .modal-details-box {
+      padding: 10px 12px;
+    }
+  }
+</style>
+
+<script>
+  const modal = document.getElementById('inspectModal');
+  const closeBtn = document.getElementById('modalCloseBtn');
+  const closeBottomBtn = document.getElementById('modalCloseBottomBtn');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalCategory = document.getElementById('modalCategory');
+  const modalDetailsText = document.getElementById('modalDetailsText');
+  const modalScreenshotImg = document.getElementById('modalScreenshotImg') as HTMLImageElement | null;
+
+  function closeModal() {
+    if (modal) modal.style.display = 'none';
+  }
+
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (closeBottomBtn) closeBottomBtn.addEventListener('click', closeModal);
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+  }
+
+  // Hook into screenshot containers and inspect buttons
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement | null;
+    const inspectBtn = target?.closest('[data-inspect-id]') as HTMLElement | null;
+    const imgContainer = target?.closest('.screenshot-image-container') as HTMLElement | null;
+
+    if (inspectBtn || imgContainer) {
+      const card = (inspectBtn || imgContainer)?.closest('.feature-card') as HTMLElement | null;
+      if (card) {
+        const title = card.querySelector('.meta-title')?.textContent || 'Feature';
+        const category = card.querySelector('.meta-category')?.textContent || 'Feature';
+        const desc = card.querySelector('.meta-desc')?.textContent || '';
+        const imgElem = card.querySelector('.screenshot-image-container') as HTMLElement | null;
+        const details = imgElem?.getAttribute('data-details') || desc;
+        const imgSrc = imgElem?.getAttribute('data-img-src') || '';
+
+        if (modalTitle) modalTitle.textContent = title;
+        if (modalCategory) modalCategory.textContent = category;
+        if (modalDetailsText) modalDetailsText.textContent = details;
+        if (modalScreenshotImg && imgSrc) {
+          modalScreenshotImg.src = imgSrc;
+          modalScreenshotImg.alt = title;
+        }
+
+        if (modal) modal.style.display = 'flex';
+      }
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
+</script>

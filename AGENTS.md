@@ -46,6 +46,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
 | **Mod Export Pipeline** | [docs/mod_export_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/mod_export_pipeline.md) | In-place VTEX interception architecture, headless `resourcecompiler.exe` invocation, automated VPK packaging, and collision-free slot allocation (`VpkIndexResolver`). |
 | **Valve / VRF Renderer Reference** | [docs/vrf_deadlock_renderer_reference.md](file:///d:/GameDev/deadlock-playground/docs/vrf_deadlock_renderer_reference.md) | Valve's Deadlock NPR toon lighting math (`citadel.slang`), `NprGain`, `NprToonDiffuse`, `NprSteppedSpecular`, and VRF shader decoding rules. |
 | **Hero Particle Editor System** | [docs/hero_particle_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_particle_editor_system.md) | VData indexing, particle picker modal, 3D stage lifecycle, Pose Tab simulation scrubbing, and 2D particle texture repainting. |
+| **Dynamic Changelog & Web Showcase** | [docs/dynamic_changelog_and_website_system.md](file:///d:/GameDev/deadlock-playground/docs/dynamic_changelog_and_website_system.md) | Astro web showcase (`web/`), `@tabler/icons`, custom theme cursor, static `/api/changelog.json` endpoint, Cloudflare Pages hosting, and Godot `ChangelogFeedService.cs` integration. |
 
 ---
 
