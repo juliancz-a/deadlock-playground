@@ -1,9 +1,27 @@
 {
-  "latestVersion": "1.0.1",
-  "publishedAt": "2026-09-29T00:00:00Z",
-  "title": "Version 1.0.1 — New Heroes & Topbar Menu",
-  "markdown": "### Version 1.0.1 — New Heroes\n\n#### New Content:\n* Added support for 6 new update heroes from `models/heroes_wip/`:\n  - Violet\n  - Baba\n  - Deadman Danny\n  - Nurse Harrow\n  - Ratking\n  - Solomon\n* Highlighted the new WIP roster in the Hero Selection menu with dedicated badges.\n* Added update topbar menu and changelog viewing modal.",
+  "latestVersion": "1.1.0-beta",
+  "publishedAt": "2026-10-16T00:00:00Z",
+  "title": "Version 1.1.0-beta — Painter Overhaul, Particle VFX Studio & Workspace (.dpp)",
+  "markdown": "### Version 1.1.0-beta — Painter Overhaul, Particle VFX Studio & Workspace\n\n#### Complete Painter Overhaul:\n* **Per-Material Native Resolution Atlases:** Loaded materials now retain their authentic native resolutions (`512x512` up to `4096x4096`), grouping character submeshes under collapsible Material Groups.\n* **Advanced Layer Stack & 8 Blend Modes:** Full GPU/CPU compositing support for Normal, Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, and Color (HSL) with per-layer opacity.\n* **New Shape & Selection Toolkits:**\n  - **3D & 2D Shape Tools:** Draw Squares/Rectangles, Circles/Ellipses, and Lines with live 3D Decal projection and customizable Fill/Stroke modes.\n  - **Selection Tools:** Added Rectangular Marquee, Freehand Lasso, Polygonal Lasso, and upgraded Magic Wand with Add (`Shift`) and Subtract (`Alt`) mask modes.\n* **Interactive 3D & 2D Transform Gizmos:** Move, scale, resize axes independently, and rotate Decals, Text Projections, and Shapes directly in the 3D Viewport and 2D UV Canvas.\n* **Fast GPU Undo/Redo & Depth-Peeling:** Instant VRAM/CPU Undo/Redo history and `Alt + Left Click` depth-peeling to select occluded submeshes.\n\n#### Source 2 Particle VFX Simulator & Editor:\n* **Deterministic 3D CPU Particle Engine:** Emulates hierarchical Source 2 `.vpcf_c` systems with child emitters, Control Point (`CP0`/`CP10`) bone sockets, trails (`C_OP_RenderTrails`), sprites (`C_OP_RenderSprites`), and 3D mesh particles (`C_OP_RenderModels`).\n* **Per-Emitter VFX Customization:** Toggle emitter visibility, scale particle Size/Radius, and adjust Alpha/Opacity in real time.\n* **Context-Aware Dynamic Color Pickers:** Automatically exposes dedicated pickers for Base Color (`m_ConstantColor`), Random Color Min/Max (`C_INIT_RandomColor`), and Interpolate Fade Color (`C_OP_ColorInterpolate`).\n* **2D Canvas Particle Texture Painting:** Paint, erase, and layer-blend particle `.vtex` textures with live 3D feedback and direct `.vpcf_c` / `.vtex_c` VPK compilation.\n\n#### Workspace Session, .dpp Projects & Extra Models:\n* **Multi-Hero Mod Workspace (`Mod Changes`):** Switch freely between Heroes, Extra Models, and Particle VFX without losing edits. Review, load, or discard staged changes from the topbar modal.\n* **Unified `.dpp` Project Files:** Save and load your entire workspace session—including all layers, blend modes, extra models, and particle overrides—into a single `.dpp` archive.\n* **Extra Models Support:** Load, preview, and paint secondary hero models, summons, weapons, and ability props.\n\n#### UI Overhaul & Official Website:\n* **Illustrated Action Buttons & Card Galleries:** Redesigned sidebar and visual picker modals with artwork cards for Heroes, Community Mods, Extra Models, and Particle VFX thumbnails.\n* **Live Changelog & VRF 20.1:** Synchronized with our new official web portal ([deadlock-playground.top](https://deadlock-playground.top/)) and upgraded to ValveResourceFormat 20.1 (`vpcf61` & shader v72 support).",
   "history": [
+    {
+      "version": "1.1.0-beta",
+      "date": "October 16, 2026",
+      "title": "Version 1.1.0-beta — Painter Overhaul, Particle VFX Studio & Workspace (.dpp)",
+      "badge": "Latest Release",
+      "badgeType": "gold",
+      "videoUrl": "",
+      "highlights": [
+        "VPK Library updated to latest release 20.1, allowing correct hero loading.",
+        "Per-material native resolution painting architecture with material-grouped submesh hierarchy.",
+        "New 3D & 2D Shape Tools (Square, Circle, Line), Selection Mask Suite (Rectangular, Lasso, Polygonal), and interactive 3D/2D Transform Gizmos for Decals, Text, and Shapes.",
+        "Deterministic 3D CPU Particle VFX Simulator & Editor: paint particle textures and customize emitter Size, Alpha, Constant Color, Random Color Min/Max, and Color Fade with direct .vpcf_c VPK export.",
+        "Multi-asset Mod Workspace Session and unified .dpp project files preserving layers, blend modes, Extra Models, and VFX across multiple heroes.",
+        "Full Extra Models support for editing hero summons, weapons, and ability props.",
+        "Redesigned UI with illustrated sidebar buttons, visual card gallery modals (Heroes, Mods, Extra Models, Particle thumbnails).",
+        "Website release."
+      ]
+    },
     {
       "version": "1.0.1",
       "date": "September 29, 2026",
