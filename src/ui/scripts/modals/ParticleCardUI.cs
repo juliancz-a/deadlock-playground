@@ -119,7 +119,8 @@ public partial class ParticleCardUI : PanelContainer
         {
             CustomMinimumSize = new Vector2(198, 140),
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            ClipContents = true
         };
         var thumbStyle = new StyleBoxFlat
         {
@@ -178,8 +179,9 @@ public partial class ParticleCardUI : PanelContainer
         var sparkles = GD.Load<Texture2D>("res://assets/icons/sparkles.svg");
         if (_thumbRect != null)
         {
+            _thumbRect.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
             _thumbRect.Texture = sparkles;
-            _thumbRect.Modulate = new Color(0.45f, 0.7f, 0.95f, 0.5f);
+            _thumbRect.Modulate = new Color(0.45f, 0.7f, 0.95f, 0.35f);
         }
     }
 
@@ -187,6 +189,7 @@ public partial class ParticleCardUI : PanelContainer
     {
         if (_thumbRect != null && thumbnail != null)
         {
+            _thumbRect.StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered;
             _thumbRect.Texture = thumbnail;
             _thumbRect.Modulate = Colors.White;
         }

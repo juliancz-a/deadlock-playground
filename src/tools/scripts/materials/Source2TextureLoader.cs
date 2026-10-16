@@ -589,12 +589,15 @@ public static class Source2TextureLoader
 
             if (res == null && basePackage != null)
             {
-                var entry = FindVtexEntry(basePackage, searchPath);
-                if (entry != null)
+                lock (basePackage)
                 {
-                    basePackage.ReadEntry(entry, out var bytes);
-                    res = new ValveResourceFormat.Resource();
-                    res.Read(new MemoryStream(bytes));
+                    var entry = FindVtexEntry(basePackage, searchPath);
+                    if (entry != null)
+                    {
+                        basePackage.ReadEntry(entry, out var bytes);
+                        res = new ValveResourceFormat.Resource();
+                        res.Read(new MemoryStream(bytes));
+                    }
                 }
             }
         }

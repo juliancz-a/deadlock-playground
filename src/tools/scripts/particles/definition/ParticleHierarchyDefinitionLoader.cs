@@ -61,12 +61,15 @@ public static class ParticleHierarchyDefinitionLoader
 
             if (res == null && basePackage != null)
             {
-                var entry = basePackage.FindEntry(compiledPath);
-                if (entry != null)
+                lock (basePackage)
                 {
-                    basePackage.ReadEntry(entry, out var bytes);
-                    res = new VrfResource();
-                    res.Read(new MemoryStream(bytes));
+                    var entry = basePackage.FindEntry(compiledPath);
+                    if (entry != null)
+                    {
+                        basePackage.ReadEntry(entry, out var bytes);
+                        res = new VrfResource();
+                        res.Read(new MemoryStream(bytes));
+                    }
                 }
             }
         }

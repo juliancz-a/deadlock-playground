@@ -102,8 +102,9 @@ public partial class ParticleStage3D : Node3D
         Camera3D camera = GetViewport()?.GetCamera3D();
         var cpRegistry = _simulator.ControlPoints;
 
-        foreach (var renderer in _renderers)
+        for (int i = 0; i < _renderers.Count; i++)
         {
+            var renderer = _renderers[i];
             if (IsInstanceValid(renderer))
             {
                 renderer.Render(camera, renderer.Instance.ControlPoints ?? cpRegistry);
@@ -1175,6 +1176,10 @@ public void RestoreAllVanillaOverrides()
         {
             if (IsInstanceValid(renderer))
             {
+                if (renderer.GetParent() != null)
+                {
+                    renderer.GetParent().RemoveChild(renderer);
+                }
                 renderer.QueueFree();
             }
         }
@@ -1184,6 +1189,10 @@ public void RestoreAllVanillaOverrides()
         {
             if (IsInstanceValid(mount))
             {
+                if (mount.GetParent() != null)
+                {
+                    mount.GetParent().RemoveChild(mount);
+                }
                 mount.QueueFree();
             }
         }

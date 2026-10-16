@@ -2062,15 +2062,33 @@ namespace DeadlockPlayground.UI
             _cursorOverlay?.QueueRedraw();
         }
 
+        private bool _isFitDeferredPending = false;
+        private int _fitDeferredRetries = 0;
+
         public void FitToView()
         {
-            if (_canvasDrawArea == null) return;
+            if (_canvasDrawArea == null || !IsInsideTree()) return;
+            if (!IsVisibleInTree() || !Visible)
+            {
+                _isFitDeferredPending = false;
+                _fitDeferredRetries = 0;
+                return;
+            }
+
             Vector2 viewSize = _canvasDrawArea.Size;
             if (viewSize.X <= 10 || viewSize.Y <= 10)
             {
-                CallDeferred(nameof(FitToView));
+                if (!_isFitDeferredPending && _fitDeferredRetries < 2)
+                {
+                    _isFitDeferredPending = true;
+                    _fitDeferredRetries++;
+                    CallDeferred(nameof(DeferredFitToView));
+                }
                 return;
             }
+
+            _isFitDeferredPending = false;
+            _fitDeferredRetries = 0;
 
             int atlasW = _layerManager?.CanvasSize.X ?? 2048;
             int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
@@ -2089,6 +2107,12 @@ namespace DeadlockPlayground.UI
             _wireframeOverlay?.QueueRedraw();
             _cursorOverlay?.QueueRedraw();
             _canvasDrawArea.QueueRedraw();
+        }
+
+        private void DeferredFitToView()
+        {
+            _isFitDeferredPending = false;
+            FitToView();
         }
     }
 }

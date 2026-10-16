@@ -60,7 +60,7 @@ public sealed class ChangelogPayload
 /// </summary>
 public static class ChangelogFeedService
 {
-    public const string DefaultApiUrl = "https://deadlock-playground.pages.dev/api/changelog.json";
+    public const string DefaultApiUrl = "https://deadlock-playground.top/api/changelog.json";
     public const string CacheFileName = "changelog_cache.json";
     public const string UserAgentHeader = "DeadlockPlayground-Client";
 
@@ -163,7 +163,7 @@ public static class ChangelogFeedService
             IsFromCache = false,
             Links = new Dictionary<string, string>
             {
-                ["website"] = "https://deadlock-playground.pages.dev",
+                ["website"] = "https://deadlock-playground.top/",
                 ["github"] = "https://github.com/juliancz-a/deadlock-playground",
                 ["gamebanana"] = "https://gamebanana.com/tools/24316"
             }

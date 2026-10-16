@@ -22,13 +22,13 @@ const currentVersion = `v${changelogData.latestVersion}`;
 
       <div class="download-actions">
         <a 
-          href="https://github.com/juliancz-a/deadlock-playground/releases/latest" 
+          href={`https://github.com/juliancz-a/deadlock-playground/releases/download/${currentVersion}/deadlock-playground-${currentVersion}.7z`} 
           target="_blank" 
           rel="noopener noreferrer" 
           class="btn-primary btn-large"
         >
           <Icon name="download" size={20} />
-          <span>Download DeadlockPlayground-{currentVersion}-win-x64.zip</span>
+          <span>Download deadlock-playground-{currentVersion}.7z</span>
         </a>
 
         <div class="download-secondary-row">
