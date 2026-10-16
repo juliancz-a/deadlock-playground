@@ -439,6 +439,11 @@ namespace DeadlockPlayground.Painter
 
             if (ShapeType == CanvasShapeType.Line)
             {
+                if (StrokeWidth > 1.0f)
+                {
+                    canvas.DrawCircle(LineStart, StrokeWidth * 0.5f, strokePreview);
+                    canvas.DrawCircle(LineEnd, StrokeWidth * 0.5f, strokePreview);
+                }
                 canvas.DrawLine(LineStart, LineEnd, strokePreview, StrokeWidth, antialiased: true);
                 canvas.DrawLine(LineStart, LineEnd, accentBorder, 1.5f / zoom, antialiased: true);
 

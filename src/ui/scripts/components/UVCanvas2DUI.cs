@@ -754,6 +754,8 @@ namespace DeadlockPlayground.UI
                 }
                 _canvasDrawArea?.QueueRedraw();
             }
+
+            EmitSignal(SignalName.VisibilityToggled, isVisible);
         }
 
         public void ToggleVisibility()
@@ -1463,15 +1465,23 @@ namespace DeadlockPlayground.UI
 
                         if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null)
                         {
+                            bool isCurrentText = _painter.ToolMode == BrushToolMode.Text;
                             if (_painter.ProjectionGizmo.IsActive)
                             {
-                                var handle = _painter.ProjectionGizmo.HitTest(atlasPx, _zoom);
-                                if (handle != ProjectionGizmoHandle.None)
+                                if (_painter.ProjectionGizmo.IsText == isCurrentText)
                                 {
-                                    _painter.ProjectionGizmo.Is3DProjection = false;
-                                    _painter.ProjectionGizmo.StartHandleDrag(handle, atlasPx);
-                                    canvas.AcceptEvent();
-                                    return;
+                                    var handle = _painter.ProjectionGizmo.HitTest(atlasPx, _zoom);
+                                    if (handle != ProjectionGizmoHandle.None)
+                                    {
+                                        _painter.ProjectionGizmo.Is3DProjection = false;
+                                        _painter.ProjectionGizmo.StartHandleDrag(handle, atlasPx);
+                                        canvas.AcceptEvent();
+                                        return;
+                                    }
+                                }
+                                else
+                                {
+                                    _painter.CancelActiveProjectionGizmo();
                                 }
                             }
 
@@ -1482,7 +1492,7 @@ namespace DeadlockPlayground.UI
                                 if (decalTex != null)
                                 {
                                     float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
-                                    float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                                    float scale = _painter.DecalStamper?.DecalScale ?? 0.25f;
                                     _painter.ProjectionGizmo.Activate(atlasPx, decalTex, scale, rot, isText: false, atlasSize);
                                     _painter.ProjectionGizmo.Is3DProjection = false;
                                     _painter.ProjectionGizmo.StartHandleDrag(ProjectionGizmoHandle.Body, atlasPx);
