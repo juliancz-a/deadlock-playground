@@ -1,0 +1,220 @@
+---
+import '../styles/global.css';
+import Navbar from '../components/Navbar.astro';
+import OverviewView from '../components/OverviewView.astro';
+import ShowcaseView from '../components/ShowcaseView.astro';
+import ChangelogView from '../components/ChangelogView.astro';
+import DownloadView from '../components/DownloadView.astro';
+import InspectModal from '../components/InspectModal.astro';
+import changelogData from '../data/changelog.json';
+
+const currentVersion = `v${changelogData.latestVersion}`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deadlock Playground {currentVersion} — 3D Posing, GPU Painting & Source 2 Modding Suite</title>
+    <meta 
+      name="description" 
+      content="A comprehensive 3D character posing, real-time GPU texture painting, and model inspection suite for Valve's Deadlock. Direct VPK mod compilation into Citadel addons." 
+    />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <meta property="og:title" content={`Deadlock Playground ${currentVersion} — Source 2 Modding Suite`} />
+    <meta property="og:description" content="Direct Source 2 VPK Ingestion, GPU 3D painting, IK posing, and one-click Citadel mod export." />
+    <meta property="og:image" content="https://img.youtube.com/vi/0GgRUHwB0ek/maxresdefault.jpg" />
+    <meta name="theme-color" content="#0c100e" />
+  </head>
+  <body>
+    <div class="app-workspace">
+      <!-- Top Navigation Bar -->
+      <Navbar />
+
+      <!-- Viewport Stage (Tabs container) -->
+      <main class="app-viewport">
+        <section id="view-overview" class="view-panel active">
+          <OverviewView />
+        </section>
+
+        <section id="view-showcase" class="view-panel">
+          <ShowcaseView />
+        </section>
+
+        <section id="view-changelog" class="view-panel">
+          <ChangelogView />
+        </section>
+
+        <section id="view-download" class="view-panel">
+          <DownloadView />
+        </section>
+      </main>
+
+      <!-- Bottom Status Bar -->
+      <footer class="app-statusbar">
+        <div class="status-left">
+          <span class="status-dot"></span>
+          <span>Cloud API Active: <span class="font-code">/api/changelog.json</span></span>
+        </div>
+        <div class="status-right">
+          <span>Made by <span class="font-code">Julian (juliancz-a) :P</span></span>
+          <span class="status-divider">•</span>
+          <span>Engine: <span class="font-code">Godot 4.7.2 .NET / .NET 10</span></span>
+        </div>
+      </footer>
+
+      <!-- Feature Deep Dive Modal -->
+      <InspectModal />
+    </div>
+
+    <style>
+      .app-workspace {
+        width: 100%;
+        max-width: 100%;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--dl-bg-main);
+        overflow: hidden;
+      }
+
+      .app-viewport {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .view-panel {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        transform: translateY(4px);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .view-panel.active {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+        z-index: 10;
+      }
+
+      .app-statusbar {
+        height: 28px;
+        background: #090e0c;
+        border-top: 1px solid var(--dl-border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px;
+        font-size: 0.725rem;
+        color: var(--dl-text-dim);
+        flex-shrink: 0;
+        z-index: 40;
+      }
+
+      .status-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--dl-accent-sage);
+        box-shadow: 0 0 8px var(--dl-accent-sage);
+      }
+
+      .status-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .status-divider {
+        color: var(--dl-border-light);
+      }
+
+      @media (max-width: 900px) {
+        .app-workspace {
+          width: 100%;
+          max-width: 100%;
+          height: auto;
+          min-height: 100dvh;
+          overflow: visible; /* Allows sticky topbar to stick to viewport */
+        }
+        .app-viewport {
+          position: static;
+          overflow: visible;
+          width: 100%;
+          max-width: 100%;
+        }
+        .view-panel {
+          position: static;
+          transform: none;
+          display: none;
+          width: 100%;
+          max-width: 100%;
+        }
+        .view-panel.active {
+          display: flex;
+        }
+        .app-statusbar {
+          display: none;
+        }
+      }
+    </style>
+
+    <script>
+      // Tab Switching Architecture
+      const navButtons = document.querySelectorAll('.nav-tab');
+      const viewPanels = document.querySelectorAll('.view-panel');
+
+      function switchTab(tabId: string) {
+        navButtons.forEach((btn) => {
+          if (btn.getAttribute('data-tab') === tabId) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+
+        viewPanels.forEach((panel) => {
+          if (panel.id === `view-${tabId}`) {
+            panel.classList.add('active');
+          } else {
+            panel.classList.remove('active');
+          }
+        });
+
+        // Update URL hash without jumping
+        history.replaceState(null, '', `#${tabId}`);
+      }
+
+      navButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tabId = btn.getAttribute('data-tab');
+          if (tabId) switchTab(tabId);
+        });
+      });
+
+      // Handle brand logo click
+      document.querySelector('[data-tab-target="overview"]')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchTab('overview');
+      });
+
+      // Initial tab from hash if present
+      const initialHash = window.location.hash.replace('#', '');
+      if (initialHash && ['overview', 'showcase', 'changelog', 'download'].includes(initialHash)) {
+        switchTab(initialHash);
+      }
+    </script>
+  </body>
+</html>

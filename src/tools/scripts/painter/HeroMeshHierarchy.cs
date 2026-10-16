@@ -40,6 +40,14 @@ namespace DeadlockPlayground.Painter
         public bool PreserveOriginal { get; set; } = false;
     }
 
+    public class MaterialGroup
+    {
+        public string MaterialKey { get; set; }
+        public string DisplayName { get; set; }
+        public List<SubmeshNodeInfo> Submeshes { get; } = new();
+        public bool IsExpanded { get; set; } = false;
+    }
+
     public partial class HeroMeshHierarchy : Node
     {
         [Signal] public delegate void HierarchyChangedEventHandler();
@@ -47,6 +55,9 @@ namespace DeadlockPlayground.Painter
 
         private readonly List<SubmeshNodeInfo> _submeshes = new();
         public IReadOnlyList<SubmeshNodeInfo> Submeshes => _submeshes;
+
+        private readonly List<MaterialGroup> _materialGroups = new();
+        public IReadOnlyList<MaterialGroup> MaterialGroups => _materialGroups;
 
         private SubmeshNodeInfo _activeTarget;
         public SubmeshNodeInfo ActiveTarget => _activeTarget;
@@ -69,6 +80,7 @@ namespace DeadlockPlayground.Painter
             HeroRoot = heroNode;
             _currentHeroName = heroNode?.Name.ToString().ToLowerInvariant() ?? string.Empty;
             _submeshes.Clear();
+            _materialGroups.Clear();
             _preSoloVisibility.Clear();
             _isAnySoloed = false;
             _activeTarget = null;
@@ -245,6 +257,7 @@ namespace DeadlockPlayground.Painter
 
             // 3. Preprocess meshes: Ensure non-zero lightmap hints for GPU Texture Painter atlas packing
             EnsureLightmapUv2Coordinates();
+            RebuildMaterialGroups();
 
             // 4. Select body or first submesh as default target
             if (_submeshes.Count > 0)
@@ -276,9 +289,43 @@ namespace DeadlockPlayground.Painter
             return false;
         }
 
+        public static bool IsAuthenticHeroMesh(MeshInstance3D mi)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi)) return false;
+            if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) return false;
+            if (mi.Mesh is ImmediateMesh) return false;
+
+            string name = mi.Name.ToString();
+            if (name.StartsWith("@")) return false;
+            string lowerName = name.ToLowerInvariant();
+            if (lowerName.Contains("picker") || lowerName.Contains("handle") || lowerName.Contains("visual") ||
+                lowerName.Contains("gizmo") || lowerName.Contains("marker") || lowerName.Contains("preview") ||
+                lowerName.Contains("tip") || lowerName.Contains("pole") || lowerName.Contains("outline"))
+            {
+                return false;
+            }
+
+            // Verify the node is an authentic descendant and not part of an editor/gizmo tree
+            Node parent = mi.GetParent();
+            while (parent != null)
+            {
+                string pName = parent.Name.ToString();
+                if (pName.StartsWith("@")) return false;
+                string pLower = pName.ToLowerInvariant();
+                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual"))
+                {
+                    return false;
+                }
+                parent = parent.GetParent();
+            }
+
+            return true;
+        }
+
         public static Material GetAuthenticMaterial(MeshInstance3D mi, int surfaceIndex)
         {
-            if (mi == null) return null;
+            if (mi == null || !GodotObject.IsInstanceValid(mi) || mi.Mesh == null) return null;
+            if (surfaceIndex < 0 || mi.Mesh.GetSurfaceCount() <= surfaceIndex) return null;
 
             if (mi.HasMeta($"OriginalMaterial_{surfaceIndex}"))
             {
@@ -289,7 +336,7 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            var baseMat = mi.Mesh?.SurfaceGetMaterial(surfaceIndex);
+            var baseMat = mi.Mesh.SurfaceGetMaterial(surfaceIndex);
             if (baseMat != null && !IsToonMaterial(baseMat))
             {
                 return baseMat;
@@ -583,17 +630,19 @@ namespace DeadlockPlayground.Painter
 
         private static void CollectCandidateMeshesRecursive(Node node, List<MeshInstance3D> results)
         {
-            if (node is MeshInstance3D mi && mi.Mesh != null)
+            if (node is MeshInstance3D mi && IsAuthenticHeroMesh(mi))
             {
-                string lowerName = mi.Name.ToString().ToLowerInvariant();
-                if (!lowerName.Contains("marker") && !lowerName.Contains("gizmo") && !lowerName.Contains("preview"))
-                {
-                    results.Add(mi);
-                }
+                results.Add(mi);
             }
 
             foreach (Node child in node.GetChildren())
             {
+                string childName = child.Name.ToString();
+                if (childName.StartsWith("@")) continue;
+                string childLower = childName.ToLowerInvariant();
+                if (childLower.Contains("picker") || childLower.Contains("gizmo") || childLower.Contains("handle") || childLower.Contains("visual"))
+                    continue;
+
                 CollectCandidateMeshesRecursive(child, results);
             }
         }
@@ -752,9 +801,84 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        public void MarkMaterialDirty(string matKey, SkinLayerManager layerManager = null)
+        {
+            if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
+            string normKey = matKey.ToLowerInvariant().Trim();
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null || sm.IsDirty) continue;
+                string smMatKey = layerManager != null ? layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) : null;
+                if ((!string.IsNullOrEmpty(smMatKey) && string.Equals(smMatKey, normKey, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(sm.MaterialName, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sm.OriginalVmatPath, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(sm.DisplayName) && normKey.Contains(sm.DisplayName.ToLowerInvariant())) ||
+                    (!string.IsNullOrEmpty(sm.OriginalVmatPath) && normKey.Contains(System.IO.Path.GetFileNameWithoutExtension(sm.OriginalVmatPath).ToLowerInvariant())))
+                {
+                    sm.IsDirty = true;
+                    sm.IsSelected = true;
+                }
+            }
+        }
+
+        public void ClearMaterialDirty(string matKey, SkinLayerManager layerManager = null)
+        {
+            if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
+            string normKey = matKey.ToLowerInvariant().Trim();
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null) continue;
+                string smMatKey = layerManager != null ? layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) : null;
+                if ((!string.IsNullOrEmpty(smMatKey) && string.Equals(smMatKey, normKey, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(sm.MaterialName, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(sm.OriginalVmatPath, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(sm.OriginalVmatPath) && normKey.Contains(System.IO.Path.GetFileNameWithoutExtension(sm.OriginalVmatPath).ToLowerInvariant())))
+                {
+                    sm.IsDirty = false;
+                }
+            }
+            NotifyHierarchyChanged();
+        }
+
         public List<SubmeshNodeInfo> GetDirtySubmeshes()
         {
             return _submeshes.FindAll(s => s.IsDirty);
+        }
+
+        public void ReconcileDirtyStates(SkinLayerManager layerManager)
+        {
+            if (layerManager == null || _submeshes == null) return;
+            foreach (var sm in _submeshes)
+            {
+                if (sm.Mesh == null) continue;
+                string matKey = layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex);
+                if (layerManager.HasPaintStrokes(matKey))
+                {
+                    sm.IsDirty = true;
+                }
+                // Never overwrite sm.IsDirty back to false if it was already true!
+            }
+        }
+
+        public SubmeshNodeInfo FindSubmesh(MeshInstance3D mesh)
+        {
+            if (mesh == null) return null;
+            for (int i = 0; i < _submeshes.Count; i++)
+            {
+                if (_submeshes[i].Mesh == mesh) return _submeshes[i];
+            }
+            return null;
+        }
+
+        public SubmeshNodeInfo FindSubmesh(MeshInstance3D mesh, int surfaceIndex)
+        {
+            if (mesh == null) return null;
+            for (int i = 0; i < _submeshes.Count; i++)
+            {
+                if (_submeshes[i].Mesh == mesh && (surfaceIndex < 0 || _submeshes[i].SurfaceIndex == surfaceIndex))
+                    return _submeshes[i];
+            }
+            return FindSubmesh(mesh);
         }
 
         public void SelectTarget(SubmeshNodeInfo info, int surfaceIndex = -1)
@@ -788,10 +912,13 @@ namespace DeadlockPlayground.Painter
                         if (_preSoloVisibility.TryGetValue(s.Mesh, out bool prevVis))
                         {
                             s.Mesh.Visible = prevVis;
+                            if (prevVis) s.Mesh.Layers |= (1u << 20);
+                            else s.Mesh.Layers &= ~(1u << 20);
                         }
                         else
                         {
                             s.Mesh.Visible = true;
+                            s.Mesh.Layers |= (1u << 20);
                         }
                     }
                 }
@@ -815,10 +942,19 @@ namespace DeadlockPlayground.Painter
 
                 foreach (var s in _submeshes)
                 {
-                    s.IsSoloed = (s == info);
+                    bool isTarget = (s == info);
+                    s.IsSoloed = isTarget;
                     if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                     {
-                        s.Mesh.Visible = (s == info);
+                        s.Mesh.Visible = isTarget;
+                        if (isTarget)
+                        {
+                            s.Mesh.Layers |= (1u << 20);
+                        }
+                        else
+                        {
+                            s.Mesh.Layers &= ~(1u << 20); // remove from brush camera culling
+                        }
                     }
                 }
                 _isAnySoloed = true;
@@ -826,6 +962,50 @@ namespace DeadlockPlayground.Painter
             }
 
             NotifyHierarchyChanged();
+        }
+
+        public void RebuildMaterialGroups()
+        {
+            _materialGroups.Clear();
+            var map = new Dictionary<string, MaterialGroup>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var sub in _submeshes)
+            {
+                string key = GetSubmeshMaterialKey(sub);
+                if (string.IsNullOrWhiteSpace(key)) key = "default_material";
+
+                if (!map.TryGetValue(key, out var group))
+                {
+                    string display = CleanName(key);
+                    group = new MaterialGroup
+                    {
+                        MaterialKey = key,
+                        DisplayName = display
+                    };
+                    map[key] = group;
+                    _materialGroups.Add(group);
+                }
+                group.Submeshes.Add(sub);
+            }
+        }
+
+        public string GetSubmeshMaterialKey(SubmeshNodeInfo info)
+        {
+            if (info == null) return string.Empty;
+            if (!string.IsNullOrWhiteSpace(info.OriginalVmatPath))
+            {
+                return Path.GetFileNameWithoutExtension(info.OriginalVmatPath).ToLowerInvariant().Trim();
+            }
+            if (!string.IsNullOrWhiteSpace(info.MaterialName))
+            {
+                return info.MaterialName.ToLowerInvariant().Trim();
+            }
+            if (info.Mesh != null && GodotObject.IsInstanceValid(info.Mesh) && info.Mesh.HasMeta("OriginalVmatPath"))
+            {
+                string vmat = info.Mesh.GetMeta("OriginalVmatPath").AsString();
+                if (!string.IsNullOrWhiteSpace(vmat)) return Path.GetFileNameWithoutExtension(vmat).ToLowerInvariant().Trim();
+            }
+            return info.RawName.ToLowerInvariant().Trim();
         }
 
         public void ShowAll()
@@ -857,6 +1037,24 @@ namespace DeadlockPlayground.Painter
                 {
                     s.Mesh.Visible = !s.IsAccessory;
                     _preSoloVisibility[s.Mesh] = !s.IsAccessory;
+                }
+            }
+            NotifyHierarchyChanged();
+        }
+
+        public void HideAll()
+        {
+            _isAnySoloed = false;
+            _preSoloVisibility.Clear();
+
+            foreach (var s in _submeshes)
+            {
+                s.IsSoloed = false;
+                if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
+                {
+                    s.Mesh.Visible = false;
+                    _preSoloVisibility[s.Mesh] = false;
+                    s.Mesh.Layers &= ~(1u << 20);
                 }
             }
             NotifyHierarchyChanged();

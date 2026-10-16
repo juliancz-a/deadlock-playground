@@ -319,7 +319,7 @@ custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
 toggle_mode = true
-text = "Pose"
+text = "Player"
 
 [node name="SceneButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1164696300]
 custom_minimum_size = Vector2(0, 30)
@@ -858,7 +858,6 @@ An open-source, community-driven tool designed to view, inspect, pose, and paint
 • [b]SVG Icons:[/b] [color=#4DA3FF][url=https://github.com/Voxybunsl/at-icons]at-icons (MIT License)[/url][/color] by Voxybuns.
 • [b]GPU Texture Painter plugin:[/b] [color=#4DA3FF][url=https://github.com/maantho/gpu-texture-painter]GPU Texture Painter (MIT License)[/url][/color] by maantho.
 • [b]Gizmo3D plugin:[/b] [color=#4DA3FF][url=https://github.com/chrisizeful/Gizmo3D]Gizmo3D (MIT License)[/url][/color] by chrisizeful.
-• [b]Intro Background image:[/b] Artwork by [color=#4DA3FF][url=https://ayeaka.itch.io/ayeaka]ayeaka[/url][/color].
 • [b]Project Source:[/b] Check out the code and contribute on [color=#4DA3FF][url=https://github.com/juliancz-a/deadlock-playground]GitHub[/url][/color].
 
 [font_size=20][b]Legal Disclaimer & Intellectual Property[/b][/font_size]

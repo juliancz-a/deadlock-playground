@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Tools;
+using DeadlockPlayground.Workspace;
 
 public partial class StudioUIManager : CanvasLayer
 {
@@ -31,7 +32,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private CharacterTabUI _tabCharacter;
     [Export] private BonesTabUI _tabBones;
     [Export] private CameraTabUI _tabCamera;
-    [Export] private PoseTabUI _tabPose;
+    [Export] private PlayerTabUI _tabPlayer;
     [Export] private SceneTabUI _tabScene;
     [Export] private EffectsTabUI _tabEffects;
     [Export] private LightingTabUI _tabLighting;
@@ -69,6 +70,11 @@ public partial class StudioUIManager : CanvasLayer
 
     private Control _unreadBadge;
     private CharacterIKManager _currentIKManager;
+    private bool _isParticleActive = false;
+    private Button _btnModChanges;
+    private ModChangesModalUI _modChangesModal;
+    private PanelContainer _unsavedChangesModal;
+    private FileDialog _unsavedSaveDialog;
 
     // Services
     private GamePathManager _pathManager;
@@ -105,6 +111,7 @@ public partial class StudioUIManager : CanvasLayer
     public override void _Ready()
     {
         Instance = this;
+        GetTree().AutoAcceptQuit = false;
         GetViewport().TransparentBg = false;
 
         var win = GetWindow();
@@ -149,10 +156,23 @@ public partial class StudioUIManager : CanvasLayer
 
         UpdateNewsBadgeState();
 
+        DeadlockPlayground.Particles.ParticleStage3D.OnParticleActiveStateChanged += UpdateParticleState;
+        ModWorkspaceSession.Instance.OnWorkspaceChanged += UpdateModChangesBadge;
+        UpdateModChangesBadge();
+
         PlaygroundThemeHelper.AutoDecorate(this);
 
         // Non-blocking update check on application startup
         _ = CheckUpdatesOnStartupAsync();
+    }
+
+    public override void _Notification(int what)
+    {
+        base._Notification(what);
+        if (what == NotificationWMCloseRequest)
+        {
+            HandleQuitRequested();
+        }
     }
 
     private SubViewport _worldViewport;
@@ -322,7 +342,7 @@ public partial class StudioUIManager : CanvasLayer
 
         if (@event.IsActionPressed("bones_reset_pose", exactMatch: true))
         {
-            _tabPose?.ResetAllPoses();
+            _tabPlayer?.ResetAllPoses();
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -367,6 +387,35 @@ public partial class StudioUIManager : CanvasLayer
 
         _unreadBadge ??= _btnNews?.FindChild("UnreadBadge", true, false) as Control;
 
+        var topBarHBox = GetNodeOrNull<HBoxContainer>("MainHUD/VBoxContainer/TopBar/HBoxContainer")
+                      ?? GetNodeOrNull<HBoxContainer>("MainHUD/TopBar/HBoxContainer");
+        if (topBarHBox != null && _btnModChanges == null)
+        {
+            _btnModChanges = new Button
+            {
+                Name = "ModChangesButton",
+                Text = "MOD CHANGES",
+                TooltipText = "View and manage staged mod changes across heroes, extra models, and VFX",
+                CustomMinimumSize = new Vector2(110, 28),
+                FocusMode = Control.FocusModeEnum.None
+            };
+            PlaygroundThemeHelper.MakeSecondaryButton(_btnModChanges);
+            var colus = PlaygroundThemeHelper.GetFontColus();
+            if (colus != null) _btnModChanges.AddThemeFontOverride("font", colus);
+            _btnModChanges.AddThemeFontSizeOverride("font_size", 12);
+            _btnModChanges.Pressed += OpenModChangesModal;
+
+            if (_btnNews != null && _btnNews.GetParent() == topBarHBox)
+            {
+                topBarHBox.AddChild(_btnModChanges);
+                topBarHBox.MoveChild(_btnModChanges, _btnNews.GetIndex());
+            }
+            else
+            {
+                topBarHBox.AddChild(_btnModChanges);
+            }
+        }
+
         // Tab Buttons
         _btnTabCharacter ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
                           ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/CharacterButton");
@@ -393,7 +442,7 @@ public partial class StudioUIManager : CanvasLayer
         _tabCharacter ??= _tabContentContainer?.GetNodeOrNull<CharacterTabUI>("CharacterTab");
         _tabBones ??= _tabContentContainer?.GetNodeOrNull<BonesTabUI>("BonesTab");
         _tabCamera ??= _tabContentContainer?.GetNodeOrNull<CameraTabUI>("CameraTab");
-        _tabPose ??= _tabContentContainer?.GetNodeOrNull<PoseTabUI>("PoseTab");
+        _tabPlayer ??= _tabContentContainer?.GetNodeOrNull<PlayerTabUI>("PoseTab");
         _tabScene ??= _tabContentContainer?.GetNodeOrNull<SceneTabUI>("SceneTab");
         _tabEffects ??= _tabContentContainer?.GetNodeOrNull<EffectsTabUI>("EffectsTab");
         _tabLighting ??= _tabContentContainer?.GetNodeOrNull<LightingTabUI>("LightingTab");
@@ -532,6 +581,105 @@ public partial class StudioUIManager : CanvasLayer
                 _modalsLayer.AddChild(_changelogModal);
             }
         }
+
+        _modChangesModal ??= _modalsLayer?.FindChild("ModChangesModal", true, false) as ModChangesModalUI;
+        if (_modChangesModal == null && _modalsLayer != null)
+        {
+            _modChangesModal = new ModChangesModalUI();
+            _modalsLayer.AddChild(_modChangesModal);
+        }
+        if (_modChangesModal != null)
+        {
+            _modChangesModal.ModalClosed += UpdateModalsState;
+            _modChangesModal.OnExportModRequested += () =>
+            {
+                _modChangesModal.CloseModal();
+                UpdateModalsState();
+                SwitchTab(8);
+                _tabPaint?.OpenExportModDialog();
+            };
+            _modChangesModal.OnExportHeroModRequested += (heroId, heroDisplayName) =>
+            {
+                _modChangesModal.CloseModal();
+                UpdateModalsState();
+                SwitchTab(8);
+                _tabPaint?.OpenExportModDialog(heroId, heroDisplayName);
+            };
+                _modChangesModal.OnLoadModelRequested += async (heroId, vpkPath) =>
+            {
+                _modChangesModal.CloseModal();
+                UpdateModalsState();
+                var ldr = GetVpkLoader();
+                if (ldr == null) return;
+
+                // 1. Si hay una partícula activa, cerrarla primero
+                var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+                if (stage != null && stage.HasActiveParticle)
+                {
+                    stage.UnloadActiveParticle();
+                }
+
+                // Determinar si el asset pedido está registrado como ExtraModel en el Workspace o si difiere del VMDL base del catálogo
+                var heroCatalogEntry = DeadlockPlayground.Catalog.DeadlockHeroCatalog.GetByCodename(heroId)
+                                    ?? DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(heroId);
+                string baseVmdl = heroCatalogEntry?.VmdlRelativePath?.Replace('\\', '/')?.TrimStart('/') ?? "";
+                string reqVmdl = (vpkPath ?? "").Replace('\\', '/').TrimStart('/');
+
+                bool isExtraRequest = false;
+                if (ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(heroId, out var wsHero))
+                {
+                    var wsAsset = wsHero.Assets.Find(a => string.Equals(a.VpkPath, vpkPath, StringComparison.OrdinalIgnoreCase));
+                    if (wsAsset != null)
+                    {
+                        isExtraRequest = string.Equals(wsAsset.Category, "ExtraModel", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                if (!isExtraRequest && !string.IsNullOrEmpty(baseVmdl) && !string.IsNullOrEmpty(reqVmdl))
+                {
+                    string baseNoC = baseVmdl.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? baseVmdl[..^2] : baseVmdl;
+                    string reqNoC = reqVmdl.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? reqVmdl[..^2] : reqVmdl;
+                    if (!string.Equals(baseNoC, reqNoC, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isExtraRequest = true;
+                    }
+                }
+
+                string currentLoadedHero = ldr.LastLoadedHeroEntry?.InternalCodename ?? ldr.LastLoadedHeroKey ?? "";
+
+                // 2. Si pide el Character Model base y ese mismo héroe YA está cargado en escena, no recargar!
+                if (!isExtraRequest && !ldr.IsExtraModelLoaded && ldr.CurrentHeroNode != null &&
+                    string.Equals(currentLoadedHero, heroId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                // 3. Si pide un Extra Model y ese mismo Extra Model YA está cargado en escena, no recargar!
+                if (isExtraRequest && ldr.IsExtraModelLoaded && ldr.CurrentHeroNode != null &&
+                    string.Equals(ldr.LastLoadedVmdlPath?.Replace('\\', '/'), reqVmdl, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (isExtraRequest)
+                {
+                    await ldr.LoadExtraModelAsync(vpkPath, heroId, System.IO.Path.GetFileNameWithoutExtension(vpkPath));
+                }
+                else if (heroCatalogEntry != null)
+                {
+                    await ldr.LoadHeroModelAsync(heroCatalogEntry);
+                }
+                else
+                {
+                    await ldr.LoadHeroAsync(heroId, heroId);
+                }
+            };
+            _modChangesModal.OnLoadParticleRequested += (heroId, vpcfPath) =>
+            {
+                _modChangesModal.CloseModal();
+                UpdateModalsState();
+                _tabCharacter?.LoadParticleDirectly(vpcfPath, ownerHeroId: heroId);
+            };
+        }
     }
 
     private void InitTabs()
@@ -541,7 +689,7 @@ public partial class StudioUIManager : CanvasLayer
             _tabCharacter,
             _tabBones,
             _tabCamera,
-            _tabPose,
+            _tabPlayer,
             _tabScene,
             _tabEffects,
             _tabLighting,
@@ -573,8 +721,16 @@ public partial class StudioUIManager : CanvasLayer
         }
     }
 
+    public int CurrentTabIndex => _currentTabIndex;
+
     public void SwitchTab(int tabIndex)
     {
+        if (tabIndex == 1 && _isParticleActive)
+        {
+            ShowToast("Bones tab is disabled while viewing particles");
+            return;
+        }
+
         int prevTab = _currentTabIndex;
         _currentTabIndex = tabIndex;
 
@@ -596,12 +752,22 @@ public partial class StudioUIManager : CanvasLayer
         {
             _tabPaint?.OnTabDeactivated();
             if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
+            var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+            bool hasActiveParticle = stage != null && stage.HasActiveParticle;
+
+            var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+            badge?.SetPaintingMode(false);
+
             if (_exportPanel != null)
             {
-                _exportPanel.Visible = true;
-                _exportPanel.SetFramingOverlayVisible(true);
+                _exportPanel.Visible = !hasActiveParticle;
+                _exportPanel.SetFramingOverlayVisible(!hasActiveParticle);
             }
-            _currentSkeletonGizmoManager?.SetGizmoEnabled(true);
+            if (!hasActiveParticle && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
+            {
+                bool showGizmo = (tabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+                _currentSkeletonGizmoManager.SetGizmoEnabled(showGizmo);
+            }
             _tabShading?.SetPaintingModeActive(false);
 
             if (_uvCanvasPanel != null) _uvCanvasPanel.Visible = false;
@@ -610,14 +776,21 @@ public partial class StudioUIManager : CanvasLayer
             if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
         }
-        else if (tabIndex == 8)
+      else if (tabIndex == 8)
         {
             var hero = GetVpkLoader()?.CurrentHeroNode;
             if (hero != null && _tabPaint?.CurrentHero == null)
             {
                 _tabPaint?.SetCurrentHero(hero);
             }
+            if (_uvCanvasPanel != null)
+            {
+                _uvCanvasPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.Painter, _tabPaint?.MeshHierarchy, _tabPaint?.BrushPalette);
+            }
             _tabPaint?.OnTabActivated();
+
+            var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+            badge?.SetPaintingMode(true);
 
             // Disable IK when entering paint mode
             _currentIKManager?.SetMasterIKEnabled(false);
@@ -638,12 +811,14 @@ public partial class StudioUIManager : CanvasLayer
                 _paintModExportPanel.Visible = true;
                 _paintModExportPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.MeshHierarchy, _tabPaint?.CurrentHero);
             }
-            _currentSkeletonGizmoManager?.SetGizmoEnabled(false);
+           if (_currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
+            {
+                _currentSkeletonGizmoManager.SetGizmoEnabled(false);
+            }
             _tabShading?.SetPaintingModeActive(true);
 
             if (_uvCanvasPanel != null)
             {
-                _uvCanvasPanel.Setup(_tabPaint?.LayerManager, _tabPaint?.Painter, _tabPaint?.MeshHierarchy, _tabPaint?.BrushPalette);
                 _uvCanvasPanel.SetPaintActive(_uvCanvasUserWantsOpen);
             }
             if (_painterKeymapBadge != null)
@@ -669,6 +844,11 @@ public partial class StudioUIManager : CanvasLayer
         else if (tabIndex == 6)
         {
             _tabLighting?.SyncUIToScene();
+        }
+        if (tabIndex != 8 && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
+        {
+            bool showBones = (tabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+            _currentSkeletonGizmoManager.SetGizmoEnabled(showBones);
         }
     }
 
@@ -721,7 +901,7 @@ public partial class StudioUIManager : CanvasLayer
 
         if (_btnQuit != null)
         {
-            _btnQuit.Pressed += () => GetTree().Quit();
+            _btnQuit.Pressed += HandleQuitRequested;
         }
 
         if (_btnNews != null)
@@ -847,9 +1027,12 @@ public partial class StudioUIManager : CanvasLayer
     {
         if (_btnTabBones != null)
         {
-            _btnTabBones.Disabled = !hasCharacter;
-            _btnTabBones.Modulate = hasCharacter ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
-            _btnTabBones.TooltipText = hasCharacter ? "" : "Requires an active character model";
+            bool canUseBones = hasCharacter && !_isParticleActive;
+            _btnTabBones.Disabled = !canUseBones;
+            _btnTabBones.Modulate = canUseBones ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            _btnTabBones.TooltipText = _isParticleActive 
+                ? "Bones editing is not available while viewing particles" 
+                : (hasCharacter ? "" : "Requires an active character model");
         }
 
         if (_btnTabPose != null)
@@ -871,6 +1054,53 @@ public partial class StudioUIManager : CanvasLayer
         if (!hasCharacter && (_currentTabIndex == 1 || _currentTabIndex == 3 || _currentTabIndex == 8))
         {
             SwitchTab(0);
+        }
+    }
+
+    public void UpdateParticleState(bool hasParticle)
+    {
+        _isParticleActive = hasParticle;
+        var hero = GetVpkLoader()?.CurrentHeroNode;
+        bool hasCharacter = hero != null;
+
+        if (_btnTabBones != null)
+        {
+            bool canUseBones = hasCharacter && !_isParticleActive;
+            _btnTabBones.Disabled = !canUseBones;
+            _btnTabBones.Modulate = canUseBones ? Colors.White : new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            _btnTabBones.TooltipText = _isParticleActive 
+                ? "Bones editing is not available while viewing particles" 
+                : (hasCharacter ? "" : "Requires an active character model");
+        }
+
+        if (_isParticleActive && _currentTabIndex == 1)
+        {
+            SwitchTab(3);
+        }
+    }
+
+    private void UpdateModChangesBadge()
+    {
+        if (_btnModChanges == null) return;
+        int count = ModWorkspaceSession.Instance.GetAllModifiedAssets().Count;
+        if (count > 0)
+        {
+            _btnModChanges.Text = $"MOD CHANGES ({count})";
+            _btnModChanges.Modulate = new Color(0.95f, 0.75f, 0.3f);
+        }
+        else
+        {
+            _btnModChanges.Text = "MOD CHANGES";
+            _btnModChanges.Modulate = Colors.White;
+        }
+    }
+
+    public void OpenModChangesModal()
+    {
+        if (_modChangesModal != null)
+        {
+            _modChangesModal.OpenModal();
+            UpdateModalsState();
         }
     }
 
@@ -901,10 +1131,13 @@ public partial class StudioUIManager : CanvasLayer
         var skeleton = SearchSkeleton(heroNode);
         var animPlayer = SearchAnimationPlayer(heroNode);
 
+        _currentSkeletonGizmoManager = null;
+        _currentIKManager = null;
+
         if (skeleton != null)
         {
             _tabBones?.SetSkeleton(skeleton);
-            _tabPose?.SetSkeleton(skeleton);
+            _tabPlayer?.SetSkeleton(skeleton);
 
             ProceduralClothSolver.Conform(skeleton);
 
@@ -916,10 +1149,6 @@ public partial class StudioUIManager : CanvasLayer
             };
             skeleton.AddChild(gizmoManager);
             _currentSkeletonGizmoManager = gizmoManager;
-            if (_currentTabIndex == 8)
-            {
-                gizmoManager.SetGizmoEnabled(false);
-            }
 
             if (_tabBones != null)
             {
@@ -938,11 +1167,34 @@ public partial class StudioUIManager : CanvasLayer
             gizmoManager.IKManager = ikManager;
             _currentIKManager.SetHandlesOpacity(GizmoDisplaySettings.IKHandlesOpacity);
             _tabBones?.SetIKManager(ikManager);
-            if (_currentTabIndex == 8)
+
+            bool shouldShowBones = (_currentTabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+            gizmoManager.SetGizmoEnabled(shouldShowBones);
+            if (!shouldShowBones)
             {
                 _currentIKManager.SetMasterIKEnabled(false);
                 _tabBones?.DisableMasterIK();
+                _tabBones?.SetXRay(false);
             }
+
+            // Garantizar en el siguiente frame que ningún _Ready() hijo haya reactivado los gizmos fuera del tab Bones
+            Callable.From(() =>
+            {
+                bool showNow = (_currentTabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+                if (GodotObject.IsInstanceValid(gizmoManager))
+                {
+                    gizmoManager.SetGizmoEnabled(showNow);
+                }
+                if (!showNow && GodotObject.IsInstanceValid(ikManager))
+                {
+                    ikManager.SetMasterIKEnabled(false);
+                    _tabBones?.DisableMasterIK();
+                    if (_btnQuickXRay == null || !_btnQuickXRay.ButtonPressed)
+                    {
+                        _tabBones?.SetXRay(false);
+                    }
+                }
+            }).CallDeferred();
 
             // Synchronize Weapon Bone Attachments
             SyncWeaponBoneAttachments(heroNode, skeleton);
@@ -950,7 +1202,7 @@ public partial class StudioUIManager : CanvasLayer
 
         if (animPlayer != null)
         {
-            _tabPose?.SetAnimationPlayer(animPlayer);
+            _tabPlayer?.SetAnimationPlayer(animPlayer);
         }
     }
 
@@ -1061,6 +1313,7 @@ public partial class StudioUIManager : CanvasLayer
     private void OnHeroUnloaded()
     {
         _currentIKManager = null;
+        _currentSkeletonGizmoManager = null;
         _tabCharacter?.ClearSubmeshes();
         _tabShading?.ClearHero();
         _tabPaint?.ClearHero();
@@ -1068,8 +1321,8 @@ public partial class StudioUIManager : CanvasLayer
         _tabPaint?.Painter?.ResetSession();
         _tabBones?.SetSkeleton(null);
         _tabBones?.SetIKManager(null);
-        _tabPose?.SetSkeleton(null);
-        _tabPose?.SetAnimationPlayer(null);
+        _tabPlayer?.SetSkeleton(null);
+        _tabPlayer?.SetAnimationPlayer(null);
         UpdateCharacterDependencyState(false);
     }
 
@@ -1109,6 +1362,11 @@ public partial class StudioUIManager : CanvasLayer
 
     public bool IsAnyModalOpen()
     {
+        var particleModal = _modalsLayer?.FindChild("ParticlePickerModal", true, false) as Control;
+        var heroModal = _modalsLayer?.FindChild("HeroPickerModal", true, false) as Control;
+        var extraModelModal = _modalsLayer?.FindChild("ExtraModelPickerModal", true, false) as Control;
+        var modModal = _modalsLayer?.FindChild("ModPickerModal", true, false) as Control;
+
         return (_settingsModal != null && _settingsModal.Visible)
             || (_feedbackModal != null && _feedbackModal.Visible)
             || (_aboutModal != null && _aboutModal.Visible)
@@ -1116,7 +1374,13 @@ public partial class StudioUIManager : CanvasLayer
             || (_loadingOverlay != null && _loadingOverlay.Visible)
             || (_gameFolderDialog != null && _gameFolderDialog.Visible)
             || (_saveFolderDialog != null && _saveFolderDialog.Visible)
-            || (_fallbackPathDialog != null && _fallbackPathDialog.Visible);
+            || (_fallbackPathDialog != null && _fallbackPathDialog.Visible)
+            || (_modChangesModal != null && _modChangesModal.Visible)
+            || (_unsavedChangesModal != null && _unsavedChangesModal.Visible)
+            || (particleModal != null && particleModal.Visible)
+            || (heroModal != null && heroModal.Visible)
+            || (extraModelModal != null && extraModelModal.Visible)
+            || (modModal != null && modModal.Visible);
     }
 
     public void UpdateModalsState()
@@ -1145,6 +1409,159 @@ public partial class StudioUIManager : CanvasLayer
         {
             _unreadBadge.Visible = ChangelogModalUI.HasUnreadChangelog();
         }
+    }
+
+    private void HandleQuitRequested()
+    {
+        if (ModWorkspaceSession.Instance.HasUnsavedChanges)
+        {
+            _tabPaint?.FlushActiveChangesToWorkspace(true);
+            ShowUnsavedChangesDialog();
+        }
+        else
+        {
+            ModWorkspaceSession.Instance.ClearSession();
+            GetTree().Quit();
+        }
+    }
+
+    private void ShowUnsavedChangesDialog()
+    {
+        if (_unsavedChangesModal == null)
+        {
+            _unsavedChangesModal = new PanelContainer
+            {
+                Name = "UnsavedChangesModal",
+                Visible = false,
+                CustomMinimumSize = new Vector2(500, 220)
+            };
+            _unsavedChangesModal.SetAnchorsPreset(Control.LayoutPreset.Center);
+            _unsavedChangesModal.GrowHorizontal = Control.GrowDirection.Both;
+            _unsavedChangesModal.GrowVertical = Control.GrowDirection.Both;
+
+            var panelStyle = new StyleBoxFlat
+            {
+                BgColor = new Color(0.10f, 0.12f, 0.16f, 0.98f),
+                BorderWidthBottom = 2,
+                BorderWidthLeft = 2,
+                BorderWidthRight = 2,
+                BorderWidthTop = 2,
+                BorderColor = new Color(0.95f, 0.75f, 0.30f, 0.9f),
+                CornerRadiusBottomLeft = 8,
+                CornerRadiusBottomRight = 8,
+                CornerRadiusTopLeft = 8,
+                CornerRadiusTopRight = 8,
+                ShadowColor = new Color(0, 0, 0, 0.6f),
+                ShadowSize = 16
+            };
+            _unsavedChangesModal.AddThemeStyleboxOverride("panel", panelStyle);
+
+            var margin = new MarginContainer();
+            margin.AddThemeConstantOverride("margin_left", 24);
+            margin.AddThemeConstantOverride("margin_right", 24);
+            margin.AddThemeConstantOverride("margin_top", 20);
+            margin.AddThemeConstantOverride("margin_bottom", 20);
+            _unsavedChangesModal.AddChild(margin);
+
+            var vbox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+            vbox.AddThemeConstantOverride("separation", 14);
+            margin.AddChild(vbox);
+
+            var colus = PlaygroundThemeHelper.GetFontColus();
+
+            var titleLbl = new Label
+            {
+                Text = "UNSAVED WORKSPACE CHANGES",
+                Modulate = new Color(0.95f, 0.75f, 0.30f)
+            };
+            if (colus != null) titleLbl.AddThemeFontOverride("font", colus);
+            titleLbl.AddThemeFontSizeOverride("font_size", 16);
+            vbox.AddChild(titleLbl);
+
+            int assetCount = ModWorkspaceSession.Instance.GetAllModifiedAssets().Count;
+            var bodyLbl = new Label
+            {
+                Text = $"You have {assetCount} modified asset(s) staged in your current workspace session.\nDo you want to save your project (.dlproj) before exiting?",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill
+            };
+            bodyLbl.AddThemeFontSizeOverride("font_size", 12);
+            vbox.AddChild(bodyLbl);
+
+            var btnRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Alignment = BoxContainer.AlignmentMode.End };
+            btnRow.AddThemeConstantOverride("separation", 10);
+
+            var btnCancel = new Button { Text = "Cancel", CustomMinimumSize = new Vector2(80, 32) };
+            btnCancel.Pressed += () =>
+            {
+                _unsavedChangesModal.Visible = false;
+                UpdateModalsState();
+            };
+            btnRow.AddChild(btnCancel);
+
+            var btnDiscard = new Button { Text = "Discard & Exit", CustomMinimumSize = new Vector2(110, 32) };
+            btnDiscard.Modulate = new Color(0.9f, 0.4f, 0.4f);
+            btnDiscard.Pressed += () =>
+            {
+                ModWorkspaceSession.Instance.ClearSession();
+                GetTree().Quit();
+            };
+            btnRow.AddChild(btnDiscard);
+
+            var btnSaveExit = new Button { Text = "Save & Exit", CustomMinimumSize = new Vector2(110, 32) };
+            PlaygroundThemeHelper.MakeAccentButton(btnSaveExit);
+            btnSaveExit.Pressed += () =>
+            {
+                _unsavedChangesModal.Visible = false;
+                UpdateModalsState();
+                ShowUnsavedSaveFileDialog();
+            };
+            btnRow.AddChild(btnSaveExit);
+
+            vbox.AddChild(btnRow);
+
+            if (_modalsLayer != null)
+            {
+                _modalsLayer.AddChild(_unsavedChangesModal);
+            }
+            else
+            {
+                AddChild(_unsavedChangesModal);
+            }
+        }
+
+        _unsavedChangesModal.Visible = true;
+        UpdateModalsState();
+    }
+
+   private void ShowUnsavedSaveFileDialog()
+    {
+        if (_unsavedSaveDialog == null)
+        {
+            _unsavedSaveDialog = new FileDialog
+            {
+                Title = "Save Project (.dpp) & Exit",
+                FileMode = FileDialog.FileModeEnum.SaveFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new string[] { "*.dpp ; Deadlock Playground Project (*.dpp)" },
+                UseNativeDialog = true
+            };
+            _unsavedSaveDialog.FileSelected += (path) =>
+            {
+                if (!string.IsNullOrEmpty(path))
+                {
+                    if (!path.EndsWith(".dpp", StringComparison.OrdinalIgnoreCase))
+                        path += ".dpp";
+                    _tabPaint?.FlushActiveChangesToWorkspace(true);
+                    ModWorkspaceSession.Instance.PackageProject(path);
+                    ModWorkspaceSession.Instance.ClearSession();
+                    GetTree().Quit();
+                }
+            };
+            AddChild(_unsavedSaveDialog);
+        }
+        _unsavedSaveDialog.CurrentFile = "workspace_project.dpp";
+        _unsavedSaveDialog.PopupCentered();
     }
 
 

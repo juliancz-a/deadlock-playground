@@ -154,7 +154,11 @@ func _create_dummy_texture() -> void:
 	dummy_fmt.height = 1
 	dummy_fmt.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
 	dummy_fmt.texture_type = RenderingDevice.TEXTURE_TYPE_2D
-	dummy_fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+	dummy_fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT | \
+	                       RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 	var dummy_img = Image.create(1, 1, false, Image.FORMAT_RGBAH)
 	dummy_texture_rid = rd.texture_create(dummy_fmt, RDTextureView.new(), [dummy_img.get_data()])
 
@@ -185,70 +189,108 @@ func _get_fallback_dummy_texture_rid() -> RID:
 	return dummy_texture_rid
 
 
-func get_atlas_textures(all_managers: Array[Node]) -> void:
+func clear_atlas_textures() -> void:
+	atlas_texture_uniform_set = RID()
+
+
+func bind_atlas_textures(active_rid: RID, base_rid: RID, mask_rid: RID) -> void:
 	if not rd:
 		rd = RenderingServer.get_rendering_device()
 	if not rd:
+		atlas_texture_uniform_set = RID()
 		return
 
 	var fallback_rid := _get_fallback_dummy_texture_rid()
-	if not fallback_rid.is_valid() or not rd.texture_is_valid(fallback_rid):
-		push_error("CameraBrush: Failed to create fallback dummy texture.")
+	if not (fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid)):
+		_create_dummy_texture()
+		fallback_rid = dummy_texture_rid
+	if not (fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid)):
+		atlas_texture_uniform_set = RID()
 		return
 
-	var active_atlases: Array[RID] = []
-	for i in range(8):
-		active_atlases.append(fallback_rid)
+	# If active target texture is invalid, there is no active painting surface: clear and exit cleanly.
+	if not (active_rid is RID and active_rid.is_valid() and rd.texture_is_valid(active_rid)):
+		atlas_texture_uniform_set = RID()
+		return
 
-	var base_tex_rid: RID = fallback_rid
+	var valid_base_rid: RID = fallback_rid
+	if base_rid is RID and base_rid.is_valid() and rd.texture_is_valid(base_rid):
+		valid_base_rid = base_rid
 
+	var valid_mask_rid: RID = fallback_rid
+	if mask_rid is RID and mask_rid.is_valid() and rd.texture_is_valid(mask_rid):
+		valid_mask_rid = mask_rid
+
+	var uniforms: Array[RDUniform] = []
+	# Slot 0: Active painting target texture
+	var u0 = RDUniform.new()
+	u0.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	u0.binding = 0
+	u0.add_id(active_rid)
+	uniforms.append(u0)
+
+	# Slots 1..7: Always bind safe fallback_rid. CameraBrush strictly culls Layer 21,
+	# so the active submesh is strictly bound to Slot 0. Binding fallback to 1..7
+	# guarantees zero invalid-texture collisions with other submeshes or evicted materials.
+	for i in range(1, 8):
+		var u = RDUniform.new()
+		u.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+		u.binding = i
+		u.add_id(fallback_rid)
+		uniforms.append(u)
+
+	# Binding 8: Companion base texture for real-time blend modes
+	var base_uniform = RDUniform.new()
+	base_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	base_uniform.binding = 8
+	base_uniform.add_id(valid_base_rid)
+	uniforms.append(base_uniform)
+
+	# Binding 9: Selection mask image for stencil masking
+	var mask_uniform = RDUniform.new()
+	mask_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	mask_uniform.binding = 9
+	mask_uniform.add_id(valid_mask_rid)
+	uniforms.append(mask_uniform)
+
+	# Validate all uniforms before touching UniformSetCacheRD
+	for u in uniforms:
+		var ids := u.get_ids()
+		if ids.is_empty():
+			atlas_texture_uniform_set = RID()
+			return
+		for id in ids:
+			if not (id is RID and id.is_valid() and rd.texture_is_valid(id)):
+				atlas_texture_uniform_set = RID()
+				return
+
+	if shader.is_valid():
+		atlas_texture_uniform_set = UniformSetCacheRD.get_cache(shader, 2, uniforms)
+		if not atlas_texture_uniform_set.is_valid():
+			atlas_texture_uniform_set = rd.uniform_set_create(uniforms, shader, 2)
+
+
+func get_atlas_textures(all_managers: Array[Node] = []) -> void:
+	var active_mgr: OverlayAtlasManager = null
 	for item in all_managers:
 		var manager := item as OverlayAtlasManager
 		if manager == null or not is_instance_valid(manager) or manager.is_queued_for_deletion():
 			continue
-		if manager.atlas_index < 0 or manager.atlas_index >= 8:
-			continue
-		if manager.atlas_texture_rid is RID and manager.atlas_texture_rid.is_valid() and rd.texture_is_valid(manager.atlas_texture_rid):
-			active_atlases[manager.atlas_index] = manager.atlas_texture_rid
-		if manager.base_texture_rid is RID and manager.base_texture_rid.is_valid() and rd.texture_is_valid(manager.base_texture_rid):
-			base_tex_rid = manager.base_texture_rid
+		if manager.get("is_active_target") == true:
+			active_mgr = manager
+			break
 
-	var uniforms: Array[RDUniform] = []
-	for i in range(8):
-		var tex_rid: RID = active_atlases[i] if (active_atlases[i] is RID and active_atlases[i].is_valid() and rd.texture_is_valid(active_atlases[i])) else fallback_rid
-		var uniform = RDUniform.new()
-		uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
-		uniform.binding = i
-		uniform.add_id(tex_rid)
-		uniforms.append(uniform)
+	if active_mgr == null:
+		atlas_texture_uniform_set = RID()
+		return
 
-	# Binding 8: companion base texture for real-time blend modes
-	var base_uniform = RDUniform.new()
-	base_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
-	base_uniform.binding = 8
-	var valid_base_rid: RID = fallback_rid
-	if base_tex_rid is RID and base_tex_rid.is_valid() and rd.texture_is_valid(base_tex_rid):
-		valid_base_rid = base_tex_rid
-	base_uniform.add_id(valid_base_rid)
-	uniforms.append(base_uniform)
+	var act_rid: RID = active_mgr.atlas_texture_rid if active_mgr.atlas_texture_rid is RID else RID()
+	var base_rid: RID = active_mgr.base_texture_rid if active_mgr.base_texture_rid is RID else RID()
+	var mask_rid: RID = RID()
+	if camera_brush and "selection_mask_rid" in camera_brush:
+		mask_rid = camera_brush.selection_mask_rid
 
-	# Binding 9: selection mask image for stencil masking
-	var mask_uniform = RDUniform.new()
-	mask_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
-	mask_uniform.binding = 9
-	var valid_mask_rid: RID = fallback_rid
-	if camera_brush and camera_brush.selection_mask_rid is RID and camera_brush.selection_mask_rid.is_valid() and rd.texture_is_valid(camera_brush.selection_mask_rid):
-		valid_mask_rid = camera_brush.selection_mask_rid
-	mask_uniform.add_id(valid_mask_rid)
-	uniforms.append(mask_uniform)
-
-	atlas_texture_uniform_set = RID()
-
-	# Create uniform set using UniformSetCacheRD to manage lifecycle across canvas resizes
-	if shader.is_valid() and fallback_rid.is_valid() and rd.texture_is_valid(fallback_rid):
-		atlas_texture_uniform_set = UniformSetCacheRD.get_cache(shader, 2, uniforms)
-		if not atlas_texture_uniform_set.is_valid():
-			atlas_texture_uniform_set = rd.uniform_set_create(uniforms, shader, 2)
+	bind_atlas_textures(act_rid, base_rid, mask_rid)
 
 
 func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data: RenderData) -> void:
@@ -277,12 +319,27 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 		if size.x == 0 and size.y == 0:
 			return
 
-		# We can use a compute shader here.
+		var tex_width: int = size.x
+		var tex_height: int = size.y
+		var center := Vector2(float(tex_width) * 0.5, float(tex_height) * 0.5)
+		if "brush_center" in camera_brush and camera_brush.brush_center.x >= 0.0 and camera_brush.brush_center.y >= 0.0:
+			center = camera_brush.brush_center
+
+		var brush_radius: float = minf(float(tex_width), float(tex_height)) * 0.5
+		if "brush_radius" in camera_brush and camera_brush.brush_radius > 0.0:
+			brush_radius = camera_brush.brush_radius
+		brush_radius += float(camera_brush.max_bleed)
+
+		var min_x: int = maxi(0, int(center.x - brush_radius))
+		var max_x: int = mini(tex_width - 1, int(center.x + brush_radius))
+		var min_y: int = maxi(0, int(center.y - brush_radius))
+		var max_y: int = mini(tex_height - 1, int(center.y + brush_radius))
+
 		@warning_ignore("integer_division")
-		var x_groups := (size.x - 1) / 8 + 1
+		var x_groups: int = clampi(int(ceil(float(max_x - min_x + 1) / 16.0)), 1, 16)
 		@warning_ignore("integer_division")
-		var y_groups := (size.y - 1) / 8 + 1
-		var z_groups := 1
+		var y_groups: int = clampi(int(ceil(float(max_y - min_y + 1) / 16.0)), 1, 16)
+		var z_groups: int = 1
 
 		# prepare push constant
 		var linear_color := camera_brush.color.srgb_to_linear()
@@ -298,12 +355,18 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 			float(camera_brush.max_bleed),
 			float(1.0 if (camera_brush.is_erase or camera_brush.color.a < 0.0) else 0.0),
 			float(camera_brush.blend_mode),
-			float(1.0 if camera_brush.use_selection_mask else 0.0)
+			float(1.0 if camera_brush.use_selection_mask else 0.0),
+			float(min_x),
+			float(min_y),
+			float(max_x),
+			float(max_y)
 		])
 
 
 		# Get the RID for our color image, we will be reading from and writing to it.
 		var framebuffer_rid: RID = render_scene_buffers.get_color_layer(0)
+		if not (framebuffer_rid.is_valid() and rd.texture_is_valid(framebuffer_rid)):
+			return
 
 		# Create a uniform set, this will be cached, the cache will be cleared if our viewports configuration is changed.
 		var framebuffer_uniform := RDUniform.new()
@@ -311,6 +374,10 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 		framebuffer_uniform.binding = 0
 		framebuffer_uniform.add_id(framebuffer_rid)
 		var framebuffer_uniform_set := UniformSetCacheRD.get_cache(shader, 0, [framebuffer_uniform])
+		if not framebuffer_uniform_set.is_valid():
+			framebuffer_uniform_set = rd.uniform_set_create([framebuffer_uniform], shader, 0)
+		if not (framebuffer_uniform_set.is_valid() and rd.uniform_set_is_valid(framebuffer_uniform_set)):
+			return
 
 		# Run our compute shader.
 		var compute_list := rd.compute_list_begin()

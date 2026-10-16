@@ -39,7 +39,7 @@ public static class DynamicFxMaterialBuilder
                       || (matResource.VectorParams.TryGetValue("g_vTranslucentScrollSpeed1", out var trScroll1) && (trScroll1.X != 0 || trScroll1.Y != 0));
 
         bool isDedicatedFxName = vmatLower.Contains("jitter") || vmatLower.Contains("armglow") ||
-                                 vmatLower.Contains("vindicta_glow") || vmatLower.Contains("hornet_glow") ||
+                                 vmatLower.Contains("ghost_glow") || vmatLower.Contains("vindicta_glow") || vmatLower.Contains("hornet_glow") ||
                                  vmatLower.Contains("inferno_armglow") || vmatLower.Contains("flame") ||
                                  vmatLower.Contains("headglow") || vmatLower.Contains("headsmoke") || vmatLower.Contains("smoke") ||
                                  vmatLower.Contains("sparkle") || vmatLower.Contains("sparkles") ||
@@ -63,6 +63,7 @@ public static class DynamicFxMaterialBuilder
         bool isHeadSmoke = vmatLower.Contains("headsmoke") || vmatLower.Contains("smoke");
         bool isArmGlow = vmatLower.Contains("armglow") || vmatLower.Contains("flame_arm") || (vmatLower.Contains("inferno_flames") && !isHeadGlow);
         bool isSparkle = vmatLower.Contains("sparkle") || vmatLower.Contains("lash_sparkles");
+        bool isGlow = vmatLower.Contains("ghost_glow") || vmatLower.Contains("vindicta_glow") || vmatLower.Contains("hornet_glow");
 
         Shader fxShader;
         if (isHeadSmoke)
@@ -73,7 +74,15 @@ public static class DynamicFxMaterialBuilder
         {
             fxShader = Source2ShaderRegistry.GetFlameHairShader();
         }
-        else if (isArmGlow || isFxAdditive || isSparkle)
+        else if (isSparkle)
+        {
+            fxShader = Source2ShaderRegistry.GetLashSparklesShader() ?? Source2ShaderRegistry.GetDynamicFxShader(true);
+        }
+        else if (isGlow)
+        {
+            fxShader = GD.Load<Shader>("res://assets/shaders/valve/vindicta.gdshader") ?? Source2ShaderRegistry.GetDynamicGlowShader();
+        }
+        else if (isArmGlow || isFxAdditive)
         {
             fxShader = Source2ShaderRegistry.GetDynamicFxShader(true);
         }

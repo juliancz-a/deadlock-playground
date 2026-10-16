@@ -119,6 +119,11 @@ dotnet build src/Deadlock_Playground.csproj
 godot --path src/
 ```
 
+> **Note on ValveResourceFormat & Local Packages:**
+> This repository ships with a local package build of `ValveResourceFormat` (`20.0.7461`) in `local-nupkgs/` incorporating recent Source 2 KeyValues3 binary updates (`datatype: 26/27`). `dotnet restore` automatically resolves it alongside packages from NuGet.org using the configured `nuget.config`.
+>
+> If you have limited disk space on your OS drive (e.g. Drive C), you can configure `globalPackagesFolder` in `nuget.config` to cache packages on a secondary drive.
+
 > **Note:** You can also open the repository directly by launching Godot and importing `src/project.godot`, or by opening `Deadlock_Playground.sln` in Visual Studio / JetBrains Rider / VS Code.
 
 ---

@@ -14,7 +14,9 @@ namespace DeadlockPlayground.Painter
         Decal = 4,
         Text = 5,
         SelectSubmesh = 6,
-        MagicWand = 7
+        MagicWand = 7,
+        Selection = 8,
+        Shape = 9
     }
 
     public enum BrushShapeType
@@ -33,7 +35,75 @@ namespace DeadlockPlayground.Painter
         [Signal] public delegate void StrokeStartedEventHandler();
         [Signal] public delegate void StrokeFinishedEventHandler();
 
-        [Export] public bool IsPaintingActive { get; set; } = true;
+        private bool _isPaintingActive = true;
+        [Export] public bool IsPaintingActive
+        {
+            get => _isPaintingActive;
+            set
+            {
+                _isPaintingActive = value;
+                if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+                {
+                    _selectionOverlay3D.Visible = value;
+                    if (!value) _selectionOverlay3D.QueueRedraw();
+                }
+            }
+        }
+
+        // Shape Painting Subsystem
+        private readonly ShapeTool _shapeTool = new();
+        public ShapeTool ShapeTool => _shapeTool;
+
+        // Decal & Text Projection Subsystem
+        private readonly ProjectionTransformGizmo _projectionGizmo = new();
+        public ProjectionTransformGizmo ProjectionGizmo => _projectionGizmo;
+
+        private bool _isDraggingShape3D = false;
+        private Vector2 _shapeStartScreenPos = Vector2.Zero;
+        private Vector2 _shapeCurrentScreenPos = Vector2.Zero;
+        private Vector2 _shapeStartUV = Vector2.Zero;
+        private Vector2 _shapeCurrentUV = Vector2.Zero;
+        private Vector2 _shapeSubmeshAtlasPos = Vector2.Zero;
+        private Vector2 _shapeSubmeshAtlasSize = Vector2.One;
+        private Vector2 _shapeStartAtlasUV = Vector2.Zero;
+
+        private bool _isShapeOriginatedIn3D = false;
+
+        public bool IsShapeOriginatedIn3D
+        {
+            get => _isShapeOriginatedIn3D;
+            set => _isShapeOriginatedIn3D = value;
+        }
+
+        // Front Faces Only / Backface Occlusion
+        private bool _frontFacesOnly = true;
+
+        private Texture2D _cachedShapeDecalTexture;
+        private CanvasShapeType _lastDecalShapeType = (CanvasShapeType)(-1);
+        private Color _lastDecalColor = Colors.Transparent;
+        private ShapeFillMode _lastDecalFillMode = (ShapeFillMode)(-1);
+        private float _lastDecalStrokeWidth = -1f;
+        public bool FrontFacesOnly
+        {
+            get => _frontFacesOnly;
+            set
+            {
+                _frontFacesOnly = value;
+                ApplyFrontFacesOnlyToMaterials();
+            }
+        }
+
+        public void ApplyFrontFacesOnlyToMaterials()
+        {
+            if (MeshHierarchy == null || MeshHierarchy.Submeshes == null) return;
+            foreach (var sub in MeshHierarchy.Submeshes)
+            {
+                if (sub.Mesh != null && sub.Mesh.MaterialOverlay is ShaderMaterial sm)
+                {
+                    sm.SetShaderParameter("front_faces_only", _frontFacesOnly);
+                }
+            }
+        }
 
         // Brush parameters
         private Color _brushColor = new Color(0.85f, 0.15f, 0.2f, 1.0f);
@@ -50,9 +120,77 @@ namespace DeadlockPlayground.Painter
             }
         }
         public float BrushSize { get; set; } = 32.0f;
-        public float BrushHardness { get; set; } = 0.5f;
+
+        private float _brushHardness = 0.5f;
+        public float BrushHardness
+        {
+            get => _brushHardness;
+            set
+            {
+                if (Math.Abs(_brushHardness - value) > 0.005f)
+                {
+                    _brushHardness = value;
+                    GenerateProceduralBrushTextures();
+                    _lastShapeType = (BrushShapeType)(-1);
+                    SyncCameraBrushProperties();
+                }
+            }
+        }
+
         public float BrushFlow { get; set; } = 1.0f;
-        public BrushToolMode ToolMode { get; set; } = BrushToolMode.Paint;
+        private BrushToolMode _toolMode = BrushToolMode.Paint;
+        public BrushToolMode ToolMode
+        {
+            get => _toolMode;
+            set
+            {
+                if (_toolMode == value) return;
+                var oldMode = _toolMode;
+                _toolMode = value;
+
+                // Deactivate projection gizmo when exiting Decal or Text tools, or switching between them
+                if (oldMode == BrushToolMode.Decal || oldMode == BrushToolMode.Text || value != oldMode)
+                {
+                    if (oldMode == BrushToolMode.Decal || oldMode == BrushToolMode.Text)
+                    {
+                        if (_projectionGizmo != null && _projectionGizmo.IsActive)
+                        {
+                            _projectionGizmo.Deactivate();
+                        }
+                        _isDraggingGizmo3D = false;
+                        _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+                        if (_previewDecalNode != null && GodotObject.IsInstanceValid(_previewDecalNode))
+                        {
+                            _previewDecalNode.Visible = false;
+                        }
+                        _decalStamper?.HidePreview();
+                        _textProjector?.HidePreview();
+                    }
+                }
+
+                // Cancel active shape if exiting Shape mode
+              if (oldMode == BrushToolMode.Shape && value != BrushToolMode.Shape)
+                {
+                    if (_shapeDecalNode != null) _shapeDecalNode.Visible = false;
+                    if (_shapeTool != null && _shapeTool.HasActiveShape)
+                    {
+                        _shapeTool.CancelShape();
+                        _layerManager?.CancelShapePreview();
+                    }
+                }
+
+                if (value == BrushToolMode.Decal || value == BrushToolMode.Text || value == BrushToolMode.Shape || value == BrushToolMode.Selection)
+                {
+                    EnsureSelectionOverlay3D();
+                    if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+                    {
+                        _selectionOverlay3D.Visible = true;
+                    }
+                }
+
+                _selectionOverlay3D?.QueueRedraw();
+            }
+        }
         public BrushShapeType BrushShape { get; set; } = BrushShapeType.SoftCircle;
         public BrushShapeType EraserShape { get; set; } = BrushShapeType.HardCircle;
         public BrushShapeType ShapeType
@@ -87,6 +225,8 @@ namespace DeadlockPlayground.Painter
 
         // Submesh Selection Outline Gizmo
         private MeshInstance3D _selectionOutlineMesh;
+        private MeshInstance3D _lastOutlinedMeshInstance;
+        private Mesh _lastOutlinedMeshResource;
         private ShaderMaterial _outlineMaskMat;
         private ShaderMaterial _outlineEdgeMat;
 
@@ -107,6 +247,7 @@ namespace DeadlockPlayground.Painter
         private readonly MeshRaycaster _raycaster = new();
         private MeshInstance3D _currentMesh;
         public MeshInstance3D CurrentMesh => _currentMesh;
+        private int _currentSurfaceIndex = 0;
 
         // GPU Texture Painter interop
         private Node3D _cameraBrush;
@@ -117,7 +258,19 @@ namespace DeadlockPlayground.Painter
         private int _debugFrameCount = 0;
 
         // 3D Oriented Ring Cursor Gizmo
-        private MeshInstance3D _cursorGizmo;
+        private Node3D _cursorGizmo;
+        private MeshInstance3D _cursorRingMesh;
+
+        // CameraBrush property caching to prevent redundant per-frame reflection calls
+        private bool _lastIsErase = false;
+        private bool _lastUseMask = false;
+        private Rid _lastMaskRid = new();
+        private Vector2I _lastResolution = new(256, 256);
+        private int _lastMinBleed = 0;
+        private int _lastMaxBleed = 0;
+        private Vector2 _lastBrushCenter = new(-1, -1);
+        private float _lastBrushRadius = -1f;
+
         private StandardMaterial3D _cursorMaterial;
         private Sprite3D _eyedropperSprite;
         private TorusMesh _cursorTorusMesh;
@@ -127,6 +280,7 @@ namespace DeadlockPlayground.Painter
         private MeshInstance3D _decalPreviewQuad;
         private StandardMaterial3D _decalMaterial;
         private Decal _previewDecalNode;
+        private Decal _shapeDecalNode;
         private DecalStamper _decalStamper;
         public DecalStamper DecalStamper
         {
@@ -136,6 +290,48 @@ namespace DeadlockPlayground.Painter
 
         private MagicWandTool _magicWandTool = new();
         public MagicWandTool MagicWandTool => _magicWandTool;
+        public SelectionMask SelectionMask => _magicWandTool.SelectionMask;
+
+        // 3D Viewport Selection Toolkit state
+        private bool _isSelecting3D = false;
+        private bool _isBuildingPoly3D = false;
+        private Vector2 _selectionStartScreenPos;
+        private Vector2 _selectionCurrentScreenPos;
+        private readonly List<Vector2> _lassoPoints3D = new();
+        private readonly List<Vector2> _polyPoints3D = new();
+        private Vector2 _polyCurrentScreenPos;
+        private Control _selectionOverlay3D;
+
+        private SubmeshNodeInfo _lastHitSubmesh;
+        public SubmeshNodeInfo LastHitSubmesh => _lastHitSubmesh;
+
+        // 3D Shape Projection State
+        private Vector3 _shapeStartWorldPos;
+        private Vector3 _shapeStartWorldNormal;
+        private Vector3 _shapeStartWorldTangent;
+        private Vector3 _shapeStartWorldBitangent;
+        private float _shapeStartUnitsPerU = 0.5f;
+        private float _shapeStartUnitsPerV = 0.5f;
+        private ulong _lastShapePreviewMs = 0;
+        private Vector3 _shapeLineStartWorldPos;
+        private Vector3 _shapeLineEndWorldPos;
+        private bool _hasShapeLineWorldPlacement = false;
+
+        // 3D Interactive Gizmo Transform Handles (Decal, Text, Shape)
+        private bool _isDraggingGizmo3D = false;
+        private ProjectionGizmoHandle _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+        private ShapeHandleType _activeShapeHandle3D = ShapeHandleType.None;
+        private Vector2 _gizmoDragStartScreenPos;
+        private float _gizmoDragStartRot;
+        private Vector2 _gizmoDragStartSize;
+        private Vector2 _gizmo3DScreenTL;
+        private Vector2 _gizmo3DScreenTR;
+        private Vector2 _gizmo3DScreenBR;
+        private Vector2 _gizmo3DScreenBL;
+        private Vector2 _gizmo3DScreenCenter;
+        private Vector2 _gizmo3DScreenRot;
+        //
+        private readonly Dictionary<CanvasShapeType, Texture2D> _shapeDecalTextures = new();
 
         private TextProjector _textProjector;
         public TextProjector TextProjector
@@ -154,6 +350,231 @@ namespace DeadlockPlayground.Painter
                 }
             }
         }
+        public void Update3DShapeDecalAndSync()
+        {
+            if (_shapeDecalNode == null) EnsureCursorGizmo();
+            if (_shapeDecalNode == null) return;
+
+            if (_shapeTool.HasActiveShape && _shapeStartWorldPos != Vector3.Zero)
+            {
+                var shapeTex = GetShapeDecalTexture(_shapeTool.ShapeType, BrushColor, _shapeTool.StrokeWidth, _shapeTool.FillMode);
+                if (shapeTex == null) return;
+
+                _shapeDecalNode.SetTexture(Decal.DecalTexture.Albedo, shapeTex);
+                _shapeDecalNode.Modulate = Colors.White;
+
+                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+
+                float submeshW = MathF.Max(1.0f, _shapeSubmeshAtlasSize.X * atlasW);
+                float submeshH = MathF.Max(1.0f, _shapeSubmeshAtlasSize.Y * atlasH);
+
+                float unitsU = (_shapeStartUnitsPerU > 1e-4f && _shapeStartUnitsPerU < 20.0f) ? _shapeStartUnitsPerU : 0.5f;
+                float unitsV = (_shapeStartUnitsPerV > 1e-4f && _shapeStartUnitsPerV < 20.0f) ? _shapeStartUnitsPerV : 0.5f;
+
+                // Tamaño en metros de mundo 3D
+                float sizeX = (_shapeTool.Size.X / submeshW) * unitsU;
+                float sizeZ = (_shapeTool.ShapeType == CanvasShapeType.Line ? _shapeTool.StrokeWidth : _shapeTool.Size.Y) / submeshH * unitsV;
+                float depthY = Mathf.Clamp(MathF.Max(sizeX, sizeZ) * 1.5f, 0.4f, 2.0f);
+
+                Basis basis = CreateOrthonormalDecalBasis(_shapeStartWorldTangent, _shapeStartWorldNormal, _shapeStartWorldBitangent, _shapeTool.RotationDegrees);
+                Vector3 decalCenterWorld = _shapeStartWorldPos;
+                if (_shapeTool.ShapeType == CanvasShapeType.Line)
+                {
+                    Vector3 pStartWorld;
+                    Vector3 pEndWorld;
+                    if (_hasShapeLineWorldPlacement)
+                    {
+                        pStartWorld = _shapeLineStartWorldPos;
+                        pEndWorld = _shapeLineEndWorldPos;
+                    }
+                    else
+                    {
+                        Vector2 startAtlasUV = new Vector2(_shapeTool.LineStart.X / atlasW, _shapeTool.LineStart.Y / atlasH);
+                        Vector2 endAtlasUV = new Vector2(_shapeTool.LineEnd.X / atlasW, _shapeTool.LineEnd.Y / atlasH);
+                        Vector2 deltaStartSubmesh = (startAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                            MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                            MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                        );
+                        Vector2 deltaEndSubmesh = (endAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                            MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                            MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                        );
+
+                        pStartWorld = _shapeStartWorldPos + 
+                            _shapeStartWorldTangent * (deltaStartSubmesh.X * unitsU) + 
+                            _shapeStartWorldBitangent * (deltaStartSubmesh.Y * unitsV);
+                        pEndWorld = _shapeStartWorldPos + 
+                            _shapeStartWorldTangent * (deltaEndSubmesh.X * unitsU) + 
+                            _shapeStartWorldBitangent * (deltaEndSubmesh.Y * unitsV);
+                    }
+
+                    decalCenterWorld = (pStartWorld + pEndWorld) * 0.5f;
+                    Vector3 lineVec3D = pEndWorld - pStartWorld;
+                    if (lineVec3D.LengthSquared() > 0.0001f)
+                    {
+                        Vector3 tangent = lineVec3D.Normalized();
+                        Vector3 normal = _shapeStartWorldNormal.LengthSquared() > 0.001f ? _shapeStartWorldNormal.Normalized() : Vector3.Up;
+                        Vector3 bitangent = tangent.Cross(normal).Normalized();
+                        basis = new Basis(tangent, normal, bitangent);
+                        sizeX = lineVec3D.Length();
+                        sizeZ = (_shapeTool.StrokeWidth / submeshH) * unitsV;
+                    }
+                }
+
+                _shapeDecalNode.Size = new Vector3(Mathf.Max(0.01f, sizeX), depthY, Mathf.Max(0.01f, sizeZ));
+                _shapeDecalNode.Transform = new Transform3D(basis, decalCenterWorld + _shapeStartWorldNormal * (depthY * 0.2f));
+                _shapeDecalNode.Visible = true;
+            }
+            else
+            {
+                _shapeDecalNode.Visible = false;
+            }
+
+            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                        ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
+        }
+
+        public bool Commit3DShape()
+        {
+            if (!_shapeTool.HasActiveShape || _layerManager == null) return false;
+
+            var shapeTex = GetShapeDecalTexture(_shapeTool.ShapeType, BrushColor, _shapeTool.StrokeWidth, _shapeTool.FillMode);
+            if (shapeTex == null) return false;
+
+            Basis decalBasis = _shapeDecalNode != null ? _shapeDecalNode.Transform.Basis : Basis.Identity;
+            Vector3 decalRight = decalBasis.Column0.Normalized();
+            Vector3 decalDown = decalBasis.Column2.Normalized();
+
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+            int atlasSize = Math.Max(atlasW, atlasH);
+            float normScale = MathF.Max(_shapeTool.Size.X, _shapeTool.Size.Y) / (float)atlasSize;
+
+            float unitsU = (_shapeStartUnitsPerU > 1e-4f && _shapeStartUnitsPerU < 20.0f) ? _shapeStartUnitsPerU : 0.5f;
+            float unitsV = (_shapeStartUnitsPerV > 1e-4f && _shapeStartUnitsPerV < 20.0f) ? _shapeStartUnitsPerV : 0.5f;
+
+            // Pasamos explicitPixelSize exacto en coordenadas de atlas para que no se deforme en rectángulos
+            bool success = _layerManager.StampDecalToAtlas(
+                _shapeStartUV,
+                shapeTex,
+                _shapeTool.RotationDegrees,
+                normScale,
+                _magicWandTool,
+                decalRight,
+                decalDown,
+                _shapeStartWorldTangent,
+                _shapeStartWorldBitangent,
+                unitsU,
+                unitsV,
+                explicitPixelSize: _shapeTool.Size
+            );
+
+            if (_shapeDecalNode != null)
+            {
+                _shapeDecalNode.Visible = false;
+            }
+            _shapeStartWorldPos = Vector3.Zero;
+            _shapeTool.CancelShape();
+            _selectionOverlay3D?.QueueRedraw();
+
+            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                        ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
+            
+            if (success) EmitSignal(SignalName.StrokeFinished);
+            return success;
+        }
+    
+
+        public Texture2D GetShapeDecalTexture(CanvasShapeType type, Color color, float strokeWidth, ShapeFillMode fillMode)
+        {
+            if (_cachedShapeDecalTexture != null && 
+                _lastDecalShapeType == type && 
+                _lastDecalColor == color && 
+                _lastDecalFillMode == fillMode && 
+                MathF.Abs(_lastDecalStrokeWidth - strokeWidth) < 0.1f)
+            {
+                return _cachedShapeDecalTexture;
+            }
+
+            int size = 512;
+            var img = Image.CreateEmpty(size, size, false, Image.Format.Rgba8);
+            img.Fill(Colors.Transparent);
+
+            Vector2 center = new Vector2(size * 0.5f, size * 0.5f);
+            float halfSize = size * 0.46f;
+            float strokePx = MathF.Max(4.0f, strokeWidth * (size / 1024.0f) * 4.0f);
+            float innerHalfSize = halfSize - strokePx;
+
+            Color strokeCol = color;
+            Color fillCol = (fillMode == ShapeFillMode.StrokeOnly) 
+                ? Colors.Transparent 
+                : new Color(color.R, color.G, color.B, color.A * (fillMode == ShapeFillMode.FillOnly ? 1.0f : 0.85f));
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    Vector2 p = new Vector2(x + 0.5f, y + 0.5f);
+                    Vector2 d = (p - center).Abs();
+
+                    if (type == CanvasShapeType.Square)
+                    {
+                        float maxD = MathF.Max(d.X, d.Y);
+                        if (maxD <= halfSize)
+                        {
+                            if (fillMode == ShapeFillMode.FillOnly)
+                            {
+                                img.SetPixel(x, y, fillCol);
+                            }
+                            else if (fillMode == ShapeFillMode.StrokeOnly)
+                            {
+                                if (maxD >= innerHalfSize) img.SetPixel(x, y, strokeCol);
+                            }
+                            else // FillAndStroke
+                            {
+                                img.SetPixel(x, y, maxD >= innerHalfSize ? strokeCol : fillCol);
+                            }
+                        }
+                    }
+                    else if (type == CanvasShapeType.Circle)
+                    {
+                        float dist = (p - center).Length();
+                        if (dist <= halfSize)
+                        {
+                            if (fillMode == ShapeFillMode.FillOnly)
+                            {
+                                img.SetPixel(x, y, fillCol);
+                            }
+                            else if (fillMode == ShapeFillMode.StrokeOnly)
+                            {
+                                if (dist >= innerHalfSize) img.SetPixel(x, y, strokeCol);
+                            }
+                            else // FillAndStroke
+                            {
+                                img.SetPixel(x, y, dist >= innerHalfSize ? strokeCol : fillCol);
+                            }
+                        }
+                    }
+                    else if (type == CanvasShapeType.Line)
+                    {
+                        if (x >= 1 && x < size - 1 && y >= 1 && y < size - 1)
+                        {
+                            img.SetPixel(x, y, strokeCol);
+                        }
+                    }
+                }
+            }
+
+            _lastDecalShapeType = type;
+            _lastDecalColor = color;
+            _lastDecalFillMode = fillMode;
+            _lastDecalStrokeWidth = strokeWidth;
+            _cachedShapeDecalTexture = ImageTexture.CreateFromImage(img);
+            return _cachedShapeDecalTexture;
+        }
 
         private void OnTextProjectorTextureChanged(Texture2D newTexture)
         {
@@ -161,6 +582,263 @@ namespace DeadlockPlayground.Painter
             {
                 _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, newTexture);
             }
+        }
+
+        public void Queue3DOverlayRedraw()
+        {
+            _selectionOverlay3D?.QueueRedraw();
+        }
+
+        private static void Draw3DHandleBox(Control canvas, Vector2 pos, float size = 8.0f)
+        {
+            Rect2 rect = new Rect2(pos - new Vector2(size * 0.5f, size * 0.5f), new Vector2(size, size));
+            canvas.DrawRect(rect, Colors.White, filled: true);
+            canvas.DrawRect(rect, new Color(0.12f, 0.14f, 0.18f, 1.0f), filled: false, width: 1.5f);
+        }
+
+        private ProjectionGizmoHandle HitTest3DProjectionGizmo(Vector2 screenMousePos)
+        {
+            if (!_projectionGizmo.IsActive || !_projectionGizmo.Has3DPlacement) return ProjectionGizmoHandle.None;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenRot) <= 14.0f) return ProjectionGizmoHandle.Rotate;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenTL) <= 12.0f) return ProjectionGizmoHandle.TopLeft;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenTR) <= 12.0f) return ProjectionGizmoHandle.TopRight;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenBR) <= 12.0f) return ProjectionGizmoHandle.BottomRight;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenBL) <= 12.0f) return ProjectionGizmoHandle.BottomLeft;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenCenter) <= 14.0f) return ProjectionGizmoHandle.Body;
+            return ProjectionGizmoHandle.None;
+        }
+
+        private ShapeHandleType HitTest3DShapeGizmo(Vector2 screenMousePos)
+        {
+            if (!_shapeTool.HasActiveShape) return ShapeHandleType.None;
+            if (_shapeTool.ShapeType == CanvasShapeType.Line)
+            {
+                if (screenMousePos.DistanceTo(_gizmo3DScreenTL) <= 14.0f) return ShapeHandleType.TopLeft;
+                if (screenMousePos.DistanceTo(_gizmo3DScreenBR) <= 14.0f) return ShapeHandleType.BottomRight;
+                Vector2 ab = _gizmo3DScreenBR - _gizmo3DScreenTL;
+                float l2 = ab.LengthSquared();
+                if (l2 > 1e-4f)
+                {
+                    float t = Math.Clamp((screenMousePos - _gizmo3DScreenTL).Dot(ab) / l2, 0.0f, 1.0f);
+                    Vector2 proj = _gizmo3DScreenTL + t * ab;
+                    if (screenMousePos.DistanceTo(proj) <= 12.0f) return ShapeHandleType.Body;
+                }
+                return ShapeHandleType.None;
+            }
+            if (screenMousePos.DistanceTo(_gizmo3DScreenRot) <= 14.0f) return ShapeHandleType.Rotate;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenTL) <= 12.0f) return ShapeHandleType.TopLeft;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenTR) <= 12.0f) return ShapeHandleType.TopRight;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenBR) <= 12.0f) return ShapeHandleType.BottomRight;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenBL) <= 12.0f) return ShapeHandleType.BottomLeft;
+            if (screenMousePos.DistanceTo(_gizmo3DScreenCenter) <= 14.0f) return ShapeHandleType.Body;
+            return ShapeHandleType.None;
+        }
+
+        private static Basis CreateOrthonormalDecalBasis(Vector3 tangent, Vector3 normal, Vector3 bitangent, float rotationDeg)
+        {
+            if (normal.LengthSquared() < 0.001f) normal = Vector3.Up;
+            else normal = normal.Normalized();
+
+            if (tangent.LengthSquared() < 0.001f || MathF.Abs(tangent.Dot(normal)) > 0.99f)
+            {
+                Vector3 up = MathF.Abs(normal.Y) < 0.95f ? Vector3.Up : Vector3.Right;
+                tangent = normal.Cross(up).Normalized();
+            }
+            else
+            {
+                tangent = (tangent - normal * normal.Dot(tangent)).Normalized();
+            }
+
+            Vector3 cleanBitangent = tangent.Cross(normal).Normalized();
+            Basis basis = new Basis(tangent, normal, cleanBitangent);
+            if (MathF.Abs(basis.Determinant()) < 1e-4f)
+            {
+                Vector3 fallbackUp = MathF.Abs(normal.Y) < 0.95f ? Vector3.Up : Vector3.Right;
+                tangent = normal.Cross(fallbackUp).Normalized();
+                cleanBitangent = tangent.Cross(normal).Normalized();
+                basis = new Basis(tangent, normal, cleanBitangent);
+            }
+            return basis.Rotated(normal, Mathf.DegToRad(rotationDeg));
+        }
+
+        private void OnProjectionGizmoChanged()
+        {
+            if (!_projectionGizmo.IsActive) return;
+
+            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+            if (atlasW <= 0) atlasW = 2048;
+            if (atlasH <= 0) atlasH = 2048;
+            float normScale = _projectionGizmo.NormalizedScale(Math.Max(atlasW, atlasH));
+
+            if (_projectionGizmo.IsText)
+            {
+                if (_textProjector != null)
+                {
+                    _textProjector.TextScale = normScale;
+                    _textProjector.RotationDegrees = _projectionGizmo.RotationDegrees;
+                }
+            }
+            else
+            {
+                if (_decalStamper != null)
+                {
+                    _decalStamper.DecalScale = normScale;
+                    _decalStamper.RotationDegrees = _projectionGizmo.RotationDegrees;
+                    _decalStamper.UpdatePreviewTransform();
+                }
+            }
+
+            // Sync 2D Center to 3D surface point if gizmo is moved in 2D canvas or updated via UI controls
+            bool isDraggingIn3D = _isDraggingGizmo3D && _activeGizmoHandle3D != ProjectionGizmoHandle.None;
+            if (!isDraggingIn3D && _currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+            {
+                Vector2 atlasUv = new Vector2(_projectionGizmo.Center.X / atlasW, _projectionGizmo.Center.Y / atlasH);
+                Vector2 submeshUv = atlasUv;
+                if (_currentMesh.MaterialOverlay is ShaderMaterial sm)
+                {
+                    var posVar = sm.GetShaderParameter("position_in_atlas");
+                    var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                    {
+                        Vector2 p = posVar.AsVector2();
+                        Vector2 s = sizeVar.AsVector2();
+                        if (s.X > 0 && s.Y > 0)
+                        {
+                            submeshUv = (atlasUv - p) / s;
+                        }
+                    }
+                }
+                Vector3? camPos = _worldViewport?.GetCamera3D()?.GlobalPosition;
+                var hit = _raycaster.FindPointFromUV(_currentMesh, submeshUv, camPos);
+                if (!hit.Hit && MeshHierarchy != null)
+                {
+                    foreach (var sub in MeshHierarchy.Submeshes)
+                    {
+                        if (sub.Mesh == null || sub.Mesh == _currentMesh) continue;
+                        Vector2 otherSubUv = atlasUv;
+                        if (sub.Mesh.MaterialOverlay is ShaderMaterial otherSm)
+                        {
+                            var posVar = otherSm.GetShaderParameter("position_in_atlas");
+                            var sizeVar = otherSm.GetShaderParameter("size_in_atlas");
+                            if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                            {
+                                Vector2 p = posVar.AsVector2();
+                                Vector2 s = sizeVar.AsVector2();
+                                if (s.X > 0 && s.Y > 0)
+                                {
+                                    otherSubUv = (atlasUv - p) / s;
+                                }
+                            }
+                        }
+                        var subHit = _raycaster.FindPointFromUV(sub.Mesh, otherSubUv, camPos);
+                        if (subHit.Hit)
+                        {
+                            hit = subHit;
+                            _currentMesh = sub.Mesh;
+                            _projectionGizmo.HitMesh = sub.Mesh;
+                            break;
+                        }
+                    }
+                }
+
+                if (hit.Hit)
+                {
+                    _projectionGizmo.WorldPos = hit.WorldPosition;
+                    _projectionGizmo.WorldNormal = hit.WorldNormal;
+                    _projectionGizmo.WorldTangent = hit.WorldTangent;
+                    _projectionGizmo.WorldBitangent = hit.WorldBitangent;
+                    _projectionGizmo.UnitsU = hit.WorldUnitsPerU;
+                    _projectionGizmo.UnitsV = hit.WorldUnitsPerV;
+                    _projectionGizmo.HitUV = hit.HitUV;
+                    _projectionGizmo.HitMesh = _currentMesh;
+                    _projectionGizmo.HitSurfaceIndex = hit.HitSurfaceIndex;
+                    _projectionGizmo.Has3DPlacement = true;
+                }
+            }
+
+            if (_previewDecalNode != null && _projectionGizmo.Has3DPlacement)
+            {
+                Basis basis = CreateOrthonormalDecalBasis(
+                    _projectionGizmo.WorldTangent,
+                    _projectionGizmo.WorldNormal,
+                    _projectionGizmo.WorldBitangent,
+                    _projectionGizmo.RotationDegrees
+                );
+
+                _projectionGizmo.DecalRight = basis.Column0.Normalized();
+                _projectionGizmo.DecalDown = basis.Column2.Normalized();
+
+                float uvSpanU = (atlasW > 0) ? _projectionGizmo.Size.X / (float)atlasW : 0.25f;
+                float uvSpanV = (atlasH > 0) ? _projectionGizmo.Size.Y / (float)atlasH : 0.25f;
+                float unitsU = (_projectionGizmo.UnitsU > 1e-4f && _projectionGizmo.UnitsU < 20.0f) ? _projectionGizmo.UnitsU : 0.5f;
+                float unitsV = (_projectionGizmo.UnitsV > 1e-4f && _projectionGizmo.UnitsV < 20.0f) ? _projectionGizmo.UnitsV : 0.5f;
+                float sizeX = uvSpanU * unitsU;
+                float sizeZ = uvSpanV * unitsV;
+                float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
+
+                _previewDecalNode.NormalFade = 0.65f;
+                _previewDecalNode.UpperFade = 0.3f;
+                _previewDecalNode.LowerFade = 0.3f;
+                _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
+                _previewDecalNode.Transform = new Transform3D(basis, _projectionGizmo.WorldPos + _projectionGizmo.WorldNormal * (depthY * 0.20f));
+                _previewDecalNode.Visible = true;
+            }
+
+            _selectionOverlay3D?.QueueRedraw();
+        }
+
+        public bool CommitProjectionGizmo()
+        {
+            if (!_projectionGizmo.IsActive || _layerManager == null) return false;
+
+            int atlasSize = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            bool success = _projectionGizmo.Commit(_layerManager, _magicWandTool, atlasSize);
+
+            if (success)
+            {
+                if (IsMirroringEnabled && _projectionGizmo.Has3DPlacement)
+                {
+                    var (mirrorWorldPos, mirrorNormal) = ComputeMirroredPointAndNormal(_projectionGizmo.WorldPos, _projectionGizmo.WorldNormal);
+                    RaycastHitResult mirrorHit = default;
+                    if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                    {
+                        mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: FrontFacesOnly);
+                    }
+                    if (!mirrorHit.Hit)
+                    {
+                        RaycastAllSubmeshes(mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, out _, out mirrorHit);
+                    }
+
+                    if (mirrorHit.Hit)
+                    {
+                        Vector3 mRight = new Vector3(-_projectionGizmo.DecalRight.X, _projectionGizmo.DecalRight.Y, _projectionGizmo.DecalRight.Z).Normalized();
+                        Vector3 mDown = new Vector3(-_projectionGizmo.DecalDown.X, _projectionGizmo.DecalDown.Y, _projectionGizmo.DecalDown.Z).Normalized();
+                        float mUnitsU = (mirrorHit.WorldUnitsPerU > 1e-4f && mirrorHit.WorldUnitsPerU < 20.0f) ? mirrorHit.WorldUnitsPerU : 0.5f;
+                        float mUnitsV = (mirrorHit.WorldUnitsPerV > 1e-4f && mirrorHit.WorldUnitsPerV < 20.0f) ? mirrorHit.WorldUnitsPerV : 0.5f;
+
+                        _layerManager.StampDecalToAtlas(
+                            mirrorHit.HitUV,
+                            _projectionGizmo.Texture,
+                            _projectionGizmo.RotationDegrees,
+                            _projectionGizmo.NormalizedScale(atlasSize),
+                            _magicWandTool,
+                            mRight,
+                            mDown,
+                            mirrorHit.WorldTangent,
+                            mirrorHit.WorldBitangent,
+                            mUnitsU,
+                            mUnitsV);
+                    }
+                }
+
+                _decalStamper?.HidePreview();
+                if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                _selectionOverlay3D?.QueueRedraw();
+                _brushPalette?.SyncProjectionControls();
+            }
+            EmitSignal(SignalName.StrokeFinished);
+            return success;
         }
 
         private bool _isMirroringEnabled = false;
@@ -191,6 +869,50 @@ namespace DeadlockPlayground.Painter
                 return true;
             }
 
+            if (PaintTabUI.IsRenameDialogOpen)
+            {
+                return true;
+            }
+
+            var tree = GetTree();
+            if (tree != null)
+            {
+                var root = tree.Root;
+                if (root != null)
+                {
+                    var windows = root.FindChildren("*", "Window", recursive: true, owned: false);
+                    if (windows != null)
+                    {
+                        for (int i = 0; i < windows.Count; i++)
+                        {
+                            if (windows[i] is Window win && win != root && win.Visible)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                var paintTab = GetParent() as PaintTabUI ?? root?.FindChild("PaintTab", true, false) as PaintTabUI;
+                if (paintTab != null && paintTab.IsAnyDialogOpen())
+                {
+                    return true;
+                }
+
+                var exportPanel = root?.FindChild("PaintModExportPanel", true, false) as PaintModExportPanelUI;
+                if (exportPanel != null && GodotObject.IsInstanceValid(exportPanel))
+                {
+                    if (exportPanel.IsAnyDialogOpen()) return true;
+                    if (exportPanel.Visible && exportPanel.GetGlobalRect().HasPoint(GetViewport().GetMousePosition())) return true;
+                }
+
+                var modDialog = root?.FindChild("ExportModDialog", true, false) as CanvasLayer;
+                if (modDialog != null && GodotObject.IsInstanceValid(modDialog) && modDialog.Visible) return true;
+
+                var progDialog = root?.FindChild("ExportProgressDialog", true, false) as CanvasLayer;
+                if (progDialog != null && GodotObject.IsInstanceValid(progDialog) && progDialog.Visible) return true;
+            }
+
             var hovered = GetTree()?.Root?.GuiGetHoveredControl();
             if (hovered != null)
             {
@@ -205,7 +927,7 @@ namespace DeadlockPlayground.Painter
 
             if (_brushPalette != null && GodotObject.IsInstanceValid(_brushPalette) && _brushPalette.Visible)
             {
-                if (_brushPalette.GetGlobalRect().HasPoint(globalMouse))
+                if (_brushPalette.IsMouseOverPalette(globalMouse))
                 {
                     return true;
                 }
@@ -240,7 +962,7 @@ namespace DeadlockPlayground.Painter
             return false;
         }
 
-        public bool RaycastAllSubmeshes(Vector3 rayOrigin, Vector3 rayDir, out SubmeshNodeInfo hitSubmesh, out RaycastHitResult hitResult)
+        public bool RaycastAllSubmeshes(Vector3 rayOrigin, Vector3 rayDir, out SubmeshNodeInfo hitSubmesh, out RaycastHitResult hitResult, bool? cullBackfaces = null)
         {
             hitSubmesh = null;
             hitResult = new RaycastHitResult { Hit = false, Distance = float.MaxValue };
@@ -248,32 +970,65 @@ namespace DeadlockPlayground.Painter
             if (MeshHierarchy == null || MeshHierarchy.Submeshes == null) return false;
 
             float closestDist = float.MaxValue;
+            bool doCull = cullBackfaces ?? FrontFacesOnly;
 
             foreach (var sub in MeshHierarchy.Submeshes)
             {
                 if (sub.Mesh == null || !sub.Mesh.Visible || !GodotObject.IsInstanceValid(sub.Mesh)) continue;
 
-                // Lazily build and cache the raycaster for each submesh once
+                // Lazily build and cache the raycaster for each mesh across all surfaces (-1)
                 if (sub.Raycaster == null)
                 {
                     sub.Raycaster = new MeshRaycaster();
-                    sub.Raycaster.BuildFromMesh(sub.Mesh, sub.SurfaceIndex);
+                    sub.Raycaster.BuildFromMesh(sub.Mesh, -1);
                 }
 
                 if (!sub.Raycaster.IsInitialized) continue;
 
                 // IntersectRay performs an early-exit AABB bound check first;
                 // submeshes not under the ray return instantly in ~0.001ms without iterating triangles.
-                var hit = sub.Raycaster.IntersectRay(sub.Mesh, rayOrigin, rayDir, cullBackfaces: false);
+                var hit = sub.Raycaster.IntersectRay(sub.Mesh, rayOrigin, rayDir, cullBackfaces: doCull);
                 if (hit.Hit && hit.Distance < closestDist)
                 {
                     closestDist = hit.Distance;
                     hitResult = hit;
-                    hitSubmesh = sub;
+                    hitSubmesh = MeshHierarchy?.FindSubmesh(sub.Mesh, hit.HitSurfaceIndex) ?? sub;
                 }
             }
 
             return hitSubmesh != null;
+        }
+
+        private int _depthPeelIndex = 0;
+        private Vector2 _lastPeelMousePos = new Vector2(-9999, -9999);
+
+        public List<(SubmeshNodeInfo Submesh, RaycastHitResult Hit)> RaycastAllSubmeshesSorted(Vector3 rayOrigin, Vector3 rayDir)
+        {
+            var hits = new List<(SubmeshNodeInfo, RaycastHitResult)>();
+            if (MeshHierarchy == null || MeshHierarchy.Submeshes == null) return hits;
+
+            foreach (var sub in MeshHierarchy.Submeshes)
+            {
+                if (sub.Mesh == null || !sub.Mesh.Visible || !GodotObject.IsInstanceValid(sub.Mesh)) continue;
+
+                if (sub.Raycaster == null)
+                {
+                    sub.Raycaster = new MeshRaycaster();
+                    sub.Raycaster.BuildFromMesh(sub.Mesh, -1);
+                }
+
+                if (!sub.Raycaster.IsInitialized) continue;
+
+                var hit = sub.Raycaster.IntersectRay(sub.Mesh, rayOrigin, rayDir, cullBackfaces: FrontFacesOnly);
+                if (hit.Hit)
+                {
+                    var resolvedSub = MeshHierarchy?.FindSubmesh(sub.Mesh, hit.HitSurfaceIndex) ?? sub;
+                    hits.Add((resolvedSub, hit));
+                }
+            }
+
+            hits.Sort((a, b) => a.Item2.Distance.CompareTo(b.Item2.Distance));
+            return hits;
         }
 
         private byte[] _preStrokeAtlasData;
@@ -302,6 +1057,7 @@ namespace DeadlockPlayground.Painter
             {
                 _magicWandTool.MaskUpdated += (hasMask) => SyncSelectionMaskState();
             }
+            _projectionGizmo.GizmoChanged += OnProjectionGizmoChanged;
         }
 
         public void EnsureCameraBrush()
@@ -338,8 +1094,7 @@ namespace DeadlockPlayground.Painter
             _cameraBrush = (Node3D)brushScript.New();
             _cameraBrush.Name = "ActiveCameraBrush";
             _cameraBrush.Set("projection", 1); // 1 = PROJECTION_ORTHOGONAL (constant radius pencil)
-            int atlasRes = _layerManager?.CanvasSize.X ?? 2048;
-            _cameraBrush.Set("resolution", new Vector2I(atlasRes, atlasRes));
+            _cameraBrush.Set("resolution", new Vector2I(256, 256));
             _cameraBrush.Set("max_distance", 0.35f);
             _cameraBrush.Set("draw_speed", 35.0f);
             _cameraBrush.Set("drawing", false);
@@ -377,8 +1132,7 @@ namespace DeadlockPlayground.Painter
             _mirrorCameraBrush = (Node3D)brushScript.New();
             _mirrorCameraBrush.Name = "MirrorCameraBrush";
             _mirrorCameraBrush.Set("projection", 1);
-            int atlasRes = _layerManager?.CanvasSize.X ?? 2048;
-            _mirrorCameraBrush.Set("resolution", new Vector2I(atlasRes, atlasRes));
+            _mirrorCameraBrush.Set("resolution", new Vector2I(256, 256));
             _mirrorCameraBrush.Set("max_distance", 0.35f);
             _mirrorCameraBrush.Set("draw_speed", 35.0f);
             _mirrorCameraBrush.Set("drawing", false);
@@ -419,7 +1173,7 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            if (_mirrorCameraBrush.HasMethod("get_atlas_textures"))
+            if (_currentMesh != null && IsPaintingActive && _mirrorCameraBrush.HasMethod("get_atlas_textures"))
             {
                 _mirrorCameraBrush.Call("get_atlas_textures");
             }
@@ -481,10 +1235,14 @@ namespace DeadlockPlayground.Painter
             }
 
             bool isErase = ToolMode == BrushToolMode.Erase;
-            _cameraBrush.Set("is_erase", isErase);
-            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+            if (force || isErase != _lastIsErase)
             {
-                _mirrorCameraBrush.Set("is_erase", isErase);
+                _cameraBrush.Set("is_erase", isErase);
+                if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                {
+                    _mirrorCameraBrush.Set("is_erase", isErase);
+                }
+                _lastIsErase = isErase;
             }
 
             float layerOpacity = _layerManager?.ActiveLayer?.Opacity ?? 1.0f;
@@ -494,7 +1252,7 @@ namespace DeadlockPlayground.Painter
 
             Color paintColor = isErase 
                 ? new Color(1, 1, 1, BrushFlow) 
-                : new Color(BrushColor.R, BrushColor.G, BrushColor.B, Mathf.Clamp(BrushColor.A * layerOpacity, 0.01f, 1.0f));
+                : new Color(BrushColor.R, BrushColor.G, BrushColor.B, Mathf.Clamp(BrushColor.A, 0.01f, 1.0f));
 
             if (force || _lastBrushColor != paintColor || _lastToolMode != ToolMode)
             {
@@ -539,10 +1297,11 @@ namespace DeadlockPlayground.Painter
 
             if (force || _lastBlendMode != activeBlendMode)
             {
-                _cameraBrush.Set("blend_mode", activeBlendMode);
+                // Active layer stores raw paint dabs; layer blend mode is dynamically evaluated by hero_painter_overlay.gdshader and compositor
+                _cameraBrush.Set("blend_mode", 0);
                 if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
                 {
-                    _mirrorCameraBrush.Set("blend_mode", activeBlendMode);
+                    _mirrorCameraBrush.Set("blend_mode", 0);
                 }
                 _lastBlendMode = activeBlendMode;
                 BlendMode = activeBlendMode;
@@ -550,29 +1309,63 @@ namespace DeadlockPlayground.Painter
 
             int minBleed = 0;
             int maxBleed = 0;
-            Vector2I brushRes = (atlasRes >= 2048) ? new Vector2I(512, 512) : new Vector2I(256, 256);
+            Vector2I brushRes = new Vector2I(256, 256);
+            Vector2 brushCenter = new Vector2(128.0f, 128.0f);
+            float brushRadius = 128.0f;
 
-            _cameraBrush.Set("min_bleed", minBleed);
-            _cameraBrush.Set("max_bleed", maxBleed);
-            _cameraBrush.Set("resolution", brushRes);
+            if (force || minBleed != _lastMinBleed)
+            {
+                _cameraBrush.Set("min_bleed", minBleed);
+                _lastMinBleed = minBleed;
+            }
+            if (force || maxBleed != _lastMaxBleed)
+            {
+                _cameraBrush.Set("max_bleed", maxBleed);
+                _lastMaxBleed = maxBleed;
+            }
+            if (force || brushRes != _lastResolution)
+            {
+                _cameraBrush.Set("resolution", brushRes);
+                _lastResolution = brushRes;
+            }
+            if (force || brushCenter != _lastBrushCenter)
+            {
+                _cameraBrush.Set("brush_center", brushCenter);
+                _lastBrushCenter = brushCenter;
+            }
+            if (force || Math.Abs(brushRadius - _lastBrushRadius) > 0.001f)
+            {
+                _cameraBrush.Set("brush_radius", brushRadius);
+                _lastBrushRadius = brushRadius;
+            }
 
             bool useMask = _magicWandTool != null && _magicWandTool.HasSelection;
-            _cameraBrush.Set("use_selection_mask", useMask);
-            if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
+            if (force || useMask != _lastUseMask)
             {
-                _cameraBrush.Set("selection_mask_rid", _magicWandTool.SelectionMaskRid);
+                _cameraBrush.Set("use_selection_mask", useMask);
+                _lastUseMask = useMask;
+            }
+            Rid maskRid = (useMask && _magicWandTool.SelectionMaskRid.IsValid) ? _magicWandTool.SelectionMaskRid : new Rid();
+            var rd = RenderingServer.GetRenderingDevice();
+            if (maskRid.IsValid && rd != null && !rd.TextureIsValid(maskRid))
+            {
+                maskRid = new Rid();
+            }
+            if (force || maskRid != _lastMaskRid)
+            {
+                _cameraBrush.Set("selection_mask_rid", maskRid);
+                _lastMaskRid = maskRid;
             }
 
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
-                _mirrorCameraBrush.Set("min_bleed", minBleed);
-                _mirrorCameraBrush.Set("max_bleed", maxBleed);
-                _mirrorCameraBrush.Set("resolution", brushRes);
-                _mirrorCameraBrush.Set("use_selection_mask", useMask);
-                if (useMask && _magicWandTool.SelectionMaskRid.IsValid)
-                {
-                    _mirrorCameraBrush.Set("selection_mask_rid", _magicWandTool.SelectionMaskRid);
-                }
+                if (force || minBleed != _lastMinBleed) _mirrorCameraBrush.Set("min_bleed", minBleed);
+                if (force || maxBleed != _lastMaxBleed) _mirrorCameraBrush.Set("max_bleed", maxBleed);
+                if (force || brushRes != _lastResolution) _mirrorCameraBrush.Set("resolution", brushRes);
+                if (force || brushCenter != _lastBrushCenter) _mirrorCameraBrush.Set("brush_center", brushCenter);
+                if (force || Math.Abs(brushRadius - _lastBrushRadius) > 0.001f) _mirrorCameraBrush.Set("brush_radius", brushRadius);
+                if (force || useMask != _lastUseMask) _mirrorCameraBrush.Set("use_selection_mask", useMask);
+                if (force || maskRid != _lastMaskRid) _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
             }
         }
 
@@ -587,6 +1380,17 @@ namespace DeadlockPlayground.Painter
             }
 
             EnsureCameraBrush();
+            EnsureSelectionOverlay3D();
+
+            if (_selectionOverlay3D != null && _selectionOverlay3D.Visible)
+            {
+                if (((ToolMode == BrushToolMode.Decal || ToolMode == BrushToolMode.Text) && ((_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement) || (_previewDecalNode != null && _previewDecalNode.Visible))) ||
+                    (ToolMode == BrushToolMode.Shape && (_isDraggingShape3D || (_shapeTool != null && _shapeTool.HasActiveShape))) ||
+                    (ToolMode == BrushToolMode.Selection && (_isSelecting3D || _isBuildingPoly3D)))
+                {
+                    _selectionOverlay3D.QueueRedraw();
+                }
+            }
 
             bool isLeftDown = Input.IsMouseButtonPressed(MouseButton.Left);
             if (!isLeftDown)
@@ -601,15 +1405,60 @@ namespace DeadlockPlayground.Painter
             if (IsMouseOverUI() || _clickOriginatedOnUI)
             {
                 if (_cursorGizmo != null) _cursorGizmo.Visible = false;
-                if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                {
+                    _previewDecalNode.Visible = false;
+                }
+                if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+                {
+                    _cameraBrush.Set("drawing", false);
+                }
+                if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                {
+                    _mirrorCameraBrush.Set("drawing", false);
+                }
                 if (_isMouseDown) FinishStroke();
                 return;
+            }
+
+            if (ToolMode == BrushToolMode.Selection || ToolMode == BrushToolMode.Shape)
+            {
+                {
+                    if (_cursorGizmo != null) _cursorGizmo.Visible = false;
+                    if (_previewDecalNode != null && ToolMode == BrushToolMode.Selection)
+                    {
+                        _previewDecalNode.Visible = false;
+                    }
+                    if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
+                    {
+                        _cameraBrush.Set("drawing", false);
+                    }
+                    if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                    {
+                        _mirrorCameraBrush.Set("drawing", false);
+                    }
+                }
             }
 
             UpdateBrushCursor();
             UpdateSelectionOutline();
 
+            // Auto-select target submesh on click if clicking a different authentic hero submesh BEFORE evaluating painting permissions
+            if (isLeftDown && !_isMouseDown && _lastHitSubmesh != null && _lastHitSubmesh.Mesh != _currentMesh && !IsMouseOverUI())
+            {
+                MeshHierarchy?.SelectTarget(_lastHitSubmesh, _lastHitSubmesh.SurfaceIndex);
+            }
+
             var camera = _worldViewport?.GetCamera3D() ?? _camera;
+
+            bool isParticleMode = _layerManager != null && _layerManager.IsStandaloneTextureMode;
+            if (isParticleMode)
+            {
+                if (_cursorGizmo != null) _cursorGizmo.Visible = false;
+                if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush)) _cameraBrush.Set("drawing", false);
+                if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush)) _mirrorCameraBrush.Set("drawing", false);
+                return;
+            }
 
             bool canPaintLayer = _layerManager?.ActiveLayer != null && !_layerManager.ActiveLayer.IsLocked && _layerManager.ActiveLayer.IsVisible;
             bool isPainting = IsPaintingActive && canPaintLayer && isLeftDown && _lastHit.Hit 
@@ -618,7 +1467,9 @@ namespace DeadlockPlayground.Painter
                 && ToolMode != BrushToolMode.Decal 
                 && ToolMode != BrushToolMode.Text 
                 && ToolMode != BrushToolMode.SelectSubmesh
-                && ToolMode != BrushToolMode.MagicWand;
+                && ToolMode != BrushToolMode.MagicWand
+                && ToolMode != BrushToolMode.Selection
+                && ToolMode != BrushToolMode.Shape;
 
             if (isLeftDown)
             {
@@ -649,7 +1500,7 @@ namespace DeadlockPlayground.Painter
                         Vector2 mousePos = GetViewportMousePosition();
                         Vector3 origin = camera.ProjectRayOrigin(mousePos);
                         Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
-                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
                         if (hit.Hit)
                         {
                             _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool, BucketFillTolerance);
@@ -660,6 +1511,10 @@ namespace DeadlockPlayground.Painter
                             _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool, BucketFillTolerance);
                         }
                     }
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
@@ -673,7 +1528,7 @@ namespace DeadlockPlayground.Painter
                         if (Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
                         else if (Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
 
-                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
                         if (hit.Hit)
                         {
                             ExecuteMagicWandSelection(hit, combineMode);
@@ -692,7 +1547,7 @@ namespace DeadlockPlayground.Painter
                         Vector2 mousePos = GetViewportMousePosition();
                         Vector3 origin = camera.ProjectRayOrigin(mousePos);
                         Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
-                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
                         if (hit.Hit)
                         {
                             SampleColorAtUV(hit.HitUV, hit.HitSurfaceIndex);
@@ -704,84 +1559,136 @@ namespace DeadlockPlayground.Painter
                         }
                     }
                 }
-                else if (ToolMode == BrushToolMode.Decal && _lastHit.Hit)
+            }
+
+            // 3D placement and continuous drag for Decal and Text
+            if (isLeftDown && !_isDraggingGizmo3D && !IsMouseOverUI() && (ToolMode == BrushToolMode.Decal || ToolMode == BrushToolMode.Text) && _lastHit.Hit)
+            {
+                bool isInitialClick = !_isActionClickDown;
+                _isActionClickDown = true;
+
+                if (ToolMode == BrushToolMode.Decal && _decalStamper?.DecalTexture != null)
                 {
-                    if (_decalStamper != null && _decalStamper.DecalTexture != null)
+                    Basis decalBasis = _previewDecalNode != null ? _previewDecalNode.Transform.Basis : Basis.Identity;
+                    Vector3 decalRight = decalBasis.Column0.Normalized();
+                    Vector3 decalDown = decalBasis.Column2.Normalized();
+                    float unitsU = (_lastHit.WorldUnitsPerU > 1e-4f && _lastHit.WorldUnitsPerU < 20.0f) ? _lastHit.WorldUnitsPerU : 0.5f;
+                    float unitsV = (_lastHit.WorldUnitsPerV > 1e-4f && _lastHit.WorldUnitsPerV < 20.0f) ? _lastHit.WorldUnitsPerV : 0.5f;
+
+                    _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
+
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    int atlasSize = Math.Max(atlasW, atlasH);
+                    Vector2 atlasUV = _lastHit.HitUV;
+                    if (_currentMesh?.MaterialOverlay is ShaderMaterial sm)
                     {
-                        Basis decalBasis = _previewDecalNode != null ? _previewDecalNode.Transform.Basis : Basis.Identity;
-                        Vector3 decalRight = decalBasis.Column0.Normalized();
-                        Vector3 decalDown = decalBasis.Column2.Normalized();
-                        float unitsU = (_lastHit.WorldUnitsPerU > 1e-4f && _lastHit.WorldUnitsPerU < 20.0f) ? _lastHit.WorldUnitsPerU : 0.5f;
-                        float unitsV = (_lastHit.WorldUnitsPerV > 1e-4f && _lastHit.WorldUnitsPerV < 20.0f) ? _lastHit.WorldUnitsPerV : 0.5f;
-
-                        _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
-                        _decalStamper.BakeToActiveLayer();
-
-                        if (IsMirroringEnabled)
+                        var posVar = sm.GetShaderParameter("position_in_atlas");
+                        var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
                         {
-                            var (mirrorWorldPos, mirrorNormal) = ComputeMirroredPointAndNormal(_lastHit.HitPositionWorld, _lastHit.HitNormal);
-                            RaycastHitResult mirrorHit = default;
-                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                            Vector2 p = posVar.AsVector2();
+                            Vector2 s = sizeVar.AsVector2();
+                            if (s.X > 0 && s.Y > 0)
                             {
-                                mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: false);
-                            }
-                            if (!mirrorHit.Hit)
-                            {
-                                RaycastAllSubmeshes(mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, out _, out mirrorHit);
-                            }
-
-                            if (mirrorHit.Hit)
-                            {
-                                Vector3 mRight = new Vector3(-decalRight.X, decalRight.Y, decalRight.Z).Normalized();
-                                Vector3 mDown = new Vector3(-decalDown.X, decalDown.Y, decalDown.Z).Normalized();
-                                float mUnitsU = (mirrorHit.WorldUnitsPerU > 1e-4f && mirrorHit.WorldUnitsPerU < 20.0f) ? mirrorHit.WorldUnitsPerU : 0.5f;
-                                float mUnitsV = (mirrorHit.WorldUnitsPerV > 1e-4f && mirrorHit.WorldUnitsPerV < 20.0f) ? mirrorHit.WorldUnitsPerV : 0.5f;
-
-                                _decalStamper.PlaceAt(mirrorHit.HitPositionWorld, mirrorHit.HitNormal, mirrorHit.HitUV, mRight, mDown, mirrorHit.WorldTangent, mirrorHit.WorldBitangent, mUnitsU, mUnitsV);
-                                _decalStamper.BakeToActiveLayer();
-                                _decalStamper.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
+                                atlasUV = p + _lastHit.HitUV * s;
                             }
                         }
                     }
-                }
-                else if (ToolMode == BrushToolMode.Text && _lastHit.Hit)
-                {
-                    if (_textProjector != null)
+                    Vector2 centerAtlasPx = new Vector2(atlasUV.X * atlasW, atlasUV.Y * atlasH);
+
+                    if (!_projectionGizmo.IsActive || isInitialClick || _projectionGizmo.IsText)
                     {
-                        Basis decalBasis = _previewDecalNode != null ? _previewDecalNode.Transform.Basis : Basis.Identity;
-                        Vector3 decalRight = decalBasis.Column0.Normalized();
-                        Vector3 decalDown = decalBasis.Column2.Normalized();
-                        float unitsU = (_lastHit.WorldUnitsPerU > 1e-4f && _lastHit.WorldUnitsPerU < 20.0f) ? _lastHit.WorldUnitsPerU : 0.5f;
-                        float unitsV = (_lastHit.WorldUnitsPerV > 1e-4f && _lastHit.WorldUnitsPerV < 20.0f) ? _lastHit.WorldUnitsPerV : 0.5f;
+                        _projectionGizmo.Activate(centerAtlasPx, _decalStamper.DecalTexture, _decalStamper.DecalScale, _decalStamper.RotationDegrees, isText: false, atlasSize);
+                    }
+                    else
+                    {
+                        _projectionGizmo.Center = centerAtlasPx;
+                    }
 
-                        _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
-                        _textProjector.BakeToActiveLayer();
+                    _projectionGizmo.Is3DProjection = true;
+                    _projectionGizmo.Has3DPlacement = true;
+                    _projectionGizmo.WorldPos = _lastHit.HitPositionWorld;
+                    _projectionGizmo.WorldNormal = _lastHit.HitNormal;
+                    _projectionGizmo.DecalRight = decalRight;
+                    _projectionGizmo.DecalDown = decalDown;
+                    _projectionGizmo.WorldTangent = _lastHit.WorldTangent;
+                    _projectionGizmo.WorldBitangent = _lastHit.WorldBitangent;
+                    _projectionGizmo.UnitsU = unitsU;
+                    _projectionGizmo.UnitsV = unitsV;
+                    _projectionGizmo.HitMesh = _currentMesh;
+                    _projectionGizmo.HitUV = _lastHit.HitUV;
+                    _projectionGizmo.HitSurfaceIndex = _lastHit.HitSurfaceIndex;
 
-                        if (IsMirroringEnabled)
+                    OnProjectionGizmoChanged();
+                    _brushPalette?.SyncProjectionControls();
+                    EnsureSelectionOverlay3D();
+                    if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+                    {
+                        _selectionOverlay3D.Visible = true;
+                        _selectionOverlay3D.QueueRedraw();
+                    }
+                }
+                else if (ToolMode == BrushToolMode.Text && _textProjector?.CurrentTexture != null)
+                {
+                    Basis decalBasis = _previewDecalNode != null ? _previewDecalNode.Transform.Basis : Basis.Identity;
+                    Vector3 decalRight = decalBasis.Column0.Normalized();
+                    Vector3 decalDown = decalBasis.Column2.Normalized();
+                    float unitsU = (_lastHit.WorldUnitsPerU > 1e-4f && _lastHit.WorldUnitsPerU < 20.0f) ? _lastHit.WorldUnitsPerU : 0.5f;
+                    float unitsV = (_lastHit.WorldUnitsPerV > 1e-4f && _lastHit.WorldUnitsPerV < 20.0f) ? _lastHit.WorldUnitsPerV : 0.5f;
+
+                    _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
+
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    int atlasSize = Math.Max(atlasW, atlasH);
+                    Vector2 textAtlasUV = _lastHit.HitUV;
+                    if (_currentMesh?.MaterialOverlay is ShaderMaterial textSm)
+                    {
+                        var posVar = textSm.GetShaderParameter("position_in_atlas");
+                        var sizeVar = textSm.GetShaderParameter("size_in_atlas");
+                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
                         {
-                            var (mirrorWorldPos, mirrorNormal) = ComputeMirroredPointAndNormal(_lastHit.HitPositionWorld, _lastHit.HitNormal);
-                            RaycastHitResult mirrorHit = default;
-                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                            Vector2 p = posVar.AsVector2();
+                            Vector2 s = sizeVar.AsVector2();
+                            if (s.X > 0 && s.Y > 0)
                             {
-                                mirrorHit = _raycaster.IntersectRay(_currentMesh, mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, cullBackfaces: false);
-                            }
-                            if (!mirrorHit.Hit)
-                            {
-                                RaycastAllSubmeshes(mirrorWorldPos + mirrorNormal * 0.1f, -mirrorNormal, out _, out mirrorHit);
-                            }
-
-                            if (mirrorHit.Hit)
-                            {
-                                Vector3 mRight = new Vector3(-decalRight.X, decalRight.Y, decalRight.Z).Normalized();
-                                Vector3 mDown = new Vector3(-decalDown.X, decalDown.Y, decalDown.Z).Normalized();
-                                float mUnitsU = (mirrorHit.WorldUnitsPerU > 1e-4f && mirrorHit.WorldUnitsPerU < 20.0f) ? mirrorHit.WorldUnitsPerU : 0.5f;
-                                float mUnitsV = (mirrorHit.WorldUnitsPerV > 1e-4f && mirrorHit.WorldUnitsPerV < 20.0f) ? mirrorHit.WorldUnitsPerV : 0.5f;
-
-                                _textProjector.PlaceAt(mirrorHit.HitPositionWorld, mirrorHit.HitNormal, mirrorHit.HitUV, mRight, mDown, mirrorHit.WorldTangent, mirrorHit.WorldBitangent, mUnitsU, mUnitsV);
-                                _textProjector.BakeToActiveLayer();
-                                _textProjector.PlaceAt(_lastHit.HitPositionWorld, _lastHit.HitNormal, _lastHit.HitUV, decalRight, decalDown, _lastHit.WorldTangent, _lastHit.WorldBitangent, unitsU, unitsV);
+                                textAtlasUV = p + _lastHit.HitUV * s;
                             }
                         }
+                    }
+                    Vector2 centerAtlasPx = new Vector2(textAtlasUV.X * atlasW, textAtlasUV.Y * atlasH);
+
+                    if (!_projectionGizmo.IsActive || isInitialClick || !_projectionGizmo.IsText)
+                    {
+                        _projectionGizmo.Activate(centerAtlasPx, _textProjector.CurrentTexture, _textProjector.TextScale, _textProjector.RotationDegrees, isText: true, atlasSize);
+                    }
+                    else
+                    {
+                        _projectionGizmo.Center = centerAtlasPx;
+                    }
+
+                    _projectionGizmo.Is3DProjection = true;
+                    _projectionGizmo.Has3DPlacement = true;
+                    _projectionGizmo.WorldPos = _lastHit.HitPositionWorld;
+                    _projectionGizmo.WorldNormal = _lastHit.HitNormal;
+                    _projectionGizmo.DecalRight = decalRight;
+                    _projectionGizmo.DecalDown = decalDown;
+                    _projectionGizmo.WorldTangent = _lastHit.WorldTangent;
+                    _projectionGizmo.WorldBitangent = _lastHit.WorldBitangent;
+                    _projectionGizmo.UnitsU = unitsU;
+                    _projectionGizmo.UnitsV = unitsV;
+                    _projectionGizmo.HitMesh = _currentMesh;
+                    _projectionGizmo.HitUV = _lastHit.HitUV;
+                    _projectionGizmo.HitSurfaceIndex = _lastHit.HitSurfaceIndex;
+
+                    OnProjectionGizmoChanged();
+                    _brushPalette?.SyncProjectionControls();
+                    EnsureSelectionOverlay3D();
+                    if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+                    {
+                        _selectionOverlay3D.Visible = true;
+                        _selectionOverlay3D.QueueRedraw();
                     }
                 }
             }
@@ -798,10 +1705,13 @@ namespace DeadlockPlayground.Painter
 
                 if (_lastHit.Hit)
                 {
-                    Vector3 brushPos = _lastHit.HitPositionWorld - rayDir * 0.15f;
+                    Vector3 surfaceNormal = _lastHit.HitNormal.Normalized();
+                    if (surfaceNormal.LengthSquared() < 0.001f) surfaceNormal = -rayDir;
+                    if (surfaceNormal.Dot(-rayDir) < 0f) surfaceNormal = -surfaceNormal; // Ensure CameraBrush stays in front of surface
+                    Vector3 brushPos = _lastHit.HitPositionWorld + surfaceNormal * 0.15f;
                     _cameraBrush.GlobalPosition = brushPos;
-                    Vector3 up = Mathf.Abs(rayDir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
-                    _cameraBrush.LookAt(brushPos + rayDir, up);
+                    Vector3 up = Mathf.Abs(surfaceNormal.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
+                    _cameraBrush.LookAt(_lastHit.HitPositionWorld, up);
                     _cameraBrush.Set("max_distance", 0.35f);
                 }
                 else
@@ -819,11 +1729,16 @@ namespace DeadlockPlayground.Painter
                 {
                     if (_lastHit.Hit)
                     {
-                        var (mirrorPos, mirrorRayDir) = ComputeMirroredPointAndDir(_lastHit.HitPositionWorld, rayDir);
-                        Vector3 mirrorBrushPos = mirrorPos - mirrorRayDir * 0.15f;
+                        Vector3 surfaceNormal = _lastHit.HitNormal.Normalized();
+                        if (surfaceNormal.LengthSquared() < 0.001f) surfaceNormal = -rayDir;
+                        if (surfaceNormal.Dot(-rayDir) < 0f) surfaceNormal = -surfaceNormal;
+                        var (mirrorPos, mirrorNormal) = ComputeMirroredPointAndDir(_lastHit.HitPositionWorld, surfaceNormal);
+                        mirrorNormal = mirrorNormal.Normalized();
+                        if (mirrorNormal.Dot(-rayDir) < 0f) mirrorNormal = -mirrorNormal;
+                        Vector3 mirrorBrushPos = mirrorPos + mirrorNormal * 0.15f;
                         _mirrorCameraBrush.GlobalPosition = mirrorBrushPos;
-                        Vector3 up = Mathf.Abs(mirrorRayDir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
-                        _mirrorCameraBrush.LookAt(mirrorBrushPos + mirrorRayDir, up);
+                        Vector3 up = Mathf.Abs(mirrorNormal.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
+                        _mirrorCameraBrush.LookAt(mirrorPos, up);
                         _mirrorCameraBrush.Set("max_distance", 0.35f);
                     }
                     _mirrorCameraBrush.Set("drawing", isPainting && _lastHit.Hit);
@@ -840,12 +1755,10 @@ namespace DeadlockPlayground.Painter
                 {
                     _isMouseDown = true;
                     _strokeInProgress = true;
-                    _layerManager?.RecordInitialSnapshot();
-                    _preStrokeAtlasData = _layerManager?.GetAtlasDataSnapshot();
-                    _cameraBrush?.Call("get_atlas_textures");
-                    if (IsMirroringEnabled && _mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
+                    _layerManager?.RecordGpuUndoSnapshot();
+                    if (_layerManager?.ActiveLayer != null)
                     {
-                        _mirrorCameraBrush.Call("get_atlas_textures");
+                        _layerManager.ActiveLayer.IsCpuSynced = false;
                     }
                     EmitSignal(SignalName.StrokeStarted);
                 }
@@ -878,12 +1791,9 @@ namespace DeadlockPlayground.Painter
                 _cursorSplatterMesh = CreateSplatterGizmoMesh();
                 _cursorGrungeMesh = CreateGrungeGizmoMesh();
 
-                _cursorGizmo = new MeshInstance3D
+                _cursorGizmo = new Node3D
                 {
-                    Name = "BrushCursorRingGizmo",
-                    Mesh = _cursorTorusMesh,
-                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                    Layers = 1 | 2,
+                    Name = "BrushCursorRootGizmo",
                     Visible = false
                 };
 
@@ -896,7 +1806,17 @@ namespace DeadlockPlayground.Painter
                     Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                     CullMode = BaseMaterial3D.CullModeEnum.Disabled
                 };
-                _cursorGizmo.MaterialOverride = _cursorMaterial;
+
+                _cursorRingMesh = new MeshInstance3D
+                {
+                    Name = "BrushCursorRingGizmo",
+                    Mesh = _cursorTorusMesh,
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                    Layers = 1 | 2,
+                    Visible = false,
+                    MaterialOverride = _cursorMaterial
+                };
+                _cursorGizmo.AddChild(_cursorRingMesh);
 
                 _eyedropperSprite = new Sprite3D
                 {
@@ -964,14 +1884,40 @@ namespace DeadlockPlayground.Painter
                 {
                     Name = "PainterLiveDecalPreview",
                     Size = new Vector3(0.5f, 1.2f, 0.5f),
-                    AlbedoMix = 0.95f,
-                    CullMask = 1,
+                    AlbedoMix = 1.0f,
+                    CullMask = (uint)((1 << 0) | (1 << 1) | (1 << 20)), // Abarca mallas estándar, gizmos y capas de pintura
                     NormalFade = 0.0f,
                     UpperFade = 0.0f,
                     LowerFade = 0.0f,
                     Visible = false
                 };
             }
+
+            if (_shapeDecalNode == null)
+                {
+                    _shapeDecalNode = new Decal
+                    {
+                        Name = "PainterLiveShapeDecalPreview",
+                        Size = new Vector3(0.5f, 1.2f, 0.5f),
+                        AlbedoMix = 1.0f,
+                        CullMask = (uint)((1 << 0) | (1 << 1) | (1 << 20)),
+                        NormalFade = 0.0f,
+                        UpperFade = 0.0f,
+                        LowerFade = 0.0f,
+                        Visible = false
+                    };
+                }
+                if (!_shapeDecalNode.IsInsideTree())
+                {
+                    if (_worldViewport != null && GodotObject.IsInstanceValid(_worldViewport))
+                    {
+                        _worldViewport.AddChild(_shapeDecalNode);
+                    }
+                    else if (_currentMesh != null && _currentMesh.IsInsideTree())
+                    {
+                        _currentMesh.GetParent()?.AddChild(_shapeDecalNode);
+                    }
+                }
 
             if (!_previewDecalNode.IsInsideTree())
             {
@@ -984,6 +1930,7 @@ namespace DeadlockPlayground.Painter
                     _currentMesh.GetParent()?.AddChild(_previewDecalNode);
                 }
             }
+
         }
 
         private void CreateEyedropperSpriteTexture()
@@ -1170,30 +2117,45 @@ namespace DeadlockPlayground.Painter
             Vector3 rayOrigin = camera.ProjectRayOrigin(localMouse);
             Vector3 rayDir = camera.ProjectRayNormal(localMouse);
 
-            if (ToolMode == BrushToolMode.SelectSubmesh || ToolMode == BrushToolMode.MagicWand || ToolMode == BrushToolMode.BucketFill || ToolMode == BrushToolMode.Eyedropper)
+            RaycastHitResult hitResult = default;
+            SubmeshNodeInfo hitSub = null;
+
+            // 1. First test current active mesh with FrontFacesOnly
+            if (_currentMesh != null)
             {
-                var curHit = (_currentMesh != null)
-                    ? _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: false)
-                    : default;
-                if (curHit.Hit)
+                hitResult = _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: FrontFacesOnly);
+                if (hitResult.Hit)
                 {
-                    _lastHit = curHit;
+                    hitSub = MeshHierarchy?.FindSubmesh(_currentMesh, hitResult.HitSurfaceIndex);
                 }
-                else if (RaycastAllSubmeshes(rayOrigin, rayDir, out var hoverSub, out var allHit))
+                else if (FrontFacesOnly)
                 {
-                    _lastHit = allHit;
-                }
-                else
-                {
-                    _lastHit = new RaycastHitResult { Hit = false };
+                    // 1b. Fallback: try current mesh with cullBackfaces = false to hit double-sided / back-facing surfaces (skirts, hair, ribbons)
+                    hitResult = _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: false);
+                    if (hitResult.Hit)
+                    {
+                        hitSub = MeshHierarchy?.FindSubmesh(_currentMesh, hitResult.HitSurfaceIndex);
+                    }
                 }
             }
-            else
+
+            // 2. If no hit on current mesh, search across all submeshes of the character
+            if (!hitResult.Hit)
             {
-                _lastHit = (_currentMesh != null)
-                    ? _raycaster.IntersectRay(_currentMesh, rayOrigin, rayDir, cullBackfaces: false)
-                    : new RaycastHitResult { Hit = false };
+                if (RaycastAllSubmeshes(rayOrigin, rayDir, out var anySub, out var anyHit, cullBackfaces: FrontFacesOnly))
+                {
+                    hitResult = anyHit;
+                    hitSub = anySub;
+                }
+                else if (FrontFacesOnly && RaycastAllSubmeshes(rayOrigin, rayDir, out anySub, out anyHit, cullBackfaces: false))
+                {
+                    hitResult = anyHit;
+                    hitSub = anySub;
+                }
             }
+
+            _lastHit = hitResult;
+            _lastHitSubmesh = hitSub;
 
             var hit = _lastHit;
 
@@ -1204,10 +2166,10 @@ namespace DeadlockPlayground.Painter
 
             if (hit.Hit)
             {
-                if (ToolMode == BrushToolMode.MagicWand)
+                if (ToolMode == BrushToolMode.MagicWand || ToolMode == BrushToolMode.Selection || ToolMode == BrushToolMode.Shape)
                 {
                     _cursorGizmo.Visible = false;
-                    _cursorGizmo.Mesh = null;
+                    if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                 }
                 else
                 {
@@ -1264,14 +2226,18 @@ namespace DeadlockPlayground.Painter
 
                 if (ToolMode == BrushToolMode.Eyedropper)
                 {
-                    _cursorGizmo.Mesh = null;
+                    if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = true;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
                 }
                 else if (ToolMode == BrushToolMode.SelectSubmesh)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = _cursorTorusMesh;
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
@@ -1279,15 +2245,19 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
-                    _cursorGizmo.Mesh = null;
                     _cursorGizmo.Visible = false;
+                    if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
                 }
                 else if (ToolMode == BrushToolMode.Decal)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = _cursorTorusMesh;
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.35f, 0.85f, 1.0f, 0.95f);
@@ -1297,34 +2267,40 @@ namespace DeadlockPlayground.Painter
                     {
                         _previewDecalNode.Visible = true;
                         _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, tex);
-                        float scale = _decalStamper?.DecalScale ?? 0.25f;
-                        float rotDeg = _decalStamper?.RotationDegrees ?? 0.0f;
-                        float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
+                        if (!(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                        {
+                            float scale = _decalStamper?.DecalScale ?? 0.25f;
+                            float rotDeg = _decalStamper?.RotationDegrees ?? 0.0f;
+                            float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
 
-                        float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
-                        float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
-                        float uvSpanU = (aspect >= 1.0f) ? scale * aspect : scale;
-                        float uvSpanV = (aspect < 1.0f) ? scale / aspect : scale;
-                        float sizeX = uvSpanU * unitsU;
-                        float sizeZ = uvSpanV * unitsV;
-                        float depthY = Mathf.Max(1.0f, Mathf.Max(sizeX, sizeZ) * 2.0f);
-                        _previewDecalNode.NormalFade = 0.0f;
-                        _previewDecalNode.UpperFade = 0.0f;
-                        _previewDecalNode.LowerFade = 0.0f;
-                        _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
+                            float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
+                            float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
+                            float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                            float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
+                            float sizeX = uvSpanU * unitsU;
+                            float sizeZ = uvSpanV * unitsV;
+                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
+                            _previewDecalNode.NormalFade = 0.65f;
+                            _previewDecalNode.UpperFade = 0.3f;
+                            _previewDecalNode.LowerFade = 0.3f;
+                            _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
-                        Basis basis = new Basis(tangent, normal, bitangent);
-                        basis = basis.Rotated(normal, Mathf.DegToRad(rotDeg));
-                        _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld);
+                            Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
+                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.20f));
+                        }
                     }
-                    else if (_previewDecalNode != null)
+                    else if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
                     {
                         _previewDecalNode.Visible = false;
                     }
                 }
                 else if (ToolMode == BrushToolMode.Text)
                 {
-                    _cursorGizmo.Mesh = _cursorTorusMesh;
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = _cursorTorusMesh;
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_cursorMaterial != null) _cursorMaterial.AlbedoColor = new Color(0.85f, 0.45f, 1.0f, 0.95f);
@@ -1334,27 +2310,29 @@ namespace DeadlockPlayground.Painter
                     {
                         _previewDecalNode.Visible = true;
                         _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, tex);
-                        float scale = _textProjector?.TextScale ?? 0.25f;
-                        float rotDeg = _textProjector?.RotationDegrees ?? 0.0f;
-                        float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
+                        if (!(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                        {
+                            float scale = _textProjector?.TextScale ?? 0.25f;
+                            float rotDeg = _textProjector?.RotationDegrees ?? 0.0f;
+                            float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
 
-                        float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
-                        float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
-                        float uvSpanU = (aspect >= 1.0f) ? scale * aspect : scale;
-                        float uvSpanV = (aspect < 1.0f) ? scale / aspect : scale;
-                        float sizeX = uvSpanU * unitsU;
-                        float sizeZ = uvSpanV * unitsV;
-                        float depthY = Mathf.Max(1.0f, Mathf.Max(sizeX, sizeZ) * 2.0f);
-                        _previewDecalNode.NormalFade = 0.0f;
-                        _previewDecalNode.UpperFade = 0.0f;
-                        _previewDecalNode.LowerFade = 0.0f;
-                        _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
+                            float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
+                            float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
+                            float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                            float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
+                            float sizeX = uvSpanU * unitsU;
+                            float sizeZ = uvSpanV * unitsV;
+                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
+                            _previewDecalNode.NormalFade = 0.65f;
+                            _previewDecalNode.UpperFade = 0.3f;
+                            _previewDecalNode.LowerFade = 0.3f;
+                            _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
-                        Basis basis = new Basis(tangent, normal, bitangent);
-                        basis = basis.Rotated(normal, Mathf.DegToRad(rotDeg));
-                        _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld);
+                            Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
+                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.20f));
+                        }
                     }
-                    else if (_previewDecalNode != null)
+                    else if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
                     {
                         _previewDecalNode.Visible = false;
                     }
@@ -1362,7 +2340,11 @@ namespace DeadlockPlayground.Painter
                 else
                 {
                     BrushShapeType activeShape = (ToolMode == BrushToolMode.Erase) ? EraserShape : BrushShape;
-                    _cursorGizmo.Mesh = GetGizmoMeshForShape(activeShape);
+                    if (_cursorRingMesh != null)
+                    {
+                        _cursorRingMesh.Visible = true;
+                        _cursorRingMesh.Mesh = GetGizmoMeshForShape(activeShape);
+                    }
                     if (_eyedropperSprite != null) _eyedropperSprite.Visible = false;
                     if (_decalPreviewQuad != null) _decalPreviewQuad.Visible = false;
                     if (_previewDecalNode != null) _previewDecalNode.Visible = false;
@@ -1382,7 +2364,11 @@ namespace DeadlockPlayground.Painter
             else
             {
                 _cursorGizmo.Visible = false;
-                if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
+                if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                {
+                    _previewDecalNode.Visible = false;
+                }
             }
         }
 
@@ -1400,24 +2386,77 @@ namespace DeadlockPlayground.Painter
             EnsureCursorGizmo();
             EnsureCameraBrush();
             AttachCameraBrushWorld();
+
+            if (_layerManager != null)
+            {
+                _layerManager.LayerSelected -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerRemoved -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerAdded -= OnLayerManagerAtlasAdded;
+                _layerManager.LayersReordered -= OnLayerManagerAtlasReordered;
+                _layerManager.StackChanged -= OnLayerManagerAtlasReordered;
+
+                _layerManager.LayerSelected += OnLayerManagerAtlasChanged;
+                _layerManager.LayerRemoved += OnLayerManagerAtlasChanged;
+                _layerManager.LayerAdded += OnLayerManagerAtlasAdded;
+                _layerManager.LayersReordered += OnLayerManagerAtlasReordered;
+                _layerManager.StackChanged += OnLayerManagerAtlasReordered;
+
+                _layerManager.LayerRemoved += (idx) => CancelActiveShapePreview();
+                _layerManager.LayersReordered += CancelActiveShapePreview;
+            }
+        }
+
+        private void OnLayerManagerAtlasChanged(int index)
+        {
+            if (!IsInsideTree() || GetTree() == null) return;
+            if (!IsPaintingActive || _currentMesh == null || _layerManager?.AtlasManager == null) return;
+            if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush) && _cameraBrush.IsInsideTree())
+            {
+                _cameraBrush.Call("get_atlas_textures");
+            }
+            if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush) && _mirrorCameraBrush.IsInsideTree())
+            {
+                _mirrorCameraBrush.Call("get_atlas_textures");
+            }
+        }
+
+        private void OnLayerManagerAtlasAdded(int index, string name)
+        {
+            OnLayerManagerAtlasChanged(index);
+        }
+
+        private void OnLayerManagerAtlasReordered()
+        {
+            OnLayerManagerAtlasChanged(0);
         }
 
         public void SetTargetMesh(MeshInstance3D mesh, int surfaceIndex = 0)
         {
             _currentMesh = mesh;
+            _currentSurfaceIndex = surfaceIndex;
 
             if (_currentMesh != null)
             {
-                _raycaster.BuildFromMesh(_currentMesh, surfaceIndex);
+                _raycaster.BuildFromMesh(_currentMesh, -1);
                 _layerManager?.SetupForMesh(_currentMesh, surfaceIndex);
-                _layerManager?.SetPaintTargetMesh(_currentMesh);
+                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                _magicWandTool?.SelectionMask?.EnsureSize(atlasW, atlasH);
+                ApplyFrontFacesOnlyToMaterials();
             }
 
             UpdateSelectionOutline();
 
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
-                _cameraBrush.Call("get_atlas_textures");
+                if (_currentMesh != null && IsPaintingActive)
+                {
+                    _cameraBrush.Call("get_atlas_textures");
+                }
+                else
+                {
+                    _cameraBrush.Call("reset_atlas_textures");
+                }
             }
         }
 
@@ -1447,7 +2486,7 @@ namespace DeadlockPlayground.Painter
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
                     Layers = 1,
                     Visible = false,
-                    MaterialOverride = _outlineMaskMat
+                    MaterialOverride = null
                 };
             }
 
@@ -1469,13 +2508,25 @@ namespace DeadlockPlayground.Painter
             EnsureSelectionOutline();
             if (_selectionOutlineMesh == null || !GodotObject.IsInstanceValid(_selectionOutlineMesh)) return;
 
-            if (IsPaintingActive && _currentMesh != null && GodotObject.IsInstanceValid(_currentMesh) && _currentMesh.IsInsideTree())
+            var stage = _worldViewport?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D
+                     ?? GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+            bool hasParticle = stage != null && stage.HasActiveParticle;
+
+           if (IsPaintingActive && !hasParticle && _currentMesh != null && GodotObject.IsInstanceValid(_currentMesh) && _currentMesh.IsInsideTree() && _currentMesh.Mesh != null && _currentMesh.Mesh.GetSurfaceCount() > 0)
             {
-                _selectionOutlineMesh.Visible = true;
-                _selectionOutlineMesh.Mesh = _currentMesh.Mesh;
-                _selectionOutlineMesh.Skin = _currentMesh.Skin;
-                _selectionOutlineMesh.Skeleton = _currentMesh.Skeleton;
+                if (_lastOutlinedMeshInstance != _currentMesh || _lastOutlinedMeshResource != _currentMesh.Mesh)
+                {
+                    _lastOutlinedMeshInstance = _currentMesh;
+                    _lastOutlinedMeshResource = _currentMesh.Mesh;
+                    _selectionOutlineMesh.Mesh = _currentMesh.Mesh;
+                    _selectionOutlineMesh.Skin = _currentMesh.Skin;
+                    _selectionOutlineMesh.Skeleton = _currentMesh.Skeleton;
+                    _selectionOutlineMesh.MaterialOverride = _outlineMaskMat;
+                }
+
                 _selectionOutlineMesh.GlobalTransform = _currentMesh.GlobalTransform;
+
+                if (!_selectionOutlineMesh.Visible) _selectionOutlineMesh.Visible = true;
 
                 bool isHidden = !_currentMesh.Visible;
                 _outlineMaskMat?.SetShaderParameter("is_mesh_hidden", isHidden);
@@ -1483,7 +2534,14 @@ namespace DeadlockPlayground.Painter
             }
             else
             {
-                _selectionOutlineMesh.Visible = false;
+                if (_selectionOutlineMesh.Visible || _selectionOutlineMesh.Mesh != null)
+                {
+                    _selectionOutlineMesh.Visible = false;
+                    _selectionOutlineMesh.MaterialOverride = null;
+                    _selectionOutlineMesh.Mesh = null;
+                    _lastOutlinedMeshInstance = null;
+                    _lastOutlinedMeshResource = null;
+                }
             }
         }
 
@@ -1494,10 +2552,10 @@ namespace DeadlockPlayground.Painter
             if (@event is InputEventMouseButton mbRelease && !mbRelease.Pressed && mbRelease.ButtonIndex == MouseButton.Left)
             {
                 _clickOriginatedOnUI = false;
+                _isActionClickDown = false;
             }
 
             if (IsMouseOverUI() || _clickOriginatedOnUI) return;
-            if (_currentMesh == null && ToolMode != BrushToolMode.SelectSubmesh && !(@event is InputEventMouseButton mb && mb.AltPressed)) return;
 
             if (@event is InputEventMouseButton mouseBtn && mouseBtn.ButtonIndex == MouseButton.Left && mouseBtn.Pressed)
             {
@@ -1512,9 +2570,29 @@ namespace DeadlockPlayground.Painter
                     {
                         Vector3 origin = camera.ProjectRayOrigin(pos);
                         Vector3 dir = camera.ProjectRayNormal(pos).Normalized();
-                        if (RaycastAllSubmeshes(origin, dir, out var clickedSub, out _))
+                        var hits = RaycastAllSubmeshesSorted(origin, dir);
+                        if (hits.Count > 0)
                         {
-                            MeshHierarchy?.SelectTarget(clickedSub, clickedSub.SurfaceIndex);
+                            if (mouseBtn.AltPressed)
+                            {
+                                if (pos.DistanceTo(_lastPeelMousePos) < 20.0f)
+                                {
+                                    _depthPeelIndex = (_depthPeelIndex + 1) % hits.Count;
+                                }
+                                else
+                                {
+                                    _depthPeelIndex = 0;
+                                }
+                            }
+                            else
+                            {
+                                _depthPeelIndex = 0;
+                            }
+                            _lastPeelMousePos = pos;
+
+                            var chosen = hits[_depthPeelIndex];
+                            GD.Print($"[MeshPainter3D] Depth peel select: layer {_depthPeelIndex + 1}/{hits.Count} -> {chosen.Submesh.DisplayName}");
+                            MeshHierarchy?.SelectTarget(chosen.Submesh, chosen.Submesh.SurfaceIndex);
                             GetViewport()?.SetInputAsHandled();
                             return;
                         }
@@ -1526,7 +2604,7 @@ namespace DeadlockPlayground.Painter
                     var camera = _worldViewport?.GetCamera3D() ?? _camera;
                     if (camera != null)
                     {
-                        var hit = _raycaster.IntersectRay(_currentMesh, camera.ProjectRayOrigin(pos), camera.ProjectRayNormal(pos), cullBackfaces: false);
+                        var hit = _raycaster.IntersectRay(_currentMesh, camera.ProjectRayOrigin(pos), camera.ProjectRayNormal(pos), cullBackfaces: FrontFacesOnly);
                         if (hit.Hit)
                         {
                             SampleColorAtUV(hit.HitUV, hit.HitSurfaceIndex);
@@ -1542,7 +2620,7 @@ namespace DeadlockPlayground.Painter
                     {
                         Vector3 origin = camera.ProjectRayOrigin(pos);
                         Vector3 dir = camera.ProjectRayNormal(pos).Normalized();
-                        var hit = _currentMesh != null ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false) : default;
+                        var hit = _currentMesh != null ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
                         if (hit.Hit)
                         {
                             _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool, BucketFillTolerance);
@@ -1555,6 +2633,10 @@ namespace DeadlockPlayground.Painter
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
@@ -1569,7 +2651,7 @@ namespace DeadlockPlayground.Painter
                         if (mouseBtn.ShiftPressed || Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
                         else if (mouseBtn.AltPressed || Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
 
-                        var hit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false);
+                        var hit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly);
                         if (hit.Hit)
                         {
                             ExecuteMagicWandSelection(hit, combineMode);
@@ -1589,8 +2671,786 @@ namespace DeadlockPlayground.Painter
         public override void _Input(InputEvent @event)
         {
             if (!IsPaintingActive) return;
+
+            // 0. Dedicated 3D Shape Tool Handling
+            if (ToolMode == BrushToolMode.Shape)
+            {
+                if (@event is InputEventKey shapeKeyEv && shapeKeyEv.Pressed)
+                {
+                    if (shapeKeyEv.Keycode == Key.Escape)
+                    {
+                        _isDraggingShape3D = false;
+                        _shapeTool.CancelShape();
+                        _layerManager?.CancelShapePreview();
+                        if (_shapeDecalNode != null) _shapeDecalNode.Visible = false; // <-- Ocultar decal
+                        _shapeStartWorldPos = Vector3.Zero;
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                    else if (shapeKeyEv.Keycode == Key.Enter || shapeKeyEv.Keycode == Key.KpEnter)
+                    {
+                        if (_shapeTool.HasActiveShape)
+                        {
+                            _isDraggingShape3D = false;
+                            _shapeTool.EndHandleDrag();
+                            if (_shapeDecalNode != null) _shapeDecalNode.Visible = false;
+                            
+                            if (_isShapeOriginatedIn3D && _shapeStartWorldPos != Vector3.Zero)
+                            {
+                                Commit3DShape();
+                            }
+                            else
+                            {
+                                _shapeTool.CommitShape(_layerManager, BrushColor, (LayerBlendMode)BlendMode, _magicWandTool);
+                                EmitSignal(SignalName.StrokeFinished);
+                            }
+
+                            _isShapeOriginatedIn3D = false;
+                            _shapeStartWorldPos = Vector3.Zero;
+                            _selectionOverlay3D?.QueueRedraw();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+                }
+
+                if (@event is InputEventMouseButton shapeMb)
+                {
+                   if (shapeMb.ButtonIndex == MouseButton.Right && shapeMb.Pressed)
+{
+                        _isDraggingShape3D = false;
+                        _shapeTool.CancelShape();
+                        _layerManager?.CancelShapePreview();
+                        if (_shapeDecalNode != null) _shapeDecalNode.Visible = false; // <-- Ocultar decal
+                        _shapeStartWorldPos = Vector3.Zero;
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+
+                    if (shapeMb.ButtonIndex == MouseButton.Left)
+                    {
+                        if (shapeMb.Pressed)
+                        {
+                            if (IsMouseOverUI() || _clickOriginatedOnUI) return;
+                            var vpContainer = _worldViewportContainer;
+                            if (vpContainer != null && !vpContainer.GetGlobalRect().HasPoint(shapeMb.GlobalPosition)) return;
+
+                            Vector2 mousePos = GetViewportMousePosition();
+
+                            if (_shapeTool.HasActiveShape)
+                            {
+                                var handle = HitTest3DShapeGizmo(mousePos);
+                                if (handle != ShapeHandleType.None)
+                                {
+                                    _isDraggingGizmo3D = true;
+                                    _activeShapeHandle3D = handle;
+                                    _gizmoDragStartScreenPos = mousePos;
+                                    _gizmoDragStartRot = _shapeTool.RotationDegrees;
+                                    _gizmoDragStartSize = _shapeTool.Size;
+                                    GetViewport()?.SetInputAsHandled();
+                                    return;
+                                }
+                            }
+
+                            var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                            if (camera == null) return;
+
+                            Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                            Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+
+                            RaycastHitResult hit = default;
+                            if (_currentMesh != null)
+                            {
+                                hit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly);
+                            }
+                            if (!hit.Hit)
+                            {
+                                if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                                {
+                                    MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                                    hit = otherHit;
+                                }
+                            }
+
+                            if (hit.Hit)
+                            {
+                                EnsureSelectionOverlay3D();
+                                _isShapeOriginatedIn3D = true;
+                                _isDraggingShape3D = true;
+                                _shapeStartScreenPos = mousePos;
+                                _shapeCurrentScreenPos = mousePos;
+                                _shapeStartUV = hit.HitUV;
+                                _shapeCurrentUV = hit.HitUV;
+                                _shapeStartWorldPos = hit.HitPositionWorld;
+                                _shapeStartWorldNormal = hit.HitNormal.Normalized();
+                                _shapeStartWorldTangent = hit.WorldTangent.LengthSquared() > 0.001f ? hit.WorldTangent.Normalized() : Vector3.Right;
+                                _shapeStartWorldBitangent = hit.WorldBitangent.LengthSquared() > 0.001f ? hit.WorldBitangent.Normalized() : Vector3.Forward;
+                                _shapeStartUnitsPerU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
+                                _shapeStartUnitsPerV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
+
+                                MeshInstance3D mesh = hit.HitMesh ?? _currentMesh;
+                                _shapeSubmeshAtlasPos = Vector2.Zero;
+                                _shapeSubmeshAtlasSize = Vector2.One;
+                                if (mesh != null && mesh.MaterialOverlay is ShaderMaterial sm)
+                                {
+                                    var posVar = sm.GetShaderParameter("position_in_atlas");
+                                    var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                    {
+                                        _shapeSubmeshAtlasPos = posVar.AsVector2();
+                                        _shapeSubmeshAtlasSize = sizeVar.AsVector2();
+                                    }
+                                }
+
+                                Vector2 atlasUV = hit.HitUV * _shapeSubmeshAtlasSize + _shapeSubmeshAtlasPos;
+                                _shapeStartAtlasUV = atlasUV;
+
+                                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                                Vector2 startAtlasPx = new Vector2(atlasUV.X * atlasW, atlasUV.Y * atlasH);
+                                _shapeTool.BeginNewShape(startAtlasPx);
+                                _lastShapePreviewMs = Time.GetTicksMsec();
+                                _brushPalette?.SyncShapeControls();
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                        else // Left release
+                        {
+                            if (_isDraggingGizmo3D && _activeShapeHandle3D != ShapeHandleType.None)
+                            {
+                                _isDraggingGizmo3D = false;
+                                _activeShapeHandle3D = ShapeHandleType.None;
+                                _shapeTool.EndHandleDrag();
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+
+                            if (_isDraggingShape3D)
+                            {
+                                _isDraggingShape3D = false;
+                                _shapeTool.EndHandleDrag();
+                                if (_shapeStartScreenPos.DistanceTo(_shapeCurrentScreenPos) < 3.0f)
+                                {
+                                    _shapeTool.CancelShape();
+                                    _layerManager?.CancelShapePreview();
+                                    if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                                }
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                    }
+                }
+
+            if (@event is InputEventMouseMotion shapeMm)
+            {
+                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+
+                if (_isDraggingGizmo3D && _activeShapeHandle3D != ShapeHandleType.None)
+                {
+                    Vector2 mousePos = GetViewportMousePosition();
+                    if (_shapeTool.ShapeType == CanvasShapeType.Line && (_activeShapeHandle3D == ShapeHandleType.TopLeft || _activeShapeHandle3D == ShapeHandleType.BottomRight))
+                    {
+                        var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                        if (camera != null)
+                        {
+                            Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                            Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+                            RaycastHitResult currentHit = default;
+                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                                currentHit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly);
+                            if (!currentHit.Hit)
+                                RaycastAllSubmeshes(origin, dir, out _, out currentHit, cullBackfaces: FrontFacesOnly);
+
+                            Vector3 planePt = currentHit.Hit ? currentHit.HitPositionWorld : Vector3.Zero;
+                            if (!currentHit.Hit)
+                            {
+                                float denom = dir.Dot(_shapeStartWorldNormal);
+                                if (Mathf.Abs(denom) > 1e-5f)
+                                {
+                                    Vector3 planeAnchor = (_activeShapeHandle3D == ShapeHandleType.TopLeft) ? _shapeLineStartWorldPos : _shapeLineEndWorldPos;
+                                    float t = (planeAnchor - origin).Dot(_shapeStartWorldNormal) / denom;
+                                    if (t > 0) planePt = origin + dir * t;
+                                }
+                            }
+
+                            if (planePt != Vector3.Zero)
+                            {
+                                if (_activeShapeHandle3D == ShapeHandleType.TopLeft)
+                                {
+                                    _shapeLineStartWorldPos = planePt;
+                                }
+                                else
+                                {
+                                    _shapeLineEndWorldPos = planePt;
+                                }
+                                _hasShapeLineWorldPlacement = true;
+                                _shapeStartWorldPos = (_shapeLineStartWorldPos + _shapeLineEndWorldPos) * 0.5f;
+
+                                Vector3 lineVec = _shapeLineEndWorldPos - _shapeLineStartWorldPos;
+                                float len3D = lineVec.Length();
+                                float unitsU = (_shapeStartUnitsPerU > 1e-4f && _shapeStartUnitsPerU < 20.0f) ? _shapeStartUnitsPerU : 0.5f;
+                                float pxLen = (len3D / unitsU) * atlasW;
+                                _shapeTool.Size = new Vector2(MathF.Max(8.0f, pxLen), _shapeTool.StrokeWidth);
+
+                                Update3DShapeDecalAndSync();
+                                _brushPalette?.SyncShapeControls();
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                    }
+                    else if (_activeShapeHandle3D == ShapeHandleType.Rotate)
+                    {
+                        Vector2 fromCenter = mousePos - _gizmo3DScreenCenter;
+                        Vector2 fromStart = _gizmoDragStartScreenPos - _gizmo3DScreenCenter;
+                        float deltaAngleRad = fromStart.AngleTo(fromCenter);
+                        float deltaDeg = Mathf.RadToDeg(deltaAngleRad);
+                        float deg = _gizmoDragStartRot - deltaDeg;
+                        if (Input.IsKeyPressed(Key.Shift)) deg = MathF.Round(deg / 15.0f) * 15.0f;
+                        _shapeTool.RotationDegrees = deg;
+
+                        Update3DShapeDecalAndSync();
+                        _brushPalette?.SyncShapeControls();
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                    else if (_activeShapeHandle3D == ShapeHandleType.Body)
+                    {
+                        var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                        if (camera != null)
+                        {
+                            Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                            Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+                            RaycastHitResult currentHit = default;
+                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                                currentHit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly);
+                            if (!currentHit.Hit)
+                                RaycastAllSubmeshes(origin, dir, out _, out currentHit, cullBackfaces: FrontFacesOnly);
+                            if (currentHit.Hit)
+                            {
+                                if (_shapeTool.ShapeType == CanvasShapeType.Line && _hasShapeLineWorldPlacement)
+                                {
+                                    Vector3 deltaPos = currentHit.HitPositionWorld - _shapeStartWorldPos;
+                                    _shapeLineStartWorldPos += deltaPos;
+                                    _shapeLineEndWorldPos += deltaPos;
+                                }
+
+                                MeshInstance3D curMesh = currentHit.HitMesh ?? _currentMesh;
+                                Vector2 curAtlasUV = currentHit.HitUV;
+                                if (curMesh != null && curMesh.MaterialOverlay is ShaderMaterial curSm)
+                                {
+                                    var posVar = curSm.GetShaderParameter("position_in_atlas");
+                                    var sizeVar = curSm.GetShaderParameter("size_in_atlas");
+                                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                    {
+                                        curAtlasUV = curAtlasUV * sizeVar.AsVector2() + posVar.AsVector2();
+                                    }
+                                }
+
+                                _shapeTool.Center = new Vector2(curAtlasUV.X * atlasW, curAtlasUV.Y * atlasH);
+
+                                _shapeStartWorldPos = currentHit.HitPositionWorld;
+                                _shapeStartWorldNormal = currentHit.HitNormal.Normalized();
+                                _shapeStartWorldTangent = currentHit.WorldTangent.LengthSquared() > 0.001f ? currentHit.WorldTangent.Normalized() : Vector3.Right;
+                                _shapeStartWorldBitangent = currentHit.WorldBitangent.LengthSquared() > 0.001f ? currentHit.WorldBitangent.Normalized() : Vector3.Forward;
+                                _shapeStartUnitsPerU = (currentHit.WorldUnitsPerU > 1e-4f && currentHit.WorldUnitsPerU < 20.0f) ? currentHit.WorldUnitsPerU : 0.5f;
+                                _shapeStartUnitsPerV = (currentHit.WorldUnitsPerV > 1e-4f && currentHit.WorldUnitsPerV < 20.0f) ? currentHit.WorldUnitsPerV : 0.5f;
+                                _shapeStartUV = currentHit.HitUV;
+                                _shapeStartAtlasUV = curAtlasUV;
+
+                                Update3DShapeDecalAndSync();
+                                _brushPalette?.SyncShapeControls();
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                    }
+                    else // Corner scale (Width y Height independientes)
+                    {
+                        // Proyectar el movimiento del mouse sobre los ejes locales del gizmo en pantalla
+                        Vector2 axisX = (_gizmo3DScreenTR - _gizmo3DScreenTL).Normalized();
+                        Vector2 axisY = (_gizmo3DScreenBL - _gizmo3DScreenTL).Normalized();
+                        Vector2 deltaMouse = mousePos - _gizmoDragStartScreenPos;
+
+                        float signX = (_activeShapeHandle3D == ShapeHandleType.TopRight || _activeShapeHandle3D == ShapeHandleType.BottomRight) ? 1.0f : -1.0f;
+                        float signY = (_activeShapeHandle3D == ShapeHandleType.BottomLeft || _activeShapeHandle3D == ShapeHandleType.BottomRight) ? 1.0f : -1.0f;
+
+                        float projX = deltaMouse.Dot(axisX) * signX;
+                        float projY = deltaMouse.Dot(axisY) * signY;
+
+                        float baseLenX = MathF.Max(20.0f, (_gizmo3DScreenTR - _gizmo3DScreenTL).Length());
+                        float baseLenY = MathF.Max(20.0f, (_gizmo3DScreenBL - _gizmo3DScreenTL).Length());
+
+                        float scaleX = MathF.Pow(2.0f, (projX * 1.5f) / baseLenX);
+                        float scaleY = MathF.Pow(2.0f, (projY * 1.5f) / baseLenY);
+
+                        if (Input.IsKeyPressed(Key.Shift))
+                        {
+                            float maxScale = (projX + projY >= 0) ? MathF.Max(scaleX, scaleY) : MathF.Min(scaleX, scaleY);
+                            scaleX = maxScale;
+                            scaleY = maxScale;
+                        }
+
+                        _shapeTool.Size = new Vector2(
+                            MathF.Max(4.0f, _gizmoDragStartSize.X * scaleX),
+                            MathF.Max(4.0f, _gizmoDragStartSize.Y * scaleY)
+                        );
+
+                        Update3DShapeDecalAndSync();
+                        _brushPalette?.SyncShapeControls();
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                }
+                else if (_isDraggingShape3D)
+                {
+                    var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                    if (camera != null)
+                    {
+                        Vector2 mousePos = GetViewportMousePosition();
+                        _shapeCurrentScreenPos = mousePos;
+                        Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                        Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+
+                        // Proyectar el rayo sobre el plano tangente 3D del punto donde se inició el clic
+                        float denom = dir.Dot(_shapeStartWorldNormal);
+                        if (Mathf.Abs(denom) > 1e-5f)
+                        {
+                            float t = (_shapeStartWorldPos - origin).Dot(_shapeStartWorldNormal) / denom;
+                            if (t > 0)
+                            {
+                                Vector3 planePt = origin + dir * t;
+                                Vector3 deltaWorld = planePt - _shapeStartWorldPos;
+
+                                float unitsU = (_shapeStartUnitsPerU > 1e-4f && _shapeStartUnitsPerU < 20.0f) ? _shapeStartUnitsPerU : 0.5f;
+                                float unitsV = (_shapeStartUnitsPerV > 1e-4f && _shapeStartUnitsPerV < 20.0f) ? _shapeStartUnitsPerV : 0.5f;
+
+                                if (_shapeTool.ShapeType == CanvasShapeType.Line)
+                                {
+                                    _shapeLineStartWorldPos = _shapeStartWorldPos;
+                                    _shapeLineEndWorldPos = planePt;
+                                    _hasShapeLineWorldPlacement = true;
+
+                                    Vector3 lineVec = _shapeLineEndWorldPos - _shapeLineStartWorldPos;
+                                    float len3D = lineVec.Length();
+                                    float pxLen = (len3D / unitsU) * atlasW;
+
+                                    Vector2 startPx = new Vector2(_shapeStartAtlasUV.X * atlasW, _shapeStartAtlasUV.Y * atlasH);
+                                    _shapeTool.LineStart = startPx;
+                                    _shapeTool.LineEnd = startPx + new Vector2(pxLen, 0);
+                                    _shapeTool.Center = (startPx + _shapeTool.LineEnd) * 0.5f;
+                                    _shapeTool.Size = new Vector2(MathF.Max(8.0f, pxLen), _shapeTool.StrokeWidth);
+                                }
+                                else
+                                {
+                                    float worldWidthMeters = MathF.Abs(deltaWorld.Dot(_shapeStartWorldTangent)) * 2.0f;
+                                    float worldHeightMeters = MathF.Abs(deltaWorld.Dot(_shapeStartWorldBitangent)) * 2.0f;
+
+                                    if (Input.IsKeyPressed(Key.Shift))
+                                    {
+                                        float maxM = MathF.Max(worldWidthMeters, worldHeightMeters);
+                                        worldWidthMeters = maxM;
+                                        worldHeightMeters = maxM;
+                                    }
+
+                                    float pxW = MathF.Max(8.0f, (worldWidthMeters / unitsU) * atlasW);
+                                    float pxH = MathF.Max(8.0f, (worldHeightMeters / unitsV) * atlasH);
+
+                                    _shapeTool.Size = new Vector2(pxW, pxH);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Vector2 screenDelta = (_shapeCurrentScreenPos - _shapeStartScreenPos).Abs();
+                            _shapeTool.Size = new Vector2(MathF.Max(8.0f, screenDelta.X * 4.0f), MathF.Max(8.0f, screenDelta.Y * 4.0f));
+                        }
+
+                        Update3DShapeDecalAndSync();
+
+                        _brushPalette?.SyncShapeControls();
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                }
+            }
+        }
+
+            // 0b. Dedicated Decal & Text Projection Gizmo Handling in 3D
+            if (ToolMode == BrushToolMode.Decal || ToolMode == BrushToolMode.Text)
+            {
+                if (_previewDecalNode != null)
+                {
+                    _previewDecalNode.Modulate = Colors.White;
+                }
+
+                if (@event is InputEventKey projKeyEv && projKeyEv.Pressed)
+                {
+                    if (projKeyEv.Keycode == Key.Escape)
+                    {
+                        if (_projectionGizmo.IsActive)
+                        {
+                            _isDraggingGizmo3D = false;
+                            _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+                            _projectionGizmo.Deactivate();
+                            _decalStamper?.HidePreview();
+                            _selectionOverlay3D?.QueueRedraw();
+                            _brushPalette?.SyncProjectionControls();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+                    else if (projKeyEv.Keycode == Key.Enter || projKeyEv.Keycode == Key.KpEnter)
+                    {
+                        if (_projectionGizmo.IsActive)
+                        {
+                            _isDraggingGizmo3D = false;
+                            _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+                            CommitProjectionGizmo();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+                }
+
+                if (@event is InputEventMouseButton projMb)
+                {
+                    if (projMb.ButtonIndex == MouseButton.Right && projMb.Pressed)
+                    {
+                        if (_projectionGizmo.IsActive)
+                        {
+                            _isDraggingGizmo3D = false;
+                            _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+                            _projectionGizmo.Deactivate();
+                            _decalStamper?.HidePreview();
+                            _selectionOverlay3D?.QueueRedraw();
+                            _brushPalette?.SyncProjectionControls();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+                    else if (projMb.ButtonIndex == MouseButton.Left)
+                    {
+                        if (projMb.Pressed)
+                        {
+                            if (IsMouseOverUI() || _clickOriginatedOnUI) return;
+                            var vpContainer = _worldViewportContainer;
+                            if (vpContainer != null && !vpContainer.GetGlobalRect().HasPoint(projMb.GlobalPosition)) return;
+
+                            Vector2 mousePos = GetViewportMousePosition();
+                            if (_projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement)
+                            {
+                                var handle = HitTest3DProjectionGizmo(mousePos);
+                                if (handle != ProjectionGizmoHandle.None)
+                                {
+                                    _isDraggingGizmo3D = true;
+                                    _activeGizmoHandle3D = handle;
+                                    _gizmoDragStartScreenPos = mousePos;
+                                    _gizmoDragStartRot = _projectionGizmo.RotationDegrees;
+                                    _gizmoDragStartSize = _projectionGizmo.Size;
+                                    GetViewport()?.SetInputAsHandled();
+                                    return;
+                                }
+                            }
+                        }
+                        else // Left release
+                        {
+                            if (_isDraggingGizmo3D && _activeGizmoHandle3D != ProjectionGizmoHandle.None)
+                            {
+                                _isDraggingGizmo3D = false;
+                                _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                    }
+                    else if (projMb.ButtonIndex == MouseButton.WheelUp && projMb.Pressed && (projMb.AltPressed || projMb.CtrlPressed || projMb.ShiftPressed))
+                    {
+                        if (_projectionGizmo.IsActive)
+                        {
+                            if (projMb.ShiftPressed)
+                            {
+                                _projectionGizmo.RotationDegrees = (_projectionGizmo.RotationDegrees + 5.0f) % 360f;
+                            }
+                            else
+                            {
+                                _projectionGizmo.Size *= 1.1f;
+                            }
+                            OnProjectionGizmoChanged();
+                            _brushPalette?.SyncProjectionControls();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+                    else if (projMb.ButtonIndex == MouseButton.WheelDown && projMb.Pressed && (projMb.AltPressed || projMb.CtrlPressed || projMb.ShiftPressed))
+                    {
+                        if (_projectionGizmo.IsActive)
+                        {
+                            if (projMb.ShiftPressed)
+                            {
+                                _projectionGizmo.RotationDegrees = (_projectionGizmo.RotationDegrees - 5.0f + 360f) % 360f;
+                            }
+                            else
+                            {
+                                _projectionGizmo.Size = new Vector2(MathF.Max(16f, _projectionGizmo.Size.X * 0.9f), MathF.Max(16f, _projectionGizmo.Size.Y * 0.9f));
+                            }
+                            OnProjectionGizmoChanged();
+                            _brushPalette?.SyncProjectionControls();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+                }
+
+                if (@event is InputEventMouseMotion projMm && _isDraggingGizmo3D && _activeGizmoHandle3D != ProjectionGizmoHandle.None)
+                {
+                    Vector2 mousePos = GetViewportMousePosition();
+                    if (_activeGizmoHandle3D == ProjectionGizmoHandle.Rotate)
+                    {
+                        Vector2 fromCenter = mousePos - _gizmo3DScreenCenter;
+                        Vector2 fromStart = _gizmoDragStartScreenPos - _gizmo3DScreenCenter;
+                        float deltaAngleRad = fromStart.AngleTo(fromCenter);
+                        float deltaDeg = Mathf.RadToDeg(deltaAngleRad);
+                        float deg = _gizmoDragStartRot - deltaDeg;
+                        if (Input.IsKeyPressed(Key.Shift)) deg = MathF.Round(deg / 15.0f) * 15.0f;
+                        _projectionGizmo.RotationDegrees = (deg % 360f + 360f) % 360f;
+                        OnProjectionGizmoChanged();
+                        _brushPalette?.SyncProjectionControls();
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                    else if (_activeGizmoHandle3D == ProjectionGizmoHandle.Body)
+                    {
+                        var camera = _worldViewport?.GetCamera3D() ?? _camera;
+                        if (camera != null)
+                        {
+                            Vector3 origin = camera.ProjectRayOrigin(mousePos);
+                            Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
+                            RaycastHitResult currentHit = default;
+                            if (_currentMesh != null && _raycaster != null && _raycaster.IsInitialized)
+                                currentHit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly);
+                            if (!currentHit.Hit)
+                                RaycastAllSubmeshes(origin, dir, out _, out currentHit, cullBackfaces: FrontFacesOnly);
+                            if (currentHit.Hit)
+                            {
+                                _projectionGizmo.WorldPos = currentHit.HitPositionWorld;
+                                _projectionGizmo.WorldNormal = currentHit.HitNormal;
+                                _projectionGizmo.WorldTangent = currentHit.WorldTangent;
+                                _projectionGizmo.WorldBitangent = currentHit.WorldBitangent;
+                                float unitsU = (currentHit.WorldUnitsPerU > 1e-4f && currentHit.WorldUnitsPerU < 20.0f) ? currentHit.WorldUnitsPerU : 0.5f;
+                                float unitsV = (currentHit.WorldUnitsPerV > 1e-4f && currentHit.WorldUnitsPerV < 20.0f) ? currentHit.WorldUnitsPerV : 0.5f;
+                                _projectionGizmo.UnitsU = unitsU;
+                                _projectionGizmo.UnitsV = unitsV;
+                                _projectionGizmo.HitUV = currentHit.HitUV;
+                                _projectionGizmo.HitMesh = _currentMesh;
+                                _projectionGizmo.HitSurfaceIndex = currentHit.HitSurfaceIndex;
+                                _projectionGizmo.Is3DProjection = true;
+                                _projectionGizmo.Has3DPlacement = true;
+
+                                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+
+                                Vector2 atlasUV = currentHit.HitUV;
+                                if (_currentMesh?.MaterialOverlay is ShaderMaterial sm)
+                                {
+                                    var posVar = sm.GetShaderParameter("position_in_atlas");
+                                    var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                                    {
+                                        Vector2 p = posVar.AsVector2();
+                                        Vector2 s = sizeVar.AsVector2();
+                                        if (s.X > 0 && s.Y > 0)
+                                        {
+                                            atlasUV = p + currentHit.HitUV * s;
+                                        }
+                                    }
+                                }
+                                _projectionGizmo.Center = new Vector2(atlasUV.X * atlasW, atlasUV.Y * atlasH);
+
+                                OnProjectionGizmoChanged();
+                                _brushPalette?.SyncProjectionControls();
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                    }
+                    else // Corner scale
+                    {
+                        float startDist = MathF.Max(15.0f, _gizmoDragStartScreenPos.DistanceTo(_gizmo3DScreenCenter));
+                        float currentDist = MathF.Max(15.0f, mousePos.DistanceTo(_gizmo3DScreenCenter));
+                        float deltaDist = currentDist - startDist;
+                        float factor = MathF.Pow(2.0f, (deltaDist * 1.5f) / startDist);
+                        _projectionGizmo.Size = new Vector2(
+                            MathF.Max(4.0f, _gizmoDragStartSize.X * factor),
+                            MathF.Max(4.0f, _gizmoDragStartSize.Y * factor)
+                        );
+                        OnProjectionGizmoChanged();
+                        _brushPalette?.SyncProjectionControls();
+                        _selectionOverlay3D?.QueueRedraw();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                }
+            }
+
+            // 1. Dedicated 3D Selection Tool Handling
+            if (ToolMode == BrushToolMode.Selection)
+            {
+                if (@event is InputEventKey keyEv && keyEv.Pressed && keyEv.Keycode == Key.Escape)
+                {
+                    if (_isSelecting3D || _isBuildingPoly3D)
+                    {
+                        Cancel3DSelection();
+                        GetViewport()?.SetInputAsHandled();
+                        return;
+                    }
+                }
+
+                if (@event is InputEventMouseButton mb)
+                {
+                    if (mb.ButtonIndex == MouseButton.Right && mb.Pressed)
+                    {
+                        if (_isSelecting3D || _isBuildingPoly3D)
+                        {
+                            Cancel3DSelection();
+                            GetViewport()?.SetInputAsHandled();
+                            return;
+                        }
+                    }
+
+                    if (mb.ButtonIndex == MouseButton.Left)
+                    {
+                        if (mb.Pressed)
+                        {
+                            if (IsMouseOverUI() || _clickOriginatedOnUI) return;
+
+                            var vpContainer = _worldViewportContainer;
+                            if (vpContainer != null && !vpContainer.GetGlobalRect().HasPoint(mb.GlobalPosition)) return;
+
+                            EnsureSelectionOverlay3D();
+                            Vector2 pos = GetViewportMousePosition();
+                            var selType = SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+
+                            if (selType == SelectionToolType.Rectangular)
+                            {
+                                _isSelecting3D = true;
+                                _selectionStartScreenPos = pos;
+                                _selectionCurrentScreenPos = pos;
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                            else if (selType == SelectionToolType.Lasso)
+                            {
+                                _isSelecting3D = true;
+                                _lassoPoints3D.Clear();
+                                _lassoPoints3D.Add(pos);
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                            else if (selType == SelectionToolType.Polygonal)
+                            {
+                                if (!_isBuildingPoly3D)
+                                {
+                                    _isBuildingPoly3D = true;
+                                    _polyPoints3D.Clear();
+                                    _polyPoints3D.Add(pos);
+                                    _polyCurrentScreenPos = pos;
+                                }
+                                else
+                                {
+                                    bool isNearStart = _polyPoints3D.Count >= 3 && pos.DistanceTo(_polyPoints3D[0]) <= 10.0f;
+                                    if (mb.DoubleClick || isNearStart)
+                                    {
+                                        CloseAndApply3DPolygonSelection();
+                                    }
+                                    else
+                                    {
+                                        _polyPoints3D.Add(pos);
+                                    }
+                                }
+                                _selectionOverlay3D?.QueueRedraw();
+                                GetViewport()?.SetInputAsHandled();
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            if (_isSelecting3D)
+                            {
+                                var selType = SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+                                if (selType == SelectionToolType.Rectangular)
+                                {
+                                    _isSelecting3D = false;
+                                    Apply3DRectSelection();
+                                    _selectionOverlay3D?.QueueRedraw();
+                                    GetViewport()?.SetInputAsHandled();
+                                    return;
+                                }
+                                else if (selType == SelectionToolType.Lasso)
+                                {
+                                    _isSelecting3D = false;
+                                    Apply3DLassoSelection();
+                                    _selectionOverlay3D?.QueueRedraw();
+                                    GetViewport()?.SetInputAsHandled();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (@event is InputEventMouseMotion)
+                {
+                    if (_isSelecting3D || _isBuildingPoly3D)
+                    {
+                        Vector2 localMouse = GetViewportMousePosition();
+                        var selType = SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+                        if (_isSelecting3D && selType == SelectionToolType.Rectangular)
+                        {
+                            _selectionCurrentScreenPos = localMouse;
+                            _selectionOverlay3D?.QueueRedraw();
+                        }
+                        else if (_isSelecting3D && selType == SelectionToolType.Lasso)
+                        {
+                            if (_lassoPoints3D.Count == 0 || _lassoPoints3D[_lassoPoints3D.Count - 1].DistanceTo(localMouse) > 4.0f)
+                            {
+                                _lassoPoints3D.Add(localMouse);
+                                _selectionOverlay3D?.QueueRedraw();
+                            }
+                        }
+                        else if (_isBuildingPoly3D && selType == SelectionToolType.Polygonal)
+                        {
+                            _polyCurrentScreenPos = localMouse;
+                            _selectionOverlay3D?.QueueRedraw();
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            // 2. Stroke finish for standard paint/erase
             if (@event is InputEventMouseButton mouseBtn && mouseBtn.ButtonIndex == MouseButton.Left && !mouseBtn.Pressed)
             {
+                _isActionClickDown = false;
                 FinishStroke();
             }
         }
@@ -1601,11 +3461,21 @@ namespace DeadlockPlayground.Painter
             _isMouseDown = false;
             _strokeInProgress = false;
             _isActionClickDown = false;
-            byte[] postData = _layerManager?.GetAtlasDataSnapshot();
-            bool isErase = ToolMode == BrushToolMode.Erase;
-            _layerManager?.CommitStrokeToActiveLayer(_preStrokeAtlasData, postData, BrushColor, isErase, _magicWandTool);
-            _layerManager?.RecompositeGpuLayers();
-            _layerManager?.RecordUndoSnapshot();
+
+            if (_layerManager != null)
+            {
+                _layerManager.SyncGpuStrokeToComposite();
+            }
+
+            if (_layerManager != null && !string.IsNullOrEmpty(_layerManager.ActiveMaterialKey) && MeshHierarchy != null)
+            {
+                MeshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+            }
+            else if (_currentMesh != null && MeshHierarchy != null)
+            {
+                MeshHierarchy.MarkSubmeshDirty(_currentMesh);
+            }
+
             EmitSignal(SignalName.StrokeFinished);
         }
 
@@ -1619,18 +3489,45 @@ namespace DeadlockPlayground.Painter
             _isMouseDown = false;
             _strokeInProgress = false;
             _isActionClickDown = false;
+            if (_isDraggingShape3D)
+            {
+                _isDraggingShape3D = false;
+                _shapeTool.CancelShape();
+                _layerManager?.CancelShapePreview();
+                _selectionOverlay3D?.QueueRedraw();
+            }
+
+            if (_projectionGizmo != null && _projectionGizmo.IsActive)
+            {
+                _projectionGizmo.Deactivate();
+            }
+            _isDraggingGizmo3D = false;
+            _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+            _decalStamper?.HidePreview();
+            _textProjector?.HidePreview();
 
             if (_cursorGizmo != null)
             {
                 _cursorGizmo.Visible = false;
+                if (_cursorRingMesh != null) _cursorRingMesh.Visible = false;
             }
             if (_selectionOutlineMesh != null)
             {
                 _selectionOutlineMesh.Visible = false;
+                _selectionOutlineMesh.MaterialOverride = null;
+                _selectionOutlineMesh.Mesh = null;
             }
             if (_previewDecalNode != null)
             {
                 _previewDecalNode.Visible = false;
+            }
+
+            if (_shapeDecalNode != null) _shapeDecalNode.Visible = false;
+
+            if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+            {
+                _selectionOverlay3D.Visible = false;
+                _selectionOverlay3D.QueueRedraw();
             }
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
@@ -1654,16 +3551,641 @@ namespace DeadlockPlayground.Painter
             _strokeInProgress = false;
             _isActionClickDown = false;
             _preStrokeAtlasData = null;
+            if (_isDraggingShape3D)
+            {
+                _isDraggingShape3D = false;
+                _shapeTool.CancelShape();
+                _layerManager?.CancelShapePreview();
+                _selectionOverlay3D?.QueueRedraw();
+            }
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
                 _cameraBrush.Set("drawing", false);
+                _cameraBrush.Call("reset_atlas_textures");
             }
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
                 _mirrorCameraBrush.Set("drawing", false);
+                _mirrorCameraBrush.Call("reset_atlas_textures");
             }
             _magicWandTool?.ClearMask();
             SyncSelectionMaskState();
+        }
+
+        private void EnsureSelectionOverlay3D()
+        {
+            var container = _worldViewportContainer;
+            if (container == null)
+            {
+                container = GetTree()?.Root?.FindChild("SubViewportContainer", true, false) as SubViewportContainer;
+            }
+            if (container == null) return;
+
+            Control host = container.GetParent() as Control ?? container;
+            if (_selectionOverlay3D == null || !GodotObject.IsInstanceValid(_selectionOverlay3D))
+            {
+                _selectionOverlay3D = host.GetNodeOrNull<Control>("SelectionOverlay3D");
+                if (_selectionOverlay3D == null)
+                {
+                    _selectionOverlay3D = new Control
+                    {
+                        Name = "SelectionOverlay3D",
+                        MouseFilter = Control.MouseFilterEnum.Ignore,
+                        ZIndex = 100
+                    };
+                    host.AddChild(_selectionOverlay3D);
+                    _selectionOverlay3D.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+                    _selectionOverlay3D.OffsetLeft = 0;
+                    _selectionOverlay3D.OffsetTop = 0;
+                    _selectionOverlay3D.OffsetRight = 0;
+                    _selectionOverlay3D.OffsetBottom = 0;
+                }
+            }
+
+            if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
+            {
+                var drawCallable = Callable.From(OnDrawSelectionOverlay3D);
+                if (!_selectionOverlay3D.IsConnected(CanvasItem.SignalName.Draw, drawCallable))
+                {
+                    _selectionOverlay3D.Connect(CanvasItem.SignalName.Draw, drawCallable);
+                }
+                _selectionOverlay3D.MouseFilter = Control.MouseFilterEnum.Ignore;
+                _selectionOverlay3D.Visible = true;
+                _selectionOverlay3D.ZIndex = 100;
+                if (_selectionOverlay3D.GetParent() == host)
+                {
+                    host.MoveChild(_selectionOverlay3D, host.GetChildCount() - 1);
+                }
+            }
+        }
+
+        private void OnDrawSelectionOverlay3D()
+        {
+            if (_selectionOverlay3D == null) return;
+
+            Vector2 vpOffset = (_worldViewportContainer != null && _selectionOverlay3D.GetParent() != _worldViewportContainer)
+                ? _worldViewportContainer.GlobalPosition - _selectionOverlay3D.GlobalPosition
+                : Vector2.Zero;
+
+            if (ToolMode == BrushToolMode.Shape && (_isDraggingShape3D || _shapeTool.HasActiveShape))
+            {
+                Color shapeWireColor = new Color(0.96f, 0.82f, 0.35f, 0.95f);
+                Color shapeFillColor = new Color(BrushColor.R, BrushColor.G, BrushColor.B, 0.20f);
+
+                if (_isDraggingShape3D)
+                {
+                    var cam = _worldViewport?.GetCamera3D() ?? _camera;
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+
+                    if (cam != null && _shapeStartWorldPos != Vector3.Zero)
+                    {
+                        if (_shapeTool.ShapeType == CanvasShapeType.Line)
+                        {
+                            Vector3 pStartWorld = _shapeStartWorldPos;
+                            Vector3 pEndWorld = _hasShapeLineWorldPlacement ? _shapeLineEndWorldPos : _shapeStartWorldPos;
+
+                            if (!cam.IsPositionBehind(pStartWorld) && !cam.IsPositionBehind(pEndWorld))
+                            {
+                                Vector2 sStart = cam.UnprojectPosition(pStartWorld) + vpOffset;
+                                Vector2 sEnd = cam.UnprojectPosition(pEndWorld) + vpOffset;
+                                _selectionOverlay3D.DrawLine(sStart, sEnd, shapeWireColor, 2.0f, antialiased: true);
+                                _selectionOverlay3D.DrawCircle(sStart, 4.0f, shapeWireColor);
+                                _selectionOverlay3D.DrawCircle(sEnd, 4.0f, shapeWireColor);
+                            }
+                        }
+                        else
+                        {
+                            float spanU = _shapeTool.Size.X / (float)atlasW;
+                            float spanV = _shapeTool.Size.Y / (float)atlasH;
+                            float unitsU = (_shapeStartUnitsPerU > 1e-4f && _shapeStartUnitsPerU < 20.0f) ? _shapeStartUnitsPerU : 0.5f;
+                            float unitsV = (_shapeStartUnitsPerV > 1e-4f && _shapeStartUnitsPerV < 20.0f) ? _shapeStartUnitsPerV : 0.5f;
+
+                            float hw3D = spanU * unitsU * 0.5f;
+                            float hh3D = spanV * unitsV * 0.5f;
+                            float rad = Mathf.DegToRad(_shapeTool.RotationDegrees);
+
+                            Vector3 right3D = (_shapeStartWorldTangent * MathF.Cos(rad) + _shapeStartWorldBitangent * MathF.Sin(rad)).Normalized() * hw3D;
+                            Vector3 down3D = (-_shapeStartWorldTangent * MathF.Sin(rad) + _shapeStartWorldBitangent * MathF.Cos(rad)).Normalized() * hh3D;
+
+                            Vector3 pTL = _shapeStartWorldPos - right3D - down3D;
+                            Vector3 pTR = _shapeStartWorldPos + right3D - down3D;
+                            Vector3 pBR = _shapeStartWorldPos + right3D + down3D;
+                            Vector3 pBL = _shapeStartWorldPos - right3D + down3D;
+
+                            if (!cam.IsPositionBehind(pTL) && !cam.IsPositionBehind(pTR) && !cam.IsPositionBehind(pBR) && !cam.IsPositionBehind(pBL))
+                            {
+                                Vector2 sTL = cam.UnprojectPosition(pTL) + vpOffset;
+                                Vector2 sTR = cam.UnprojectPosition(pTR) + vpOffset;
+                                Vector2 sBR = cam.UnprojectPosition(pBR) + vpOffset;
+                                Vector2 sBL = cam.UnprojectPosition(pBL) + vpOffset;
+
+                                if (_shapeTool.ShapeType == CanvasShapeType.Square)
+                                {
+                                    _selectionOverlay3D.DrawColoredPolygon(new Vector2[] { sTL, sTR, sBR, sBL }, shapeFillColor);
+                                    _selectionOverlay3D.DrawPolyline(new Vector2[] { sTL, sTR, sBR, sBL, sTL }, shapeWireColor, 2.0f, antialiased: true);
+                                }
+                                else if (_shapeTool.ShapeType == CanvasShapeType.Circle)
+                                {
+                                    int segs = 36;
+                                    Vector2[] polyPts = new Vector2[segs + 1];
+                                    bool allVisible = true;
+                                    for (int i = 0; i <= segs; i++)
+                                    {
+                                        float a = (i % segs) * (Mathf.Tau / segs);
+                                        Vector3 p3D = _shapeStartWorldPos + right3D * MathF.Cos(a) + down3D * MathF.Sin(a);
+                                        if (cam.IsPositionBehind(p3D)) { allVisible = false; break; }
+                                        polyPts[i] = cam.UnprojectPosition(p3D) + vpOffset;
+                                    }
+                                    if (allVisible)
+                                    {
+                                        Vector2[] fillPts = new Vector2[segs];
+                                        Array.Copy(polyPts, fillPts, segs);
+                                        _selectionOverlay3D.DrawColoredPolygon(fillPts, shapeFillColor);
+                                        _selectionOverlay3D.DrawPolyline(polyPts, shapeWireColor, 2.0f, antialiased: true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (_shapeTool.HasActiveShape)
+                {
+                    var cam = _worldViewport?.GetCamera3D() ?? _camera;
+                    if (cam != null)
+                    {
+                        int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                        int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+
+                        if (_shapeTool.ShapeType == CanvasShapeType.Line)
+                        {
+                            Vector3 pStartWorld;
+                            Vector3 pEndWorld;
+                            if (_hasShapeLineWorldPlacement)
+                            {
+                                pStartWorld = _shapeLineStartWorldPos;
+                                pEndWorld = _shapeLineEndWorldPos;
+                            }
+                            else
+                            {
+                                Vector2 startAtlasUV = new Vector2(_shapeTool.LineStart.X / atlasW, _shapeTool.LineStart.Y / atlasH);
+                                Vector2 endAtlasUV = new Vector2(_shapeTool.LineEnd.X / atlasW, _shapeTool.LineEnd.Y / atlasH);
+                                Vector2 deltaStartSubmesh = (startAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                                    MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                                    MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                                );
+                                Vector2 deltaEndSubmesh = (endAtlasUV - _shapeStartAtlasUV) / new Vector2(
+                                    MathF.Max(_shapeSubmeshAtlasSize.X, 0.001f),
+                                    MathF.Max(_shapeSubmeshAtlasSize.Y, 0.001f)
+                                );
+
+                                pStartWorld = _shapeStartWorldPos + 
+                                    _shapeStartWorldTangent * (deltaStartSubmesh.X * _shapeStartUnitsPerU) + 
+                                    _shapeStartWorldBitangent * (deltaStartSubmesh.Y * _shapeStartUnitsPerV);
+                                pEndWorld = _shapeStartWorldPos + 
+                                    _shapeStartWorldTangent * (deltaEndSubmesh.X * _shapeStartUnitsPerU) + 
+                                    _shapeStartWorldBitangent * (deltaEndSubmesh.Y * _shapeStartUnitsPerV);
+                            }
+
+                            if (!cam.IsPositionBehind(pStartWorld) && !cam.IsPositionBehind(pEndWorld))
+                            {
+                                _gizmo3DScreenTL = cam.UnprojectPosition(pStartWorld) + vpOffset;
+                                _gizmo3DScreenBR = cam.UnprojectPosition(pEndWorld) + vpOffset;
+                                _gizmo3DScreenCenter = (_gizmo3DScreenTL + _gizmo3DScreenBR) * 0.5f;
+
+                                _selectionOverlay3D.DrawLine(_gizmo3DScreenTL, _gizmo3DScreenBR, shapeWireColor, 2.0f, antialiased: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenTL, 6.0f, Colors.White, filled: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenTL, 6.0f, Colors.Black, filled: false, width: 1.5f);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenBR, 6.0f, Colors.White, filled: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenBR, 6.0f, Colors.Black, filled: false, width: 1.5f);
+                            }
+                        }
+                        else
+                        {
+                            Vector3 shapeCenterWorld = _shapeStartWorldPos;
+                            if (_shapeStartWorldPos != Vector3.Zero && cam != null && !cam.IsPositionBehind(shapeCenterWorld))
+                            {
+                                float rad = Mathf.DegToRad(_shapeTool.RotationDegrees);
+                                float spanU = _shapeTool.Size.X / (float)atlasW;
+                                float spanV = _shapeTool.Size.Y / (float)atlasH;
+                                float unitsU = (_shapeStartUnitsPerU > 1e-4f && _shapeStartUnitsPerU < 20.0f) ? _shapeStartUnitsPerU : 0.5f;
+                                float unitsV = (_shapeStartUnitsPerV > 1e-4f && _shapeStartUnitsPerV < 20.0f) ? _shapeStartUnitsPerV : 0.5f;
+
+                                float hw3D = spanU * unitsU * 0.5f;
+                                float hh3D = spanV * unitsV * 0.5f;
+
+                                Vector3 right3D = (_shapeStartWorldTangent * MathF.Cos(rad) + _shapeStartWorldBitangent * MathF.Sin(rad)).Normalized() * hw3D;
+                                Vector3 down3D = (-_shapeStartWorldTangent * MathF.Sin(rad) + _shapeStartWorldBitangent * MathF.Cos(rad)).Normalized() * hh3D;
+
+                                Vector3 pTL = shapeCenterWorld - right3D - down3D;
+                                Vector3 pTR = shapeCenterWorld + right3D - down3D;
+                                Vector3 pBR = shapeCenterWorld + right3D + down3D;
+                                Vector3 pBL = shapeCenterWorld - right3D + down3D;
+                                Vector3 topCenter = shapeCenterWorld - down3D;
+                                Vector3 rotHandlePos = topCenter - down3D.Normalized() * (Mathf.Min(hw3D, hh3D) * 0.25f + 0.04f);
+
+                                _gizmo3DScreenTL = cam.UnprojectPosition(pTL) + vpOffset;
+                                _gizmo3DScreenTR = cam.UnprojectPosition(pTR) + vpOffset;
+                                _gizmo3DScreenBR = cam.UnprojectPosition(pBR) + vpOffset;
+                                _gizmo3DScreenBL = cam.UnprojectPosition(pBL) + vpOffset;
+                                _gizmo3DScreenCenter = cam.UnprojectPosition(shapeCenterWorld) + vpOffset;
+                                _gizmo3DScreenRot = cam.UnprojectPosition(rotHandlePos) + vpOffset;
+                                Vector2 sTopCenter = cam.UnprojectPosition(topCenter) + vpOffset;
+
+                                _selectionOverlay3D.DrawPolyline(new Vector2[] { _gizmo3DScreenTL, _gizmo3DScreenTR, _gizmo3DScreenBR, _gizmo3DScreenBL, _gizmo3DScreenTL }, shapeWireColor, 1.5f, antialiased: true);
+                                _selectionOverlay3D.DrawLine(sTopCenter, _gizmo3DScreenRot, shapeWireColor, 1.2f, antialiased: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, new Color(0.35f, 0.85f, 1.0f, 0.95f), filled: true);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, Colors.White, filled: false, width: 1.5f);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTL);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTR);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBR);
+                                Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBL);
+                                _selectionOverlay3D.DrawCircle(_gizmo3DScreenCenter, 4.0f, shapeWireColor, filled: true);
+
+                                if (_shapeTool.ShapeType == CanvasShapeType.Circle)
+                                {
+                                    int segs = 36;
+                                    Vector2[] ellipsePts = new Vector2[segs + 1];
+                                    bool allVis = true;
+                                    for (int i = 0; i <= segs; i++)
+                                    {
+                                        float a = (i % segs) * (Mathf.Tau / segs);
+                                        Vector3 p3D = shapeCenterWorld + right3D * MathF.Cos(a) + down3D * MathF.Sin(a);
+                                        if (cam.IsPositionBehind(p3D)) { allVis = false; break; }
+                                        ellipsePts[i] = cam.UnprojectPosition(p3D) + vpOffset;
+                                    }
+                                    if (allVis)
+                                    {
+                                        _selectionOverlay3D.DrawPolyline(ellipsePts, new Color(shapeWireColor.R, shapeWireColor.G, shapeWireColor.B, 0.7f), 1.2f, antialiased: true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
+            if (ToolMode == BrushToolMode.Decal || ToolMode == BrushToolMode.Text)
+            {
+                bool hasActivePlacement = _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement;
+                bool hasPreviewHover = !hasActivePlacement && _previewDecalNode != null && _previewDecalNode.Visible;
+
+                if (hasActivePlacement || hasPreviewHover)
+                {
+                    var cam = _worldViewport?.GetCamera3D() ?? _camera;
+                    Vector3 pos = hasActivePlacement ? _projectionGizmo.WorldPos : (_previewDecalNode != null ? _previewDecalNode.Transform.Origin : Vector3.Zero);
+                    if (cam != null && pos != Vector3.Zero && !cam.IsPositionBehind(pos))
+                    {
+                        int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                        int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                        float rad = Mathf.DegToRad(hasActivePlacement ? _projectionGizmo.RotationDegrees : (_decalStamper?.RotationDegrees ?? 0.0f));
+                        float spanU = hasActivePlacement ? (_projectionGizmo.Size.X / (float)atlasW) : ((_decalStamper?.DecalScale ?? 0.25f));
+                        float spanV = hasActivePlacement ? (_projectionGizmo.Size.Y / (float)atlasH) : ((_decalStamper?.DecalScale ?? 0.25f));
+                        float unitsU = hasActivePlacement ? _projectionGizmo.UnitsU : (_lastHit.WorldUnitsPerU > 1e-4f ? _lastHit.WorldUnitsPerU : 0.5f);
+                        float unitsV = hasActivePlacement ? _projectionGizmo.UnitsV : (_lastHit.WorldUnitsPerV > 1e-4f ? _lastHit.WorldUnitsPerV : 0.5f);
+                        if (unitsU < 1e-4f || unitsU > 20.0f) unitsU = 0.5f;
+                        if (unitsV < 1e-4f || unitsV > 20.0f) unitsV = 0.5f;
+
+                        float hw3D = spanU * unitsU * 0.5f;
+                        float hh3D = spanV * unitsV * 0.5f;
+
+                        Vector3 tangent = hasActivePlacement ? _projectionGizmo.WorldTangent : _lastHit.WorldTangent;
+                        Vector3 bitangent = hasActivePlacement ? _projectionGizmo.WorldBitangent : _lastHit.WorldBitangent;
+                        if (tangent.LengthSquared() < 0.001f) tangent = Vector3.Right;
+                        if (bitangent.LengthSquared() < 0.001f) bitangent = Vector3.Forward;
+
+                        Vector3 right3D = (tangent * MathF.Cos(rad) + bitangent * MathF.Sin(rad)).Normalized() * hw3D;
+                        Vector3 down3D = (-tangent * MathF.Sin(rad) + bitangent * MathF.Cos(rad)).Normalized() * hh3D;
+
+                        Vector3 pTL = pos - right3D - down3D;
+                        Vector3 pTR = pos + right3D - down3D;
+                        Vector3 pBR = pos + right3D + down3D;
+                        Vector3 pBL = pos - right3D + down3D;
+                        Vector3 topCenter = pos - down3D;
+                        Vector3 rotHandlePos = topCenter - down3D.Normalized() * (Mathf.Min(hw3D, hh3D) * 0.25f + 0.04f);
+
+                        _gizmo3DScreenTL = cam.UnprojectPosition(pTL) + vpOffset;
+                        _gizmo3DScreenTR = cam.UnprojectPosition(pTR) + vpOffset;
+                        _gizmo3DScreenBR = cam.UnprojectPosition(pBR) + vpOffset;
+                        _gizmo3DScreenBL = cam.UnprojectPosition(pBL) + vpOffset;
+                        _gizmo3DScreenCenter = cam.UnprojectPosition(pos) + vpOffset;
+                        _gizmo3DScreenRot = cam.UnprojectPosition(rotHandlePos) + vpOffset;
+                        Vector2 sTopCenter = cam.UnprojectPosition(topCenter) + vpOffset;
+
+                        Color gizmoCol = (ToolMode == BrushToolMode.Text) 
+                            ? new Color(0.85f, 0.45f, 1.0f, 0.95f) 
+                            : new Color(0.25f, 0.75f, 1.0f, 0.95f);
+
+                        _selectionOverlay3D.DrawPolyline(new Vector2[] { _gizmo3DScreenTL, _gizmo3DScreenTR, _gizmo3DScreenBR, _gizmo3DScreenBL, _gizmo3DScreenTL }, gizmoCol, 1.5f, antialiased: true);
+                        _selectionOverlay3D.DrawLine(sTopCenter, _gizmo3DScreenRot, gizmoCol, 1.2f, antialiased: true);
+                        _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, new Color(0.35f, 0.85f, 1.0f, 0.95f), filled: true);
+                        _selectionOverlay3D.DrawCircle(_gizmo3DScreenRot, 6.0f, Colors.White, filled: false, width: 1.5f);
+
+                        Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTL);
+                        Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenTR);
+                        Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBR);
+                        Draw3DHandleBox(_selectionOverlay3D, _gizmo3DScreenBL);
+
+                        _selectionOverlay3D.DrawCircle(_gizmo3DScreenCenter, 4.0f, gizmoCol, filled: true);
+                    }
+                }
+            }
+
+            if (ToolMode != BrushToolMode.Selection) return;
+
+            var selType = SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+            Color marqueeColor = new Color(0.96f, 0.82f, 0.35f, 0.95f);
+            Color marqueeFill = new Color(0.96f, 0.82f, 0.35f, 0.15f);
+
+            if (_isSelecting3D && selType == SelectionToolType.Rectangular)
+            {
+                Rect2 selRect = new Rect2(_selectionStartScreenPos + vpOffset, Vector2.Zero).Expand(_selectionCurrentScreenPos + vpOffset);
+                _selectionOverlay3D.DrawRect(selRect, marqueeFill, filled: true);
+                _selectionOverlay3D.DrawRect(selRect, marqueeColor, filled: false, width: 1.5f);
+            }
+            else if (_isSelecting3D && selType == SelectionToolType.Lasso && _lassoPoints3D.Count >= 2)
+            {
+                for (int i = 0; i < _lassoPoints3D.Count - 1; i++)
+                {
+                    _selectionOverlay3D.DrawLine(_lassoPoints3D[i] + vpOffset, _lassoPoints3D[i + 1] + vpOffset, marqueeColor, 1.5f);
+                }
+                _selectionOverlay3D.DrawLine(_lassoPoints3D[_lassoPoints3D.Count - 1] + vpOffset, _lassoPoints3D[0] + vpOffset, new Color(0.96f, 0.82f, 0.35f, 0.5f), 1.0f);
+            }
+            else if (_isBuildingPoly3D && selType == SelectionToolType.Polygonal && _polyPoints3D.Count >= 1)
+            {
+                for (int i = 0; i < _polyPoints3D.Count - 1; i++)
+                {
+                    _selectionOverlay3D.DrawLine(_polyPoints3D[i] + vpOffset, _polyPoints3D[i + 1] + vpOffset, marqueeColor, 1.5f);
+                    _selectionOverlay3D.DrawCircle(_polyPoints3D[i] + vpOffset, 3.0f, marqueeColor);
+                }
+                _selectionOverlay3D.DrawCircle(_polyPoints3D[_polyPoints3D.Count - 1] + vpOffset, 3.0f, marqueeColor);
+                _selectionOverlay3D.DrawLine(_polyPoints3D[_polyPoints3D.Count - 1] + vpOffset, _polyCurrentScreenPos + vpOffset, marqueeColor, 1.0f);
+
+                bool nearStart = _polyCurrentScreenPos.DistanceTo(_polyPoints3D[0]) <= 10.0f;
+                _selectionOverlay3D.DrawCircle(_polyPoints3D[0] + vpOffset, nearStart ? 6.0f : 4.0f, nearStart ? Colors.White : marqueeColor);
+            }
+        }
+
+        private SelectionCombineMode Get3DSelectionCombineMode()
+        {
+            if (Input.IsKeyPressed(Key.Shift)) return SelectionCombineMode.Add;
+            if (Input.IsKeyPressed(Key.Alt)) return SelectionCombineMode.Subtract;
+            return SelectionCombineMode.Replace;
+        }
+
+        private void Apply3DRectSelection()
+        {
+            float minX = Mathf.Min(_selectionStartScreenPos.X, _selectionCurrentScreenPos.X);
+            float minY = Mathf.Min(_selectionStartScreenPos.Y, _selectionCurrentScreenPos.Y);
+            float maxX = Mathf.Max(_selectionStartScreenPos.X, _selectionCurrentScreenPos.X);
+            float maxY = Mathf.Max(_selectionStartScreenPos.Y, _selectionCurrentScreenPos.Y);
+            Rect2 rect = new Rect2(minX, minY, Mathf.Max(maxX - minX, 1.0f), Mathf.Max(maxY - minY, 1.0f));
+            if (rect.Size.X < 2f && rect.Size.Y < 2f) return;
+            Rasterize3DScreenSelection(rect, null, Get3DSelectionCombineMode());
+        }
+
+        private void Apply3DLassoSelection()
+        {
+            if (_lassoPoints3D.Count < 3)
+            {
+                _lassoPoints3D.Clear();
+                return;
+            }
+            Rasterize3DScreenSelection(new Rect2(), _lassoPoints3D, Get3DSelectionCombineMode());
+            _lassoPoints3D.Clear();
+        }
+
+        private void CloseAndApply3DPolygonSelection()
+        {
+            if (_polyPoints3D.Count >= 3)
+            {
+                Rasterize3DScreenSelection(new Rect2(), _polyPoints3D, Get3DSelectionCombineMode());
+            }
+            _isBuildingPoly3D = false;
+            _polyPoints3D.Clear();
+            _selectionOverlay3D?.QueueRedraw();
+        }
+
+        public void QueueSelectionOverlayRedraw()
+        {
+            _selectionOverlay3D?.QueueRedraw();
+        }
+
+        public void Cancel3DSelection()
+        {
+            _isSelecting3D = false;
+            _isBuildingPoly3D = false;
+            _lassoPoints3D.Clear();
+            _polyPoints3D.Clear();
+            _selectionOverlay3D?.QueueRedraw();
+        }
+
+        public void CancelActiveShapePreview()
+        {
+            if (_shapeDecalNode != null)
+            {
+                _shapeDecalNode.Visible = false;
+            }
+            _isDraggingShape3D = false;
+            _shapeStartWorldPos = Vector3.Zero;
+            _hasShapeLineWorldPlacement = false;
+            if (_shapeTool != null && _shapeTool.HasActiveShape)
+            {
+                _shapeTool.CancelShape();
+            }
+            _layerManager?.CancelShapePreview();
+            _selectionOverlay3D?.QueueRedraw();
+        }
+
+        public void CancelActiveProjectionGizmo()
+        {
+            if (_projectionGizmo != null && _projectionGizmo.IsActive)
+            {
+                _isDraggingGizmo3D = false;
+                _activeGizmoHandle3D = ProjectionGizmoHandle.None;
+                _projectionGizmo.Deactivate();
+                _decalStamper?.HidePreview();
+                _textProjector?.HidePreview();
+                if (_previewDecalNode != null && GodotObject.IsInstanceValid(_previewDecalNode))
+                {
+                    _previewDecalNode.Visible = false;
+                }
+                _selectionOverlay3D?.QueueRedraw();
+                _brushPalette?.SyncProjectionControls();
+            }
+        }
+
+        private void Rasterize3DScreenSelection(Rect2 screenRect, IReadOnlyList<Vector2> screenPoly, SelectionCombineMode mode)
+        {
+            var camera = _worldViewport?.GetCamera3D() ?? _camera;
+            if (camera == null || _currentMesh == null) return;
+
+            if (!_raycaster.IsInitialized)
+            {
+                _raycaster.BuildFromMesh(_currentMesh, -1);
+            }
+            if (!_raycaster.IsInitialized || _raycaster.TriangleCount == 0) return;
+
+            var selMask = _magicWandTool?.SelectionMask;
+            if (selMask == null) return;
+            int atlasW = _layerManager?.CanvasSize.X ?? (selMask.Width > 0 ? selMask.Width : 2048);
+            int atlasH = _layerManager?.CanvasSize.Y ?? (selMask.Height > 0 ? selMask.Height : 2048);
+            selMask.EnsureSize(atlasW, atlasH);
+
+            byte[] maskBuf = selMask.Buffer;
+            if (maskBuf == null || maskBuf.Length != atlasW * atlasH)
+            {
+                selMask.EnsureBuffer(atlasW, atlasH);
+                maskBuf = selMask.Buffer;
+            }
+
+            if (mode == SelectionCombineMode.Replace)
+            {
+                Array.Clear(maskBuf, 0, maskBuf.Length);
+            }
+
+            bool isPoly = (screenPoly != null && screenPoly.Count >= 3);
+            Vector2[] polyArr = isPoly ? new List<Vector2>(screenPoly).ToArray() : null;
+
+            Rect2 marqueeBounds;
+            if (isPoly)
+            {
+                float pMinX = float.MaxValue, pMaxX = float.MinValue, pMinY = float.MaxValue, pMaxY = float.MinValue;
+                for (int i = 0; i < polyArr.Length; i++)
+                {
+                    if (polyArr[i].X < pMinX) pMinX = polyArr[i].X;
+                    if (polyArr[i].X > pMaxX) pMaxX = polyArr[i].X;
+                    if (polyArr[i].Y < pMinY) pMinY = polyArr[i].Y;
+                    if (polyArr[i].Y > pMaxY) pMaxY = polyArr[i].Y;
+                }
+                marqueeBounds = new Rect2(pMinX, pMinY, Mathf.Max(pMaxX - pMinX, 1.0f), Mathf.Max(pMaxY - pMinY, 1.0f));
+            }
+            else
+            {
+                marqueeBounds = screenRect;
+            }
+
+            Vector2 submeshPos = Vector2.Zero;
+            Vector2 submeshSize = Vector2.One;
+            if (_currentMesh.MaterialOverlay is ShaderMaterial sm)
+            {
+                var pVar = sm.GetShaderParameter("position_in_atlas");
+                var sVar = sm.GetShaderParameter("size_in_atlas");
+                if (pVar.VariantType == Variant.Type.Vector2 && sVar.VariantType == Variant.Type.Vector2)
+                {
+                    submeshPos = pVar.AsVector2();
+                    submeshSize = sVar.AsVector2();
+                }
+            }
+
+            Transform3D globalTransform = _currentMesh.GlobalTransform;
+            int triCount = _raycaster.TriangleCount;
+
+            var candidateTris = new List<(Vector2 s0, Vector2 s1, Vector2 s2, Vector2 u0, Vector2 u1, Vector2 u2, int uvMinX, int uvMaxX, int uvMinY, int uvMaxY, float invDenom, bool allVerticesInside)>();
+
+            for (int t = 0; t < triCount; t++)
+            {
+                var tri = _raycaster.GetTriangle(t);
+
+                // Scope to currently active surface index
+                if (_currentSurfaceIndex >= 0 && tri.SurfaceIndex != _currentSurfaceIndex)
+                    continue;
+
+                // 1. Transform to world space
+                Vector3 w0 = globalTransform * tri.V0;
+                Vector3 w1 = globalTransform * tri.V1;
+                Vector3 w2 = globalTransform * tri.V2;
+
+                // 2. Behind camera check
+                if (camera.IsPositionBehind(w0) && camera.IsPositionBehind(w1) && camera.IsPositionBehind(w2)) continue;
+
+                // 3. Project to screen
+                Vector2 s0 = camera.UnprojectPosition(w0);
+                Vector2 s1 = camera.UnprojectPosition(w1);
+                Vector2 s2 = camera.UnprojectPosition(w2);
+
+                float sMinX = Mathf.Min(s0.X, Mathf.Min(s1.X, s2.X));
+                float sMaxX = Mathf.Max(s0.X, Mathf.Max(s1.X, s2.X));
+                float sMinY = Mathf.Min(s0.Y, Mathf.Min(s1.Y, s2.Y));
+                float sMaxY = Mathf.Max(s0.Y, Mathf.Max(s1.Y, s2.Y));
+                Rect2 triScreenBounds = new Rect2(sMinX, sMinY, Mathf.Max(sMaxX - sMinX, 0.001f), Mathf.Max(sMaxY - sMinY, 0.001f));
+
+                // EARLY REJECTION: Discard triangles outside screen marquee immediately
+                if (!marqueeBounds.Intersects(triScreenBounds)) continue;
+
+                // 4. Front Faces Only (Fast backface dot product)
+                if (FrontFacesOnly)
+                {
+                    Vector3 worldNormal = (globalTransform.Basis * tri.Normal).Normalized();
+                    Vector3 triCenter = (w0 + w1 + w2) / 3.0f;
+                    Vector3 viewDir = (triCenter - camera.GlobalPosition).Normalized();
+                    if (worldNormal.Dot(viewDir) >= 0.0f)
+                    {
+                        continue; // Back-facing
+                    }
+                }
+
+                // 5. UV triangle in atlas pixels
+                Vector2 u0 = new Vector2((submeshPos.X + tri.UV0.X * submeshSize.X) * atlasW, (submeshPos.Y + tri.UV0.Y * submeshSize.Y) * atlasH);
+                Vector2 u1 = new Vector2((submeshPos.X + tri.UV1.X * submeshSize.X) * atlasW, (submeshPos.Y + tri.UV1.Y * submeshSize.Y) * atlasH);
+                Vector2 u2 = new Vector2((submeshPos.X + tri.UV2.X * submeshSize.X) * atlasW, (submeshPos.Y + tri.UV2.Y * submeshSize.Y) * atlasH);
+
+                int uvMinX = Math.Clamp((int)MathF.Floor(Mathf.Min(u0.X, Mathf.Min(u1.X, u2.X))), 0, atlasW - 1);
+                int uvMaxX = Math.Clamp((int)MathF.Ceiling(Mathf.Max(u0.X, Mathf.Max(u1.X, u2.X))), 0, atlasW - 1);
+                int uvMinY = Math.Clamp((int)MathF.Floor(Mathf.Min(u0.Y, Mathf.Min(u1.Y, u2.Y))), 0, atlasH - 1);
+                int uvMaxY = Math.Clamp((int)MathF.Ceiling(Mathf.Max(u0.Y, Mathf.Max(u1.Y, u2.Y))), 0, atlasH - 1);
+
+                float denom = (u1.Y - u2.Y) * (u0.X - u2.X) + (u2.X - u1.X) * (u0.Y - u2.Y);
+                if (MathF.Abs(denom) < 1e-6f) continue;
+                float invDenom = 1.0f / denom;
+
+                bool allVerticesInside = isPoly
+                    ? (Geometry2D.IsPointInPolygon(s0, polyArr) && Geometry2D.IsPointInPolygon(s1, polyArr) && Geometry2D.IsPointInPolygon(s2, polyArr))
+                    : (marqueeBounds.HasPoint(s0) && marqueeBounds.HasPoint(s1) && marqueeBounds.HasPoint(s2));
+
+                candidateTris.Add((s0, s1, s2, u0, u1, u2, uvMinX, uvMaxX, uvMinY, uvMaxY, invDenom, allVerticesInside));
+            }
+
+            byte fillByte = (mode == SelectionCombineMode.Subtract) ? (byte)0 : (byte)255;
+            System.Threading.Tasks.Parallel.ForEach(candidateTris, cTri =>
+            {
+                for (int py = cTri.uvMinY; py <= cTri.uvMaxY; py++)
+                {
+                    float uvY = py + 0.5f;
+                    int row = py * atlasW;
+                    for (int px = cTri.uvMinX; px <= cTri.uvMaxX; px++)
+                    {
+                        float uvX = px + 0.5f;
+                        float wA = ((cTri.u1.Y - cTri.u2.Y) * (uvX - cTri.u2.X) + (cTri.u2.X - cTri.u1.X) * (uvY - cTri.u2.Y)) * cTri.invDenom;
+                        float wB = ((cTri.u2.Y - cTri.u0.Y) * (uvX - cTri.u2.X) + (cTri.u0.X - cTri.u2.X) * (uvY - cTri.u2.Y)) * cTri.invDenom;
+                        float wC = 1.0f - wA - wB;
+
+                        if (wA >= -0.02f && wB >= -0.02f && wC >= -0.02f)
+                        {
+                            bool inside = cTri.allVerticesInside;
+                            if (!inside)
+                            {
+                                Vector2 screenPos = wA * cTri.s0 + wB * cTri.s1 + wC * cTri.s2;
+                                inside = isPoly
+                                    ? Geometry2D.IsPointInPolygon(screenPos, polyArr)
+                                    : marqueeBounds.HasPoint(screenPos);
+                            }
+
+                            if (inside)
+                            {
+                                maskBuf[row + px] = fillByte;
+                            }
+                        }
+                    }
+                }
+            });
+
+            selMask.UseSelectionMask = true;
+            selMask.UpdateSelectionStateAndUpload();
+            SyncSelectionMaskState();
+            _brushPalette?.UpdateWandUI();
+            GD.Print($"[MeshPainter3D] Rasterized 3D selection marquee (mode={mode}, candidateTriangles={candidateTris.Count})");
         }
 
         [Obsolete("CPU raycasting paint strokes have been deprecated in favor of CameraBrush GPU compute projection.")]
@@ -1683,159 +4205,105 @@ namespace DeadlockPlayground.Painter
             return true;
         }
 
+        public void SyncShapeFrom2DCanvas()
+{
+    if (!_shapeTool.HasActiveShape || _currentMesh == null || _raycaster == null || !_raycaster.IsInitialized) return;
+
+    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+
+    Vector2 atlasUv = new Vector2(_shapeTool.Center.X / atlasW, _shapeTool.Center.Y / atlasH);
+    Vector2 submeshUv = atlasUv;
+
+    if (_currentMesh.MaterialOverlay is ShaderMaterial sm)
+    {
+        var posVar = sm.GetShaderParameter("position_in_atlas");
+        var sizeVar = sm.GetShaderParameter("size_in_atlas");
+        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+        {
+            Vector2 p = posVar.AsVector2();
+            Vector2 s = sizeVar.AsVector2();
+            if (s.X > 0 && s.Y > 0)
+            {
+                submeshUv = (atlasUv - p) / s;
+            }
+        }
+    }
+
+    Vector3? camPos = _worldViewport?.GetCamera3D()?.GlobalPosition;
+    var hit = _raycaster.FindPointFromUV(_currentMesh, submeshUv, camPos);
+    if (!hit.Hit && MeshHierarchy != null)
+    {
+        foreach (var sub in MeshHierarchy.Submeshes)
+        {
+            if (sub.Mesh == null || sub.Mesh == _currentMesh) continue;
+            var subHit = _raycaster.FindPointFromUV(sub.Mesh, atlasUv, camPos);
+            if (subHit.Hit)
+            {
+                hit = subHit;
+                _currentMesh = sub.Mesh;
+                break;
+            }
+        }
+    }
+
+    if (hit.Hit)
+    {
+        _shapeStartWorldPos = hit.WorldPosition;
+        _shapeStartWorldNormal = hit.WorldNormal;
+        _shapeStartWorldTangent = hit.WorldTangent;
+        _shapeStartWorldBitangent = hit.WorldBitangent;
+        _shapeStartUnitsPerU = hit.WorldUnitsPerU;
+        _shapeStartUnitsPerV = hit.WorldUnitsPerV;
+        _shapeStartUV = hit.HitUV;
+
+        Update3DShapeDecalAndSync();
+    }
+}
+
         public void ExecuteMagicWandSelection(RaycastHitResult hit, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
         {
-            if (_currentMesh == null || _layerManager == null || _magicWandTool == null) return;
+            if (_layerManager == null || _magicWandTool == null) return;
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
 
-            // Ensure base atlas buffer is populated with submesh textures
-            _layerManager.RebuildBaseAtlasBuffer();
-
-            Texture2D baseTex = null;
-            int sCount = _currentMesh.Mesh != null ? _currentMesh.Mesh.GetSurfaceCount() : 1;
-            int surfaceIdx = Mathf.Clamp(hit.HitSurfaceIndex, 0, sCount - 1);
-
-            var origMat = HeroMeshHierarchy.GetAuthenticMaterial(_currentMesh, surfaceIdx)
-                       ?? _currentMesh.GetSurfaceOverrideMaterial(surfaceIdx)
-                       ?? (_currentMesh.Mesh != null ? _currentMesh.Mesh.SurfaceGetMaterial(surfaceIdx) : null)
-                       ?? _currentMesh.MaterialOverride;
-
-            if (origMat != null)
+            Vector2 atlasUv = hit.HitUV;
+            MeshInstance3D mesh = hit.HitMesh ?? _currentMesh;
+            if (mesh != null && mesh.MaterialOverlay is ShaderMaterial sm)
             {
-                baseTex = SkinLayerManager.ExtractBaseTexture(origMat);
-            }
-
-            Rect2 submeshRect = new Rect2(0, 0, 1, 1);
-            var overlayMat = _currentMesh.MaterialOverlay as ShaderMaterial;
-            if (overlayMat != null)
-            {
-                var posVal = overlayMat.GetShaderParameter("position_in_atlas");
-                var szVal = overlayMat.GetShaderParameter("size_in_atlas");
-                if (posVal.VariantType == Variant.Type.Vector2 && szVal.VariantType == Variant.Type.Vector2)
+                var posVar = sm.GetShaderParameter("position_in_atlas");
+                var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
                 {
-                    submeshRect = new Rect2(posVal.AsVector2(), szVal.AsVector2());
-                }
-                if (baseTex == null)
-                {
-                    var gCol = overlayMat.GetShaderParameter("g_tColor");
-                    if (gCol.VariantType == Variant.Type.Object && gCol.AsGodotObject() is Texture2D t2d)
-                    {
-                        baseTex = t2d;
-                    }
+                    atlasUv = atlasUv * sizeVar.AsVector2() + posVar.AsVector2();
                 }
             }
 
-            Image img = null;
-            if (baseTex != null)
-            {
-                img = baseTex.GetImage();
-                if (img != null)
-                {
-                    if (img.IsCompressed()) img.Decompress();
-                    if (img.HasMipmaps()) img.ClearMipmaps();
-                    if (img.GetFormat() != Image.Format.Rgba8) img.Convert(Image.Format.Rgba8);
-                }
-            }
+            int seedX = Math.Clamp((int)(atlasUv.X * atlasW), 0, atlasW - 1);
+            int seedY = Math.Clamp((int)(atlasUv.Y * atlasH), 0, atlasH - 1);
+            ExecuteMagicWandAtPixel(seedX, seedY, combineMode);
+        }
 
-            if (img == null)
-            {
-                img = Image.CreateEmpty(512, 512, false, Image.Format.Rgba8);
-                img.Fill(Colors.White);
-            }
+        public void ExecuteMagicWandSelectionAtlasPx(Vector2 atlasPx, MagicWandCombineMode combineMode = MagicWandCombineMode.Replace)
+        {
+            if (_layerManager == null || _magicWandTool == null) return;
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+            int seedX = Math.Clamp((int)atlasPx.X, 0, atlasW - 1);
+            int seedY = Math.Clamp((int)atlasPx.Y, 0, atlasH - 1);
+            ExecuteMagicWandAtPixel(seedX, seedY, combineMode);
+        }
 
-            // Composite live painted layers over the submesh base texture so wand samples the true visible surface
-            if (_layerManager != null)
-            {
-                var fullAtlas = _layerManager.BakeCompositeImage(surfaceIdx);
-                if (fullAtlas != null)
-                {
-                    int rX = Mathf.Clamp((int)(submeshRect.Position.X * fullAtlas.GetWidth()), 0, fullAtlas.GetWidth() - 1);
-                    int rY = Mathf.Clamp((int)(submeshRect.Position.Y * fullAtlas.GetHeight()), 0, fullAtlas.GetHeight() - 1);
-                    int rW = Mathf.Clamp((int)(submeshRect.Size.X * fullAtlas.GetWidth()), 1, fullAtlas.GetWidth() - rX);
-                    int rH = Mathf.Clamp((int)(submeshRect.Size.Y * fullAtlas.GetHeight()), 1, fullAtlas.GetHeight() - rY);
-                    var paintRegion = fullAtlas.GetRegion(new Rect2I(rX, rY, rW, rH));
-                    if (paintRegion != null)
-                    {
-                        if (paintRegion.GetWidth() != img.GetWidth() || paintRegion.GetHeight() != img.GetHeight())
-                        {
-                            paintRegion.Resize(img.GetWidth(), img.GetHeight());
-                        }
-                        if (paintRegion.GetFormat() != Image.Format.Rgba8) paintRegion.Convert(Image.Format.Rgba8);
-                        int w = img.GetWidth();
-                        int h = img.GetHeight();
-                        byte[] baseBytes = img.GetData();
-                        byte[] paintBytes = paintRegion.GetData();
+        private void ExecuteMagicWandAtPixel(int seedX, int seedY, MagicWandCombineMode combineMode)
+        {
+            if (_layerManager == null || _magicWandTool == null) return;
 
-                        int expectedBaseSize = w * h * 4;
-                        if (baseBytes.Length > expectedBaseSize)
-                        {
-                            baseBytes = baseBytes.AsSpan(0, expectedBaseSize).ToArray();
-                        }
-                        if (paintBytes.Length > expectedBaseSize)
-                        {
-                            paintBytes = paintBytes.AsSpan(0, expectedBaseSize).ToArray();
-                        }
+            _layerManager.EnsureCpuCompositeBufferSynced();
 
-                        System.Threading.Tasks.Parallel.For(0, h, y =>
-                        {
-                            int row = y * w * 4;
-                            for (int x = 0; x < w; x++)
-                            {
-                                int off = row + x * 4;
-                                byte pa = paintBytes[off + 3];
-                                if (pa > 0)
-                                {
-                                    if (pa == 255)
-                                    {
-                                        baseBytes[off] = paintBytes[off];
-                                        baseBytes[off + 1] = paintBytes[off + 1];
-                                        baseBytes[off + 2] = paintBytes[off + 2];
-                                        baseBytes[off + 3] = 255;
-                                    }
-                                    else
-                                    {
-                                        int a = pa;
-                                        int invA = 255 - a;
-                                        baseBytes[off] = (byte)((paintBytes[off] * a + baseBytes[off] * invA) / 255);
-                                        baseBytes[off + 1] = (byte)((paintBytes[off + 1] * a + baseBytes[off + 1] * invA) / 255);
-                                        baseBytes[off + 2] = (byte)((paintBytes[off + 2] * a + baseBytes[off + 2] * invA) / 255);
-                                        baseBytes[off + 3] = 255;
-                                    }
-                                }
-                            }
-                        });
-
-                        if (baseBytes.Length > expectedBaseSize)
-                        {
-                            baseBytes = baseBytes.AsSpan(0, expectedBaseSize).ToArray();
-                        }
-                        img.SetData(w, h, false, Image.Format.Rgba8, baseBytes);
-                    }
-                }
-            }
-
-            int px = Mathf.Clamp((int)(hit.HitUV.X * img.GetWidth()), 0, img.GetWidth() - 1);
-            int py = Mathf.Clamp((int)(hit.HitUV.Y * img.GetHeight()), 0, img.GetHeight() - 1);
-            Color sampledColor = img.GetPixel(px, py);
-
-            Rid baseTextureRid = new();
-            int atlasSize = _layerManager.CanvasSize.X;
-            if (_layerManager.AtlasManager != null && GodotObject.IsInstanceValid(_layerManager.AtlasManager))
-            {
-                var ridVal = _layerManager.AtlasManager.Get("base_texture_rid");
-                if (ridVal.VariantType == Variant.Type.Rid)
-                {
-                    baseTextureRid = ridVal.AsRid();
-                }
-                var sizeVal = _layerManager.AtlasManager.Get("atlas_size");
-                if (sizeVal.VariantType == Variant.Type.Int)
-                {
-                    atlasSize = (int)sizeVal;
-                }
-            }
-
-            if (_magicWandTool.GenerateMask(sampledColor, hit.HitUV, img, submeshRect, baseTextureRid, atlasSize, combineMode))
+            if (_magicWandTool.GenerateMaskFromAtlas(seedX, seedY, _layerManager, combineMode))
             {
                 SyncSelectionMaskState();
+                _brushPalette?.UpdateWandUI();
             }
         }
 
@@ -1845,19 +4313,49 @@ namespace DeadlockPlayground.Painter
 
             bool hasSelection = _magicWandTool.HasSelection;
             bool showPattern = _magicWandTool.UseSelectionMask;
-            Rid maskRid = hasSelection ? _magicWandTool.SelectionMaskRid : new Rid();
+            Rid maskRid = new Rid();
+
+            if (hasSelection)
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null)
+                {
+                    int mw = _magicWandTool.SelectionMask?.Width ?? (_layerManager?.CanvasSize.X ?? 2048);
+                    int mh = _magicWandTool.SelectionMask?.Height ?? (_layerManager?.CanvasSize.Y ?? 2048);
+                    _magicWandTool.SelectionMask?.EnsureMaskTexture(rd, mw, mh);
+                }
+                var candRid = _magicWandTool.SelectionMaskRid;
+                if (candRid.IsValid && rd != null && rd.TextureIsValid(candRid))
+                {
+                    maskRid = candRid;
+                }
+            }
 
             if (_cameraBrush != null && GodotObject.IsInstanceValid(_cameraBrush))
             {
                 _cameraBrush.Set("selection_mask_rid", maskRid);
                 _cameraBrush.Set("use_selection_mask", hasSelection);
-                _cameraBrush.Call("get_atlas_textures");
+                if (_currentMesh != null && IsPaintingActive)
+                {
+                    _cameraBrush.Call("get_atlas_textures");
+                }
+                else
+                {
+                    _cameraBrush.Call("reset_atlas_textures");
+                }
             }
             if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
             {
                 _mirrorCameraBrush.Set("selection_mask_rid", maskRid);
                 _mirrorCameraBrush.Set("use_selection_mask", hasSelection);
-                _mirrorCameraBrush.Call("get_atlas_textures");
+                if (_currentMesh != null && IsPaintingActive)
+                {
+                    _mirrorCameraBrush.Call("get_atlas_textures");
+                }
+                else
+                {
+                    _mirrorCameraBrush.Call("reset_atlas_textures");
+                }
             }
 
             if (_layerManager != null)
@@ -1866,6 +4364,10 @@ namespace DeadlockPlayground.Painter
             }
 
             _brushPalette?.UpdateWandUI();
+
+            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                        ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
         }
 
         private void SampleColorAtUV(Vector2 uv, int surfaceIndex)
@@ -1890,37 +4392,53 @@ namespace DeadlockPlayground.Painter
 
         private void GenerateProceduralBrushTextures()
         {
-            int texSize = 64;
+            int texSize = 256;
 
-            // 1. Soft Circle (Cosine / Gaussian)
+            // 1. Soft Circle (Respects BrushHardness with smooth Hermite falloff)
             {
                 var img = Image.CreateEmpty(texSize, texSize, false, Image.Format.Rgba8);
                 Vector2 center = new Vector2(texSize * 0.5f, texSize * 0.5f);
-                float radius = texSize * 0.5f;
+                float radius = texSize * 0.5f - 1.0f;
+                float hClamped = Mathf.Clamp(BrushHardness, 0.0f, 0.99f);
+                float inner = radius * hClamped;
 
                 for (int y = 0; y < texSize; y++)
                 {
                     for (int x = 0; x < texSize; x++)
                     {
-                        float d = (new Vector2(x, y) - center).Length() / radius;
-                        float alpha = Mathf.Clamp(1.0f - Mathf.SmoothStep(0.0f, 1.0f, d), 0.0f, 1.0f);
+                        float d = (new Vector2(x + 0.5f, y + 0.5f) - center).Length();
+                        float alpha;
+                        if (d <= inner)
+                        {
+                            alpha = 1.0f;
+                        }
+                        else if (d < radius)
+                        {
+                            float t = (d - inner) / (radius - inner);
+                            float s = Mathf.Clamp(1.0f - t, 0.0f, 1.0f);
+                            alpha = s * s * (3.0f - 2.0f * s);
+                        }
+                        else
+                        {
+                            alpha = 0.0f;
+                        }
                         img.SetPixel(x, y, new Color(1, 1, 1, alpha));
                     }
                 }
                 _brushTextures[BrushShapeType.SoftCircle] = ImageTexture.CreateFromImage(img);
             }
 
-            // 2. Hard Circle
+            // 2. Hard Circle (Strict 1px anti-aliased edge)
             {
                 var img = Image.CreateEmpty(texSize, texSize, false, Image.Format.Rgba8);
                 Vector2 center = new Vector2(texSize * 0.5f, texSize * 0.5f);
-                float radius = texSize * 0.5f - 1.0f;
+                float radius = texSize * 0.5f - 1.5f;
 
                 for (int y = 0; y < texSize; y++)
                 {
                     for (int x = 0; x < texSize; x++)
                     {
-                        float d = (new Vector2(x, y) - center).Length();
+                        float d = (new Vector2(x + 0.5f, y + 0.5f) - center).Length();
                         float alpha = d <= radius ? 1.0f : Mathf.Clamp(1.0f - (d - radius), 0.0f, 1.0f);
                         img.SetPixel(x, y, new Color(1, 1, 1, alpha));
                     }
@@ -1928,21 +4446,21 @@ namespace DeadlockPlayground.Painter
                 _brushTextures[BrushShapeType.HardCircle] = ImageTexture.CreateFromImage(img);
             }
 
-            // 3. Splatter (Random multi-dot distribution)
+            // 3. Splatter (Multi-dot distribution)
             {
                 var img = Image.CreateEmpty(texSize, texSize, false, Image.Format.Rgba8);
                 img.Fill(Colors.Transparent);
                 var rng = new RandomNumberGenerator();
                 rng.Seed = 1337;
 
-                int dotCount = 35;
+                int dotCount = 85;
                 for (int i = 0; i < dotCount; i++)
                 {
                     float angle = rng.RandfRange(0, Mathf.Tau);
-                    float dist = rng.RandfRange(0, texSize * 0.45f);
+                    float dist = rng.RandfRange(0, texSize * 0.44f);
                     int cx = (int)(texSize * 0.5f + Mathf.Cos(angle) * dist);
                     int cy = (int)(texSize * 0.5f + Mathf.Sin(angle) * dist);
-                    int r = rng.RandiRange(1, 4);
+                    int r = rng.RandiRange(3, 11);
 
                     for (int dy = -r; dy <= r; dy++)
                     {
@@ -1975,7 +4493,7 @@ namespace DeadlockPlayground.Painter
                 {
                     for (int x = 0; x < texSize; x++)
                     {
-                        float d = (new Vector2(x, y) - center).Length() / radius;
+                        float d = (new Vector2(x + 0.5f, y + 0.5f) - center).Length() / radius;
                         float falloff = Mathf.Clamp(1.0f - d, 0.0f, 1.0f);
                         float noise = rng.RandfRange(0.2f, 1.0f);
                         float alpha = falloff * noise;
@@ -1985,7 +4503,7 @@ namespace DeadlockPlayground.Painter
                 _brushTextures[BrushShapeType.Grunge] = ImageTexture.CreateFromImage(img);
             }
 
-            // 5. Square
+            // 5. Square (Crisp white box)
             {
                 var img = Image.CreateEmpty(texSize, texSize, false, Image.Format.Rgba8);
                 img.Fill(Colors.White);
@@ -1996,10 +4514,19 @@ namespace DeadlockPlayground.Painter
         public override void _ExitTree()
         {
             GizmoDisplaySettings.OnSettingsChanged -= ApplyOutlineSettings;
+            if (_layerManager != null && GodotObject.IsInstanceValid(_layerManager))
+            {
+                _layerManager.LayerSelected -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerRemoved -= OnLayerManagerAtlasChanged;
+                _layerManager.LayerAdded -= OnLayerManagerAtlasAdded;
+                _layerManager.LayersReordered -= OnLayerManagerAtlasReordered;
+                _layerManager.StackChanged -= OnLayerManagerAtlasReordered;
+            }
             if (_cursorGizmo != null && GodotObject.IsInstanceValid(_cursorGizmo))
             {
                 _cursorGizmo.QueueFree();
                 _cursorGizmo = null;
+                _cursorRingMesh = null;
             }
             if (_selectionOutlineMesh != null && GodotObject.IsInstanceValid(_selectionOutlineMesh))
             {
@@ -2010,6 +4537,12 @@ namespace DeadlockPlayground.Painter
             {
                 _mirrorCameraBrush.QueueFree();
                 _mirrorCameraBrush = null;
+            }
+            if (_shapeDecalNode != null && GodotObject.IsInstanceValid(_shapeDecalNode))
+            {
+                _shapeDecalNode.SetTexture(Decal.DecalTexture.Albedo, null);
+                _shapeDecalNode.QueueFree();
+                _shapeDecalNode = null;
             }
             base._ExitTree();
         }

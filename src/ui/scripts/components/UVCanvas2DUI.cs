@@ -43,13 +43,23 @@ namespace DeadlockPlayground.UI
         private bool _isPainting = false;
         private Vector2 _lastAtlasPx = Vector2.Zero;
         private Vector2 _hoverMousePos = new Vector2(-9999, -9999);
+        private Rect2I _totalStrokeDirtyRect = default;
+
+        // Advanced Selection State (Rectangular, Lasso, Polygonal)
+        private bool _isSelecting = false;
+        private Vector2 _selectionStartAtlasPx = Vector2.Zero;
+        private Vector2 _selectionCurrentAtlasPx = Vector2.Zero;
+        private readonly List<Vector2> _lassoPoints = new();
+        private readonly List<Vector2> _polyPoints = new();
+        private Vector2 _polyCurrentAtlasPx = Vector2.Zero;
+        private bool _isBuildingPoly = false;
 
         // UV Wireframe Cache & Mode (Default: Outlines to preserve performance)
         private WireframeDisplayMode _wireframeMode = WireframeDisplayMode.Outlines;
         private float _wireframeOpacity = 0.5f;
         private bool _showBaseTexture = true;
-        private ArrayMesh _cachedBoundaryMesh = null;
-        private ArrayMesh _cachedAllWireMesh = null;
+        private Vector2[] _cachedBoundaryPoints = null;
+        private Vector2[] _cachedAllWirePoints = null;
         private Rect2 _cachedSubmeshAtlasRect = default;
         private bool _hasSubmeshRect = false;
 
@@ -69,12 +79,17 @@ namespace DeadlockPlayground.UI
         public bool IsResizingWidth => _isResizingWidth;
 
         private TextureRect _baseTextureRect = null;
+        private Button _btnResetParticle = null;
         private ShaderMaterial _baseTextureMat = null;
         private TextureRect _paintOverlayRect = null;
         private ShaderMaterial _paintOverlayMat = null;
         private ColorRect _selectionOverlayRect = null;
         private ShaderMaterial _selectionOverlayMat = null;
         private Control _wireframeOverlay = null;
+        private Control _cursorOverlay = null;
+        private ulong _lastCanvasRedrawMs = 0;
+        private ulong _lastStrokeRecompositeMs = 0;
+        private ulong _lastShapePreviewMs = 0;
 
         private bool _hasInitialFit = false;
         private Vector2 _lastDrawAreaSize = Vector2.Zero;
@@ -280,6 +295,26 @@ namespace DeadlockPlayground.UI
             _btnWireOpacity = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnWireOpacity")
                            ?? FindChild("BtnWireOpacity", true, false) as Button;
 
+            var hBox = GetNodeOrNull<HBoxContainer>("VBoxContainer/Header/Margin/HBox")
+                    ?? FindChild("HBox", true, false) as HBoxContainer;
+            if (hBox != null)
+            {
+                _btnResetParticle = new Button
+                {
+                    Name = "BtnResetParticle",
+                    Text = "Reset to Original",
+                    TooltipText = "Reset particle texture to the original clean VPK texture",
+                    Visible = false,
+                    CustomMinimumSize = new Vector2(110, 24)
+                };
+                _btnResetParticle.Pressed += OnResetParticlePressed;
+                hBox.AddChild(_btnResetParticle);
+                if (_btnClose != null)
+                {
+                    hBox.MoveChild(_btnResetParticle, _btnClose.GetIndex());
+                }
+            }
+
             _viewportContainer = GetNodeOrNull<SubViewportContainer>("VBoxContainer/ViewportContainer")
                               ?? FindChild("ViewportContainer", true, false) as SubViewportContainer;
             if (_viewportContainer != null)
@@ -385,6 +420,20 @@ namespace DeadlockPlayground.UI
                     _wireframeOverlay.Draw += () => OnDrawWireframeOverlay(_wireframeOverlay);
                     _canvasDrawArea.AddChild(_wireframeOverlay);
                 }
+
+                _cursorOverlay = _canvasDrawArea.GetNodeOrNull<Control>("CursorOverlay");
+                if (_cursorOverlay == null)
+                {
+                    _cursorOverlay = new Control
+                    {
+                        Name = "CursorOverlay",
+                        MouseFilter = Control.MouseFilterEnum.Ignore,
+                        LayoutMode = 1,
+                        AnchorsPreset = (int)Control.LayoutPreset.FullRect
+                    };
+                    _cursorOverlay.Draw += () => OnDrawCursorOverlay(_cursorOverlay);
+                    _canvasDrawArea.AddChild(_cursorOverlay);
+                }
             }
 
             UpdateWireButtons();
@@ -478,6 +527,11 @@ namespace DeadlockPlayground.UI
         public void Setup(SkinLayerManager layerManager, MeshPainter3D painter, HeroMeshHierarchy hierarchy, FloatingBrushPaletteUI palette)
         {
             // Unsubscribe previous
+            if (_painter != null && _painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged -= QueueCanvasRedraw;
+            }
+
             if (_layerManager != null)
             {
                 _layerManager.StackChanged -= OnStackChanged;
@@ -510,6 +564,22 @@ namespace DeadlockPlayground.UI
             {
                 _painter.MagicWandTool.MaskUpdated += OnMagicWandMaskUpdated;
             }
+            
+            if (_painter != null && _painter.ShapeTool != null)
+            {
+                _painter.ShapeTool.ShapeChanged += QueueCanvasRedraw;
+            }
+            
+            if (_painter != null)
+            {
+                _painter.StrokeFinished -= OnPainterStrokeFinished;
+                _painter.StrokeFinished += OnPainterStrokeFinished;
+                if (_painter.ProjectionGizmo != null)
+                {
+                    _painter.ProjectionGizmo.GizmoChanged -= QueueCanvasRedraw;
+                    _painter.ProjectionGizmo.GizmoChanged += QueueCanvasRedraw;
+                }
+            }
 
             if (_layerManager != null)
             {
@@ -526,6 +596,98 @@ namespace DeadlockPlayground.UI
             RebuildWireframe();
             CallDeferred(nameof(EnforcePanelWidthLimits));
             CallDeferred(nameof(FitToView));
+        }
+
+        private string _activeParticleTexturePath = null;
+        public string ActiveParticleTexturePath => _activeParticleTexturePath;
+        private Action<Image> _onParticleTextureUpdated = null;
+
+        public void OpenParticleTexture(string vtexPath, ImageTexture texture, Action<Image> onTextureUpdated)
+        {
+            _activeParticleTexturePath = vtexPath;
+            _onParticleTextureUpdated = onTextureUpdated;
+            _layerManager ??= SkinLayerManager.Instance;
+
+            if (_lblTitle != null)
+            {
+                _lblTitle.Text = $"Particle: {System.IO.Path.GetFileName(vtexPath)}";
+            }
+
+            if (_baseTextureRect != null)
+            {
+                _baseTextureRect.Visible = false;
+                _baseTextureRect.Texture = texture;
+                _baseTextureRect.Material = null;
+            }
+
+            if (_btnResetParticle != null)
+            {
+                _btnResetParticle.Visible = true;
+            }
+
+            if (_paintOverlayRect != null)
+            {
+                _paintOverlayRect.Material = null;
+            }
+
+            _layerManager?.SetupForStandaloneTexture("particle:" + vtexPath, texture);
+
+            int pW = texture?.GetWidth() ?? 512;
+            int pH = texture?.GetHeight() ?? 512;
+            _painter?.MagicWandTool?.SelectionMask?.EnsureBuffer(pW, pH);
+
+            SetVisibleState(true);
+            UpdateResolutionLabel();
+            RebuildWireframe();
+            FitToView();
+        }
+
+        public void CloseParticleTextureMode()
+        {
+            _activeParticleTexturePath = null;
+            _onParticleTextureUpdated = null;
+            if (_btnResetParticle != null)
+            {
+                _btnResetParticle.Visible = false;
+            }
+            if (_baseTextureRect != null && _baseTextureMat != null)
+            {
+                _baseTextureRect.Material = _baseTextureMat;
+            }
+            if (_paintOverlayRect != null && _paintOverlayMat != null)
+            {
+                _paintOverlayRect.Material = _paintOverlayMat;
+            }
+            UpdateResolutionLabel();
+            RebuildWireframe();
+            FitToView();
+            QueueCanvasRedraw();
+        }
+
+        private void OnResetParticlePressed()
+        {
+            if (string.IsNullOrEmpty(_activeParticleTexturePath)) return;
+            _layerManager?.ResetStandaloneToOriginalVpkTexture();
+            var baked = _layerManager?.BakeCompositeImage();
+            if (baked != null && _onParticleTextureUpdated != null)
+            {
+                _onParticleTextureUpdated.Invoke(baked);
+            }
+            QueueCanvasRedraw();
+            _cursorOverlay?.QueueRedraw();
+        }
+
+        private void OnPainterStrokeFinished()
+        {
+            QueueCanvasRedraw();
+            if (_onParticleTextureUpdated != null && _layerManager != null)
+            {
+                var baked = _layerManager.BakeCompositeImage();
+                if (baked != null)
+                {
+                    _onParticleTextureUpdated.Invoke(baked);
+                }
+            }
         }
 
         private void OnMagicWandMaskUpdated(bool hasActiveMask)
@@ -550,18 +712,40 @@ namespace DeadlockPlayground.UI
 
         public void SetVisibleState(bool isVisible)
         {
+            if (isVisible)
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                if (studioUI != null && studioUI.CurrentTabIndex != 8)
+                {
+                    // 2D UV canvas dock strictly lives inside the Painter tab (tab 8)
+                    Visible = false;
+                    if (_resizeGrip != null) _resizeGrip.Visible = false;
+                    EmitSignal(SignalName.VisibilityToggled, false);
+                    return;
+                }
+            }
+
             Visible = isVisible;
             if (_resizeGrip != null)
             {
                 _resizeGrip.Visible = isVisible;
                 if (isVisible) UpdateGripTransform();
             }
-            EmitSignal(SignalName.VisibilityToggled, isVisible);
-            if (isVisible)
+          if (isVisible)
             {
+                if (_layerManager != null && !_layerManager.IsStandaloneTextureMode)
+                {
+                    _layerManager.EnsureCpuSynced();
+                    _layerManager.RecompositeGpuLayers();
+                    _layerManager.RebuildBaseAtlasBuffer();
+                }
+                else
+                {
+                    _layerManager?.UpdateStandaloneComposite();
+                }
                 EnforcePanelWidthLimits();
                 CallDeferred(nameof(EnforcePanelWidthLimits));
-                _layerManager?.RebuildBaseAtlasBuffer();
                 RebuildWireframe();
                 UpdateResolutionLabel();
                 if (!_hasInitialFit)
@@ -672,7 +856,16 @@ namespace DeadlockPlayground.UI
                     _optBlendMode.Select(bMode);
                 }
             }
-            RebuildWireframe();
+            if (_onParticleTextureUpdated != null && _layerManager != null &&
+                !string.IsNullOrEmpty(_activeParticleTexturePath) && _layerManager.HasPaintStrokes())
+            {
+                var baked = _layerManager.BakeCompositeImage();
+                if (baked != null)
+                {
+                    _onParticleTextureUpdated.Invoke(baked);
+             }
+         }
+            _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
             _canvasDrawArea?.QueueRedraw();
         }
 
@@ -686,7 +879,19 @@ namespace DeadlockPlayground.UI
 
         private void OnTargetMeshChanged(MeshInstance3D mesh, int surfaceIndex)
         {
+            _activeParticleTexturePath = null;
+            _onParticleTextureUpdated = null;
+            if (_btnResetParticle != null)
+            {
+                _btnResetParticle.Visible = false;
+            }
+            if (_lblTitle != null && mesh != null)
+            {
+                _lblTitle.Text = $"UV Map - {mesh.Name}";
+            }
+            UpdateResolutionLabel();
             RebuildWireframe();
+            FitToView();
             _canvasDrawArea?.QueueRedraw();
         }
 
@@ -706,9 +911,11 @@ namespace DeadlockPlayground.UI
 
         public void RebuildWireframe()
         {
-            _cachedBoundaryMesh = null;
-            _cachedAllWireMesh = null;
+            _cachedBoundaryPoints = null;
+            _cachedAllWirePoints = null;
             _hasSubmeshRect = false;
+
+            if (!string.IsNullOrEmpty(_activeParticleTexturePath)) return;
 
             if (_meshHierarchy == null) return;
             var active = _meshHierarchy.ActiveTarget;
@@ -720,22 +927,10 @@ namespace DeadlockPlayground.UI
             int surfaceIdx = active.SurfaceIndex;
             if (surfaceIdx < 0 || surfaceIdx >= mesh.GetSurfaceCount()) surfaceIdx = 0;
 
-            // Retrieve atlas layout transform
-            Vector2 pos = Vector2.Zero;
-            Vector2 size = Vector2.One;
-            if (active.Mesh.MaterialOverlay is ShaderMaterial sm)
-            {
-                var posVar = sm.GetShaderParameter("position_in_atlas");
-                var sizeVar = sm.GetShaderParameter("size_in_atlas");
-                if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
-                {
-                    pos = posVar.AsVector2();
-                    size = sizeVar.AsVector2();
-                }
-            }
-
-            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-            _cachedSubmeshAtlasRect = new Rect2(pos * atlasSize, size * atlasSize);
+            // Retrieve atlas layout transform (1:1 dedicated submesh atlas)
+            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+            _cachedSubmeshAtlasRect = new Rect2(0, 0, atlasW, atlasH);
             _hasSubmeshRect = true;
 
             var arrays = mesh.SurfaceGetArrays(surfaceIdx);
@@ -784,8 +979,8 @@ namespace DeadlockPlayground.UI
                 else
                 {
                     edgeCounts[key] = 1;
-                    Vector2 p1 = (pos + uv1 * size) * atlasSize;
-                    Vector2 p2 = (pos + uv2 * size) * atlasSize;
+                    Vector2 p1 = new Vector2(uv1.X * atlasW, uv1.Y * atlasH);
+                    Vector2 p2 = new Vector2(uv2.X * atlasW, uv2.Y * atlasH);
                     edgeCoords[key] = (p1, p2);
                 }
             }
@@ -827,8 +1022,8 @@ namespace DeadlockPlayground.UI
                 }
             }
 
-            _cachedAllWireMesh = BuildLineMesh(allPoints);
-            _cachedBoundaryMesh = BuildLineMesh(boundaryPoints);
+            _cachedAllWirePoints = allPoints.Count >= 2 ? allPoints.ToArray() : null;
+            _cachedBoundaryPoints = boundaryPoints.Count >= 2 ? boundaryPoints.ToArray() : null;
         }
 
         private static ArrayMesh BuildLineMesh(List<Vector2> points)
@@ -852,33 +1047,42 @@ namespace DeadlockPlayground.UI
 
         private void OnDrawCanvas(Control canvas)
         {
-            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-            if (atlasSize <= 0) atlasSize = 2048;
+            var canvasSize = _layerManager?.CanvasSize ?? new Vector2I(2048, 2048);
+            int atlasW = canvasSize.X > 0 ? canvasSize.X : 2048;
+            int atlasH = canvasSize.Y > 0 ? canvasSize.Y : 2048;
 
             // 1. Background fill
             canvas.DrawRect(new Rect2(Vector2.Zero, canvas.Size), new Color(0.06f, 0.07f, 0.09f, 1.0f));
 
             // 2. Atlas bounds backdrop
-            canvas.DrawRect(new Rect2(_pan, new Vector2(atlasSize * _zoom, atlasSize * _zoom)), new Color(0.12f, 0.14f, 0.18f, 1.0f));
+            canvas.DrawRect(new Rect2(_pan, new Vector2(atlasW * _zoom, atlasH * _zoom)), new Color(0.12f, 0.14f, 0.18f, 1.0f));
 
             // 3. Update base diffuse texture with opaque RGB shader (prevents low-alpha crushing)
             var baseTex = _layerManager?.GetBaseTextureResource();
             if (_baseTextureRect != null)
             {
-                bool showBase = _showBaseTexture && baseTex != null && GodotObject.IsInstanceValid(baseTex);
+                bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
+                bool showBase = !isStandalone && _showBaseTexture && baseTex != null && GodotObject.IsInstanceValid(baseTex);
                 _baseTextureRect.Visible = showBase;
                 if (showBase)
                 {
                     _baseTextureRect.Position = _pan;
                     _baseTextureRect.Scale = new Vector2(_zoom, _zoom);
-                    _baseTextureRect.Size = new Vector2(atlasSize, atlasSize);
+                    _baseTextureRect.Size = new Vector2(atlasW, atlasH);
                     _baseTextureRect.TextureFilter = TextureFilterEnum.Nearest;
                     _baseTextureRect.Texture = baseTex;
-                    if (_baseTextureRect.Material != _baseTextureMat && _baseTextureMat != null)
+                    if (!isStandalone)
                     {
-                        _baseTextureRect.Material = _baseTextureMat;
+                        if (_baseTextureRect.Material != _baseTextureMat && _baseTextureMat != null)
+                        {
+                            _baseTextureRect.Material = _baseTextureMat;
+                        }
+                        _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
                     }
-                    _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
+                    else
+                    {
+                        _baseTextureRect.Material = null;
+                    }
                 }
             }
 
@@ -892,12 +1096,20 @@ namespace DeadlockPlayground.UI
                 {
                     _paintOverlayRect.Position = _pan;
                     _paintOverlayRect.Scale = new Vector2(_zoom, _zoom);
-                    _paintOverlayRect.Size = new Vector2(atlasSize, atlasSize);
+                    _paintOverlayRect.Size = new Vector2(atlasW, atlasH);
                     _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
                     _paintOverlayRect.Texture = atlasTex;
-                    if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
+                    bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
+                    if (!isStandalone)
                     {
-                        _paintOverlayRect.Material = _paintOverlayMat;
+                        if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
+                        {
+                            _paintOverlayRect.Material = _paintOverlayMat;
+                        }
+                    }
+                    else
+                    {
+                        _paintOverlayRect.Material = null;
                     }
                 }
             }
@@ -912,42 +1124,51 @@ namespace DeadlockPlayground.UI
                 {
                     _selectionOverlayRect.Position = _pan;
                     _selectionOverlayRect.Scale = new Vector2(_zoom, _zoom);
-                    _selectionOverlayRect.Size = new Vector2(atlasSize, atlasSize);
+                    _selectionOverlayRect.Size = new Vector2(atlasW, atlasH);
 
                     if (_selectionOverlayMat != null)
                     {
                         var maskTex = _painter.MagicWandTool.MaskTextureResource;
                         _selectionOverlayMat.SetShaderParameter("selection_mask", maskTex);
-                        _selectionOverlayMat.SetShaderParameter("atlas_size", new Vector2(atlasSize, atlasSize));
+                        _selectionOverlayMat.SetShaderParameter("atlas_size", new Vector2(atlasW, atlasH));
                         _selectionOverlayMat.SetShaderParameter("has_submesh_rect", _hasSubmeshRect);
                         _selectionOverlayMat.SetShaderParameter("show_stencil_pattern", showPattern);
                         if (_hasSubmeshRect)
                         {
-                            _selectionOverlayMat.SetShaderParameter("submesh_pos", _cachedSubmeshAtlasRect.Position / atlasSize);
-                            _selectionOverlayMat.SetShaderParameter("submesh_size", _cachedSubmeshAtlasRect.Size / atlasSize);
+                            Vector2 submeshNormPos = new Vector2(_cachedSubmeshAtlasRect.Position.X / atlasW, _cachedSubmeshAtlasRect.Position.Y / atlasH);
+                            Vector2 submeshNormSize = new Vector2(_cachedSubmeshAtlasRect.Size.X / atlasW, _cachedSubmeshAtlasRect.Size.Y / atlasH);
+                            _selectionOverlayMat.SetShaderParameter("submesh_pos", submeshNormPos);
+                            _selectionOverlayMat.SetShaderParameter("submesh_size", submeshNormSize);
                         }
                     }
                 }
             }
 
-            // 5. Trigger wireframe and cursor overlay redraw
-            if (_wireframeOverlay != null)
+            // 5. Update overlay sizes
+            if (_wireframeOverlay != null && _wireframeOverlay.Size != canvas.Size)
             {
                 _wireframeOverlay.Size = canvas.Size;
                 _wireframeOverlay.QueueRedraw();
+            }
+            if (_cursorOverlay != null && _cursorOverlay.Size != canvas.Size)
+            {
+                _cursorOverlay.Size = canvas.Size;
+                _cursorOverlay.QueueRedraw();
             }
         }
 
         private void OnDrawWireframeOverlay(Control overlay)
         {
-            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-            if (atlasSize <= 0) atlasSize = 2048;
+            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+            if (atlasW <= 0) atlasW = 2048;
+            if (atlasH <= 0) atlasH = 2048;
 
             // Set 2D transform to local atlas pixel coordinates
             overlay.DrawSetTransform(_pan, 0.0f, new Vector2(_zoom, _zoom));
 
             // Atlas bounds border
-            overlay.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasSize, atlasSize)), new Color(0.35f, 0.40f, 0.50f, 0.85f), filled: false, width: 2.0f / _zoom);
+            overlay.DrawRect(new Rect2(Vector2.Zero, new Vector2(atlasW, atlasH)), new Color(0.35f, 0.40f, 0.50f, 0.85f), filled: false, width: 2.0f / _zoom);
 
             // Active submesh highlight border
             if (_hasSubmeshRect)
@@ -955,31 +1176,185 @@ namespace DeadlockPlayground.UI
                 overlay.DrawRect(_cachedSubmeshAtlasRect, new Color(0.96f, 0.77f, 0.26f, 0.95f), filled: false, width: 2.0f / _zoom);
             }
 
-            // Static GPU cached UV wireframe overlay (draws in a single GPU draw call)
             if (_wireframeMode != WireframeDisplayMode.Off)
             {
-                var mesh = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryMesh : _cachedAllWireMesh;
-                if (mesh != null)
+                var pts = (_wireframeMode == WireframeDisplayMode.Outlines) ? _cachedBoundaryPoints : _cachedAllWirePoints;
+                if (pts != null && pts.Length >= 2)
                 {
                     float baseAlpha = (_wireframeMode == WireframeDisplayMode.Outlines) ? 0.85f : 0.40f;
                     Color wireColor = new Color(0.85f, 0.88f, 0.95f, baseAlpha * _wireframeOpacity);
-                    overlay.DrawMesh(mesh, null, Transform2D.Identity, wireColor);
+                    overlay.DrawMultiline(pts, wireColor);
                 }
             }
 
-            // Restore identity transform for screen-space cursor preview
-            overlay.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+            // Active selection preview (Rectangular, Lasso, Polygonal)
+            var currentSelType = _painter?.SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+            if (_painter != null && _painter.ToolMode == BrushToolMode.Selection)
+            {
+                Color marqueeColor = new Color(0.96f, 0.82f, 0.35f, 0.95f);
+                Color marqueeFill = new Color(0.96f, 0.82f, 0.35f, 0.15f);
 
-            // Cursor preview circle (only for radial brush tools: Paint & Erase)
+                if (_isSelecting && currentSelType == SelectionToolType.Rectangular)
+                {
+                    Vector2 pMin = new Vector2(Mathf.Min(_selectionStartAtlasPx.X, _selectionCurrentAtlasPx.X), Mathf.Min(_selectionStartAtlasPx.Y, _selectionCurrentAtlasPx.Y));
+                    Vector2 pMax = new Vector2(Mathf.Max(_selectionStartAtlasPx.X, _selectionCurrentAtlasPx.X), Mathf.Max(_selectionStartAtlasPx.Y, _selectionCurrentAtlasPx.Y));
+                    Rect2 selRect = new Rect2(pMin, pMax - pMin);
+                    overlay.DrawRect(selRect, marqueeFill, filled: true);
+                    overlay.DrawRect(selRect, marqueeColor, filled: false, width: 1.5f / _zoom);
+                }
+                else if (_isSelecting && currentSelType == SelectionToolType.Lasso && _lassoPoints.Count >= 2)
+                {
+                    for (int i = 0; i < _lassoPoints.Count - 1; i++)
+                    {
+                        overlay.DrawLine(_lassoPoints[i], _lassoPoints[i + 1], marqueeColor, 1.5f / _zoom, antialiased: true);
+                    }
+                    overlay.DrawLine(_lassoPoints[^1], _lassoPoints[0], new Color(0.96f, 0.82f, 0.35f, 0.45f), 1.0f / _zoom, antialiased: true);
+                }
+                else if (_isBuildingPoly && _polyPoints.Count > 0)
+                {
+                    for (int i = 0; i < _polyPoints.Count - 1; i++)
+                    {
+                        overlay.DrawLine(_polyPoints[i], _polyPoints[i + 1], marqueeColor, 1.5f / _zoom, antialiased: true);
+                    }
+
+                    // Rubber band line to current cursor
+                    overlay.DrawLine(_polyPoints[^1], _polyCurrentAtlasPx, marqueeColor, 1.2f / _zoom, antialiased: true);
+                    // Closing loop guide
+                    overlay.DrawLine(_polyCurrentAtlasPx, _polyPoints[0], new Color(0.96f, 0.82f, 0.35f, 0.35f), 1.0f / _zoom, antialiased: true);
+
+                    // Draw vertices
+                    float handleRadius = 3.5f / _zoom;
+                    for (int i = 0; i < _polyPoints.Count; i++)
+                    {
+                        overlay.DrawCircle(_polyPoints[i], handleRadius, Colors.White, filled: true);
+                        overlay.DrawCircle(_polyPoints[i], handleRadius, new Color(0.12f, 0.14f, 0.18f, 1.0f), filled: false, width: 1.0f / _zoom);
+                    }
+
+                    // Highlight start vertex if within 8px snap distance
+                    if ((_polyCurrentAtlasPx - _polyPoints[0]).Length() * _zoom <= 8.0f)
+                    {
+                        overlay.DrawCircle(_polyPoints[0], 8.0f / _zoom, new Color(0.3f, 1.0f, 0.5f, 0.95f), filled: false, width: 2.0f / _zoom);
+                    }
+                }
+            }
+
+            // Active shape tool overlay (Square, Circle, Line with Gizmo Handles)
+            if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
+            {
+                _painter.ShapeTool.DrawOverlay(overlay, _pan, _zoom, _painter.BrushColor);
+            }
+
+            // Active decal and text projection transform gizmo overlay
+            if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+            {
+                _painter.ProjectionGizmo.DrawOverlay(overlay, _pan, _zoom);
+            }
+        }
+
+        private void OnDrawCursorOverlay(Control overlay)
+        {
+            // Dynamic brush cursor preview (Paint & Erase) in screen space
             if (_hoverMousePos.X > -1000 && _painter != null)
             {
                 if (_painter.ToolMode == BrushToolMode.Paint || _painter.ToolMode == BrushToolMode.Erase)
                 {
+                    BrushShapeType activeShape = (_painter.ToolMode == BrushToolMode.Erase) ? _painter.EraserShape : _painter.BrushShape;
                     float brushRadius = _painter.BrushSize * 0.5f * _zoom;
+                    float brushDiameter = _painter.BrushSize * _zoom;
                     Color cursorCol = (_painter.ToolMode == BrushToolMode.Erase)
-                        ? new Color(1.0f, 0.35f, 0.35f, 0.85f)
-                        : new Color(1.0f, 1.0f, 1.0f, 0.85f);
-                    overlay.DrawCircle(_hoverMousePos, brushRadius, cursorCol, filled: false, width: 1.5f, antialiased: true);
+                        ? new Color(1.0f, 0.35f, 0.35f, 0.90f)
+                        : new Color(1.0f, 1.0f, 1.0f, 0.90f);
+                    Color faintCol = new Color(cursorCol.R, cursorCol.G, cursorCol.B, 0.35f);
+
+                    if (activeShape == BrushShapeType.Square)
+                    {
+                        Rect2 rect = new Rect2(_hoverMousePos - new Vector2(brushRadius, brushRadius), new Vector2(brushDiameter, brushDiameter));
+                        overlay.DrawRect(rect, cursorCol, filled: false, width: 1.5f);
+                        // Center crosshairs
+                        overlay.DrawLine(_hoverMousePos - new Vector2(4, 0), _hoverMousePos + new Vector2(4, 0), faintCol, 1.0f);
+                        overlay.DrawLine(_hoverMousePos - new Vector2(0, 4), _hoverMousePos + new Vector2(0, 4), faintCol, 1.0f);
+                    }
+                    else if (activeShape == BrushShapeType.Splatter || activeShape == BrushShapeType.Grunge)
+                    {
+                        // Outer boundary wireframe + faint alpha stamp of texture mask
+                        var tex = _painter.GetBrushTexture(activeShape);
+                        if (tex != null)
+                        {
+                            Rect2 rect = new Rect2(_hoverMousePos - new Vector2(brushRadius, brushRadius), new Vector2(brushDiameter, brushDiameter));
+                            Color stampCol = (_painter.ToolMode == BrushToolMode.Erase)
+                                ? new Color(1.0f, 0.35f, 0.35f, 0.25f)
+                                : new Color(1.0f, 1.0f, 1.0f, 0.28f);
+                            overlay.DrawTextureRect(tex, rect, false, stampCol);
+                        }
+                        // Organic boundary ring
+                        overlay.DrawCircle(_hoverMousePos, brushRadius, cursorCol, filled: false, width: 1.5f, antialiased: true);
+                        overlay.DrawLine(_hoverMousePos - new Vector2(3, 0), _hoverMousePos + new Vector2(3, 0), faintCol, 1.0f);
+                        overlay.DrawLine(_hoverMousePos - new Vector2(0, 3), _hoverMousePos + new Vector2(0, 3), faintCol, 1.0f);
+                    }
+                    else // SoftCircle or HardCircle
+                    {
+                        // Outer ring (brush radius)
+                        overlay.DrawCircle(_hoverMousePos, brushRadius, cursorCol, filled: false, width: 1.5f, antialiased: true);
+
+                        // Inner ring (hardness falloff boundary) if soft circle and hardness < 0.98
+                        if (activeShape == BrushShapeType.SoftCircle && _painter.BrushHardness > 0.05f && _painter.BrushHardness < 0.98f)
+                        {
+                            float innerRadius = brushRadius * _painter.BrushHardness;
+                            Color innerCol = new Color(cursorCol.R, cursorCol.G, cursorCol.B, 0.45f);
+                            overlay.DrawCircle(_hoverMousePos, innerRadius, innerCol, filled: false, width: 1.0f, antialiased: true);
+                        }
+
+                        // Center dot
+                        overlay.DrawCircle(_hoverMousePos, 1.5f, cursorCol, filled: true);
+                    }
+                }
+                else if (_painter.ToolMode == BrushToolMode.Decal)
+                {
+                    if (_painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive) return;
+                    var decalTex = _painter.DecalStamper?.DecalTexture;
+                    if (decalTex != null)
+                    {
+                        float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                        float rotDeg = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                        int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                        float dW = decalTex.GetWidth();
+                        float dH = decalTex.GetHeight();
+                        float aspect = dW / dH;
+                        float spanU = (aspect >= 1.0f) ? scale * aspect : scale;
+                        float spanV = (aspect < 1.0f) ? scale / aspect : scale;
+                        float w = spanU * atlasSize * _zoom;
+                        float h = spanV * atlasSize * _zoom;
+
+                        overlay.DrawSetTransform(_hoverMousePos, Mathf.DegToRad(rotDeg), Vector2.One);
+                        Rect2 rect = new Rect2(-w * 0.5f, -h * 0.5f, w, h);
+                        overlay.DrawTextureRect(decalTex, rect, false, new Color(1, 1, 1, 0.75f));
+                        overlay.DrawRect(rect, new Color(0.96f, 0.77f, 0.26f, 0.9f), filled: false, width: 1.5f);
+                        overlay.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+                    }
+                }
+                else if (_painter.ToolMode == BrushToolMode.Text)
+                {
+                    if (_painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive) return;
+                    var textTex = _painter.TextProjector?.CurrentTexture;
+                    if (textTex != null)
+                    {
+                        float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                        float rotDeg = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                        int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
+                        float dW = textTex.GetWidth();
+                        float dH = textTex.GetHeight();
+                        float aspect = dW / dH;
+                        float spanU = (aspect >= 1.0f) ? scale * aspect : scale;
+                        float spanV = (aspect < 1.0f) ? scale / aspect : scale;
+                        float w = spanU * atlasSize * _zoom;
+                        float h = spanV * atlasSize * _zoom;
+
+                        overlay.DrawSetTransform(_hoverMousePos, Mathf.DegToRad(rotDeg), Vector2.One);
+                        Rect2 rect = new Rect2(-w * 0.5f, -h * 0.5f, w, h);
+                        overlay.DrawTextureRect(textTex, rect, false, new Color(1, 1, 1, 0.75f));
+                        overlay.DrawRect(rect, new Color(0.4f, 0.8f, 1.0f, 0.9f), filled: false, width: 1.5f);
+                        overlay.DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+                    }
                 }
             }
         }
@@ -1014,6 +1389,34 @@ namespace DeadlockPlayground.UI
                     GetViewport()?.SetInputAsHandled();
                     return;
                 }
+                else if (mb.ButtonIndex == MouseButton.Right && mb.Pressed)
+                {
+                    if (_isBuildingPoly || _isSelecting)
+                    {
+                        CancelSelection();
+                        canvas.AcceptEvent();
+                        return;
+                    }
+                    if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
+                    {
+                       _painter.ShapeTool.CancelShape();
+                        _painter.LayerManager?.CancelShapePreview();
+                        if (_painter.FindChild("PainterLiveShapeDecalPreview", true, false) is Decal d) d.Visible = false;
+                        _wireframeOverlay?.QueueRedraw();
+                        canvas.QueueRedraw();
+                        canvas.AcceptEvent();
+                        return;
+                    }
+                    if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+                    {
+                        _painter.ProjectionGizmo.Deactivate();
+                        _painter.DecalStamper?.HidePreview();
+                        _wireframeOverlay?.QueueRedraw();
+                        _cursorOverlay?.QueueRedraw();
+                        canvas.AcceptEvent();
+                        return;
+                    }
+                }
                 else if (mb.ButtonIndex == MouseButton.Left)
                 {
                     if (Input.IsKeyPressed(Key.Space))
@@ -1023,21 +1426,176 @@ namespace DeadlockPlayground.UI
                         return;
                     }
 
+                    Vector2 atlasPx = ScreenToAtlasPx(mb.Position);
+
                     if (mb.Pressed)
                     {
-                        Vector2 atlasPx = ScreenToAtlasPx(mb.Position);
-                        if (IsAtlasPxInBounds(atlasPx, atlasSize))
+                        if (_painter != null && _painter.ToolMode == BrushToolMode.Selection)
+                        {
+                            HandleSelectionLeftPress(atlasPx, mb);
+                            canvas.AcceptEvent();
+                            return;
+                        }
+
+                        if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null)
+                        {
+                            if (_painter.ShapeTool.HasActiveShape)
+                            {
+                                var handle = _painter.ShapeTool.HitTest(atlasPx, _zoom);
+                                if (handle != ShapeHandleType.None)
+                                {
+                                    _painter.ShapeTool.StartHandleDrag(handle, atlasPx);
+                                    _painter.LayerManager?.CancelShapePreview();
+                                    canvas.QueueRedraw();
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+
+                            // Start defining new shape
+                            _painter.ShapeTool.BeginNewShape(atlasPx);
+                            _painter.IsShapeOriginatedIn3D = false;
+                            _brushPalette?.SyncShapeControls();
+                            _wireframeOverlay?.QueueRedraw();
+                            canvas.AcceptEvent();
+                            return;
+                        }
+
+                        if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null)
+                        {
+                            if (_painter.ProjectionGizmo.IsActive)
+                            {
+                                var handle = _painter.ProjectionGizmo.HitTest(atlasPx, _zoom);
+                                if (handle != ProjectionGizmoHandle.None)
+                                {
+                                    _painter.ProjectionGizmo.Is3DProjection = false;
+                                    _painter.ProjectionGizmo.StartHandleDrag(handle, atlasPx);
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+
+                            // Place new projection
+                            if (_painter.ToolMode == BrushToolMode.Decal)
+                            {
+                                var decalTex = _painter.DecalStamper?.DecalTexture;
+                                if (decalTex != null)
+                                {
+                                    float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                                    float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                                    _painter.ProjectionGizmo.Activate(atlasPx, decalTex, scale, rot, isText: false, atlasSize);
+                                    _painter.ProjectionGizmo.Is3DProjection = false;
+                                    _painter.ProjectionGizmo.StartHandleDrag(ProjectionGizmoHandle.Body, atlasPx);
+                                    _brushPalette?.SyncProjectionControls();
+                                    _wireframeOverlay?.QueueRedraw();
+                                    _cursorOverlay?.QueueRedraw();
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+                            else if (_painter.ToolMode == BrushToolMode.Text)
+                            {
+                                var textTex = _painter.TextProjector?.CurrentTexture;
+                                if (textTex != null)
+                                {
+                                    float rot = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                                    float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                                    _painter.ProjectionGizmo.Activate(atlasPx, textTex, scale, rot, isText: true, atlasSize);
+                                    _painter.ProjectionGizmo.Is3DProjection = false;
+                                    _painter.ProjectionGizmo.StartHandleDrag(ProjectionGizmoHandle.Body, atlasPx);
+                                    _brushPalette?.SyncProjectionControls();
+                                    _wireframeOverlay?.QueueRedraw();
+                                    _cursorOverlay?.QueueRedraw();
+                                    canvas.AcceptEvent();
+                                    return;
+                                }
+                            }
+                        }
+
+                        int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                        int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                        if (IsAtlasPxInBounds(atlasPx, atlasW, atlasH))
                         {
                             HandleToolClick(atlasPx);
                         }
                     }
                     else
                     {
+                        if (_painter != null && _painter.ToolMode == BrushToolMode.Selection)
+                        {
+                            HandleSelectionLeftRelease(atlasPx, mb);
+                            canvas.AcceptEvent();
+                            return;
+                        }
+
+                        if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null)
+                        {
+                            if (_painter.ShapeTool.IsDragging)
+                            {
+                               _painter.ShapeTool.EndHandleDrag();
+                                _painter.SyncShapeFrom2DCanvas(); // Sincroniza al soltar
+                                _brushPalette?.SyncShapeControls();
+                                _wireframeOverlay?.QueueRedraw();
+                                canvas.AcceptEvent();
+                                return;
+                            }
+                        }
+
+                        if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null)
+                        {
+                            if (_painter.ProjectionGizmo.IsDragging)
+                            {
+                                _painter.ProjectionGizmo.EndHandleDrag();
+                                _brushPalette?.SyncProjectionControls();
+                                _wireframeOverlay?.QueueRedraw();
+                                canvas.AcceptEvent();
+                                return;
+                            }
+                        }
+
                         if (_isPainting)
                         {
                             _isPainting = false;
-                            _layerManager?.Finish2DStroke();
+                            if (_accumulated2DDirtyRect.Size.X > 0)
+                            {
+                                if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                                {
+                                    _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                                }
+                                else
+                                {
+                                    _layerManager?.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                                }
+                                _accumulated2DDirtyRect = default;
+                            }
+                            _layerManager?.Finish2DStroke(_totalStrokeDirtyRect);
+                            _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
+                            _totalStrokeDirtyRect = default;
                             canvas.QueueRedraw();
+                            _cursorOverlay?.QueueRedraw();
+
+                            if (_onParticleTextureUpdated != null && _layerManager != null)
+                            {
+                                var baked = _layerManager.BakeCompositeImage();
+                                if (baked != null)
+                                {
+                                    _onParticleTextureUpdated.Invoke(baked);
+                                }
+                            }
+                            else
+                            {
+                                if (_meshHierarchy != null && _layerManager != null)
+                                {
+                                    _meshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+                                }
+                                else if (_layerManager?.TargetMesh != null && _meshHierarchy != null)
+                                {
+                                    _meshHierarchy.MarkSubmeshDirty(_layerManager.TargetMesh);
+                                }
+                                var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                                             ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                                paintTab?.RegisterActiveStrokeMetadata();
+                            }
                         }
                     }
                 }
@@ -1045,12 +1603,45 @@ namespace DeadlockPlayground.UI
             else if (@event is InputEventMouseMotion mm)
             {
                 _hoverMousePos = mm.Position;
-                _wireframeOverlay?.QueueRedraw();
+                _cursorOverlay?.QueueRedraw();
 
                 if (_isPanning)
                 {
                     _pan += mm.Relative;
+                    _wireframeOverlay?.QueueRedraw();
                     canvas.QueueRedraw();
+                    return;
+                }
+
+                if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.IsDragging)
+                {
+                    Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
+                    _painter.ShapeTool.UpdateDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
+
+                    // Sincronizar el Decal 3D con la posición del canvas 2D
+                    _painter.SyncShapeFrom2DCanvas();
+
+                    _brushPalette?.SyncShapeControls();
+                    _wireframeOverlay?.QueueRedraw();
+                    canvas.AcceptEvent();
+                    return;
+                }
+
+                if (_painter != null && (_painter.ToolMode == BrushToolMode.Decal || _painter.ToolMode == BrushToolMode.Text) && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsDragging)
+                {
+                    Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
+                    _painter.ProjectionGizmo.UpdateHandleDrag(currentAtlasPx, Input.IsKeyPressed(Key.Shift));
+
+                    _brushPalette?.SyncProjectionControls();
+                    _wireframeOverlay?.QueueRedraw();
+                    canvas.AcceptEvent();
+                    return;
+                }
+
+                if (_painter != null && _painter.ToolMode == BrushToolMode.Selection)
+                {
+                    Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
+                    HandleSelectionMouseMotion(currentAtlasPx);
                     return;
                 }
 
@@ -1059,60 +1650,288 @@ namespace DeadlockPlayground.UI
                     Vector2 currentAtlasPx = ScreenToAtlasPx(mm.Position);
                     ExecuteToolDrag(_lastAtlasPx, currentAtlasPx);
                     _lastAtlasPx = currentAtlasPx;
-                    canvas.QueueRedraw();
+
+                    ulong nowMs = Time.GetTicksMsec();
+                    if (nowMs - _lastCanvasRedrawMs >= 33)
+                    {
+                        _lastCanvasRedrawMs = nowMs;
+                        canvas.QueueRedraw();
+                        _cursorOverlay?.QueueRedraw();
+                    }
                     return;
                 }
+            }
+        }
 
-                canvas.QueueRedraw();
+        private void HandleSelectionLeftPress(Vector2 atlasPx, InputEventMouseButton mb)
+        {
+            var selType = _painter?.SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+            var combineMode = GetSelectionCombineMode();
+
+            switch (selType)
+            {
+                case SelectionToolType.Rectangular:
+                    _isSelecting = true;
+                    _selectionStartAtlasPx = atlasPx;
+                    _selectionCurrentAtlasPx = atlasPx;
+                    _wireframeOverlay?.QueueRedraw();
+                    break;
+
+                case SelectionToolType.Lasso:
+                    _isSelecting = true;
+                    _lassoPoints.Clear();
+                    _lassoPoints.Add(atlasPx);
+                    _wireframeOverlay?.QueueRedraw();
+                    break;
+
+                case SelectionToolType.Polygonal:
+                    // Check if closing existing polygon (near start point <= 8px screen distance or double-click)
+                    if (_polyPoints.Count >= 3 && (mb.DoubleClick || (_polyPoints[0] - atlasPx).Length() * _zoom <= 8.0f))
+                    {
+                        CloseAndApplyPolygonSelection(combineMode);
+                    }
+                    else
+                    {
+                        _polyPoints.Add(atlasPx);
+                        _isBuildingPoly = true;
+                        _polyCurrentAtlasPx = atlasPx;
+                        _wireframeOverlay?.QueueRedraw();
+                    }
+                    break;
+            }
+        }
+
+        private void HandleSelectionLeftRelease(Vector2 atlasPx, InputEventMouseButton mb)
+        {
+            var selType = _painter?.SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+            var combineMode = GetSelectionCombineMode();
+
+            if (selType == SelectionToolType.Rectangular && _isSelecting)
+            {
+                _isSelecting = false;
+                _selectionCurrentAtlasPx = atlasPx;
+                Vector2 p1 = _selectionStartAtlasPx;
+                Vector2 p2 = _selectionCurrentAtlasPx;
+                float diffX = MathF.Abs(p2.X - p1.X);
+                float diffY = MathF.Abs(p2.Y - p1.Y);
+                if (diffX >= 1.0f || diffY >= 1.0f)
+                {
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    _painter?.SelectionMask?.EnsureSize(atlasW, atlasH);
+                    _painter?.SelectionMask?.RasterizeRect(p1, p2, combineMode);
+                    _painter?.SyncSelectionMaskState();
+                    _brushPalette?.UpdateWandUI();
+                }
+                _wireframeOverlay?.QueueRedraw();
+                _canvasDrawArea?.QueueRedraw();
+            }
+            else if (selType == SelectionToolType.Lasso && _isSelecting)
+            {
+                _isSelecting = false;
+                _lassoPoints.Add(atlasPx);
+                if (_lassoPoints.Count >= 3)
+                {
+                    int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                    _painter?.SelectionMask?.EnsureSize(atlasW, atlasH);
+                    _painter?.SelectionMask?.RasterizePolygon(_lassoPoints, combineMode);
+                    _painter?.SyncSelectionMaskState();
+                    _brushPalette?.UpdateWandUI();
+                }
+                _lassoPoints.Clear();
+                _wireframeOverlay?.QueueRedraw();
+                _canvasDrawArea?.QueueRedraw();
+            }
+        }
+
+        private void HandleSelectionMouseMotion(Vector2 atlasPx)
+        {
+            var selType = _painter?.SelectionMask?.CurrentToolType ?? _brushPalette?.CurrentSelectionType ?? SelectionToolType.Rectangular;
+            if (selType == SelectionToolType.Rectangular && _isSelecting)
+            {
+                _selectionCurrentAtlasPx = atlasPx;
+                _wireframeOverlay?.QueueRedraw();
+            }
+            else if (selType == SelectionToolType.Lasso && _isSelecting)
+            {
+                if (_lassoPoints.Count == 0 || (_lassoPoints[^1] - atlasPx).Length() >= 2.0f)
+                {
+                    _lassoPoints.Add(atlasPx);
+                    _wireframeOverlay?.QueueRedraw();
+                }
+            }
+            else if (selType == SelectionToolType.Polygonal && _isBuildingPoly)
+            {
+                _polyCurrentAtlasPx = atlasPx;
+                _wireframeOverlay?.QueueRedraw();
+            }
+        }
+
+        private void CloseAndApplyPolygonSelection(SelectionCombineMode combineMode)
+        {
+            if (_polyPoints.Count >= 3)
+            {
+                int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                _painter?.SelectionMask?.EnsureSize(atlasW, atlasH);
+                _painter?.SelectionMask?.RasterizePolygon(_polyPoints, combineMode);
+                _painter?.SyncSelectionMaskState();
+                _brushPalette?.UpdateWandUI();
+            }
+            _polyPoints.Clear();
+            _isBuildingPoly = false;
+            _wireframeOverlay?.QueueRedraw();
+            _canvasDrawArea?.QueueRedraw();
+        }
+
+        private SelectionCombineMode GetSelectionCombineMode()
+        {
+            if (Input.IsKeyPressed(Key.Shift)) return SelectionCombineMode.Add;
+            if (Input.IsKeyPressed(Key.Alt)) return SelectionCombineMode.Subtract;
+            return SelectionCombineMode.Replace;
+        }
+
+        public void CancelSelection()
+        {
+            _isSelecting = false;
+            _lassoPoints.Clear();
+            _polyPoints.Clear();
+            _isBuildingPoly = false;
+            _wireframeOverlay?.QueueRedraw();
+        }
+
+        public void QueueCanvasRedraw()
+        {
+            _wireframeOverlay?.QueueRedraw();
+            _canvasDrawArea?.QueueRedraw();
+        }
+
+        public override void _UnhandledKeyInput(InputEvent @event)
+        {
+            if (!Visible || @event is not InputEventKey key || !key.Pressed) return;
+
+            if (key.Keycode == Key.Escape)
+            {
+                if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+                {
+                    _painter.ProjectionGizmo.Deactivate();
+                    _painter.DecalStamper?.HidePreview();
+                    _wireframeOverlay?.QueueRedraw();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
+                if (_isBuildingPoly || _isSelecting)
+                {
+                    CancelSelection();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
+                if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
+                {
+                    _painter.ShapeTool.CancelShape();
+                    _painter.LayerManager?.CancelShapePreview();
+                    _wireframeOverlay?.QueueRedraw();
+                    _canvasDrawArea?.QueueRedraw();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
+            }
+
+            if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter)
+            {
+                if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+                {
+                    _painter.CommitProjectionGizmo();
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _wireframeOverlay?.QueueRedraw();
+                    _canvasDrawArea?.QueueRedraw();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
+                if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null && _painter.ShapeTool.HasActiveShape)
+                {
+                    _painter.ShapeTool.CommitShape(_layerManager, _painter.BrushColor, (LayerBlendMode)_painter.BlendMode, _painter.MagicWandTool);
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _wireframeOverlay?.QueueRedraw();
+                    GetViewport()?.SetInputAsHandled();
+                    return;
+                }
             }
         }
 
         private void HandleToolClick(Vector2 atlasPx)
         {
             if (_painter == null || _layerManager == null) return;
-            int atlasSize = _layerManager.CanvasSize.X;
+            int currentSubmeshWidth = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int currentSubmeshHeight = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
 
             var mode = _painter.ToolMode;
             if (mode == BrushToolMode.Paint || mode == BrushToolMode.Erase)
             {
                 _isPainting = true;
                 _lastAtlasPx = atlasPx;
-                _layerManager.RecordInitialSnapshot();
-                _layerManager.PaintDab2D(atlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool);
-                _layerManager.RecompositeGpuLayers();
+                _accumulated2DDirtyRect = default;
+                _layerManager.EnsureCpuSynced();
+                _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
+
+                var shape = (mode == BrushToolMode.Erase) ? _painter.EraserShape : _painter.BrushShape;
+                var brushTex = _painter.GetBrushTexture(shape);
+                var dirtyRect = _layerManager.PaintDab2D(atlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool, shape, brushTex);
+                _totalStrokeDirtyRect = dirtyRect;
+                if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                {
+                    _layerManager?.UpdateStandaloneComposite(dirtyRect);
+                }
+                else
+                {
+                    _layerManager?.UpdateActiveLayerGpuTextureThrottled(dirtyRect);
+                }
                 _canvasDrawArea?.QueueRedraw();
+                _cursorOverlay?.QueueRedraw();
             }
             else if (mode == BrushToolMode.BucketFill)
             {
-                Vector2 uv = atlasPx / atlasSize;
-                var active = _meshHierarchy?.ActiveTarget;
-                if (active != null && active.Mesh != null)
+                if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
                 {
-                    Vector2 pos = Vector2.Zero;
-                    Vector2 size = Vector2.One;
-                    if (active.Mesh.MaterialOverlay is ShaderMaterial sm)
+                    _layerManager?.FillActiveLayer2D(_painter.BrushColor, _painter.MagicWandTool);
+                    _canvasDrawArea?.QueueRedraw();
+                    if (_onParticleTextureUpdated != null && _layerManager != null)
                     {
-                        var posVar = sm.GetShaderParameter("position_in_atlas");
-                        var sizeVar = sm.GetShaderParameter("size_in_atlas");
-                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                        var baked = _layerManager.BakeCompositeImage();
+                        if (baked != null)
                         {
-                            pos = posVar.AsVector2();
-                            size = sizeVar.AsVector2();
+                            _onParticleTextureUpdated.Invoke(baked);
                         }
                     }
-                    Vector2 submeshUv = (size.X > 0 && size.Y > 0) ? (uv - pos) / size : uv;
-                    _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, submeshUv, _painter.MagicWandTool, _painter.BucketFillTolerance);
-                    _canvasDrawArea?.QueueRedraw();
+                }
+                else
+                {
+                    Vector2 uv = new Vector2(
+                        Mathf.Clamp(atlasPx.X / currentSubmeshWidth, 0.0f, 1.0f),
+                        Mathf.Clamp(atlasPx.Y / currentSubmeshHeight, 0.0f, 1.0f)
+                    );
+                    var active = _meshHierarchy?.ActiveTarget;
+                    if (active != null && active.Mesh != null)
+                    {
+                        _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, uv, _painter.MagicWandTool, _painter.BucketFillTolerance);
+                        _canvasDrawArea?.QueueRedraw();
+                    }
                 }
             }
             else if (mode == BrushToolMode.Eyedropper)
             {
+                _layerManager.EnsureCpuCompositeBufferSynced();
                 byte[] compBuf = _layerManager.CompositeBuffer;
-                if (compBuf != null && compBuf.Length >= atlasSize * atlasSize * 8)
+                if (compBuf != null && compBuf.Length >= currentSubmeshWidth * currentSubmeshHeight * 8)
                 {
-                    int pxX = Mathf.Clamp((int)atlasPx.X, 0, atlasSize - 1);
-                    int pxY = Mathf.Clamp((int)atlasPx.Y, 0, atlasSize - 1);
-                    int idx = (pxY * atlasSize + pxX) * 4;
+                    int pxX = Mathf.Clamp((int)atlasPx.X, 0, currentSubmeshWidth - 1);
+                    int pxY = Mathf.Clamp((int)atlasPx.Y, 0, currentSubmeshHeight - 1);
+                    int idx = (pxY * currentSubmeshWidth + pxX) * 4;
 
                     unsafe
                     {
@@ -1132,86 +1951,39 @@ namespace DeadlockPlayground.UI
             }
             else if (mode == BrushToolMode.MagicWand)
             {
-                Vector2 uv = atlasPx / atlasSize;
-                SubmeshNodeInfo targetSub = null;
-                Vector2 submeshUv = uv;
+                MagicWandCombineMode combineMode = MagicWandCombineMode.Replace;
+                if (Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
+                else if (Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
 
-                if (_meshHierarchy != null && _meshHierarchy.Submeshes != null)
-                {
-                    foreach (var entry in _meshHierarchy.Submeshes)
-                    {
-                        if (entry.Mesh?.MaterialOverlay is ShaderMaterial sm)
-                        {
-                            var posVar = sm.GetShaderParameter("position_in_atlas");
-                            var sizeVar = sm.GetShaderParameter("size_in_atlas");
-                            if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
-                            {
-                                Vector2 pos = posVar.AsVector2();
-                                Vector2 size = sizeVar.AsVector2();
-                                Rect2 rect = new Rect2(pos, size);
-                                if (rect.HasPoint(uv))
-                                {
-                                    targetSub = entry;
-                                    submeshUv = (size.X > 0 && size.Y > 0) ? (uv - pos) / size : uv;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (targetSub == null)
-                {
-                    targetSub = _meshHierarchy?.ActiveTarget;
-                }
-
-                if (targetSub != null && targetSub.Mesh != null)
-                {
-                    _meshHierarchy.SelectTarget(targetSub, targetSub.SurfaceIndex);
-
-                    MagicWandCombineMode combineMode = MagicWandCombineMode.Replace;
-                    if (Input.IsKeyPressed(Key.Shift)) combineMode = MagicWandCombineMode.Add;
-                    else if (Input.IsKeyPressed(Key.Alt)) combineMode = MagicWandCombineMode.Subtract;
-
-                    RaycastHitResult hit = new RaycastHitResult
-                    {
-                        Hit = true,
-                        HitUV = submeshUv,
-                        HitSurfaceIndex = targetSub.SurfaceIndex
-                    };
-
-                    _painter.ExecuteMagicWandSelection(hit, combineMode);
-                    _canvasDrawArea?.QueueRedraw();
-                }
+                _painter?.ExecuteMagicWandSelectionAtlasPx(atlasPx, combineMode);
+                _canvasDrawArea?.QueueRedraw();
+                _wireframeOverlay?.QueueRedraw();
             }
             else if (mode == BrushToolMode.Decal)
             {
-                Vector2 uv = atlasPx / atlasSize;
-                var active = _meshHierarchy?.ActiveTarget;
-                if (active != null && active.Mesh != null)
+                var decalTex = _painter.DecalStamper?.DecalTexture;
+                if (decalTex != null)
                 {
-                    Vector2 pos = Vector2.Zero;
-                    Vector2 size = Vector2.One;
-                    if (active.Mesh.MaterialOverlay is ShaderMaterial sm)
-                    {
-                        var posVar = sm.GetShaderParameter("position_in_atlas");
-                        var sizeVar = sm.GetShaderParameter("size_in_atlas");
-                        if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
-                        {
-                            pos = posVar.AsVector2();
-                            size = sizeVar.AsVector2();
-                        }
-                    }
-                    Vector2 submeshUv = (size.X > 0 && size.Y > 0) ? (uv - pos) / size : uv;
-                    var decalTex = _painter.DecalStamper?.DecalTexture;
-                    if (decalTex != null)
-                    {
-                        _layerManager.StampDecalToAtlas(submeshUv, decalTex, 0.0f, 1.0f);
-                        _canvasDrawArea?.QueueRedraw();
-                    }
+                    float rot = _painter.DecalStamper?.RotationDegrees ?? 0.0f;
+                    float scale = _painter.DecalStamper?.DecalScale ?? 0.15f;
+                    _painter.ProjectionGizmo?.Activate(atlasPx, decalTex, scale, rot, isText: false, currentSubmeshWidth);
+                    _wireframeOverlay?.QueueRedraw();
+                }
+            }
+            else if (mode == BrushToolMode.Text)
+            {
+                var textTex = _painter.TextProjector?.CurrentTexture;
+                if (textTex != null)
+                {
+                    float rot = _painter.TextProjector?.RotationDegrees ?? 0.0f;
+                    float scale = _painter.TextProjector?.TextScale ?? 0.25f;
+                    _painter.ProjectionGizmo?.Activate(atlasPx, textTex, scale, rot, isText: true, currentSubmeshWidth);
+                    _wireframeOverlay?.QueueRedraw();
                 }
             }
         }
+
+        private Rect2I _accumulated2DDirtyRect = default;
 
         private void ExecuteToolDrag(Vector2 fromAtlasPx, Vector2 toAtlasPx)
         {
@@ -1219,8 +1991,54 @@ namespace DeadlockPlayground.UI
             var mode = _painter.ToolMode;
             if (mode == BrushToolMode.Paint || mode == BrushToolMode.Erase)
             {
-                _layerManager.PaintStroke2D(fromAtlasPx, toAtlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool);
-                _layerManager.RecompositeGpuLayers();
+                if (fromAtlasPx.DistanceSquaredTo(toAtlasPx) < 0.01f) return;
+
+                var shape = (mode == BrushToolMode.Erase) ? _painter.EraserShape : _painter.BrushShape;
+                var brushTex = _painter.GetBrushTexture(shape);
+                var dirtyRect = _layerManager.PaintStroke2D(fromAtlasPx, toAtlasPx, _painter.BrushColor, _painter.BrushSize, _painter.BrushHardness, _painter.BrushFlow, mode == BrushToolMode.Erase, _painter.MagicWandTool, shape, brushTex);
+                _totalStrokeDirtyRect = (_totalStrokeDirtyRect.Size.X == 0) ? dirtyRect : _totalStrokeDirtyRect.Merge(dirtyRect);
+
+                // If adding this segment would make dirty rect exceed 512px, flush previously accumulated rect immediately
+                if (_accumulated2DDirtyRect.Size.X > 0)
+                {
+                    var merged = _accumulated2DDirtyRect.Merge(dirtyRect);
+                    if (merged.Size.X > 512 || merged.Size.Y > 512)
+                    {
+                        if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                        {
+                            _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                        }
+                        else
+                        {
+                            _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                        }
+                        _accumulated2DDirtyRect = dirtyRect;
+                        _lastStrokeRecompositeMs = Time.GetTicksMsec();
+                    }
+                    else
+                    {
+                        _accumulated2DDirtyRect = merged;
+                    }
+                }
+                else
+                {
+                    _accumulated2DDirtyRect = dirtyRect;
+                }
+
+                ulong nowMs = Time.GetTicksMsec();
+                if (nowMs - _lastStrokeRecompositeMs >= 25)
+                {
+                    _lastStrokeRecompositeMs = nowMs;
+                    if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                    {
+                        _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                    }
+                    else
+                    {
+                        _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                    }
+                    _accumulated2DDirtyRect = default;
+                }
             }
         }
 
@@ -1229,9 +2047,9 @@ namespace DeadlockPlayground.UI
             return (screenPos - _pan) / _zoom;
         }
 
-        private bool IsAtlasPxInBounds(Vector2 atlasPx, int atlasSize)
+        private bool IsAtlasPxInBounds(Vector2 atlasPx, int atlasW, int atlasH)
         {
-            return atlasPx.X >= 0 && atlasPx.Y >= 0 && atlasPx.X < atlasSize && atlasPx.Y < atlasSize;
+            return atlasPx.X >= 0 && atlasPx.Y >= 0 && atlasPx.X < atlasW && atlasPx.Y < atlasH;
         }
 
         private void ZoomAtPoint(Vector2 mousePos, float factor)
@@ -1240,6 +2058,8 @@ namespace DeadlockPlayground.UI
             Vector2 atlasPosBefore = (mousePos - _pan) / _zoom;
             _zoom = Mathf.Clamp(_zoom * factor, 0.05f, 40.0f);
             _pan = mousePos - atlasPosBefore * _zoom;
+            _wireframeOverlay?.QueueRedraw();
+            _cursorOverlay?.QueueRedraw();
         }
 
         public void FitToView()
@@ -1252,19 +2072,22 @@ namespace DeadlockPlayground.UI
                 return;
             }
 
-            int atlasSize = _layerManager?.CanvasSize.X ?? 2048;
-            if (atlasSize <= 0) atlasSize = 2048;
+            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+            if (atlasW <= 0) atlasW = 2048;
+            if (atlasH <= 0) atlasH = 2048;
 
             float margin = 20.0f;
             float availW = Mathf.Max(viewSize.X - margin * 2.0f, 10.0f);
             float availH = Mathf.Max(viewSize.Y - margin * 2.0f, 10.0f);
 
-            _zoom = Mathf.Clamp(Mathf.Min(availW / atlasSize, availH / atlasSize), 0.05f, 40.0f);
-            Vector2 scaledSize = new Vector2(atlasSize, atlasSize) * _zoom;
+            _zoom = Mathf.Clamp(Mathf.Min(availW / atlasW, availH / atlasH), 0.05f, 40.0f);
+            Vector2 scaledSize = new Vector2(atlasW, atlasH) * _zoom;
             _pan = (viewSize - scaledSize) * 0.5f;
             _lastDrawAreaSize = viewSize;
             _hasInitialFit = true;
             _wireframeOverlay?.QueueRedraw();
+            _cursorOverlay?.QueueRedraw();
             _canvasDrawArea.QueueRedraw();
         }
     }

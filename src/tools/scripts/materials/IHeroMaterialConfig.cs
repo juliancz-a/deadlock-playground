@@ -34,7 +34,6 @@ public interface IHeroMaterialConfig
     /// Returns null if no custom parameters are needed.
     /// </summary>
     Control BuildUI(Action<string, Variant> onParameterChanged);
-
     /// <summary>
     /// Signature glow color fallback for dynamic energy layers if VMAT attributes do not declare a chromatic tint.
     /// </summary>

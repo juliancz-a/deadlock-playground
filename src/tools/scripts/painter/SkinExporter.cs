@@ -12,6 +12,7 @@ using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Workspace;
 
 namespace DeadlockPlayground.Painter
 {
@@ -50,6 +51,13 @@ namespace DeadlockPlayground.Painter
         public string CsdkPath { get; set; } = "";
         public string ResourceCompilerPath { get; set; } = "";
         public Image PreBakedAtlas { get; set; } // Pre-extracted on Godot main thread
+        public Dictionary<int, Image> PreBakedAtlasesBySurface { get; set; } = new();
+        public Dictionary<int, Image> PreExtractedBaseImages { get; set; } = new();
+        public Dictionary<int, (Vector2 pos, Vector2 size)> SubmeshAtlasRects { get; set; } = new();
+        public Dictionary<string, Image> PreBakedAtlasesBySubmesh { get; set; } = new();
+        public Dictionary<string, Image> PreExtractedBaseImagesBySubmesh { get; set; } = new();
+        public Dictionary<string, (Vector2 pos, Vector2 size)> SubmeshAtlasRectsBySubmesh { get; set; } = new();
+        public HashSet<string> ExcludedAssetVpkPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class SkinExportResult
@@ -98,6 +106,71 @@ namespace DeadlockPlayground.Painter
                 result.Success = false;
                 result.ErrorMessage = "Export configuration is null.";
                 return result;
+            }
+
+            // Pre-extract all textures, materials, and atlas rects on the Godot MAIN THREAD before entering worker thread
+            var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && s.IsDirty).ToList();
+            if (candidateSubmeshes == null || candidateSubmeshes.Count == 0)
+            {
+                candidateSubmeshes = config.TargetSubmeshes ?? new List<SubmeshNodeInfo>();
+            }
+
+            foreach (var submesh in candidateSubmeshes)
+            {
+                if (submesh == null) continue;
+                int sIdx = submesh.SurfaceIndex;
+                string subKey = ResolveSubmeshKey(submesh);
+
+                if (!config.PreBakedAtlasesBySubmesh.ContainsKey(subKey))
+                {
+                    var baked = _layerManager?.BakeCompositeImageForSubmesh(submesh);
+                    if (baked != null && !baked.IsEmpty())
+                    {
+                        config.PreBakedAtlasesBySubmesh[subKey] = baked;
+                        config.PreBakedAtlasesBySurface[sIdx] = baked;
+                    }
+                    else if (config.PreBakedAtlas != null && !config.PreBakedAtlas.IsEmpty())
+                    {
+                        config.PreBakedAtlasesBySubmesh[subKey] = config.PreBakedAtlas;
+                        config.PreBakedAtlasesBySurface[sIdx] = config.PreBakedAtlas;
+                    }
+                }
+
+                if (!config.PreExtractedBaseImagesBySubmesh.ContainsKey(subKey) && submesh.Mesh != null)
+                {
+                    var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
+                           ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
+                           ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
+                           ?? submesh.Mesh.MaterialOverride;
+
+                    if (mat != null)
+                    {
+                        var baseTex = SkinLayerManager.ExtractBaseTexture(mat);
+                        if (baseTex != null)
+                        {
+                            var bImg = baseTex.GetImage();
+                            if (bImg != null && !bImg.IsEmpty())
+                            {
+                                if (bImg.IsCompressed()) bImg.Decompress();
+                                var dup = (Image)bImg.Duplicate();
+                                config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
+                                config.PreExtractedBaseImages[sIdx] = dup;
+                            }
+                        }
+                    }
+                }
+
+                if (!config.SubmeshAtlasRectsBySubmesh.ContainsKey(subKey) && submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
+                {
+                    var posVar = sm.GetShaderParameter("position_in_atlas");
+                    var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                    if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                    {
+                        var rect = (posVar.AsVector2(), sizeVar.AsVector2());
+                        config.SubmeshAtlasRectsBySubmesh[subKey] = rect;
+                        config.SubmeshAtlasRects[sIdx] = rect;
+                    }
+                }
             }
 
             return await Task.Run(() =>
@@ -215,9 +288,18 @@ namespace DeadlockPlayground.Painter
                     submeshesToExport = config.TargetSubmeshes.Where(s => s.IsSelected).ToList();
                 }
 
-                if (submeshesToExport.Count == 0)
+                var workspaceSession = ModWorkspaceSession.Instance;
+                var workspaceAssets = new List<DeadlockPlayground.Workspace.WorkspaceAssetEntry>();
+                if (workspaceSession != null && workspaceSession.Manifest.Heroes.TryGetValue(config.HeroCodename, out var targetHeroEntry) && targetHeroEntry != null)
                 {
-                    string err = "No modified submeshes selected for compilation. Base game submeshes were left untouched.";
+                    workspaceAssets.AddRange(targetHeroEntry.Assets);
+                }                
+                int workspaceTexCount = workspaceAssets.Sum(a => a.ModifiedTextures.Count);
+                int workspaceVpcfCount = workspaceAssets.Count(a => a.Category == "ParticleVFX" && !string.IsNullOrEmpty(a.ParticleOverridesFile));
+
+                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0)
+                {
+                    string err = "No modified submeshes or workspace assets selected for compilation. Base game submeshes were left untouched.";
                     progress?.Report(new ExportProgressReport(0.15f, $"[WARNING] {err}", ExportLogLevel.Warning));
                     result.Success = false;
                     result.ErrorMessage = err;
@@ -251,8 +333,8 @@ namespace DeadlockPlayground.Painter
                     // =========================================================================
                     ct.ThrowIfCancellationRequested();
                     progress?.Report(new ExportProgressReport(0.15f, $"[INFO] Baking {submeshesToExport.Count} composite texture(s) ({config.Resolution}x{config.Resolution})..."));
-
                     var stagedTextures = new List<(string materialName, string pngPath, string vtexPath, string originalVtexCPath)>();
+                    var processedHeroVtexCPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     foreach (var submesh in submeshesToExport)
                     {
@@ -261,6 +343,11 @@ namespace DeadlockPlayground.Painter
                         string matName = ResolveSubmeshMaterialName(submesh, config.HeroCodename);
                         string originalColorVtexC = ResolveOriginalColorVtexCPath(submesh, config.HeroCodename, baseVpkPackage);
 
+                        if (!processedHeroVtexCPaths.Add(originalColorVtexC))
+                        {
+                            progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping duplicate material export for submesh '{submesh.DisplayName}' (shares {Path.GetFileName(originalColorVtexC)})"));
+                            continue;
+                        }
                         progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {originalColorVtexC}"));
 
                         string pngFileName = $"{matName}_color.png";
@@ -268,7 +355,7 @@ namespace DeadlockPlayground.Painter
 
                         progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {submesh.DisplayName} composite -> {pngFileName}..."));
 
-                        Image submeshImage = ExtractAndBlendSubmeshImage(config.PreBakedAtlas, submesh, config.Resolution);
+                        Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution);
                         if (submeshImage == null)
                         {
                             string err = $"Failed to extract image for submesh '{submesh.DisplayName}'.";
@@ -299,7 +386,84 @@ namespace DeadlockPlayground.Painter
                         stagedTextures.Add((matName, fullPngPath, fullVtexPath, originalColorVtexC));
                     }
 
-                    progress?.Report(new ExportProgressReport(0.35f, $"[SUCCESS] All {stagedTextures.Count} custom textures staged successfully.", ExportLogLevel.Success));
+                    // =========================================================================
+                    // STEP B.2: Incorporate Multi-Asset Workspace Staged Textures
+                    // =========================================================================
+                    try
+                    {
+                        var existingVtexPaths = new HashSet<string>(stagedTextures.Select(t => t.originalVtexCPath), StringComparer.OrdinalIgnoreCase);
+
+                        foreach (var asset in workspaceAssets)
+                        {
+                            if (config.ExcludedAssetVpkPaths != null &&
+                                (config.ExcludedAssetVpkPaths.Contains(asset.VpkPath) || (!string.IsNullOrEmpty(asset.OwnerAssetPath) && config.ExcludedAssetVpkPaths.Contains(asset.OwnerAssetPath))))
+                            {
+                                continue;
+                            }
+
+                            foreach (var (vtexKey, relPath) in asset.ModifiedTextures)
+                            {
+                                if (existingVtexPaths.Contains(vtexKey)) continue;
+
+                                string stagedPngFull = Path.Combine(workspaceSession.SessionDir, relPath);
+                                var inMemImg = workspaceSession.GetStagedTexture(vtexKey);
+                                if (!File.Exists(stagedPngFull) && (inMemImg == null || inMemImg.IsEmpty())) continue;
+
+                                string normVtex = vtexKey.Replace('\\', '/').TrimStart('/');
+                                if (normVtex.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    normVtex = normVtex.Substring("particle:".Length).TrimStart('/');
+                                }
+                                string assetFolder = Path.GetDirectoryName(normVtex)?.Replace('\\', '/');
+                                if (string.IsNullOrEmpty(assetFolder)) assetFolder = "materials/particle";
+
+                                string assetContentDir = Path.Combine(contentStagingRoot, assetFolder);
+                                Directory.CreateDirectory(assetContentDir);
+
+                                string baseName = Path.GetFileNameWithoutExtension(normVtex);
+                                if (baseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    baseName = baseName.Substring(0, baseName.Length - 2);
+                                }
+
+                                string targetPngFileName = $"{baseName}.png";
+                                string targetPngFull = Path.Combine(assetContentDir, targetPngFileName);
+                                if (File.Exists(stagedPngFull))
+                                {
+                                    File.Copy(stagedPngFull, targetPngFull, true);
+                                }
+                                else if (inMemImg != null)
+                                {
+                                    if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
+                                    inMemImg.SavePng(targetPngFull);
+                                }
+
+                                string targetVtexFileName = $"{baseName}.vtex";
+                                string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
+                                string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
+                                string vtexDesc = GenerateSource2DmxVtex(relPng);
+                                File.WriteAllText(targetVtexFull, vtexDesc);
+
+                                string targetCompiledVtexCPath = normVtex;
+                                if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    targetCompiledVtexCPath += "_c";
+                                }
+
+                                stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
+                                existingVtexPaths.Add(vtexKey);
+                                existingVtexPaths.Add(targetCompiledVtexCPath);
+
+                                progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {vtexKey}"));
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[SkinExporter] Notice: Non-fatal error collecting workspace textures: {ex.Message}");
+                    }
+
+                    progress?.Report(new ExportProgressReport(0.38f, $"[SUCCESS] All {stagedTextures.Count} custom texture(s) staged successfully across workspace.", ExportLogLevel.Success));
 
                     // =========================================================================
                     // STEP C: Compile Source 2 Textures via Headless resourcecompiler.exe (40% -> 85%)
@@ -334,7 +498,7 @@ namespace DeadlockPlayground.Painter
                         int vtexExitCode = RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vtexArgs), progress, ct, vtexProgress + 0.05f);
 
                         // Exact file match without wildcards to avoid prefix collisions
-                        string expectedVtexFileName = $"{matName}_color.vtex_c";
+                        string expectedVtexFileName = $"{Path.GetFileNameWithoutExtension(vtexPath)}.vtex_c";
                         string expectedVtexC = LocateEmittedFile(gameMaterialsDir, contentMaterialsDir, expectedVtexFileName, gameStagingRoot, contentStagingRoot);
                         bool vtexEmitted = !string.IsNullOrEmpty(expectedVtexC) && File.Exists(expectedVtexC);
 
@@ -363,6 +527,113 @@ namespace DeadlockPlayground.Painter
 
                     progress?.Report(new ExportProgressReport(0.85f, $"[SUCCESS] All {totalTextures} texture(s) compiled successfully to .vtex_c.", ExportLogLevel.Success));
 
+                    // =========================================================================
+                    // STEP C.2: Stage & Compile Modified Particle Systems (.vpcf -> .vpcf_c)
+                    // =========================================================================
+                    if (baseVpkPackage != null)
+                    {
+                        foreach (var asset in workspaceAssets)
+                        {
+                            if (asset.Category != "ParticleVFX" || string.IsNullOrEmpty(asset.ParticleOverridesFile)) continue;
+                            if (config.ExcludedAssetVpkPaths != null &&
+                                (config.ExcludedAssetVpkPaths.Contains(asset.VpkPath) || (!string.IsNullOrEmpty(asset.OwnerAssetPath) && config.ExcludedAssetVpkPaths.Contains(asset.OwnerAssetPath))))
+                            {
+                                continue;
+                            }
+
+                            var pOverrides = workspaceSession.GetStagedParticleOverrides(asset.VpkPath);
+                            if (pOverrides == null || pOverrides.Emitters == null || pOverrides.Emitters.Count == 0) continue;
+
+                            // Agrupar overrides por cada archivo .vpcf hijo (ej. chrono_time_wall_charge_beams.vpcf)
+                            var vpcfTargets = new Dictionary<string, EmitterOverrideData>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var em in pOverrides.Emitters.Values)
+                            {
+                                string targetVpcf = !string.IsNullOrEmpty(em.ChildVpcfPath) ? em.ChildVpcfPath : asset.VpkPath;
+                                if (!string.IsNullOrEmpty(targetVpcf))
+                                {
+                                    vpcfTargets[targetVpcf] = em;
+                                }
+                            }
+
+                            foreach (var (rawVpcfPath, emOverride) in vpcfTargets)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                string normVpcf = rawVpcfPath.Replace('\\', '/').TrimStart('/');
+                                if (normVpcf.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    normVpcf = normVpcf[..^2];
+                                string compiledVpcfPath = normVpcf + "_c";
+
+                                var vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
+                                if (vpkEntry == null) continue;
+
+                                baseVpkPackage.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
+                                using var vrfRes = new ValveResourceFormat.Resource();
+                                using var ms = new MemoryStream(rawVpcfBytes);
+                                vrfRes.Read(ms);
+
+                                string kv3Text = vrfRes.DataBlock?.ToString();
+                                if (string.IsNullOrEmpty(kv3Text)) continue;
+
+                                // Check if the emitter override actually introduces meaningful modifications compared to vanilla KV3
+                                if (!HasMeaningfulVpcfOverrides(kv3Text, emOverride))
+                                {
+                                    GD.Print($"[SkinExporter] Skipping untouched particle definition: {normVpcf}");
+                                    continue;
+                                }
+
+                                // Aplicar modificaciones al texto KV3 del .vpcf
+                                kv3Text = ApplyOverridesToVpcfKv3Text(kv3Text, emOverride);
+
+                                string vpcfFolder = Path.GetDirectoryName(normVpcf)?.Replace('\\', '/') ?? "particles";
+                                string vpcfContentDir = Path.Combine(contentStagingRoot, vpcfFolder);
+                                string vpcfGameDir = Path.Combine(gameStagingRoot, vpcfFolder);
+                                Directory.CreateDirectory(vpcfContentDir);
+
+                                string vpcfFileName = Path.GetFileName(normVpcf);
+                                string fullVpcfContentPath = Path.Combine(vpcfContentDir, vpcfFileName);
+                                // Asegurar que todas las texturas referenciadas en el .vpcf existan en gameStagingRoot para que resourcecompiler.exe no falle
+                                foreach (System.Text.RegularExpressions.Match resMatch in System.Text.RegularExpressions.Regex.Matches(kv3Text, @"resource:""([^""]+)"""))
+                                {
+                                    string rawDep = resMatch.Groups[1].Value.Replace('\\', '/').Trim().TrimStart('/');
+                                    string compiledDep = rawDep.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? rawDep : rawDep + "_c";
+                                    EnsureTextureStagedInGameTree(gameStagingRoot, compiledDep, baseVpkPackage);
+                                }
+                                File.WriteAllText(fullVpcfContentPath, kv3Text);
+
+                                string expectedVpcfCName = vpcfFileName + "_c";
+                                string stagingGameVpcfC = Path.Combine(vpcfGameDir, expectedVpcfCName);
+                                if (File.Exists(stagingGameVpcfC))
+                                {
+                                    try { File.Delete(stagingGameVpcfC); } catch { }
+                                }
+
+                                progress?.Report(new ExportProgressReport(0.82f, $"[INFO] Compiling modified particle definition: {vpcfFileName}..."));
+
+                                var vpcfArgs = new List<string>
+                                {
+                                    "-i", $"\"{fullVpcfContentPath.Replace('\\', '/')}\"",
+                                    "-nop4",
+                                    "-v"
+                                };
+                                int exitCode = RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vpcfArgs), progress, ct, 0.83f);
+
+                                string emittedVpcfC = LocateEmittedFile(vpcfGameDir, vpcfContentDir, expectedVpcfCName, gameStagingRoot, contentStagingRoot);
+                                if (exitCode == 0 && !string.IsNullOrEmpty(emittedVpcfC) && File.Exists(emittedVpcfC))
+                                {
+                                    compiledOutputFiles.Add((emittedVpcfC, compiledVpcfPath));
+                                    progress?.Report(new ExportProgressReport(0.84f, $"[SUCCESS] Compiled particle: {expectedVpcfCName}", ExportLogLevel.Success));
+                                }
+                                else
+                                {
+                                    string err = $"resourcecompiler.exe failed (exit code {exitCode}) while compiling particle '{vpcfFileName}'. Check compiler log for details.";
+                                    progress?.Report(new ExportProgressReport(0.84f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                    result.Success = false;
+                                    result.ErrorMessage = err;
+                                    return result;
+                                }
+                            }
+                        }
+                    }
                     // =========================================================================
                     // STEP D: Package Intercepted VTEX Binaries into VPK Archive (85% -> 100%)
                     // =========================================================================
@@ -563,68 +834,139 @@ namespace DeadlockPlayground.Painter
             return $"{heroCodename.ToLowerInvariant()}_{cleanMesh}";
         }
 
-        private static Image ExtractAndBlendSubmeshImage(Image atlasImage, SubmeshNodeInfo submesh, int targetRes)
+        public static string ResolveSubmeshKey(SubmeshNodeInfo sm)
         {
-            if (atlasImage == null) return null;
+            if (sm == null) return string.Empty;
+            if (!string.IsNullOrEmpty(sm.DisplayName)) return sm.DisplayName;
+            if (!string.IsNullOrEmpty(sm.RawName)) return sm.RawName;
+            if (sm.Mesh != null) return $"{sm.Mesh.Name}_{sm.SurfaceIndex}";
+            return sm.SurfaceIndex.ToString();
+        }
+
+        private static Image ExtractAndBlendSubmeshImage(ModExportConfig config, SubmeshNodeInfo submesh, int targetRes)
+        {
+            if (config == null || submesh == null) return null;
+
+            string subKey = ResolveSubmeshKey(submesh);
+            Image atlasImage = null;
+            if (config.PreBakedAtlasesBySubmesh.TryGetValue(subKey, out var subAtlas) && subAtlas != null && !subAtlas.IsEmpty())
+            {
+                atlasImage = subAtlas;
+            }
+            else if (config.PreBakedAtlasesBySurface.TryGetValue(submesh.SurfaceIndex, out var surfaceAtlas) && surfaceAtlas != null && !surfaceAtlas.IsEmpty())
+            {
+                atlasImage = surfaceAtlas;
+            }
+            else if (config.PreBakedAtlas != null && !config.PreBakedAtlas.IsEmpty())
+            {
+                atlasImage = config.PreBakedAtlas;
+            }
+
+            if (atlasImage == null || atlasImage.IsEmpty()) return null;
 
             Image isolatedImage = atlasImage;
 
             // Check if submesh is assigned an atlas rectangle
-            if (submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
+            Vector2 pos = Vector2.Zero;
+            Vector2 size = Vector2.One;
+            if (config.SubmeshAtlasRectsBySubmesh.TryGetValue(subKey, out var subRect))
+            {
+                pos = subRect.pos;
+                size = subRect.size;
+            }
+            else if (config.SubmeshAtlasRects.TryGetValue(submesh.SurfaceIndex, out var atlasRect))
+            {
+                pos = atlasRect.pos;
+                size = atlasRect.size;
+            }
+            else if (submesh.Mesh != null && submesh.Mesh.MaterialOverlay is ShaderMaterial sm)
             {
                 var posVar = sm.GetShaderParameter("position_in_atlas");
                 var sizeVar = sm.GetShaderParameter("size_in_atlas");
-
                 if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
                 {
-                    Vector2 pos = posVar.AsVector2();
-                    Vector2 size = sizeVar.AsVector2();
-
-                    if (size.X > 0 && size.Y > 0 && (size.X < 0.999f || size.Y < 0.999f))
-                    {
-                        int px = Mathf.Clamp(Mathf.RoundToInt(pos.X * atlasImage.GetWidth()), 0, atlasImage.GetWidth() - 1);
-                        int py = Mathf.Clamp(Mathf.RoundToInt(pos.Y * atlasImage.GetHeight()), 0, atlasImage.GetHeight() - 1);
-                        int pw = Mathf.Clamp(Mathf.RoundToInt(size.X * atlasImage.GetWidth()), 1, atlasImage.GetWidth() - px);
-                        int ph = Mathf.Clamp(Mathf.RoundToInt(size.Y * atlasImage.GetHeight()), 1, atlasImage.GetHeight() - py);
-
-                        isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
-                    }
+                    pos = posVar.AsVector2();
+                    size = sizeVar.AsVector2();
                 }
             }
 
-            // Extract base texture from submesh material to composite under paint strokes
-            Texture2D baseTex = null;
-            if (submesh.Mesh != null)
+            if (size.X > 0 && size.Y > 0 && (size.X < 0.999f || size.Y < 0.999f))
             {
-                var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
-                       ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
-                       ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
-                       ?? submesh.Mesh.MaterialOverride;
+                int px = Mathf.Clamp(Mathf.RoundToInt(pos.X * atlasImage.GetWidth()), 0, atlasImage.GetWidth() - 1);
+                int py = Mathf.Clamp(Mathf.RoundToInt(pos.Y * atlasImage.GetHeight()), 0, atlasImage.GetHeight() - 1);
+                int pw = Mathf.Clamp(Mathf.RoundToInt(size.X * atlasImage.GetWidth()), 1, atlasImage.GetWidth() - px);
+                int ph = Mathf.Clamp(Mathf.RoundToInt(size.Y * atlasImage.GetHeight()), 1, atlasImage.GetHeight() - py);
 
-                if (mat != null)
-                {
-                    baseTex = SkinLayerManager.ExtractBaseTexture(mat);
-                }
+                isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
             }
 
-            int exportWidth = targetRes > 0 ? targetRes : 2048;
-            int exportHeight = targetRes > 0 ? targetRes : 2048;
-
+            // Retrieve pre-extracted base texture image
             Image baseImg = null;
-            if (baseTex != null)
+            if (config.PreExtractedBaseImagesBySubmesh.TryGetValue(subKey, out var subBase) && subBase != null && !subBase.IsEmpty())
             {
-                baseImg = baseTex.GetImage();
-                if (baseImg != null)
+                baseImg = subBase;
+            }
+            else if (config.PreExtractedBaseImages.TryGetValue(submesh.SurfaceIndex, out var preBase) && preBase != null && !preBase.IsEmpty())
+            {
+                baseImg = preBase;
+            }
+
+            int exportWidth = 2048;
+            int exportHeight = 2048;
+
+            if (baseImg != null && !baseImg.IsEmpty())
+            {
+                int baseW = baseImg.GetWidth();
+                int baseH = baseImg.GetHeight();
+                if (targetRes > 0)
                 {
-                    if (baseImg.IsCompressed())
+                    if (baseW >= baseH)
                     {
-                        baseImg.Decompress();
+                        exportWidth = targetRes;
+                        exportHeight = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * baseH / baseW));
                     }
-                    // Retain native full dimensions if base texture is high-res (e.g. 2048x2048)
-                    exportWidth = Mathf.Max(exportWidth, baseImg.GetWidth());
-                    exportHeight = Mathf.Max(exportHeight, baseImg.GetHeight());
+                    else
+                    {
+                        exportHeight = targetRes;
+                        exportWidth = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * baseW / baseH));
+                    }
+                }
+                else
+                {
+                    exportWidth = baseW;
+                    exportHeight = baseH;
                 }
             }
+            else if (isolatedImage != null && !isolatedImage.IsEmpty())
+            {
+                int isoW = isolatedImage.GetWidth();
+                int isoH = isolatedImage.GetHeight();
+                if (targetRes > 0)
+                {
+                    if (isoW >= isoH)
+                    {
+                        exportWidth = targetRes;
+                        exportHeight = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * isoH / isoW));
+                    }
+                    else
+                    {
+                        exportHeight = targetRes;
+                        exportWidth = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * isoW / isoH));
+                    }
+                }
+                else
+                {
+                    exportWidth = isoW;
+                    exportHeight = isoH;
+                }
+            }
+            else
+            {
+                exportWidth = targetRes > 0 ? targetRes : 2048;
+                exportHeight = targetRes > 0 ? targetRes : 2048;
+            }
+
+            if (isolatedImage == null || isolatedImage.IsEmpty()) return null;
 
             // Ensure isolated painted region matches target dimensions without blur
             var finalImage = (Image)isolatedImage.Duplicate();
@@ -639,7 +981,7 @@ namespace DeadlockPlayground.Painter
             finalImage.Convert(Image.Format.Rgba8);
 
             // Composite over base texture if present
-            if (baseImg != null)
+            if (baseImg != null && !baseImg.IsEmpty())
             {
                 var baseUnscaled = (Image)baseImg.Duplicate();
                 baseUnscaled.Convert(Image.Format.Rgba8);
@@ -652,44 +994,47 @@ namespace DeadlockPlayground.Painter
                 byte[] paintData = finalImage.GetData();
                 byte[] baseData = baseUnscaled.GetData();
 
-                int pixelCount = exportWidth * exportHeight;
-                for (int i = 0; i < pixelCount; i++)
+                if (paintData != null && baseData != null && paintData.Length >= exportWidth * exportHeight * 4 && baseData.Length >= exportWidth * exportHeight * 4)
                 {
-                    int idx = i * 4;
-                    float pA = paintData[idx + 3] / 255.0f;
-                    if (pA <= 0.001f)
+                    int pixelCount = exportWidth * exportHeight;
+                    for (int i = 0; i < pixelCount; i++)
                     {
-                        // 1:1 unpainted: exact raw base texels byte-for-byte!
-                        paintData[idx] = baseData[idx];
-                        paintData[idx + 1] = baseData[idx + 1];
-                        paintData[idx + 2] = baseData[idx + 2];
-                        // Preserve Valve's original Alpha channel (cavity AO, tint, fabric spec) byte-for-byte
-                        paintData[idx + 3] = baseData[idx + 3];
-                    }
-                    else if (pA < 0.999f)
-                    {
-                        float bR = baseData[idx];
-                        float bG = baseData[idx + 1];
-                        float bB = baseData[idx + 2];
+                        int idx = i * 4;
+                        float pA = paintData[idx + 3] / 255.0f;
+                        if (pA <= 0.001f)
+                        {
+                            // 1:1 unpainted: exact raw base texels byte-for-byte!
+                            paintData[idx] = baseData[idx];
+                            paintData[idx + 1] = baseData[idx + 1];
+                            paintData[idx + 2] = baseData[idx + 2];
+                            // Preserve Valve's original Alpha channel (cavity AO, tint, fabric spec) byte-for-byte
+                            paintData[idx + 3] = baseData[idx + 3];
+                        }
+                        else if (pA < 0.999f)
+                        {
+                            float bR = baseData[idx];
+                            float bG = baseData[idx + 1];
+                            float bB = baseData[idx + 2];
 
-                        float pR = paintData[idx];
-                        float pG = paintData[idx + 1];
-                        float pB = paintData[idx + 2];
+                            float pR = paintData[idx];
+                            float pG = paintData[idx + 1];
+                            float pB = paintData[idx + 2];
 
-                        paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
-                        paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
-                        paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
-                        // Preserve Valve's original Alpha channel byte-for-byte
-                        paintData[idx + 3] = baseData[idx + 3];
+                            paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
+                            paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
+                            paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
+                            // Preserve Valve's original Alpha channel byte-for-byte
+                            paintData[idx + 3] = baseData[idx + 3];
+                        }
+                        else
+                        {
+                            // Full paint opacity replaces RGB but retains authentic base alpha channel
+                            paintData[idx + 3] = baseData[idx + 3];
+                        }
                     }
-                    else
-                    {
-                        // Full paint opacity replaces RGB but retains authentic base alpha channel
-                        paintData[idx + 3] = baseData[idx + 3];
-                    }
+
+                    finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
-
-                finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
             }
 
             return finalImage;
@@ -1073,6 +1418,264 @@ namespace DeadlockPlayground.Painter
 	""m_bNoLod"" ""bool"" ""0""
 }
 ";
+        }
+
+        private static int FindRootOpeningBrace(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return -1;
+            int headerEnd = text.IndexOf("-->", StringComparison.Ordinal);
+            return headerEnd >= 0 ? text.IndexOf('{', headerEnd) : text.IndexOf('{');
+        }
+
+        private static bool HasMeaningfulVpcfOverrides(string kv3Text, EmitterOverrideData ov)
+        {
+            if (string.IsNullOrEmpty(kv3Text) || ov == null) return false;
+
+            // 1. Visibility toggle
+            if (!ov.Visible) return true;
+
+            // 2. Custom Size scale (vanilla is 1.0f)
+            if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f) return true;
+
+            // 3. Custom Alpha scale (vanilla is 1.0f)
+            if (Math.Abs(ov.AlphaScale - 1.0f) > 0.01f) return true;
+
+            // 4. Constant Color / Tint
+            if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
+            {
+                int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
+                int g = Math.Clamp((int)MathF.Round(ov.TintColorRgba[1] * 255f), 0, 255);
+                int b = Math.Clamp((int)MathF.Round(ov.TintColorRgba[2] * 255f), 0, 255);
+
+                var colMatch = System.Text.RegularExpressions.Regex.Match(
+                    kv3Text,
+                    @"m_ConstantColor\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*(\d+))?\s*\]");
+                if (colMatch.Success)
+                {
+                    int baseR = int.Parse(colMatch.Groups[1].Value);
+                    int baseG = int.Parse(colMatch.Groups[2].Value);
+                    int baseB = int.Parse(colMatch.Groups[3].Value);
+                    if (Math.Abs(r - baseR) > 1 || Math.Abs(g - baseG) > 1 || Math.Abs(b - baseB) > 1)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    // If the particle has no m_ConstantColor in vanilla, it defaults to pure white [255, 255, 255].
+                    // If the user picked a different tint color, it's a modification!
+                    if (r < 250 || g < 250 || b < 250)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // 5. C_INIT_RandomColor
+            if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
+            {
+                if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
+                {
+                    int rMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[0] * 255f), 0, 255);
+                    int gMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[1] * 255f), 0, 255);
+                    int bMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[2] * 255f), 0, 255);
+                    var minMatch = System.Text.RegularExpressions.Regex.Match(
+                        kv3Text,
+                        @"m_ColorMin\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]");
+                    if (minMatch.Success)
+                    {
+                        int baseR = int.Parse(minMatch.Groups[1].Value);
+                        int baseG = int.Parse(minMatch.Groups[2].Value);
+                        int baseB = int.Parse(minMatch.Groups[3].Value);
+                        if (Math.Abs(rMin - baseR) > 1 || Math.Abs(gMin - baseG) > 1 || Math.Abs(bMin - baseB) > 1)
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                if (ov.ColorMaxRgb != null && ov.ColorMaxRgb.Length >= 3)
+                {
+                    int rMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[0] * 255f), 0, 255);
+                    int gMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[1] * 255f), 0, 255);
+                    int bMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[2] * 255f), 0, 255);
+                    var maxMatch = System.Text.RegularExpressions.Regex.Match(
+                        kv3Text,
+                        @"m_ColorMax\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]");
+                    if (maxMatch.Success)
+                    {
+                        int baseR = int.Parse(maxMatch.Groups[1].Value);
+                        int baseG = int.Parse(maxMatch.Groups[2].Value);
+                        int baseB = int.Parse(maxMatch.Groups[3].Value);
+                        if (Math.Abs(rMax - baseR) > 1 || Math.Abs(gMax - baseG) > 1 || Math.Abs(bMax - baseB) > 1)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // 6. C_OP_ColorInterpolate
+            if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
+            {
+                int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
+                int gFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[1] * 255f), 0, 255);
+                int bFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[2] * 255f), 0, 255);
+                var fadeMatch = System.Text.RegularExpressions.Regex.Match(
+                    kv3Text,
+                    @"m_ColorFade\s*=\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]");
+                if (fadeMatch.Success)
+                {
+                    int baseR = int.Parse(fadeMatch.Groups[1].Value);
+                    int baseG = int.Parse(fadeMatch.Groups[2].Value);
+                    int baseB = int.Parse(fadeMatch.Groups[3].Value);
+                    if (Math.Abs(rFade - baseR) > 1 || Math.Abs(gFade - baseG) > 1 || Math.Abs(bFade - baseB) > 1)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
+        {
+
+            if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
+
+            // 0. Sanear propiedades exclusivas de Deadlock vpcf61 que causan [FAIL] en bin_cs2/resourcecompiler.exe (ej. explode_warp, explode_elec)
+            string[] incompatibleCs2Keys = new[]
+            {
+                @"^\s*m_NamedValue\s*=\s*""""\s*\r?\n",
+                @"^\s*m_nRandomSeed\s*=\s*-?\d+\s*\r?\n",
+                @"^\s*m_nNoiseInputVectorAttribute\s*=\s*\d+\s*\r?\n",
+                @"^\s*m_flNoCameraFallback\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_bUseBoundsCenter\s*=\s*(?:true|false)\s*\r?\n",
+                @"^\s*m_flNotchedRangeMin\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_flNotchedRangeMax\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_flNotchedOutputOutside\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_flNotchedOutputInside\s*=\s*[-0-9\.]+\s*\r?\n",
+                @"^\s*m_nRoundType\s*=\s*""[^""]*""\s*\r?\n",
+                @"^\s*m_nRefractBlurType\s*=\s*""[^""]*""\s*\r?\n"
+            };
+
+            foreach (var pattern in incompatibleCs2Keys)
+            {
+                kv3Text = System.Text.RegularExpressions.Regex.Replace(
+                    kv3Text,
+                    pattern,
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.Multiline);
+            }
+
+            if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
+
+            // 1. Asegurar que m_ForceGenerators = [  ] esté presente (como en los .vpcf_c vanilla)
+            if (!kv3Text.Contains("m_ForceGenerators"))
+            {
+                int renderersIdx = kv3Text.IndexOf("m_Renderers", StringComparison.Ordinal);
+                if (renderersIdx > 0)
+                {
+                    kv3Text = kv3Text.Insert(renderersIdx, "m_ForceGenerators = [  ]\n\t");
+                }
+            }
+
+            // 2. Si el usuario ocultó este emisor (Visible = false), ponemos m_nMaxParticles = 0
+            if (!ov.Visible)
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_nMaxParticles\s*=\s*\d+"))
+                {
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_nMaxParticles\s*=\s*\d+", "m_nMaxParticles = 0");
+                }
+                else
+                {
+                    int braceIdx = FindRootOpeningBrace(kv3Text);
+                    if (braceIdx >= 0)
+                        kv3Text = kv3Text.Insert(braceIdx + 1, "\n\tm_nMaxParticles = 0");
+                }
+            }
+
+           // 3a. m_ConstantColor + AlphaScale
+            if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
+            {
+                int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
+                int g = Math.Clamp((int)MathF.Round(ov.TintColorRgba[1] * 255f), 0, 255);
+                int b = Math.Clamp((int)MathF.Round(ov.TintColorRgba[2] * 255f), 0, 255);
+                int a = Math.Clamp((int)MathF.Round(ov.AlphaScale * 255f), 0, 255);
+                string rgbaBlock = $"[ {r}, {g}, {b}, {a} ]";
+
+                if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]"))
+                {
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ConstantColor\s*=\s*\[[^\]]*\]", $"m_ConstantColor = {rgbaBlock}");
+                }
+                else
+                {
+                    int braceIdx = FindRootOpeningBrace(kv3Text);
+                    if (braceIdx >= 0)
+                        kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_ConstantColor = {rgbaBlock}");
+                }
+            }
+
+            // 3b. C_INIT_RandomColor: m_ColorMin y m_ColorMax independientes!
+            if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
+            {
+                if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
+                {
+                    int rMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[0] * 255f), 0, 255);
+                    int gMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[1] * 255f), 0, 255);
+                    int bMin = Math.Clamp((int)MathF.Round(ov.ColorMinRgb[2] * 255f), 0, 255);
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorMin\s*=\s*\[[^\]]*\]", $"m_ColorMin = [ {rMin}, {gMin}, {bMin} ]");
+                }
+                if (ov.ColorMaxRgb != null && ov.ColorMaxRgb.Length >= 3)
+                {
+                    int rMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[0] * 255f), 0, 255);
+                    int gMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[1] * 255f), 0, 255);
+                    int bMax = Math.Clamp((int)MathF.Round(ov.ColorMaxRgb[2] * 255f), 0, 255);
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorMax\s*=\s*\[[^\]]*\]", $"m_ColorMax = [ {rMax}, {gMax}, {bMax} ]");
+                }
+            }
+
+            // 3c. C_OP_ColorInterpolate: m_ColorFade independiente!
+            if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
+            {
+                int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
+                int gFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[1] * 255f), 0, 255);
+                int bFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[2] * 255f), 0, 255);
+                kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorFade\s*=\s*\[[^\]]*\]", $"m_ColorFade = [ {rFade}, {gFade}, {bFade} ]");
+            }
+
+            // 4. Si cambió SizeScale, escalamos m_flConstantRadius e inyectamos/escalamos m_flRadiusScale en el Renderer
+            if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f)
+            {
+                string scaleStr = ov.SizeScale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
+
+                var match = System.Text.RegularExpressions.Regex.Match(kv3Text, @"m_flConstantRadius\s*=\s*([0-9\.]+)");
+                if (match.Success && float.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float baseRad))
+                {
+                    float newRad = baseRad * ov.SizeScale;
+                    kv3Text = kv3Text.Substring(0, match.Index) +
+                              $"m_flConstantRadius = {newRad.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}" +
+                              kv3Text.Substring(match.Index + match.Length);
+                }
+                else
+                {
+                    int braceIdx = FindRootOpeningBrace(kv3Text);
+                    if (braceIdx >= 0)
+                        kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_flConstantRadius = {(5.0f * ov.SizeScale).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
+                }
+
+                // Inyectar m_flRadiusScale en el primer Renderer si no lo tiene, para que escale incluso cuando C_INIT_InitFloat pisa el radio
+                if (!kv3Text.Contains("m_flRadiusScale"))
+                {
+                    kv3Text = System.Text.RegularExpressions.Regex.Replace(
+                        kv3Text,
+                        @"(_class\s*=\s*""C_OP_Render(?:Sprites|Trails)"")",
+                        $"$1\n\t\t\tm_flRadiusScale = {scaleStr}");
+                }
+            }
+
+            return kv3Text;
         }
 
         private static int RunCompilerProcess(

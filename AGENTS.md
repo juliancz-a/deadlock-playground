@@ -22,9 +22,10 @@ Always consult this guide before implementing new features, modifying shaders, a
 | **UI Theme** | `res://assets/themes/PlaygroundTheme.tres` | Global custom theme applied in `src/project.godot`. |
 
 ### Primary NuGet Dependencies
-- **`ValveResourceFormat` (`20.0.6980`)**: Reverse-engineered Source 2 parser by SteamDatabase. Ingests compiled `.vmdl_c` (models), `.vmat_c` (materials), `.vtex_c` (textures), and `.vanim_c` (animations) from Deadlock's `pak01_dir.vpk`.
-- **`ValvePak` (`5.0.2.177`)**: Reads, indexes, extracts, and packages Source 2 VPK archives (`pak01_dir.vpk` and mod `pak##_dir.vpk` files).
-- **`ValveKeyValue` (`0.70.0.499`)**: High-speed KeyValues3 (KV3) deserializer/serializer used in material analysis and mod packaging.
+- **`ValveResourceFormat` (`20.0.7461`)**: Reverse-engineered Source 2 parser by SteamDatabase (local nupkg compiled from commit `d53ad1c63`). Ingests compiled `.vmdl_c`, `.vmat_c`, `.vtex_c`, `.vanim_c`, supporting Source 2 KV3 uint32 constants (`datatype: 26 (0x1A) / 27`).
+- **`ValvePak` (`6.0.0.182`)**: Reads, indexes, extracts, and packages Source 2 VPK archives (`pak01_dir.vpk` and mod `pak##_dir.vpk` files). Uses namespace `ValvePak`.
+- **`ValveKeyValue` (`0.71.0.528`)**: High-speed KeyValues3 (KV3) deserializer/serializer used in material analysis and mod packaging.
+- **`nuget.config` Global Cache**: Configured to `globalPackagesFolder="D:\GameDev\.nuget_packages"` to store all packages on Drive D and prevent filling Drive C.
 
 ### Active Godot Plugins
 - **`Gizmo3DSharp`** (`res://addons/Gizmo3DSharp/`): Interactive 3D bone manipulator for character posing.
@@ -44,6 +45,8 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
 | **Hero Materials & Shaders Guide** | [docs/hero_materials_and_shaders_guide.md](file:///d:/GameDev/deadlock-playground/docs/hero_materials_and_shaders_guide.md) | Per-hero material configurations (Infernus, Lady Geist, Ivy, Lash, Mirage, Vindicta, Viscous, Wraith), outline masks, CSB color matrices, and past material collision bug fixes. |
 | **Mod Export Pipeline** | [docs/mod_export_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/mod_export_pipeline.md) | In-place VTEX interception architecture, headless `resourcecompiler.exe` invocation, automated VPK packaging, and collision-free slot allocation (`VpkIndexResolver`). |
 | **Valve / VRF Renderer Reference** | [docs/vrf_deadlock_renderer_reference.md](file:///d:/GameDev/deadlock-playground/docs/vrf_deadlock_renderer_reference.md) | Valve's Deadlock NPR toon lighting math (`citadel.slang`), `NprGain`, `NprToonDiffuse`, `NprSteppedSpecular`, and VRF shader decoding rules. |
+| **Hero Particle Editor System** | [docs/hero_particle_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_particle_editor_system.md) | VData indexing, particle picker modal, 3D stage lifecycle, Pose Tab simulation scrubbing, and 2D particle texture repainting. |
+| **Dynamic Changelog & Web Showcase** | [docs/dynamic_changelog_and_website_system.md](file:///d:/GameDev/deadlock-playground/docs/dynamic_changelog_and_website_system.md) | Astro web showcase (`web/`), `@tabler/icons`, custom theme cursor, static `/api/changelog.json` endpoint, Cloudflare Pages hosting, and Godot `ChangelogFeedService.cs` integration. |
 
 ---
 
@@ -132,6 +135,14 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Firing deltas (`recoil`, `primary_fire_aimed`, `shoot`, `burst`, `_add`, `_delta`) are authored as runtime additive modifiers, not standalone base poses.
    - Categorize these sequences into `"Additive Layers"` in `DeadlockAnimLoader.ClassifyCategory`.
    - In `PoseTabUI.cs`, present `"Additive Layers"` as a distinct subcategory collapsed by default, and exclude it from `AutoSelectDefaultIdle()` so partial overlays are never accidentally loaded as default stances.
+
+### E. Mandatory Documentation Synchronization & Maintenance
+> [!IMPORTANT]
+> **AGENTS MUST KEEP DOCUMENTATION UPDATED**:
+> Whenever you modify texture painting pipelines, shaders, hero materials, animation loaders, or UI components:
+> 1. You **MUST** immediately update the relevant documentation in [`docs/`](file:///d:/GameDev/deadlock-playground/docs/) (such as [`hero_materials_and_shaders_guide.md`](file:///d:/GameDev/deadlock-playground/docs/hero_materials_and_shaders_guide.md), [`gpu_texture_painter_system.md`](file:///d:/GameDev/deadlock-playground/docs/gpu_texture_painter_system.md), [`agent_engineering_guide.md`](file:///d:/GameDev/deadlock-playground/docs/agent_engineering_guide.md), or [`texture_pipeline_audit/recent_changes_and_fixes.md`](file:///d:/GameDev/deadlock-playground/docs/texture_pipeline_audit/recent_changes_and_fixes.md)).
+> 2. Detail the exact root causes, architectural fixes, shader parameters, and file changes.
+> 3. Future agents rely on these technical documents as the architectural source of truth. Never leave code modified without updating its corresponding architectural guide.
 
 ---
 

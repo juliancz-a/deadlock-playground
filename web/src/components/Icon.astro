@@ -1,0 +1,56 @@
+---
+import fs from 'node:fs';
+import path from 'node:path';
+
+interface Props {
+  name: string;
+  size?: number | string;
+  class?: string;
+  color?: string;
+  strokeWidth?: number | string;
+}
+
+const { 
+  name, 
+  size = 20, 
+  class: className = '', 
+  color = 'currentColor',
+  strokeWidth = 2
+} = Astro.props;
+
+let svgInner = '';
+try {
+  const iconPath = path.resolve(`./node_modules/@tabler/icons/icons/outline/${name}.svg`);
+  if (fs.existsSync(iconPath)) {
+    const raw = fs.readFileSync(iconPath, 'utf-8');
+    // Extract everything between <svg ...> and </svg>
+    const match = raw.match(/<svg[^>]*>([\s\S]*?)<\/svg>/);
+    if (match) {
+      svgInner = match[1];
+    }
+  }
+} catch (e) {
+  // Graceful fallback
+}
+---
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke={color}
+  stroke-width={strokeWidth}
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  class={`tabler-icon tabler-icon-${name} ${className}`}
+  set:html={svgInner}
+/>
+
+<style>
+  .tabler-icon {
+    display: inline-block;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+</style>

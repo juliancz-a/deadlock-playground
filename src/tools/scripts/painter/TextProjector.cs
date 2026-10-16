@@ -406,5 +406,10 @@ namespace DeadlockPlayground.Painter
 
             return success;
         }
+
+        public void HidePreview()
+        {
+            _hasPlacement = false;
+        }
     }
 }

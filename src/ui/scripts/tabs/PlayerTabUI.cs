@@ -5,8 +5,9 @@ using System.Collections.Generic;
 using System.Linq;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Tools;
+using DeadlockPlayground.Particles;
 
-public partial class PoseTabUI : VBoxContainer
+public partial class PlayerTabUI : VBoxContainer
 {
     [Export] private LineEdit _animSearch;
     [Export] private Tree _animTree;
@@ -22,6 +23,12 @@ public partial class PoseTabUI : VBoxContainer
     private Skeleton3D _skeleton;
     private AnimationPlayer _animPlayer;
     private VpkLoaderTest _vpkLoader;
+    private ParticleStage3D _particleStage;
+    private VBoxContainer _particleControlsGroup;
+    private HSlider _sliderCharge;
+    private Label _labelCharge;
+    private Button _btnRelease;
+    private CheckBox _chkAutoLoop;
 
     private List<DeadlockAnimLoader.AnimSequenceInfo> _currentHeroAnimations = new();
     private string _activeAnimName = "";
@@ -95,10 +102,244 @@ public partial class PoseTabUI : VBoxContainer
         {
             _btnResetAllPoses.Pressed += ResetAllPoses;
         }
+
+        InitParticleControls();
+
+        var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
+        if (stage != null)
+        {
+            SetParticleStage(stage);
+        }
+    }
+
+    public override void _Notification(int what)
+    {
+        if (what == NotificationVisibilityChanged && IsVisibleInTree())
+        {
+            if (_particleStage == null)
+            {
+                var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
+                if (stage != null)
+                {
+                    SetParticleStage(stage);
+                }
+            }
+
+            if (_particleStage != null && _particleStage.HasActiveParticle)
+            {
+                OnParticleStageLoaded(_particleStage.ActiveVpcfPath, _particleStage.ActiveVariantName, _particleStage.ActiveAbilityName);
+            }
+            else if (_particleStage != null && !_particleStage.HasActiveParticle && _particleControlsGroup != null && _particleControlsGroup.Visible)
+            {
+                OnParticleStageUnloaded();
+            }
+        }
+    }
+
+    private void InitParticleControls()
+    {
+        var transport = GetNodeOrNull<Control>("TransportGroup");
+        if (transport == null) return;
+
+        _particleControlsGroup = new VBoxContainer
+        {
+            Name = "ParticleControlsGroup",
+            Visible = false
+        };
+        _particleControlsGroup.AddThemeConstantOverride("separation", 8);
+
+        // Header label: autowraps into two rows if space is tight
+        var header = new Label
+        {
+            Text = "Hero Particle Controls\n(CP1 / EndCap)",
+            ThemeTypeVariation = "TitleLabel",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart
+        };
+        _particleControlsGroup.AddChild(header);
+
+        // Charge Slider Group (Label above full-width slider to prevent squishing)
+        var chargeGroup = new VBoxContainer();
+        chargeGroup.AddThemeConstantOverride("separation", 2);
+
+        _labelCharge = new Label
+        {
+            Text = "Charge (CP1): 0%",
+            ThemeTypeVariation = "HeaderSmall",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart
+        };
+        chargeGroup.AddChild(_labelCharge);
+
+        _sliderCharge = new HSlider
+        {
+            MinValue = 0.0,
+            MaxValue = 1.0,
+            Step = 0.01,
+            Value = 0.0,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 24)
+        };
+        _sliderCharge.ValueChanged += (double val) =>
+        {
+            if (_particleStage != null)
+            {
+                _particleStage.SetCharge((float)val);
+                if (_labelCharge != null)
+                {
+                    _labelCharge.Text = $"Charge (CP1): {Mathf.RoundToInt(val * 100)}%";
+                }
+            }
+        };
+        chargeGroup.AddChild(_sliderCharge);
+        _particleControlsGroup.AddChild(chargeGroup);
+
+        // Action Group (Prominent Release button on row 1, Auto-Loop checkbox on row 2)
+        var actionGroup = new VBoxContainer();
+        actionGroup.AddThemeConstantOverride("separation", 4);
+
+        _btnRelease = new Button
+        {
+            Text = "Release (EndCap)",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 32)
+        };
+        _btnRelease.Pressed += () =>
+        {
+            _particleStage?.TriggerRelease();
+        };
+        actionGroup.AddChild(_btnRelease);
+
+        _chkAutoLoop = new CheckBox
+        {
+            Text = "Auto Loop (Charge & Release)",
+            ButtonPressed = false,
+            TooltipText = "Ramps Charge (CP1) automatically 0->1 and releases EndCap on loop"
+        };
+        _chkAutoLoop.Toggled += (bool toggled) =>
+        {
+            if (_particleStage != null)
+            {
+                _particleStage.SetAutoChargeLoop(toggled);
+            }
+        };
+        actionGroup.AddChild(_chkAutoLoop);
+        _particleControlsGroup.AddChild(actionGroup);
+
+        transport.AddChild(_particleControlsGroup);
+    }
+
+    public void SetParticleStage(ParticleStage3D stage)
+    {
+        if (_particleStage != null)
+        {
+            _particleStage.ParticleLoaded -= OnParticleStageLoaded;
+            _particleStage.ParticleUnloaded -= OnParticleStageUnloaded;
+        }
+
+        _particleStage = stage;
+        if (_particleStage != null)
+        {
+            _particleStage.ParticleLoaded += OnParticleStageLoaded;
+            _particleStage.ParticleUnloaded += OnParticleStageUnloaded;
+
+            if (_particleStage.HasActiveParticle)
+            {
+                OnParticleStageLoaded(_particleStage.ActiveVpcfPath, _particleStage.ActiveVariantName, _particleStage.ActiveAbilityName);
+            }
+        }
+    }
+
+    private void OnParticleStageLoaded(string vpcfPath, string variantName, string abilityName)
+    {
+        if (_particleStage == null) return;
+        _animPlayer?.Stop();
+
+        // Hide character model animations and pose buttons while particle is active
+        var animGroup = GetNodeOrNull<Control>("AnimGroup");
+        if (animGroup != null) animGroup.Visible = false;
+
+        var actionButtons = GetNodeOrNull<Control>("TransportGroup/ActionButtons");
+        if (actionButtons != null) actionButtons.Visible = false;
+
+        _particleStage.SetLooping(_isLooping);
+
+        if (_timelineSlider != null)
+        {
+            _timelineSlider.MinValue = 0.0;
+            _timelineSlider.MaxValue = _particleStage.Duration;
+            _timelineSlider.Step = 0.01;
+            _timelineSlider.SetValueNoSignal(0.0);
+        }
+        UpdateTimeLabel(0.0f, _particleStage.Duration);
+
+        if (_btnPlayPause != null)
+        {
+            _btnPlayPause.ButtonPressed = true;
+            _btnPlayPause.Icon = _iconPause;
+        }
+
+        if (_particleControlsGroup != null)
+        {
+            _particleControlsGroup.Visible = true;
+            if (_sliderCharge != null)
+            {
+                _sliderCharge.SetValueNoSignal(_particleStage.Charge);
+            }
+            if (_labelCharge != null)
+            {
+                _labelCharge.Text = $"Charge (CP1): {Mathf.RoundToInt(_particleStage.Charge * 100)}%";
+            }
+            if (_chkAutoLoop != null)
+            {
+                _chkAutoLoop.SetPressedNoSignal(_particleStage.AutoChargeLoop);
+            }
+        }
+    }
+
+    private void OnParticleStageUnloaded()
+    {
+        // Restore character model animations and pose buttons
+        var animGroup = GetNodeOrNull<Control>("AnimGroup");
+        if (animGroup != null) animGroup.Visible = true;
+
+        var actionButtons = GetNodeOrNull<Control>("TransportGroup/ActionButtons");
+        if (actionButtons != null) actionButtons.Visible = true;
+
+        if (_timelineSlider != null)
+        {
+            _timelineSlider.MinValue = 0.0;
+            _timelineSlider.MaxValue = _activeAnimLength;
+            _timelineSlider.Step = 0.01;
+            _timelineSlider.SetValueNoSignal(0.0);
+        }
+        UpdateTimeLabel(0.0f, _activeAnimLength);
+
+        if (_particleControlsGroup != null)
+        {
+            _particleControlsGroup.Visible = false;
+        }
     }
 
     public override void _Process(double delta)
     {
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            if (!_isUserDraggingSlider)
+            {
+                _timelineSlider?.SetValueNoSignal(_particleStage.CurrentTime);
+                UpdateTimeLabel(_particleStage.CurrentTime, _particleStage.Duration);
+            }
+
+            if (_particleStage.AutoChargeLoop && _sliderCharge != null)
+            {
+                _sliderCharge.SetValueNoSignal(_particleStage.Charge);
+                if (_labelCharge != null)
+                {
+                    _labelCharge.Text = $"Charge (CP1): {Mathf.RoundToInt(_particleStage.Charge * 100)}%";
+                }
+            }
+            return;
+        }
+
         if (_animPlayer != null && _animPlayer.IsPlaying() && !_isUserDraggingSlider)
         {
             float currentPos = (float)_animPlayer.CurrentAnimationPosition;
@@ -546,6 +787,13 @@ public partial class PoseTabUI : VBoxContainer
 
     private void OnPlayPauseToggled(bool isPlaying)
     {
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            if (isPlaying) _particleStage.Play(); else _particleStage.Pause();
+            if (_btnPlayPause != null) _btnPlayPause.Icon = isPlaying ? _iconPause : _iconPlay;
+            return;
+        }
+
         if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
 
         if (isPlaying)
@@ -573,6 +821,19 @@ public partial class PoseTabUI : VBoxContainer
 
     private void OnStopPressed()
     {
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            _particleStage.Stop();
+            _timelineSlider?.SetValueNoSignal(0.0);
+            UpdateTimeLabel(0.0f, _particleStage.Duration);
+            if (_btnPlayPause != null)
+            {
+                _btnPlayPause.ButtonPressed = false;
+                _btnPlayPause.Icon = _iconPlay;
+            }
+            return;
+        }
+
         if (_animPlayer == null) return;
 
         _animPlayer.Stop();
@@ -598,6 +859,12 @@ public partial class PoseTabUI : VBoxContainer
     private void OnLoopToggled(bool looping)
     {
         _isLooping = looping;
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            _particleStage.SetLooping(looping);
+            return;
+        }
+
         if (_animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
         {
             var anim = _animPlayer.GetAnimation(_activeAnimName);
@@ -619,6 +886,12 @@ public partial class PoseTabUI : VBoxContainer
             _ => 1.0f
         };
 
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            _particleStage.SetSpeed(speed);
+            return;
+        }
+
         if (_animPlayer != null)
         {
             _animPlayer.SpeedScale = speed;
@@ -627,6 +900,13 @@ public partial class PoseTabUI : VBoxContainer
 
     private void OnTimelineSliderValueChanged(double val)
     {
+        if (_particleStage != null && _particleStage.HasActiveParticle)
+        {
+            _particleStage.Seek((float)val);
+            UpdateTimeLabel((float)val, _particleStage.Duration);
+            return;
+        }
+
         if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
 
         // Immediate seek to evaluate bone matrices in real time
@@ -704,4 +984,9 @@ public partial class PoseTabUI : VBoxContainer
         if (_timeLabel == null) return;
         _timeLabel.Text = $"{current:00.00}s / {total:00.00}s";
     }
+}
+
+[Obsolete("Use PlayerTabUI instead")]
+public partial class PoseTabUI : PlayerTabUI
+{
 }

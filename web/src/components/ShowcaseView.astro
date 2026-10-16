@@ -1,0 +1,856 @@
+---
+import Icon from './Icon.astro';
+
+const videoShowcases = [
+  {
+    id: 'video-main',
+    title: 'Deadlock Playground — Full Walkthrough & Feature Tour',
+    badge: 'Principal Showcase',
+    badgeType: 'gold',
+    desc: 'Comprehensive demonstration of real-time 3D texture painting, UV canvas editing, skeletal posing controls, and direct Source 2 VPK mod export.',
+    youtubeId: '0GgRUHwB0ek',
+    url: 'https://www.youtube.com/watch?v=0GgRUHwB0ek',
+    thumbnail: 'https://img.youtube.com/vi/0GgRUHwB0ek/maxresdefault.jpg'
+  },
+  {
+    id: 'video-update-101',
+    title: 'Update v1.0.1 Showcase — 6 New WIP Heroes Roster',
+    badge: 'v1.0.1 Update',
+    badgeType: 'sage',
+    desc: 'Showcase of the 6 newly supported WIP update heroes (Violet, Baba, Deadman Danny, Nurse Harrow, Ratking, Solomon) and the topbar changelog menu.',
+    youtubeId: 'O7x7LGm_FOs',
+    url: 'https://www.youtube.com/watch?v=O7x7LGm_FOs',
+    thumbnail: 'https://img.youtube.com/vi/O7x7LGm_FOs/maxresdefault.jpg'
+  }
+];
+
+const features = [
+  {
+    id: 'gpu-3d-paint',
+    title: 'Real-Time 3D CameraBrush Painting',
+    category: 'painting',
+    categoryLabel: 'Texture Painting',
+    tag: 'Vulkan Compute',
+    image: '/screenshots/3d_camera_brush_painting.png',
+    desc: 'Paint directly on character geometry in the 3D viewport using orthographic GPU compute projection with zero seam artifacts.',
+    details: 'Supports configurable brush radius, hardness, opacity, spacing, and procedural grunge/splatter brush dynamics via Vulkan compute shaders.',
+    icon: 'brush'
+  },
+  {
+    id: 'uv-canvas-2d',
+    title: '2D UV Canvas Dock & Magic Wand',
+    category: 'painting',
+    categoryLabel: 'Texture Painting',
+    tag: 'Layer Stack',
+    image: '/screenshots/2d_uv_canvas_dock_magic_wand.png',
+    desc: 'Full non-destructive multi-layer canvas dock with Layer 0 protection, opacity sliders, and standard blend modes.',
+    details: 'Perceptual sRGB BFS Magic Wand flood-fill, perimeter feathering, dilation, and decal stamper for external PNG decals and typography.',
+    icon: 'wand'
+  },
+  {
+    id: 'skeletal-ik',
+    title: 'Full-Body Two-Bone IK & FK Manipulator',
+    category: 'posing',
+    categoryLabel: 'Posing & IK',
+    tag: 'Gizmo3DSharp',
+    image: '/screenshots/hero_full_body_two_bone_ik_and_fk.png',
+    desc: 'Pose characters using integrated Gizmo3D transform handles, two-bone inverse kinematics chains, and look-at gaze targets.',
+    details: 'Manipulate arms and legs with natural anatomical joint limits, spine curves, and retargeted animation sequence blending.',
+    icon: 'bone'
+  },
+  {
+    id: 'cloth-simulation',
+    title: 'Procedural Cloth Simulation (PBD)',
+    category: 'posing',
+    categoryLabel: 'Posing & IK',
+    tag: 'Position-Based Dynamics',
+    image: '/screenshots/procedural_cloth_sim.png',
+    desc: 'Real-time cloth solver simulating cloaks, capes, skirts, and hair strands conforming naturally to custom posed joint positions.',
+    details: 'Gravity, wind, air drag, and obstacle collision spheres protect geometry from clipping while maintaining authentic fabric weight.',
+    icon: 'shirt'
+  },
+  {
+    id: 'screenshot-export',
+    title: 'Virtual Photography & 4K Screenshot Export',
+    category: 'photography',
+    categoryLabel: 'Photography',
+    tag: 'High-Res Viewport',
+    image: '/screenshots/screenshot_export.png',
+    desc: 'Studio turntable orbit camera, customizable backdrops, lighting controls, and high-resolution viewport capture up to 4K.',
+    details: 'Export hero portraits and skin showcases with optional transparent backgrounds, customizable field of view, and frame-selection centering.',
+    icon: 'camera'
+  },
+  {
+    id: 'mod-export',
+    title: 'One-Click Source 2 VPK Mod Compiler',
+    category: 'modding',
+    categoryLabel: 'Mod Compiler',
+    tag: 'Citadel Addons',
+    image: '/screenshots/one_click_s2_vpk_mod_compiler.png',
+    desc: 'In-place VTEX interception that compiles custom hero skins directly into collision-free pak##_dir.vpk files in game/citadel/addons/.',
+    details: 'Headless Valve resourcecompiler.exe invocation, automated VPK slot allocation, and immediate in-game skin verification.',
+    icon: 'package'
+  },
+  {
+    id: 'hero-shaders',
+    title: 'NPR Toon & Bespoke Hero Shaders',
+    category: 'shaders',
+    categoryLabel: 'Shading & Materials',
+    tag: 'Valve NPR Lighting',
+    image: '/screenshots/hero_npr_toon_and_hero_shaders.png',
+    desc: 'Switch between authentic Source 2 PBR and stylized NPR Toon shading with custom ink outlines and character-specific spectral effects.',
+    details: 'Custom shaders for Infernus arm flames, Lady Geist spectral tinting, Viscous translucent slime hull, and Lash gold sparkles.',
+    icon: 'sparkles'
+  },
+  {
+    id: 'particle-editor',
+    title: 'Hero Particle Modifier & Stage 3D',
+    category: 'particles',
+    categoryLabel: 'Particle FX',
+    tag: 'Source 2 VPCF',
+    image: '/screenshots/hero_particle_editor_and_stage_3d.png',
+    desc: 'Inspect and customize hero ability particles, emitter colors, alpha fades, size scales, and 2D particle sprite textures in real time.',
+    details: 'Live simulation scrubbing, multi-mesh particle rendering, and automatic VPCF delta extraction for mod packaging.',
+    icon: 'flare'
+  },
+  {
+    id: 'hero-catalog',
+    title: 'Hero Catalog & WIP Update Roster',
+    category: 'heroes',
+    categoryLabel: 'Hero Catalog',
+    tag: 'Source 2 VMDL',
+    image: '/screenshots/hero_catalog_and_update_roster.png',
+    desc: 'Direct ingestion of all Deadlock heroes, weapons, and legacy/WIP characters directly from Valve pak01_dir.vpk archives.',
+    details: 'Support for upcoming roster heroes (Violet, Baba, Deadman Danny, Nurse Harrow, Ratking, Solomon) with weapon mesh aliases.',
+    icon: 'users'
+  }
+];
+---
+
+<div class="showcase-container">
+  <!-- Top search & category filter bar -->
+  <div class="showcase-toolbar">
+    <div class="search-box">
+      <Icon name="search" size={18} class="search-icon" />
+      <input 
+        type="text" 
+        id="featureSearchInput" 
+        placeholder="Search features (e.g. IK, Painting, Mod Export, Photography, Shaders...)" 
+        autocomplete="off"
+      />
+      <button id="searchClearBtn" class="clear-btn" style="display: none;">✕</button>
+    </div>
+
+    <div class="category-chips" id="categoryChips">
+      <button class="chip active" data-category="all">
+        <Icon name="layout-grid" size={15} />
+        <span>All ({features.length})</span>
+      </button>
+      <button class="chip" data-category="videos">
+        <Icon name="video" size={15} />
+        <span>Videos ({videoShowcases.length})</span>
+      </button>
+      <button class="chip" data-category="painting">
+        <Icon name="brush" size={15} />
+        <span>Painting</span>
+      </button>
+      <button class="chip" data-category="posing">
+        <Icon name="bone" size={15} />
+        <span>Posing & IK</span>
+      </button>
+      <button class="chip" data-category="photography">
+        <Icon name="camera" size={15} />
+        <span>Photography</span>
+      </button>
+      <button class="chip" data-category="modding">
+        <Icon name="package" size={15} />
+        <span>Mod Compiler</span>
+      </button>
+      <button class="chip" data-category="shaders">
+        <Icon name="sparkles" size={15} />
+        <span>Shaders</span>
+      </button>
+      <button class="chip" data-category="particles">
+        <Icon name="flare" size={15} />
+        <span>Particles</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Scrollable Showcase Area -->
+  <div class="showcase-scrollable">
+    <!-- Video Showcase Section -->
+    <section class="video-showcases-section" id="videoSection">
+      <div class="section-title-row">
+        <div class="title-with-badge">
+          <Icon name="brand-youtube" size={22} color="#e50914" />
+          <h2 class="font-heading">Official Video Walkthroughs</h2>
+        </div>
+        <span class="badge badge-gold">YouTube Demos</span>
+      </div>
+
+      <div class="video-cards-grid">
+        {videoShowcases.map((vid) => (
+          <article class="video-card card-panel">
+            <div class="video-thumb-frame">
+              <img src={vid.thumbnail} alt={vid.title} class="vid-thumb-img" />
+              <div class="video-thumb-overlay">
+                <span class={`badge badge-${vid.badgeType} video-badge`}>{vid.badge}</span>
+                <a 
+                  href={vid.url} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  class="vid-play-button"
+                  title="Watch on YouTube"
+                >
+                  <Icon name="player-play" size={24} />
+                </a>
+              </div>
+            </div>
+            <div class="video-card-meta">
+              <h3 class="video-title font-heading">{vid.title}</h3>
+              <p class="video-desc">{vid.desc}</p>
+              <div class="video-footer">
+                <a 
+                  href={vid.url} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  class="btn-video-watch"
+                >
+                  <Icon name="brand-youtube" size={16} />
+                  <span>Watch on YouTube</span>
+                  <Icon name="external-link" size={13} />
+                </a>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <!-- Screenshot Feature Cards Grid -->
+    <section class="features-section" id="featuresSection">
+      <div class="section-title-row">
+        <div class="title-with-badge">
+          <Icon name="photo" size={22} color="var(--dl-accent-sage)" />
+          <h2 class="font-heading">Feature Showcase Gallery</h2>
+        </div>
+        <span class="section-count">{features.length} Features Documented</span>
+      </div>
+
+      <div class="showcase-grid" id="featureGrid">
+        {features.map((item) => (
+          <article 
+            class="feature-card card-panel" 
+            data-id={item.id}
+            data-category={item.category}
+            data-title={item.title.toLowerCase()}
+            data-desc={item.desc.toLowerCase()}
+            data-tags={item.tag.toLowerCase()}
+          >
+            <!-- Real Screenshot Image Container with Zoom & Click to Enlarge -->
+            <div 
+              class="screenshot-image-container" 
+              data-img-src={item.image}
+              data-title={item.title} 
+              data-details={item.details}
+              title="Click to view full screenshot"
+            >
+              <img 
+                src={item.image} 
+                alt={item.title} 
+                class="feature-img" 
+                loading="lazy" 
+              />
+              <div class="img-overlay-hover">
+                <div class="zoom-pill">
+                  <Icon name="zoom-in" size={15} />
+                  <span>Enlarge Screenshot</span>
+                </div>
+              </div>
+              <div class="feature-tag-badge">
+                <span class="badge badge-sage">{item.tag}</span>
+              </div>
+            </div>
+
+            <!-- Feature Meta Content -->
+            <div class="feature-meta">
+              <div class="meta-header">
+                <span class="meta-category">{item.categoryLabel}</span>
+                <span class="badge badge-gold">In-App View</span>
+              </div>
+              <h3 class="meta-title font-heading">{item.title}</h3>
+              <p class="meta-desc">{item.desc}</p>
+              <div class="meta-footer">
+                <span class="meta-tag font-code">#{item.tag.toLowerCase().replace(/\s+/g, '-')}</span>
+                <button class="btn-inspect" data-inspect-id={item.id}>
+                  <span>Inspect Details</span>
+                  <Icon name="chevron-right" size={14} />
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <!-- Empty search state -->
+      <div id="noResultsState" class="no-results" style="display: none;">
+        <Icon name="search-off" size={42} color="var(--dl-accent-gold)" />
+        <h3>No features matching your search</h3>
+        <p>Try searching for terms like "painting", "IK", "photography", "cloth", "shaders", or "compiler".</p>
+        <button id="resetSearchBtn" class="btn-secondary">Reset Filters</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<style>
+  .showcase-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .showcase-toolbar {
+    padding: 14px 20px;
+    background: var(--dl-bg-panel);
+    border-bottom: 1px solid var(--dl-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .search-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 380px;
+    max-width: 100%;
+    background: var(--dl-bg-main);
+    border: 1px solid var(--dl-border);
+    border-radius: 6px;
+    padding: 0 12px;
+  }
+  .search-box:focus-within {
+    border-color: var(--dl-accent-brass);
+    box-shadow: 0 0 0 2px rgba(239, 222, 191, 0.15);
+  }
+
+  .search-icon {
+    color: var(--dl-text-dim);
+    margin-right: 8px;
+  }
+
+  .search-box input {
+    width: 100%;
+    height: 36px;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--dl-text-primary);
+    font-size: 0.85rem;
+  }
+
+  .search-box input::placeholder {
+    color: var(--dl-text-dim);
+  }
+
+  .clear-btn {
+    background: transparent;
+    border: none;
+    color: var(--dl-text-dim);
+    font-size: 0.85rem;
+    padding: 4px;
+  }
+  .clear-btn:hover {
+    color: var(--dl-text-primary);
+  }
+
+  .category-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--dl-bg-card);
+    border: 1px solid var(--dl-border);
+    color: var(--dl-text-muted);
+    font-size: 0.775rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 20px;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+  .chip:hover {
+    border-color: var(--dl-border-light);
+    color: var(--dl-text-primary);
+  }
+  .chip.active {
+    background: var(--dl-accent-sage);
+    border-color: var(--dl-accent-sage);
+    color: #0c100e;
+    font-weight: 700;
+  }
+
+  .showcase-scrollable {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .section-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(43, 63, 55, 0.4);
+  }
+
+  .title-with-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .title-with-badge h2 {
+    font-size: 1.25rem;
+    color: var(--dl-accent-brass);
+  }
+
+  .section-count {
+    font-size: 0.75rem;
+    color: var(--dl-text-dim);
+  }
+
+  /* Video Showcases Grid (Compact) */
+  .video-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  .video-card {
+    display: flex;
+    flex-direction: row;
+    height: 140px;
+    max-height: 140px;
+    overflow: hidden;
+  }
+
+  .video-thumb-frame {
+    position: relative;
+    width: 200px;
+    min-width: 200px;
+    height: 100%;
+    background: #090e0c;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .vid-thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+  }
+  .video-card:hover .vid-thumb-img {
+    transform: scale(1.04);
+  }
+
+  .video-thumb-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.75) 0%, transparent 60%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .video-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    font-size: 0.65rem;
+    padding: 1px 6px;
+  }
+
+  .vid-play-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #e50914;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 15px rgba(229, 9, 20, 0.6);
+    transition: transform 0.2s ease;
+    text-decoration: none;
+  }
+  .vid-play-button:hover {
+    transform: scale(1.1);
+  }
+
+  .video-card-meta {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 4px;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .video-title {
+    font-size: 0.88rem;
+    color: var(--dl-accent-brass);
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .video-desc {
+    font-size: 0.75rem;
+    color: var(--dl-text-muted);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .video-footer {
+    padding-top: 6px;
+    border-top: 1px solid rgba(43, 63, 55, 0.4);
+  }
+
+  .btn-video-watch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--dl-accent-gold);
+    font-size: 0.775rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+  .btn-video-watch:hover {
+    color: #ffffff;
+  }
+
+  /* Screenshot Showcase Grid */
+  .showcase-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+    gap: 20px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .feature-card {
+    display: flex;
+    flex-direction: column;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  /* Real Screenshot Box */
+  .screenshot-image-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #090e0c;
+    border-bottom: 1px solid var(--dl-border);
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .feature-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease, filter 0.2s ease;
+  }
+  .screenshot-image-container:hover .feature-img {
+    transform: scale(1.03);
+    filter: brightness(1.05);
+  }
+
+  .img-overlay-hover {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s ease;
+  }
+  .screenshot-image-container:hover .img-overlay-hover {
+    opacity: 1;
+  }
+
+  .zoom-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(18, 24, 21, 0.9);
+    border: 1px solid var(--dl-accent-brass);
+    color: var(--dl-accent-brass);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.775rem;
+    font-weight: 600;
+  }
+
+  .feature-tag-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+  }
+
+  /* Metadata container */
+  .feature-meta {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+
+  .meta-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .meta-category {
+    font-size: 0.725rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--dl-accent-sage);
+  }
+
+  .meta-title {
+    font-size: 1.05rem;
+    color: var(--dl-accent-brass);
+    line-height: 1.25;
+  }
+
+  .meta-desc {
+    font-size: 0.825rem;
+    color: var(--dl-text-muted);
+    line-height: 1.4;
+    flex: 1;
+  }
+
+  .meta-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(43, 63, 55, 0.4);
+  }
+
+  .meta-tag {
+    font-size: 0.75rem;
+    color: var(--dl-text-dim);
+  }
+
+  .btn-inspect {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: none;
+    color: var(--dl-accent-brass);
+    font-size: 0.8rem;
+    font-weight: 600;
+    transition: color 0.15s ease;
+  }
+  .btn-inspect:hover {
+    color: var(--dl-accent-gold);
+  }
+
+  .no-results {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    text-align: center;
+    gap: 12px;
+  }
+  .no-results h3 {
+    color: var(--dl-accent-brass);
+  }
+  .no-results p {
+    color: var(--dl-text-muted);
+    font-size: 0.9rem;
+  }
+
+  @media (max-width: 900px) {
+    .video-cards-grid {
+      grid-template-columns: 1fr;
+    }
+    .video-card {
+      height: auto;
+      max-height: none;
+      flex-direction: column;
+    }
+    .video-thumb-frame {
+      width: 100%;
+      height: 160px;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .showcase-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 12px 14px;
+      gap: 10px;
+    }
+    .search-box {
+      width: 100%;
+      max-width: 100%;
+    }
+    .category-chips {
+      flex-wrap: wrap;
+      gap: 6px;
+      width: 100%;
+    }
+    .chip {
+      padding: 6px 10px;
+      font-size: 0.75rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .showcase-scrollable {
+      padding: 12px;
+      gap: 20px;
+    }
+    .showcase-grid {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .feature-card {
+      width: 100%;
+      max-width: 100%;
+    }
+  }
+</style>
+
+<script>
+  // Client-side search and category filtering for the showcase
+  const searchInput = document.getElementById('featureSearchInput') as HTMLInputElement | null;
+  const clearBtn = document.getElementById('searchClearBtn');
+  const chipButtons = document.querySelectorAll('#categoryChips .chip');
+  const cards = document.querySelectorAll('.feature-card') as NodeListOf<HTMLElement>;
+  const videoSection = document.getElementById('videoSection');
+  const featuresSection = document.getElementById('featuresSection');
+  const noResults = document.getElementById('noResultsState');
+  const resetBtn = document.getElementById('resetSearchBtn');
+
+  let activeCategory = 'all';
+  let searchTerm = '';
+
+  function applyFilter() {
+    let visibleCount = 0;
+
+    // Toggle video section visibility
+    if (videoSection) {
+      if (activeCategory === 'videos') {
+        videoSection.style.display = 'block';
+        if (featuresSection) featuresSection.style.display = 'none';
+        return;
+      } else {
+        if (featuresSection) featuresSection.style.display = 'block';
+        videoSection.style.display = (activeCategory === 'all' && !searchTerm) ? 'block' : 'none';
+      }
+    }
+
+    cards.forEach((card) => {
+      const cat = card.getAttribute('data-category') || '';
+      const title = card.getAttribute('data-title') || '';
+      const desc = card.getAttribute('data-desc') || '';
+      const tags = card.getAttribute('data-tags') || '';
+
+      const matchesCat = activeCategory === 'all' || cat === activeCategory;
+      const matchesSearch = !searchTerm || title.includes(searchTerm) || desc.includes(searchTerm) || tags.includes(searchTerm);
+
+      if (matchesCat && matchesSearch) {
+        card.style.display = 'flex';
+        visibleCount++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    if (noResults) {
+      noResults.style.display = visibleCount === 0 ? 'flex' : 'none';
+    }
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      searchTerm = (e.target as HTMLInputElement).value.trim().toLowerCase();
+      if (clearBtn) clearBtn.style.display = searchTerm ? 'inline-block' : 'none';
+      applyFilter();
+    });
+  }
+
+  if (clearBtn && searchInput) {
+    clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchTerm = '';
+      clearBtn.style.display = 'none';
+      searchInput.focus();
+      applyFilter();
+    });
+  }
+
+  chipButtons.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      chipButtons.forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      activeCategory = chip.getAttribute('data-category') || 'all';
+      applyFilter();
+    });
+  });
+
+  if (resetBtn && searchInput) {
+    resetBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchTerm = '';
+      if (clearBtn) clearBtn.style.display = 'none';
+      chipButtons.forEach((c) => c.classList.remove('active'));
+      const allChip = document.querySelector('#categoryChips [data-category="all"]');
+      if (allChip) allChip.classList.add('active');
+      activeCategory = 'all';
+      applyFilter();
+    });
+  }
+</script>

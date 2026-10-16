@@ -127,19 +127,6 @@ namespace DeadlockPlayground.Addons
 
                     string lower = fullPath.Replace('\\', '/').ToLowerInvariant();
 
-                    // Only inspect files modifying heroes_wip, heroes_staging, or heroes character directories
-                    bool isHeroFile = lower.Contains("heroes_staging/") ||
-                                      lower.Contains("heroes_wip/") ||
-                                      lower.Contains("/heroes/") ||
-                                      lower.StartsWith("heroes/") ||
-                                      lower.Contains("models/heroes") ||
-                                      lower.Contains("materials/models/heroes");
-
-                    if (!isHeroFile)
-                    {
-                        continue;
-                    }
-
                     RegisterHeroCandidate(lower);
 
                     if (lower.EndsWith(".vmdl_c") || lower.EndsWith(".vmdl"))
@@ -161,16 +148,32 @@ namespace DeadlockPlayground.Addons
                 }
             }
 
-            // Exclude packages that do not modify character heroes folders (e.g. map, UI, sound, prop mods)
+            // Exclude packages that do not contain models, materials or textures
             if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && modInfo.MaterialEntries.Count == 0)
             {
-                GD.Print($"[AddonScanner] Skipping '{fileName}': does not modify heroes_wip, heroes_staging, or heroes.");
+                GD.Print($"[AddonScanner] Skipping '{fileName}': does not contain models, materials or textures.");
                 return null;
             }
 
-            // Fallback hero detection: if regex didn't find heroes/ in paths, scan against catalog codenames
+            // Fallback hero detection: if regex didn't find heroes/ in paths, scan against catalog codenames and aliases
             if (heroFrequency.Count == 0)
             {
+                var candidateAliases = new[]
+                {
+                    "kali", "viper", "bull", "abrams", "spectre", "geist", "sumo", "dynamo",
+                    "werewolf_wolf", "werewolf", "tengu", "ivy", "engineer", "mcginnis",
+                    "gigawatt", "seven", "hornet", "vindicta", "inferno", "infernus",
+                    "astro", "holliday", "fencer", "apollo", "nano", "calico", "digger"
+                };
+
+                foreach (var alias in candidateAliases)
+                {
+                    int matches = modInfo.AllEntries.Count(e => e.IndexOf(alias, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (matches > 0)
+                    {
+                        heroFrequency[alias] = matches;
+                    }
+                }
                 foreach (var hero in DeadlockHeroCatalog.Entries)
                 {
                     string code = hero.InternalCodename.ToLowerInvariant();
@@ -245,7 +248,7 @@ namespace DeadlockPlayground.Addons
                 _ => $"{heroName} Mod"
             };
 
-            modInfo.DisplayTitle = $"{typeTag} - {fileName}";
+            modInfo.DisplayTitle = typeTag;
 
             return modInfo;
         }

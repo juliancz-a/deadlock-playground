@@ -1,0 +1,622 @@
+---
+import Icon from './Icon.astro';
+import changelogData from '../data/changelog.json';
+
+const currentVersion = `v${changelogData.latestVersion}`;
+---
+
+<div class="overview-container">
+  <!-- Top Split Hero -->
+  <div class="hero-split">
+    <!-- Left Hero Content -->
+    <div class="hero-text-card card-panel">
+      <div class="hero-badge-row">
+        <span class="badge badge-orange">{currentVersion} Available</span>
+      </div>
+
+      <h1 class="hero-title font-display">
+        The Ultimate 3D Studio & Texture Painter for <em>Deadlock</em>.
+      </h1>
+
+      <p class="hero-description">
+        Deadlock Playground is an open-source desktop application engineered to inspect heroes, pose skeletons with full IK, paint custom skins in real-time 3D and 2D UV canvases, and compile mods directly into Source 2 VPK archives.
+      </p>
+
+      <div class="hero-cta-group">
+        <a 
+          href="https://github.com/juliancz-a/deadlock-playground/releases/latest" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="btn-primary"
+        >
+          <Icon name="download" size={18} />
+          <span>Download {currentVersion}</span>
+        </a>
+
+        <!-- GitHub Repository Link in Default View -->
+        <a 
+          href="https://github.com/juliancz-a/deadlock-playground" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="btn-secondary gh-btn"
+          title="View source code, star and contribute on GitHub"
+        >
+          <Icon name="brand-github" size={18} />
+          <span>GitHub Repository</span>
+          <span class="star-badge">★ Star</span>
+        </a>
+
+        <!-- GameBanana Link with custom logo -->
+        <a 
+          href="https://gamebanana.com/tools/24316" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="btn-secondary gb-btn-full"
+        >
+          <img src="/logo_gamebanana.jpg" alt="GameBanana" class="gb-img-small" />
+          <span>GameBanana</span>
+        </a>
+
+        <!-- Discord Copy Username -->
+        <button 
+          id="overviewDiscordBtn" 
+          class="btn-secondary discord-copy-action"
+          data-discord="juliancz_"
+          title="Click to copy Discord username: juliancz_"
+        >
+          <Icon name="brand-discord" size={18} color="#818cf8" />
+          <span id="overviewDiscordText">Discord: juliancz_</span>
+        </button>
+      </div>
+
+      <!-- Quick Tech Badges -->
+      <div class="tech-strip">
+        <div class="tech-item">
+          <Icon name="cpu" size={15} color="var(--dl-accent-sage)" />
+          <span>.NET 10 / C# 13</span>
+        </div>
+        <div class="tech-item">
+          <img src="/godot_logo.png" alt="Godot Engine" class="tech-logo-img" />
+          <span>Godot 4.7.2</span>
+        </div>
+        <div class="tech-item">
+          <img src="/source2viewer_logo.png" alt="ValveResourceFormat" class="tech-logo-img" />
+          <span>ValveResourceFormat</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Hero Media Container: YouTube Preview of Principal Walkthrough -->
+    <div class="hero-media-card card-panel">
+      <div class="media-frame">
+        <img 
+          src="https://img.youtube.com/vi/0GgRUHwB0ek/maxresdefault.jpg" 
+          alt="Deadlock Playground YouTube Walkthrough Preview" 
+          class="yt-preview-img" 
+        />
+        <div class="media-overlay">
+          <div class="media-tag">
+            <span class="badge badge-gold">Principal Walkthrough Video</span>
+          </div>
+          <a 
+            href="https://www.youtube.com/watch?v=0GgRUHwB0ek" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            class="video-play-btn"
+            title="Watch full demonstration on YouTube"
+          >
+            <Icon name="player-play" size={26} />
+          </a>
+          <span class="media-caption">Full Walkthrough: 3D Painting, IK Posing & Source 2 VPK Export</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Core Feature Pillars (including Screenshot Export) -->
+  <div class="pillars-row">
+    <div class="pillar-card card-panel">
+      <div class="pillar-icon-box">
+        <Icon name="database-import" size={22} color="var(--dl-accent-sage)" />
+      </div>
+      <div class="pillar-content">
+        <h3 class="pillar-title font-heading">Direct VPK Ingestion</h3>
+        <p class="pillar-desc">
+          Extracts and decodes compiled Source 2 files (<span class="font-code">.vmdl_c</span>, <span class="font-code">.vmat_c</span>, <span class="font-code">.vtex_c</span>, <span class="font-code">.vanim_c</span>) on the fly directly from Deadlock's <span class="font-code">pak01_dir.vpk</span>.
+        </p>
+      </div>
+    </div>
+
+    <div class="pillar-card card-panel">
+      <div class="pillar-icon-box">
+        <Icon name="brush" size={22} color="var(--dl-accent-gold)" />
+      </div>
+      <div class="pillar-content">
+        <h3 class="pillar-title font-heading">GPU 3D Texture Painting</h3>
+        <p class="pillar-desc">
+          Orthographic compute projection allows seamless painting over 3D seams, paired with a full 2D UV canvas dock, Magic Wand, and non-destructive layer blending.
+        </p>
+      </div>
+    </div>
+
+    <div class="pillar-card card-panel">
+      <div class="pillar-icon-box">
+        <Icon name="bone" size={22} color="var(--dl-accent-cyan)" />
+      </div>
+      <div class="pillar-content">
+        <h3 class="pillar-title font-heading">Skeletal Posing & IK</h3>
+        <p class="pillar-desc">
+          Two-bone anatomical IK chains, FK gizmo manipulation, additive animation recoil scrubbing, and real-time Position-Based Dynamics cloth simulation.
+        </p>
+      </div>
+    </div>
+
+    <div class="pillar-card card-panel">
+      <div class="pillar-icon-box">
+        <Icon name="camera" size={22} color="#a78bfa" />
+      </div>
+      <div class="pillar-content">
+        <h3 class="pillar-title font-heading">Virtual Photography & 4K Export</h3>
+        <p class="pillar-desc">
+          Studio orbit turntable camera, custom backdrops, lighting controls, and high-resolution screenshot export up to 4K with optional transparent backgrounds.
+        </p>
+      </div>
+    </div>
+
+    <div class="pillar-card card-panel">
+      <div class="pillar-icon-box">
+        <Icon name="package-export" size={22} color="var(--dl-accent-orange)" />
+      </div>
+      <div class="pillar-content">
+        <h3 class="pillar-title font-heading">Direct Mod Packaging</h3>
+        <p class="pillar-desc">
+          Automated collision-free <span class="font-code">pak##_dir.vpk</span> compilation directly into <span class="font-code">game/citadel/addons/</span> for instant testing in game.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compact Credits & Intellectual Property Section -->
+  <div class="credits-legal-strip card-panel">
+    <!-- Left: Credits -->
+    <div class="credits-col">
+      <div class="strip-header">
+        <Icon name="code" size={13} color="var(--dl-accent-sage)" />
+        <h4 class="strip-title font-heading">Core Open-Source Credits</h4>
+      </div>
+      <div class="credits-grid">
+        <div class="credit-item">
+          <span class="credit-label">• Engine:</span>
+          <a href="https://godotengine.org/" target="_blank" rel="noopener noreferrer" class="credit-link">Godot Engine 4 (.NET / C#)</a>
+        </div>
+        <div class="credit-item">
+          <span class="credit-label">• Asset Pipeline:</span>
+          <a href="https://github.com/ValveResourceFormat/ValveResourceFormat" target="_blank" rel="noopener noreferrer" class="credit-link">ValveResourceFormat (VRF)</a>
+        </div>
+        <div class="credit-item">
+          <span class="credit-label">• SVG Icons:</span>
+          <a href="https://github.com/Voxybunsl/at-icons" target="_blank" rel="noopener noreferrer" class="credit-link">at-icons (Voxybuns)</a>
+        </div>
+        <div class="credit-item">
+          <span class="credit-label">• GPU Painter:</span>
+          <a href="https://github.com/maantho/gpu-texture-painter" target="_blank" rel="noopener noreferrer" class="credit-link">gpu-texture-painter (maantho)</a>
+        </div>
+        <div class="credit-item">
+          <span class="credit-label">• Gizmo3D:</span>
+          <a href="https://github.com/chrisizeful/Gizmo3D" target="_blank" rel="noopener noreferrer" class="credit-link">Gizmo3D (chrisizeful)</a>
+        </div>
+        <div class="credit-item">
+          <span class="credit-label">• Project Source:</span>
+          <a href="https://github.com/juliancz-a/deadlock-playground" target="_blank" rel="noopener noreferrer" class="credit-link">GitHub (Contribute)</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vertical Divider Line -->
+    <div class="strip-vertical-divider"></div>
+
+    <!-- Right: Legal Disclaimer -->
+    <div class="legal-col">
+      <div class="strip-header">
+        <Icon name="scale" size={13} color="var(--dl-accent-gold)" />
+        <h4 class="strip-title font-heading">Legal Disclaimer & Intellectual Property</h4>
+      </div>
+      <p class="legal-text">
+        <em>Deadlock</em>, <em>Source 2</em>, and <em>Valve</em> are trademarks of <strong>Valve Corporation</strong>. All character models, textures, animations, and game assets parsed by this software are property of Valve Corporation.
+      </p>
+      <p class="legal-text">
+        Unofficial fan creation not affiliated with or endorsed by Valve. <strong>No proprietary game files are bundled</strong>; assets are parsed locally from the user's personal Deadlock installation.
+      </p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .overview-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 20px;
+    overflow-y: auto;
+  }
+
+  .hero-split {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+
+  .hero-text-card {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    background: radial-gradient(circle at top left, rgba(114, 148, 127, 0.12) 0%, var(--dl-bg-card) 60%);
+  }
+
+  .hero-badge-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .hero-title {
+    font-size: 1.75rem;
+    line-height: 1.2;
+    color: var(--dl-accent-brass);
+  }
+  .hero-title em {
+    font-style: normal;
+    color: var(--dl-accent-gold);
+    text-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
+  }
+
+  .hero-description {
+    font-size: 0.86rem;
+    color: var(--dl-text-secondary);
+    line-height: 1.45;
+  }
+
+  .hero-cta-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+
+  .star-badge {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--dl-accent-gold);
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 700;
+  }
+
+  .gb-btn-full {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gb-img-small {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    object-fit: cover;
+  }
+
+  .tech-strip {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(43, 63, 55, 0.5);
+    flex-wrap: wrap;
+  }
+
+  .tech-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--dl-text-muted);
+    font-weight: 500;
+  }
+
+  .tech-logo-img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    display: inline-block;
+  }
+
+  /* Right Media Card (YouTube Preview) */
+  .hero-media-card {
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #090e0c;
+  }
+
+  .media-frame {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 230px;
+  }
+
+  .yt-preview-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.88;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+  .hero-media-card:hover .yt-preview-img {
+    opacity: 0.98;
+    transform: scale(1.02);
+  }
+
+  .media-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(12, 16, 14, 0.92) 0%, rgba(12, 16, 14, 0.25) 60%, transparent 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 14px;
+    gap: 8px;
+  }
+
+  .media-tag {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+  }
+
+  .video-play-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #e50914; /* YouTube red */
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    box-shadow: 0 0 20px rgba(229, 9, 20, 0.6);
+    transition: transform 0.2s ease, background 0.2s ease;
+  }
+  .video-play-btn:hover {
+    transform: scale(1.1);
+    background: #ff1f2c;
+  }
+
+  .media-caption {
+    font-size: 0.725rem;
+    color: var(--dl-accent-brass);
+    font-weight: 600;
+    text-align: center;
+  }
+
+  /* Pillars Grid (5 columns on desktop) - Expanded for better vertical balance */
+  .pillars-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .pillar-card {
+    padding: 14px 14px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+  .pillar-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--dl-border-light);
+  }
+
+  .pillar-icon-box {
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    background: var(--dl-bg-main);
+    border: 1px solid var(--dl-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .pillar-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pillar-title {
+    font-size: 0.86rem;
+    color: var(--dl-accent-brass);
+    line-height: 1.25;
+  }
+
+  .pillar-desc {
+    font-size: 0.735rem;
+    color: var(--dl-text-muted);
+    line-height: 1.4;
+  }
+
+  /* Credits & Legal Strip - Anchored to bottom */
+  .credits-legal-strip {
+    display: grid;
+    grid-template-columns: 1.15fr auto 1fr;
+    gap: 16px;
+    padding: 10px 16px;
+    background: rgba(17, 23, 21, 0.75);
+    border: 1px solid var(--dl-border);
+    border-radius: 8px;
+    flex-shrink: 0;
+    margin-top: auto; /* Anchors the credits flush to the bottom */
+  }
+
+  .strip-vertical-divider {
+    width: 1px;
+    height: 100%;
+    min-height: 48px;
+    background: var(--dl-border-light);
+    opacity: 0.85;
+  }
+
+  .credits-col, .legal-col {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .strip-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .strip-title {
+    font-size: 0.75rem;
+    color: var(--dl-accent-brass);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .credits-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px 10px;
+  }
+
+  .credit-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .credit-label {
+    color: var(--dl-text-dim);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .credit-link {
+    color: #4da3ff;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.15s ease;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .credit-link:hover {
+    color: #93c5fd;
+    text-decoration: underline;
+  }
+
+  .legal-text {
+    font-size: 0.68rem;
+    color: var(--dl-text-muted);
+    line-height: 1.32;
+    font-style: italic;
+  }
+  .legal-text strong {
+    color: var(--dl-text-secondary);
+    font-style: normal;
+  }
+  .legal-text em {
+    color: var(--dl-accent-brass);
+    font-style: italic;
+  }
+
+  @media (max-width: 1200px) {
+    .pillars-row {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  @media (max-width: 900px) {
+    .hero-split {
+      grid-template-columns: 1fr;
+    }
+    .pillars-row {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .credits-legal-strip {
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-top: 0;
+    }
+    .strip-vertical-divider {
+      width: 100%;
+      height: 1px;
+      min-height: 1px;
+      background: var(--dl-border);
+      margin: 2px 0;
+    }
+    .credits-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .overview-container {
+      padding: 12px;
+      gap: 12px;
+    }
+    .hero-text-card {
+      padding: 16px;
+    }
+    .pillars-row {
+      grid-template-columns: 1fr;
+    }
+    .hero-title {
+      font-size: 1.35rem;
+      word-break: break-word;
+    }
+    .hero-cta-group a, .hero-cta-group button {
+      max-width: 100%;
+    }
+  }
+</style>
+
+<script>
+  // Discord copy username in overview
+  const ovDiscordBtn = document.getElementById('overviewDiscordBtn');
+  const ovDiscordText = document.getElementById('overviewDiscordText');
+  if (ovDiscordBtn && ovDiscordText) {
+    ovDiscordBtn.addEventListener('click', () => {
+      const username = ovDiscordBtn.getAttribute('data-discord') || 'juliancz_';
+      navigator.clipboard.writeText(username).then(() => {
+        ovDiscordText.textContent = `Copied: ${username}!`;
+        ovDiscordText.style.color = '#72947f';
+        setTimeout(() => {
+          ovDiscordText.textContent = `Discord: ${username}`;
+          ovDiscordText.style.color = '';
+        }, 2200);
+      });
+    });
+  }
+</script>

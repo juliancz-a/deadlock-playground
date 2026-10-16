@@ -1,0 +1,378 @@
+---
+import Icon from './Icon.astro';
+import changelogData from '../data/changelog.json';
+
+const currentVersion = `v${changelogData.latestVersion}`;
+---
+
+<div class="download-container">
+  <div class="download-grid">
+    <!-- Primary Download Card -->
+    <div class="main-download-card card-panel">
+      <div class="card-badge-row">
+        <span class="badge badge-gold">Official Build</span>
+        <span class="badge badge-sage">Windows 64-bit</span>
+        <span class="badge badge-orange">{currentVersion}</span>
+      </div>
+
+      <h2 class="card-title font-heading">Deadlock Playground {currentVersion}</h2>
+      <p class="card-desc">
+        Pre-compiled standalone Windows release. Includes full Source 2 ingestion, 3D texture painter, IK posing studio, high-res photography exporter, and auto-updater. No installation required—just unzip and run.
+      </p>
+
+      <div class="download-actions">
+        <a 
+          href="https://github.com/juliancz-a/deadlock-playground/releases/latest" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="btn-primary btn-large"
+        >
+          <Icon name="download" size={20} />
+          <span>Download DeadlockPlayground-{currentVersion}-win-x64.zip</span>
+        </a>
+
+        <div class="download-secondary-row">
+          <a 
+            href="https://github.com/juliancz-a/deadlock-playground/releases" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            class="btn-secondary"
+          >
+            <Icon name="archive" size={17} />
+            <span>All Release Archives</span>
+          </a>
+
+          <a 
+            href="https://github.com/juliancz-a/deadlock-playground" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            class="btn-secondary"
+          >
+            <Icon name="brand-github" size={17} />
+            <span>Source Code (GitHub)</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="requirements-box">
+        <h4 class="font-heading">System Requirements</h4>
+        <div class="req-grid">
+          <div class="req-item">
+            <span class="req-label">OS:</span>
+            <span class="req-val">Windows 10 / 11 (64-bit)</span>
+          </div>
+          <div class="req-item">
+            <span class="req-label">GPU:</span>
+            <span class="req-val">Direct3D 12 / Vulkan compatible GPU</span>
+          </div>
+          <div class="req-item">
+            <span class="req-label">Storage:</span>
+            <span class="req-val">~400 MB (plus local Deadlock files)</span>
+          </div>
+          <div class="req-item">
+            <span class="req-label">Game:</span>
+            <span class="req-val">Valve's Deadlock installed on Steam</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Community & Hub Cards -->
+    <div class="hub-cards-column">
+      <!-- GameBanana Card with Official Logo -->
+      <a 
+        href="https://gamebanana.com/tools/24316" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="hub-card card-panel gb-hub-card"
+      >
+        <div class="hub-icon-box gb-box">
+          <img src="/logo_gamebanana.jpg" alt="GameBanana" class="gb-logo-card" />
+        </div>
+        <div class="hub-info">
+          <div class="hub-title-row">
+            <h3 class="font-heading">GameBanana Mod Page</h3>
+            <Icon name="external-link" size={15} color="var(--dl-accent-brass)" />
+          </div>
+          <p>Download community hero skins, textures, and share your Deadlock creations.</p>
+        </div>
+      </a>
+
+      <!-- Discord Copy Username Card -->
+      <div 
+        id="downloadDiscordCard" 
+        class="hub-card card-panel discord-hub-card"
+        data-discord="juliancz_"
+        title="Click to copy Discord username: juliancz_"
+      >
+        <div class="hub-icon-box discord">
+          <Icon name="brand-discord" size={24} />
+        </div>
+        <div class="hub-info">
+          <div class="hub-title-row">
+            <h3 class="font-heading">Discord Contact</h3>
+            <span class="copy-badge" id="downloadDiscordBadge">Click to Copy</span>
+          </div>
+          <p id="downloadDiscordDesc">Direct message for help and feedback: <strong class="font-code">juliancz_</strong></p>
+        </div>
+      </div>
+
+      <!-- GitHub Repository Card -->
+      <a 
+        href="https://github.com/juliancz-a/deadlock-playground" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="hub-card card-panel"
+      >
+        <div class="hub-icon-box github">
+          <Icon name="brand-github" size={24} />
+        </div>
+        <div class="hub-info">
+          <div class="hub-title-row">
+            <h3 class="font-heading">GitHub Open Source</h3>
+            <Icon name="external-link" size={15} color="var(--dl-accent-brass)" />
+          </div>
+          <p>Full C# 13 / Godot 4.7.2 source code, issue tracker, and feature roadmap.</p>
+        </div>
+      </a>
+    </div>
+  </div>
+</div>
+
+<style>
+  .download-container {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .download-grid {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 20px;
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  .main-download-card {
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: radial-gradient(circle at top left, rgba(245, 158, 11, 0.08) 0%, var(--dl-bg-card) 70%);
+  }
+
+  .card-badge-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .card-title {
+    font-size: 1.6rem;
+    color: var(--dl-accent-brass);
+    line-height: 1.2;
+  }
+
+  .card-desc {
+    font-size: 0.875rem;
+    color: var(--dl-text-secondary);
+    line-height: 1.5;
+  }
+
+  .download-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .btn-large {
+    padding: 12px 22px;
+    font-size: 0.95rem;
+    justify-content: center;
+  }
+
+  .download-secondary-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .requirements-box {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--dl-border);
+  }
+
+  .requirements-box h4 {
+    font-size: 0.85rem;
+    color: var(--dl-accent-sage);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .req-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    font-size: 0.775rem;
+  }
+
+  .req-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .req-label {
+    color: var(--dl-text-dim);
+    font-weight: 600;
+  }
+
+  .req-val {
+    color: var(--dl-text-primary);
+  }
+
+  /* Right column hub cards */
+  .hub-cards-column {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    justify-content: center;
+  }
+
+  .hub-card {
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+  .hub-card:hover {
+    transform: translateX(4px);
+    border-color: var(--dl-accent-sage);
+  }
+
+  .hub-icon-box {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .gb-box {
+    background: #1e261f;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+  .gb-logo-card {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+
+  .hub-icon-box.discord {
+    background: rgba(88, 101, 242, 0.15);
+    color: #818cf8;
+    border: 1px solid rgba(88, 101, 242, 0.3);
+  }
+  .hub-icon-box.github {
+    background: rgba(243, 244, 246, 0.1);
+    color: #f3f4f6;
+    border: 1px solid rgba(243, 244, 246, 0.2);
+  }
+
+  .copy-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(129, 140, 248, 0.2);
+    color: #a5b4fc;
+    font-weight: 700;
+  }
+
+  .hub-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .hub-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .hub-title-row h3 {
+    font-size: 1rem;
+    color: var(--dl-accent-brass);
+  }
+
+  .hub-info p {
+    font-size: 0.775rem;
+    color: var(--dl-text-muted);
+    line-height: 1.4;
+  }
+
+  @media (max-width: 900px) {
+    .download-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .download-container {
+      padding: 12px;
+    }
+    .main-download-card {
+      padding: 16px;
+    }
+    .btn-large {
+      padding: 10px 14px;
+      font-size: 0.825rem;
+      text-align: center;
+    }
+    .btn-large span {
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }
+    .req-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  // Discord copy username card handler in Download tab
+  const dlDiscordCard = document.getElementById('downloadDiscordCard');
+  const dlDiscordBadge = document.getElementById('downloadDiscordBadge');
+  const dlDiscordDesc = document.getElementById('downloadDiscordDesc');
+
+  if (dlDiscordCard && dlDiscordBadge && dlDiscordDesc) {
+    dlDiscordCard.addEventListener('click', () => {
+      const username = dlDiscordCard.getAttribute('data-discord') || 'juliancz_';
+      navigator.clipboard.writeText(username).then(() => {
+        dlDiscordBadge.textContent = 'Copied!';
+        dlDiscordBadge.style.background = '#72947f';
+        dlDiscordBadge.style.color = '#0c100e';
+        dlDiscordDesc.innerHTML = `<span style="color:#72947f; font-weight:700;">Copied username: ${username} to clipboard!</span>`;
+        setTimeout(() => {
+          dlDiscordBadge.textContent = 'Click to Copy';
+          dlDiscordBadge.style.background = '';
+          dlDiscordBadge.style.color = '';
+          dlDiscordDesc.innerHTML = `Direct message for help and feedback: <strong class="font-code">${username}</strong>`;
+        }, 2500);
+      });
+    });
+  }
+</script>

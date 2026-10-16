@@ -12,6 +12,9 @@ const  GROUP_NAME := "overlay_atlas_managers"
 		atlas_size = clampi(value, 1, 1024 * 4)
 		
 @export_storage var atlas_texture_resource: Texture2DRD = null
+@export_storage var active_layer_resource: Texture2DRD = null
+@export_storage var full_composite_resource: Texture2DRD = null
+@export_storage var composite_above_resource: Texture2DRD = null
 ## Shader used for overlay materials.
 @export var overlay_shader: Shader = preload("uid://qow53ph8eivf")
 
@@ -21,10 +24,17 @@ const  GROUP_NAME := "overlay_atlas_managers"
 @export var apply_on_ready: bool = false
 
 var atlas_index: int = 0
+var owns_atlas_texture_rid: bool = true
+var is_active_target: bool = false
 
 var rd: RenderingDevice
 var atlas_texture_rid: RID = RID()
+var composite_texture_rid: RID = RID()
+var full_composite_rid: RID = RID()
+var composite_above_rid: RID = RID()
 var base_texture_rid: RID = RID()
+var atlas_width: int = 2048
+var atlas_height: int = 2048
 
 @export_category("Storage")
 # File load and save
@@ -52,11 +62,115 @@ func _notification(what):
 		_cleanup_texture()
 
 
+func _exit_tree() -> void:
+	if is_in_group(GROUP_NAME):
+		remove_from_group(GROUP_NAME)
+	_cleanup_texture()
+
+
 func apply() -> void:
 	_create_texture()
 	_create_texture_resource()
 	_apply_texture_to_texture_resource()
 	_construct_atlas_and_apply_materials()
+
+
+func resize_atlas(new_size: int) -> void:
+	atlas_size = new_size
+	_create_texture()
+	_create_texture_resource()
+	_apply_texture_to_texture_resource()
+
+	var mesh_instances := _get_child_mesh_instances(get_parent())
+	for mi in mesh_instances:
+		if mi and is_instance_valid(mi) and mi.material_overlay is ShaderMaterial:
+			mi.material_overlay.set_shader_parameter("overlay_texture", atlas_texture_resource)
+	print("OverlayAtlasManager: Resized atlas to {0}x{0} without repacking submeshes".format([atlas_size]))
+
+
+## Returns the current atlas size (width == height for square atlases).
+func get_native_atlas_size() -> int:
+	return maxi(atlas_width, atlas_height)
+
+
+func get_native_atlas_width() -> int:
+	return atlas_width
+
+
+func get_native_atlas_height() -> int:
+	return atlas_height
+
+
+func get_native_atlas_size_vec() -> Vector2i:
+	return Vector2i(atlas_width, atlas_height)
+
+
+## Applies this atlas manager to a single mesh at full native resolution.
+## Sized independently in width and height to next power-of-two (generic non-square support).
+## The mesh receives position_in_atlas=(0,0) and size_in_atlas=(1,1) — no packing, no downscaling.
+func apply_single_mesh(mesh_instance: MeshInstance3D, native_w: int, native_h: int) -> void:
+	if not mesh_instance or not is_instance_valid(mesh_instance) or not mesh_instance.mesh or mesh_instance.mesh.get_surface_count() == 0:
+		return
+
+	# Compute power-of-two for width and height independently
+	var w: int = 512
+	while w < native_w and w < 4096:
+		w *= 2
+	var h: int = 512
+	while h < native_h and h < 4096:
+		h *= 2
+	atlas_width = clampi(w, 256, 4096)
+	atlas_height = clampi(h, 256, 4096)
+	atlas_size = maxi(atlas_width, atlas_height)
+
+	_create_texture()
+	_create_texture_resource()
+	_apply_texture_to_texture_resource()
+
+	print("OverlayAtlasManager: apply_single_mesh — atlas={0}x{1}, native={2}x{3}".format([atlas_width, atlas_height, native_w, native_h]))
+
+	# Apply overlay material to the target mesh
+	var overlay_material := ShaderMaterial.new()
+	overlay_material.shader = overlay_shader
+	overlay_material.set_shader_parameter("overlay_texture", atlas_texture_resource)
+	overlay_material.set_shader_parameter("active_layer_texture", active_layer_resource)
+	overlay_material.set_shader_parameter("overlay_above_texture", composite_above_resource)
+	overlay_material.set_shader_parameter("position_in_atlas", Vector2(0.0, 0.0))
+	overlay_material.set_shader_parameter("size_in_atlas", Vector2(1.0, 1.0))
+	overlay_material.set_shader_parameter("atlas_index", atlas_index)
+
+	var base_tex := _find_base_texture(mesh_instance)
+	if base_tex:
+		overlay_material.set_shader_parameter("g_tColor", base_tex)
+
+	mesh_instance.material_overlay = overlay_material
+	mesh_instance.layers |= 1 << 20
+
+	print("OverlayAtlasManager: Bound atlas_index={0} to mesh '{1}' ({2}x{3})".format([atlas_index, mesh_instance.name, atlas_width, atlas_height]))
+
+
+## Applies the existing overlay texture and shader configuration of this atlas manager to an additional mesh sharing this material.
+func apply_to_mesh(mesh_instance: MeshInstance3D) -> void:
+	if not mesh_instance or not is_instance_valid(mesh_instance) or not mesh_instance.mesh or mesh_instance.mesh.get_surface_count() == 0:
+		return
+
+	var overlay_material := ShaderMaterial.new()
+	overlay_material.shader = overlay_shader
+	overlay_material.set_shader_parameter("overlay_texture", atlas_texture_resource)
+	overlay_material.set_shader_parameter("active_layer_texture", active_layer_resource)
+	overlay_material.set_shader_parameter("overlay_above_texture", composite_above_resource)
+	overlay_material.set_shader_parameter("position_in_atlas", Vector2(0.0, 0.0))
+	overlay_material.set_shader_parameter("size_in_atlas", Vector2(1.0, 1.0))
+	overlay_material.set_shader_parameter("atlas_index", atlas_index)
+
+	var base_tex := _find_base_texture(mesh_instance)
+	if base_tex:
+		overlay_material.set_shader_parameter("g_tColor", base_tex)
+
+	mesh_instance.material_overlay = overlay_material
+	mesh_instance.layers |= 1 << 20
+
+	print("OverlayAtlasManager: Bound existing atlas_index={0} to shared-material mesh '{1}'".format([atlas_index, mesh_instance.name]))
 
 
 func _get_atlas_index() -> void:
@@ -73,7 +187,9 @@ func _get_atlas_index() -> void:
 			possible_index.erase(manager.atlas_index)
 		
 		if possible_index.is_empty():
-			push_error("OverlayAtlasManager: No available atlas indices left! Maximum of 8 overlay atlases reached.")
+			# All 8 initial static slots claimed. SkinLayerManager dynamically sets the active target to slot 0.
+			atlas_index = 0
+			print("OverlayAtlasManager: Static atlas slots full. Using dynamic slot 0 for '{0}'".format([name]))
 			return
 		
 		atlas_index = possible_index[0]
@@ -84,17 +200,18 @@ func _create_texture() -> void:
 	if not rd:
 		return
 
-	print("OverlayAtlasManager: Creating overlay texture of size {0}x{0}".format([atlas_size]))
+	print("OverlayAtlasManager: Creating overlay texture of size {0}x{1}".format([atlas_width, atlas_height]))
 
 	# create texure format
 	var fmt := RDTextureFormat.new()
-	fmt.width = atlas_size
-	fmt.height = atlas_size
+	fmt.width = atlas_width
+	fmt.height = atlas_height
 	fmt.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
 	fmt.texture_type = RenderingDevice.TEXTURE_TYPE_2D
 	fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT + \
 					 RenderingDevice.TEXTURE_USAGE_STORAGE_BIT + \
 					 RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT + \
+					 RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT + \
 					 RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 
 	# create texture view
@@ -117,15 +234,37 @@ func _create_texture() -> void:
 	
 	#if not loaded create new image
 	if !image:
-		image = Image.create(atlas_size, atlas_size, false, Image.FORMAT_RGBAH)
+		image = Image.create(atlas_width, atlas_height, false, Image.FORMAT_RGBAH)
 
 	# Clean up previous texture and resource binding
 	if atlas_texture_resource:
 		atlas_texture_resource.texture_rd_rid = RID()
+	if active_layer_resource:
+		active_layer_resource.texture_rd_rid = RID()
+	if full_composite_resource:
+		full_composite_resource.texture_rd_rid = RID()
+	if composite_above_resource:
+		composite_above_resource.texture_rd_rid = RID()
+
 	var old_rid := atlas_texture_rid
 	atlas_texture_rid = RID()
-	if old_rid.is_valid() and rd.texture_is_valid(old_rid):
+	if owns_atlas_texture_rid and old_rid.is_valid() and rd.texture_is_valid(old_rid):
 		rd.free_rid(old_rid)
+
+	var old_comp_rid := composite_texture_rid
+	composite_texture_rid = RID()
+	if old_comp_rid.is_valid() and rd.texture_is_valid(old_comp_rid):
+		rd.free_rid(old_comp_rid)
+
+	var old_above_rid := composite_above_rid
+	composite_above_rid = RID()
+	if old_above_rid.is_valid() and rd.texture_is_valid(old_above_rid):
+		rd.free_rid(old_above_rid)
+
+	var old_full_rid := full_composite_rid
+	full_composite_rid = RID()
+	if old_full_rid.is_valid() and rd.texture_is_valid(old_full_rid):
+		rd.free_rid(old_full_rid)
 
 	# Clean up previous base texture
 	var old_base_rid := base_texture_rid
@@ -133,13 +272,18 @@ func _create_texture() -> void:
 	if old_base_rid.is_valid() and rd.texture_is_valid(old_base_rid):
 		rd.free_rid(old_base_rid)
 
-	# Create new texture on RenderingDevice
-	atlas_texture_rid = rd.texture_create(fmt, view, [image.get_data()])
+	# Create new textures on RenderingDevice
+	var raw_init_data := [image.get_data()]
+	atlas_texture_rid = rd.texture_create(fmt, view, raw_init_data)
+	owns_atlas_texture_rid = true
+	composite_texture_rid = rd.texture_create(fmt, view, raw_init_data)
+	composite_above_rid = rd.texture_create(fmt, view, raw_init_data)
+	full_composite_rid = rd.texture_create(fmt, view, raw_init_data)
 	image = null # Free CPU RAM immediately
-	print("OverlayAtlasManager: Created texture RID {0}".format([atlas_texture_rid.get_id()]))
+	print("OverlayAtlasManager: Created texture RID {0}, composite RID {1}, above RID {2}".format([atlas_texture_rid.get_id(), composite_texture_rid.get_id(), composite_above_rid.get_id()]))
 
 	# Create companion base texture on RenderingDevice
-	var base_image := Image.create(atlas_size, atlas_size, false, Image.FORMAT_RGBAH)
+	var base_image := Image.create(atlas_width, atlas_height, false, Image.FORMAT_RGBAH)
 	base_texture_rid = rd.texture_create(fmt, view, [base_image.get_data()])
 	base_image = null
 	print("OverlayAtlasManager: Created base texture RID {0}".format([base_texture_rid.get_id()]))
@@ -153,13 +297,28 @@ func _cleanup_texture() -> void:
 	print("OverlayAtlasManager: Cleaning up overlay texture")
 	if atlas_texture_resource:
 		atlas_texture_resource.texture_rd_rid = RID()
-	if atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+	if active_layer_resource:
+		active_layer_resource.texture_rd_rid = RID()
+	if full_composite_resource:
+		full_composite_resource.texture_rd_rid = RID()
+	if composite_above_resource:
+		composite_above_resource.texture_rd_rid = RID()
+
+	if owns_atlas_texture_rid and atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
 		rd.free_rid(atlas_texture_rid)
-		atlas_texture_rid = RID()
+	atlas_texture_rid = RID()
+	if composite_texture_rid.is_valid() and rd and rd.texture_is_valid(composite_texture_rid):
+		rd.free_rid(composite_texture_rid)
+		composite_texture_rid = RID()
+	if composite_above_rid.is_valid() and rd and rd.texture_is_valid(composite_above_rid):
+		rd.free_rid(composite_above_rid)
+		composite_above_rid = RID()
+	if full_composite_rid.is_valid() and rd and rd.texture_is_valid(full_composite_rid):
+		rd.free_rid(full_composite_rid)
+		full_composite_rid = RID()
 	if base_texture_rid.is_valid() and rd and rd.texture_is_valid(base_texture_rid):
 		rd.free_rid(base_texture_rid)
 		base_texture_rid = RID()
-	_notify_brushes()
 
 
 func _notify_brushes() -> void:
@@ -169,16 +328,55 @@ func _notify_brushes() -> void:
 
 func _create_texture_resource() -> void:
 	atlas_texture_resource = Texture2DRD.new()
+	active_layer_resource = Texture2DRD.new()
+	full_composite_resource = Texture2DRD.new()
+	composite_above_resource = Texture2DRD.new()
 
 
 func _apply_texture_to_texture_resource() -> void:
 	#create Texture2DRD
-	if not atlas_texture_resource:
+	if not atlas_texture_resource or not active_layer_resource or not full_composite_resource or not composite_above_resource:
 		_create_texture_resource()
 	
-	if atlas_texture_rid.is_valid():
-		atlas_texture_resource.texture_rd_rid = atlas_texture_rid  # handles cleanup of old RID
-		print("OverlayAtlasManager: Bound atlas_texture_rid {0} to Texture2DRD".format([atlas_texture_rid.get_id()]))
+	var target_atlas_rid := RID()
+	if composite_texture_rid.is_valid() and rd and rd.texture_is_valid(composite_texture_rid):
+		target_atlas_rid = composite_texture_rid
+	elif atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+		target_atlas_rid = atlas_texture_rid
+
+	if atlas_texture_resource.texture_rd_rid != target_atlas_rid:
+		atlas_texture_resource = Texture2DRD.new()
+		atlas_texture_resource.texture_rd_rid = target_atlas_rid
+
+	var target_active_rid := RID()
+	if atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+		target_active_rid = atlas_texture_rid
+
+	if active_layer_resource.texture_rd_rid != target_active_rid:
+		active_layer_resource = Texture2DRD.new()
+		active_layer_resource.texture_rd_rid = target_active_rid
+
+	var target_above_rid := RID()
+	if composite_above_rid.is_valid() and rd and rd.texture_is_valid(composite_above_rid):
+		target_above_rid = composite_above_rid
+
+	if composite_above_resource.texture_rd_rid != target_above_rid:
+		composite_above_resource = Texture2DRD.new()
+		composite_above_resource.texture_rd_rid = target_above_rid
+
+	var target_full_rid := RID()
+	if full_composite_rid.is_valid() and rd and rd.texture_is_valid(full_composite_rid):
+		target_full_rid = full_composite_rid
+	elif composite_texture_rid.is_valid() and rd and rd.texture_is_valid(composite_texture_rid):
+		target_full_rid = composite_texture_rid
+	elif atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
+		target_full_rid = atlas_texture_rid
+
+	if full_composite_resource.texture_rd_rid != target_full_rid:
+		if full_composite_resource.texture_rd_rid.is_valid() and rd and not rd.texture_is_valid(full_composite_resource.texture_rd_rid):
+			full_composite_resource = Texture2DRD.new()
+		full_composite_resource.texture_rd_rid = target_full_rid
+
 	notify_property_list_changed()
 
 
@@ -249,6 +447,17 @@ func _get_submesh_recommended_size(mesh_instance: MeshInstance3D, base_tex: Text
 		return Vector2i(256, 256)
 
 
+func _is_valid_character_mesh(mesh_instance: MeshInstance3D) -> bool:
+	if not mesh_instance or not is_instance_valid(mesh_instance) or mesh_instance.mesh == null:
+		return false
+	if mesh_instance.has_meta("IsHiddenComposite") or mesh_instance.has_meta("IsHelperMesh"):
+		return false
+	var n := mesh_instance.name.to_lower()
+	if n.begins_with("gizmo") or n.begins_with("selectionoutline") or n.begins_with("decal") or n.begins_with("camerabrush") or n.begins_with("preview") or n.begins_with("textprojector"):
+		return false
+	return true
+
+
 func _construct_atlas_and_apply_materials() -> void:
 	var mesh_instances := _get_child_mesh_instances(get_parent())
 
@@ -256,10 +465,8 @@ func _construct_atlas_and_apply_materials() -> void:
 	var rects: Array[Vector2] = []
 	for i in range(mesh_instances.size() - 1, -1, -1):
 		var mesh_instance = mesh_instances[i]
-		if mesh_instance.mesh == null or not mesh_instance.visible:
-			mesh_instances.erase(mesh_instance)
-			if mesh_instance.mesh == null:
-				push_warning("MeshInstance3D '{0}' has no mesh assigned, skipping overlay material application.".format([mesh_instance.name]))
+		if not _is_valid_character_mesh(mesh_instance):
+			mesh_instances.remove_at(i)
 		else:
 			var base_tex := _find_base_texture(mesh_instance)
 			var rec_size := _get_submesh_recommended_size(mesh_instance, base_tex)
@@ -298,9 +505,15 @@ func _construct_atlas_and_apply_materials() -> void:
 
 func _get_self_and_child_mesh_instances(node: Node, children_acc: Array[MeshInstance3D]) -> void:
 	if node is MeshInstance3D:
-		children_acc.push_back(node)
+		var n_name := node.name.to_lower()
+		if not n_name.begins_with("@") and not "picker" in n_name and not "handle" in n_name and not "visual" in n_name and not "gizmo" in n_name and not "tip" in n_name and not "pole" in n_name:
+			if node.mesh and node.mesh.get_surface_count() > 0 and not (node.mesh is ImmediateMesh):
+				children_acc.push_back(node)
 		
 	for child in node.get_children():
+		var c_name := child.name.to_lower()
+		if c_name.begins_with("@") or "picker" in c_name or "gizmo" in c_name or "handle" in c_name or "visual" in c_name:
+			continue
 		_get_self_and_child_mesh_instances(child, children_acc)
 
 

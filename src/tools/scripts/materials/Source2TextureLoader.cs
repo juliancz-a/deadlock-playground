@@ -1,11 +1,13 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Godot;
 using SteamDatabase.ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using ValveResourceFormat.Serialization.KeyValues;
+using ValveResourceFormat.IO;
 using SkiaSharp;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 
@@ -196,7 +198,53 @@ public static class Source2TextureLoader
             return null;
         }
 
-        var texture = (ValveResourceFormat.ResourceTypes.Texture)resource.DataBlock;
+        return DecodeTextureToGodot((ValveResourceFormat.ResourceTypes.Texture)resource.DataBlock, vtexInternalPath, maxDimension, forceOpaque);
+    }
+
+    /// <summary>
+    /// Extracts a .vtex_c file from an IFileLoader into a Godot ImageTexture.
+    /// </summary>
+    public static ImageTexture ExtractVtexToGodot(IFileLoader fileLoader, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = false)
+    {
+        if (fileLoader == null || string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
+
+        if (vtexInternalPath.StartsWith("resource:", StringComparison.OrdinalIgnoreCase))
+        {
+            vtexInternalPath = vtexInternalPath.Substring(9);
+        }
+        vtexInternalPath = vtexInternalPath.Trim('"', '\'', ' ');
+
+        string searchRoute = vtexInternalPath.Replace('\\', '/');
+        if (!searchRoute.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+        {
+            searchRoute += "_c";
+        }
+
+        ValveResourceFormat.Resource resource = null;
+        try
+        {
+            resource = fileLoader.LoadFile(searchRoute) ?? fileLoader.LoadFileCompiled(searchRoute);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[TextureLoader] Error loading {searchRoute} via fileLoader: {ex.Message}");
+        }
+
+        if (resource == null) return null;
+        using (resource)
+        {
+            if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture texture)
+            {
+                return null;
+            }
+
+            return DecodeTextureToGodot(texture, vtexInternalPath, maxDimension, forceOpaque);
+        }
+    }
+
+    public static ImageTexture DecodeTextureToGodot(ValveResourceFormat.ResourceTypes.Texture texture, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = false)
+    {
+        if (texture == null) return null;
 
         uint maxMip = texture.NumMipLevels > 0 ? (uint)(texture.NumMipLevels - 1) : 0;
         uint mipLevel = 0;
@@ -243,55 +291,141 @@ public static class Source2TextureLoader
                                   vtexInternalPath.Contains("smoke", StringComparison.OrdinalIgnoreCase) ||
                                   vtexInternalPath.Contains("opacity", StringComparison.OrdinalIgnoreCase);
 
-        // Encode to PNG via Skia. Skia handles internal bitmap format (BGRA8888) to standard PNG conversion reliably.
-        using var skImage = SKImage.FromBitmap(skBitmap);
-        if (skImage == null) return null;
+        int width = skBitmap.Width;
+        int height = skBitmap.Height;
+        int pixelCount = width * height;
+        IntPtr pixelsPtr = skBitmap.GetPixels();
+        int byteCount = skBitmap.ByteCount;
+        if (pixelsPtr == IntPtr.Zero || byteCount <= 0 || width <= 0 || height <= 0) return null;
 
-        using var encodedData = skImage.Encode(SKEncodedImageFormat.Png, 100);
-        if (encodedData == null) return null;
+        // Allocate a standard 32-bit RGBA buffer of exact size width * height * 4
+        byte[] rgbaBytes = new byte[pixelCount * 4];
 
-        byte[] pngBytes = encodedData.ToArray();
-        var godotImage = new Image();
-        Error err = godotImage.LoadPngFromBuffer(pngBytes);
-        if (err != Error.Ok)
+        // Format 1: 32-bit BGRA (Most common Source 2 format from VRF on Windows)
+        if (skBitmap.ColorType == SKColorType.Bgra8888 && byteCount >= pixelCount * 4)
         {
-            GD.PrintErr($"[TextureLoader] Error loading PNG buffer ({vtexInternalPath}): {err}");
-            return null;
-        }
+            byte[] rawBytes = new byte[pixelCount * 4];
+            Marshal.Copy(pixelsPtr, rawBytes, 0, rawBytes.Length);
 
-        if (!isAlphaCardTexture)
-        {
-            // For standard non-card surfaces, remove BC7 roughness/specular masks by converting to Rgb8 and back to Rgba8
-            godotImage.Convert(Image.Format.Rgb8);
-            godotImage.Convert(Image.Format.Rgba8);
-        }
-        else
-        {
-            // For authentic alpha-card textures (fur, sparkles, eyelashes, cards), preserve the author-crafted cutout mask.
-            // Safeguard: if the decoded alpha is completely blank (all zeros), convert to opaque so geometry doesn't vanish.
-            bool hasVisiblePixels = false;
-            int stepX = Math.Max(1, godotImage.GetWidth() / 16);
-            int stepY = Math.Max(1, godotImage.GetHeight() / 16);
-            for (int y = 0; y < godotImage.GetHeight(); y += stepY)
+            unsafe
             {
-                for (int x = 0; x < godotImage.GetWidth(); x += stepX)
+                fixed (byte* srcPtr = rawBytes)
+                fixed (byte* dstPtr = rgbaBytes)
                 {
-                    if (godotImage.GetPixel(x, y).A > 0.05f)
+                    uint* s32 = (uint*)srcPtr;
+                    uint* d32 = (uint*)dstPtr;
+
+                    if (!isAlphaCardTexture)
                     {
-                        hasVisiblePixels = true;
-                        break;
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = s32[i];
+                            byte b = (byte)(c & 0xFF);
+                            byte g = (byte)((c >> 8) & 0xFF);
+                            byte r = (byte)((c >> 16) & 0xFF);
+                            byte a = forceOpaque ? (byte)0xFF : (byte)((c >> 24) & 0xFF);
+                            d32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                        }
+                    }
+                    else
+                    {
+                        bool hasVisiblePixels = false;
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = s32[i];
+                            byte a = (byte)((c >> 24) & 0xFF);
+                            if (a > 12) { hasVisiblePixels = true; break; }
+                        }
+
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            uint c = s32[i];
+                            byte b = (byte)(c & 0xFF);
+                            byte g = (byte)((c >> 8) & 0xFF);
+                            byte r = (byte)((c >> 16) & 0xFF);
+                            byte a = (byte)((c >> 24) & 0xFF);
+                            if (!hasVisiblePixels) a = 0xFF;
+                            d32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                        }
                     }
                 }
-                if (hasVisiblePixels) break;
             }
-
-            if (!hasVisiblePixels)
+        }
+        // Format 2: 32-bit RGBA
+        else if (skBitmap.ColorType == SKColorType.Rgba8888 && byteCount >= pixelCount * 4)
+        {
+            Marshal.Copy(pixelsPtr, rgbaBytes, 0, rgbaBytes.Length);
+            unsafe
             {
-                godotImage.Convert(Image.Format.Rgb8);
-                godotImage.Convert(Image.Format.Rgba8);
+                fixed (byte* ptr = rgbaBytes)
+                {
+                    uint* d32 = (uint*)ptr;
+                    if (!isAlphaCardTexture && forceOpaque)
+                    {
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            d32[i] |= 0xFF000000;
+                        }
+                    }
+                    else if (isAlphaCardTexture)
+                    {
+                        bool hasVisiblePixels = false;
+                        for (int i = 0; i < pixelCount; i++)
+                        {
+                            if (((d32[i] >> 24) & 0xFF) > 12) { hasVisiblePixels = true; break; }
+                        }
+                        if (!hasVisiblePixels)
+                        {
+                            for (int i = 0; i < pixelCount; i++) d32[i] |= 0xFF000000;
+                        }
+                    }
+                }
+            }
+        }
+        // Format 3: 8-bit Single Channel (Gray8 or Alpha8 - masks like lash_sparkles_mask, jitter_mask, etc.)
+        else if ((skBitmap.ColorType == SKColorType.Gray8 || skBitmap.ColorType == SKColorType.Alpha8) && byteCount >= pixelCount)
+        {
+            byte[] rawBytes = new byte[pixelCount];
+            Marshal.Copy(pixelsPtr, rawBytes, 0, rawBytes.Length);
+
+            unsafe
+            {
+                fixed (byte* srcPtr = rawBytes)
+                fixed (byte* dstPtr = rgbaBytes)
+                {
+                    uint* d32 = (uint*)dstPtr;
+                    for (int i = 0; i < pixelCount; i++)
+                    {
+                        byte v = srcPtr[i];
+                        // Replicate value across R, G, B, and A so shaders sampling .r, .rgb, or .a get the exact mask value
+                        d32[i] = (uint)(v | (v << 8) | (v << 16) | (v << 24));
+                    }
+                }
+            }
+        }
+        // Format 4: Fallback for any other format (e.g. Rgb565) via GetPixel
+        else
+        {
+            unsafe
+            {
+                fixed (byte* dstPtr = rgbaBytes)
+                {
+                    uint* d32 = (uint*)dstPtr;
+                    int idx = 0;
+                    for (int y = 0; y < height; y++)
+                    {
+                        for (int x = 0; x < width; x++)
+                        {
+                            var col = skBitmap.GetPixel(x, y);
+                            byte a = (!isAlphaCardTexture && forceOpaque) ? (byte)0xFF : col.Alpha;
+                            d32[idx++] = (uint)(col.Red | (col.Green << 8) | (col.Blue << 16) | (a << 24));
+                        }
+                    }
+                }
             }
         }
 
+        var godotImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, rgbaBytes);
         godotImage.GenerateMipmaps();
         var imageTex = ImageTexture.CreateFromImage(godotImage);
         if (imageTex != null)
@@ -418,5 +552,86 @@ public static class Source2TextureLoader
         }
 
         return entry;
+    }
+
+    /// <summary>
+    /// Extracts all sprite sheet sequence bounding rectangles from a compiled .vtex_c texture.
+    /// </summary>
+    public static Vector4[] ExtractSpriteSheetSequences(
+        string vtexPath,
+        IFileLoader fileLoader,
+        Package basePackage = null,
+        Package addonPackage = null)
+    {
+        if (string.IsNullOrWhiteSpace(vtexPath)) return Array.Empty<Vector4>();
+
+        string searchPath = vtexPath.Replace('\\', '/');
+        if (!searchPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) searchPath += "_c";
+
+        ValveResourceFormat.Resource res = null;
+        try
+        {
+            if (fileLoader != null)
+            {
+                res = fileLoader.LoadFile(searchPath) ?? fileLoader.LoadFileCompiled(searchPath);
+            }
+
+            if (res == null && addonPackage != null)
+            {
+                var entry = FindVtexEntry(addonPackage, searchPath);
+                if (entry != null)
+                {
+                    addonPackage.ReadEntry(entry, out var bytes);
+                    res = new ValveResourceFormat.Resource();
+                    res.Read(new MemoryStream(bytes));
+                }
+            }
+
+            if (res == null && basePackage != null)
+            {
+                var entry = FindVtexEntry(basePackage, searchPath);
+                if (entry != null)
+                {
+                    basePackage.ReadEntry(entry, out var bytes);
+                    res = new ValveResourceFormat.Resource();
+                    res.Read(new MemoryStream(bytes));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[TextureLoader] Error reading spritesheet metadata ({vtexPath}): {ex.Message}");
+        }
+
+        if (res != null)
+        {
+            using (res)
+            {
+                if (res.DataBlock is ValveResourceFormat.ResourceTypes.Texture vTex)
+                {
+                    var sheet = vTex.GetSpriteSheetData();
+                    if (sheet != null && sheet.Sequences.Length > 0)
+                    {
+                        var rects = new Vector4[sheet.Sequences.Length];
+                        for (int i = 0; i < sheet.Sequences.Length; i++)
+                        {
+                            var seq = sheet.Sequences[i];
+                            if (seq.Frames.Length > 0 && seq.Frames[0].Images.Length > 0)
+                            {
+                                var img = seq.Frames[0].Images[0];
+                                rects[i] = new Vector4(img.UncroppedMin.X, img.UncroppedMin.Y, img.UncroppedMax.X, img.UncroppedMax.Y);
+                            }
+                            else
+                            {
+                                rects[i] = new Vector4(0f, 0f, 1f, 1f);
+                            }
+                        }
+                        return rects;
+                    }
+                }
+            }
+        }
+
+        return Array.Empty<Vector4>();
     }
 }

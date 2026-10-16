@@ -1,0 +1,199 @@
+/* Deadlock Playground Global Design System */
+
+@font-face {
+  font-family: 'Dahlia';
+  src: url('/fonts/dahlia-bold.otf') format('opentype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Colus';
+  src: url('/fonts/Colus-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Supersonic';
+  src: url('/fonts/Supersonic Rocketship.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --dl-bg-main: #0c100e;
+  --dl-bg-sidebar: #111715;
+  --dl-bg-panel: #16201d;
+  --dl-bg-card: #1c2a26;
+  --dl-bg-card-hover: #233631;
+  --dl-border: #2b3f37;
+  --dl-border-light: #3d584d;
+  --dl-border-gold: rgba(239, 222, 191, 0.4);
+  --dl-accent-sage: #72947f;
+  --dl-accent-sage-glow: rgba(114, 148, 127, 0.35);
+  --dl-accent-brass: #efdebf;
+  --dl-accent-gold: #f59e0b;
+  --dl-accent-orange: #ef6133;
+  --dl-accent-purple: #7e4a86;
+  --dl-accent-cyan: #38bdf8;
+  --dl-text-primary: #f8fafc;
+  --dl-text-secondary: #cbd5e1;
+  --dl-text-muted: #94a3b8;
+  --dl-text-dim: #64748b;
+  --dl-font-display: 'Dahlia', 'Colus', 'Georgia', serif;
+  --dl-font-heading: 'Colus', 'Dahlia', serif;
+  --dl-font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --dl-font-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+/* Custom Tabler / Deadlock Cursor */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  cursor: url('/cursor.svg') 3 3, auto;
+}
+
+a, button, select, input[type="button"], input[type="submit"], input[type="reset"], [role="button"], .interactive, .cursor-pointer {
+  cursor: url('/cursor-pointer.svg') 3 3, pointer !important;
+}
+
+html, body {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  background-color: var(--dl-bg-main);
+  color: var(--dl-text-primary);
+  font-family: var(--dl-font-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  overflow-y: hidden; /* App-like viewport layout on desktop */
+}
+
+@media (max-width: 900px) {
+  html, body {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden; /* Strictly prevent horizontal scroll on mobile */
+    overflow-y: auto;   /* Natural smooth vertical scroll */
+  }
+}
+
+/* Custom Dark Sage Scrollbar (identical to Godot UI) */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: var(--dl-bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--dl-border-light);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--dl-accent-sage);
+}
+
+/* Typography Helpers */
+.font-display { font-family: var(--dl-font-display); }
+.font-heading { font-family: var(--dl-font-heading); }
+.font-code { font-family: var(--dl-font-code); }
+
+/* Buttons & Chips */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, var(--dl-accent-brass) 0%, #d8c6a5 100%);
+  color: #121815;
+  font-weight: 700;
+  font-size: 0.875rem;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.btn-primary:hover {
+  background: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(239, 222, 191, 0.4);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--dl-bg-card);
+  color: var(--dl-text-primary);
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--dl-border);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+.btn-secondary:hover {
+  background: var(--dl-bg-card-hover);
+  border-color: var(--dl-accent-sage);
+  color: var(--dl-accent-brass);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.725rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-gold {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--dl-accent-gold);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.badge-sage {
+  background: rgba(114, 148, 127, 0.15);
+  color: var(--dl-accent-sage);
+  border: 1px solid rgba(114, 148, 127, 0.35);
+}
+.badge-orange {
+  background: rgba(239, 97, 51, 0.15);
+  color: var(--dl-accent-orange);
+  border: 1px solid rgba(239, 97, 51, 0.3);
+}
+
+/* Glassmorphism Panel Cards */
+.card-panel {
+  background: var(--dl-bg-card);
+  border: 1px solid var(--dl-border);
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.card-panel:hover {
+  border-color: var(--dl-border-light);
+}
+
+/* Pulse animation for live/unread indicators */
+@keyframes dl-pulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+.pulse-dot {
+  animation: dl-pulse 2s infinite ease-in-out;
+}

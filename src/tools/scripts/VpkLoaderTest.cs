@@ -1,6 +1,4 @@
-#pragma warning disable CS0618
 using Godot;
-using SteamDatabase.ValvePak;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -14,6 +12,7 @@ using DeadlockPlayground.Tools;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Addons;
+using SteamDatabase.ValvePak;
 
 public partial class VpkLoaderTest : Node3D
 {
@@ -39,6 +38,8 @@ public partial class VpkLoaderTest : Node3D
 
 	public string ActiveAddonVpkPath => AddonVpkPath;
 	public DeadlockHeroEntry LastLoadedHeroEntry { get; private set; }
+	public DeadlockHeroEntry BaseHeroEntry { get; private set; }
+	public bool IsExtraModelLoaded { get; private set; }
 	public string LastLoadedVmdlPath { get; private set; }
 	public string LastLoadedHeroKey { get; private set; }
 	public string LastLoadedDisplayName { get; private set; }
@@ -55,6 +56,55 @@ public partial class VpkLoaderTest : Node3D
     private ValveResourceFormat.Resource _currentVrfResource;
     private Model _currentVrfModel;
     private IFileLoader _currentFileLoader;
+    public IFileLoader CurrentFileLoader => _currentFileLoader;
+
+    private Package _basePackage;
+
+    public Package GetOrCreateBasePackage()
+    {
+        if (_basePackage != null) return _basePackage;
+        if (File.Exists(VpkPath))
+        {
+            try
+            {
+                _basePackage = new Package();
+                _basePackage.Read(VpkPath);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[VpkLoader] Failed to read base package '{VpkPath}': {ex.Message}");
+                _basePackage?.Dispose();
+                _basePackage = null;
+            }
+        }
+        return _basePackage;
+    }
+
+    public IFileLoader GetOrCreateFileLoader()
+    {
+        if (_currentFileLoader != null) return _currentFileLoader;
+
+        var basePkg = GetOrCreateBasePackage();
+        if (basePkg != null)
+        {
+            IFileLoader baseLoader = new GameFileLoader(basePkg, "");
+
+            if (!string.IsNullOrEmpty(AddonVpkPath) && File.Exists(AddonVpkPath))
+            {
+                var addonPkg = new Package();
+                addonPkg.Read(AddonVpkPath);
+                IFileLoader addonLoader = new GameFileLoader(addonPkg, "");
+                _currentFileLoader = new DualLayerGameFileLoader(addonLoader, baseLoader);
+            }
+            else
+            {
+                _currentFileLoader = baseLoader;
+            }
+        }
+
+        return _currentFileLoader;
+    }
+
     public List<DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo> CurrentHeroAnimations { get; private set; } = new();
 
     public Godot.Animation DecodeAnimation(DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info, Skeleton3D skeleton, AnimationPlayer animPlayer)
@@ -72,6 +122,7 @@ public partial class VpkLoaderTest : Node3D
 	{
 		AddonVpkPath = addonVpkPath ?? "";
 		ActiveAddonInfo = modInfo;
+		_currentFileLoader = null;
 		GD.Print($"[VpkLoader] Active Addon set to: {(string.IsNullOrEmpty(AddonVpkPath) ? "None (Vanilla)" : Path.GetFileName(AddonVpkPath))}");
 	}
 
@@ -96,13 +147,29 @@ public partial class VpkLoaderTest : Node3D
 
 		SetActiveAddon(modInfo.FilePath, modInfo);
 
-		// If texture-only mod with detected hero, load the corresponding hero from catalog
-		if (modInfo.ModType == AddonModType.TextureOnly && !string.IsNullOrEmpty(modInfo.DetectedHeroCodename))
+		// If package info is incomplete, inspect package directly to populate model and texture entries
+		if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && File.Exists(modInfo.FilePath))
 		{
-			var catalogEntry = DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename);
+			var inspected = DeadlockAddonScanner.InspectAddonPackage(modInfo.FilePath);
+			if (inspected != null)
+			{
+				modInfo = inspected;
+				ActiveAddonInfo = inspected;
+			}
+		}
+
+		// If texture-only mod with detected hero, load the corresponding hero from catalog
+		if (modInfo.ModType == AddonModType.TextureOnly)
+		{
+			var catalogEntry = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
+				? (DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename) ?? DeadlockHeroCatalog.ResolveHero(modInfo.DetectedHeroCodename))
+				: null;
+
+			catalogEntry ??= BaseHeroEntry;
+
 			if (catalogEntry != null)
 			{
-				GD.Print($"[VpkLoader] Loading base hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
+				GD.Print($"[VpkLoader] Loading hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
 				return await LoadHeroModelAsync(catalogEntry);
 			}
 		}
@@ -116,6 +183,16 @@ public partial class VpkLoaderTest : Node3D
 
 		if (string.IsNullOrEmpty(targetRoute))
 		{
+			var fallbackHero = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
+				? (DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename) ?? DeadlockHeroCatalog.ResolveHero(modInfo.DetectedHeroCodename))
+				: null;
+
+			if (fallbackHero != null)
+			{
+				GD.Print($"[VpkLoader] No .vmdl_c in addon '{modInfo.FileName}', applying textures to hero '{fallbackHero.DisplayName}'...");
+				return await LoadHeroModelAsync(fallbackHero);
+			}
+
 			GD.PrintErr($"[VpkLoader] No .vmdl_c found in addon '{modInfo.FileName}' to load.");
 			return null;
 		}
@@ -156,13 +233,39 @@ public partial class VpkLoaderTest : Node3D
 	public async Task<Node3D> LoadHeroModelAsync(DeadlockHeroEntry entry)
 	{
 		if (entry == null) return null;
+		// 1. Cleanup and flush previous hero before overwriting hero metadata
+		CleanupCurrentHero();
+
 		LastLoadedHeroEntry = entry;
+		BaseHeroEntry = entry;
+		IsExtraModelLoaded = false;
 		LastLoadedVmdlPath = entry.VmdlRelativePath;
 		LastLoadedHeroKey = entry.InternalCodename;
 		LastLoadedDisplayName = entry.DisplayName;
 		HeroName = entry.InternalCodename;
 		HeroModelName = Path.GetFileNameWithoutExtension(entry.VmdlRelativePath);
 		return await LoadModelInternalAsync(entry.VmdlRelativePath, entry.InternalCodename, entry.DisplayName);
+	}
+
+	/// <summary>
+	/// Loads an extra or ability-specific 3D model (e.g. bookworm_dragon.vmdl_c, summons, turrets).
+	/// Cleans up any previously loaded model, displays the extra model in the 3D viewport,
+	/// and emits HeroLoaded to automatically populate Painter Tab and Submesh Visibility.
+	/// </summary>
+	public async Task<Node3D> LoadExtraModelAsync(string vmdlPath, string heroKey, string displayName)
+	{
+		if (string.IsNullOrEmpty(vmdlPath)) return null;
+		// 1. Cleanup and flush previous hero before overwriting hero metadata
+		CleanupCurrentHero();
+
+		LastLoadedVmdlPath = vmdlPath;
+		LastLoadedHeroKey = heroKey ?? Path.GetFileNameWithoutExtension(vmdlPath);
+		LastLoadedDisplayName = displayName ?? Path.GetFileNameWithoutExtension(vmdlPath);
+		LastLoadedHeroEntry = null;
+		IsExtraModelLoaded = true;
+		HeroName = LastLoadedHeroKey;
+		HeroModelName = Path.GetFileNameWithoutExtension(vmdlPath);
+		return await LoadModelInternalAsync(vmdlPath, LastLoadedHeroKey, LastLoadedDisplayName);
 	}
 
 	public async Task LoadHeroAsync(string hero, string model)
@@ -467,6 +570,10 @@ public partial class VpkLoaderTest : Node3D
 
     private void CleanupCurrentHero()
     {
+        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                     ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+        paintTab?.FlushActiveChangesToWorkspace(true);
+
         EmitSignal(SignalName.HeroUnloaded);
 
         if (_currentPoseEditor != null)
@@ -482,6 +589,7 @@ public partial class VpkLoaderTest : Node3D
             {
                 DeadlockAnimLoader.ClearAnimationLibrary(animPlayer);
             }
+            DeadlockPlayground.Particles.ModelAttachmentRegistry.ClearHeroAttachments(_currentHeroNode);
             DeadlockAnimLoader.ClearHeroPoses(_currentHeroNode);
             DisposeNodeRecursively(_currentHeroNode);
             _currentHeroNode.GetParent()?.RemoveChild(_currentHeroNode);
@@ -494,6 +602,12 @@ public partial class VpkLoaderTest : Node3D
         _currentVrfResource = null;
         _currentVrfModel = null;
         _currentFileLoader = null;
+
+        // Unload active particle effect and badge
+        var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+        stage?.UnloadActiveParticle();
+        var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+        badge?.HideBadge();
 
         // Clean texture cache so reloading a hero or switching heroes never accesses disposed texture objects
         Source2MaterialHelper.cleanCache();
@@ -585,6 +699,9 @@ public partial class VpkLoaderTest : Node3D
 
 			_currentHeroNode = modelScene;
 
+			// Register authoritative Model Attachments for data-driven particle sockets
+			DeadlockPlayground.Particles.ModelAttachmentRegistry.RegisterAttachments(modelScene, vrfModel);
+
 			AddChild(modelScene);
 			GD.Print($"¡Héroe '{hero}' instanciado en el Viewport con éxito!");
 
@@ -601,6 +718,7 @@ public partial class VpkLoaderTest : Node3D
 			// DeadlockAnimLoader.LoadHeroPoses is bypassed here so it does not clear AnimationPlayer or push unretargeted raw bone frames.
 
 			EmitSignal(SignalName.HeroLoaded, modelScene);
+			DeadlockPlayground.Painter.SkinLayerManager.RunHeroMaterialAudit(modelScene);
 
 			// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
 			var skeleton = SearchSkeleton(modelScene);

@@ -11,12 +11,16 @@ config_version=5
 [application]
 
 config/name="Deadlock_Playground"
-config/version="1.0.1"
+config/version="1.1.0-beta"
 run/main_scene="uid://b0avkl80hhgtj"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 run/max_fps=60
 boot_splash/show_image=false
 config/icon="uid://67nlgu7dndiv"
+
+[autoload]
+
+DiscordRpcService="*uid://diukumx2opmi8"
 
 [display]
 
@@ -33,7 +37,7 @@ project/assembly_name="Deadlock_Playground"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
+enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/discord-rpc-gd/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
 
 [file_customization]
 
