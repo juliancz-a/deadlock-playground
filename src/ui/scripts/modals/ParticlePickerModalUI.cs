@@ -1,9 +1,13 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Particles;
 using DeadlockPlayground.Particles.Models;
+using SteamDatabase.ValvePak;
+using ValveResourceFormat.IO;
 
 namespace DeadlockPlayground.UI;
 
@@ -36,6 +40,10 @@ public partial class ParticlePickerModalUI : PanelContainer
     // Assets
     private Texture2D _iconSparkles;
     private Texture2D _iconFolder;
+
+    // Thumbnail Caching Subsystem
+    private static readonly Dictionary<string, Texture2D> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, Texture2D> _thumbTextureCache = new(StringComparer.OrdinalIgnoreCase);
 
     // Thumbnail Generation Subsystem
     private SubViewport _thumbViewport;
@@ -236,6 +244,92 @@ public partial class ParticlePickerModalUI : PanelContainer
 
     private Node3D _thumbStageRoot;
 
+    private VpkLoaderTest GetVpkLoader()
+    {
+        return GetNodeOrNull<VpkLoaderTest>("/root/Main/UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea/SubViewportContainer/WorldViewport/VpkLoaderTest")
+            ?? GetNodeOrNull<VpkLoaderTest>("/root/Main/VpkLoaderTest")
+            ?? GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+    }
+
+    private static string GetDiskCachePath(string vpcfPath)
+    {
+        if (string.IsNullOrEmpty(vpcfPath)) return null;
+        string safe = vpcfPath.Replace('\\', '/').TrimStart('/');
+        safe = safe.Replace('/', '_').Replace('.', '_') + ".png";
+        return ProjectSettings.GlobalizePath($"user://cache/particle_thumbs/{safe}");
+    }
+
+    private static bool TryLoadDiskThumbnail(string vpcfPath, out Texture2D texture)
+    {
+        texture = null;
+        string path = GetDiskCachePath(vpcfPath);
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+
+        try
+        {
+            var img = Image.LoadFromFile(path);
+            if (img != null && !img.IsEmpty())
+            {
+                texture = ImageTexture.CreateFromImage(img);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ParticlePickerModalUI] Error reading disk thumbnail cache for {vpcfPath}: {ex.Message}");
+        }
+        return false;
+    }
+
+    private static void SaveDiskThumbnail(string vpcfPath, Image img)
+    {
+        if (img == null || img.IsEmpty()) return;
+        string path = GetDiskCachePath(vpcfPath);
+        if (string.IsNullOrEmpty(path)) return;
+
+        try
+        {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            img.SavePng(path);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ParticlePickerModalUI] Failed to save disk thumbnail cache for {vpcfPath}: {ex.Message}");
+        }
+    }
+
+    private static Texture2D LoadOrGetThumbTexture(string texPath, IFileLoader fileLoader, Package basePackage, Package addonPackage)
+    {
+        if (string.IsNullOrEmpty(texPath)) return null;
+
+        if (_thumbTextureCache.TryGetValue(texPath, out var cached))
+        {
+            return cached;
+        }
+
+        ImageTexture tex = null;
+        if (fileLoader != null)
+        {
+            tex = Source2TextureLoader.ExtractVtexToGodot(fileLoader, texPath, maxDimension: 256, forceOpaque: false);
+        }
+        if (tex == null && (basePackage != null || addonPackage != null))
+        {
+            tex = Source2TextureLoader.ExtractVtexToGodot(basePackage, texPath, maxDimension: 256, forceOpaque: false, addonPackage: addonPackage);
+        }
+
+        if (tex != null)
+        {
+            _thumbTextureCache[texPath] = tex;
+            return tex;
+        }
+
+        return null;
+    }
+
     public void CenterModal()
     {
         SetAnchorsPreset(LayoutPreset.Center);
@@ -251,9 +345,15 @@ public partial class ParticlePickerModalUI : PanelContainer
 
     private void SetupThumbnailViewport()
     {
+        string cacheDir = ProjectSettings.GlobalizePath("user://cache/particle_thumbs");
+        if (!Directory.Exists(cacheDir))
+        {
+            Directory.CreateDirectory(cacheDir);
+        }
+
         _thumbViewport = new SubViewport
         {
-            Size = new Vector2I(256, 256),
+            Size = new Vector2I(256, 180),
             TransparentBg = false,
             RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled,
             OwnWorld3D = true
@@ -263,7 +363,7 @@ public partial class ParticlePickerModalUI : PanelContainer
         var env = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Color,
-            BackgroundColor = new Color(0.08f, 0.09f, 0.12f, 1.0f)
+            BackgroundColor = new Color(0.06f, 0.07f, 0.09f, 1.0f)
         };
         world.Environment = env;
         _thumbViewport.World3D = world;
@@ -281,8 +381,9 @@ public partial class ParticlePickerModalUI : PanelContainer
 
         _thumbCamera = new Camera3D
         {
-            Position = new Vector3(0, 0.1f, 1.8f),
-            Fov = 45f
+            Position = new Vector3(0, 0.5f, 2.0f),
+            Fov = 45f,
+            Current = true
         };
         _thumbStageRoot.AddChild(_thumbCamera);
         _thumbCamera.LookAtFromPosition(_thumbCamera.Position, Vector3.Zero);
@@ -366,7 +467,11 @@ public partial class ParticlePickerModalUI : PanelContainer
         // Cleanup old cards
         foreach (var card in _spawnedCards)
         {
-            card.QueueFree();
+            if (IsInstanceValid(card))
+            {
+                if (card.GetParent() != null) card.GetParent().RemoveChild(card);
+                card.QueueFree();
+            }
         }
         _spawnedCards.Clear();
         _thumbnailQueue.Clear();
@@ -400,8 +505,21 @@ public partial class ParticlePickerModalUI : PanelContainer
                 _cardFlowContainer.AddChild(card);
                 _spawnedCards.Add(card);
 
-                // Queue for background thumbnail generation
-                _thumbnailQueue.Enqueue(card);
+                // Immediate cache check (0ms display for cached thumbnails)
+                if (_thumbnailCache.TryGetValue(p.VpcfPath, out var memTex))
+                {
+                    card.SetThumbnail(memTex);
+                }
+                else if (TryLoadDiskThumbnail(p.VpcfPath, out var diskTex))
+                {
+                    _thumbnailCache[p.VpcfPath] = diskTex;
+                    card.SetThumbnail(diskTex);
+                }
+                else
+                {
+                    // Queue for background thumbnail generation
+                    _thumbnailQueue.Enqueue(card);
+                }
             }
         }
 
@@ -411,7 +529,7 @@ public partial class ParticlePickerModalUI : PanelContainer
 
     private void TriggerNextThumbnail()
     {
-        if (_isGeneratingThumbnail || _thumbnailQueue.Count == 0 || _thumbViewport == null) return;
+        if (!Visible || !IsInsideTree() || _isGeneratingThumbnail || _thumbnailQueue.Count == 0 || _thumbViewport == null) return;
 
         _isGeneratingThumbnail = true;
         var card = _thumbnailQueue.Dequeue();
@@ -421,74 +539,246 @@ public partial class ParticlePickerModalUI : PanelContainer
 
     private async System.Threading.Tasks.Task ProcessThumbnailStepAsync(ParticleCardUI card)
     {
-        if (!IsInstanceValid(card) || card.IsQueuedForDeletion() || !IsInsideTree())
+        if (!Visible || !IsInsideTree() || !IsInstanceValid(card) || card.IsQueuedForDeletion())
+        {
+            _isGeneratingThumbnail = false;
+            if (Visible && IsInsideTree()) TriggerNextThumbnail();
+            return;
+        }
+
+        string vpcfPath = card.Entry?.VpcfPath;
+        if (string.IsNullOrEmpty(vpcfPath))
         {
             _isGeneratingThumbnail = false;
             TriggerNextThumbnail();
             return;
         }
 
-        // 1. Create a stylized preview particle at origin
-        var previewEmitter = new GpuParticles3D
+        // Check caches again in case another card or previous pass resolved it
+        if (_thumbnailCache.TryGetValue(vpcfPath, out var cachedTex))
         {
-            Amount = 32,
-            Lifetime = 1.0f,
-            Explosiveness = 0.2f,
-            Randomness = 0.5f,
-            Emitting = true
-        };
-        previewEmitter.Layers &= ~(1u << 20);
-
-        var processMat = new ParticleProcessMaterial
-        {
-            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Sphere,
-            EmissionSphereRadius = 0.35f,
-            Direction = Vector3.Up,
-            Spread = 60f,
-            InitialVelocityMin = 0.3f,
-            InitialVelocityMax = 1.0f,
-            Gravity = new Vector3(0, 0.2f, 0),
-            Color = new Color(0.45f, 0.75f, 1.0f, 0.95f)
-        };
-        previewEmitter.ProcessMaterial = processMat;
-
-        var quad = new QuadMesh { Size = new Vector2(0.28f, 0.28f) };
-        var mat = new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            BlendMode = BaseMaterial3D.BlendModeEnum.Add,
-            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
-            VertexColorUseAsAlbedo = true,
-            AlbedoTexture = ParticleStage3D.GetFallbackParticleTexture()
-        };
-        quad.Material = mat;
-        previewEmitter.DrawPass1 = quad;
-
-        _thumbStageRoot.AddChild(previewEmitter);
-
-        // 2. Set RenderTargetUpdateMode = Always and await render pipeline
-        _thumbViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
-
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-
-        var img = _thumbViewport.GetTexture()?.GetImage();
-        _thumbViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-
-        if (img != null && !img.IsEmpty() && IsInstanceValid(card))
-        {
-            var tex = ImageTexture.CreateFromImage(img);
-            card.SetThumbnail(tex);
+            card.SetThumbnail(cachedTex);
+            _isGeneratingThumbnail = false;
+            TriggerNextThumbnail();
+            return;
         }
 
-        if (IsInstanceValid(previewEmitter))
+        if (TryLoadDiskThumbnail(vpcfPath, out var diskTex))
         {
-            previewEmitter.QueueFree();
+            _thumbnailCache[vpcfPath] = diskTex;
+            card.SetThumbnail(diskTex);
+            _isGeneratingThumbnail = false;
+            TriggerNextThumbnail();
+            return;
+        }
+
+        var vpkLoader = GetVpkLoader();
+        var fileLoader = vpkLoader?.GetOrCreateFileLoader();
+        var basePkg = vpkLoader?.GetOrCreateBasePackage();
+        Package addonPkg = null;
+        if (!string.IsNullOrEmpty(vpkLoader?.AddonVpkPath) && File.Exists(vpkLoader.AddonVpkPath))
+        {
+            try
+            {
+                addonPkg = new Package();
+                addonPkg.Read(vpkLoader.AddonVpkPath);
+            }
+            catch { }
+        }
+
+        // 1. Load strongly typed particle definition hierarchy (shallow depth 2 is fast & sufficient for thumbnails)
+        ParticleSystemDefinition rootDef = null;
+        try
+        {
+            rootDef = ParticleHierarchyDefinitionLoader.LoadHierarchy(
+                vpcfPath,
+                fileLoader,
+                basePkg,
+                addonPkg,
+                maxDepth: 2);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ParticlePickerModalUI] Error loading hierarchy for {vpcfPath}: {ex.Message}");
+        }
+
+        if (rootDef == null)
+        {
+            _isGeneratingThumbnail = false;
+            TriggerNextThumbnail();
+            return;
+        }
+
+        var renderers = new List<ParticleMultiMeshRenderer>();
+        try
+        {
+            // 2. Setup deterministic simulator
+            var simulator = new CpuParticleSimulator();
+            simulator.ControlPoints.SetValue(1, 1.0f); // Fully charged so models & charge-scaled operators are visible
+            simulator.ControlPoints.SetPosition(10, new Vector3(0, 1.288f, 0)); // Aim point
+
+            var flattened = ParticleHierarchyDefinitionLoader.FlattenHierarchy(rootDef);
+            uint seed = 1337;
+
+            foreach (var item in flattened)
+            {
+                var inst = new ParticleSystemInstance(item.Def, seed++)
+                {
+                    Delay = item.Delay,
+                    IsEndCap = item.IsEndCap
+                };
+                inst.ControlPoints = new ControlPointRegistry();
+                inst.ControlPoints.CopyFrom(simulator.ControlPoints);
+                simulator.AddInstance(inst);
+
+                if (item.Def.Renderers.Count == 0) continue;
+
+                for (int rIdx = 0; rIdx < item.Def.Renderers.Count; rIdx++)
+                {
+                    var rDef = item.Def.Renderers[rIdx];
+                    Texture2D tex = null;
+                    Vector4[] seqRects = null;
+
+                    string texPath = rDef.PrimaryTexturePath;
+                    if (!string.IsNullOrEmpty(texPath))
+                    {
+                        tex = LoadOrGetThumbTexture(texPath, fileLoader, basePkg, addonPkg);
+                        seqRects = Source2TextureLoader.ExtractSpriteSheetSequences(texPath, fileLoader, basePkg, addonPkg);
+                    }
+                    tex ??= ParticleStage3D.GetFallbackParticleTexture();
+
+                    Texture2D noiseTex = (rDef is RenderModelsDef) ? tex : null;
+                    var renderer = new ParticleMultiMeshRenderer(inst, rDef, tex, seqRects, noiseTex);
+                    _thumbStageRoot.AddChild(renderer);
+                    renderers.Add(renderer);
+                }
+            }
+
+            // 3. Step forward to a frozen representative frame (Source2Viewer style)
+            simulator.Seek(0.18f);
+
+            // Check if alive particles exist
+            int aliveCount = 0;
+            foreach (var inst in simulator.Instances)
+            {
+                aliveCount += inst.ActiveParticleCount;
+            }
+
+            // Fallback for EndCap or delayed burst particles (e.g. explosion streaks, shells, warps)
+            if (aliveCount == 0)
+            {
+                simulator.TriggerRelease();
+                simulator.Seek(0.32f);
+
+                aliveCount = 0;
+                foreach (var inst in simulator.Instances)
+                {
+                    aliveCount += inst.ActiveParticleCount;
+                }
+
+                if (aliveCount == 0)
+                {
+                    simulator.Seek(0.5f);
+                }
+            }
+
+            // 4. Compute bounding box of active particles
+            Aabb bbox = default;
+            bool hasAabb = false;
+
+            foreach (var inst in simulator.Instances)
+            {
+                var particles = inst.Particles;
+                for (int i = 0; i < particles.Length; i++)
+                {
+                    ref readonly var p = ref particles[i];
+                    if (!p.IsAlive) continue;
+
+                    float r = MathF.Max(p.Radius, 0.04f);
+                    var pAabb = new Aabb(p.Position - new Vector3(r, r, r), new Vector3(r * 2, r * 2, r * 2));
+                    if (!hasAabb)
+                    {
+                        bbox = pAabb;
+                        hasAabb = true;
+                    }
+                    else
+                    {
+                        bbox = bbox.Merge(pAabb);
+                    }
+                }
+            }
+
+            if (!hasAabb || bbox.Size.LengthSquared() < 1e-4f)
+            {
+                bbox = new Aabb(new Vector3(-0.4f, -0.4f, -0.4f), new Vector3(0.8f, 0.8f, 0.8f));
+            }
+
+            // 5. Frame camera on bounding box with padding (VRF isometric perspective)
+            Vector3 center = bbox.GetCenter();
+            float maxDim = MathF.Max(bbox.Size.X, MathF.Max(bbox.Size.Y, bbox.Size.Z));
+            maxDim = MathF.Max(maxDim, 0.2f);
+            float radius = (maxDim * 0.5f) * 1.4f;
+
+            float fovRad = Mathf.DegToRad(_thumbCamera.Fov);
+            float dist = radius / MathF.Sin(fovRad * 0.5f);
+            dist = Mathf.Clamp(dist, 0.4f, 40.0f);
+
+            // Elevated 3/4 isometric angle (pitch 20 deg, yaw 45 deg)
+            Vector3 camDir = new Vector3(0.55f, 0.35f, 0.75f).Normalized();
+            Vector3 camPos = center + camDir * dist;
+
+            _thumbCamera.Position = camPos;
+            _thumbCamera.LookAtFromPosition(camPos, center, Vector3.Up);
+
+            // 6. Dispatch MultiMesh renderer buffers
+            foreach (var renderer in renderers)
+            {
+                if (IsInstanceValid(renderer))
+                {
+                    renderer.Render(_thumbCamera, renderer.Instance.ControlPoints ?? simulator.ControlPoints);
+                }
+            }
+
+            // 7. Render SubViewport and capture frame
+            if (!Visible || !IsInsideTree()) return;
+
+            _thumbViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (!Visible || !IsInsideTree()) return;
+
+            await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            if (!Visible || !IsInsideTree()) return;
+
+            var img = _thumbViewport.GetTexture()?.GetImage();
+            _thumbViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+
+            if (img != null && !img.IsEmpty() && IsInstanceValid(card) && !card.IsQueuedForDeletion())
+            {
+                var tex = ImageTexture.CreateFromImage(img);
+                _thumbnailCache[vpcfPath] = tex;
+                SaveDiskThumbnail(vpcfPath, img);
+                card.SetThumbnail(tex);
+            }
+        }
+        finally
+        {
+            // Safe lifecycle cleanup: guarantee no leaked MultiMesh nodes
+            foreach (var r in renderers)
+            {
+                if (IsInstanceValid(r))
+                {
+                    if (r.GetParent() != null) r.GetParent().RemoveChild(r);
+                    r.QueueFree();
+                }
+            }
+            addonPkg?.Dispose();
         }
 
         _isGeneratingThumbnail = false;
-        TriggerNextThumbnail();
+        if (Visible && IsInsideTree())
+        {
+            TriggerNextThumbnail();
+        }
     }
 
     private void OnTreeSelectionChanged()
@@ -567,6 +857,8 @@ public partial class ParticlePickerModalUI : PanelContainer
     private void OnCloseRequested()
     {
         Visible = false;
+        _thumbnailQueue.Clear();
+        _isGeneratingThumbnail = false;
         EmitSignal(SignalName.ModalClosed);
     }
 

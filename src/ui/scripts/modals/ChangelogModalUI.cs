@@ -13,8 +13,8 @@ public partial class ChangelogModalUI : PanelContainer
     public const string ConfigPath = "user://settings.cfg";
     public const string ConfigSection = "News";
     public const string ConfigKey = "LastReadVersion";
-    public const string DefaultWebsiteUrl = "https://deadlock-playground.pages.dev";
-    public const string DefaultDiscordUrl = "https://discord.gg/deadlock";
+    public const string DefaultWebsiteUrl = "https://deadlock-playground.top/";
+    public const string DiscordUsername = "juliancz_";
 
     public const string InitialChangelogMarkdown = @"### Version 1.0.1 — New Heroes & Topbar Menu
 
@@ -40,7 +40,7 @@ public partial class ChangelogModalUI : PanelContainer
 
     private string _activeVersion = CurrentVersion;
     private string _websiteUrl = DefaultWebsiteUrl;
-    private string _discordUrl = DefaultDiscordUrl;
+    private string _discordUsername = DiscordUsername;
     private bool _isLoading = false;
 
     public override void _Ready()
@@ -66,7 +66,12 @@ public partial class ChangelogModalUI : PanelContainer
         if (_btnBottomClose != null) _btnBottomClose.Pressed += Close;
         if (_btnRefresh != null) _btnRefresh.Pressed += () => _ = RefreshFeedAsync(true);
         if (_btnWebsite != null) _btnWebsite.Pressed += OnWebsiteClicked;
-        if (_btnDiscord != null) _btnDiscord.Pressed += OnDiscordClicked;
+        if (_btnDiscord != null)
+        {
+            _btnDiscord.Pressed += OnDiscordClicked;
+            _btnDiscord.Text = $"💬 Discord: {_discordUsername}";
+            _btnDiscord.TooltipText = $"Click to copy Discord username: {_discordUsername}";
+        }
 
         if (_richTextLabel != null)
         {
@@ -120,9 +125,14 @@ public partial class ChangelogModalUI : PanelContainer
                 {
                     _websiteUrl = webUrl;
                 }
-                if (payload.Links.TryGetValue("discord", out var discUrl) && !string.IsNullOrEmpty(discUrl))
+                if (payload.Links.TryGetValue("discord", out var discUser) && !string.IsNullOrEmpty(discUser))
                 {
-                    _discordUrl = discUrl;
+                    _discordUsername = discUser.Replace("https://discord.gg/", "").Trim();
+                    if (_btnDiscord != null)
+                    {
+                        _btnDiscord.Text = $"Discord: {_discordUsername}";
+                        _btnDiscord.TooltipText = $"Click to copy Discord username: {_discordUsername}";
+                    }
                 }
 
                 if (_statusBadge != null)
@@ -209,14 +219,14 @@ public partial class ChangelogModalUI : PanelContainer
 
     private void OnDiscordClicked()
     {
-        DisplayServer.ClipboardSet("juliancz_");
+        DisplayServer.ClipboardSet(_discordUsername);
         if (_btnDiscord != null)
         {
-            _btnDiscord.Text = "✓ juliancz_";
+            _btnDiscord.Text = "✓ Copied!";
             GetTree().CreateTimer(2.0).Timeout += () =>
             {
                 if (GodotObject.IsInstanceValid(_btnDiscord))
-                    _btnDiscord.Text = "💬 Discord";
+                    _btnDiscord.Text = $"💬 Discord: {_discordUsername}";
             };
         }
     }
