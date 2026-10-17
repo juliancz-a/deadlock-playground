@@ -20,6 +20,11 @@ layout(push_constant, std430) uniform Params {
     float use_selection_mask;
     vec2 rect_offset;
     vec2 rect_max;
+    float hit_depth;
+    float brush_depth;
+    vec2 brush_center;
+    float brush_radius;
+    float pad;
 } params;
 
 layout(rgba16f, set = 2, binding = 0) uniform restrict image2D overlay_texture_0;
@@ -65,27 +70,63 @@ void main() {
     if ((b_bits & (1u << 30u)) == 0u) {
         return;
     }
-    // get distance in 13-23 -> 11 bits truncated
+
+    // 2D Normalized Brush Coordinates relative to brush_center & brush_radius
+    vec2 pixel_center = vec2(framebuffer_coords) + vec2(0.5f);
+    vec2 uv_offset = (pixel_center - params.brush_center) / max(params.brush_radius, 0.001f);
+    if (abs(uv_offset.x) > 1.0f || abs(uv_offset.y) > 1.0f) {
+        return;
+    }
+    float r2d = length(uv_offset);
+
+    // Unpack camera-space depth (distance from camera plane along view ray in meters)
     float distance = unpackHalf2x16(b_bits >> uint(13 - 5) & 0xFFE0u).x;
+
+    // Discard pixels beyond camera far clipping plane
+    if (distance > params.max_distance) {
+        return;
+    }
+
+    // 3D Spherical Volume Clamping:
+    // Strictly confine paint within brush_depth along the Z axis from hit_depth.
+    // Discards geometry behind the hit surface (prevents piercing collars/limbs/cavities).
+    float depth_fade = 1.0f;
+    if (params.brush_depth > 0.0001f) {
+        float depth_offset = abs(distance - params.hit_depth);
+        if (depth_offset > params.brush_depth) {
+            return;
+        }
+        float depth_norm = depth_offset / params.brush_depth;
+        float dist3d = sqrt(r2d * r2d + depth_norm * depth_norm);
+        if (dist3d > 1.0f) {
+            return;
+        }
+        depth_fade = clamp(1.0f - depth_norm, 0.0f, 1.0f);
+    }
+
     float distance_value = clamp(abs(distance) / params.max_distance, 0.0f, 1.0f);
 
-    //distance fade
-    float distance_fade = 1.0f;
+    // Distance fade
+    float distance_fade = depth_fade;
     if (params.start_distance_fade < 1.0f) {
         if (distance_value >= params.start_distance_fade) {
-            distance_fade = 1.0f - ((distance_value - params.start_distance_fade) / (1.0f - params.start_distance_fade));
+            distance_fade *= 1.0f - ((distance_value - params.start_distance_fade) / (1.0f - params.start_distance_fade));
         }
     }
 
-    //distance bleed
+    // Distance bleed
     int bleed = int(params.max_bleed);
     if (params.max_bleed > 0.0f && params.min_bleed < params.max_bleed) {
         bleed = int(mix(params.min_bleed, params.max_bleed, distance_value));
     }
 
-    vec2 brush_shape_uv = (vec2(framebuffer_coords) + vec2(0.5f)) / vec2(imageSize(framebuffer));
+    // Sample brush shape texture centered in brush circle
+    vec2 brush_shape_uv = uv_offset * 0.5f + vec2(0.5f);
     vec4 brush_shape_color = texture(brush_shape, brush_shape_uv);
     float brush_shape_val = brush_shape_color.a * distance_fade;
+    if (brush_shape_val <= 0.0001f) {
+        return;
+    }
     vec4 brush_color = vec4(params.brush_color.rgb, brush_shape_val * params.delta * params.brush_color.a);
 
 #define PROCESS_TEXTURE(tex) { \

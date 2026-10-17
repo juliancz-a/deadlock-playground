@@ -14,6 +14,8 @@ public partial class ParticleMultiMeshRenderer : Node3D
     private readonly ParticleSystemInstance _instance;
     private MultiMeshInstance3D _multiMeshInstance;
     private MultiMesh _multiMesh;
+    private MeshInstance3D _ropeMeshInstance;
+    private ArrayMesh _ropeMesh;
     private ShaderMaterial _material;
     private IParticleRendererDef _rendererDef;
     private Vector4[] _sequenceRects;
@@ -23,6 +25,8 @@ public partial class ParticleMultiMeshRenderer : Node3D
     private static Shader _trailShader;
     private static Shader _modelShader;
     private static Shader _refractShader;
+    private static Shader _ropeShader;
+    private static Shader _ropeAdditiveShader;
 
     public ParticleSystemInstance Instance => _instance;
     public ShaderMaterial Material => _material;
@@ -71,6 +75,15 @@ public partial class ParticleMultiMeshRenderer : Node3D
         return _modelShader ??= GD.Load<Shader>("res://assets/shaders/particles/source2_model_additive.gdshader");
     }
 
+    private static Shader GetRopeShader(bool isAdditive = false)
+    {
+        if (isAdditive)
+        {
+            return _ropeAdditiveShader ??= GD.Load<Shader>("res://assets/shaders/particles/source2_particle_rope_additive.gdshader");
+        }
+        return _ropeShader ??= GD.Load<Shader>("res://assets/shaders/particles/source2_particle_rope.gdshader");
+    }
+
     private void BuildMultiMesh(Texture2D texture, Texture2D noiseTexture)
     {
         int maxCapacity = Math.Max(1, _instance.Particles.Length);
@@ -117,7 +130,36 @@ public partial class ParticleMultiMeshRenderer : Node3D
             _material.SetShaderParameter("u_seq_count", 0);
         }
 
-        if (_rendererDef is RenderTrailsDef trailsDef)
+        if (_rendererDef is RenderRopesDef ropesDef)
+        {
+            _multiMeshInstance.Visible = false;
+            _ropeMesh = new ArrayMesh();
+            _ropeMeshInstance = new MeshInstance3D
+            {
+                Name = "RopeMeshInstance",
+                Mesh = _ropeMesh,
+                MaterialOverride = _material,
+                TopLevel = true,
+                Transform = Transform3D.Identity,
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                CustomAabb = new Aabb(new Vector3(-50, -50, -50), new Vector3(100, 100, 100))
+            };
+            _ropeMeshInstance.Layers &= ~(1u << 20); // Strict Rule B.1: Clear Layer 21 (CameraBrush culling mask)
+            AddChild(_ropeMeshInstance);
+
+            bool isAdditive = ropesDef.BlendMode != null && ropesDef.BlendMode.Equals("PARTICLE_OUTPUT_BLEND_MODE_ADD", StringComparison.OrdinalIgnoreCase);
+            _material.Shader = GetRopeShader(isAdditive);
+            _material.SetShaderParameter("overbright_factor", ropesDef.OverbrightFactor > 0 ? ropesDef.OverbrightFactor : 1.0f);
+            _material.SetShaderParameter("alpha_scale", ropesDef.AlphaScale.LiteralValue > 0 ? ropesDef.AlphaScale.LiteralValue : 1.0f);
+            _material.SetShaderParameter("constant_color", _instance.Definition.ConstantColor);
+            _material.SetShaderParameter("u_uv_transform", ropesDef.UVTransform);
+
+            if (texture != null)
+            {
+                _material.SetShaderParameter("albedo_texture", texture);
+            }
+        }
+        else if (_rendererDef is RenderTrailsDef trailsDef)
         {
             _material.Shader = GetTrailShader();
             _material.SetShaderParameter("overbright_factor", trailsDef.OverbrightFactor > 0 ? trailsDef.OverbrightFactor : 2.0f);
@@ -211,7 +253,7 @@ public partial class ParticleMultiMeshRenderer : Node3D
         // Debug Aid 3: Per-renderer log: blend mode, texture format and channel layout
         string rName = _rendererDef != null ? _rendererDef.ClassName : "Default";
         string texInfo = texture != null ? $"{texture.GetWidth()}x{texture.GetHeight()}" : "null";
-        string blendDesc = (_rendererDef is RenderSpritesDef sd && sd.IsRefract) ? "REFRACT" : "ADD";
+        string blendDesc = (_rendererDef is RenderRopesDef) ? "ROPE" : ((_rendererDef is RenderSpritesDef sd && sd.IsRefract) ? "REFRACT" : "ADD");
         GD.Print($"[ParticleRenderer] Bound '{Name}' ({rName}): Blend={blendDesc}, Texture={texInfo}, Sequences={_sequenceRects?.Length ?? 0}");
     }
 
@@ -265,13 +307,27 @@ public partial class ParticleMultiMeshRenderer : Node3D
     {
         if (_multiMesh == null) return;
 
-        if (!Visible)
+        if (!Visible || (_rendererDef is RenderRopesDef rBloom && rBloom.OnlyRenderInEffectsBloomPass))
         {
             if (_multiMesh.VisibleInstanceCount > 0)
             {
                 _multiMesh.VisibleInstanceCount = 0;
             }
+            if (_ropeMesh != null && _ropeMesh.GetSurfaceCount() > 0)
+            {
+                _ropeMesh.ClearSurfaces();
+            }
+            if (_ropeMeshInstance != null)
+            {
+                _ropeMeshInstance.Visible = false;
+            }
             return;
+        }
+
+        if (_ropeMeshInstance != null)
+        {
+            _ropeMeshInstance.Visible = true;
+            _ropeMeshInstance.Transform = Transform3D.Identity;
         }
 
         var particles = _instance.Particles;
@@ -286,7 +342,173 @@ public partial class ParticleMultiMeshRenderer : Node3D
             ControlPoints = cpRegistry
         };
 
-        if (_rendererDef is RenderTrailsDef trailsDef)
+        if (_rendererDef is RenderRopesDef ropesDef)
+        {
+            float radScale = ropesDef.RadiusScale.Evaluate(evalCtx);
+            float overbright = ropesDef.OverbrightFactor > 0 ? ropesDef.OverbrightFactor : 1.0f;
+            float addSelf = 1.0f + ropesDef.AddSelfAmount;
+            float selfIllum = ropesDef.SelfIllumAmount > 0 ? ropesDef.SelfIllumAmount : 1.0f;
+            float totalBrightness = overbright * addSelf * selfIllum;
+            float alphaScale = ropesDef.AlphaScale.Evaluate(evalCtx);
+
+            _material.SetShaderParameter("overbright_factor", totalBrightness);
+            _material.SetShaderParameter("alpha_scale", alphaScale);
+            _material.SetShaderParameter("u_animated_v_offset", -_instance.CollectionAge);
+            _material.SetShaderParameter("u_uv_transform", ropesDef.UVTransform);
+
+            var aliveIndices = new List<int>();
+            for (int i = 0; i < particles.Length; i++)
+            {
+                if (particles[i].IsAlive) aliveIndices.Add(i);
+            }
+
+            int count = aliveIndices.Count;
+            if (count < 2)
+            {
+                if (_ropeMesh != null && _ropeMesh.GetSurfaceCount() > 0)
+                {
+                    _ropeMesh.ClearSurfaces();
+                }
+                return;
+            }
+
+            int subdivisions = Math.Clamp(ropesDef.MinTesselation, 1, 8);
+            int segmentCount = count - 1;
+            int totalSamples = segmentCount * subdivisions + 1;
+            int totalVerts = totalSamples * 2;
+            int totalIndices = segmentCount * subdivisions * 6;
+
+            var vertArray = new Vector3[totalVerts];
+            var uvArray = new Vector2[totalVerts];
+            var colorArray = new Color[totalVerts];
+            var indexArray = new int[totalIndices];
+
+            int sampleIdx = 0;
+            int quadIdx = 0;
+            Vector3 stripAxis = Vector3.Zero;
+
+            for (int seg = 0; seg < segmentCount; seg++)
+            {
+                int idx1 = aliveIndices[seg];
+                int idx2 = aliveIndices[seg + 1];
+                int idx0 = seg > 0 ? aliveIndices[seg - 1] : idx1;
+                int idx3 = seg + 2 < count ? aliveIndices[seg + 2] : idx2;
+
+                ref readonly var p0 = ref particles[idx0];
+                ref readonly var p1 = ref particles[idx1];
+                ref readonly var p2 = ref particles[idx2];
+                ref readonly var p3 = ref particles[idx3];
+
+                float v1 = ropesDef.UseScalarForTextureCoordinate
+                    ? p1.GetField(ropesDef.ScalarFieldForTextureCoordinate)
+                    : ((float)seg / (count - 1));
+                float v2 = ropesDef.UseScalarForTextureCoordinate
+                    ? p2.GetField(ropesDef.ScalarFieldForTextureCoordinate)
+                    : ((float)(seg + 1) / (count - 1));
+
+                float r0 = p0.Radius * radScale * CustomSizeScale;
+                float r1 = p1.Radius * radScale * CustomSizeScale;
+                float r2 = p2.Radius * radScale * CustomSizeScale;
+                float r3 = p3.Radius * radScale * CustomSizeScale;
+
+                Color c1 = new Color(
+                    p1.Color.R * CustomTintColor.R,
+                    p1.Color.G * CustomTintColor.G,
+                    p1.Color.B * CustomTintColor.B,
+                    p1.Alpha * CustomAlphaScale
+                );
+                Color c2 = new Color(
+                    p2.Color.R * CustomTintColor.R,
+                    p2.Color.G * CustomTintColor.G,
+                    p2.Color.B * CustomTintColor.B,
+                    p2.Alpha * CustomAlphaScale
+                );
+
+                int startStep = (seg == 0) ? 0 : 1;
+                for (int step = startStep; step <= subdivisions; step++)
+                {
+                    float t = (float)step / subdivisions;
+
+                    Vector3 pos = CatmullRom(p0.Position, p1.Position, p2.Position, p3.Position, t);
+                    float rad = Mathf.Max(0.005f, CatmullRom(r0, r1, r2, r3, t));
+                    Vector3 tangent = CatmullRomTangent(p0.Position, p1.Position, p2.Position, p3.Position, t);
+                    if (tangent.LengthSquared() < 1e-5f)
+                    {
+                        tangent = p2.Position - p1.Position;
+                    }
+                    tangent = tangent.LengthSquared() > 1e-5f ? tangent.Normalized() : Vector3.Forward;
+
+                    Vector3 planeNormal = camPos - pos;
+                    if (planeNormal.LengthSquared() < 1e-5f) planeNormal = Vector3.Back;
+                    planeNormal = planeNormal.Normalized();
+
+                    Vector3 widthAxis = tangent.Cross(planeNormal);
+                    if (widthAxis.LengthSquared() < 1e-5f)
+                    {
+                        widthAxis = tangent.Cross(MathF.Abs(tangent.Y) < 0.99f ? Vector3.Up : Vector3.Right);
+                    }
+                    widthAxis = widthAxis.Normalized();
+
+                    if (sampleIdx == 0)
+                    {
+                        stripAxis = widthAxis;
+                    }
+                    else
+                    {
+                        if (widthAxis.Dot(stripAxis) < 0f)
+                        {
+                            widthAxis = -widthAxis;
+                        }
+                        stripAxis = widthAxis;
+                    }
+
+                    Color col = c1.Lerp(c2, t);
+                    float v = Mathf.Lerp(v1, v2, t);
+
+                    int vLeft = sampleIdx * 2;
+                    int vRight = sampleIdx * 2 + 1;
+
+                    vertArray[vLeft] = pos - widthAxis * rad;
+                    vertArray[vRight] = pos + widthAxis * rad;
+
+                    uvArray[vLeft] = new Vector2(0f, v);
+                    uvArray[vRight] = new Vector2(1f, v);
+
+                    colorArray[vLeft] = col;
+                    colorArray[vRight] = col;
+
+                    if (sampleIdx > 0)
+                    {
+                        int prevLeft = (sampleIdx - 1) * 2;
+                        int prevRight = (sampleIdx - 1) * 2 + 1;
+
+                        int iBase = quadIdx * 6;
+                        indexArray[iBase + 0] = prevLeft;
+                        indexArray[iBase + 1] = vLeft;
+                        indexArray[iBase + 2] = prevRight;
+
+                        indexArray[iBase + 3] = prevRight;
+                        indexArray[iBase + 4] = vLeft;
+                        indexArray[iBase + 5] = vRight;
+
+                        quadIdx++;
+                    }
+
+                    sampleIdx++;
+                }
+            }
+
+            var arrays = new Godot.Collections.Array();
+            arrays.Resize((int)Mesh.ArrayType.Max);
+            arrays[(int)Mesh.ArrayType.Vertex] = vertArray;
+            arrays[(int)Mesh.ArrayType.TexUV] = uvArray;
+            arrays[(int)Mesh.ArrayType.Color] = colorArray;
+            arrays[(int)Mesh.ArrayType.Index] = indexArray;
+
+            _ropeMesh.ClearSurfaces();
+            _ropeMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        }
+        else if (_rendererDef is RenderTrailsDef trailsDef)
         {
             float lenScale = trailsDef.LengthScale > 0 ? trailsDef.LengthScale : 1.0f;
             float maxLenM = trailsDef.MaxLength * 0.0254f;
@@ -482,5 +704,39 @@ public partial class ParticleMultiMeshRenderer : Node3D
         }
 
         _multiMesh.VisibleInstanceCount = activeCount;
+    }
+
+    private static Vector3 CatmullRom(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
+    {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        return 0.5f * (
+            (2f * p1) +
+            (-p0 + p2) * t +
+            (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 +
+            (-p0 + 3f * p1 - 3f * p2 + p3) * t3
+        );
+    }
+
+    private static float CatmullRom(float p0, float p1, float p2, float p3, float t)
+    {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        return 0.5f * (
+            (2f * p1) +
+            (-p0 + p2) * t +
+            (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 +
+            (-p0 + 3f * p1 - 3f * p2 + p3) * t3
+        );
+    }
+
+    private static Vector3 CatmullRomTangent(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
+    {
+        float t2 = t * t;
+        return 0.5f * (
+            (-p0 + p2) +
+            2f * (2f * p0 - 5f * p1 + 4f * p2 - p3) * t +
+            3f * (-p0 + 3f * p1 - 3f * p2 + p3) * t2
+        );
     }
 }

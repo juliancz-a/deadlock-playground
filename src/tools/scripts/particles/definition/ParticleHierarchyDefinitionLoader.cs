@@ -72,6 +72,21 @@ public static class ParticleHierarchyDefinitionLoader
                     }
                 }
             }
+
+            if (res == null && DeadlockPlayground.Materials.Source2TextureLoader.CorePackage != null)
+            {
+                var corePkg = DeadlockPlayground.Materials.Source2TextureLoader.CorePackage;
+                lock (corePkg)
+                {
+                    var entry = corePkg.FindEntry(compiledPath);
+                    if (entry != null)
+                    {
+                        corePkg.ReadEntry(entry, out var bytes);
+                        res = new VrfResource();
+                        res.Read(new MemoryStream(bytes));
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {

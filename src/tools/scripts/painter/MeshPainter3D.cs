@@ -1346,7 +1346,7 @@ namespace DeadlockPlayground.Painter
             if (force || Math.Abs(_lastBrushSize - BrushSize) > 0.01f)
             {
                 float worldPixelSize = 1.6f / atlasRes;
-                float worldSize = Mathf.Max(worldPixelSize * 0.5f, BrushSize * worldPixelSize);
+               float worldSize = ComputeWorldBrushDiameter();
                 _cameraBrush.Set("size", worldSize);
                 if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
                 {
@@ -1853,23 +1853,50 @@ namespace DeadlockPlayground.Painter
                 Vector3 rayOrigin = camera.ProjectRayOrigin(mousePos);
                 Vector3 rayDir = camera.ProjectRayNormal(mousePos).Normalized();
 
+                float worldDiameter = ComputeWorldBrushDiameter();
+                float worldRadius = worldDiameter * 0.5f;
+
+                // Safe standoff distance: at least 10mm so the surface is always well behind Camera3D.near (0.5mm),
+                // but small enough to fit inside cavities and collars without occluding geometry in front.
+                float standoff = Mathf.Clamp(worldRadius * 0.5f, 0.010f, 0.050f);
+                // Depth penetration: limit brush volume to avoid piercing thin geometry (collar, ears, fingers)
+                float brushDepth = Mathf.Clamp(worldRadius * 0.75f, 0.003f, 0.040f);
+                float maxDist = standoff + brushDepth + 0.005f;
+
                 if (_lastHit.Hit)
                 {
                     Vector3 surfaceNormal = _lastHit.HitNormal.Normalized();
                     if (surfaceNormal.LengthSquared() < 0.001f) surfaceNormal = -rayDir;
-                    if (surfaceNormal.Dot(-rayDir) < 0f) surfaceNormal = -surfaceNormal; // Ensure CameraBrush stays in front of surface
-                    Vector3 brushPos = _lastHit.HitPositionWorld + surfaceNormal * 0.15f;
+                    if (surfaceNormal.Dot(-rayDir) < 0f) surfaceNormal = -surfaceNormal;
+
+                    // Align projection direction strictly with surfaceNormal to maintain 1:1 circular alignment with the cursor ring gizmo
+                    Vector3 projDir = surfaceNormal;
+
+                    Vector3 upGuide = Mathf.Abs(projDir.Dot(Vector3.Up)) > 0.95f ? Vector3.Forward : Vector3.Up;
+                    if (_lastHit.WorldBitangent.LengthSquared() > 0.001f)
+                    {
+                        Vector3 bitan = (_lastHit.WorldBitangent - projDir * projDir.Dot(_lastHit.WorldBitangent)).Normalized();
+                        if (bitan.LengthSquared() > 0.001f)
+                        {
+                            upGuide = -bitan;
+                        }
+                    }
+
+                    Vector3 brushPos = _lastHit.HitPositionWorld + projDir * standoff;
                     _cameraBrush.GlobalPosition = brushPos;
-                    Vector3 up = Mathf.Abs(surfaceNormal.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
-                    _cameraBrush.LookAt(_lastHit.HitPositionWorld, up);
-                    _cameraBrush.Set("max_distance", 0.35f);
+                    _cameraBrush.LookAt(_lastHit.HitPositionWorld, upGuide);
+                    _cameraBrush.Set("hit_depth", standoff);
+                    _cameraBrush.Set("brush_depth", brushDepth);
+                    _cameraBrush.Set("max_distance", maxDist);
                 }
                 else
                 {
                     _cameraBrush.GlobalPosition = rayOrigin;
                     Vector3 up = Mathf.Abs(rayDir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
                     _cameraBrush.LookAt(rayOrigin + rayDir, up);
-                    _cameraBrush.Set("max_distance", 0.35f);
+                    _cameraBrush.Set("hit_depth", standoff);
+                    _cameraBrush.Set("brush_depth", brushDepth);
+                    _cameraBrush.Set("max_distance", maxDist);
                 }
 
                 SyncCameraBrushProperties();
@@ -1882,14 +1909,17 @@ namespace DeadlockPlayground.Painter
                         Vector3 surfaceNormal = _lastHit.HitNormal.Normalized();
                         if (surfaceNormal.LengthSquared() < 0.001f) surfaceNormal = -rayDir;
                         if (surfaceNormal.Dot(-rayDir) < 0f) surfaceNormal = -surfaceNormal;
-                        var (mirrorPos, mirrorNormal) = ComputeMirroredPointAndDir(_lastHit.HitPositionWorld, surfaceNormal);
+                        Vector3 projDir = surfaceNormal;
+                        var (mirrorPos, mirrorNormal) = ComputeMirroredPointAndDir(_lastHit.HitPositionWorld, projDir);
                         mirrorNormal = mirrorNormal.Normalized();
-                        if (mirrorNormal.Dot(-rayDir) < 0f) mirrorNormal = -mirrorNormal;
-                        Vector3 mirrorBrushPos = mirrorPos + mirrorNormal * 0.15f;
+
+                        Vector3 mirrorBrushPos = mirrorPos + mirrorNormal * standoff;
                         _mirrorCameraBrush.GlobalPosition = mirrorBrushPos;
                         Vector3 up = Mathf.Abs(mirrorNormal.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
                         _mirrorCameraBrush.LookAt(mirrorPos, up);
-                        _mirrorCameraBrush.Set("max_distance", 0.35f);
+                        _mirrorCameraBrush.Set("hit_depth", standoff);
+                        _mirrorCameraBrush.Set("brush_depth", brushDepth);
+                        _mirrorCameraBrush.Set("max_distance", maxDist);
                     }
                     _mirrorCameraBrush.Set("drawing", isPainting && _lastHit.Hit);
                 }
@@ -2326,19 +2356,8 @@ namespace DeadlockPlayground.Painter
                     _cursorGizmo.Visible = true;
                 }
 
-                // Scale ring diameter to match CameraBrush size in world units
-                float radius;
-                if (ToolMode == BrushToolMode.SelectSubmesh)
-                {
-                    radius = 0.035f; // Compact, accurate reticle for submesh selection
-                }
-                else
-                {
-                    int atlasRes = _layerManager?.CanvasSize.X ?? 2048;
-                    float worldPixelSize = 1.6f / atlasRes;
-                    float worldDiameter = Mathf.Max(worldPixelSize * 0.5f, BrushSize * worldPixelSize);
-                    radius = worldDiameter * 0.5f;
-                }
+                // Scale ring diameter to match CameraBrush size in world units (strict 1:1 match)
+                float radius = ComputeWorldBrushDiameter() * 0.5f;
 
                 // Align ring normal to hit.HitNormal using UV tangents when available
                 Vector3 normal = hit.HitNormal.Normalized();
@@ -2651,6 +2670,25 @@ namespace DeadlockPlayground.Painter
                     _currentMesh.GetParent()?.AddChild(_selectionOutlineMesh);
                 }
             }
+        }
+        private float ComputeWorldBrushDiameter()
+        {
+            int atlasRes = _layerManager?.CanvasSize.X ?? 2048;
+            float baseMetersPerAtlas = 1.35f;
+
+            if (_lastHit.Hit)
+            {
+                float uMeters = _lastHit.WorldUnitsPerU;
+                float vMeters = _lastHit.WorldUnitsPerV;
+                if (uMeters > 0.05f && uMeters < 4.0f && vMeters > 0.05f && vMeters < 4.0f)
+                {
+                    float localMeters = MathF.Sqrt(uMeters * vMeters);
+                    baseMetersPerAtlas = Mathf.Clamp(Mathf.Lerp(1.35f, localMeters, 0.65f), 0.35f, 1.8f);
+                }
+            }
+
+            float worldPixelSize = baseMetersPerAtlas / atlasRes;
+            return Mathf.Max(worldPixelSize * 1.5f, BrushSize * worldPixelSize);
         }
 
         private void UpdateSelectionOutline()

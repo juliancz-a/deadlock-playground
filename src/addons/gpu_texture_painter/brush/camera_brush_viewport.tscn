@@ -36,4 +36,4 @@ render_target_update_mode = 4
 cull_mask = 1048576
 environment = SubResource("Environment_2vbdc")
 compositor = SubResource("Compositor_5jtd2")
-near = 0.01
+near = 0.0005

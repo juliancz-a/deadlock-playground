@@ -1085,12 +1085,12 @@ public partial class StudioUIManager : CanvasLayer
         int count = ModWorkspaceSession.Instance.GetAllModifiedAssets().Count;
         if (count > 0)
         {
-            _btnModChanges.Text = $"MOD CHANGES ({count})";
+            _btnModChanges.Text = $"WORKSPACE ({count})";
             _btnModChanges.Modulate = new Color(0.95f, 0.75f, 0.3f);
         }
         else
         {
-            _btnModChanges.Text = "MOD CHANGES";
+            _btnModChanges.Text = "WORKSPACE";
             _btnModChanges.Modulate = Colors.White;
         }
     }

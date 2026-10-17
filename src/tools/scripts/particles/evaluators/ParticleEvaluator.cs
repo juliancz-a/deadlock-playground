@@ -92,6 +92,8 @@ public class ParticleEvaluationContext
     public float ParticleAge { get; set; } = 0.0f;
     public float Lifetime { get; set; } = 1.0f;
     public float NormalizedAge => Lifetime > 1e-5f ? Mathf.Clamp(ParticleAge / Lifetime, 0.0f, 1.0f) : 1.0f;
+    public int ParticleIndex { get; set; } = 0;
+    public int MaxParticles { get; set; } = 1;
     public Vector3 ParticlePosition { get; set; } = Vector3.Zero;
     public Vector3 ParticleVelocity { get; set; } = Vector3.Zero;
     public ControlPointRegistry ControlPoints { get; set; }
@@ -161,6 +163,8 @@ public class ParticleFloatInput
             "PF_TYPE_COLLECTION_AGE" => ctx.CollectionAge,
             "PF_TYPE_PARTICLE_AGE" => ctx.ParticleAge,
             "PF_TYPE_PARTICLE_AGE_NORMALIZED" => ctx.NormalizedAge,
+            "PF_TYPE_PARTICLE_NUMBER" => (float)ctx.ParticleIndex,
+            "PF_TYPE_PARTICLE_NUMBER_NORMALIZED" => ctx.MaxParticles > 1 ? (float)ctx.ParticleIndex / (float)(ctx.MaxParticles - 1) : 0.0f,
             "PF_TYPE_CONTROL_POINT_COMPONENT" => EvaluateControlPointComponent(ctx),
             "PF_TYPE_RANDOM_UNIFORM" => EvaluateRandomUniform(ctx),
             "PF_TYPE_RANDOM_BIASED" => EvaluateRandomBiased(ctx),
@@ -244,6 +248,12 @@ public class ParticleFloatInput
     }
 }
 
+public class GradientStopDef
+{
+    public float Position { get; set; } = 0.0f;
+    public Vector3 Color { get; set; } = Vector3.Zero;
+}
+
 /// <summary>
 /// Strongly typed Source 2 Vector Input evaluator (CParticleCollectionVecInput).
 /// </summary>
@@ -255,21 +265,65 @@ public class ParticleVecInput
     public ParticleFloatInput ComponentX { get; set; }
     public ParticleFloatInput ComponentY { get; set; }
     public ParticleFloatInput ComponentZ { get; set; }
+    public ParticleFloatInput FloatInterp { get; set; }
+    public List<GradientStopDef> GradientStops { get; } = new();
 
-    public static ParticleVecInput FromLiteral(Vector3 val) => new() { LiteralValue = val, Type = "PVEC_TYPE_LITERAL" };
+    public bool IsPosition { get; set; } = false;
+
+    public static ParticleVecInput FromLiteral(Vector3 val, bool isPosition = false) => new() { LiteralValue = val, Type = "PVEC_TYPE_LITERAL", IsPosition = isPosition };
 
     public Vector3 Evaluate(ParticleEvaluationContext ctx)
     {
+        if (Type == "PVEC_TYPE_FLOAT_INTERP_GRADIENT")
+        {
+            if (GradientStops.Count == 0) return LiteralValue;
+            float t = FloatInterp?.Evaluate(ctx) ?? ctx?.NormalizedAge ?? 0.0f;
+            t = Mathf.Clamp(t, 0.0f, 1.0f);
+
+            if (t <= GradientStops[0].Position) return GradientStops[0].Color;
+            if (t >= GradientStops[^1].Position) return GradientStops[^1].Color;
+
+            for (int i = 0; i < GradientStops.Count - 1; i++)
+            {
+                var s0 = GradientStops[i];
+                var s1 = GradientStops[i + 1];
+                if (t >= s0.Position && t <= s1.Position)
+                {
+                    float span = s1.Position - s0.Position;
+                    float f = span > 1e-5f ? (t - s0.Position) / span : 0.0f;
+                    return s0.Color.Lerp(s1.Color, f);
+                }
+            }
+            return GradientStops[^1].Color;
+        }
+
         return Type switch
         {
             "PVEC_TYPE_LITERAL" => LiteralValue,
             "PVEC_TYPE_CONTROL_POINT" => ctx?.ControlPoints?.GetPosition(ControlPoint) ?? Vector3.Zero,
-            "PVEC_TYPE_FLOAT_COMPONENTS" => new Vector3(
-                ComponentX?.Evaluate(ctx) ?? 0f,
-                ComponentY?.Evaluate(ctx) ?? 0f,
-                ComponentZ?.Evaluate(ctx) ?? 0f
-            ),
+            "PVEC_TYPE_FLOAT_COMPONENTS" => IsPosition
+                ? new Vector3(
+                    EvaluateDistance(ComponentX, ctx),
+                    EvaluateDistance(ComponentZ, ctx), // Source 2 Z is Godot Y (up)
+                    -EvaluateDistance(ComponentY, ctx) // Source 2 Y is Godot -Z
+                )
+                : new Vector3(
+                    ComponentX?.Evaluate(ctx) ?? 0f,
+                    ComponentY?.Evaluate(ctx) ?? 0f,
+                    ComponentZ?.Evaluate(ctx) ?? 0f
+                ),
             _ => LiteralValue
         };
+    }
+
+    private static float EvaluateDistance(ParticleFloatInput comp, ParticleEvaluationContext ctx)
+    {
+        if (comp == null) return 0f;
+        float val = comp.Evaluate(ctx);
+        if (comp.Type == "PF_TYPE_LITERAL")
+        {
+            return val * 0.0254f; // Inches to meters
+        }
+        return val;
     }
 }

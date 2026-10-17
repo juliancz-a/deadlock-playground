@@ -544,18 +544,69 @@ namespace DeadlockPlayground.Painter
                             var pOverrides = workspaceSession.GetStagedParticleOverrides(asset.VpkPath);
                             if (pOverrides == null || pOverrides.Emitters == null || pOverrides.Emitters.Count == 0) continue;
 
-                            // Agrupar overrides por cada archivo .vpcf hijo (ej. chrono_time_wall_charge_beams.vpcf)
-                            var vpcfTargets = new Dictionary<string, EmitterOverrideData>(StringComparer.OrdinalIgnoreCase);
+                            string normRootVpcf = asset.VpkPath.Replace('\\', '/').TrimStart('/');
+                            if (normRootVpcf.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                normRootVpcf = normRootVpcf[..^2];
+
+                            // Agrupar overrides por cada archivo .vpcf hijo (ej. chrono_time_wall_warp.vpcf)
+                            var childTargets = new Dictionary<string, EmitterOverrideData>(StringComparer.OrdinalIgnoreCase);
                             foreach (var em in pOverrides.Emitters.Values)
                             {
-                                string targetVpcf = !string.IsNullOrEmpty(em.ChildVpcfPath) ? em.ChildVpcfPath : asset.VpkPath;
-                                if (!string.IsNullOrEmpty(targetVpcf))
+                                if (string.IsNullOrEmpty(em.ChildVpcfPath)) continue;
+                                string normChild = em.ChildVpcfPath.Replace('\\', '/').TrimStart('/');
+                                if (normChild.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    normChild = normChild[..^2];
+
+                                if (normChild.Equals(normRootVpcf, StringComparison.OrdinalIgnoreCase)) continue;
+
+                                if (!childTargets.TryGetValue(normChild, out var existingEm) || (!existingEm.Visible && em.Visible))
                                 {
-                                    vpcfTargets[targetVpcf] = em;
+                                    childTargets[normChild] = em;
                                 }
                             }
 
-                            foreach (var (rawVpcfPath, emOverride) in vpcfTargets)
+                            // Preparar override para la partícula raíz (orquestador principal)
+                            EmitterOverrideData rootOverride = null;
+                            foreach (var em in pOverrides.Emitters.Values)
+                            {
+                                if (!string.IsNullOrEmpty(em.ChildVpcfPath))
+                                {
+                                    string normChild = em.ChildVpcfPath.Replace('\\', '/').TrimStart('/');
+                                    if (normChild.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                        normChild = normChild[..^2];
+                                    if (normChild.Equals(normRootVpcf, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        rootOverride = em;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (rootOverride == null)
+                            {
+                                rootOverride = new EmitterOverrideData
+                                {
+                                    ChildVpcfPath = normRootVpcf,
+                                    Visible = true,
+                                    TintColorRgba = pOverrides.ConstantColorRgba ?? new float[] { 1f, 1f, 1f, 1f },
+                                    SizeScale = pOverrides.RadiusScale > 0f ? pOverrides.RadiusScale : 1.0f,
+                                    AlphaScale = pOverrides.AlphaScale > 0f ? pOverrides.AlphaScale : 1.0f
+                                };
+                            }
+
+                            // Orden de compilación: Primero las partículas hijas para que existan en gameStagingRoot,
+                            // seguido por la partícula raíz orquestadora al final.
+                            var allCompileTargets = new List<(string TargetPath, EmitterOverrideData OverrideData, bool IsRoot)>();
+                            foreach (var (childPath, em) in childTargets)
+                            {
+                                allCompileTargets.Add((childPath, em, false));
+                            }
+                            if (!string.IsNullOrEmpty(normRootVpcf))
+                            {
+                                allCompileTargets.Add((normRootVpcf, rootOverride, true));
+                            }
+
+                            foreach (var (rawVpcfPath, emOverride, isRoot) in allCompileTargets)
                             {
                                 ct.ThrowIfCancellationRequested();
                                 string normVpcf = rawVpcfPath.Replace('\\', '/').TrimStart('/');
@@ -564,7 +615,11 @@ namespace DeadlockPlayground.Painter
                                 string compiledVpcfPath = normVpcf + "_c";
 
                                 var vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
-                                if (vpkEntry == null) continue;
+                                if (vpkEntry == null)
+                                {
+                                    GD.PrintErr($"[SkinExporter] Could not find base VPK entry for particle: {compiledVpcfPath}");
+                                    continue;
+                                }
 
                                 baseVpkPackage.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
                                 using var vrfRes = new ValveResourceFormat.Resource();
@@ -574,11 +629,31 @@ namespace DeadlockPlayground.Painter
                                 string kv3Text = vrfRes.DataBlock?.ToString();
                                 if (string.IsNullOrEmpty(kv3Text)) continue;
 
-                                // Check if the emitter override actually introduces meaningful modifications compared to vanilla KV3
-                                if (!HasMeaningfulVpcfOverrides(kv3Text, emOverride))
+                                // Check if the emitter override actually introduces meaningful modifications compared to vanilla KV3.
+                                // NOTE: The root orchestrator particle (isRoot == true) is NEVER skipped because it represents the
+                                // primary entry point for the ability particle system in Deadlock, and must be included in the mod VPK
+                                // alongside its compiled child emitters.
+                                if (!isRoot && !HasMeaningfulVpcfOverrides(kv3Text, emOverride))
                                 {
                                     GD.Print($"[SkinExporter] Skipping untouched particle definition: {normVpcf}");
                                     continue;
+                                }
+
+                                // Si es la raíz, propagar estados de visibilidad desactivados a m_Children
+                                if (isRoot)
+                                {
+                                    foreach (var (childPath, childOv) in childTargets)
+                                    {
+                                        if (childOv != null && !childOv.Visible)
+                                        {
+                                            string escapedChild = System.Text.RegularExpressions.Regex.Escape(childPath);
+                                            string childRefPattern = $@"(m_ChildRef\s*=\s*resource:""{escapedChild}"")";
+                                            if (!System.Text.RegularExpressions.Regex.IsMatch(kv3Text, $@"m_bDisableChild\s*=\s*true[\s\S]*?{childRefPattern}"))
+                                            {
+                                                kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, childRefPattern, "m_bDisableChild = true\n\t\t\t$1");
+                                            }
+                                        }
+                                    }
                                 }
 
                                 // Aplicar modificaciones al texto KV3 del .vpcf
@@ -1544,7 +1619,15 @@ namespace DeadlockPlayground.Painter
 
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
-            // 0. Sanear propiedades exclusivas de Deadlock vpcf61 que causan [FAIL] en bin_cs2/resourcecompiler.exe (ej. explode_warp, explode_elec)
+            // 0a. Compatibilidad de versión de formato: Si el .vpcf viene de Deadlock con versión > vpcf63 (ej. vpcf64, vpcf65, vpcf66),
+            // degradar el encabezado a vpcf63 para que bin_cs2/resourcecompiler.exe pueda compilarlo sin error
+            // "RESOURCE COMPILE ERROR: No valid format conversion from 'vpcf65' to 'vpcf63'"
+            kv3Text = System.Text.RegularExpressions.Regex.Replace(
+                kv3Text,
+                @"format:vpcf(6[4-9]|[7-9]\d+|\d{3,}):version\{[a-f0-9\-]+\}",
+                "format:vpcf63:version{a6e6a69e-52d3-4527-8b9c-ff3bb91aca3e}");
+
+            // 0b. Sanear propiedades exclusivas de Deadlock vpcf61+ que causan [FAIL] en bin_cs2/resourcecompiler.exe (ej. explode_warp, explode_elec)
             string[] incompatibleCs2Keys = new[]
             {
                 @"^\s*m_NamedValue\s*=\s*""""\s*\r?\n",
@@ -1557,7 +1640,10 @@ namespace DeadlockPlayground.Painter
                 @"^\s*m_flNotchedOutputOutside\s*=\s*[-0-9\.]+\s*\r?\n",
                 @"^\s*m_flNotchedOutputInside\s*=\s*[-0-9\.]+\s*\r?\n",
                 @"^\s*m_nRoundType\s*=\s*""[^""]*""\s*\r?\n",
-                @"^\s*m_nRefractBlurType\s*=\s*""[^""]*""\s*\r?\n"
+                @"^\s*m_nRefractBlurType\s*=\s*""[^""]*""\s*\r?\n",
+                @"^\s*m_bReverseOrder\s*=\s*(?:true|false)\s*\r?\n",
+                @"^\s*m_strSnapshotSubset\s*=\s*""[^""]*""\s*\r?\n",
+                @"^\s*m_flLOD[0-3]\s*=\s*[-0-9\.]+\s*\r?\n"
             };
 
             foreach (var pattern in incompatibleCs2Keys)
@@ -1611,9 +1697,12 @@ namespace DeadlockPlayground.Painter
                 }
                 else
                 {
-                    int braceIdx = FindRootOpeningBrace(kv3Text);
-                    if (braceIdx >= 0)
-                        kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_ConstantColor = {rgbaBlock}");
+                    if (r < 250 || g < 250 || b < 250 || a < 250)
+                    {
+                        int braceIdx = FindRootOpeningBrace(kv3Text);
+                        if (braceIdx >= 0)
+                            kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_ConstantColor = {rgbaBlock}");
+                    }
                 }
             }
 

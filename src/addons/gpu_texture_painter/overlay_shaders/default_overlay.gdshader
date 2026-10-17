@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_opaque, cull_back;
+render_mode unshaded, blend_mix, depth_draw_always, cull_back;
 
 uniform sampler2D overlay_texture : hint_default_transparent;
 uniform vec2 position_in_atlas;

@@ -107,6 +107,30 @@ public class RandomColorInitializerDef : IParticleInitializerDef
     public Color ColorMax { get; set; } = Colors.White;
 }
 
+public class ParticlePathParameters
+{
+    public int StartControlPointNumber { get; set; } = 0;
+    public int MidControlPointNumber { get; set; } = -1;
+    public int EndControlPointNumber { get; set; } = 0;
+    public int BulgeControl { get; set; } = 0;
+    public float Bulge { get; set; } = 0.0f;
+    public float MidPoint { get; set; } = 0.5f;
+    public Vector3 StartPointOffset { get; set; } = Vector3.Zero;
+    public Vector3 MidPointOffset { get; set; } = Vector3.Zero;
+    public Vector3 EndOffset { get; set; } = Vector3.Zero;
+}
+
+public class CreateSequentialPathV2Def : IParticleInitializerDef
+{
+    public string ClassName => "C_INIT_CreateSequentialPathV2";
+    public ParticlePathParameters PathParams { get; set; } = new();
+    public ParticleFloatInput NumToAssign { get; set; } = ParticleFloatInput.FromLiteral(100.0f);
+    public ParticleFloatInput MaxDistance { get; set; } = ParticleFloatInput.FromLiteral(0.0f);
+    public bool Loop { get; set; } = true;
+    public bool CPPairs { get; set; } = false;
+    public bool SaveOffset { get; set; } = false;
+}
+
 public class RandomYawFlipInitializerDef : IParticleInitializerDef
 {
     public string ClassName => "C_INIT_RandomYawFlip";
@@ -116,8 +140,8 @@ public class RandomYawFlipInitializerDef : IParticleInitializerDef
 public class PositionOffsetInitializerDef : IParticleInitializerDef
 {
     public string ClassName => "C_INIT_PositionOffset";
-    public Vector3 OffsetMin { get; set; } = Vector3.Zero;
-    public Vector3 OffsetMax { get; set; } = Vector3.Zero;
+    public ParticleVecInput OffsetMin { get; set; } = ParticleVecInput.FromLiteral(Vector3.Zero);
+    public ParticleVecInput OffsetMax { get; set; } = ParticleVecInput.FromLiteral(Vector3.Zero);
     public bool LocalCoords { get; set; } = false;
     public int ControlPointNumber { get; set; } = 0;
 }
@@ -283,6 +307,25 @@ public class RenderModelsDef : IParticleRendererDef
     public string OverrideMaterialPath { get; set; } = string.Empty;
     public bool OrientZ { get; set; } = true;
     public List<MaterialVarMapping> MaterialVars { get; } = new();
+}
+
+public class RenderRopesDef : IParticleRendererDef
+{
+    public string ClassName => "C_OP_RenderRopes";
+    public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ALPHA";
+    public string PrimaryTexturePath { get; set; } = string.Empty;
+    public float OverbrightFactor { get; set; } = 1.0f;
+    public float AddSelfAmount { get; set; } = 0.0f;
+    public float SelfIllumAmount { get; set; } = 0.0f;
+    public ParticleFloatInput AlphaScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public ParticleFloatInput RadiusScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public Vector4 UVTransform { get; set; } = new(1f, 1f, 0f, 0f);
+    public bool OnlyRenderInEffectsBloomPass { get; set; } = false;
+    public int MinTesselation { get; set; } = 4;
+    public int MaxTesselation { get; set; } = 4;
+    public bool ClosedLoop { get; set; } = false;
+    public bool UseScalarForTextureCoordinate { get; set; } = false;
+    public int ScalarFieldForTextureCoordinate { get; set; } = 0;
 }
 
 #endregion
