@@ -35,6 +35,7 @@ public class ParticleSystemInstance
     private Transform3D _prevCpTransform = Transform3D.Identity;
     private bool _hasPrevCpTransform = false;
     private uint _ringWaveOrbitCount = 0;
+    private float _sequentialPathParameter = 0.0f;
 
     public ReadOnlySpan<CpuParticle> Particles => _particles;
     public int ActiveParticleCount
@@ -72,6 +73,7 @@ public class ParticleSystemInstance
         _instantaneousEmitted = false;
         _hasPrevCpTransform = false;
         _ringWaveOrbitCount = 0;
+        _sequentialPathParameter = 0.0f;
 
         for (int i = 0; i < _maxParticles; i++)
         {
@@ -447,16 +449,140 @@ public class ParticleSystemInstance
                 break;
             }
 
+            case CreateSequentialPathV2Def sp:
+            {
+                ExecuteCreateSequentialPath(sp, ref p, ctx, cpRegistry);
+                break;
+            }
+
             case PositionOffsetInitializerDef pof:
             {
+                Vector3 minOff = pof.OffsetMin.Evaluate(ctx);
+                Vector3 maxOff = pof.OffsetMax.Evaluate(ctx);
                 Vector3 off = new Vector3(
-                    Mathf.Lerp(pof.OffsetMin.X, pof.OffsetMax.X, NextRandomFloat()),
-                    Mathf.Lerp(pof.OffsetMin.Y, pof.OffsetMax.Y, NextRandomFloat()),
-                    Mathf.Lerp(pof.OffsetMin.Z, pof.OffsetMax.Z, NextRandomFloat())
+                    Mathf.Lerp(minOff.X, maxOff.X, NextRandomFloat()),
+                    Mathf.Lerp(minOff.Y, maxOff.Y, NextRandomFloat()),
+                    Mathf.Lerp(minOff.Z, maxOff.Z, NextRandomFloat())
                 );
+                if (pof.LocalCoords && pof.ControlPointNumber >= 0 && cpRegistry != null)
+                {
+                    Quaternion cpRot = cpRegistry.GetOrientation(pof.ControlPointNumber);
+                    off = cpRot * off;
+                }
                 p.Position += off;
                 p.OffsetFromCP += off;
                 break;
+            }
+        }
+    }
+
+    private void ExecuteCreateSequentialPath(
+        CreateSequentialPathV2Def sp,
+        ref CpuParticle p,
+        ParticleEvaluationContext evalCtx,
+        ControlPointRegistry cpRegistry)
+    {
+        float assignCount = sp.NumToAssign.Evaluate(evalCtx);
+        if (assignCount <= 1f) assignCount = 100f;
+
+        int startCp = sp.PathParams.StartControlPointNumber;
+        int endCp = sp.PathParams.EndControlPointNumber;
+        int spanDirection = endCp >= startCp ? 1 : -1;
+
+        int spanLength;
+        bool cpPairs = sp.CPPairs;
+        if (cpPairs)
+        {
+            spanLength = Math.Abs(endCp - startCp);
+            if (spanLength <= 1) cpPairs = false;
+        }
+        else
+        {
+            spanLength = 1;
+        }
+
+        float parameterStep = assignCount > 1f ? 1f / (assignCount - 1f) : 0f;
+        if (cpPairs && spanLength > 1)
+        {
+            parameterStep *= spanLength;
+        }
+
+        float t = _sequentialPathParameter;
+        int segmentStart;
+        int segmentEnd;
+
+        if (!cpPairs)
+        {
+            segmentStart = startCp;
+            segmentEnd = endCp;
+        }
+        else
+        {
+            segmentStart = startCp + (int)t * spanDirection;
+            segmentEnd = segmentStart + spanDirection;
+            t -= (int)t;
+
+            if (spanDirection * (spanDirection + segmentStart - endCp) >= 1)
+            {
+                segmentEnd = endCp;
+                segmentStart = endCp - spanDirection;
+                t = 1f;
+            }
+        }
+
+        Vector3 startPos = (cpRegistry != null ? cpRegistry.GetPosition(segmentStart) : Vector3.Zero) + sp.PathParams.StartPointOffset;
+        Vector3 endPos = (cpRegistry != null ? cpRegistry.GetPosition(segmentEnd) : Vector3.Zero) + sp.PathParams.EndOffset;
+        Vector3 midPos;
+
+        if (sp.PathParams.MidControlPointNumber > -1)
+        {
+            Vector3 through = cpRegistry != null ? cpRegistry.GetPosition(sp.PathParams.MidControlPointNumber) : Vector3.Zero;
+            midPos = (2f * through) - (0.5f * (startPos + endPos)) + sp.PathParams.MidPointOffset;
+        }
+        else
+        {
+            midPos = startPos.Lerp(endPos, sp.PathParams.MidPoint);
+            if (sp.PathParams.BulgeControl != 0 && cpRegistry != null)
+            {
+                int bulgeCp = sp.PathParams.BulgeControl == 2 ? segmentEnd : segmentStart;
+                Quaternion rot = cpRegistry.GetOrientation(bulgeCp);
+                Vector3 forward = rot * Vector3.Forward;
+                Vector3 dir = endPos - startPos;
+                float len = dir.Length();
+                if (len > 1e-4f)
+                {
+                    float perp = 1f - MathF.Abs(dir.Normalized().Dot(forward));
+                    midPos += forward * (len * sp.PathParams.Bulge * perp);
+                }
+            }
+            midPos += sp.PathParams.MidPointOffset;
+        }
+
+        Vector3 pos = startPos.Lerp(midPos, t).Lerp(midPos.Lerp(endPos, t), t);
+
+        float maxDist = sp.MaxDistance.Evaluate(evalCtx) * 0.0254f;
+        if (maxDist > 1e-4f)
+        {
+            pos += new Vector3(
+                (NextRandomFloat() * 2f - 1f) * maxDist,
+                (NextRandomFloat() * 2f - 1f) * maxDist,
+                (NextRandomFloat() * 2f - 1f) * maxDist
+            );
+        }
+
+        p.Position = pos;
+        p.PrevPosition = pos;
+
+        _sequentialPathParameter += parameterStep;
+        if (_sequentialPathParameter > spanLength)
+        {
+            if (sp.Loop)
+            {
+                _sequentialPathParameter %= spanLength;
+            }
+            else
+            {
+                _sequentialPathParameter = spanLength;
             }
         }
     }

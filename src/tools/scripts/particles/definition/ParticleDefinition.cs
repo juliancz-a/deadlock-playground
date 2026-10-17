@@ -107,6 +107,30 @@ public class RandomColorInitializerDef : IParticleInitializerDef
     public Color ColorMax { get; set; } = Colors.White;
 }
 
+public class ParticlePathParameters
+{
+    public int StartControlPointNumber { get; set; } = 0;
+    public int MidControlPointNumber { get; set; } = -1;
+    public int EndControlPointNumber { get; set; } = 0;
+    public int BulgeControl { get; set; } = 0;
+    public float Bulge { get; set; } = 0.0f;
+    public float MidPoint { get; set; } = 0.5f;
+    public Vector3 StartPointOffset { get; set; } = Vector3.Zero;
+    public Vector3 MidPointOffset { get; set; } = Vector3.Zero;
+    public Vector3 EndOffset { get; set; } = Vector3.Zero;
+}
+
+public class CreateSequentialPathV2Def : IParticleInitializerDef
+{
+    public string ClassName => "C_INIT_CreateSequentialPathV2";
+    public ParticlePathParameters PathParams { get; set; } = new();
+    public ParticleFloatInput NumToAssign { get; set; } = ParticleFloatInput.FromLiteral(100.0f);
+    public ParticleFloatInput MaxDistance { get; set; } = ParticleFloatInput.FromLiteral(0.0f);
+    public bool Loop { get; set; } = true;
+    public bool CPPairs { get; set; } = false;
+    public bool SaveOffset { get; set; } = false;
+}
+
 public class RandomYawFlipInitializerDef : IParticleInitializerDef
 {
     public string ClassName => "C_INIT_RandomYawFlip";
@@ -116,8 +140,8 @@ public class RandomYawFlipInitializerDef : IParticleInitializerDef
 public class PositionOffsetInitializerDef : IParticleInitializerDef
 {
     public string ClassName => "C_INIT_PositionOffset";
-    public Vector3 OffsetMin { get; set; } = Vector3.Zero;
-    public Vector3 OffsetMax { get; set; } = Vector3.Zero;
+    public ParticleVecInput OffsetMin { get; set; } = ParticleVecInput.FromLiteral(Vector3.Zero);
+    public ParticleVecInput OffsetMax { get; set; } = ParticleVecInput.FromLiteral(Vector3.Zero);
     public bool LocalCoords { get; set; } = false;
     public int ControlPointNumber { get; set; } = 0;
 }

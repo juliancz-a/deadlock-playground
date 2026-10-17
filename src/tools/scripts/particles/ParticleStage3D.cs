@@ -320,25 +320,36 @@ public partial class ParticleStage3D : Node3D
         _simulator.ControlPoints.SetPosition(0, cp0Pos);
         _simulator.ControlPoints.SetOrientation(0, cp0Rot);
 
-        // CP10: Target / torso height (1.288 m relative to hero origin)
-        Vector3 cp10Pos;
-        if (_currentHeroNode != null)
+        // Populate and synchronize all configured Control Points from preview drivers
+        bool hasCustomCp10 = false;
+        if (ActiveRootDefinition != null && ActiveRootDefinition.ControlPointDrivers.Count > 0)
         {
-            cp10Pos = _currentHeroNode.GlobalPosition + new Vector3(0, 1.288f, 0);
+            foreach (var drv in ActiveRootDefinition.ControlPointDrivers)
+            {
+                if (drv.ControlPointNumber == 0) continue; // CP0 handled above
+                if (drv.ControlPointNumber == 10) hasCustomCp10 = true;
+
+                Vector3 drvPos = cp0Pos + (cp0Rot * drv.Offset);
+                _simulator.ControlPoints.SetPosition(drv.ControlPointNumber, drvPos);
+                _simulator.ControlPoints.SetOrientation(drv.ControlPointNumber, cp0Rot);
+            }
         }
-        else
+
+        if (!hasCustomCp10)
         {
-            cp10Pos = new Vector3(0, 1.288f, 0);
+            // Fall back to torso target (1.288 m) if CP10 was not explicitly configured
+            Vector3 cp10Pos = (_currentHeroNode != null)
+                ? _currentHeroNode.GlobalPosition + new Vector3(0, 1.288f, 0)
+                : new Vector3(0, 1.288f, 0);
+            _simulator.ControlPoints.SetPosition(10, cp10Pos);
+            _simulator.ControlPoints.SetOrientation(10, cp0Rot);
         }
-        _simulator.ControlPoints.SetPosition(10, cp10Pos);
-        _simulator.ControlPoints.SetOrientation(10, cp0Rot);
 
         // Section A4: Sync each child system's own ControlPointRegistry
         foreach (var inst in _simulator.Instances)
         {
-            inst.ControlPoints.SetValue(1, _simulator.ControlPoints.GetValue(1));
-            inst.ControlPoints.SetPosition(10, cp10Pos);
-            inst.ControlPoints.SetOrientation(10, cp0Rot);
+            // Full copy of all parent simulation control points (CP 0..63)
+            inst.ControlPoints.CopyFrom(_simulator.ControlPoints);
 
             // Check if child definition specifies its own CP0 driver (e.g. streaks -> muzzle_fx)
             string childAttName = null;
@@ -358,13 +369,8 @@ public partial class ParticleStage3D : Node3D
                     Quaternion childRot = (skeleton.GlobalTransform.Basis * bonePose.Basis).Orthonormalized().GetRotationQuaternion();
                     inst.ControlPoints.SetPosition(0, childPos);
                     inst.ControlPoints.SetOrientation(0, childRot);
-                    continue;
                 }
             }
-
-            // Fall back to inherited CP0
-            inst.ControlPoints.SetPosition(0, cp0Pos);
-            inst.ControlPoints.SetOrientation(0, cp0Rot);
         }
     }
 

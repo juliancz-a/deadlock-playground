@@ -268,7 +268,9 @@ public class ParticleVecInput
     public ParticleFloatInput FloatInterp { get; set; }
     public List<GradientStopDef> GradientStops { get; } = new();
 
-    public static ParticleVecInput FromLiteral(Vector3 val) => new() { LiteralValue = val, Type = "PVEC_TYPE_LITERAL" };
+    public bool IsPosition { get; set; } = false;
+
+    public static ParticleVecInput FromLiteral(Vector3 val, bool isPosition = false) => new() { LiteralValue = val, Type = "PVEC_TYPE_LITERAL", IsPosition = isPosition };
 
     public Vector3 Evaluate(ParticleEvaluationContext ctx)
     {
@@ -299,12 +301,29 @@ public class ParticleVecInput
         {
             "PVEC_TYPE_LITERAL" => LiteralValue,
             "PVEC_TYPE_CONTROL_POINT" => ctx?.ControlPoints?.GetPosition(ControlPoint) ?? Vector3.Zero,
-            "PVEC_TYPE_FLOAT_COMPONENTS" => new Vector3(
-                ComponentX?.Evaluate(ctx) ?? 0f,
-                ComponentY?.Evaluate(ctx) ?? 0f,
-                ComponentZ?.Evaluate(ctx) ?? 0f
-            ),
+            "PVEC_TYPE_FLOAT_COMPONENTS" => IsPosition
+                ? new Vector3(
+                    EvaluateDistance(ComponentX, ctx),
+                    EvaluateDistance(ComponentZ, ctx), // Source 2 Z is Godot Y (up)
+                    -EvaluateDistance(ComponentY, ctx) // Source 2 Y is Godot -Z
+                )
+                : new Vector3(
+                    ComponentX?.Evaluate(ctx) ?? 0f,
+                    ComponentY?.Evaluate(ctx) ?? 0f,
+                    ComponentZ?.Evaluate(ctx) ?? 0f
+                ),
             _ => LiteralValue
         };
+    }
+
+    private static float EvaluateDistance(ParticleFloatInput comp, ParticleEvaluationContext ctx)
+    {
+        if (comp == null) return 0f;
+        float val = comp.Evaluate(ctx);
+        if (comp.Type == "PF_TYPE_LITERAL")
+        {
+            return val * 0.0254f; // Inches to meters
+        }
+        return val;
     }
 }

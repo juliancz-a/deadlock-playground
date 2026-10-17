@@ -160,7 +160,7 @@ namespace DeadlockPlayground.UI
 
             _btnSaveProject = new Button
             {
-                Text = "Save Project (.dlproj)",
+                Text = "Save Project (.dpp)",
                 CustomMinimumSize = new Vector2(160, 32)
             };
             _btnSaveProject.Pressed += OnSaveProjectClicked;

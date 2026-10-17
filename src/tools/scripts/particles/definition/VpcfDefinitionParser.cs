@@ -282,11 +282,36 @@ public static class VpcfDefinitionParser
                     Percent = ExtractFloat(kv, "m_flPercent", 0.5f)
                 };
 
+            case "C_INIT_CreateSequentialPath":
+            case "C_INIT_CreateSequentialPathV2":
+                var seqPath = new CreateSequentialPathV2Def
+                {
+                    Loop = ExtractBool(kv, "m_bLoop", true),
+                    CPPairs = ExtractBool(kv, "m_bCPPairs", false),
+                    SaveOffset = ExtractBool(kv, "m_bSaveOffset", false),
+                    NumToAssign = ParseFloatInput(kv, "m_flNumToAssign", 100.0f),
+                    MaxDistance = ParseFloatInput(kv, "m_fMaxDistance", 0.0f)
+                };
+
+                if (kv.TryGetValue("m_PathParams", out var ppObj) && ppObj != null)
+                {
+                    seqPath.PathParams.StartControlPointNumber = (int)ExtractLong(ppObj, "m_nStartControlPointNumber", 0);
+                    seqPath.PathParams.EndControlPointNumber = (int)ExtractLong(ppObj, "m_nEndControlPointNumber", 0);
+                    seqPath.PathParams.MidControlPointNumber = (int)ExtractLong(ppObj, "m_nMidControlPointNumber", -1);
+                    seqPath.PathParams.BulgeControl = (int)ExtractLong(ppObj, "m_nBulgeControl", 0);
+                    seqPath.PathParams.Bulge = ExtractFloat(ppObj, "m_flBulge", 0.0f);
+                    seqPath.PathParams.MidPoint = ExtractFloat(ppObj, "m_flMidPoint", 0.5f);
+                    seqPath.PathParams.StartPointOffset = ParseVector3Offset(ppObj, "m_vStartPointOffset");
+                    seqPath.PathParams.MidPointOffset = ParseVector3Offset(ppObj, "m_vMidPointOffset");
+                    seqPath.PathParams.EndOffset = ParseVector3Offset(ppObj, "m_vEndOffset");
+                }
+                return seqPath;
+
             case "C_INIT_PositionOffset":
                 return new PositionOffsetInitializerDef
                 {
-                    OffsetMin = ParseVector3Offset(kv, "m_OffsetMin"),
-                    OffsetMax = ParseVector3Offset(kv, "m_OffsetMax"),
+                    OffsetMin = ParseVecInput(kv, "m_OffsetMin", Vector3.Zero, isPosition: true),
+                    OffsetMax = ParseVecInput(kv, "m_OffsetMax", Vector3.Zero, isPosition: true),
                     LocalCoords = ExtractBool(kv, "m_bLocalCoords", false),
                     ControlPointNumber = (int)ExtractLong(kv, "m_nControlPointNumber", 0)
                 };
@@ -679,17 +704,35 @@ public static class VpcfDefinitionParser
         return input;
     }
 
-    public static ParticleVecInput ParseVecInput(KVObject parent, string key, Vector3 fallback)
+    public static ParticleVecInput ParseVecInput(KVObject parent, string key, Vector3 fallback, bool isPosition = false)
     {
         if (parent == null || !parent.TryGetValue(key, out var obj) || obj == null)
         {
-            return ParticleVecInput.FromLiteral(fallback);
+            return ParticleVecInput.FromLiteral(fallback, isPosition);
+        }
+
+        const float inToM = 0.0254f;
+
+        // Direct raw array [X, Y, Z]
+        if (obj.IsArray)
+        {
+            var arr = obj.Children.ToArray();
+            if (arr.Length >= 3)
+            {
+                float sx = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
+                float sy = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
+                float sz = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
+                Vector3 litVec = isPosition ? new Vector3(sx * inToM, sz * inToM, -sy * inToM) : new Vector3(sx, sy, sz);
+                return ParticleVecInput.FromLiteral(litVec, isPosition);
+            }
+            return ParticleVecInput.FromLiteral(fallback, isPosition);
         }
 
         var vec = new ParticleVecInput
         {
             Type = ExtractString(obj, "m_nType", "PVEC_TYPE_LITERAL"),
-            ControlPoint = (int)ExtractLong(obj, "m_nControlPoint", 0)
+            ControlPoint = (int)ExtractLong(obj, "m_nControlPoint", 0),
+            IsPosition = isPosition
         };
 
         if (obj.TryGetValue("m_vLiteralValue", out var lit) && lit != null && lit.IsArray)
@@ -697,11 +740,10 @@ public static class VpcfDefinitionParser
             var arr = lit.Children.ToArray();
             if (arr.Length >= 3)
             {
-                vec.LiteralValue = new Vector3(
-                    Convert.ToSingle(arr[0].Value),
-                    Convert.ToSingle(arr[1].Value),
-                    Convert.ToSingle(arr[2].Value)
-                );
+                float sx = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
+                float sy = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
+                float sz = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
+                vec.LiteralValue = isPosition ? new Vector3(sx * inToM, sz * inToM, -sy * inToM) : new Vector3(sx, sy, sz);
             }
         }
         else if (obj.TryGetValue("m_LiteralColor", out var col) && col != null && col.IsArray)
@@ -710,9 +752,9 @@ public static class VpcfDefinitionParser
             if (arr.Length >= 3)
             {
                 vec.LiteralValue = new Vector3(
-                    Convert.ToSingle(arr[0].Value) / 255.0f,
-                    Convert.ToSingle(arr[1].Value) / 255.0f,
-                    Convert.ToSingle(arr[2].Value) / 255.0f
+                    Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture) / 255.0f,
+                    Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture) / 255.0f,
+                    Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture) / 255.0f
                 );
             }
         }

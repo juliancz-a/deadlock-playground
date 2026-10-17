@@ -634,7 +634,16 @@ public partial class ParticlePickerModalUI : PanelContainer
             // 2. Setup deterministic simulator
             var simulator = new CpuParticleSimulator();
             simulator.ControlPoints.SetValue(1, 1.0f); // Fully charged so models & charge-scaled operators are visible
-            simulator.ControlPoints.SetPosition(10, new Vector3(0, 1.288f, 0)); // Aim point
+            simulator.ControlPoints.SetPosition(10, new Vector3(0, 1.288f, 0)); // Aim point fallback
+
+            // Populate all preview control points from root definition
+            if (rootDef.ControlPointDrivers.Count > 0)
+            {
+                foreach (var drv in rootDef.ControlPointDrivers)
+                {
+                    simulator.ControlPoints.SetPosition(drv.ControlPointNumber, drv.Offset);
+                }
+            }
 
             var flattened = ParticleHierarchyDefinitionLoader.FlattenHierarchy(rootDef);
             uint seed = 1337;
