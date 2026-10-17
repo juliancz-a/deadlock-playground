@@ -281,6 +281,7 @@ public partial class PaintTabUI : VBoxContainer
             {
                 _layerManager?.FillCurrentSubmesh(color, null, _painter?.MagicWandTool, _painter != null ? _painter.BucketFillTolerance : 0.5f);
                 RegisterActiveStrokeMetadata();
+                _painter?.EmitSignal(MeshPainter3D.SignalName.StrokeFinished);
             };
         }
     }

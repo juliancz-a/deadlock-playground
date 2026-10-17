@@ -1909,6 +1909,10 @@ namespace DeadlockPlayground.UI
                             _onParticleTextureUpdated.Invoke(baked);
                         }
                     }
+                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                                 ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                    paintTab?.RegisterActiveStrokeMetadata();
+                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                 }
                 else
                 {
@@ -1921,6 +1925,20 @@ namespace DeadlockPlayground.UI
                     {
                         _layerManager.FillSubmesh(active.Mesh, _painter.BrushColor, uv, _painter.MagicWandTool, _painter.BucketFillTolerance);
                         _canvasDrawArea?.QueueRedraw();
+
+                        if (_meshHierarchy != null && _layerManager != null)
+                        {
+                            _meshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+                        }
+                        else if (_layerManager?.TargetMesh != null && _meshHierarchy != null)
+                        {
+                            _meshHierarchy.MarkSubmeshDirty(_layerManager.TargetMesh);
+                        }
+
+                        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                                     ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                        paintTab?.RegisterActiveStrokeMetadata();
+                        _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
                     }
                 }
             }

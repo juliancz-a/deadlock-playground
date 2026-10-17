@@ -1622,26 +1622,39 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.BucketFill)
                 {
+                    bool filled = false;
                     if (camera != null)
                     {
                         Vector2 mousePos = GetViewportMousePosition();
                         Vector3 origin = camera.ProjectRayOrigin(mousePos);
                         Vector3 dir = camera.ProjectRayNormal(mousePos).Normalized();
                         var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
+                        if (!hit.Hit && FrontFacesOnly && _currentMesh != null)
+                        {
+                            hit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false);
+                        }
+
                         if (hit.Hit)
                         {
                             _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool, BucketFillTolerance);
+                            filled = true;
                         }
-                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit, cullBackfaces: FrontFacesOnly) ||
+                                 (FrontFacesOnly && RaycastAllSubmeshes(origin, dir, out otherSub, out otherHit, cullBackfaces: false)))
                         {
                             MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
                             _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool, BucketFillTolerance);
+                            filled = true;
                         }
                     }
-                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
-                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
-                    paintTab?.RegisterActiveStrokeMetadata();
-                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
+                    if (filled)
+                    {
+                        EmitSignal(SignalName.StrokeFinished);
+                        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                        ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                        paintTab?.RegisterActiveStrokeMetadata();
+                        _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
+                    }
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
@@ -2751,6 +2764,7 @@ namespace DeadlockPlayground.Painter
                 }
                 else if (ToolMode == BrushToolMode.BucketFill)
                 {
+                    bool filled = false;
                     Vector2 pos = GetViewportMousePosition();
                     var camera = _worldViewport?.GetCamera3D() ?? _camera;
                     if (camera != null)
@@ -2758,22 +2772,34 @@ namespace DeadlockPlayground.Painter
                         Vector3 origin = camera.ProjectRayOrigin(pos);
                         Vector3 dir = camera.ProjectRayNormal(pos).Normalized();
                         var hit = _currentMesh != null ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
+                        if (!hit.Hit && FrontFacesOnly && _currentMesh != null)
+                        {
+                            hit = _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: false);
+                        }
+
                         if (hit.Hit)
                         {
                             _layerManager?.FillSubmesh(_currentMesh, BrushColor, hit.HitUV, _magicWandTool, BucketFillTolerance);
+                            filled = true;
                             GetViewport()?.SetInputAsHandled();
                         }
-                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit, cullBackfaces: FrontFacesOnly) ||
+                                 (FrontFacesOnly && RaycastAllSubmeshes(origin, dir, out otherSub, out otherHit, cullBackfaces: false)))
                         {
                             MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
                             _layerManager?.FillSubmesh(otherSub.Mesh, BrushColor, otherHit.HitUV, _magicWandTool, BucketFillTolerance);
+                            filled = true;
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
-                    var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
-                    ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
-                    paintTab?.RegisterActiveStrokeMetadata();
-                    _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
+                    if (filled)
+                    {
+                        EmitSignal(SignalName.StrokeFinished);
+                        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
+                        ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+                        paintTab?.RegisterActiveStrokeMetadata();
+                        _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
+                    }
                 }
                 else if (ToolMode == BrushToolMode.MagicWand)
                 {
