@@ -149,8 +149,8 @@ public partial class ExtraModelPickerModalUI : PanelContainer
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
             MaxLinesVisible = 2
         };
-        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 13);
-        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.82f, 0.85f, 0.90f, 1.0f));
+        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 14);
+        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.85f, 0.88f, 0.94f, 1.0f));
         footer.AddChild(_lblSelectedInfo);
 
         _btnCancel = new Button

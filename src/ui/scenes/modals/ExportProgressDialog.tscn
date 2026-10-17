@@ -82,7 +82,7 @@ theme_override_constants/separation = 10
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 16
 text = "COMPILING & EXPORTING MOD"
 
 [node name="HSeparator1" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987234505]
@@ -91,7 +91,8 @@ layout_mode = 2
 [node name="LblStepStatus" type="Label" parent="DialogPanel/Margin/VBox" unique_id=987234506]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.82, 0.95, 1)
-theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 14
 text = "Initializing export pipeline..."
 
 [node name="ProgressBar" type="ProgressBar" parent="DialogPanel/Margin/VBox" unique_id=987234507]
@@ -105,8 +106,8 @@ custom_minimum_size = Vector2(0, 260)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_styles/normal = SubResource("StyleBoxFlat_console")
-theme_override_font_sizes/normal_font_size = 11
-theme_override_font_sizes/bold_font_size = 11
+theme_override_font_sizes/normal_font_size = 13
+theme_override_font_sizes/bold_font_size = 13
 bbcode_enabled = true
 scroll_following = true
 
@@ -119,16 +120,22 @@ alignment = 2
 visible = false
 custom_minimum_size = Vector2(160, 32)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_folder")
 text = "Open Addons Folder"
 
 [node name="BtnCopyLog" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987234512]
 custom_minimum_size = Vector2(100, 32)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Copy Log"
 
 [node name="BtnCancel" type="Button" parent="DialogPanel/Margin/VBox/HBoxButtons" unique_id=987234511]
 custom_minimum_size = Vector2(90, 32)
 layout_mode = 2
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Cancel"
 

@@ -212,8 +212,14 @@ public partial class ModCardUI : PanelContainer
         };
         _tagPanel.AddThemeStyleboxOverride("panel", tagStyle);
 
+        var colusFont = PlaygroundThemeHelper.GetFontColus();
+
         _lblTag = new Label { Text = "Mod" };
-        _lblTag.AddThemeFontSizeOverride("font_size", 10);
+        if (colusFont != null)
+        {
+            _lblTag.AddThemeFontOverride("font", colusFont);
+        }
+        _lblTag.AddThemeFontSizeOverride("font_size", 12);
         _tagPanel.AddChild(_lblTag);
         thumbPanel.AddChild(_tagPanel);
 
@@ -224,7 +230,6 @@ public partial class ModCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        var colusFont = PlaygroundThemeHelper.GetFontColus();
         if (colusFont != null)
         {
             _lblTitle.AddThemeFontOverride("font", colusFont);
@@ -240,8 +245,8 @@ public partial class ModCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblHero.AddThemeFontSizeOverride("font_size", 12);
-        _lblHero.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.82f, 1.0f));
+        _lblHero.AddThemeFontSizeOverride("font_size", 13);
+        _lblHero.AddThemeColorOverride("font_color", new Color(0.78f, 0.82f, 0.90f, 1.0f));
         vbox.AddChild(_lblHero);
 
         _lblFilename = new Label
@@ -251,8 +256,8 @@ public partial class ModCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblFilename.AddThemeFontSizeOverride("font_size", 11);
-        _lblFilename.AddThemeColorOverride("font_color", new Color(0.55f, 0.60f, 0.68f, 1.0f));
+        _lblFilename.AddThemeFontSizeOverride("font_size", 13);
+        _lblFilename.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f, 1.0f));
         vbox.AddChild(_lblFilename);
 
         if (ModInfo != null || IsVanilla)

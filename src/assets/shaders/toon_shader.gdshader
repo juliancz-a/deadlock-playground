@@ -75,7 +75,9 @@ void vertex() {
 
 void fragment() {
 	vec2 uv = UV * uv1_scale.xy + uv1_offset.xy;
-	vec4 albedo = texture(albedo_texture, uv) * albedo_color * COLOR;
+	vec3 safe_albedo_col = (dot(albedo_color.rgb, vec3(1.0)) > 0.001) ? albedo_color.rgb : vec3(1.0);
+	vec4 tex_col = texture(albedo_texture, uv);
+	vec4 albedo = vec4(tex_col.rgb * safe_albedo_col, tex_col.a * albedo_color.a);
 
 	if (alpha_scissor_threshold > 0.0) {
 		if (albedo.a < alpha_scissor_threshold) {

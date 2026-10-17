@@ -93,13 +93,13 @@ alignment = 1
 [node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/VBox" unique_id=2054632920]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 15
 text = "Source Code & Contributions"
 
 [node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/VBox" unique_id=1823734923]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.6, 0.63, 0.7, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.75, 0.78, 0.86, 1)
+theme_override_font_sizes/font_size = 13
 text = "Report issues, propose features, or view pull requests on GitHub"
 
 [node name="BtnGithub" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox" unique_id=627695329]
@@ -142,20 +142,20 @@ alignment = 1
 [node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1527859074]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 15
 text = "My Discord"
 
 [node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=808491072]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.6, 0.63, 0.7, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.75, 0.78, 0.86, 1)
+theme_override_font_sizes/font_size = 13
 text = "Username: juliancz_"
 
 [node name="LblDiscordCopied" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1080933265]
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.4, 0.85, 0.5, 1)
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 12
 text = "Username copied to clipboard!"
 
 [node name="BtnCopyDiscord" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=457214055]

@@ -154,6 +154,7 @@ public static class DeadlockHeroCatalog
             { "deadman danny", "deadman_danny" },
             { "deadman", "deadman_danny" },
             { "deadpack", "deadman_danny" },
+            { "airheart", "deadman_danny" },
             { "nurse_harrow", "nurse_harrow" },
             { "nurse harrow", "nurse_harrow" },
             { "nurse", "nurse_harrow" },

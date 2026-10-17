@@ -127,10 +127,10 @@ namespace DeadlockPlayground.UI
             _lblSubtitle = new Label
             {
                 Text = "Centralized overview of all staged character paints, extra model customizations, and particle VFX modifications.",
-                Modulate = new Color(0.65f, 0.68f, 0.74f),
+                Modulate = new Color(0.82f, 0.85f, 0.90f),
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
-            _lblSubtitle.AddThemeFontSizeOverride("font_size", 11);
+            _lblSubtitle.AddThemeFontSizeOverride("font_size", 14);
             rootVBox.AddChild(_lblSubtitle);
 
             rootVBox.AddChild(new HSeparator());
@@ -314,8 +314,9 @@ namespace DeadlockPlayground.UI
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                    Modulate = new Color(0.65f, 0.68f, 0.74f)
+                    Modulate = new Color(0.75f, 0.78f, 0.84f)
                 };
+                emptyLbl.AddThemeFontSizeOverride("font_size", 14);
                 emptyPanel.AddChild(emptyLbl);
                 _contentContainer.AddChild(emptyPanel);
                 return;
@@ -374,17 +375,18 @@ namespace DeadlockPlayground.UI
                     Modulate = isCurrentActiveHero ? new Color(1.0f, 0.88f, 0.45f) : Colors.White
                 };
                 if (colus != null) heroTitle.AddThemeFontOverride("font", colus);
-                heroTitle.AddThemeFontSizeOverride("font_size", 13);
+                heroTitle.AddThemeFontSizeOverride("font_size", 15);
                 heroHeader.AddChild(heroTitle);
 
                 var exportHeroBtn = new Button
                 {
                     Text = "Export Mod (VPK)",
-                    CustomMinimumSize = new Vector2(135, 26),
+                    CustomMinimumSize = new Vector2(145, 28),
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
                     Modulate = new Color(0.45f, 0.92f, 0.55f)
                 };
-                exportHeroBtn.AddThemeFontSizeOverride("font_size", 10);
+                if (colus != null) exportHeroBtn.AddThemeFontOverride("font", colus);
+                exportHeroBtn.AddThemeFontSizeOverride("font_size", 12);
                 string expHeroId = hero.HeroId;
                 string expHeroDisplay = hero.DisplayName;
                 exportHeroBtn.Pressed += () =>
@@ -411,8 +413,9 @@ namespace DeadlockPlayground.UI
                 // 1. Character Model
                 if (charModels.Count > 0)
                 {
-                    var catHead = new Label { Text = "• Character Model", Modulate = new Color(0.85f, 0.88f, 0.95f) };
-                    catHead.AddThemeFontSizeOverride("font_size", 11);
+                    var catHead = new Label { Text = "• Character Model", Modulate = new Color(0.92f, 0.95f, 0.98f) };
+                    if (colus != null) catHead.AddThemeFontOverride("font", colus);
+                    catHead.AddThemeFontSizeOverride("font_size", 13);
                     cardVBox.AddChild(catHead);
 
                     foreach (var a in charModels)
@@ -425,8 +428,9 @@ namespace DeadlockPlayground.UI
                 // 2. Extra Models
                 if (extraModels.Count > 0)
                 {
-                    var catHead = new Label { Text = "• Extra Models", Modulate = new Color(0.85f, 0.88f, 0.95f) };
-                    catHead.AddThemeFontSizeOverride("font_size", 11);
+                    var catHead = new Label { Text = "• Extra Models", Modulate = new Color(0.92f, 0.95f, 0.98f) };
+                    if (colus != null) catHead.AddThemeFontOverride("font", colus);
+                    catHead.AddThemeFontSizeOverride("font_size", 13);
                     cardVBox.AddChild(catHead);
 
                     foreach (var a in extraModels)
@@ -439,8 +443,9 @@ namespace DeadlockPlayground.UI
                 // 3. Particle VFX
                 if (vfxAssets.Count > 0)
                 {
-                    var catHead = new Label { Text = "• VFX (Particles)", Modulate = new Color(0.85f, 0.88f, 0.95f) };
-                    catHead.AddThemeFontSizeOverride("font_size", 11);
+                    var catHead = new Label { Text = "• VFX (Particles)", Modulate = new Color(0.92f, 0.95f, 0.98f) };
+                    if (colus != null) catHead.AddThemeFontOverride("font", colus);
+                    catHead.AddThemeFontSizeOverride("font_size", 13);
                     cardVBox.AddChild(catHead);
 
                     foreach (var a in vfxAssets)
@@ -475,18 +480,22 @@ namespace DeadlockPlayground.UI
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 TooltipText = asset.VpkPath
             };
-            nameLbl.AddThemeFontSizeOverride("font_size", 11);
+            nameLbl.AddThemeFontSizeOverride("font_size", 13);
+            nameLbl.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.96f));
             row.AddChild(nameLbl);
+
+            var colus = PlaygroundThemeHelper.GetFontColus();
 
             if (isActive)
             {
                 var activeBadge = new Label
                 {
                     Text = isModel ? "[Active Model]" : "[Active Particle]",
-                    Modulate = new Color(0.4f, 0.85f, 0.5f),
+                    Modulate = new Color(0.45f, 0.95f, 0.55f),
                     SizeFlagsVertical = SizeFlags.ShrinkCenter
                 };
-                activeBadge.AddThemeFontSizeOverride("font_size", 10);
+                if (colus != null) activeBadge.AddThemeFontOverride("font", colus);
+                activeBadge.AddThemeFontSizeOverride("font_size", 12);
                 row.AddChild(activeBadge);
             }
             else
@@ -494,10 +503,11 @@ namespace DeadlockPlayground.UI
                 var loadBtn = new Button
                 {
                     Text = isModel ? "Load Model" : "Load Particle",
-                    CustomMinimumSize = new Vector2(100, 24),
+                    CustomMinimumSize = new Vector2(110, 26),
                     SizeFlagsVertical = SizeFlags.ShrinkCenter
                 };
-                loadBtn.AddThemeFontSizeOverride("font_size", 10);
+                if (colus != null) loadBtn.AddThemeFontOverride("font", colus);
+                loadBtn.AddThemeFontSizeOverride("font_size", 12);
 
                 string localHeroId = heroId;
                 string localPath = asset.VpkPath;

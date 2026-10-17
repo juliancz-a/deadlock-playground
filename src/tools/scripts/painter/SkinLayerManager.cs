@@ -3723,10 +3723,12 @@ namespace DeadlockPlayground.Painter
                                 }
                                 else
                                 {
-                                    float nx = (float)(x - centerPx.X) / halfExtX;
-                                    float ny = (float)(y - centerPx.Y) / halfExtY;
-                                    rx = nx * cosR + ny * sinR;
-                                    ry = -nx * sinR + ny * cosR;
+                                    float dx = (float)(x - centerPx.X);
+                                    float dy = (float)(y - centerPx.Y);
+                                    float localX = dx * cosR + dy * sinR;
+                                    float localY = -dx * sinR + dy * cosR;
+                                    rx = localX / halfExtX;
+                                    ry = localY / halfExtY;
                                 }
 
                                 if (Mathf.Abs(rx) > 1.0f || Mathf.Abs(ry) > 1.0f) continue;

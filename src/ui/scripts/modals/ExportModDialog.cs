@@ -363,13 +363,16 @@ public partial class ExportModDialog : CanvasLayer
             }
         }
 
+        var colus = PlaygroundThemeHelper.GetFontColus();
+
         void AddSectionHeader(string title, Color color)
         {
             var header = new Label
             {
                 Text = title
             };
-            header.AddThemeFontSizeOverride("font_size", 12);
+            if (colus != null) header.AddThemeFontOverride("font", colus);
+            header.AddThemeFontSizeOverride("font_size", 14);
             header.AddThemeColorOverride("font_color", color);
             _submeshChecklistContainer.AddChild(header);
         }
@@ -387,13 +390,16 @@ public partial class ExportModDialog : CanvasLayer
                 ButtonPressed = isPreChecked,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
+            if (colus != null) chk.AddThemeFontOverride("font", colus);
+            chk.AddThemeFontSizeOverride("font_size", 14);
 
             var lblStatusBadge = new Label
             {
                 Text = submesh.IsDirty ? "[MODIFIED]" : "[UNMODIFIED]"
             };
-            lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
-            lblStatusBadge.AddThemeColorOverride("font_color", submesh.IsDirty ? new Color(0.4f, 0.9f, 0.5f) : new Color(0.5f, 0.55f, 0.65f));
+            if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
+            lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
+            lblStatusBadge.AddThemeColorOverride("font_color", submesh.IsDirty ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
 
             chk.Toggled += (pressed) =>
             {
@@ -402,12 +408,12 @@ public partial class ExportModDialog : CanvasLayer
                 {
                     submesh.IsDirty = true;
                     lblStatusBadge.Text = "[SELECTED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
                 }
                 else
                 {
                     lblStatusBadge.Text = "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.5f, 0.55f, 0.65f));
+                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.80f));
                 }
             };
 
@@ -421,8 +427,8 @@ public partial class ExportModDialog : CanvasLayer
                 {
                     Text = Path.GetFileName(submesh.OriginalVmatPath)
                 };
-                lblBadge.AddThemeFontSizeOverride("font_size", 10);
-                lblBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.65f, 0.85f));
+                lblBadge.AddThemeFontSizeOverride("font_size", 12);
+                lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
                 hbox.AddChild(lblBadge);
             }
 
@@ -430,7 +436,7 @@ public partial class ExportModDialog : CanvasLayer
         }
 
         // Section 1: Hero Model Submeshes
-        AddSectionHeader("👤 Hero Model Submeshes", new Color(0.9f, 0.8f, 0.45f));
+        AddSectionHeader("👤 Hero Model Submeshes", new Color(0.95f, 0.85f, 0.45f));
         var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
         bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0;
 
@@ -454,9 +460,13 @@ public partial class ExportModDialog : CanvasLayer
                     ButtonPressed = true,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
+                if (colus != null) chk.AddThemeFontOverride("font", colus);
+                chk.AddThemeFontSizeOverride("font_size", 14);
+
                 var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
                 _extraModelCheckboxes[chk] = charAsset;
                 hbox.AddChild(chk);
                 hbox.AddChild(lblStatusBadge);
@@ -469,8 +479,8 @@ public partial class ExportModDialog : CanvasLayer
             {
                 Text = "   (No character model submeshes modified)"
             };
-            emptyLbl.AddThemeFontSizeOverride("font_size", 11);
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
+            emptyLbl.AddThemeFontSizeOverride("font_size", 13);
+            emptyLbl.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f));
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
         else if (_allSubmeshes.Count > 0)
@@ -486,8 +496,8 @@ public partial class ExportModDialog : CanvasLayer
             {
                 Text = "   No submeshes found. Default body will be exported."
             };
-            emptyLbl.AddThemeFontSizeOverride("font_size", 11);
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.6f));
+            emptyLbl.AddThemeFontSizeOverride("font_size", 13);
+            emptyLbl.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f));
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
 
@@ -497,7 +507,7 @@ public partial class ExportModDialog : CanvasLayer
             var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
             _submeshChecklistContainer.AddChild(spacer);
 
-            AddSectionHeader("🗡️ Extra Models", new Color(0.4f, 0.75f, 0.95f));
+            AddSectionHeader("🗡️ Extra Models", new Color(0.45f, 0.80f, 0.98f));
 
             foreach (var extra in extraModelAssets)
             {
@@ -511,15 +521,18 @@ public partial class ExportModDialog : CanvasLayer
                     ButtonPressed = true,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
+                if (colus != null) chk.AddThemeFontOverride("font", colus);
+                chk.AddThemeFontSizeOverride("font_size", 14);
 
                 var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
 
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.4f, 0.9f, 0.5f) : new Color(0.5f, 0.55f, 0.65f));
+                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
                 };
 
                 _extraModelCheckboxes[chk] = extra;
@@ -530,8 +543,8 @@ public partial class ExportModDialog : CanvasLayer
                 if (!string.IsNullOrEmpty(modelFile))
                 {
                     var lblBadge = new Label { Text = modelFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 10);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.65f, 0.85f));
+                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
+                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
                     hbox.AddChild(lblBadge);
                 }
 
@@ -545,7 +558,7 @@ public partial class ExportModDialog : CanvasLayer
             var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
             _submeshChecklistContainer.AddChild(spacer);
 
-            AddSectionHeader("✨ Particle VFX", new Color(0.85f, 0.5f, 0.95f));
+            AddSectionHeader("✨ Particle VFX", new Color(0.90f, 0.60f, 0.98f));
 
             foreach (var part in particleAssets)
             {
@@ -559,15 +572,18 @@ public partial class ExportModDialog : CanvasLayer
                     ButtonPressed = true,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
+                if (colus != null) chk.AddThemeFontOverride("font", colus);
+                chk.AddThemeFontSizeOverride("font_size", 14);
 
                 var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 10);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.9f, 0.5f));
+                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
 
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.4f, 0.9f, 0.5f) : new Color(0.5f, 0.55f, 0.65f));
+                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
                 };
 
                 _particleCheckboxes[chk] = part;
@@ -578,8 +594,8 @@ public partial class ExportModDialog : CanvasLayer
                 if (!string.IsNullOrEmpty(vpcfFile))
                 {
                     var lblBadge = new Label { Text = vpcfFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 10);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.4f, 0.65f, 0.85f));
+                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
+                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
                     hbox.AddChild(lblBadge);
                 }
 

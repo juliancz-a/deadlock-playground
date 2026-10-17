@@ -56,11 +56,17 @@ public static class FastVDataParticleIndexer
                 continue;
             }
 
+            // Normalize to canonical display name if known
+            if (HeroParticleService.TryResolveHeroCanonicalName(heroName, out string canonicalHero))
+            {
+                heroName = canonicalHero;
+            }
+
             string abilityKey = entry.Key;
             string locToken = $"#{abilityKey}";
 
             var particles = new List<ParticleEntry>(8);
-            ExtractParticlesRecursive(abilityObj, string.Empty, particles);
+            ExtractParticlesRecursive(abilityObj, string.Empty, particles, heroName);
 
             if (particles.Count > 0)
             {
@@ -127,7 +133,7 @@ public static class FastVDataParticleIndexer
         return null;
     }
 
-    private static void ExtractParticlesRecursive(KVObject obj, string prefix, List<ParticleEntry> output)
+    private static void ExtractParticlesRecursive(KVObject obj, string prefix, List<ParticleEntry> output, string heroName)
     {
         if (obj == null || obj.IsNull) return;
 
@@ -143,7 +149,7 @@ public static class FastVDataParticleIndexer
 
                 string cleanSubName = CleanSubBlockName(child.Key);
                 string nextPrefix = string.IsNullOrEmpty(prefix) ? cleanSubName : $"{prefix} / {cleanSubName}";
-                ExtractParticlesRecursive(value, nextPrefix, output);
+                ExtractParticlesRecursive(value, nextPrefix, output, heroName);
             }
             else
             {
@@ -152,6 +158,12 @@ public static class FastVDataParticleIndexer
                     string valStr = value.ToString();
                     if (!string.IsNullOrEmpty(valStr) && valStr.EndsWith(VpcfExtension, StringComparison.OrdinalIgnoreCase))
                     {
+                        // Filter out particles owned by another hero (prevents cross-hero leaks)
+                        if (!string.IsNullOrEmpty(heroName) && !HeroParticleService.IsParticleOwnedByHero(valStr, heroName))
+                        {
+                            continue;
+                        }
+
                         string cleanProp = CleanPropertyName(child.Key);
                         string variantName = string.IsNullOrEmpty(prefix) ? cleanProp : $"{prefix} / {cleanProp}";
 

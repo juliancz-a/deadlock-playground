@@ -60,14 +60,14 @@ theme_override_constants/separation = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
 theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 14
 text = "SOURCE 2 MOD EXPORT"
 
 [node name="BtnExportMod" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1982736451]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 13
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_mod")
 text = "EXPORT MOD (.VPK)..."
 
@@ -77,19 +77,21 @@ layout_mode = 2
 [node name="BtnExportPng" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1685181799]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Export PNG Only..."
 
 [node name="BtnExportVmat" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1722466599]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_fonts/font = ExtResource("2_colus")
+theme_override_font_sizes/font_size = 13
 text = "Generate .vmat KV3..."
 
 [node name="LblStatus" type="Label" parent="MarginContainer/VBoxContainer" unique_id=88028999]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.6, 0.8, 0.6, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.65, 0.85, 0.65, 1)
+theme_override_font_sizes/font_size = 12
 text = "Ready to export"
 autowrap_mode = 2
 

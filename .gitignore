@@ -12,6 +12,9 @@ scratch_out
 tools/dump_out
 tools/tools
 tools/dump_runner
+.agent/
+PRODUCT.md
+DESIGN.md
 
 # Build output & IDE artifacts
 **/bin/

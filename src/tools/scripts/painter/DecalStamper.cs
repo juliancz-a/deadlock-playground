@@ -8,6 +8,8 @@ namespace DeadlockPlayground.Painter
         [Signal] public delegate void DecalPlacedEventHandler(Vector3 worldPos, Vector2 hitUv);
         [Signal] public delegate void DecalBakedEventHandler();
 
+        public event Action<Texture2D> DecalTextureChanged;
+
         public Texture2D DecalTexture { get; private set; }
         public float RotationDegrees { get; set; } = 0.0f;
         public float DecalScale { get; set; } = 0.25f; // UV normalized scale
@@ -38,6 +40,7 @@ namespace DeadlockPlayground.Painter
             if (DecalTexture == null)
             {
                 DecalTexture = CreateDefaultDecalTexture();
+                DecalTextureChanged?.Invoke(DecalTexture);
             }
 
             _previewContainer = parentContainer;
@@ -123,6 +126,7 @@ namespace DeadlockPlayground.Painter
             {
                 _previewDecal.TextureAlbedo = DecalTexture;
             }
+            DecalTextureChanged?.Invoke(DecalTexture);
 
             GD.Print($"[DecalStamper] Loaded decal texture: {img.GetWidth()}x{img.GetHeight()}");
             return true;
@@ -135,6 +139,7 @@ namespace DeadlockPlayground.Painter
             {
                 _previewDecal.TextureAlbedo = DecalTexture;
             }
+            DecalTextureChanged?.Invoke(DecalTexture);
         }
 
         public void PlaceAt(Vector3 worldPos, Vector3 normal, Vector2 uv, Vector3 decalRight = default, Vector3 decalDown = default, Vector3 tangent = default, Vector3 bitangent = default, float unitsU = 1.0f, float unitsV = 1.0f)

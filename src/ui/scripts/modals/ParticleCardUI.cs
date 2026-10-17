@@ -151,7 +151,7 @@ public partial class ParticleCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill
         };
         _lblVariant.AddThemeColorOverride("font_color", new Color(0.95f, 0.95f, 0.95f, 1.0f));
-        _lblVariant.AddThemeFontSizeOverride("font_size", 13);
+        _lblVariant.AddThemeFontSizeOverride("font_size", 14);
         vbox.AddChild(_lblVariant);
 
         // Ability Name Label (Secondary)
@@ -162,8 +162,8 @@ public partial class ParticleCardUI : PanelContainer
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
             SizeFlagsHorizontal = SizeFlags.Fill
         };
-        _lblAbility.AddThemeColorOverride("font_color", new Color(0.60f, 0.65f, 0.72f, 0.9f));
-        _lblAbility.AddThemeFontSizeOverride("font_size", 11);
+        _lblAbility.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 0.95f));
+        _lblAbility.AddThemeFontSizeOverride("font_size", 13);
         vbox.AddChild(_lblAbility);
     }
 

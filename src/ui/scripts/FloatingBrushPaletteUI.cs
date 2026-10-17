@@ -825,7 +825,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                     float aspect = 1.0f;
                     if (_painter.ProjectionGizmo.Texture != null && _painter.ProjectionGizmo.Texture.GetHeight() > 0)
                         aspect = (float)_painter.ProjectionGizmo.Texture.GetWidth() / _painter.ProjectionGizmo.Texture.GetHeight();
-                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim * aspect, baseDim) : new Vector2(baseDim, baseDim / aspect);
+                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim, baseDim / aspect) : new Vector2(baseDim * aspect, baseDim);
                 }
                 if (_lblDecalScale != null) _lblDecalScale.Text = $"{v:F2}x";
                 QueueCanvasRedraw();
@@ -974,7 +974,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                     float aspect = 1.0f;
                     if (_painter.ProjectionGizmo.Texture != null && _painter.ProjectionGizmo.Texture.GetHeight() > 0)
                         aspect = (float)_painter.ProjectionGizmo.Texture.GetWidth() / _painter.ProjectionGizmo.Texture.GetHeight();
-                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim * aspect, baseDim) : new Vector2(baseDim, baseDim / aspect);
+                    _painter.ProjectionGizmo.Size = aspect >= 1.0f ? new Vector2(baseDim, baseDim / aspect) : new Vector2(baseDim * aspect, baseDim);
                 }
                 if (_lblTextScale != null) _lblTextScale.Text = $"{v:F2}x";
                 QueueCanvasRedraw();
@@ -1450,6 +1450,39 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         else if (mode == BrushToolMode.MagicWand && _painter?.MagicWandTool != null)
         {
             UpdateWandUI();
+        }
+        else if (mode == BrushToolMode.Decal)
+        {
+            if (_painter?.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive && _painter.ProjectionGizmo.IsText)
+            {
+                _painter.CancelActiveProjectionGizmo();
+            }
+            float dScale = _decalStamper?.DecalScale ?? 0.25f;
+            if (_sliderDecalScale != null) _sliderDecalScale.SetValueNoSignal(dScale);
+            if (_lblDecalScale != null) _lblDecalScale.Text = $"{dScale:F2}x";
+            float dRot = _decalStamper?.RotationDegrees ?? 0.0f;
+            if (_sliderDecalRot != null) _sliderDecalRot.SetValueNoSignal(dRot);
+            if (_lblDecalRot != null) _lblDecalRot.Text = $"{Mathf.RoundToInt(dRot)}°";
+        }
+        else if (mode == BrushToolMode.Text)
+        {
+            if (_painter?.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive && !_painter.ProjectionGizmo.IsText)
+            {
+                _painter.CancelActiveProjectionGizmo();
+            }
+            float tScale = _textProjector?.TextScale ?? 0.25f;
+            if (_sliderTextScale != null) _sliderTextScale.SetValueNoSignal(tScale);
+            if (_lblTextScale != null) _lblTextScale.Text = $"{tScale:F2}x";
+            float tRot = _textProjector?.RotationDegrees ?? 0.0f;
+            if (_sliderTextRot != null) _sliderTextRot.SetValueNoSignal(tRot);
+            if (_lblTextRot != null) _lblTextRot.Text = $"{Mathf.RoundToInt(tRot)}°";
+        }
+        else if (mode != BrushToolMode.Decal && mode != BrushToolMode.Text)
+        {
+            if (_painter?.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
+            {
+                _painter.CancelActiveProjectionGizmo();
+            }
         }
 
         if (forceFlyoutOpen && _flyoutPanel != null)

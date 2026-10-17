@@ -57,7 +57,8 @@ theme_override_constants/separation = 4
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1480415954]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = ExtResource("2_dwmip")
+theme_override_font_sizes/font_size = 13
 text = "FORMAT (ASPECT RATIO)"
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1646729911]
@@ -100,7 +101,8 @@ theme_override_constants/separation = 4
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ResBox" unique_id=571090747]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_font_sizes/font_size = 12
+theme_override_fonts/font = ExtResource("2_dwmip")
+theme_override_font_sizes/font_size = 13
 text = "RESOLUTION PRESET"
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/ResBox" unique_id=924703207]
@@ -131,9 +133,9 @@ text = "4K"
 
 [node name="LblDimensions" type="Label" parent="MarginContainer/VBoxContainer" unique_id=1183140895]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.65, 0.7, 0.78, 1)
+theme_override_colors/font_color = Color(0.75, 0.80, 0.88, 1)
 theme_override_fonts/font = ExtResource("2_dwmip")
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 13
 text = "1920 × 1080 px"
 horizontal_alignment = 1
 

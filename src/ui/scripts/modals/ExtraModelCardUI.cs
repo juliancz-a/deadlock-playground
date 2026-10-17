@@ -195,8 +195,14 @@ public partial class ExtraModelCardUI : PanelContainer
         };
         _tagPanel.AddThemeStyleboxOverride("panel", tagStyle);
 
+        var colusFont = PlaygroundThemeHelper.GetFontColus();
+
         _lblTag = new Label { Text = "Extra Model" };
-        _lblTag.AddThemeFontSizeOverride("font_size", 10);
+        if (colusFont != null)
+        {
+            _lblTag.AddThemeFontOverride("font", colusFont);
+        }
+        _lblTag.AddThemeFontSizeOverride("font_size", 12);
         _tagPanel.AddChild(_lblTag);
         headerRow.AddChild(_tagPanel);
 
@@ -207,7 +213,6 @@ public partial class ExtraModelCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart
         };
-        var colusFont = PlaygroundThemeHelper.GetFontColus();
         if (colusFont != null)
         {
             _lblTitle.AddThemeFontOverride("font", colusFont);
@@ -224,8 +229,8 @@ public partial class ExtraModelCardUI : PanelContainer
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
         };
-        _lblPath.AddThemeFontSizeOverride("font_size", 11);
-        _lblPath.AddThemeColorOverride("font_color", new Color(0.60f, 0.65f, 0.72f, 1.0f));
+        _lblPath.AddThemeFontSizeOverride("font_size", 13);
+        _lblPath.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 1.0f));
         vbox.AddChild(_lblPath);
 
         if (Entry != null)
