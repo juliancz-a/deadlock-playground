@@ -270,6 +270,14 @@ public partial class ParticlePickerModalUI : PanelContainer
 
         try
         {
+            var fi = new FileInfo(path);
+            if (fi.Length <= 600)
+            {
+                // Stale blank frame (575 bytes is empty uniform background), purge so it can be re-rendered
+                File.Delete(path);
+                return false;
+            }
+
             var img = Image.LoadFromFile(path);
             if (img != null && !img.IsEmpty())
             {
@@ -298,6 +306,14 @@ public partial class ParticlePickerModalUI : PanelContainer
                 Directory.CreateDirectory(dir);
             }
             img.SavePng(path);
+
+            // If the rendered image was just the blank background (575 bytes), delete it
+            // so we don't permanently cache a blank image for unsimulated or delayed effects
+            var fi = new FileInfo(path);
+            if (fi.Length <= 600)
+            {
+                File.Delete(path);
+            }
         }
         catch (Exception ex)
         {
@@ -639,6 +655,11 @@ public partial class ParticlePickerModalUI : PanelContainer
                 for (int rIdx = 0; rIdx < item.Def.Renderers.Count; rIdx++)
                 {
                     var rDef = item.Def.Renderers[rIdx];
+                    if (rDef is RenderRopesDef rRopes && rRopes.OnlyRenderInEffectsBloomPass)
+                    {
+                        continue;
+                    }
+
                     Texture2D tex = null;
                     Vector4[] seqRects = null;
 

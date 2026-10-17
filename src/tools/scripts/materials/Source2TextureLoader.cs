@@ -22,6 +22,11 @@ public static class Source2TextureLoader
     private static readonly Dictionary<string, ImageTexture> _textureCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Optional mounted Source 2 engine core package (game/core/pak01_dir.vpk) containing base engine textures.
+    /// </summary>
+    public static Package CorePackage { get; set; }
+
+    /// <summary>
     /// Clears the session texture cache. Call between hero unloads to free GPU memory.
     /// </summary>
     public static void CleanCache()
@@ -182,9 +187,19 @@ public static class Source2TextureLoader
             }
         }
 
+        // Priority 3: Fallback to Core Engine VPK (game/core/pak01_dir.vpk)
+        if (entry == null && CorePackage != null)
+        {
+            entry = FindVtexEntry(CorePackage, vtexInternalPath);
+            if (entry != null)
+            {
+                targetPackage = CorePackage;
+            }
+        }
+
         if (entry == null || targetPackage == null)
         {
-            GD.PrintErr($"[TextureLoader] Texture not found in VPK (Addon or Base): {vtexInternalPath}");
+            GD.PrintErr($"[TextureLoader] Texture not found in VPK (Addon, Base or Core): {vtexInternalPath}");
             return null;
         }
 
@@ -224,6 +239,19 @@ public static class Source2TextureLoader
         try
         {
             resource = fileLoader.LoadFile(searchRoute) ?? fileLoader.LoadFileCompiled(searchRoute);
+            if (resource == null)
+            {
+                if (searchRoute.StartsWith("materials/", StringComparison.OrdinalIgnoreCase))
+                {
+                    string stripped = searchRoute.Substring("materials/".Length);
+                    resource = fileLoader.LoadFile(stripped) ?? fileLoader.LoadFileCompiled(stripped);
+                }
+                else
+                {
+                    string prepended = "materials/" + searchRoute;
+                    resource = fileLoader.LoadFile(prepended) ?? fileLoader.LoadFileCompiled(prepended);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -574,6 +602,19 @@ public static class Source2TextureLoader
             if (fileLoader != null)
             {
                 res = fileLoader.LoadFile(searchPath) ?? fileLoader.LoadFileCompiled(searchPath);
+                if (res == null)
+                {
+                    if (searchPath.StartsWith("materials/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string stripped = searchPath.Substring("materials/".Length);
+                        res = fileLoader.LoadFile(stripped) ?? fileLoader.LoadFileCompiled(stripped);
+                    }
+                    else
+                    {
+                        string prepended = "materials/" + searchPath;
+                        res = fileLoader.LoadFile(prepended) ?? fileLoader.LoadFileCompiled(prepended);
+                    }
+                }
             }
 
             if (res == null && addonPackage != null)
@@ -595,6 +636,20 @@ public static class Source2TextureLoader
                     if (entry != null)
                     {
                         basePackage.ReadEntry(entry, out var bytes);
+                        res = new ValveResourceFormat.Resource();
+                        res.Read(new MemoryStream(bytes));
+                    }
+                }
+            }
+
+            if (res == null && CorePackage != null)
+            {
+                lock (CorePackage)
+                {
+                    var entry = FindVtexEntry(CorePackage, searchPath);
+                    if (entry != null)
+                    {
+                        CorePackage.ReadEntry(entry, out var bytes);
                         res = new ValveResourceFormat.Resource();
                         res.Read(new MemoryStream(bytes));
                     }

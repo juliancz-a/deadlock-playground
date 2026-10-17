@@ -208,6 +208,11 @@ public partial class ParticleStage3D : Node3D
             for (int rIdx = 0; rIdx < item.Def.Renderers.Count; rIdx++)
             {
                 var rDef = item.Def.Renderers[rIdx];
+                if (rDef is RenderRopesDef rRopes && rRopes.OnlyRenderInEffectsBloomPass)
+                {
+                    continue;
+                }
+
                 Texture2D tex = null;
                 Vector4[] seqRects = null;
 

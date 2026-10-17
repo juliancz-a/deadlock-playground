@@ -145,6 +145,7 @@ public class ParticleSystemInstance
             CollectionAge = CollectionAge,
             ParticleAge = 0.0f,
             Lifetime = Definition.ConstantLifetime > 0 ? Definition.ConstantLifetime : 1.0f,
+            MaxParticles = _maxParticles,
             ControlPoints = activeCp
         };
 
@@ -222,6 +223,7 @@ public class ParticleSystemInstance
             _particles[i].Age += dt;
             evalCtx.ParticleAge = _particles[i].Age;
             evalCtx.Lifetime = _particles[i].Lifetime;
+            evalCtx.ParticleIndex = i;
 
             // Execute Operators with EndCap gating
             foreach (var op in Definition.Operators)
@@ -303,6 +305,9 @@ public class ParticleSystemInstance
         p.SetField(3, p.BaseRadius);
         p.SetField(7, p.Alpha);
         p.SetField(10, 1.0f); // Default trail length / scrollX
+
+        evalCtx.ParticleIndex = slot;
+        evalCtx.MaxParticles = _maxParticles;
 
         // Run Initializers
         foreach (var init in Definition.Initializers)

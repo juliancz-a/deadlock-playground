@@ -285,6 +285,25 @@ public class RenderModelsDef : IParticleRendererDef
     public List<MaterialVarMapping> MaterialVars { get; } = new();
 }
 
+public class RenderRopesDef : IParticleRendererDef
+{
+    public string ClassName => "C_OP_RenderRopes";
+    public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ALPHA";
+    public string PrimaryTexturePath { get; set; } = string.Empty;
+    public float OverbrightFactor { get; set; } = 1.0f;
+    public float AddSelfAmount { get; set; } = 0.0f;
+    public float SelfIllumAmount { get; set; } = 0.0f;
+    public ParticleFloatInput AlphaScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public ParticleFloatInput RadiusScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public Vector4 UVTransform { get; set; } = new(1f, 1f, 0f, 0f);
+    public bool OnlyRenderInEffectsBloomPass { get; set; } = false;
+    public int MinTesselation { get; set; } = 4;
+    public int MaxTesselation { get; set; } = 4;
+    public bool ClosedLoop { get; set; } = false;
+    public bool UseScalarForTextureCoordinate { get; set; } = false;
+    public int ScalarFieldForTextureCoordinate { get; set; } = 0;
+}
+
 #endregion
 
 #region Hierarchy & Root System Definition

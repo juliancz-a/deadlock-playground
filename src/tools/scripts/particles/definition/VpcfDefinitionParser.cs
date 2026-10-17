@@ -519,6 +519,27 @@ public static class VpcfDefinitionParser
                 }
                 return models;
 
+            case "C_OP_RenderRopes":
+                var ropes = new RenderRopesDef
+                {
+                    BlendMode = blendMode,
+                    OverbrightFactor = ParseFloatInput(kv, "m_flOverbrightFactor", 1.0f).LiteralValue,
+                    AddSelfAmount = ParseFloatInput(kv, "m_flAddSelfAmount", 0.0f).LiteralValue,
+                    SelfIllumAmount = ParseFloatInput(kv, "m_flSelfIllumAmount", 0.0f).LiteralValue,
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f),
+                    RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f),
+                    OnlyRenderInEffectsBloomPass = ExtractBool(kv, "m_bOnlyRenderInEffectsBloomPass", false),
+                    MinTesselation = (int)ExtractLong(kv, "m_nMinTesselation", 4),
+                    MaxTesselation = (int)ExtractLong(kv, "m_nMaxTesselation", 4),
+                    ClosedLoop = ExtractBool(kv, "m_bClosedLoop", false),
+                    UseScalarForTextureCoordinate = ExtractBool(kv, "m_bUseScalarForTextureCoordinate", false),
+                    ScalarFieldForTextureCoordinate = (int)ExtractLong(kv, "m_nScalarFieldForTextureCoordinate", 0)
+                };
+                ParseTextureInputs(kv, ropes, out var tPathRopes, out var uvRopes);
+                ropes.PrimaryTexturePath = tPathRopes;
+                ropes.UVTransform = uvRopes;
+                return ropes;
+
             default:
                 Log($"[VpcfDefinitionParser] Unsupported Renderer class: '{cls}' in '{vpcfPath}'");
                 return null;
@@ -558,6 +579,15 @@ public static class VpcfDefinitionParser
                 }
 
                 if (!string.IsNullOrEmpty(texturePath)) break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(texturePath))
+        {
+            string directTex = ExtractString(kv, "m_hTexture");
+            if (!string.IsNullOrEmpty(directTex))
+            {
+                texturePath = directTex;
             }
         }
     }
@@ -686,10 +716,33 @@ public static class VpcfDefinitionParser
                 );
             }
         }
-        else
+        if (obj.TryGetValue("m_FloatInterp", out var fiObj) && fiObj != null)
         {
-            vec.LiteralValue = fallback;
+            vec.FloatInterp = ParseFloatInputObject(fiObj, 0.0f);
         }
+
+        if (vec.Type == "PVEC_TYPE_FLOAT_INTERP_GRADIENT")
+        {
+            if (obj.TryGetValue("m_Gradient", out var gradObj) && gradObj != null && gradObj.TryGetValue("m_Stops", out var stopsObj) && stopsObj != null)
+            {
+                foreach (var stopItem in stopsObj.Children)
+                {
+                    var stopVal = stopItem.Value;
+                    if (stopVal == null) continue;
+                    float pos = ExtractFloat(stopVal, "m_flPosition", 0.0f);
+                    Color stopCol = ParseColor(stopVal, "m_Color", Colors.White);
+                    vec.GradientStops.Add(new GradientStopDef
+                    {
+                        Position = pos,
+                        Color = new Vector3(stopCol.R, stopCol.G, stopCol.B)
+                    });
+                }
+            }
+        }
+
+        if (obj.TryGetValue("m_FloatComponentX", out var fcX) && fcX != null) vec.ComponentX = ParseFloatInputObject(fcX, 0f);
+        if (obj.TryGetValue("m_FloatComponentY", out var fcY) && fcY != null) vec.ComponentY = ParseFloatInputObject(fcY, 0f);
+        if (obj.TryGetValue("m_FloatComponentZ", out var fcZ) && fcZ != null) vec.ComponentZ = ParseFloatInputObject(fcZ, 0f);
 
         return vec;
     }
@@ -760,14 +813,23 @@ public static class VpcfDefinitionParser
 
     private static Vector3 ParseVector3Offset(KVObject kv, string key)
     {
-        if (kv == null || !kv.TryGetValue(key, out var obj) || obj == null || !obj.IsArray) return Vector3.Zero;
-        var arr = obj.Children.ToArray();
+        if (kv == null || !kv.TryGetValue(key, out var obj) || obj == null) return Vector3.Zero;
+
+        KVObject target = obj;
+        if (!target.IsArray && target.TryGetValue("m_vLiteralValue", out var lit) && lit != null && lit.IsArray)
+        {
+            target = lit;
+        }
+
+        if (!target.IsArray) return Vector3.Zero;
+
+        var arr = target.Children.ToArray();
         if (arr.Length >= 3)
         {
-            float sx = Convert.ToSingle(arr[0].Value);
-            float sy = Convert.ToSingle(arr[1].Value);
-            float sz = Convert.ToSingle(arr[2].Value);
-            // Source 2 (inches, Z-up) to Godot (meters, Y-up)
+            float sx = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
+            float sy = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
+            float sz = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
+            // Source 2 (inches, Z-up: X fwd, Y left, Z up) to Godot (meters, Y-up: X right, Y up, Z back)
             const float inToM = 0.0254f;
             return new Vector3(sx * inToM, sz * inToM, -sy * inToM);
         }

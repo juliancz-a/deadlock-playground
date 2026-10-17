@@ -59,6 +59,7 @@ public partial class VpkLoaderTest : Node3D
     public IFileLoader CurrentFileLoader => _currentFileLoader;
 
     private Package _basePackage;
+    private Package _corePackage;
 
     public void EnsureVpkPathResolved()
     {
@@ -95,26 +96,81 @@ public partial class VpkLoaderTest : Node3D
         return _basePackage;
     }
 
+    public Package GetOrCreateCorePackage()
+    {
+        if (_corePackage != null) return _corePackage;
+        EnsureVpkPathResolved();
+        if (!string.IsNullOrEmpty(VpkPath))
+        {
+            try
+            {
+                string citadelDir = Path.GetDirectoryName(VpkPath);
+                string gameDir = Path.GetDirectoryName(citadelDir);
+                if (!string.IsNullOrEmpty(gameDir))
+                {
+                    string coreVpk = Path.Combine(gameDir, "core", "pak01_dir.vpk");
+                    if (File.Exists(coreVpk))
+                    {
+                        _corePackage = new Package();
+                        _corePackage.Read(coreVpk);
+                        DeadlockPlayground.Materials.Source2TextureLoader.CorePackage = _corePackage;
+                        GD.Print($"[VpkLoader] Successfully mounted Source 2 core package: '{coreVpk}'");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[VpkLoader] Failed to read core package: {ex.Message}");
+                _corePackage?.Dispose();
+                _corePackage = null;
+            }
+        }
+        return _corePackage;
+    }
+
     public IFileLoader GetOrCreateFileLoader()
     {
         if (_currentFileLoader != null) return _currentFileLoader;
 
         var basePkg = GetOrCreateBasePackage();
+        var corePkg = GetOrCreateCorePackage();
+
+        IFileLoader composite = null;
         if (basePkg != null)
         {
             IFileLoader baseLoader = new GameFileLoader(basePkg, "");
+            if (corePkg != null)
+            {
+                IFileLoader coreLoader = new GameFileLoader(corePkg, "");
+                composite = new DualLayerGameFileLoader(baseLoader, coreLoader);
+            }
+            else
+            {
+                composite = baseLoader;
+            }
+        }
+        else if (corePkg != null)
+        {
+            composite = new GameFileLoader(corePkg, "");
+        }
 
-            if (!string.IsNullOrEmpty(AddonVpkPath) && File.Exists(AddonVpkPath))
+        if (composite != null && !string.IsNullOrEmpty(AddonVpkPath) && File.Exists(AddonVpkPath))
+        {
+            try
             {
                 var addonPkg = new Package();
                 addonPkg.Read(AddonVpkPath);
                 IFileLoader addonLoader = new GameFileLoader(addonPkg, "");
-                _currentFileLoader = new DualLayerGameFileLoader(addonLoader, baseLoader);
+                _currentFileLoader = new DualLayerGameFileLoader(addonLoader, composite);
             }
-            else
+            catch
             {
-                _currentFileLoader = baseLoader;
+                _currentFileLoader = composite;
             }
+        }
+        else
+        {
+            _currentFileLoader = composite;
         }
 
         return _currentFileLoader;
