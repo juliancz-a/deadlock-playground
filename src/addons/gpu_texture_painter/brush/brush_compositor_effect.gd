@@ -325,15 +325,15 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 		if "brush_center" in camera_brush and camera_brush.brush_center.x >= 0.0 and camera_brush.brush_center.y >= 0.0:
 			center = camera_brush.brush_center
 
-		var brush_radius: float = minf(float(tex_width), float(tex_height)) * 0.5
+		var base_brush_radius: float = minf(float(tex_width), float(tex_height)) * 0.5
 		if "brush_radius" in camera_brush and camera_brush.brush_radius > 0.0:
-			brush_radius = camera_brush.brush_radius
-		brush_radius += float(camera_brush.max_bleed)
+			base_brush_radius = camera_brush.brush_radius
+		var padded_brush_radius: float = base_brush_radius + float(camera_brush.max_bleed)
 
-		var min_x: int = maxi(0, int(center.x - brush_radius))
-		var max_x: int = mini(tex_width - 1, int(center.x + brush_radius))
-		var min_y: int = maxi(0, int(center.y - brush_radius))
-		var max_y: int = mini(tex_height - 1, int(center.y + brush_radius))
+		var min_x: int = maxi(0, int(center.x - padded_brush_radius))
+		var max_x: int = mini(tex_width - 1, int(center.x + padded_brush_radius))
+		var min_y: int = maxi(0, int(center.y - padded_brush_radius))
+		var max_y: int = mini(tex_height - 1, int(center.y + padded_brush_radius))
 
 		@warning_ignore("integer_division")
 		var x_groups: int = clampi(int(ceil(float(max_x - min_x + 1) / 16.0)), 1, 16)
@@ -341,7 +341,7 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 		var y_groups: int = clampi(int(ceil(float(max_y - min_y + 1) / 16.0)), 1, 16)
 		var z_groups: int = 1
 
-		# prepare push constant
+		# prepare push constant (88 bytes: 22 floats in std430 alignment)
 		var linear_color := camera_brush.color.srgb_to_linear()
 		var push_constant : PackedFloat32Array = PackedFloat32Array([
 			linear_color.r,
@@ -359,7 +359,13 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 			float(min_x),
 			float(min_y),
 			float(max_x),
-			float(max_y)
+			float(max_y),
+			float(camera_brush.hit_depth if "hit_depth" in camera_brush else 0.02),
+			float(camera_brush.brush_depth if "brush_depth" in camera_brush else 0.02),
+			float(center.x),
+			float(center.y),
+			float(base_brush_radius),
+			float(0.0)
 		])
 
 

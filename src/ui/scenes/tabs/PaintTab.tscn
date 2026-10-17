@@ -204,6 +204,7 @@ size_flags_vertical = 4
 max_value = 1.0
 step = 0.01
 value = 1.0
+scrollable = false
 
 [node name="LblLayerOpacity" type="Label" parent="LayersCard/VBox/HBoxOpacity" unique_id=1010101040]
 custom_minimum_size = Vector2(45, 0)

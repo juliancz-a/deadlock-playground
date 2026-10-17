@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_opaque, cull_disabled;
+render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
 
 uniform sampler2D overlay_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D active_layer_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -180,10 +180,9 @@ void fragment() {
 		if (!is_paint_target) {
 			discard;
 		}
-		// Backface rejection: discard surfaces pointing away from the camera.
-		// Uses camera-space normal z component with threshold rather than !FRONT_FACING,
-		// allowing single-sided/ribbon geometry (hair, skirts, belts) to be painted.
-		if (front_faces_only && NORMAL.z < -0.1) {
+		// Backface rejection: discard surfaces pointing away from the camera or at steep grazing angles.
+		// NORMAL.z <= 0.05 or !FRONT_FACING rejects backfaces and grazing angles (> 87 deg), preventing bleed onto opposite or occluded walls.
+		if (front_faces_only && (NORMAL.z <= 0.05 || !FRONT_FACING)) {
 			discard;
 		}
 		uint exponential_bit = 1u << 30u;

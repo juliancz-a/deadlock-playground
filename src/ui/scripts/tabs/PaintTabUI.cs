@@ -734,6 +734,7 @@ public partial class PaintTabUI : VBoxContainer
 
         if (_sliderLayerOpacity != null)
         {
+            _sliderLayerOpacity.Scrollable = false;
             _sliderLayerOpacity.ValueChanged += (val) =>
             {
                 if (_layerManager == null) return;
@@ -2499,7 +2500,8 @@ public partial class PaintTabUI : VBoxContainer
                 Step = 0.05,
                 Value = localRenderer.CustomSizeScale,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                SizeFlagsVertical = SizeFlags.ShrinkCenter
+                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                Scrollable = false
             };
             sizeSlider.ValueChanged += (v) =>
             {
@@ -2528,7 +2530,8 @@ public partial class PaintTabUI : VBoxContainer
                 Step = 0.02,
                 Value = localRenderer.CustomAlphaScale,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                SizeFlagsVertical = SizeFlags.ShrinkCenter
+                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                Scrollable = false
             };
             alphaSlider.ValueChanged += (v) =>
             {

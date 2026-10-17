@@ -27,13 +27,26 @@ extends Node3D
 		if camera:
 			camera.size = size
 
+## Corresponds to the near value of the underlying camera
+@export var near: float = 0.0005:
+	set(value):
+		near = clampf(value, 0.0001, 10.0)
+		if camera:
+			camera.near = near
+
 ## Corresponds to the far value of the underlying camera
 @export var max_distance: float = 0.35:
 	set(value):
-		max_distance = clampf(value, 0.05, 100.0)
+		max_distance = clampf(value, 0.001, 100.0)
 		if camera:
-			max_distance = maxf(max_distance, camera.near + 0.01)
+			max_distance = maxf(max_distance, camera.near + 0.001)
 			camera.far = max_distance
+
+## Distance from camera to the surface hit point in world meters along view ray
+@export var hit_depth: float = 0.02
+
+## Maximum 3D penetration depth from hit point in world meters (prevents piercing thin geometry)
+@export var brush_depth: float = 0.02
 
 # supplied for each invocation
 ## At which distance the brush starts to fade out (1 = at max_distance / no fade)
@@ -180,6 +193,7 @@ func _ready() -> void:
 	camera.projection = projection
 	camera.fov = fov
 	camera.size = size
+	camera.near = near
 	camera.far = max_distance
 	viewport.size = resolution
 	viewport.use_debanding = false
