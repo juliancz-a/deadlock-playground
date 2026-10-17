@@ -1,6 +1,9 @@
 using Godot;
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
 
 public partial class SceneTabUI : VBoxContainer
 {
@@ -72,14 +75,98 @@ public partial class SceneTabUI : VBoxContainer
     private StandardMaterial3D _stageMaterial;
     private ImageTexture _patternTexture;
 
-    private static readonly (string Name, string ResPath)[] DefaultBackgrounds = new[]
+    private const string InGameBackgroundsDir = "res://assets/backgrounds/in-game";
+    private static (string Name, string ResPath)[] _inGameBackgrounds;
+
+    public static (string Name, string ResPath)[] InGameBackgrounds => _inGameBackgrounds ??= LoadInGameBackgrounds();
+    public static (string Name, string ResPath)[] DefaultBackgrounds => InGameBackgrounds;
+
+    public static (string Name, string ResPath)[] LoadInGameBackgrounds()
     {
-        ("In-Game Background 1", "res://assets/backgrounds/background_00.jpg"),
-        ("In-Game Background 2", "res://assets/backgrounds/background_01.jpg"),
-        ("In-Game Background 3", "res://assets/backgrounds/background_02.jpg"),
-        ("In-Game Background 4", "res://assets/backgrounds/background_03.jpg"),
-        ("In-Game Background 5", "res://assets/backgrounds/background_04.jpg"),
-    };
+        var backgrounds = new List<(string Name, string ResPath)>();
+        var foundFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Scan via Godot's DirAccess (works for res:// inside editor and exported PCK)
+        if (DirAccess.DirExistsAbsolute(InGameBackgroundsDir))
+        {
+            var files = DirAccess.GetFilesAt(InGameBackgroundsDir);
+            if (files != null)
+            {
+                foreach (var file in files)
+                {
+                    string cleanName = file;
+                    if (cleanName.EndsWith(".import", StringComparison.OrdinalIgnoreCase))
+                    {
+                        cleanName = cleanName.Substring(0, cleanName.Length - ".import".Length);
+                    }
+
+                    string ext = Path.GetExtension(cleanName).ToLowerInvariant();
+                    if (ext is ".jpg" or ".jpeg" or ".png" or ".webp")
+                    {
+                        foundFiles.Add(cleanName);
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to physical filesystem check
+        try
+        {
+            string globalPath = ProjectSettings.GlobalizePath(InGameBackgroundsDir);
+            if (Directory.Exists(globalPath))
+            {
+                foreach (var filePath in Directory.GetFiles(globalPath))
+                {
+                    string fileName = Path.GetFileName(filePath);
+                    if (fileName.EndsWith(".import", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    string ext = Path.GetExtension(fileName).ToLowerInvariant();
+                    if (ext is ".jpg" or ".jpeg" or ".png" or ".webp")
+                    {
+                        foundFiles.Add(fileName);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[SceneTabUI] Error checking backgrounds directory: {ex.Message}");
+        }
+
+        // Natural sort by numeric portions so files appear in sequential order
+        var sortedFiles = foundFiles
+            .OrderBy(f => Regex.Replace(f, @"\d+", m => m.Value.PadLeft(10, '0')), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        for (int i = 0; i < sortedFiles.Count; i++)
+        {
+            string fileName = sortedFiles[i];
+            string resPath = $"{InGameBackgroundsDir}/{fileName}";
+            string displayName = FormatBackgroundDisplayName(fileName, i + 1);
+            backgrounds.Add((displayName, resPath));
+        }
+
+        // Defensive fallback in case no background files were found
+        if (backgrounds.Count == 0)
+        {
+            backgrounds.Add(("In-Game Background 1", $"{InGameBackgroundsDir}/1422450_582.jpg"));
+        }
+
+        return backgrounds.ToArray();
+    }
+
+    private static string FormatBackgroundDisplayName(string fileName, int index)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(fileName);
+        // Generic steam screenshot ID or raw background naming -> standard clean display title
+        if (baseName.StartsWith("1422450_") || baseName.StartsWith("background_", StringComparison.OrdinalIgnoreCase) || long.TryParse(baseName, out _))
+        {
+            return $"In-Game Background {index}";
+        }
+        // Custom named backgrounds preserve descriptive title
+        return $"In-Game Background {index} ({baseName.Replace('_', ' ')})";
+    }
 
     public override void _Ready()
     {
@@ -187,20 +274,23 @@ public partial class SceneTabUI : VBoxContainer
         if (_presetImagesOption != null)
         {
             _presetImagesOption.Clear();
-            for (int i = 0; i < DefaultBackgrounds.Length; i++)
+            _inGameBackgrounds = LoadInGameBackgrounds();
+            var inGameBgs = _inGameBackgrounds;
+            for (int i = 0; i < inGameBgs.Length; i++)
             {
-                _presetImagesOption.AddItem(DefaultBackgrounds[i].Name, i);
+                _presetImagesOption.AddItem(inGameBgs[i].Name, i);
             }
-            _presetImagesOption.AddItem("Dark Studio Vignette", 5);
-            _presetImagesOption.AddItem("Neutral Photography Gray", 6);
-            _presetImagesOption.AddItem("Warm Studio Stage", 7);
-            _presetImagesOption.AddItem("Cyberpunk Neon Studio", 8);
+            int offset = inGameBgs.Length;
+            _presetImagesOption.AddItem("Dark Studio Vignette", offset + 0);
+            _presetImagesOption.AddItem("Neutral Photography Gray", offset + 1);
+            _presetImagesOption.AddItem("Warm Studio Stage", offset + 2);
+            _presetImagesOption.AddItem("Cyberpunk Neon Studio", offset + 3);
             _presetImagesOption.Select(0);
         }
 
         if (_lblImagePath != null && string.IsNullOrEmpty(_lblImagePath.Text))
         {
-            _lblImagePath.Text = DefaultBackgrounds[0].Name;
+            _lblImagePath.Text = InGameBackgrounds.Length > 0 ? InGameBackgrounds[0].Name : "None";
         }
 
         if (_stageStyleOption != null)
@@ -531,10 +621,24 @@ public partial class SceneTabUI : VBoxContainer
         if (_bgTextureRect == null) return;
         _bgTextureRect.StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered;
 
-        if (presetIdx >= 0 && presetIdx < DefaultBackgrounds.Length)
+        var inGameBgs = InGameBackgrounds;
+        if (presetIdx >= 0 && presetIdx < inGameBgs.Length)
         {
-            var (name, resPath) = DefaultBackgrounds[presetIdx];
+            var (name, resPath) = inGameBgs[presetIdx];
             var tex = GD.Load<Texture2D>(resPath);
+            if (tex == null)
+            {
+                string globalPath = ProjectSettings.GlobalizePath(resPath);
+                if (File.Exists(globalPath))
+                {
+                    var img = Image.LoadFromFile(globalPath);
+                    if (img != null)
+                    {
+                        tex = ImageTexture.CreateFromImage(img);
+                    }
+                }
+            }
+
             if (tex != null)
             {
                 _bgTextureRect.Texture = tex;
@@ -544,24 +648,30 @@ public partial class SceneTabUI : VBoxContainer
             return;
         }
 
-        switch (presetIdx)
+        int studioIdx = presetIdx - inGameBgs.Length;
+        if (presetIdx is >= 5 and <= 8 && (studioIdx < 0 || studioIdx > 3))
         {
-            case 5: // Dark Studio Vignette
+            studioIdx = presetIdx - 5;
+        }
+
+        switch (studioIdx)
+        {
+            case 0: // Dark Studio Vignette
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.14f, 0.16f, 0.20f), new Color(0.04f, 0.05f, 0.07f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Dark Studio Vignette";
                 break;
 
-            case 6: // Neutral Photography Gray
+            case 1: // Neutral Photography Gray
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.24f, 0.25f, 0.27f), new Color(0.09f, 0.09f, 0.10f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Neutral Photography Gray";
                 break;
 
-            case 7: // Warm Studio Stage
+            case 2: // Warm Studio Stage
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.25f, 0.18f, 0.16f), new Color(0.07f, 0.05f, 0.04f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Warm Studio Stage";
                 break;
 
-            case 8: // Cyberpunk Neon Studio
+            case 3: // Cyberpunk Neon Studio
                 _bgTextureRect.Texture = CreateRadialBackdrop(new Color(0.18f, 0.13f, 0.28f), new Color(0.05f, 0.04f, 0.09f));
                 if (_lblImagePath != null) _lblImagePath.Text = "Cyberpunk Neon Studio";
                 break;
