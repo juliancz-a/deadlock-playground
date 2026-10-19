@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Core;
 
 public partial class StudioUIManager : CanvasLayer
 {
@@ -110,6 +111,7 @@ public partial class StudioUIManager : CanvasLayer
 
     public override void _Ready()
     {
+        StartupDiagnosticTracker.Mark("MainUI: _Ready begin");
         Instance = this;
         GetTree().AutoAcceptQuit = false;
         GetViewport().TransparentBg = false;
@@ -125,14 +127,17 @@ public partial class StudioUIManager : CanvasLayer
                             win.Mode == Window.ModeEnum.Fullscreen ||
                             win.Mode == Window.ModeEnum.ExclusiveFullscreen;
         }
+        StartupDiagnosticTracker.Mark("MainUI: window configured");
 
         _pathManager = new GamePathManager();
+        StartupDiagnosticTracker.Mark("MainUI: GamePathManager created");
 
         // Restore persisted gizmo display settings (bone opacity, wireframe opacity, etc.)
         // before any tab or subsystem reads GizmoDisplaySettings values.
         GizmoDisplaySettings.LoadConfig();
 
         LinkNodes();
+        StartupDiagnosticTracker.Mark("MainUI: LinkNodes done (Topbar/Modals linked)");
         CreateToastUI();
 
         // Check if application was restarted after an update swap
@@ -143,16 +148,21 @@ public partial class StudioUIManager : CanvasLayer
 
         CreateUpdateNotificationUI();
         CreateFallbackDialog();
+        StartupDiagnosticTracker.Mark("MainUI: Toast/Update/Fallback dialogs created");
         InitTabs();
+        StartupDiagnosticTracker.Mark("MainUI: InitTabs done (Tabs/Painter initialized)");
         ConnectEvents();
+        StartupDiagnosticTracker.Mark("MainUI: ConnectEvents done");
         InitializePaths();
         ApplyCurrentGraphicsSettings();
         ApplySubViewportOptimizations();
+        StartupDiagnosticTracker.Mark("MainUI: graphics settings applied");
 
         UpdateCharacterDependencyState(false);
 
         // Switch to default Character tab
         SwitchTab(0);
+        StartupDiagnosticTracker.Mark("MainUI: default tab selected");
 
         UpdateNewsBadgeState();
 
@@ -161,9 +171,12 @@ public partial class StudioUIManager : CanvasLayer
         UpdateModChangesBadge();
 
         PlaygroundThemeHelper.AutoDecorate(this);
+        StartupDiagnosticTracker.Mark("MainUI: theme decoration done");
 
         // Non-blocking update check on application startup
+        StartupDiagnosticTracker.Mark("MainUI: starting background update check");
         _ = CheckUpdatesOnStartupAsync();
+        StartupDiagnosticTracker.Mark("MainUI: _Ready complete");
     }
 
     public override void _Notification(int what)
@@ -1978,7 +1991,9 @@ public partial class StudioUIManager : CanvasLayer
     {
         try
         {
+            StartupDiagnosticTracker.Log("Update check: started");
             var result = await UpdateChecker.CheckForUpdatesAsync().ConfigureAwait(false);
+            StartupDiagnosticTracker.Log("Update check: finished");
             if (result.IsUpdateAvailable && (!string.IsNullOrEmpty(result.ReleaseUrl) || !string.IsNullOrEmpty(result.DirectZipUrl)))
             {
                 Callable.From(() =>
@@ -2017,6 +2032,7 @@ public partial class StudioUIManager : CanvasLayer
     private async void InitializePaths()
     {
         ShowLoading(true, "Detecting Deadlock path...");
+        StartupDiagnosticTracker.Mark("MainUI: InitializePaths begin");
 
         if (string.IsNullOrEmpty(_pathManager.CurrentGamePath) || !_pathManager.ValidateDeadlockPath(_pathManager.CurrentGamePath))
         {
@@ -2037,6 +2053,7 @@ public partial class StudioUIManager : CanvasLayer
 
         UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
         ShowLoading(false);
+        StartupDiagnosticTracker.Mark("MainUI: InitializePaths done");
     }
 
     private void UpdateVpkLoaderPath(string basePath)

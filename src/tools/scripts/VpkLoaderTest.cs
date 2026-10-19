@@ -362,6 +362,7 @@ public partial class VpkLoaderTest : Node3D
 		HeroName = heroKey;
 		HeroModelName = Path.GetFileNameWithoutExtension(internalRoute);
 		EmitSignal(SignalName.LoadStarted);
+		DeadlockPlayground.Core.StartupDiagnosticTracker.Log($"VpkLoader: loading '{displayName}' ({internalRoute})");
 		EmitSignal(SignalName.LoadProgress, $"Reading archive for '{displayName}'...");
 
 		// 1. Cleanup old hero completely

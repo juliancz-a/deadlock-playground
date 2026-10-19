@@ -20,6 +20,7 @@ config/icon="uid://67nlgu7dndiv"
 
 [autoload]
 
+StartupDiagnostics="*res://tools/scripts/diagnostics/StartupDiagnosticsNode.cs"
 DiscordRpcService="*uid://diukumx2opmi8"
 
 [display]

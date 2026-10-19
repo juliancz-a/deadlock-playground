@@ -37,23 +37,31 @@ public class HeroParticleService
             return _currentIndex;
         }
 
+        Task<HeroParticleIndex> task;
+        bool isOwner = false;
         lock (_lock)
         {
-            if (_loadingTask != null)
+            if (_loadingTask == null)
             {
-                return _loadingTask.Result;
+                _loadingTask = Task.Run(() => LoadOrBuildIndex(customVdataOrVpkPath));
+                isOwner = true;
             }
-            _loadingTask = Task.Run(() => LoadOrBuildIndex(customVdataOrVpkPath));
+            task = _loadingTask;
         }
 
-        var result = await _loadingTask;
-        _currentIndex = result;
-        OnIndexLoaded?.Invoke();
+        // Never block the calling (possibly main) thread: every caller awaits the same task.
+        var result = await task;
+        if (isOwner)
+        {
+            _currentIndex = result;
+            OnIndexLoaded?.Invoke();
+        }
         return result;
     }
 
     private HeroParticleIndex LoadOrBuildIndex(string explicitPath)
     {
+        DeadlockPlayground.Core.StartupDiagnosticTracker.Log("HeroParticleService: index load/build start");
         string globalCachePath = ProjectSettings.GlobalizePath(CachePath);
 
         // Delete legacy v1 cache if present
@@ -224,7 +232,7 @@ public class HeroParticleService
 
         try
         {
-            string auto = pathManager.AutoDetectDeadlockPathAsync().GetAwaiter().GetResult();
+            string auto = pathManager.AutoDetectDeadlockPath();
             if (!string.IsNullOrEmpty(auto) && Directory.Exists(auto))
             {
                 return auto;
