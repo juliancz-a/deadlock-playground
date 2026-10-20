@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.IO.Pipes;
+using System.Threading.Tasks;
 using Godot;
 using Godot.Collections;
 
@@ -11,8 +14,18 @@ public partial class DiscordRPCService : Node
     // Replace with your Discord Application ID from the Developer Portal
     [Export] public string ApplicationId { get; set; } = "1556778276834254949";
 
+    /// <summary>Frames-worth of delay before the first Discord probe, so the window is fully up first.</summary>
+    private const double StartupDelaySeconds = 2.0;
+    private const double RetryDelaySeconds = 30.0;
+    private const int PipeProbeTimeoutMs = 250;
+    private const int MaxPipeIndex = 9;
+
     private Node _presenceNode;
     private long _startTimestamp;
+    private bool _exiting;
+
+    // Presence requested before Discord was reachable; replayed once the GDScript client is created.
+    private (string details, string state, string heroKey, string largeImageKey, string largeImageText)? _pendingActivity;
 
     public override void _EnterTree()
     {
@@ -21,13 +34,99 @@ public partial class DiscordRPCService : Node
 
     public override void _Ready()
     {
-        InitializeDiscord();
+        StartupDiagnosticTracker.Mark("Discord RPC: scheduled (non-blocking background probe)");
+        _ = ProbeAndInitializeAsync();
+    }
+
+    /// <summary>
+    /// The GDScript client opens the Windows named pipe synchronously on the main thread, which can block
+    /// forever if the pipe exists but nobody services it (stuck/elevated Discord, bridges such as arRPC...).
+    /// We therefore probe the pipe on a worker thread with a hard timeout and only create the client once
+    /// Discord answered. If it never does, the app simply runs without Rich Presence.
+    /// </summary>
+    private async Task ProbeAndInitializeAsync()
+    {
+        try
+        {
+            await ToSignal(GetTree().CreateTimer(StartupDelaySeconds), SceneTreeTimer.SignalName.Timeout);
+
+            while (!_exiting && _presenceNode == null)
+            {
+                bool reachable = await Task.Run(ProbeDiscordPipe).ConfigureAwait(true);
+                if (_exiting) return;
+
+                if (reachable)
+                {
+                    InitializeDiscord();
+                    return;
+                }
+
+                StartupDiagnosticTracker.Log("Discord RPC: Discord not reachable, will retry later");
+                await ToSignal(GetTree().CreateTimer(RetryDelaySeconds), SceneTreeTimer.SignalName.Timeout);
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[DiscordRPC] Background probe failed: {ex.Message}");
+            StartupDiagnosticTracker.Log($"Discord RPC: probe failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Runs on a thread-pool thread. Never touches Godot APIs.</summary>
+    private static bool ProbeDiscordPipe()
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                // Unix sockets are bridged by the GDScript client through netcat; nothing to pre-validate.
+                return true;
+            }
+
+            string[] existing;
+            try
+            {
+                existing = Directory.GetFiles(@"\\.\pipe\", "discord-ipc-*");
+            }
+            catch
+            {
+                // Pipe enumeration unavailable; fall through to direct probing.
+                existing = null;
+            }
+
+            if (existing != null && existing.Length == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i <= MaxPipeIndex; i++)
+            {
+                try
+                {
+                    using var client = new NamedPipeClientStream(".", $"discord-ipc-{i}", PipeDirection.InOut, PipeOptions.None);
+                    client.Connect(PipeProbeTimeoutMs);
+                    return true;
+                }
+                catch
+                {
+                    // Not present / busy / timed out: try the next index.
+                }
+            }
+        }
+        catch
+        {
+            // Swallow everything: this must never take the app down.
+        }
+
+        return false;
     }
 
     private void InitializeDiscord()
     {
         try
         {
+            StartupDiagnosticTracker.Mark("Discord RPC: initializing client");
+
             // Path to the pure GDScript plugin file inside the addons directory
             var presenceScript = GD.Load<GDScript>("res://addons/discord_rich_presence/discord_rich_presence.gd");
             if (presenceScript == null)
@@ -45,17 +144,28 @@ public partial class DiscordRPCService : Node
 
             _startTimestamp = (long)Time.GetUnixTimeFromSystem();
 
-            // Set initial default presence state
-            UpdateActivity(
-                details: "Experimenting with Deadlock Heroes",
-                state: "In the Playground"
-            );
+            // Replay whatever was requested while Discord was unreachable, otherwise use the default presence.
+            if (_pendingActivity.HasValue)
+            {
+                var p = _pendingActivity.Value;
+                _pendingActivity = null;
+                UpdateActivity(p.details, p.state, p.heroKey, p.largeImageKey, p.largeImageText);
+            }
+            else
+            {
+                UpdateActivity(
+                    details: "Experimenting with Deadlock Heroes",
+                    state: "In the Playground"
+                );
+            }
 
             GD.Print("[DiscordRPC] Discord RPC service successfully initialized.");
+            StartupDiagnosticTracker.Mark("Discord RPC: client initialized");
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[DiscordRPC] Initialization error: {ex.Message}");
+            StartupDiagnosticTracker.Log($"Discord RPC: initialization error: {ex.Message}");
         }
     }
 
@@ -71,6 +181,8 @@ public partial class DiscordRPCService : Node
     {
         if (_presenceNode == null || !IsInstanceValid(_presenceNode))
         {
+            // Client not created yet (deferred startup / Discord closed): remember the latest request.
+            _pendingActivity = (details, state, heroKey, largeImageKey, largeImageText);
             return;
         }
 
@@ -115,6 +227,7 @@ public partial class DiscordRPCService : Node
     /// </summary>
     public void ClearActivity()
     {
+        _pendingActivity = null;
         if (_presenceNode == null || !IsInstanceValid(_presenceNode))
         {
             return;
@@ -132,6 +245,7 @@ public partial class DiscordRPCService : Node
 
     public override void _ExitTree()
     {
+        _exiting = true;
         ClearActivity();
         if (Instance == this)
         {

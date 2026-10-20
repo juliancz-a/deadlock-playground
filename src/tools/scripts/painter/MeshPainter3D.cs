@@ -42,6 +42,8 @@ namespace DeadlockPlayground.Painter
             set
             {
                 _isPaintingActive = value;
+                // Lazy init: the CameraBrush (SubViewport + compute shader) is only built once painting is first activated.
+                if (value && IsInsideTree() && _worldViewport != null) EnsureCameraBrush();
                 if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
                 {
                     _selectionOverlay3D.Visible = value;
@@ -131,7 +133,7 @@ namespace DeadlockPlayground.Painter
                 if (Math.Abs(_brushHardness - value) > 0.005f)
                 {
                     _brushHardness = value;
-                    GenerateProceduralBrushTextures();
+                    if (_brushTexturesGenerated) GenerateProceduralBrushTextures();
                     _lastShapeType = (BrushShapeType)(-1);
                     SyncCameraBrushProperties();
                 }
@@ -1160,8 +1162,9 @@ namespace DeadlockPlayground.Painter
         private byte[] _preStrokeAtlasData;
         private bool _isActionClickDown = false;
 
-        // Cached procedural brush textures
+        // Cached procedural brush textures (generated lazily on first GetBrushTexture call)
         private readonly Dictionary<BrushShapeType, Texture2D> _brushTextures = new();
+        private bool _brushTexturesGenerated = false;
 
         private BrushShapeType _lastShapeType = (BrushShapeType)(-1);
         private float _lastBrushSize = -1f;
@@ -1173,9 +1176,8 @@ namespace DeadlockPlayground.Painter
 
         public override void _Ready()
         {
-            GenerateProceduralBrushTextures();
+            // Brush textures and the CameraBrush are intentionally NOT created here (deferred startup).
             EnsureCursorGizmo();
-            EnsureCameraBrush();
             GizmoDisplaySettings.OnSettingsChanged += ApplyOutlineSettings;
             ApplyOutlineSettings();
 
@@ -1236,6 +1238,7 @@ namespace DeadlockPlayground.Painter
 
             SyncCameraBrushProperties(force: true);
             GD.Print("[MeshPainter3D] Initialized and added CameraBrush to scene!");
+            DeadlockPlayground.Core.StartupDiagnosticTracker.Log("Painter: CameraBrush created lazily (compute shader + SubViewport)");
         }
 
         private void EnsureMirrorCameraBrush()
@@ -2559,7 +2562,7 @@ namespace DeadlockPlayground.Painter
             _brushPalette ??= GetTree()?.Root?.FindChild("FloatingBrushPalette", true, false) as FloatingBrushPaletteUI;
 
             EnsureCursorGizmo();
-            EnsureCameraBrush();
+            // CameraBrush creation deferred until painting is activated or a mesh is targeted.
             AttachCameraBrushWorld();
 
             if (_layerManager != null)
@@ -2612,6 +2615,7 @@ namespace DeadlockPlayground.Painter
 
             if (_currentMesh != null)
             {
+                EnsureCameraBrush();
                 _raycaster.BuildFromMesh(_currentMesh, -1);
                 _layerManager?.SetupForMesh(_currentMesh, surfaceIndex);
                 int atlasW = _layerManager?.CanvasSize.X ?? 2048;
@@ -4654,12 +4658,14 @@ namespace DeadlockPlayground.Painter
 
         public Texture2D GetBrushTexture(BrushShapeType type)
         {
+            if (!_brushTexturesGenerated) GenerateProceduralBrushTextures();
             if (_brushTextures.TryGetValue(type, out var tex)) return tex;
             return null;
         }
 
         private void GenerateProceduralBrushTextures()
         {
+            _brushTexturesGenerated = true;
             int texSize = 256;
 
             // 1. Soft Circle (Respects BrushHardness with smooth Hermite falloff)
