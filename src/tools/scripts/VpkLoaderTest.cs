@@ -473,6 +473,7 @@ public partial class VpkLoaderTest : Node3D
 				var exporter = new GltfModelExporter(fileLoader)
 				{
 					ExportAnimations = true, // REQUIRED: Generates Skeleton3D, joints, skins, and inverse bind matrices
+					ComposeAdditiveAnimations = true, // Composes additive sequences over bind pose so exported animations don't collapse to 0
 					AdaptTextures = true,
 					ExportMaterials = false,
 					ExportExtras = false,

@@ -155,7 +155,7 @@ public static class DeadlockAnimLoader
         {
             try
             {
-                frame.Clear(vrfSkeleton);
+                frame.ClearToIdentity();
                 frame.FrameIndex = 0;
                 anim.DecodeFrame(frame);
 
@@ -165,7 +165,7 @@ public static class DeadlockAnimLoader
                 bool isAdditive = anim.IsAdditive ||
                                   IsAdditiveOrRecoilSequence(animName) ||
                                   IsAdditiveOrRecoilSequence(cleanName) ||
-                                  IsAdditiveDeltaFrame(frame, anim.IsAdditive, animName);
+                                  IsAdditiveDeltaFrame(frame, anim.IsAdditive, animName, vrfSkeleton);
 
                 var godotAnim = new Godot.Animation
                 {
@@ -313,12 +313,15 @@ public static class DeadlockAnimLoader
     {
         if (string.IsNullOrWhiteSpace(rawName)) return true;
 
-        // In Deadlock, .vnmskel clips are intermediate Maya/AnimGraph2 skeletons that have incompatible
-        // bone counts, end bones (e.g. head_end, hand_end_L) and scrambled bone indices that destroy the .vmdl skeleton.
+        // In Deadlock, some .vnmskel clips are intermediate Maya test exports targeting external test skeletons.
         if (!string.IsNullOrEmpty(targetSkeletonName) &&
             targetSkeletonName.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            string tLower = targetSkeletonName.ToLowerInvariant();
+            if (tLower.Contains("maya") || tLower.Contains("test_") || tLower.Contains("dev_") || tLower.Contains("generic"))
+            {
+                return true;
+            }
         }
 
         string lower = rawName.ToLowerInvariant();
@@ -519,12 +522,14 @@ public static class DeadlockAnimLoader
         var vrfSkeleton = vrfModel.Skeleton;
         if (vrfSkeleton == null || vrfSkeleton.Bones.Length == 0) return null;
 
-        if (info.VrfAnimation?.TargetSkeletonName?.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase) == true)
+        if (info.VrfAnimation is ValveResourceFormat.ResourceTypes.ModelAnimation.ClipAnimation clipAnim)
         {
-            GD.Print($"[AnimLoader] Skipping decoding of AnimGraph2 Maya clip '{info.CleanName}' (incompatible .vnmskel target).");
-            return null;
+            if (clipAnim.Clip.TrackCompressionSettings.Length != vrfSkeleton.Bones.Length)
+            {
+                GD.Print($"[AnimLoader] Skipping decoding of clip '{info.CleanName}' (incompatible bone count: {clipAnim.Clip.TrackCompressionSettings.Length} vs skeleton {vrfSkeleton.Bones.Length}).");
+                return null;
+            }
         }
-
 
         float fps = info.Fps > 0 ? info.Fps : 30f;
         int totalFrames = Math.Max(1, info.FrameCount);
@@ -539,16 +544,16 @@ public static class DeadlockAnimLoader
 
         string skeletonNodePath = animPlayer.GetPathTo(skeleton);
 
-        // Pre-decode frame 0 to test if it's an additive delta sequence
+        // Pre-decode frame 0 with ClearToIdentity to test if it's an additive delta sequence
         var frame = new Frame(vrfSkeleton, vrfModel.FlexControllers);
-        frame.Clear(vrfSkeleton);
+        frame.ClearToIdentity();
         frame.FrameIndex = 0;
         info.VrfAnimation.DecodeFrame(frame);
 
         bool isAdditive = (info.VrfAnimation != null && info.VrfAnimation.IsAdditive) ||
                           IsAdditiveOrRecoilSequence(info.RawName) ||
                           IsAdditiveOrRecoilSequence(info.CleanName) ||
-                          IsAdditiveDeltaFrame(frame, info.VrfAnimation?.IsAdditive ?? false, info.CleanName);
+                          IsAdditiveDeltaFrame(frame, info.VrfAnimation?.IsAdditive ?? false, info.CleanName, vrfSkeleton);
 
         var rootBone = vrfSkeleton.Bones.FirstOrDefault(b => b.Parent == null);
 
@@ -705,10 +710,10 @@ public static class DeadlockAnimLoader
 
     /// <summary>
     /// Accurately detects whether an animation sequence is an additive delta layer.
-    /// Distinguishes between delta layers (max translation across all bones < 10 inches)
+    /// Distinguishes between delta layers (child bone translation deltas < 10 inches from rest/identity)
     /// and full body animations (pelvis translation ~35-45 inches).
     /// </summary>
-    public static bool IsAdditiveDeltaFrame(Frame frame, bool isVrfAdditive, string animName = null)
+    public static bool IsAdditiveDeltaFrame(Frame frame, bool isVrfAdditive, string animName = null, Skeleton vrfSkeleton = null)
     {
         if (isVrfAdditive) return true;
 
@@ -716,23 +721,46 @@ public static class DeadlockAnimLoader
 
         if (frame?.Bones != null && frame.Bones.Length > 0)
         {
-            float maxDist = 0f;
-            for (int i = 0; i < frame.Bones.Length; i++)
+            if (vrfSkeleton != null && vrfSkeleton.Bones.Length == frame.Bones.Length)
             {
-                float d = frame.Bones[i].Position.Length();
-                if (d > maxDist) maxDist = d;
+                float maxDiff = 0f;
+                int nonZeroDeltaBones = 0;
+                for (int i = 0; i < frame.Bones.Length; i++)
+                {
+                    if (vrfSkeleton.Bones[i].Parent == null) continue; // skip root
+                    float diff = (frame.Bones[i].Position - vrfSkeleton.Bones[i].Position).Length();
+                    if (diff > 0.05f) nonZeroDeltaBones++;
+                    if (diff > maxDiff) maxDiff = diff;
+                }
+
+                // If non-root child bones have zero delta or tiny offsets (< 5 inches) from rest:
+                // It is an additive delta layer!
+                if (maxDiff < 5.0f || nonZeroDeltaBones == 0)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                float maxDist = 0f;
+                int nonZeroBones = 0;
+                for (int i = 0; i < frame.Bones.Length; i++)
+                {
+                    float d = frame.Bones[i].Position.Length();
+                    if (d > 0.05f) nonZeroBones++;
+                    if (d > maxDist) maxDist = d;
+                }
+
+                // In Source 2 inches:
+                // Any full body pose (idle, run, jump) has pelvis at ~35-45 inches from root.
+                // An additive delta layer has max bone translation < 5 inches across all bones.
+                // If maxDist is < 10 inches, it is a delta layer.
+                if (maxDist < 10f || nonZeroBones == 0)
+                {
+                    return true;
+                }
             }
 
-            // In Source 2 inches:
-            // Any full body pose (idle, run, jump) has pelvis at ~35-45 inches from root.
-            // An additive delta layer has max bone translation < 5 inches across all bones.
-            // If maxDist is < 10 inches, it is a delta layer.
-            if (maxDist < 10f)
-            {
-                return true;
-            }
-
-            // If maxDist >= 10 inches, it is a full body pose (even if the name has "shoot" or "fire").
             return false;
         }
 
@@ -744,7 +772,7 @@ public static class DeadlockAnimLoader
     /// </summary>
     public static bool IsDeltaSequence(Frame frame, Skeleton vrfSkeleton, string animName, bool isVrfAdditive)
     {
-        return IsAdditiveDeltaFrame(frame, isVrfAdditive, animName);
+        return IsAdditiveDeltaFrame(frame, isVrfAdditive, animName, vrfSkeleton);
     }
 
     /// <summary>
@@ -824,9 +852,87 @@ public static class DeadlockAnimLoader
     }
 
     /// <summary>
-    /// Strips absolute Position3D tracks from limb joints in additive / recoil sequences so only
+    /// Generically detects if a Godot Animation has Position3D tracks that would collapse the skeleton
+    /// (e.g. child limb bones positioned at (0,0,0) or tiny deltas rather than natural skeleton rest offsets).
+    /// </summary>
+    public static bool HasCollapsedOrDeltaPositionTracks(Godot.Animation anim, Skeleton3D skeleton = null)
+    {
+        if (anim == null) return false;
+
+        int collapsedChildBones = 0;
+        int checkedChildBones = 0;
+
+        for (int i = 0; i < anim.GetTrackCount(); i++)
+        {
+            if (anim.TrackGetType(i) != Godot.Animation.TrackType.Position3D) continue;
+            if (anim.TrackGetKeyCount(i) == 0) continue;
+
+            string path = anim.TrackGetPath(i).ToString();
+            int colonIdx = path.LastIndexOf(':');
+            string boneName = colonIdx != -1 ? path.Substring(colonIdx + 1) : path;
+
+            // Skip root bones (root, root_motion)
+            if (boneName.Equals("root", StringComparison.OrdinalIgnoreCase) ||
+                boneName.Equals("root_motion", StringComparison.OrdinalIgnoreCase) ||
+                boneName.Equals("Scene Root", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var keyPos = anim.PositionTrackInterpolate(i, 0.0);
+
+            if (skeleton != null)
+            {
+                int bIdx = skeleton.FindBone(boneName);
+                if (bIdx != -1)
+                {
+                    // Check if this bone in rest pose has a physical distance from its parent joint
+                    float restLen = skeleton.GetBoneRest(bIdx).Origin.Length();
+                    if (restLen > 0.04f)
+                    {
+                        checkedChildBones++;
+                        // If the animation positions this child bone at < 0.02m (2cm) from parent, it is collapsed
+                        if (keyPos.Length() < 0.02f)
+                        {
+                            collapsedChildBones++;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                if (!boneName.Equals("pelvis", StringComparison.OrdinalIgnoreCase))
+                {
+                    checkedChildBones++;
+                    if (keyPos.Length() < 0.01f)
+                    {
+                        collapsedChildBones++;
+                    }
+                }
+            }
+        }
+
+        // If at least 2 child bones (or > 30% of child bone tracks) are collapsed near (0,0,0)
+        return checkedChildBones > 0 && (collapsedChildBones >= 2 || (float)collapsedChildBones / checkedChildBones > 0.3f);
+    }
+
+    /// <summary>
+    /// Generically determines whether an animation sequence is an additive delta or has collapsed
+    /// position tracks that would crush the skeleton into origin.
+    /// Checks VRF additive metadata, name heuristics, and inspects Godot Position3D track keys.
+    /// </summary>
+    public static bool ShouldStripPositionTracks(Godot.Animation anim, Skeleton3D skeleton = null, string animName = null, bool isVrfAdditive = false)
+    {
+        if (isVrfAdditive) return true;
+        if (IsAdditiveOrRecoilSequence(animName, isVrfAdditive)) return true;
+        if (anim != null && HasCollapsedOrDeltaPositionTracks(anim, skeleton)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Strips absolute Position3D tracks from limb joints in additive / recoil / reaction sequences so only
     /// rotational tracks evaluate against the skeleton's natural bind/rest translations, while
-    /// preserving the pelvis elevation track so hips do not collapse to the floor.
+    /// preserving or restoring the pelvis elevation track so hips do not collapse to the floor.
     /// </summary>
     public static void StripAdditivePositionTracks(Godot.Animation anim, Skeleton3D skeleton = null)
     {
@@ -847,9 +953,26 @@ public static class DeadlockAnimLoader
                 string target = colonIdx != -1 ? path.Substring(colonIdx + 1) : path;
                 if (target.Equals("pelvis", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Preserve pelvis elevation track!
+                    // Check if pelvis track itself is collapsed (< 0.25m, when rest pelvis height is ~0.9m)
+                    if (anim.TrackGetKeyCount(i) > 0 && skeleton != null)
+                    {
+                        var key0 = anim.PositionTrackInterpolate(i, 0.0);
+                        int pIdx = skeleton.FindBone("pelvis");
+                        if (pIdx != -1)
+                        {
+                            float restLen = skeleton.GetBoneRest(pIdx).Origin.Length();
+                            if (key0.Length() < 0.25f && restLen >= 0.5f)
+                            {
+                                // Remove collapsed (0,0,0) pelvis track so it will be replaced with rest elevation below
+                                anim.RemoveTrack(i);
+                                continue;
+                            }
+                        }
+                    }
+                    // Valid pelvis elevation track: preserve it
                     continue;
                 }
+                // Strip all non-pelvis bone Position3D tracks so limbs evaluate against rest pose
                 anim.RemoveTrack(i);
             }
         }
@@ -875,10 +998,11 @@ public static class DeadlockAnimLoader
                     string targetPath = !string.IsNullOrEmpty(skeletonNodePath) ? $"{skeletonNodePath}:pelvis" : "%GeneralSkeleton:pelvis";
                     int pTrack = anim.AddTrack(Godot.Animation.TrackType.Position3D);
                     anim.TrackSetPath(pTrack, targetPath);
-                    anim.PositionTrackInsertKey(pTrack, 0.0, skeleton.GetBoneRest(pelvisIdx).Origin);
+                    var restPos = skeleton.GetBoneRest(pelvisIdx).Origin;
+                    anim.PositionTrackInsertKey(pTrack, 0.0, restPos);
                     if (anim.Length > 0.0)
                     {
-                        anim.PositionTrackInsertKey(pTrack, anim.Length, skeleton.GetBoneRest(pelvisIdx).Origin);
+                        anim.PositionTrackInsertKey(pTrack, anim.Length, restPos);
                     }
                 }
             }

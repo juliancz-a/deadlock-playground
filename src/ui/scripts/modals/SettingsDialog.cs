@@ -20,6 +20,7 @@ public partial class SettingsDialog : PanelContainer
     private Button _btnBrowseSavePath;
     private LineEdit _compilerPathInput;
     private Button _btnBrowseCompilerPath;
+    private CheckBox _chkDiagnosticLogs;
     private Button _btnResetGeneral;
 
     // FileDialogs for General Paths
@@ -91,6 +92,8 @@ public partial class SettingsDialog : PanelContainer
         _btnBrowseSavePath = GetNodeOrNull<Button>("VBoxContainer/TabContainer/General/VBox/SavePathRow/HBox/BrowseSavePathButton");
         _compilerPathInput = GetNodeOrNull<LineEdit>("VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox/CompilerPathLine");
         _btnBrowseCompilerPath = GetNodeOrNull<Button>("VBoxContainer/TabContainer/General/VBox/CompilerPathRow/HBox/BrowseCompilerPathButton");
+        _chkDiagnosticLogs = GetNodeOrNull<CheckBox>("VBoxContainer/TabContainer/General/VBox/DiagnosticLogsRow/ChkDiagnosticLogs")
+            ?? GetNodeOrNull<CheckBox>("%ChkDiagnosticLogs");
         _btnResetGeneral = GetNodeOrNull<Button>("VBoxContainer/TabContainer/General/VBox/BtnResetGeneral");
 
         // Graphics
@@ -178,18 +181,28 @@ public partial class SettingsDialog : PanelContainer
             };
         }
 
+        if (_chkDiagnosticLogs != null)
+        {
+            _chkDiagnosticLogs.Toggled += (enabled) =>
+            {
+                if (!_isSyncing) UserSettings.EnableDiagnosticLogs = enabled;
+            };
+        }
+
         if (_btnResetGeneral != null)
         {
             _btnResetGeneral.Pressed += () =>
             {
                 ShowConfirmDialog(
                     "Reset General Settings?",
-                    "Reset configured Deadlock game directory and export paths back to default?",
+                    "Reset configured Deadlock game directory, export paths, and diagnostic logging back to default?",
                     () =>
                     {
                         _pathManager?.SaveConfig("", "");
                         _pathManager?.SaveResourceCompilerPath("");
+                        UserSettings.ResetGeneralDefaults();
                         UpdatePathFields();
+                        SyncFromSettings();
                     });
             };
         }
@@ -293,6 +306,9 @@ public partial class SettingsDialog : PanelContainer
         _isSyncing = true;
         try
         {
+            // General
+            if (_chkDiagnosticLogs != null) _chkDiagnosticLogs.ButtonPressed = UserSettings.EnableDiagnosticLogs;
+
             // Graphics
             if (_optMsaa != null) _optMsaa.Select(Math.Clamp(UserSettings.Msaa3D, 0, 3));
             if (_optShadowQuality != null) _optShadowQuality.Select(Math.Clamp(UserSettings.ShadowQuality, 0, 2));

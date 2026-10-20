@@ -427,7 +427,7 @@ public partial class PlayerTabUI : VBoxContainer
             if (anim != null)
             {
                 DeadlockAnimLoader.StripClothTracks(anim, _skeleton);
-                if (DeadlockAnimLoader.IsAdditiveOrRecoilSequence(animName))
+                if (DeadlockAnimLoader.ShouldStripPositionTracks(anim, _skeleton, animName))
                 {
                     DeadlockAnimLoader.StripAdditivePositionTracks(anim, _skeleton);
                 }
@@ -643,9 +643,9 @@ public partial class PlayerTabUI : VBoxContainer
         if (godotAnim != null)
         {
             DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
-            if (DeadlockAnimLoader.IsAdditiveOrRecoilSequence(targetAnim) ||
-                DeadlockAnimLoader.IsAdditiveOrRecoilSequence(info?.CleanName) ||
-                DeadlockAnimLoader.IsAdditiveOrRecoilSequence(info?.RawName))
+            if (DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, targetAnim, info?.VrfAnimation?.IsAdditive ?? false) ||
+                DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, info?.CleanName, info?.VrfAnimation?.IsAdditive ?? false) ||
+                DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, info?.RawName, info?.VrfAnimation?.IsAdditive ?? false))
             {
                 DeadlockAnimLoader.StripAdditivePositionTracks(godotAnim, _skeleton);
             }
@@ -719,7 +719,7 @@ public partial class PlayerTabUI : VBoxContainer
             if (godotAnim != null)
             {
                 DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
-                if (DeadlockAnimLoader.IsAdditiveOrRecoilSequence(animName))
+                if (DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, animName))
                 {
                     DeadlockAnimLoader.StripAdditivePositionTracks(godotAnim, _skeleton);
                 }

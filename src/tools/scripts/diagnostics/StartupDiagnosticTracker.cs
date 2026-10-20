@@ -47,6 +47,50 @@ public static class StartupDiagnosticTracker
 
     public static string LogFilePath => _logPath;
     public static string LastStage => _lastStage;
+    public static bool IsLoggingEnabled
+    {
+        get => UserSettings.EnableDiagnosticLogs;
+        set => UserSettings.EnableDiagnosticLogs = value;
+    }
+
+    static StartupDiagnosticTracker()
+    {
+        UserSettings.EnableDiagnosticLogsChanged += OnLoggingToggled;
+    }
+
+    private static void OnLoggingToggled(bool enabled)
+    {
+        lock (Gate)
+        {
+            if (!enabled)
+            {
+                CloseWriter();
+            }
+            else
+            {
+                _writerAttempted = false;
+                EnsureWriter();
+                Log("Diagnostic logging enabled by user");
+            }
+        }
+    }
+
+    private static void CloseWriter()
+    {
+        if (_writer != null)
+        {
+            try
+            {
+                _writer.WriteLine(Format($"[T{System.Environment.CurrentManagedThreadId}] Diagnostic logging disabled by user"));
+                _writer.Flush();
+                _writer.Dispose();
+            }
+            catch { /* ignore */ }
+            _writer = null;
+            _writerAttempted = false;
+            _logPath = null;
+        }
+    }
 
     /// <summary>Records a startup milestone (also becomes the "current stage" reported by the watchdog).</summary>
     public static void Mark(string stage)
@@ -89,6 +133,19 @@ public static class StartupDiagnosticTracker
     {
         Mark("Shutting down");
         _watchdogStop = true;
+        lock (Gate)
+        {
+            if (_writer != null)
+            {
+                try
+                {
+                    _writer.Flush();
+                    _writer.Dispose();
+                }
+                catch { /* ignore */ }
+                _writer = null;
+            }
+        }
     }
 
     // ------------------------------------------------------------------ writer
@@ -101,6 +158,8 @@ public static class StartupDiagnosticTracker
 
     private static void WriteLine(string line)
     {
+        if (!UserSettings.EnableDiagnosticLogs) return;
+
         lock (Gate)
         {
             EnsureWriter();
@@ -110,6 +169,7 @@ public static class StartupDiagnosticTracker
 
     private static void EnsureWriter()
     {
+        if (!UserSettings.EnableDiagnosticLogs) return;
         if (_writerAttempted) return;
         _writerAttempted = true;
 
@@ -236,8 +296,11 @@ public static class StartupDiagnosticTracker
         Info("user:// dir", () => ProjectSettings.GlobalizePath("user://"));
         Info("Log file", () => _logPath ?? "<none>");
 
-        // Process.Modules can be slow; enumerate off the main thread.
-        ThreadPool.QueueUserWorkItem(_ => LogOverlayModules("at launch"));
+        // Process.Modules can be slow; enumerate off the main thread only if logging is enabled.
+        if (UserSettings.EnableDiagnosticLogs)
+        {
+            ThreadPool.QueueUserWorkItem(_ => LogOverlayModules("at launch"));
+        }
     }
 
     private static object IsElevated()

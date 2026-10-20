@@ -119,7 +119,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
      var correctedRot = new Godot.Quaternion(convRot.X, convRot.Z, -convRot.Y, convRot.W).Normalized();
      ```
    - In `BakeConversion`, skip `SourceToGltfRotation` multiplication on root joints when `isAdditive == true` (`isRoot && !isAdditive`) so root/pelvis deltas align with the imported skeleton's coordinate frame without receiving double rotation.
-2. **Preserve Pelvis Elevation Track**:
+2. **Preserve Pelvis Elevation Track & Overwrite Collapsed Keys**:
    - Stripping all `Position3D` tracks from additive sequences leaves the `pelvis` bone at local $(0, 0, 0)$ relative to `root`, dropping the character's hips to the floor.
    - While limb translation tracks (arms, legs, head) must be omitted so joints evaluate against rest, the `pelvis` bone MUST retain its default rest height:
      ```csharp
@@ -130,11 +130,17 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
          godotAnim.PositionTrackInsertKey(pTrack, 0.0, skeleton.GetBoneRest(pelvisIdx).Origin);
      }
      ```
-   - In `StripAdditivePositionTracks`, always skip tracks targeting `:pelvis` and verify the pelvis position track exists.
+   - In `StripAdditivePositionTracks`, inspect any existing `:pelvis` track. If it holds collapsed delta keys (`Length() < 0.25m`), remove the collapsed track and re-insert the skeleton's true rest elevation (`skeleton.GetBoneRest(pelvisIdx).Origin`).
 3. **Additive Layer Classification & Default Stance Protection**:
    - Firing deltas (`recoil`, `primary_fire_aimed`, `shoot`, `burst`, `_add`, `_delta`) are authored as runtime additive modifiers, not standalone base poses.
    - Categorize these sequences into `"Additive Layers"` in `DeadlockAnimLoader.ClassifyCategory`.
    - In `PoseTabUI.cs`, present `"Additive Layers"` as a distinct subcategory collapsed by default, and exclude it from `AutoSelectDefaultIdle()` so partial overlays are never accidentally loaded as default stances.
+4. **Generic Structural Detection of Collapsed Limb Positions (`ShouldStripPositionTracks`)**:
+   - Additive reactions (e.g. `flinch_back`, `landing_impact`, `melee_hit`, `lean`) or delta clips often lack recoil/fire keywords.
+   - Do NOT hardcode animation names. Use `DeadlockAnimLoader.HasCollapsedOrDeltaPositionTracks`: inspect Godot `Position3D` tracks for child bones with physical rest lengths $> 0.04m$.
+   - If child bone keys sit at $(0, 0, 0)$ (`Length() < 0.02m`), the clip contains raw delta positions that crush the skeleton into a flat origin box.
+   - In `PlayerTabUI.cs`, guard playback using `DeadlockAnimLoader.ShouldStripPositionTracks(anim, skeleton, name)` so any collapsed sequence has limb tracks stripped and hips restored automatically.
+   - In `VpkLoaderTest.cs`, initialize `GltfModelExporter` with `ComposeAdditiveAnimations = true` so pre-exported glTF sequences compose additive deltas directly onto bind pose.
 
 ### E. Mandatory Documentation Synchronization & Maintenance
 > [!IMPORTANT]

@@ -59,6 +59,7 @@ public partial class ExtraModelCardUI : PanelContainer
     {
         CustomMinimumSize = new Vector2(200, 160);
         MouseFilter = MouseFilterEnum.Stop;
+        MouseDefaultCursorShape = CursorShape.PointingHand;
 
         InitStyles();
         BuildUI();
@@ -154,7 +155,8 @@ public partial class ExtraModelCardUI : PanelContainer
         var vbox = new VBoxContainer
         {
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         vbox.AddThemeConstantOverride("separation", 6);
         AddChild(vbox);
@@ -162,7 +164,8 @@ public partial class ExtraModelCardUI : PanelContainer
         // Header row with Icon + Tag
         var headerRow = new HBoxContainer
         {
-            SizeFlagsHorizontal = SizeFlags.Fill
+            SizeFlagsHorizontal = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         headerRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(headerRow);
@@ -173,13 +176,15 @@ public partial class ExtraModelCardUI : PanelContainer
             CustomMinimumSize = new Vector2(16, 16),
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            Modulate = new Color(0.95f, 0.85f, 0.40f, 0.9f)
+            Modulate = new Color(0.95f, 0.85f, 0.40f, 0.9f),
+            MouseFilter = MouseFilterEnum.Ignore
         };
         headerRow.AddChild(icon);
 
         _tagPanel = new PanelContainer
         {
-            SizeFlagsHorizontal = SizeFlags.ShrinkEnd
+            SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         var tagStyle = new StyleBoxFlat
         {
@@ -197,7 +202,7 @@ public partial class ExtraModelCardUI : PanelContainer
 
         var colusFont = PlaygroundThemeHelper.GetFontColus();
 
-        _lblTag = new Label { Text = "Extra Model" };
+        _lblTag = new Label { Text = "Extra Model", MouseFilter = MouseFilterEnum.Ignore };
         if (colusFont != null)
         {
             _lblTag.AddThemeFontOverride("font", colusFont);
@@ -211,7 +216,8 @@ public partial class ExtraModelCardUI : PanelContainer
         {
             Text = "Model Name",
             SizeFlagsHorizontal = SizeFlags.Fill,
-            AutowrapMode = TextServer.AutowrapMode.WordSmart
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         if (colusFont != null)
         {
@@ -227,7 +233,8 @@ public partial class ExtraModelCardUI : PanelContainer
             Text = "models/...",
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _lblPath.AddThemeFontSizeOverride("font_size", 13);
         _lblPath.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 1.0f));
