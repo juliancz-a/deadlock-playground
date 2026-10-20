@@ -20,6 +20,7 @@ config/icon="uid://67nlgu7dndiv"
 
 [autoload]
 
+StartupDiagnostics="*res://tools/scripts/diagnostics/StartupDiagnosticsNode.cs"
 DiscordRpcService="*uid://diukumx2opmi8"
 
 [display]
@@ -30,6 +31,7 @@ window/size/mode=2
 window/subwindows/embed_subwindows=false
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/per_pixel_transparency/allowed=true
 
 [dotnet]
 

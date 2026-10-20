@@ -739,6 +739,11 @@ namespace DeadlockPlayground.Painter
                 GD.PrintErr($"[SkinLayerManager] apply_single_mesh failed for '{mesh.Name}': {ex.Message}");
             }
 
+            if (mesh.MaterialOverlay is ShaderMaterial createdSm)
+            {
+                ApplyBasePbrToOverlay(createdSm, origMat);
+            }
+
             _perMaterialAtlasManagers[materialKey] = manager;
             _meshToMaterialKey[mesh] = materialKey;
             _atlasLruKeys.Remove(materialKey);
@@ -2077,6 +2082,63 @@ namespace DeadlockPlayground.Painter
             ApplyOverlayParametersToMeshes();
         }
 
+        /// <summary>
+        /// Copies the surface response of the authentic base material (normal map, AO, roughness, metallic, specular,
+        /// UV1 transform) into the lit overlay shader so painted pixels are shaded exactly like the unpainted base.
+        /// StandardMaterial3D bases are mirrored 1:1; Source 2 ShaderMaterial bases (source2_pbr family) use the
+        /// hemi-octahedron normal / blue-channel roughness path.
+        /// </summary>
+        private static void ApplyBasePbrToOverlay(ShaderMaterial overlayMat, Material baseMat)
+        {
+            if (overlayMat == null) return;
+
+            if (baseMat is StandardMaterial3D std)
+            {
+                bool hasNormal = std.NormalEnabled && std.NormalTexture != null;
+                overlayMat.SetShaderParameter("use_normal_map", hasNormal);
+                overlayMat.SetShaderParameter("normal_is_source2", false);
+                overlayMat.SetShaderParameter("normal_texture", hasNormal ? std.NormalTexture : null);
+                overlayMat.SetShaderParameter("normal_scale", std.NormalScale);
+
+                bool hasAo = std.AOEnabled && std.AOTexture != null;
+                overlayMat.SetShaderParameter("use_ao_texture", hasAo);
+                overlayMat.SetShaderParameter("ao_texture", hasAo ? std.AOTexture : null);
+                overlayMat.SetShaderParameter("ao_light_affect", std.AOLightAffect);
+
+                overlayMat.SetShaderParameter("roughness", std.Roughness);
+                overlayMat.SetShaderParameter("metallic", std.Metallic);
+                overlayMat.SetShaderParameter("specular", std.MetallicSpecular);
+                overlayMat.SetShaderParameter("uv1_scale", std.Uv1Scale);
+                overlayMat.SetShaderParameter("uv1_offset", std.Uv1Offset);
+                overlayMat.SetShaderParameter("use_vertex_color", std.VertexColorUseAsAlbedo);
+            }
+            else if (baseMat is ShaderMaterial sm)
+            {
+                var norm = sm.GetShaderParameter("g_tNormalRoughness");
+                bool hasNormal = norm.VariantType == Variant.Type.Object && norm.AsGodotObject() is Texture2D;
+                overlayMat.SetShaderParameter("use_normal_map", hasNormal);
+                overlayMat.SetShaderParameter("normal_is_source2", hasNormal);
+                overlayMat.SetShaderParameter("normal_texture", hasNormal ? (Texture2D)norm.AsGodotObject() : null);
+                var nmd = sm.GetShaderParameter("normal_map_depth");
+                overlayMat.SetShaderParameter("normal_scale", nmd.VariantType == Variant.Type.Float ? nmd.AsSingle() : 1.0f);
+
+                var ao = sm.GetShaderParameter("g_tAmbientOcclusion");
+                bool hasAo = ao.VariantType == Variant.Type.Object && ao.AsGodotObject() is Texture2D;
+                overlayMat.SetShaderParameter("use_ao_texture", hasAo);
+                overlayMat.SetShaderParameter("ao_texture", hasAo ? (Texture2D)ao.AsGodotObject() : null);
+                overlayMat.SetShaderParameter("ao_light_affect", 0.0f);
+
+                var rough = sm.GetShaderParameter("roughness");
+                overlayMat.SetShaderParameter("roughness", rough.VariantType == Variant.Type.Float ? rough.AsSingle() : 1.0f);
+                var met = sm.GetShaderParameter("metallic");
+                overlayMat.SetShaderParameter("metallic", met.VariantType == Variant.Type.Float ? met.AsSingle() : 0.0f);
+                overlayMat.SetShaderParameter("specular", 0.5f);
+                overlayMat.SetShaderParameter("uv1_scale", Vector3.One);
+                overlayMat.SetShaderParameter("uv1_offset", Vector3.Zero);
+                overlayMat.SetShaderParameter("use_vertex_color", false);
+            }
+        }
+
         private static Texture2D ExtractMeshBaseTexture(MeshInstance3D mesh)
         {
             if (mesh == null) return null;
@@ -2196,6 +2258,7 @@ namespace DeadlockPlayground.Painter
                         {
                             mat.SetShaderParameter("g_tColor", baseTex);
                         }
+                        ApplyBasePbrToOverlay(mat, checkMat);
 
                         mesh.Layers |= (uint)(1 << 20);
                     }
@@ -2311,6 +2374,7 @@ namespace DeadlockPlayground.Painter
                             {
                                 mat.SetShaderParameter("g_tColor", baseTex);
                             }
+                            ApplyBasePbrToOverlay(mat, checkMat);
 
                             mesh.Layers &= ~(uint)(1 << 20);
                         }

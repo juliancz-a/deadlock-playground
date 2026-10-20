@@ -23,6 +23,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnToolSelect;
     private Button _btnToolBrush;
     private Button _btnToolErase;
+    private Button _btnToolEyedropper;
     private Button _btnToolFill;
     private Button _btnToolSelection;
     private Button _btnToolWand;
@@ -60,6 +61,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Label _lblSelectTarget;
     private Control _brushOptions;
     private Control _eraserOptions;
+    private Control _eyedropperOptions;
     private Control _bucketFillOptions;
     private Control _wandOptions;
     private Control _decalOptions;
@@ -205,6 +207,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToolSelect != null) _btnToolSelect.Modulate = idleCol;
         if (_btnToolBrush != null) _btnToolBrush.Modulate = idleCol;
         if (_btnToolErase != null) _btnToolErase.Modulate = idleCol;
+        if (_btnToolEyedropper != null) _btnToolEyedropper.Modulate = idleCol;
         if (_btnToolFill != null) _btnToolFill.Modulate = idleCol;
         if (_btnToolSelection != null) _btnToolSelection.Modulate = idleCol;
         if (_btnToolWand != null) _btnToolWand.Modulate = idleCol;
@@ -319,6 +322,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _btnToolSelect = ResolveNode<Button>("BtnSelect", "BtnSelect");
         _btnToolBrush = ResolveNode<Button>("BtnBrush", "BtnBrush");
         _btnToolErase = ResolveNode<Button>("BtnErase", "BtnErase");
+        _btnToolEyedropper = ResolveNode<Button>("BtnEyedropper", "BtnEyedropper");
         _btnToolFill = ResolveNode<Button>("BtnFill", "BtnFill");
         _btnToolSelection = ResolveNode<Button>("BtnSelection", "BtnSelection");
         _btnToolWand = ResolveNode<Button>("BtnWand", "BtnWand");
@@ -359,7 +363,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         // Set up Radio ButtonGroup so tools are mutually exclusive
         _toolButtonGroup = new ButtonGroup();
-        var mutualButtons = new[] { _btnToolSelect, _btnToolBrush, _btnToolErase, _btnToolFill, _btnToolSelection, _btnToolWand, _btnToolDecal, _btnToolText, _btnToolShape };
+        var mutualButtons = new[] { _btnToolSelect, _btnToolBrush, _btnToolErase, _btnToolEyedropper, _btnToolFill, _btnToolSelection, _btnToolWand, _btnToolDecal, _btnToolText, _btnToolShape };
         foreach (var btn in mutualButtons)
         {
             if (btn != null)
@@ -387,6 +391,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _lblSelectTarget = ResolveNode<Label>("CurrentTargetLabel", "CurrentTargetLabel");
         _brushOptions = ResolveNode<Control>("BrushOptions", "BrushOptions");
         _eraserOptions = ResolveNode<Control>("EraserOptions", "EraserOptions");
+        _eyedropperOptions = ResolveNode<Control>("EyedropperOptions", "EyedropperOptions");
         _bucketFillOptions = ResolveNode<Control>("BucketFillOptions", "BucketFillOptions");
         _wandOptions = ResolveNode<Control>("MagicWandOptions", "MagicWandOptions");
         _selectionOptions = ResolveNode<Control>("SelectionOptions", "SelectionOptions");
@@ -544,6 +549,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToolSelect != null) _btnToolSelect.Pressed += () => OnToolButtonClicked(BrushToolMode.SelectSubmesh);
         if (_btnToolBrush != null) _btnToolBrush.Pressed += () => OnToolButtonClicked(BrushToolMode.Paint);
         if (_btnToolErase != null) _btnToolErase.Pressed += () => OnToolButtonClicked(BrushToolMode.Erase);
+        if (_btnToolEyedropper != null) _btnToolEyedropper.Pressed += () => OnToolButtonClicked(BrushToolMode.Eyedropper);
         if (_btnToolFill != null) _btnToolFill.Pressed += () => OnToolButtonClicked(BrushToolMode.BucketFill);
         if (_btnToolSelection != null)
         {
@@ -1419,6 +1425,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         UpdateButtonState(_btnToolSelect, mode == BrushToolMode.SelectSubmesh);
         UpdateButtonState(_btnToolBrush, mode == BrushToolMode.Paint);
         UpdateButtonState(_btnToolErase, mode == BrushToolMode.Erase);
+        UpdateButtonState(_btnToolEyedropper, mode == BrushToolMode.Eyedropper);
         UpdateButtonState(_btnToolFill, mode == BrushToolMode.BucketFill);
         UpdateButtonState(_btnToolSelection, mode == BrushToolMode.Selection);
         UpdateButtonState(_btnToolWand, mode == BrushToolMode.MagicWand);
@@ -1508,6 +1515,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_selectOptions != null) _selectOptions.Visible = (mode == BrushToolMode.SelectSubmesh);
         if (_brushOptions != null) _brushOptions.Visible = (mode == BrushToolMode.Paint);
         if (_eraserOptions != null) _eraserOptions.Visible = (mode == BrushToolMode.Erase);
+        if (_eyedropperOptions != null) _eyedropperOptions.Visible = (mode == BrushToolMode.Eyedropper);
         if (_bucketFillOptions != null) _bucketFillOptions.Visible = (mode == BrushToolMode.BucketFill);
         if (_wandOptions != null) _wandOptions.Visible = (mode == BrushToolMode.MagicWand);
         if (_selectionOptions != null) _selectionOptions.Visible = (mode == BrushToolMode.Selection);
@@ -1522,6 +1530,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 BrushToolMode.SelectSubmesh => "SUBMESH SELECTOR",
                 BrushToolMode.Paint => "BRUSH OPTIONS",
                 BrushToolMode.Erase => "ERASER OPTIONS",
+                BrushToolMode.Eyedropper => "EYEDROPPER",
                 BrushToolMode.BucketFill => "BUCKET FILL",
                 BrushToolMode.Selection => "SELECTION TOOLKIT",
                 BrushToolMode.MagicWand => "MAGIC WAND MASK",
@@ -1606,6 +1615,7 @@ public void UpdateTooltipsAndKeymaps()
         if (_btnToolSelect != null) _btnToolSelect.TooltipText = "Select Submesh\nClick any submesh in 3D viewport to select";
         if (_btnToolBrush != null) _btnToolBrush.TooltipText = $"Paint Brush [{KeybindsManager.GetShortcutText("paint_brush")}]";
         if (_btnToolErase != null) _btnToolErase.TooltipText = $"Eraser [{KeybindsManager.GetShortcutText("paint_eraser")}]";
+        if (_btnToolEyedropper != null) _btnToolEyedropper.TooltipText = $"Eyedropper [{KeybindsManager.GetShortcutText("paint_eyedropper")}]\nSample raw material color from surface";
         if (_btnToolFill != null) _btnToolFill.TooltipText = $"Bucket Fill Submesh [{KeybindsManager.GetShortcutText("paint_bucket")}]";
         if (_btnToolSelection != null) _btnToolSelection.TooltipText = $"Selection Toolkit [M / L / P]\nLeft-click to select, right-click for modes";
         if (_btnToolWand != null) _btnToolWand.TooltipText = $"Magic Wand Mask [{KeybindsManager.GetShortcutText("paint_wand")}]\nClick surface to sample color range";
@@ -1620,6 +1630,7 @@ public void UpdateTooltipsAndKeymaps()
         {
             _lblKeymapHint.Text = $"[{KeybindsManager.GetShortcutText("paint_brush")}] Brush   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_eraser")}] Erase   " +
+                                  $"[{KeybindsManager.GetShortcutText("paint_eyedropper")}] Pick   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_bucket")}] Fill   " +
                                   $"[M/L/P] Select   " +
                                   $"[Ctrl+Shift+I] Invert   " +
@@ -1763,6 +1774,13 @@ public void UpdateTooltipsAndKeymaps()
         if (@event.IsActionPressed("paint_eraser"))
         {
             SelectTool(BrushToolMode.Erase, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_eyedropper") || (keyEvent.Keycode == Key.I && !keyEvent.CtrlPressed && !keyEvent.ShiftPressed && !keyEvent.AltPressed))
+        {
+            SelectTool(BrushToolMode.Eyedropper, forceFlyoutOpen: true);
             GetViewport()?.SetInputAsHandled();
             return;
         }

@@ -1945,28 +1945,13 @@ namespace DeadlockPlayground.UI
             else if (mode == BrushToolMode.Eyedropper)
             {
                 _layerManager.EnsureCpuCompositeBufferSynced();
-                byte[] compBuf = _layerManager.CompositeBuffer;
-                if (compBuf != null && compBuf.Length >= currentSubmeshWidth * currentSubmeshHeight * 8)
-                {
-                    int pxX = Mathf.Clamp((int)atlasPx.X, 0, currentSubmeshWidth - 1);
-                    int pxY = Mathf.Clamp((int)atlasPx.Y, 0, currentSubmeshHeight - 1);
-                    int idx = (pxY * currentSubmeshWidth + pxX) * 4;
-
-                    unsafe
-                    {
-                        fixed (byte* pBuf = compBuf)
-                        {
-                            Half* hBuf = (Half*)pBuf;
-                            float r = (float)hBuf[idx];
-                            float g = (float)hBuf[idx + 1];
-                            float b = (float)hBuf[idx + 2];
-                            Color sampled = new Color(r, g, b, 1.0f).LinearToSrgb();
-                            _painter.BrushColor = sampled;
-                            _brushPalette?.SetUniversalColor(sampled);
-                        }
-                    }
-                    _canvasDrawArea?.QueueRedraw();
-                }
+                int pxX = Mathf.Clamp((int)atlasPx.X, 0, currentSubmeshWidth - 1);
+                int pxY = Mathf.Clamp((int)atlasPx.Y, 0, currentSubmeshHeight - 1);
+                Color sampled = _layerManager.GetVisibleColorAtAtlasPx(pxX, pxY);
+                _painter.BrushColor = sampled;
+                _brushPalette?.SetUniversalColor(sampled);
+                _painter.EmitSignal(MeshPainter3D.SignalName.ColorSampled, sampled);
+                _canvasDrawArea?.QueueRedraw();
             }
             else if (mode == BrushToolMode.MagicWand)
             {

@@ -484,8 +484,97 @@ public partial class PaintTabUI : VBoxContainer
             || (_renameLayerDialog != null && _renameLayerDialog.Visible)
             || (_modDialogInstance != null && _modDialogInstance.Visible)
             || (_progressDialogInstance != null && _progressDialogInstance.Visible)
+            || ColorAdjustmentModalUI.IsOpen
             || IsRenameDialogOpen;
     }
+
+    public void OpenAdjustmentModal(AdjustmentType type)
+    {
+        var modal = GetTree()?.Root?.FindChild("ColorAdjustmentModal", true, false) as ColorAdjustmentModalUI;
+        if (modal != null)
+        {
+            modal.Open(type, this);
+        }
+        else
+        {
+            GD.PrintErr("[PaintTabUI] ColorAdjustmentModal node not found in scene tree.");
+        }
+    }
+
+    public void ApplyImmediateAdjustment(AdjustmentType type)
+    {
+        if (_layerManager == null) return;
+        var layer = _layerManager.ActiveLayer;
+        if (layer == null)
+        {
+            StudioUIManager.Instance?.ShowToast("No active paint layer selected.");
+            return;
+        }
+        if (!layer.IsVisible)
+        {
+            StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{layer.Name}' because it is hidden.");
+            return;
+        }
+        if (layer.IsLocked)
+        {
+            StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{layer.Name}' because it is locked.");
+            return;
+        }
+
+        _layerManager.EnsureCpuSynced();
+        int w = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+        int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+        int bufLen = w * h * 8;
+        if (layer.GpuData == null || layer.GpuData.Length != bufLen)
+        {
+            layer.DecompressGpuData(bufLen);
+        }
+        if (layer.GpuData == null || layer.GpuData.Length != bufLen) return;
+
+        // 1. Record Undo snapshot BEFORE applying change
+        _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
+
+        // 2. Check active selection mask
+        byte[] maskBuffer = null;
+        int maskW = 0, maskH = 0;
+        var sel = _painter?.SelectionMask ?? _painter?.MagicWandTool?.SelectionMask;
+        if (sel != null && sel.HasSelection && sel.UseSelectionMask && sel.Buffer != null)
+        {
+            maskBuffer = sel.Buffer;
+            maskW = sel.Width;
+            maskH = sel.Height;
+        }
+
+        // 3. Make temporary copy of current pixel data to read from
+        byte[] backup = new byte[bufLen];
+        Buffer.BlockCopy(layer.GpuData, 0, backup, 0, bufLen);
+
+        var p = ColorAdjustmentParams.Default(type);
+        ColorAdjustmentEngine.ApplyAdjustment(backup, layer.GpuData, w, h, p, maskBuffer, maskW, maskH);
+
+        // 4. Synchronize GPU texture and composite
+        _layerManager.SyncActiveLayerGpuTexture();
+        _layerManager.RecompositeGpuLayers();
+        _layerManager.UpdateStandaloneComposite();
+        _layerManager.SyncGpuStrokeToComposite();
+        _layerManager.SetActiveContextHasPaintStrokes(true);
+
+        // 5. Mark material dirty & workspace registration
+        if (!string.IsNullOrEmpty(_layerManager.ActiveMaterialKey) && _meshHierarchy != null)
+        {
+            _meshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+        }
+        RegisterActiveStrokeMetadata();
+
+        // 6. Update Undo/Redo & 2D canvas redraw
+        _layerManager.NotifyStackChanged();
+        _brushPalette?.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+        var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+        uvCanvas?.QueueCanvasRedraw();
+
+        StudioUIManager.Instance?.ShowToast(type == AdjustmentType.Invert ? "Layer Inverted" : "Layer Desaturated");
+    }
+
 
     public async void ExecuteLoadProject(string path)
     {

@@ -20,6 +20,7 @@
 [ext_resource type="Texture2D" uid="uid://ci801sqr7y66" path="res://assets/at-icons/square.svg" id="18_icon_square"]
 [ext_resource type="Texture2D" uid="uid://ci801cir7y66" path="res://assets/at-icons/circle.svg" id="19_icon_circle"]
 [ext_resource type="Texture2D" uid="uid://ci801lin7y66" path="res://assets/icons/line.svg" id="20_icon_line"]
+[ext_resource type="Texture2D" path="res://assets/icons/eye-dropper.png" id="21_icon_eyedropper"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_root"]
 
@@ -136,6 +137,17 @@ layout_mode = 2
 tooltip_text = "Eraser [E]"
 toggle_mode = true
 icon = ExtResource("5_icon_eraser")
+icon_alignment = 1
+expand_icon = true
+
+[node name="BtnEyedropper" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=134801694]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Eyedropper [I]
+Sample raw material color from surface"
+toggle_mode = true
+icon = ExtResource("21_icon_eyedropper")
 icon_alignment = 1
 expand_icon = true
 
@@ -336,6 +348,26 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
 theme_override_font_sizes/font_size = 10
 text = "Tip: Hold Alt + Click while using any tool to sample/select submesh."
+autowrap_mode = 2
+
+[node name="EyedropperOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2079485697]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LblEyedropperInstructions" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EyedropperOptions" unique_id=1809195693]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
+theme_override_font_sizes/font_size = 11
+text = "Click anywhere on the character (3D viewport) or 2D UV Canvas to sample the raw material albedo color."
+autowrap_mode = 2
+
+[node name="LblEyedropperTip" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EyedropperOptions" unique_id=1564773588]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
+theme_override_font_sizes/font_size = 10
+text = "Samples unlit texture data directly, ignoring 3D shadows and lighting."
 autowrap_mode = 2
 
 [node name="BrushOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1689130778]

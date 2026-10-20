@@ -985,6 +985,11 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
+            if (ColorAdjustmentModalUI.IsOpen)
+            {
+                return true;
+            }
+
             if (StudioUIManager.Instance != null && StudioUIManager.Instance.IsAnyModalOpen())
             {
                 return true;
@@ -1217,7 +1222,7 @@ namespace DeadlockPlayground.Painter
             _cameraBrush.Set("projection", 1); // 1 = PROJECTION_ORTHOGONAL (constant radius pencil)
             _cameraBrush.Set("resolution", new Vector2I(256, 256));
             _cameraBrush.Set("max_distance", 0.35f);
-            _cameraBrush.Set("draw_speed", 35.0f);
+            _cameraBrush.Set("draw_speed", 250.0f);
             _cameraBrush.Set("drawing", false);
 
             var targetParent = _worldViewport as Node ?? _camera as Node ?? this;
@@ -1255,7 +1260,7 @@ namespace DeadlockPlayground.Painter
             _mirrorCameraBrush.Set("projection", 1);
             _mirrorCameraBrush.Set("resolution", new Vector2I(256, 256));
             _mirrorCameraBrush.Set("max_distance", 0.35f);
-            _mirrorCameraBrush.Set("draw_speed", 35.0f);
+            _mirrorCameraBrush.Set("draw_speed", 250.0f);
             _mirrorCameraBrush.Set("drawing", false);
             targetParent.AddChild(_mirrorCameraBrush);
             AttachMirrorCameraBrushWorld();
@@ -1388,7 +1393,8 @@ namespace DeadlockPlayground.Painter
 
             if (force || Math.Abs(_lastBrushFlow - BrushFlow) > 0.01f)
             {
-                float speed = Mathf.Max(5.0f, BrushFlow * 35.0f);
+                // Ensure flow 1.0 delivers 100% full opacity on strokes across any framerate (up to 240Hz)
+                float speed = Mathf.Max(10.0f, BrushFlow * 250.0f);
                 _cameraBrush.Set("draw_speed", speed);
                 if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
                 {
@@ -2792,10 +2798,18 @@ namespace DeadlockPlayground.Painter
                     var camera = _worldViewport?.GetCamera3D() ?? _camera;
                     if (camera != null)
                     {
-                        var hit = _raycaster.IntersectRay(_currentMesh, camera.ProjectRayOrigin(pos), camera.ProjectRayNormal(pos), cullBackfaces: FrontFacesOnly);
+                        Vector3 origin = camera.ProjectRayOrigin(pos);
+                        Vector3 dir = camera.ProjectRayNormal(pos);
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
                         if (hit.Hit)
                         {
                             SampleColorAtUV(hit.HitUV, hit.HitSurfaceIndex);
+                            GetViewport()?.SetInputAsHandled();
+                        }
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        {
+                            MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                            SampleColorAtUV(otherHit.HitUV, otherHit.HitSurfaceIndex);
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
@@ -4608,16 +4622,34 @@ namespace DeadlockPlayground.Painter
 
         private void SampleColorAtUV(Vector2 uv, int surfaceIndex)
         {
-            var img = _layerManager.BakeCompositeImage(surfaceIndex);
-            if (img == null) return;
+            if (_layerManager == null) return;
+            _layerManager.EnsureCpuCompositeBufferSynced();
 
-            int px = Mathf.Clamp((int)(uv.X * img.GetWidth()), 0, img.GetWidth() - 1);
-            int py = Mathf.Clamp((int)(uv.Y * img.GetHeight()), 0, img.GetHeight() - 1);
+            Vector2 p = Vector2.Zero;
+            Vector2 s = Vector2.One;
+            if (_currentMesh != null && _currentMesh.MaterialOverlay is ShaderMaterial sm)
+            {
+                var posVar = sm.GetShaderParameter("position_in_atlas");
+                var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                {
+                    p = posVar.AsVector2();
+                    s = sizeVar.AsVector2();
+                }
+            }
 
-            Color sampled = img.GetPixel(px, py);
+            Vector2 atlasUv = uv * s + p;
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+
+            int px = Mathf.Clamp((int)(atlasUv.X * atlasW), 0, atlasW - 1);
+            int py = Mathf.Clamp((int)(atlasUv.Y * atlasH), 0, atlasH - 1);
+
+            Color sampled = _layerManager.GetVisibleColorAtAtlasPx(px, py);
             BrushColor = sampled;
+            _brushPalette?.SetUniversalColor(sampled);
             EmitSignal(SignalName.ColorSampled, sampled);
-            GD.Print($"[MeshPainter3D] Sampled color at ({px}, {py}): {sampled.ToHtml()}");
+            GD.Print($"[MeshPainter3D] Sampled color at atlas ({px}, {py}): {sampled.ToHtml()}");
         }
 
         public Texture2D GetBrushTexture(BrushShapeType type)

@@ -1,0 +1,498 @@
+[gd_scene format=3 uid="uid://ccanx3q4pj08j"]
+
+[ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="1_theme"]
+[ext_resource type="Script" uid="uid://c7adjmodalui" path="res://ui/scripts/modals/ColorAdjustmentModalUI.cs" id="2_script"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="3_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal_root"]
+content_margin_left = 18.0
+content_margin_top = 14.0
+content_margin_right = 18.0
+content_margin_bottom = 16.0
+bg_color = Color(0.09, 0.10, 0.13, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.68, 0.32, 0.8)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.65)
+shadow_size = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_normal"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.25, 0.20, 0.11, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.68, 0.32, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_hover"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.38, 0.30, 0.15, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 0.85, 0.45, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_pressed"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.18, 0.14, 0.08, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.7, 0.55, 0.25, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="ColorAdjustmentModal" type="PanelContainer" unique_id=1987162501 node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_containerBrightnessContrast", "_containerHueSaturation", "_containerColorBalance", "_containerExposure", "_sliderBrightness", "_lblBrightnessVal", "_sliderContrast", "_lblContrastVal", "_sliderHue", "_lblHueVal", "_sliderSaturation", "_lblSaturationVal", "_sliderLightness", "_lblLightnessVal", "_chkColorize", "_sliderCyanRed", "_lblCyanRedVal", "_sliderMagentaGreen", "_lblMagentaGreenVal", "_sliderYellowBlue", "_lblYellowBlueVal", "_chkPreserveLuminosity", "_sliderExposure", "_lblExposureVal", "_sliderOffset", "_lblOffsetVal", "_sliderGamma", "_lblGammaVal", "_chkPreview", "_btnReset", "_btnCancel", "_btnApply")]
+custom_minimum_size = Vector2(400, 0)
+offset_right = 400.0
+offset_bottom = 320.0
+theme = ExtResource("1_theme")
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
+script = ExtResource("2_script")
+_headerContainer = NodePath("MarginContainer/VBoxContainer/HeaderBar")
+_lblTitle = NodePath("MarginContainer/VBoxContainer/HeaderBar/Title")
+_lblSubtitle = NodePath("MarginContainer/VBoxContainer/HeaderBar/VBoxTitle/Subtitle")
+_btnClose = NodePath("MarginContainer/VBoxContainer/HeaderBar/BtnClose")
+_containerBrightnessContrast = NodePath("MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer")
+_containerHueSaturation = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer")
+_containerColorBalance = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer")
+_containerExposure = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer")
+_sliderBrightness = NodePath("MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/BrightnessRow/BrightnessSlider")
+_lblBrightnessVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/BrightnessRow/BrightnessVal")
+_sliderContrast = NodePath("MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/ContrastRow/ContrastSlider")
+_lblContrastVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/ContrastRow/ContrastVal")
+_sliderHue = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/HueRow/HueSlider")
+_lblHueVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/HueRow/HueVal")
+_sliderSaturation = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/SatRow/SatSlider")
+_lblSaturationVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/SatRow/SatVal")
+_sliderLightness = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/LightRow/LightSlider")
+_lblLightnessVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/LightRow/LightVal")
+_chkColorize = NodePath("MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/ChkColorize")
+_sliderCyanRed = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/CyanRedRow/CyanRedSlider")
+_lblCyanRedVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/CyanRedRow/CyanRedVal")
+_sliderMagentaGreen = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/MagentaGreenRow/MagentaGreenSlider")
+_lblMagentaGreenVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/MagentaGreenRow/MagentaGreenVal")
+_sliderYellowBlue = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/YellowBlueRow/YellowBlueSlider")
+_lblYellowBlueVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/YellowBlueRow/YellowBlueVal")
+_chkPreserveLuminosity = NodePath("MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/ChkPreserveLuminosity")
+_sliderExposure = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/ExposureRow/ExposureSlider")
+_lblExposureVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/ExposureRow/ExposureVal")
+_sliderOffset = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/OffsetRow/OffsetSlider")
+_lblOffsetVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/OffsetRow/OffsetVal")
+_sliderGamma = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/GammaRow/GammaSlider")
+_lblGammaVal = NodePath("MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/GammaRow/GammaVal")
+_chkPreview = NodePath("MarginContainer/VBoxContainer/FooterBar/ChkPreview")
+_btnReset = NodePath("MarginContainer/VBoxContainer/FooterBar/BtnReset")
+_btnCancel = NodePath("MarginContainer/VBoxContainer/FooterBar/BtnCancel")
+_btnApply = NodePath("MarginContainer/VBoxContainer/FooterBar/BtnApply")
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=1987162502]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer" unique_id=1987162503]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162504]
+layout_mode = 2
+mouse_filter = 0
+
+[node name="VBoxTitle" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1987162505]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/VBoxTitle" unique_id=1987162506]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+theme_override_colors/font_color = Color(0.95, 0.85, 0.55, 1)
+text = "Hue / Saturation"
+
+[node name="Subtitle" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/VBoxTitle" unique_id=1987162507]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.72, 0.78, 1)
+theme_override_font_sizes/font_size = 11
+text = "Target: Paint Layer 1"
+
+[node name="BtnClose" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1987162508]
+custom_minimum_size = Vector2(28, 28)
+layout_mode = 2
+tooltip_text = "Close (Esc)"
+text = "✕"
+flat = true
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1987162509]
+layout_mode = 2
+
+[node name="ContentContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162510]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BrightnessContrastContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162511]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BrightnessRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer" unique_id=1987162512]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/BrightnessRow" unique_id=1987162513]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Brightness:"
+
+[node name="BrightnessSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/BrightnessRow" unique_id=1987162514]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="BrightnessVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/BrightnessRow" unique_id=1987162515]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="ContrastRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer" unique_id=1987162516]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/ContrastRow" unique_id=1987162517]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Contrast:"
+
+[node name="ContrastSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/ContrastRow" unique_id=1987162518]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="ContrastVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/BrightnessContrastContainer/ContrastRow" unique_id=1987162519]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="HueSaturationContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162520]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HueRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer" unique_id=1987162521]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/HueRow" unique_id=1987162522]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Hue:"
+
+[node name="HueSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/HueRow" unique_id=1987162523]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+scrollable = false
+
+[node name="HueVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/HueRow" unique_id=1987162524]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0°"
+horizontal_alignment = 2
+
+[node name="SatRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer" unique_id=1987162525]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/SatRow" unique_id=1987162526]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Saturation:"
+
+[node name="SatSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/SatRow" unique_id=1987162527]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="SatVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/SatRow" unique_id=1987162528]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="LightRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer" unique_id=1987162529]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/LightRow" unique_id=1987162530]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Lightness:"
+
+[node name="LightSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/LightRow" unique_id=1987162531]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="LightVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer/LightRow" unique_id=1987162532]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="ChkColorize" type="CheckBox" parent="MarginContainer/VBoxContainer/ContentContainer/HueSaturationContainer" unique_id=1987162533]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Colorize"
+
+[node name="ColorBalanceContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162534]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CyanRedRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer" unique_id=1987162535]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/CyanRedRow" unique_id=1987162536]
+custom_minimum_size = Vector2(105, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Cyan / Red:"
+
+[node name="CyanRedSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/CyanRedRow" unique_id=1987162537]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="CyanRedVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/CyanRedRow" unique_id=1987162538]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="MagentaGreenRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer" unique_id=1987162539]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/MagentaGreenRow" unique_id=1987162540]
+custom_minimum_size = Vector2(105, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Magenta / Green:"
+
+[node name="MagentaGreenSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/MagentaGreenRow" unique_id=1987162541]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="MagentaGreenVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/MagentaGreenRow" unique_id=1987162542]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="YellowBlueRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer" unique_id=1987162543]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/YellowBlueRow" unique_id=1987162544]
+custom_minimum_size = Vector2(105, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Yellow / Blue:"
+
+[node name="YellowBlueSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/YellowBlueRow" unique_id=1987162545]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -100.0
+scrollable = false
+
+[node name="YellowBlueVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer/YellowBlueRow" unique_id=1987162546]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="ChkPreserveLuminosity" type="CheckBox" parent="MarginContainer/VBoxContainer/ContentContainer/ColorBalanceContainer" unique_id=1987162547]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "Preserve Luminosity"
+
+[node name="ExposureContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162548]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ExposureRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer" unique_id=1987162549]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/ExposureRow" unique_id=1987162550]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Exposure:"
+
+[node name="ExposureSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/ExposureRow" unique_id=1987162551]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -3.0
+max_value = 3.0
+step = 0.05
+scrollable = false
+
+[node name="ExposureVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/ExposureRow" unique_id=1987162552]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0.00"
+horizontal_alignment = 2
+
+[node name="OffsetRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer" unique_id=1987162553]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/OffsetRow" unique_id=1987162554]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Offset:"
+
+[node name="OffsetSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/OffsetRow" unique_id=1987162555]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -0.5
+max_value = 0.5
+step = 0.01
+scrollable = false
+
+[node name="OffsetVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/OffsetRow" unique_id=1987162556]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0.000"
+horizontal_alignment = 2
+
+[node name="GammaRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer" unique_id=1987162557]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/GammaRow" unique_id=1987162558]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Gamma:"
+
+[node name="GammaSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/GammaRow" unique_id=1987162559]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.2
+max_value = 3.0
+step = 0.05
+value = 1.0
+scrollable = false
+
+[node name="GammaVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ExposureContainer/GammaRow" unique_id=1987162560]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "1.00"
+horizontal_alignment = 2
+
+[node name="FooterSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1987162561]
+layout_mode = 2
+
+[node name="FooterBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162562]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ChkPreview" type="CheckBox" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162563]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "Preview"
+
+[node name="_Spacer" type="Control" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162564]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnReset" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162565]
+custom_minimum_size = Vector2(60, 28)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Reset"
+
+[node name="BtnCancel" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162566]
+custom_minimum_size = Vector2(65, 28)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Cancel"
+
+[node name="BtnApply" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162567]
+custom_minimum_size = Vector2(75, 28)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.85, 0.55, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_apply_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_apply_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_apply_pressed")
+text = "Apply"

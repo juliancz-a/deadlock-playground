@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Painter;
 
 public partial class StudioUIManager : CanvasLayer
 {
@@ -15,6 +16,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnAbout;
     [Export] private Button _btnQuit;
     [Export] private Button _btnNews;
+    [Export] private MenuButton _btnAdjustments;
 
     [ExportCategory("Tab Navigation Buttons")]
     [Export] private Button _btnTabCharacter;
@@ -67,6 +69,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnAboutClose;
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
+    [Export] private ColorAdjustmentModalUI _colorAdjustmentModal;
 
     private Control _unreadBadge;
     private CharacterIKManager _currentIKManager;
@@ -270,6 +273,8 @@ public partial class StudioUIManager : CanvasLayer
         if (focusOwner is LineEdit or TextEdit) return;
 
         // Block shortcuts when modal dialogs are open
+        if (ColorAdjustmentModalUI.IsOpen) return;
+
         if ((_settingsModal != null && _settingsModal.Visible) ||
             (_feedbackModal != null && _feedbackModal.Visible) ||
             (_aboutModal != null && _aboutModal.Visible) ||
@@ -294,6 +299,35 @@ public partial class StudioUIManager : CanvasLayer
             ToggleFullscreen();
             GetViewport().SetInputAsHandled();
             return;
+        }
+
+        // Color Adjustments shortcuts (Only active in Paint Tab)
+        if (_currentTabIndex == 8 && _tabPaint != null)
+        {
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.U)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.HueSaturation);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.B)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.ColorBalance);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.I)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.Invert);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && key.ShiftPressed && !key.AltPressed && key.Keycode == Key.U)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.Desaturate);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
         }
 
         // Camera Actions
@@ -414,6 +448,31 @@ public partial class StudioUIManager : CanvasLayer
             {
                 topBarHBox.AddChild(_btnModChanges);
             }
+        }
+
+        _btnAdjustments ??= GetNodeOrNull<MenuButton>("MainHUD/VBoxContainer/TopBar/HBoxContainer/AdjustmentsMenuButton")
+                         ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/AdjustmentsMenuButton")
+                         ?? GetTree().Root.FindChild("AdjustmentsMenuButton", true, false) as MenuButton;
+
+        if (_btnAdjustments != null)
+        {
+            _btnAdjustments.Visible = (_currentTabIndex == 8);
+            var popup = _btnAdjustments.GetPopup();
+            popup.Clear();
+            popup.AddItem("Brightness / Contrast...", (int)AdjustmentType.BrightnessContrast);
+            popup.AddItem("Hue / Saturation...", (int)AdjustmentType.HueSaturation);
+            popup.SetItemAccelerator(1, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.U));
+            popup.AddItem("Color Balance...", (int)AdjustmentType.ColorBalance);
+            popup.SetItemAccelerator(2, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.B));
+            popup.AddItem("Exposure...", (int)AdjustmentType.Exposure);
+            popup.AddSeparator();
+            popup.AddItem("Invert", (int)AdjustmentType.Invert);
+            popup.SetItemAccelerator(5, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.I));
+            popup.AddItem("Desaturate", (int)AdjustmentType.Desaturate);
+            popup.SetItemAccelerator(6, (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskShift | (long)Key.U));
+
+            popup.AboutToPopup += OnAdjustmentsMenuAboutToPopup;
+            popup.IdPressed += (id) => HandleAdjustmentTriggered((AdjustmentType)id);
         }
 
         // Tab Buttons
@@ -579,6 +638,19 @@ public partial class StudioUIManager : CanvasLayer
             {
                 _changelogModal = modalScene.Instantiate<ChangelogModalUI>();
                 _modalsLayer.AddChild(_changelogModal);
+            }
+        }
+
+        _colorAdjustmentModal ??= GetNodeOrNull<ColorAdjustmentModalUI>("MainHUD/ModalsLayer/ColorAdjustmentModal")
+                               ?? GetTree().Root.FindChild("ColorAdjustmentModal", true, false) as ColorAdjustmentModalUI;
+
+        if (_colorAdjustmentModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/ColorAdjustmentModal.tscn");
+            if (modalScene != null)
+            {
+                _colorAdjustmentModal = modalScene.Instantiate<ColorAdjustmentModalUI>();
+                _modalsLayer.AddChild(_colorAdjustmentModal);
             }
         }
 
@@ -775,9 +847,12 @@ public partial class StudioUIManager : CanvasLayer
             if (_btnOpenUVCanvas != null) _btnOpenUVCanvas.Visible = false;
             if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
+            if (_btnAdjustments != null) _btnAdjustments.Visible = false;
+            _colorAdjustmentModal?.CancelAndClose();
         }
       else if (tabIndex == 8)
         {
+            if (_btnAdjustments != null) _btnAdjustments.Visible = true;
             var hero = GetVpkLoader()?.CurrentHeroNode;
             if (hero != null && _tabPaint?.CurrentHero == null)
             {
@@ -1377,6 +1452,7 @@ public partial class StudioUIManager : CanvasLayer
             || (_fallbackPathDialog != null && _fallbackPathDialog.Visible)
             || (_modChangesModal != null && _modChangesModal.Visible)
             || (_unsavedChangesModal != null && _unsavedChangesModal.Visible)
+            || (_colorAdjustmentModal != null && _colorAdjustmentModal.Visible)
             || (particleModal != null && particleModal.Visible)
             || (heroModal != null && heroModal.Visible)
             || (extraModelModal != null && extraModelModal.Visible)
@@ -1394,12 +1470,60 @@ public partial class StudioUIManager : CanvasLayer
 
         if (_modalBackdrop != null)
         {
-            _modalBackdrop.Visible = anyModalOpen;
+            bool isAdjustmentOpen = _colorAdjustmentModal != null && _colorAdjustmentModal.Visible;
+            _modalBackdrop.Visible = anyModalOpen && !isAdjustmentOpen;
         }
 
         if (anyModalOpen)
         {
             _quickColorPalette?.ClosePopup();
+        }
+    }
+
+    private void OnAdjustmentsMenuAboutToPopup()
+    {
+        var activeLayer = _tabPaint?.LayerManager?.ActiveLayer;
+        bool canAdjust = activeLayer != null && activeLayer.IsVisible && !activeLayer.IsLocked;
+        var popup = _btnAdjustments?.GetPopup();
+        if (popup != null)
+        {
+            for (int i = 0; i < popup.ItemCount; i++)
+            {
+                if (!popup.IsItemSeparator(i))
+                {
+                    popup.SetItemDisabled(i, !canAdjust);
+                }
+            }
+        }
+    }
+
+    private void HandleAdjustmentTriggered(AdjustmentType type)
+    {
+        if (_currentTabIndex != 8 || _tabPaint == null) return;
+        var layer = _tabPaint.LayerManager?.ActiveLayer;
+        if (layer == null)
+        {
+            ShowToast("No active paint layer selected.");
+            return;
+        }
+        if (!layer.IsVisible)
+        {
+            ShowToast($"Cannot adjust layer '{layer.Name}' because it is hidden.");
+            return;
+        }
+        if (layer.IsLocked)
+        {
+            ShowToast($"Cannot adjust layer '{layer.Name}' because it is locked.");
+            return;
+        }
+
+        if (type == AdjustmentType.Invert || type == AdjustmentType.Desaturate)
+        {
+            _tabPaint.ApplyImmediateAdjustment(type);
+        }
+        else
+        {
+            _tabPaint.OpenAdjustmentModal(type);
         }
     }
 
