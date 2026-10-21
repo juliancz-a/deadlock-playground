@@ -29,6 +29,9 @@ public partial class PlayerTabUI : VBoxContainer
     private Label _labelCharge;
     private Button _btnRelease;
     private CheckBox _chkAutoLoop;
+    private CheckBox _chkIdleUnderlay;
+    private bool _isIdleUnderlayEnabled = true;
+    private DeadlockAnimLoader.AnimSequenceInfo _activeAnimInfo;
 
     private List<DeadlockAnimLoader.AnimSequenceInfo> _currentHeroAnimations = new();
     private string _activeAnimName = "";
@@ -104,6 +107,21 @@ public partial class PlayerTabUI : VBoxContainer
         }
 
         InitParticleControls();
+
+        var animGroup = GetNodeOrNull<VBoxContainer>("AnimGroup");
+        if (animGroup != null)
+        {
+            _chkIdleUnderlay = new CheckBox
+            {
+                Name = "ChkIdleUnderlay",
+                Text = "Underlay Idle Stance",
+                ButtonPressed = _isIdleUnderlayEnabled,
+                TooltipText = "Underlays the hero's base combat idle stance for additive and reaction sequences so limbs and weapons remain naturally posed."
+            };
+            _chkIdleUnderlay.Toggled += OnIdleUnderlayToggled;
+            animGroup.AddChild(_chkIdleUnderlay);
+            animGroup.MoveChild(_chkIdleUnderlay, 1);
+        }
 
         var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
         if (stage != null)
@@ -424,11 +442,15 @@ public partial class PlayerTabUI : VBoxContainer
         foreach (var animName in animList)
         {
             var anim = _animPlayer.GetAnimation(animName);
+            bool isAdditive = false;
             if (anim != null)
             {
                 DeadlockAnimLoader.StripClothTracks(anim, _skeleton);
-                if (DeadlockAnimLoader.ShouldStripPositionTracks(anim, _skeleton, animName))
+                isAdditive = DeadlockAnimLoader.IsAdditiveAnimation(anim, null, _skeleton) ||
+                             DeadlockAnimLoader.ShouldStripPositionTracks(anim, _skeleton, animName);
+                if (isAdditive)
                 {
+                    anim.SetMeta("is_additive", true);
                     DeadlockAnimLoader.StripAdditivePositionTracks(anim, _skeleton);
                 }
             }
@@ -445,7 +467,8 @@ public partial class PlayerTabUI : VBoxContainer
                 DisplayName = displayName,
                 Category = category,
                 Duration = duration,
-                IsLooping = isLooping
+                IsLooping = isLooping,
+                IsAdditive = isAdditive
             });
         }
 
@@ -536,7 +559,8 @@ public partial class PlayerTabUI : VBoxContainer
                 item.SetMetadata(0, anim.RawName);
                 item.SetSelectable(0, true);
 
-                if (anim.RawName == _activeAnimName || anim.CleanName == _activeAnimName)
+                if (anim.RawName == _activeAnimName || anim.CleanName == _activeAnimName ||
+                    _activeAnimName == $"{anim.CleanName}_underlaid" || _activeAnimName == $"{anim.RawName}_underlaid")
                 {
                     item.Select(0);
                 }
@@ -544,43 +568,137 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
+    private void OnIdleUnderlayToggled(bool toggled)
+    {
+        _isIdleUnderlayEnabled = toggled;
+
+        if (_activeAnimInfo != null && _animPlayer != null)
+        {
+            double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
+            bool wasPlaying = _animPlayer.IsPlaying();
+            SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
+            if (_animPlayer.HasAnimation(_activeAnimName))
+            {
+                _animPlayer.Seek(currentPos, update: true);
+                if (wasPlaying) _animPlayer.Play(_activeAnimName);
+                else _animPlayer.Pause();
+            }
+            _timelineSlider?.SetValueNoSignal(currentPos);
+            UpdateTimeLabel((float)currentPos, _activeAnimLength);
+        }
+    }
+
+    private DeadlockAnimLoader.AnimSequenceInfo FindDefaultIdleAnim()
+    {
+        if (_currentHeroAnimations.Count == 0) return null;
+
+        static bool IsExcluded(string name)
+        {
+            string l = name.ToLowerInvariant();
+            return l.Contains("ability") ||
+                   l.Contains("cast") ||
+                   l.Contains("skill") ||
+                   l.Contains("ult") ||
+                   l.Contains("item") ||
+                   l.Contains("sleep") ||
+                   l.Contains("corner") ||
+                   l.Contains("stun") ||
+                   l.Contains("death") ||
+                   l.Contains("die") ||
+                   l.Contains("hurt") ||
+                   l.Contains("hit") ||
+                   l.Contains("flinch") ||
+                   l.Contains("impact") ||
+                   l.Contains("react") ||
+                   l.Contains("recoil") ||
+                   l.Contains("fire") ||
+                   l.Contains("shoot") ||
+                   l.Contains("aim") ||
+                   l.Contains("intro") ||
+                   l.Contains("menu") ||
+                   l.Contains("portrait") ||
+                   l.Contains("taunt") ||
+                   l.Contains("action");
+        }
+
+        string[] primaryIdles = [
+            "primary_stand_idle",
+            "out_of_combat_stand_idle",
+            "combat_stand_idle",
+            "primary_idle",
+            "stand_idle",
+            "idle_stand",
+            "idle_loadout",
+            "idle"
+        ];
+
+        // Tier 1: Exact matches for standard combat resting idles
+        foreach (var candidate in primaryIdles)
+        {
+            var match = _currentHeroAnimations.FirstOrDefault(a =>
+                a.CleanName.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
+
+        // Tier 2: Animations ending with standard combat resting idles (and not excluded)
+        foreach (var candidate in primaryIdles)
+        {
+            var match = _currentHeroAnimations.FirstOrDefault(a =>
+                !IsExcluded(a.CleanName) &&
+                a.CleanName.EndsWith(candidate, StringComparison.OrdinalIgnoreCase));
+            if (match != null) return match;
+        }
+
+        // Tier 3: Any Idle-category animation containing "stand_idle" or "idle" without exclusion
+        var idleMatch = _currentHeroAnimations.FirstOrDefault(a =>
+            a.Category == "Idle" &&
+            !IsExcluded(a.CleanName) &&
+            (a.CleanName.Contains("stand_idle", StringComparison.OrdinalIgnoreCase) ||
+             a.CleanName.Contains("idle", StringComparison.OrdinalIgnoreCase)));
+        if (idleMatch != null) return idleMatch;
+
+        // Tier 4: Any non-additive, non-excluded Idle
+        var anyIdle = _currentHeroAnimations.FirstOrDefault(a =>
+            a.Category == "Idle" && !IsExcluded(a.CleanName));
+        if (anyIdle != null) return anyIdle;
+
+        // Tier 5: Fallback to any non-additive animation
+        var fallback = _currentHeroAnimations.FirstOrDefault(a =>
+            a.Category != "Additive Layers" && !a.IsAdditive && !IsExcluded(a.CleanName));
+        return fallback ?? _currentHeroAnimations.FirstOrDefault();
+    }
+
+    private Godot.Animation GetOrDecodeAnimation(DeadlockAnimLoader.AnimSequenceInfo info)
+    {
+        if (info == null || _animPlayer == null) return null;
+
+        if (_animPlayer.HasAnimation(info.RawName))
+        {
+            return _animPlayer.GetAnimation(info.RawName);
+        }
+        if (_animPlayer.HasAnimation(info.CleanName))
+        {
+            return _animPlayer.GetAnimation(info.CleanName);
+        }
+
+        FindVpkLoader();
+        if (_vpkLoader != null && _skeleton != null)
+        {
+            var decoded = _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer);
+            if (decoded != null) return decoded;
+        }
+
+        if (_animPlayer.HasAnimation(info.CleanName))
+        {
+            return _animPlayer.GetAnimation(info.CleanName);
+        }
+
+        return null;
+    }
+
     private void AutoSelectDefaultIdle()
     {
-        if (_currentHeroAnimations.Count == 0) return;
-
-        DeadlockAnimLoader.AnimSequenceInfo bestAnim = null;
-
-        // Try high-value primary idles first:
-        bestAnim = _currentHeroAnimations.FirstOrDefault(a =>
-            a.Category == "Idle" && (
-                a.CleanName == "primary_stand_idle" ||
-                a.CleanName == "primary_idle" ||
-                a.CleanName == "stand_idle" ||
-                a.CleanName == "idle_loadout" ||
-                (a.CleanName.EndsWith("stand_idle") && !a.CleanName.StartsWith("item_") && !a.CleanName.StartsWith("sleep_") && !a.CleanName.StartsWith("corner_")) ||
-                a.CleanName.EndsWith("out_of_combat_stand_idle") ||
-                a.CleanName.Contains("primary_idle")
-            ));
-
-        if (bestAnim == null)
-        {
-            bestAnim = _currentHeroAnimations.FirstOrDefault(a =>
-                a.Category == "Idle" && !a.CleanName.StartsWith("item_"));
-        }
-
-        if (bestAnim == null)
-        {
-            // Pick first non-additive baseline animation if possible
-            bestAnim = _currentHeroAnimations.FirstOrDefault(a =>
-                a.Category != "Additive Layers" && !a.CleanName.StartsWith("item_"));
-        }
-
-        if (bestAnim == null)
-        {
-            bestAnim = _currentHeroAnimations.FirstOrDefault();
-        }
-
-
+        var bestAnim = FindDefaultIdleAnim();
         if (bestAnim != null)
         {
             SelectAnimation(bestAnim, autoPlay: false);
@@ -612,44 +730,84 @@ public partial class PlayerTabUI : VBoxContainer
     {
         if (info == null || _animPlayer == null || _skeleton == null) return;
 
-        string targetAnim = info.RawName;
-        if (!_animPlayer.HasAnimation(targetAnim))
+        _activeAnimInfo = info;
+
+        var rawAnim = GetOrDecodeAnimation(info);
+        bool isAdditive = DeadlockAnimLoader.IsAdditiveAnimation(rawAnim, info, _skeleton);
+        if (info != null && info.Category == "Idle")
         {
-            if (_animPlayer.HasAnimation(info.CleanName))
+            isAdditive = false;
+        }
+
+        DeadlockAnimLoader.AnimSequenceInfo idleInfo = null;
+        if (isAdditive && _isIdleUnderlayEnabled)
+        {
+            idleInfo = FindDefaultIdleAnim();
+            if (idleInfo == info) idleInfo = null;
+        }
+
+        string targetAnim = (isAdditive && _isIdleUnderlayEnabled && idleInfo != null)
+            ? $"{info.CleanName}_underlaid"
+            : info.CleanName;
+
+        if (isAdditive && _isIdleUnderlayEnabled && idleInfo != null)
+        {
+            if (!_animPlayer.HasAnimation(targetAnim))
             {
-                targetAnim = info.CleanName;
-            }
-            else
-            {
-                FindVpkLoader();
-                if (_vpkLoader != null)
+                var idleAnim = GetOrDecodeAnimation(idleInfo);
+                if (rawAnim != null && idleAnim != null)
                 {
-                    _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer);
-                }
-                if (_animPlayer.HasAnimation(info.CleanName))
-                {
-                    targetAnim = info.CleanName;
+                    var composed = DeadlockAnimLoader.ComposeOverIdle(rawAnim, idleAnim, _skeleton);
+                    if (composed != null)
+                    {
+                        var animLib = _animPlayer.HasAnimationLibrary("")
+                            ? _animPlayer.GetAnimationLibrary("")
+                            : new AnimationLibrary();
+                        if (!_animPlayer.HasAnimationLibrary(""))
+                        {
+                            _animPlayer.AddAnimationLibrary("", animLib);
+                        }
+                        if (animLib.HasAnimation(targetAnim))
+                        {
+                            animLib.RemoveAnimation(targetAnim);
+                        }
+                        animLib.AddAnimation(targetAnim, composed);
+                    }
                 }
             }
         }
 
-        if (!_animPlayer.HasAnimation(targetAnim)) return;
+        if (!_animPlayer.HasAnimation(targetAnim))
+        {
+            FindVpkLoader();
+            if (_vpkLoader != null)
+            {
+                _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo, targetAnim);
+            }
+        }
 
-        _activeAnimName = targetAnim;
+        if (!_animPlayer.HasAnimation(targetAnim))
+        {
+            if (_animPlayer.HasAnimation(info.CleanName)) targetAnim = info.CleanName;
+            else if (_animPlayer.HasAnimation(info.RawName)) targetAnim = info.RawName;
+            else return;
+        }
+
         var godotAnim = _animPlayer.GetAnimation(targetAnim);
-        _activeAnimLength = (float)(godotAnim?.Length ?? info.Duration);
+        if (godotAnim == null) return;
 
         // Configure animation playback parameters
-        if (godotAnim != null)
+        DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
+
+        string playAnimName = targetAnim;
+        Godot.Animation playAnim = godotAnim;
+
+        _activeAnimName = playAnimName;
+        _activeAnimLength = (float)(playAnim?.Length ?? info.Duration);
+
+        if (playAnim != null)
         {
-            DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
-            if (DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, targetAnim, info?.VrfAnimation?.IsAdditive ?? false) ||
-                DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, info?.CleanName, info?.VrfAnimation?.IsAdditive ?? false) ||
-                DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, info?.RawName, info?.VrfAnimation?.IsAdditive ?? false))
-            {
-                DeadlockAnimLoader.StripAdditivePositionTracks(godotAnim, _skeleton);
-            }
-            godotAnim.LoopMode = _isLooping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None;
+            playAnim.LoopMode = _isLooping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None;
         }
 
         // Configure transport UI
@@ -668,7 +826,7 @@ public partial class PlayerTabUI : VBoxContainer
 
         UpdateTimeLabel(0.0f, _activeAnimLength);
 
-        // Reset all bone poses cleanly to rest/bind pose
+        // Reset all bone poses cleanly to rest/bind pose before evaluating
         for (int i = 0; i < _skeleton.GetBoneCount(); i++)
         {
             _skeleton.ResetBonePose(i);

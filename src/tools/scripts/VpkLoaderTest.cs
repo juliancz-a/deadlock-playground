@@ -178,10 +178,15 @@ public partial class VpkLoaderTest : Node3D
 
     public List<DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo> CurrentHeroAnimations { get; private set; } = new();
 
-    public Godot.Animation DecodeAnimation(DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info, Skeleton3D skeleton, AnimationPlayer animPlayer)
+    public Godot.Animation DecodeAnimation(
+        DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info,
+        Skeleton3D skeleton,
+        AnimationPlayer animPlayer,
+        DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo idleInfo = null,
+        string targetAnimName = null)
     {
         if (_currentVrfModel == null || info == null || skeleton == null || animPlayer == null) return null;
-        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel);
+        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel, idleInfo, targetAnimName);
     }
 
 	private void EmitLoadProgress(string msg)

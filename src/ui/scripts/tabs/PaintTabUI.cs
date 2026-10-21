@@ -103,6 +103,7 @@ public partial class PaintTabUI : VBoxContainer
     public HeroMeshHierarchy MeshHierarchy => _meshHierarchy;
     public MeshPainter3D Painter => _painter;
     public FloatingBrushPaletteUI BrushPalette => _brushPalette;
+    public ParticleStage3D ParticleStage => _particleStage;
 
     // --- UI Controls ---
     // Header
@@ -475,17 +476,208 @@ public partial class PaintTabUI : VBoxContainer
         _confirmHeroMismatchDialog.PopupCentered(new Vector2I(460, 180));
     }
 
+    public void OpenSaveProjectDialog() => OnSaveProjectPressed();
+    public void OpenLoadProjectDialog() => OnLoadProjectPressed();
+
     public bool IsAnyDialogOpen()
     {
         return (_saveProjectDialog != null && _saveProjectDialog.Visible)
             || (_loadProjectDialog != null && _loadProjectDialog.Visible)
             || (_confirmHeroMismatchDialog != null && _confirmHeroMismatchDialog.Visible)
             || (_exportFileDialog != null && _exportFileDialog.Visible)
+            || (_exportActiveLayerDialog != null && _exportActiveLayerDialog.Visible)
+            || (_importImageDialog != null && _importImageDialog.Visible)
+            || (_confirmResetWorkspaceDialog != null && _confirmResetWorkspaceDialog.Visible)
             || (_renameLayerDialog != null && _renameLayerDialog.Visible)
             || (_modDialogInstance != null && _modDialogInstance.Visible)
             || (_progressDialogInstance != null && _progressDialogInstance.Visible)
             || ColorAdjustmentModalUI.IsOpen
+            || ExportBaseTexturesModalUI.IsOpen
             || IsRenameDialogOpen;
+    }
+
+    public void OpenExportBakedPngDialog()
+    {
+        if (_exportFileDialog != null)
+        {
+            _exportFileDialog.FileMode = FileDialog.FileModeEnum.SaveFile;
+            _exportFileDialog.Filters = new[] { "*.png ; PNG Image" };
+            _exportFileDialog.PopupCentered(new Vector2I(700, 500));
+        }
+    }
+
+    private FileDialog _exportActiveLayerDialog;
+    public void OpenExportActiveLayerDialog()
+    {
+        var layer = _layerManager?.ActiveLayer;
+        if (layer == null)
+        {
+            _studioUI?.ShowToast("No active paint layer selected.");
+            return;
+        }
+
+        if (_exportActiveLayerDialog == null)
+        {
+            _exportActiveLayerDialog = new FileDialog
+            {
+                Title = "Export Active Layer Only (.png)",
+                FileMode = FileDialog.FileModeEnum.SaveFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new[] { "*.png ; PNG Image (*.png)" },
+                UseNativeDialog = true
+            };
+            _exportActiveLayerDialog.FileSelected += (path) =>
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) path += ".png";
+
+                var img = _layerManager?.BakeActiveLayerImage();
+                if (img != null && !img.IsEmpty())
+                {
+                    var err = img.SavePng(path);
+                    if (err == Error.Ok)
+                    {
+                        _studioUI?.ShowToast($"Layer Exported: {System.IO.Path.GetFileName(path)}", path);
+                    }
+                    else
+                    {
+                        _studioUI?.ShowToast($"Error exporting layer: {err}");
+                    }
+                }
+                else
+                {
+                    _studioUI?.ShowToast("Failed to bake active layer image.");
+                }
+            };
+            AddChild(_exportActiveLayerDialog);
+        }
+
+        string safeName = System.IO.Path.GetFileNameWithoutExtension(layer.Name);
+        if (string.IsNullOrWhiteSpace(safeName)) safeName = "layer";
+        _exportActiveLayerDialog.CurrentFile = $"{safeName}.png";
+        _exportActiveLayerDialog.PopupCentered(new Vector2I(750, 500));
+    }
+
+    private FileDialog _importImageDialog;
+    public void OpenImportImageDialog()
+    {
+        if (_importImageDialog == null)
+        {
+            _importImageDialog = new FileDialog
+            {
+                Title = "Import Image as Layer",
+                FileMode = FileDialog.FileModeEnum.OpenFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new string[] { "*.png, *.jpg, *.jpeg, *.webp ; Image Files (*.png, *.jpg, *.jpeg, *.webp)" },
+                UseNativeDialog = true
+            };
+            _importImageDialog.FileSelected += ImportImageAsLayer;
+            AddChild(_importImageDialog);
+        }
+        _importImageDialog.PopupCentered(new Vector2I(750, 500));
+    }
+
+    public void ImportImageAsLayer(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path)) return;
+        if (_layerManager == null)
+        {
+            _studioUI?.ShowToast("Layer manager is not initialized.");
+            return;
+        }
+
+        var img = Image.LoadFromFile(path);
+        if (img == null || img.IsEmpty())
+        {
+            _studioUI?.ShowToast("Failed to load image file.");
+            return;
+        }
+
+        var tex = ImageTexture.CreateFromImage(img);
+        string layerName = System.IO.Path.GetFileNameWithoutExtension(path);
+        if (string.IsNullOrWhiteSpace(layerName)) layerName = "Imported Layer";
+
+        _layerManager.RecordGpuUndoSnapshot();
+        var newLayer = _layerManager.AddNewLayer(layerName);
+        RefreshLayersListUI();
+
+        int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+        int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+        Vector2 center = new Vector2(atlasW * 0.5f, atlasH * 0.5f);
+
+        if (_painter != null)
+        {
+            if (_brushPalette != null)
+            {
+                _brushPalette.SelectTool(BrushToolMode.Decal, forceFlyoutOpen: true);
+            }
+            else
+            {
+                _painter.ToolMode = BrushToolMode.Decal;
+            }
+
+            if (_painter.DecalStamper != null)
+            {
+                _painter.DecalStamper.SetDecalTexture(tex);
+                _painter.DecalStamper.DecalScale = 0.5f;
+                _painter.DecalStamper.RotationDegrees = 0.0f;
+            }
+
+            _painter.ProjectionGizmo.IsImportedLayerPlacement = true;
+            _painter.ProjectionGizmo.Activate(center, tex, 0.5f, 0.0f, isText: false, atlasW);
+            _painter.ProjectionGizmo.Is3DProjection = false;
+            _painter.ProjectionGizmo.Has3DPlacement = false;
+
+            _brushPalette?.SyncProjectionControls();
+            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                        ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
+        }
+
+        _studioUI?.ShowToast($"Imported: {layerName}", "Transform with gizmo, press Enter to commit");
+    }
+
+    private ConfirmationDialog _confirmResetWorkspaceDialog;
+    public void PromptResetWorkspace()
+    {
+        if (ModWorkspaceSession.Instance.HasUnsavedChanges)
+        {
+            if (_confirmResetWorkspaceDialog == null)
+            {
+                _confirmResetWorkspaceDialog = new ConfirmationDialog
+                {
+                    Title = "Reset Workspace",
+                    DialogText = "You have unsaved changes in your workspace.\nAre you sure you want to clear the session and discard all edits?",
+                    OkButtonText = "Reset Workspace",
+                    CancelButtonText = "Cancel"
+                };
+                _confirmResetWorkspaceDialog.Confirmed += () =>
+                {
+                    ModWorkspaceSession.Instance.ClearSession();
+                    _studioUI?.ShowToast("Workspace Reset", "Session cleared to default");
+                };
+                AddChild(_confirmResetWorkspaceDialog);
+            }
+            _confirmResetWorkspaceDialog.PopupCentered(new Vector2I(420, 150));
+        }
+        else
+        {
+            ModWorkspaceSession.Instance.ClearSession();
+            _studioUI?.ShowToast("Workspace Reset", "Session cleared to default");
+        }
+    }
+
+    public void OpenExportBaseTexturesModal()
+    {
+        var modal = GetTree()?.Root?.FindChild("ExportBaseTexturesModal", true, false) as ExportBaseTexturesModalUI;
+        if (modal != null)
+        {
+            modal.Open(this);
+        }
+        else
+        {
+            GD.PrintErr("[PaintTabUI] ExportBaseTexturesModal node not found in scene tree.");
+        }
     }
 
     public void OpenAdjustmentModal(AdjustmentType type)

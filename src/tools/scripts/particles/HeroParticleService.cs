@@ -20,7 +20,7 @@ public class HeroParticleService
     private static HeroParticleService _instance;
     public static HeroParticleService Instance => _instance ??= new HeroParticleService();
 
-    private const string CachePath = "user://cache/hero_particles_index_v2.json";
+    private const string CachePath = "user://cache/hero_particles_index_v3.json";
     private HeroParticleIndex _currentIndex;
     private Task<HeroParticleIndex> _loadingTask;
     private readonly object _lock = new();
@@ -64,11 +64,13 @@ public class HeroParticleService
         DeadlockPlayground.Core.StartupDiagnosticTracker.Log("HeroParticleService: index load/build start");
         string globalCachePath = ProjectSettings.GlobalizePath(CachePath);
 
-        // Delete legacy v1 cache if present
+        // Delete legacy v1/v2 cache if present
         try
         {
-            string oldCache = ProjectSettings.GlobalizePath("user://cache/hero_particles_index.json");
-            if (File.Exists(oldCache)) File.Delete(oldCache);
+            string oldCacheV1 = ProjectSettings.GlobalizePath("user://cache/hero_particles_index.json");
+            if (File.Exists(oldCacheV1)) File.Delete(oldCacheV1);
+            string oldCacheV2 = ProjectSettings.GlobalizePath("user://cache/hero_particles_index_v2.json");
+            if (File.Exists(oldCacheV2)) File.Delete(oldCacheV2);
         }
         catch { }
 
@@ -85,13 +87,14 @@ public class HeroParticleService
 
                 if (cachedIndex != null && cachedIndex.Heroes != null && cachedIndex.Heroes.Count > 0)
                 {
-                    // Ensure cache contains canonical aliases AND updated heroes (Violet, Deadman Danny, Paradox)
+                    // Ensure cache contains canonical aliases AND updated heroes (Violet, Deadman Danny, Paradox, Nurse Harrow)
                     bool hasViolet = cachedIndex.Heroes.ContainsKey("Violet") || cachedIndex.Heroes.ContainsKey("artist");
                     bool hasDeadman = cachedIndex.Heroes.ContainsKey("Deadman Danny") || cachedIndex.Heroes.ContainsKey("airheart");
                     bool hasParadox = cachedIndex.Heroes.ContainsKey("Paradox") || cachedIndex.Heroes.ContainsKey("chrono");
+                    bool hasNurse = cachedIndex.Heroes.ContainsKey("Nurse Harrow") || cachedIndex.Heroes.ContainsKey("nurse");
 
                     if ((cachedIndex.Heroes.ContainsKey("Grey Talon") || cachedIndex.Heroes.ContainsKey("Dynamo"))
-                        && hasViolet && hasDeadman && hasParadox)
+                        && hasViolet && hasDeadman && hasParadox && hasNurse)
                     {
                         GD.Print($"[HeroParticleService] Loaded particle index from cache ({cachedIndex.Heroes.Count} heroes) in < 15 ms.");
                         return cachedIndex;
@@ -473,6 +476,8 @@ public class HeroParticleService
         RegisterHeroMapping("Celeste", "unicorn", "Hero Unicorn");
         RegisterHeroMapping("Graves", "necro", "Hero Necro");
         RegisterHeroMapping("Sinclair", "magician", "Hero Magician");
+        RegisterHeroMapping("Nurse Harrow", "nurse", "nurse_harrow", "Hero Nurse", "Hero Nurse Harrow");
+        RegisterHeroMapping("Nurse", "nurse", "nurse_harrow", "Nurse Harrow", "Hero Nurse", "Hero Nurse Harrow");
 
         // 2. Dynamically ingest scripts/heroes.vdata_c if available (without hardcoding)
         try
@@ -912,8 +917,10 @@ public class HeroParticleService
         }
         try
         {
-            string oldCache = ProjectSettings.GlobalizePath("user://cache/hero_particles_index.json");
-            if (File.Exists(oldCache)) File.Delete(oldCache);
+            string oldV1 = ProjectSettings.GlobalizePath("user://cache/hero_particles_index.json");
+            if (File.Exists(oldV1)) File.Delete(oldV1);
+            string oldV2 = ProjectSettings.GlobalizePath("user://cache/hero_particles_index_v2.json");
+            if (File.Exists(oldV2)) File.Delete(oldV2);
         }
         catch { }
         _currentIndex = null;

@@ -129,6 +129,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Label _lblDecalRot;
     private Button _btnBakeDecal;
     private Button _btnCancelDecal;
+    private Button _btnFitDecalUV;
     private FileDialog _decalFileDialog;
 
     // Text controls
@@ -432,6 +433,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _lblDecalRot = ResolveNode<Label>("LblDecalRot", "LblDecalRot");
         _btnBakeDecal = ResolveNode<Button>("BtnBakeDecal", "BtnBakeDecal");
         _btnCancelDecal = ResolveNode<Button>("BtnCancelDecal", "BtnCancelDecal");
+        _btnFitDecalUV = ResolveNode<Button>("BtnFitDecalUV", "BtnFitDecalUV");
         _decalFileDialog = ResolveNode<FileDialog>("DecalFileDialog", "DecalFileDialog");
         if (_decalFileDialog != null)
         {
@@ -870,6 +872,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 else if (_decalStamper != null && _decalStamper.BakeToActiveLayer())
                 {
                     EmitSignal(SignalName.DecalBaked);
+                    if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsImportedLayerPlacement)
+                    {
+                        _painter.ProjectionGizmo.IsImportedLayerPlacement = false;
+                        _decalStamper.SetDecalTexture(null);
+                        SelectTool(BrushToolMode.Paint);
+                    }
                 }
                 SyncProjectionControls();
                 QueueCanvasRedraw();
@@ -879,6 +887,23 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnCancelDecal != null)
         {
             _btnCancelDecal.Pressed += CancelProjectionGizmo;
+        }
+
+        if (_btnFitDecalUV != null)
+        {
+            _btnFitDecalUV.Pressed += () =>
+            {
+                if (_painter != null && _painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive && !_painter.ProjectionGizmo.IsText)
+                {
+                    int atlasW = _painter.LayerManager?.CanvasSize.X ?? 2048;
+                    int atlasH = _painter.LayerManager?.CanvasSize.Y ?? 2048;
+                    _painter.ProjectionGizmo.FitToFullUV(atlasW, atlasH);
+                    if (_sliderDecalScale != null) _sliderDecalScale.Value = 1.0;
+                    if (_sliderDecalRot != null) _sliderDecalRot.Value = 0.0;
+                    SyncProjectionControls();
+                    QueueCanvasRedraw();
+                }
+            };
         }
 
         // Text Projector
@@ -2091,6 +2116,11 @@ public void UpdateTooltipsAndKeymaps()
         {
             _btnBakeDecal.Disabled = !hasDecal;
             _btnBakeDecal.Modulate = hasDecal ? Colors.White : new Color(1, 1, 1, 0.4f);
+        }
+        if (_btnFitDecalUV != null)
+        {
+            _btnFitDecalUV.Disabled = !hasDecal;
+            _btnFitDecalUV.Modulate = hasDecal ? Colors.White : new Color(1, 1, 1, 0.4f);
         }
 
         if (_btnCancelText != null)

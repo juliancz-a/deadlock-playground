@@ -18,6 +18,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnQuit;
     [Export] private Button _btnNews;
     [Export] private MenuButton _btnAdjustments;
+    [Export] private MenuButton _btnFileMenu;
 
     [ExportCategory("Tab Navigation Buttons")]
     [Export] private Button _btnTabCharacter;
@@ -71,6 +72,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
     [Export] private ColorAdjustmentModalUI _colorAdjustmentModal;
+    [Export] private ExportBaseTexturesModalUI _exportBaseTexturesModal;
 
     private Control _unreadBadge;
     private CharacterIKManager _currentIKManager;
@@ -286,7 +288,7 @@ public partial class StudioUIManager : CanvasLayer
         if (focusOwner is LineEdit or TextEdit) return;
 
         // Block shortcuts when modal dialogs are open
-        if (ColorAdjustmentModalUI.IsOpen) return;
+        if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
 
         if ((_settingsModal != null && _settingsModal.Visible) ||
             (_feedbackModal != null && _feedbackModal.Visible) ||
@@ -338,6 +340,32 @@ public partial class StudioUIManager : CanvasLayer
             if (key.CtrlPressed && key.ShiftPressed && !key.AltPressed && key.Keycode == Key.U)
             {
                 HandleAdjustmentTriggered(AdjustmentType.Desaturate);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+
+            // File Menu Shortcuts (Paint Tab)
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.O)
+            {
+                _tabPaint?.OpenLoadProjectDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.S)
+            {
+                _tabPaint?.OpenSaveProjectDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && key.ShiftPressed && !key.AltPressed && key.Keycode == Key.I)
+            {
+                _tabPaint?.OpenImportImageDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.E)
+            {
+                _tabPaint?.OpenExportModDialog();
                 GetViewport()?.SetInputAsHandled();
                 return;
             }
@@ -486,6 +514,34 @@ public partial class StudioUIManager : CanvasLayer
 
             popup.AboutToPopup += OnAdjustmentsMenuAboutToPopup;
             popup.IdPressed += (id) => HandleAdjustmentTriggered((AdjustmentType)id);
+        }
+
+        _btnFileMenu ??= GetNodeOrNull<MenuButton>("MainHUD/VBoxContainer/TopBar/HBoxContainer/FileMenuButton")
+                      ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/FileMenuButton")
+                      ?? GetTree().Root.FindChild("FileMenuButton", true, false) as MenuButton;
+
+        if (_btnFileMenu != null)
+        {
+            _btnFileMenu.Visible = (_currentTabIndex == 8);
+            var popup = _btnFileMenu.GetPopup();
+            popup.Clear();
+            popup.AddItem("New / Reset Workspace...", 0);
+            popup.AddItem("Open Project (.dpp)...", 1);
+            popup.SetItemAccelerator(popup.GetItemIndex(1), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.O));
+            popup.AddItem("Save Project (.dpp)...", 2);
+            popup.SetItemAccelerator(popup.GetItemIndex(2), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.S));
+            popup.AddSeparator();
+            popup.AddItem("Import Image as Layer (.png / .jpg)...", 3);
+            popup.SetItemAccelerator(popup.GetItemIndex(3), (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskShift | (long)Key.I));
+            popup.AddItem("Export Base Textures...", 4);
+            popup.AddItem("Export Layers (Baked PNG) (.png)...", 5);
+            popup.AddItem("Export Active Layer Only (.png)...", 6);
+            popup.AddSeparator();
+            popup.AddItem("Export Mod (.vpk)...", 7);
+            popup.SetItemAccelerator(popup.GetItemIndex(7), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.E));
+            popup.AddItem("Open Deadlock Addons Folder", 8);
+
+            popup.IdPressed += OnFileMenuItemPressed;
         }
 
         // Tab Buttons
@@ -664,6 +720,19 @@ public partial class StudioUIManager : CanvasLayer
             {
                 _colorAdjustmentModal = modalScene.Instantiate<ColorAdjustmentModalUI>();
                 _modalsLayer.AddChild(_colorAdjustmentModal);
+            }
+        }
+
+        _exportBaseTexturesModal ??= GetNodeOrNull<ExportBaseTexturesModalUI>("MainHUD/ModalsLayer/ExportBaseTexturesModal")
+                                  ?? GetTree().Root.FindChild("ExportBaseTexturesModal", true, false) as ExportBaseTexturesModalUI;
+
+        if (_exportBaseTexturesModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/ExportBaseTexturesModal.tscn");
+            if (modalScene != null)
+            {
+                _exportBaseTexturesModal = modalScene.Instantiate<ExportBaseTexturesModalUI>();
+                _modalsLayer.AddChild(_exportBaseTexturesModal);
             }
         }
 
@@ -861,11 +930,14 @@ public partial class StudioUIManager : CanvasLayer
             if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
             if (_btnAdjustments != null) _btnAdjustments.Visible = false;
+            if (_btnFileMenu != null) _btnFileMenu.Visible = false;
             _colorAdjustmentModal?.CancelAndClose();
+            _exportBaseTexturesModal?.Close();
         }
       else if (tabIndex == 8)
         {
             if (_btnAdjustments != null) _btnAdjustments.Visible = true;
+            if (_btnFileMenu != null) _btnFileMenu.Visible = true;
             var hero = GetVpkLoader()?.CurrentHeroNode;
             if (hero != null && _tabPaint?.CurrentHero == null)
             {
@@ -1466,6 +1538,7 @@ public partial class StudioUIManager : CanvasLayer
             || (_modChangesModal != null && _modChangesModal.Visible)
             || (_unsavedChangesModal != null && _unsavedChangesModal.Visible)
             || (_colorAdjustmentModal != null && _colorAdjustmentModal.Visible)
+            || (_exportBaseTexturesModal != null && _exportBaseTexturesModal.Visible)
             || (particleModal != null && particleModal.Visible)
             || (heroModal != null && heroModal.Visible)
             || (extraModelModal != null && extraModelModal.Visible)
@@ -1537,6 +1610,87 @@ public partial class StudioUIManager : CanvasLayer
         else
         {
             _tabPaint.OpenAdjustmentModal(type);
+        }
+    }
+
+    private void OnFileMenuItemPressed(long id)
+    {
+        switch (id)
+        {
+            case 0:
+                _tabPaint?.PromptResetWorkspace();
+                break;
+            case 1:
+                _tabPaint?.OpenLoadProjectDialog();
+                break;
+            case 2:
+                _tabPaint?.OpenSaveProjectDialog();
+                break;
+            case 3:
+                _tabPaint?.OpenImportImageDialog();
+                break;
+            case 4:
+                OpenExportBaseTexturesModal();
+                break;
+            case 5:
+                _tabPaint?.OpenExportBakedPngDialog();
+                break;
+            case 6:
+                _tabPaint?.OpenExportActiveLayerDialog();
+                break;
+            case 7:
+                _tabPaint?.OpenExportModDialog();
+                break;
+            case 8:
+                OpenAddonsFolder();
+                break;
+        }
+    }
+
+    public void OpenExportBaseTexturesModal()
+    {
+        if (_exportBaseTexturesModal != null && _tabPaint != null)
+        {
+            _exportBaseTexturesModal.Open(_tabPaint);
+        }
+        else
+        {
+            _tabPaint?.OpenExportBaseTexturesModal();
+        }
+    }
+
+    public void OpenAddonsFolder()
+    {
+        string addonsDir = _tabCharacter?.GetResolvedAddonsDir();
+        if (string.IsNullOrEmpty(addonsDir) || !Directory.Exists(addonsDir))
+        {
+            var pathManager = new GamePathManager();
+            pathManager.LoadConfig();
+            if (!string.IsNullOrEmpty(pathManager.CurrentGamePath))
+            {
+                addonsDir = Path.Combine(pathManager.CurrentGamePath, "game", "citadel", "addons");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(addonsDir))
+        {
+            try
+            {
+                if (!Directory.Exists(addonsDir))
+                {
+                    Directory.CreateDirectory(addonsDir);
+                }
+                OS.ShellOpen(addonsDir);
+                ShowToast("Addons Folder", addonsDir);
+            }
+            catch (Exception ex)
+            {
+                ShowToast("Error opening folder", ex.Message);
+            }
+        }
+        else
+        {
+            ShowToast("Deadlock addons folder not found", "Configure game path in Settings");
         }
     }
 

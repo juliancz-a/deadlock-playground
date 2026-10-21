@@ -5569,6 +5569,66 @@ namespace DeadlockPlayground.Painter
             return img;
         }
 
+        public Image BakeSingleLayerImage(SkinLayer layer, int width, int height)
+        {
+            if (layer == null || width <= 0 || height <= 0) return null;
+            int bufferLen = width * height * 8;
+            byte[] comp = new byte[bufferLen];
+
+            var rd = RenderingServer.GetRenderingDevice();
+            if (!layer.IsCpuSynced && layer.LayerRid.IsValid && rd != null && rd.TextureIsValid(layer.LayerRid))
+            {
+                layer.GpuData = rd.TextureGetData(layer.LayerRid, 0);
+                layer.IsCpuSynced = true;
+            }
+            if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
+            {
+                layer.DecompressGpuData(bufferLen);
+            }
+            if (layer.GpuData == null || layer.GpuData.Length != bufferLen) return null;
+
+            unsafe
+            {
+                fixed (byte* pDst = comp, pSrc = layer.GpuData)
+                {
+                    Half* hDst = (Half*)pDst;
+                    Half* hSrc = (Half*)pSrc;
+                    int count = bufferLen / 8;
+                    float op = layer.Opacity;
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        int off = i * 4;
+                        float sA = (float)hSrc[off + 3] * op;
+                        if (sA <= 0.0001f) continue;
+
+                        float sR = (float)hSrc[off];
+                        float sG = (float)hSrc[off + 1];
+                        float sB = (float)hSrc[off + 2];
+
+                        Color srgb = new Color(sR, sG, sB, sA).LinearToSrgb();
+                        hDst[off] = (Half)srgb.R;
+                        hDst[off + 1] = (Half)srgb.G;
+                        hDst[off + 2] = (Half)srgb.B;
+                        hDst[off + 3] = (Half)srgb.A;
+                    }
+                }
+            }
+
+            var singleImg = Image.CreateFromData(width, height, false, Image.Format.Rgbah, comp);
+            singleImg.Convert(Image.Format.Rgba8);
+            return singleImg;
+        }
+
+        public Image BakeActiveLayerImage()
+        {
+            var layer = ActiveLayer;
+            if (layer == null) return null;
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            return BakeSingleLayerImage(layer, w, h);
+        }
+
         public static void RunHeroMaterialAudit(Node3D heroNode, HeroMeshHierarchy hierarchy = null)
         {
             GD.Print("[HeroAudit] Starting material inspection...");

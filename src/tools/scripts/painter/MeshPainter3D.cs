@@ -955,10 +955,36 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
+                bool wasImported = _projectionGizmo.IsImportedLayerPlacement;
+                _projectionGizmo.IsImportedLayerPlacement = false;
+
                 _decalStamper?.HidePreview();
-                if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                if (_previewDecalNode != null && GodotObject.IsInstanceValid(_previewDecalNode))
+                {
+                    _previewDecalNode.Visible = false;
+                    _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, null);
+                }
+
+                if (wasImported)
+                {
+                    _decalStamper?.SetDecalTexture(null);
+                    _brushPalette ??= GetTree()?.Root?.FindChild("FloatingBrushPalette", true, false) as FloatingBrushPaletteUI;
+                    if (_brushPalette != null)
+                    {
+                        _brushPalette.SelectTool(BrushToolMode.Paint);
+                    }
+                    else
+                    {
+                        ToolMode = BrushToolMode.Paint;
+                    }
+                }
+
                 _selectionOverlay3D?.QueueRedraw();
                 _brushPalette?.SyncProjectionControls();
+
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as DeadlockPlayground.UI.UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+                uvCanvas?.QueueCanvasRedraw();
             }
             EmitSignal(SignalName.StrokeFinished);
             return success;
@@ -987,7 +1013,7 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
-            if (ColorAdjustmentModalUI.IsOpen)
+            if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen)
             {
                 return true;
             }
@@ -2443,28 +2469,35 @@ namespace DeadlockPlayground.Painter
                     var tex = _decalStamper?.DecalTexture;
                     if (tex != null && _previewDecalNode != null)
                     {
-                        _previewDecalNode.Visible = true;
-                        _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, tex);
-                        if (!(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                        if (_projectionGizmo != null && _projectionGizmo.IsActive && !_projectionGizmo.Has3DPlacement)
                         {
-                            float scale = _decalStamper?.DecalScale ?? 0.25f;
-                            float rotDeg = _decalStamper?.RotationDegrees ?? 0.0f;
-                            float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
+                            _previewDecalNode.Visible = false;
+                        }
+                        else
+                        {
+                            _previewDecalNode.Visible = true;
+                            _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, tex);
+                            if (!(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                            {
+                                float scale = _decalStamper?.DecalScale ?? 0.25f;
+                                float rotDeg = _decalStamper?.RotationDegrees ?? 0.0f;
+                                float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
 
-                            float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
-                            float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
-                            float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
-                            float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
-                            float sizeX = uvSpanU * unitsU;
-                            float sizeZ = uvSpanV * unitsV;
-                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
-                            _previewDecalNode.NormalFade = 0.65f;
-                            _previewDecalNode.UpperFade = 0.3f;
-                            _previewDecalNode.LowerFade = 0.3f;
-                            _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
+                                float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
+                                float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
+                                float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                                float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
+                                float sizeX = uvSpanU * unitsU;
+                                float sizeZ = uvSpanV * unitsV;
+                                float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
+                                _previewDecalNode.NormalFade = 0.65f;
+                                _previewDecalNode.UpperFade = 0.3f;
+                                _previewDecalNode.LowerFade = 0.3f;
+                                _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
-                            Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
-                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.20f));
+                                Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
+                                _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.20f));
+                            }
                         }
                     }
                     else if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
@@ -4239,6 +4272,7 @@ namespace DeadlockPlayground.Painter
         {
             if (_projectionGizmo != null && _projectionGizmo.IsActive)
             {
+                bool wasImported = _projectionGizmo.IsImportedLayerPlacement;
                 _isDraggingGizmo3D = false;
                 _activeGizmoHandle3D = ProjectionGizmoHandle.None;
                 _projectionGizmo.Deactivate();
@@ -4247,7 +4281,24 @@ namespace DeadlockPlayground.Painter
                 if (_previewDecalNode != null && GodotObject.IsInstanceValid(_previewDecalNode))
                 {
                     _previewDecalNode.Visible = false;
+                    _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, null);
                 }
+
+                if (wasImported)
+                {
+                    _projectionGizmo.IsImportedLayerPlacement = false;
+                    _decalStamper?.SetDecalTexture(null);
+                    _brushPalette ??= GetTree()?.Root?.FindChild("FloatingBrushPalette", true, false) as FloatingBrushPaletteUI;
+                    if (_brushPalette != null)
+                    {
+                        _brushPalette.SelectTool(BrushToolMode.Paint);
+                    }
+                    else
+                    {
+                        ToolMode = BrushToolMode.Paint;
+                    }
+                }
+
                 _selectionOverlay3D?.QueueRedraw();
                 _brushPalette?.SyncProjectionControls();
             }

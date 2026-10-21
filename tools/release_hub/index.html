@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deadlock Playground — Release Hub</title>
+  <style>
+    :root {
+      --bg-main: #0c100e;
+      --bg-surface: #141d1a;
+      --bg-surface-elevated: #1a2723;
+      --bg-card: #182420;
+      --border-subtle: #24352e;
+      --border-focus: #3f5e51;
+      --border-highlight: #5a8573;
+      
+      --accent-brass: #efdebf;
+      --accent-gold: #f59e0b;
+      --accent-mint: #72947f;
+      --accent-emerald: #10b981;
+      --accent-danger: #ef4444;
+      --accent-blue: #3b82f6;
+
+      --text-main: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Top Navbar */
+    header {
+      background: rgba(18, 27, 24, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--accent-gold), #b45309);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: #0c100e;
+      box-shadow: 0 0 14px rgba(245, 158, 11, 0.35);
+    }
+
+    .brand-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--accent-brass);
+    }
+
+    .brand-sub {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent-mint);
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    .nav-status {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 12px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 8px var(--accent-emerald);
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1540px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 1080px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-card);
+      margin-bottom: 20px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 650;
+      color: var(--accent-brass);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-subtitle {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    input[type="text"], input[type="password"], textarea, select {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      color: var(--text-main);
+      font-size: 0.9rem;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--accent-mint);
+      box-shadow: 0 0 0 2px rgba(114, 148, 127, 0.2);
+      background: var(--bg-surface-elevated);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 110px;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .input-hint {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    /* Quick Pick Pills */
+    .pills-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .pill-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .pill-btn:hover {
+      background: var(--bg-surface-elevated);
+      color: var(--accent-brass);
+      border-color: var(--border-highlight);
+    }
+
+    /* Checkbox Toggles */
+    .checkbox-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      margin-bottom: 8px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.12s;
+    }
+
+    .checkbox-item:hover {
+      background: var(--bg-surface-elevated);
+    }
+
+    .checkbox-item input[type="checkbox"] {
+      margin-top: 3px;
+      accent-color: var(--accent-gold);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    .checkbox-label {
+      font-size: 0.85rem;
+      font-weight: 550;
+      color: var(--text-main);
+    }
+
+    .checkbox-desc {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    /* Dry Run Banner */
+    .dryrun-switch {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .dryrun-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--accent-gold);
+    }
+
+    .dryrun-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Launch Button */
+    .btn-launch {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent-gold), #b45309);
+      color: #0c100e;
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 4px 18px rgba(245, 158, 11, 0.3);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-launch:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(245, 158, 11, 0.45);
+    }
+
+    .btn-launch:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .btn-launch:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      filter: grayscale(0.5);
+    }
+
+    /* Stepper */
+    .stepper {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      transition: all 0.2s ease;
+    }
+
+    .step-item.active {
+      border-color: var(--accent-gold);
+      background: rgba(245, 158, 11, 0.07);
+    }
+
+    .step-item.completed {
+      border-color: var(--accent-emerald);
+      background: rgba(16, 185, 129, 0.07);
+    }
+
+    .step-item.failed {
+      border-color: var(--accent-danger);
+      background: rgba(239, 68, 68, 0.08);
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-dim);
+    }
+
+    .step-item.active .step-number {
+      background: var(--accent-gold);
+      color: #0c100e;
+      border-color: var(--accent-gold);
+    }
+
+    .step-item.completed .step-number {
+      background: var(--accent-emerald);
+      color: #0c100e;
+      border-color: var(--accent-emerald);
+    }
+
+    .step-item.failed .step-number {
+      background: var(--accent-danger);
+      color: #fff;
+      border-color: var(--accent-danger);
+    }
+
+    .step-text {
+      flex: 1;
+    }
+
+    .step-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .step-detail {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .step-status-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-pending { background: rgba(100, 116, 139, 0.2); color: var(--text-dim); }
+    .badge-running { background: rgba(245, 158, 11, 0.2); color: var(--accent-gold); }
+    .badge-success { background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); }
+    .badge-failed { background: rgba(239, 68, 68, 0.2); color: var(--accent-danger); }
+
+    /* Progress bar */
+    .progress-bar-container {
+      width: 100%;
+      height: 6px;
+      background: var(--bg-surface);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-mint), var(--accent-gold));
+      transition: width 0.3s ease;
+    }
+
+    /* Terminal Console */
+    .terminal-container {
+      background: #060908;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 380px;
+    }
+
+    .terminal-header {
+      background: #0f1614;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-red { background: #ef4444; }
+    .dot-yellow { background: #f59e0b; }
+    .dot-green { background: #10b981; }
+
+    .terminal-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .terminal-btn {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-dim);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      cursor: pointer;
+    }
+
+    .terminal-btn:hover {
+      color: var(--text-main);
+      border-color: var(--border-highlight);
+    }
+
+    .terminal-body {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: #94a3b8;
+    }
+
+    .log-line {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 2px;
+      word-break: break-word;
+    }
+
+    .log-ts {
+      color: #475569;
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    .log-level {
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .log-level-info { color: #38bdf8; }
+    .log-level-success { color: #34d399; }
+    .log-level-warn { color: #fbbf24; }
+    .log-level-error { color: #f87171; }
+    .log-msg { color: #e2e8f0; }
+
+    /* GameBanana Assistant Box */
+    .gb-assistant-card {
+      background: linear-gradient(135deg, rgba(20, 29, 26, 0.95), rgba(26, 39, 35, 0.95));
+      border: 1px solid rgba(114, 148, 127, 0.4);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      margin-top: 16px;
+    }
+
+    .gb-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .btn-secondary {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--accent-brass);
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-surface-elevated);
+      border-color: var(--accent-mint);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">DP</div>
+      <div>
+        <span class="brand-title">Deadlock Playground</span>
+        <span class="brand-sub">Release Hub</span>
+      </div>
+    </div>
+    <div class="nav-status">
+      <div class="status-pill">
+        <span class="pulse-dot"></span>
+        <span id="nav-branch">Branch: main</span>
+      </div>
+      <div class="status-pill">
+        <span>Latest: <strong id="nav-latest-ver" style="color: var(--accent-gold)">...</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main View -->
+  <main>
+    <!-- Left Column: Setup & Form -->
+    <div class="col-left">
+
+      <!-- Release Metadata -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📦 Release Metadata</div>
+          <div class="card-subtitle" id="repo-badge">juliancz-a/deadlock-playground</div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Release Version</label>
+            <input type="text" id="input-version" placeholder="e.g. 1.1.1 or 1.2.0">
+            <div class="input-hint">Tags will be prefixed automatically with 'v'</div>
+          </div>
+          <div class="form-group">
+            <label>Release Date</label>
+            <input type="text" id="input-date" placeholder="e.g. October 20, 2026">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Release Title</label>
+          <input type="text" id="input-title" placeholder="e.g. Version 1.1.1 — Hotfixes & Performance Improvements">
+        </div>
+
+        <div class="form-group">
+          <label>Highlights (One per line)</label>
+          <textarea id="input-highlights" rows="3" placeholder="• Fixed additive animation recoil coordinate conversion&#10;• Added particle texture repainting tab&#10;• Optimized 4K atlas VRAM compositing"></textarea>
+          <div class="input-hint">Will be rendered as bullet items on the website and GameBanana update notice.</div>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="margin-bottom: 0;">Full Markdown Changelog</label>
+            <button type="button" class="pill-btn" onclick="generateMarkdownFromHighlights()">⚡ Sync From Highlights</button>
+          </div>
+          <textarea id="input-markdown" rows="5" placeholder="### Version 1.1.1 Changelog&#10;&#10;Detailed notes..."></textarea>
+        </div>
+      </div>
+
+      <!-- Binary Archive / Build Artifact -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📁 Release Binary Archive</div>
+          <div class="card-subtitle">ZIP, 7z or Build Folder</div>
+        </div>
+
+        <div class="form-group">
+          <label>Archive / Build Path</label>
+          <input type="text" id="input-archive-path" placeholder="Path to .7z, .zip or folder">
+          <div class="input-hint">If you select a folder, it will be automatically zipped into a release archive.</div>
+        </div>
+
+        <div id="detected-releases-section">
+          <label style="font-size: 0.72rem; margin-top: 8px;">Auto-Detected Builds on Drive:</label>
+          <div class="pills-container" id="detected-pills">
+            <span style="font-size: 0.75rem; color: var(--text-dim);">Scanning for builds...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pipeline Execution Checklist -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">⚙️ Pipeline Steps & Automation</div>
+        </div>
+
+        <div class="dryrun-switch">
+          <div>
+            <div class="dryrun-title">Dry Run Mode</div>
+            <div class="dryrun-sub">Simulate and test without pushing to git, creating tags, or uploading files.</div>
+          </div>
+          <input type="checkbox" id="chk-dry-run" style="width: 20px; height: 20px; accent-color: var(--accent-gold);">
+        </div>
+
+        <label class="checkbox-item">
+          <input type="checkbox" id="chk-update-changelog" checked>
+          <div>
+            <div class="checkbox-label">Step A: Update web/src/data/changelog.json</div>
+            <div class="checkbox-desc">Updates website changelog, bumps version badge, sets publish date.</div>
+          </div>
+        </label>
+
+        <label class="checkbox-item">
+          <input type="checkbox" id="chk-git-commit" checked>
+          <div>
+            <div class="checkbox-label">Step B1: Git Commit & Push to Main</div>
+            <div class="checkbox-desc">Pushes changes to GitHub, triggering Cloudflare Pages automatic deployment.</div>
+          </div>
+        </label>
+
+        <label class="checkbox-item">
+          <input type="checkbox" id="chk-git-tag" checked>
+          <div>
+            <div class="checkbox-label">Step B2: Create & Push Git Tag (vX.Y.Z)</div>
+            <div class="checkbox-desc">Creates annotated release tag and pushes it to remote origin.</div>
+          </div>
+        </label>
+
+        <label class="checkbox-item">
+          <input type="checkbox" id="chk-github-release" checked>
+          <div>
+            <div class="checkbox-label">Step B3: Publish GitHub Release & Upload Asset</div>
+            <div class="checkbox-desc">Calls GitHub API, creates the official release, and streams upload of the binary file.</div>
+          </div>
+        </label>
+
+        <label class="checkbox-item">
+          <input type="checkbox" id="chk-gamebanana" checked>
+          <div>
+            <div class="checkbox-label">Step C: GameBanana Release Assistant (Option 2)</div>
+            <div class="checkbox-desc">Copies changelog to clipboard, reveals zip in Explorer, and opens GameBanana update form.</div>
+          </div>
+        </label>
+
+        <div class="form-group" style="margin-top: 14px;">
+          <label>Target Git Branch</label>
+          <input type="text" id="input-target-branch" value="main">
+        </div>
+      </div>
+
+      <!-- GitHub Token Settings -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🔑 GitHub Authentication</div>
+          <div class="card-subtitle" id="token-status-pill">Checking...</div>
+        </div>
+
+        <div class="form-group">
+          <label>GitHub Personal Access Token (PAT)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="password" id="input-github-token" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+            <button type="button" class="btn-secondary" onclick="saveGitHubToken()">Save Token</button>
+          </div>
+          <div class="input-hint">Requires 'repo' scope permissions. Saved locally to release_config.json (gitignored).</div>
+        </div>
+      </div>
+
+      <!-- Big Action CTA -->
+      <button id="btn-launch" class="btn-launch" onclick="launchPipeline()">
+        <span>🚀 Launch Release Pipeline</span>
+      </button>
+
+    </div>
+
+    <!-- Right Column: Live Stepper, Terminal & Assistant -->
+    <div class="col-right">
+
+      <!-- Progress Stepper -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📊 Pipeline Progress</div>
+          <div class="card-subtitle" id="overall-status">Idle</div>
+        </div>
+
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="progress-bar-fill"></div>
+        </div>
+
+        <div class="stepper" id="stepper">
+          <div class="step-item" id="step-1">
+            <div class="step-number">1</div>
+            <div class="step-text">
+              <div class="step-title">Package & Validate Release Binary</div>
+              <div class="step-detail">Verify archive, calculate SHA-256 and size</div>
+            </div>
+            <span class="step-status-badge badge-pending">Pending</span>
+          </div>
+
+          <div class="step-item" id="step-2">
+            <div class="step-number">2</div>
+            <div class="step-text">
+              <div class="step-title">Update Website Changelog (JSON)</div>
+              <div class="step-detail">Write new version to web/src/data/changelog.json</div>
+            </div>
+            <span class="step-status-badge badge-pending">Pending</span>
+          </div>
+
+          <div class="step-item" id="step-3">
+            <div class="step-number">3</div>
+            <div class="step-text">
+              <div class="step-title">Git Commit & Push Branch</div>
+              <div class="step-detail">Pushes to main & triggers Cloudflare Pages deploy</div>
+            </div>
+            <span class="step-status-badge badge-pending">Pending</span>
+          </div>
+
+          <div class="step-item" id="step-4">
+            <div class="step-number">4</div>
+            <div class="step-text">
+              <div class="step-title">Create & Push Git Tag</div>
+              <div class="step-detail">Tags commit with vX.Y.Z and pushes tag</div>
+            </div>
+            <span class="step-status-badge badge-pending">Pending</span>
+          </div>
+
+          <div class="step-item" id="step-5">
+            <div class="step-number">5</div>
+            <div class="step-text">
+              <div class="step-title">GitHub Release & Asset Upload</div>
+              <div class="step-detail">Publishes GitHub Release and uploads binary</div>
+            </div>
+            <span class="step-status-badge badge-pending">Pending</span>
+          </div>
+
+          <div class="step-item" id="step-6">
+            <div class="step-number">6</div>
+            <div class="step-text">
+              <div class="step-title">GameBanana Release Assistant</div>
+              <div class="step-detail">Copies notes to clipboard, opens browser & explorer</div>
+            </div>
+            <span class="step-status-badge badge-pending">Pending</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Terminal Log -->
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <div class="terminal-container">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <div class="terminal-dot dot-red"></div>
+              <div class="terminal-dot dot-yellow"></div>
+              <div class="terminal-dot dot-green"></div>
+              <span style="font-size: 0.72rem; color: #64748b; margin-left: 8px;">Pipeline Console Output</span>
+            </div>
+            <div class="terminal-actions">
+              <button class="terminal-btn" onclick="copyConsoleLogs()">Copy Logs</button>
+              <button class="terminal-btn" onclick="clearConsoleLogs()">Clear</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div class="log-line">
+              <span class="log-ts">[Ready]</span>
+              <span class="log-msg">Release Hub ready. Waiting to launch pipeline...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GameBanana Assistant Action Box -->
+      <div class="gb-assistant-card">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="font-weight: 700; color: var(--accent-brass); font-size: 0.95rem;">
+            🍌 GameBanana Tool #24316 Assistant
+          </div>
+          <span style="font-size: 0.75rem; color: var(--accent-mint); font-weight: 600;">Option 2 Active</span>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 6px; line-height: 1.45;">
+          GameBanana requires manual submission confirmation. When Step 6 triggers, this assistant will copy your changelog, highlight your archive in Explorer, and launch the update page for you.
+        </p>
+
+        <div class="gb-actions">
+          <button class="btn-secondary" onclick="openGameBananaPage()">
+            🌐 Open GameBanana Page
+          </button>
+          <button class="btn-secondary" onclick="copyChangelogToClipboard()">
+            📋 Copy Changelog
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    let infoData = null;
+    let sseSource = null;
+
+    // Load initial info
+    async function loadInfo() {
+      try {
+        const res = await fetch('/api/info');
+        infoData = await res.json();
+        
+        document.getElementById('nav-branch').innerText = `Branch: ${infoData.current_branch}`;
+        document.getElementById('nav-latest-ver').innerText = `v${infoData.latest_version}`;
+        document.getElementById('input-target-branch').value = infoData.current_branch || 'main';
+        document.getElementById('repo-badge').innerText = `${infoData.github_owner}/${infoData.github_repo}`;
+
+        const tokenBadge = document.getElementById('token-status-pill');
+        if (infoData.has_github_token) {
+          tokenBadge.innerText = 'Token Configured';
+          tokenBadge.style.color = 'var(--accent-emerald)';
+        } else {
+          tokenBadge.innerText = 'Token Missing';
+          tokenBadge.style.color = 'var(--accent-danger)';
+        }
+
+        // Render detected releases
+        const pillsContainer = document.getElementById('detected-pills');
+        pillsContainer.innerHTML = '';
+        if (infoData.detected_releases && infoData.detected_releases.length > 0) {
+          infoData.detected_releases.forEach(rel => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'pill-btn';
+            btn.innerText = `${rel.is_folder ? '📁' : '📦'} ${rel.name} (${rel.size_mb > 0 ? rel.size_mb + 'MB' : 'folder'})`;
+            btn.onclick = () => {
+              document.getElementById('input-archive-path').value = rel.path;
+              // Suggest version from name
+              const match = rel.name.match(/\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+)?/);
+              if (match && !document.getElementById('input-version').value) {
+                document.getElementById('input-version').value = match[0];
+              }
+            };
+            pillsContainer.appendChild(btn);
+          });
+        } else {
+          pillsContainer.innerHTML = '<span style="font-size: 0.75rem; color: var(--text-dim);">No builds found in releases folder. Specify path manually.</span>';
+        }
+
+        // Auto-fill today's date
+        if (!document.getElementById('input-date').value) {
+          const now = new Date();
+          const options = { year: 'numeric', month: 'long', day: 'numeric' };
+          document.getElementById('input-date').value = now.toLocaleDateString('en-US', options);
+        }
+
+        // Suggest next version if current version is available
+        if (infoData.latest_version && !document.getElementById('input-version').value) {
+          const parts = infoData.latest_version.split('-');
+          const vNums = parts[0].split('.').map(n => parseInt(n));
+          if (vNums.length === 3 && !isNaN(vNums[2])) {
+            const nextPatch = `${vNums[0]}.${vNums[1]}.${vNums[2] + 1}` + (parts[1] ? `-${parts[1]}` : '');
+            document.getElementById('input-version').placeholder = `Current is ${infoData.latest_version} (e.g. ${nextPatch})`;
+          }
+        }
+
+      } catch (err) {
+        console.error('Failed to load info:', err);
+      }
+    }
+
+    // Connect SSE for live logs & progress
+    function setupEventSource() {
+      if (sseSource) sseSource.close();
+      sseSource = new EventSource('/api/logs');
+
+      sseSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleServerEvent(data);
+        } catch (e) {
+          console.error('Error parsing SSE:', e);
+        }
+      };
+
+      sseSource.onerror = () => {
+        console.log('SSE connection error, retrying...');
+      };
+    }
+
+    function handleServerEvent(evt) {
+      if (evt.type === 'log') {
+        appendLog(evt.timestamp, evt.level, evt.message);
+        if (evt.step !== undefined && evt.step !== null) {
+          updateStepUI(evt.step, evt.level);
+        }
+        if (evt.progress !== undefined && evt.progress !== null) {
+          document.getElementById('progress-bar-fill').style.width = `${evt.progress}%`;
+        }
+      } else if (evt.type === 'pipeline_start') {
+        document.getElementById('btn-launch').disabled = true;
+        document.getElementById('btn-launch').innerHTML = '<span>⏳ Pipeline Running...</span>';
+        document.getElementById('overall-status').innerText = 'Running';
+        document.getElementById('overall-status').style.color = 'var(--accent-gold)';
+        resetStepBadges();
+      } else if (evt.type === 'pipeline_complete') {
+        document.getElementById('btn-launch').disabled = false;
+        document.getElementById('btn-launch').innerHTML = '<span>🚀 Launch Release Pipeline</span>';
+        if (evt.success) {
+          document.getElementById('overall-status').innerText = 'Complete 🎉';
+          document.getElementById('overall-status').style.color = 'var(--accent-emerald)';
+          document.getElementById('progress-bar-fill').style.width = '100%';
+          loadInfo(); // Refresh latest version
+        } else {
+          document.getElementById('overall-status').innerText = 'Failed ❌';
+          document.getElementById('overall-status').style.color = 'var(--accent-danger)';
+        }
+      }
+    }
+
+    function updateStepUI(stepNum, level) {
+      if (stepNum < 1 || stepNum > 6) return;
+      const stepElem = document.getElementById(`step-${stepNum}`);
+      if (!stepElem) return;
+
+      const badge = stepElem.querySelector('.step-status-badge');
+      
+      // Mark previous steps completed if moving forward
+      for (let i = 1; i < stepNum; i++) {
+        const prev = document.getElementById(`step-${i}`);
+        if (prev && !prev.classList.contains('failed')) {
+          prev.className = 'step-item completed';
+          prev.querySelector('.step-status-badge').className = 'step-status-badge badge-success';
+          prev.querySelector('.step-status-badge').innerText = 'Done';
+        }
+      }
+
+      if (level === 'error') {
+        stepElem.className = 'step-item failed';
+        badge.className = 'step-status-badge badge-failed';
+        badge.innerText = 'Failed';
+      } else if (level === 'success') {
+        stepElem.className = 'step-item completed';
+        badge.className = 'step-status-badge badge-success';
+        badge.innerText = 'Done';
+      } else {
+        stepElem.className = 'step-item active';
+        badge.className = 'step-status-badge badge-running';
+        badge.innerText = 'Active';
+      }
+    }
+
+    function resetStepBadges() {
+      for (let i = 1; i <= 6; i++) {
+        const step = document.getElementById(`step-${i}`);
+        if (step) {
+          step.className = 'step-item';
+          const b = step.querySelector('.step-status-badge');
+          b.className = 'step-status-badge badge-pending';
+          b.innerText = 'Pending';
+        }
+      }
+      document.getElementById('progress-bar-fill').style.width = '0%';
+    }
+
+    function appendLog(ts, level, message) {
+      const term = document.getElementById('terminal-body');
+      const row = document.createElement('div');
+      row.className = 'log-line';
+
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-ts';
+      timeSpan.innerText = `[${ts}]`;
+
+      const lvlSpan = document.createElement('span');
+      lvlSpan.className = `log-level log-level-${level}`;
+      lvlSpan.innerText = `[${level.toUpperCase()}]`;
+
+      const msgSpan = document.createElement('span');
+      msgSpan.className = 'log-msg';
+      msgSpan.innerText = message;
+
+      row.appendChild(timeSpan);
+      row.appendChild(lvlSpan);
+      row.appendChild(msgSpan);
+      term.appendChild(row);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function clearConsoleLogs() {
+      document.getElementById('terminal-body').innerHTML = '';
+    }
+
+    function copyConsoleLogs() {
+      const lines = Array.from(document.querySelectorAll('.log-line')).map(l => l.innerText).join('\n');
+      navigator.clipboard.writeText(lines);
+      alert('Console logs copied to clipboard!');
+    }
+
+    function generateMarkdownFromHighlights() {
+      const version = document.getElementById('input-version').value.trim() || '1.X.X';
+      const title = document.getElementById('input-title').value.trim() || 'New Update';
+      const rawHighlights = document.getElementById('input-highlights').value.trim().split('\n');
+      
+      const bullets = rawHighlights
+        .map(h => h.trim().replace(/^[-•*]\s*/, ''))
+        .filter(h => h.length > 0)
+        .map(h => `* ${h}`)
+        .join('\n');
+
+      const md = `### Version ${version} — ${title}\n\n#### Highlights & Changes:\n${bullets}`;
+      document.getElementById('input-markdown').value = md;
+    }
+
+    async function saveGitHubToken() {
+      const token = document.getElementById('input-github-token').value.trim();
+      if (!token) {
+        alert('Please enter a GitHub Personal Access Token first.');
+        return;
+      }
+      const res = await fetch('/api/save-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ github_token: token })
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        alert('GitHub Token saved securely to release_config.json!');
+        document.getElementById('input-github-token').value = '';
+        loadInfo();
+      }
+    }
+
+    async function launchPipeline() {
+      const version = document.getElementById('input-version').value.trim();
+      const title = document.getElementById('input-title').value.trim();
+      const date = document.getElementById('input-date').value.trim();
+      const rawHighlights = document.getElementById('input-highlights').value.trim().split('\n');
+      const highlights = rawHighlights.map(h => h.trim().replace(/^[-•*]\s*/, '')).filter(h => h.length > 0);
+      const markdown = document.getElementById('input-markdown').value.trim();
+      const archivePath = document.getElementById('input-archive-path').value.trim();
+      const targetBranch = document.getElementById('input-target-branch').value.trim() || 'main';
+      const dryRun = document.getElementById('chk-dry-run').checked;
+
+      if (!version) {
+        alert('Please specify a Release Version (e.g. 1.1.1)');
+        return;
+      }
+      if (!title) {
+        alert('Please enter a Release Title');
+        return;
+      }
+
+      const steps = {
+        update_changelog: document.getElementById('chk-update-changelog').checked,
+        git_commit: document.getElementById('chk-git-commit').checked,
+        git_push: document.getElementById('chk-git-commit').checked,
+        git_tag: document.getElementById('chk-git-tag').checked,
+        github_release: document.getElementById('chk-github-release').checked,
+        gamebanana_assistant: document.getElementById('chk-gamebanana').checked
+      };
+
+      const payload = {
+        version,
+        title,
+        date,
+        highlights,
+        markdown,
+        archive_path: archivePath,
+        target_branch: targetBranch,
+        dry_run: dryRun,
+        steps
+      };
+
+      try {
+        const res = await fetch('/api/run-pipeline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status !== 'started') {
+          alert('Error: ' + data.message);
+        }
+      } catch (err) {
+        alert('Failed to launch pipeline: ' + err);
+      }
+    }
+
+    function openGameBananaPage() {
+      const url = (infoData && infoData.gamebanana_url) || 'https://gamebanana.com/tools/updates/add/24316';
+      window.open(url, '_blank');
+    }
+
+    function copyChangelogToClipboard() {
+      const version = document.getElementById('input-version').value.trim() || 'Latest';
+      const title = document.getElementById('input-title').value.trim() || 'Release';
+      const rawHighlights = document.getElementById('input-highlights').value.trim().split('\n');
+      const bullets = rawHighlights.map(h => '• ' + h.trim().replace(/^[-•*]\s*/, '')).filter(h => h.length > 2).join('\n');
+      const md = document.getElementById('input-markdown').value.trim();
+
+      const text = `Version ${version} — ${title}\n\n${bullets ? 'Highlights:\n' + bullets + '\n\n' : ''}${md}`;
+      navigator.clipboard.writeText(text);
+      alert('Changelog text copied to clipboard!');
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadInfo();
+      setupEventSource();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,217 @@
+[gd_scene format=3 uid="uid://bcwou8lew6qrn"]
+
+[ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://ui/scripts/modals/ExportBaseTexturesModalUI.cs" id="2_script"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="3_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal_root"]
+content_margin_left = 18.0
+content_margin_top = 14.0
+content_margin_right = 18.0
+content_margin_bottom = 16.0
+bg_color = Color(0.09, 0.1, 0.13, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.5, 0.75, 0.85)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.65)
+shadow_size = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_export_normal"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.16, 0.24, 0.38, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.5, 0.75, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_export_hover"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.22, 0.35, 0.55, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.55, 0.72, 0.95, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_export_pressed"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.11, 0.16, 0.27, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.9, 0.82, 0.65, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="ExportBaseTexturesModal" type="PanelContainer" unique_id=1987162601 node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_btnSelectAll", "_btnDeselectAll", "_lblCount", "_itemsContainer", "_chkIncludeUvWireframe", "_lblSelectionSummary", "_btnCancel", "_btnExport")]
+custom_minimum_size = Vector2(520, 0)
+offset_right = 520.0
+offset_bottom = 440.0
+theme = ExtResource("1_theme")
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
+script = ExtResource("2_script")
+_headerContainer = NodePath("MarginContainer/VBoxContainer/HeaderBar")
+_lblTitle = NodePath("MarginContainer/VBoxContainer/HeaderBar/VBoxTitle/Title")
+_lblSubtitle = NodePath("MarginContainer/VBoxContainer/HeaderBar/VBoxTitle/Subtitle")
+_btnClose = NodePath("MarginContainer/VBoxContainer/HeaderBar/BtnClose")
+_btnSelectAll = NodePath("MarginContainer/VBoxContainer/ActionsBar/BtnSelectAll")
+_btnDeselectAll = NodePath("MarginContainer/VBoxContainer/ActionsBar/BtnDeselectAll")
+_lblCount = NodePath("MarginContainer/VBoxContainer/ActionsBar/LblCount")
+_itemsContainer = NodePath("MarginContainer/VBoxContainer/Scroll/ItemsContainer")
+_chkIncludeUvWireframe = NodePath("MarginContainer/VBoxContainer/OptionsRow/ChkIncludeUv")
+_lblSelectionSummary = NodePath("MarginContainer/VBoxContainer/FooterBar/LblSummary")
+_btnCancel = NodePath("MarginContainer/VBoxContainer/FooterBar/BtnCancel")
+_btnExport = NodePath("MarginContainer/VBoxContainer/FooterBar/BtnExport")
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=1987162602]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 4
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer" unique_id=1987162603]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162604]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="VBoxTitle" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1987162605]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="Title" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/VBoxTitle" unique_id=1987162606]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.98, 1)
+theme_override_fonts/font = ExtResource("3_colus")
+theme_override_font_sizes/font_size = 15
+text = "EXPORT ORIGINAL BASE TEXTURES"
+
+[node name="Subtitle" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/VBoxTitle" unique_id=1987162607]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.6, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = "Export unpainted vanilla / mod textures for external inspection & editing"
+
+[node name="BtnClose" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1987162608]
+custom_minimum_size = Vector2(26, 26)
+layout_mode = 2
+size_flags_vertical = 0
+tooltip_text = "Close (Esc)"
+text = "✕"
+
+[node name="HSeparator1" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1987162609]
+layout_mode = 2
+
+[node name="ActionsBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162610]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnSelectAll" type="Button" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162611]
+custom_minimum_size = Vector2(80, 24)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Select All"
+
+[node name="BtnDeselectAll" type="Button" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162612]
+custom_minimum_size = Vector2(85, 24)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Deselect All"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162613]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LblCount" type="Label" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162614]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.72, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "0 texture(s) available"
+
+[node name="Scroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162615]
+custom_minimum_size = Vector2(0, 220)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ItemsContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/Scroll" unique_id=1987162616]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="HSeparator2" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1987162617]
+layout_mode = 2
+
+[node name="OptionsRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162618]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ChkIncludeUv" type="CheckBox" parent="MarginContainer/VBoxContainer/OptionsRow" unique_id=1987162619]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.88, 0.94, 1)
+theme_override_font_sizes/font_size = 12
+text = "Include UV Wireframe Overlay (as separate _uv.png)"
+
+[node name="FooterBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162620]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LblSummary" type="Label" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162621]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 1)
+theme_override_font_sizes/font_size = 12
+text = "0 of 0 texture(s) selected"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162622]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnCancel" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162623]
+custom_minimum_size = Vector2(75, 28)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Cancel"
+
+[node name="BtnExport" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162624]
+custom_minimum_size = Vector2(130, 28)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.98, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_fonts/font = ExtResource("3_colus")
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_export_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_export_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_export_pressed")
+text = "Export Selected..."

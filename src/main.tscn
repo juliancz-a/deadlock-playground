@@ -33,6 +33,7 @@
 [ext_resource type="PackedScene" uid="uid://bkc7qpal8tx01" path="res://ui/scenes/components/QuickColorPalette.tscn" id="31_quick_palette"]
 [ext_resource type="PackedScene" path="res://ui/scenes/modals/ChangelogModal.tscn" id="32_changelog_modal"]
 [ext_resource type="PackedScene" uid="uid://ccanx3q4pj08j" path="res://ui/scenes/modals/ColorAdjustmentModal.tscn" id="33_color_adj_modal"]
+[ext_resource type="PackedScene" uid="uid://c6exportbasetexmodal" path="res://ui/scenes/modals/ExportBaseTexturesModal.tscn" id="34_export_base_tex_modal"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -206,7 +207,7 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnAdjustments", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_quickColorPalette", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_colorAdjustmentModal")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnAdjustments", "_btnFileMenu", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_quickColorPalette", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_colorAdjustmentModal", "_exportBaseTexturesModal")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
@@ -215,6 +216,7 @@ _btnAbout = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
 _btnQuit = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
 _btnNews = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/NewsButton")
 _btnAdjustments = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AdjustmentsMenuButton")
+_btnFileMenu = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/FileMenuButton")
 _btnTabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
 _btnTabBones = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/BonesButton")
 _btnTabCamera = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CameraButton")
@@ -243,6 +245,7 @@ _btnAboutClose = NodePath("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxCo
 _gameFolderDialog = NodePath("MainHUD/ModalsLayer/GameFolderDialog")
 _saveFolderDialog = NodePath("MainHUD/ModalsLayer/ScreenshotFolderDialog")
 _colorAdjustmentModal = NodePath("MainHUD/ModalsLayer/ColorAdjustmentModal")
+_exportBaseTexturesModal = NodePath("MainHUD/ModalsLayer/ExportBaseTexturesModal")
 
 [node name="MainHUD" type="Control" parent="UIRoot" unique_id=1389755641]
 layout_mode = 3
@@ -295,6 +298,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="AdjustmentsMenuButton" type="MenuButton" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1987162598]
+visible = false
 layout_mode = 2
 theme_override_colors/font_pressed_color = Color(0.9, 0.82, 0.65, 1)
 theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
@@ -306,6 +310,21 @@ theme_override_styles/pressed = SubResource("StyleBoxFlat_adj_btn_pressed")
 theme_override_styles/hover = SubResource("StyleBoxFlat_adj_btn_hover")
 theme_override_styles/disabled = SubResource("StyleBoxFlat_adj_btn_disabled")
 text = "ADJUSTMENTS ▾"
+flat = false
+
+[node name="FileMenuButton" type="MenuButton" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1987162650]
+visible = false
+layout_mode = 2
+theme_override_colors/font_pressed_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_disabled_color = Color(0.5, 0.55, 0.62, 0.5)
+theme_override_fonts/font = ExtResource("30_kq58d")
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBoxFlat_adj_btn_normal")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_adj_btn_pressed")
+theme_override_styles/hover = SubResource("StyleBoxFlat_adj_btn_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_adj_btn_disabled")
+text = "FILE ▾"
 flat = false
 
 [node name="_Spacer" type="Control" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1906916890]
@@ -858,6 +877,10 @@ layout_mode = 1
 layout_mode = 1
 
 [node name="ColorAdjustmentModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1987162599 instance=ExtResource("33_color_adj_modal")]
+visible = false
+layout_mode = 1
+
+[node name="ExportBaseTexturesModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1987162651 instance=ExtResource("34_export_base_tex_modal")]
 visible = false
 layout_mode = 1
 
