@@ -957,7 +957,7 @@ theme_override_fonts/normal_font = ExtResource("30_kq58d")
 theme_override_fonts/bold_font = ExtResource("30_kq58d")
 bbcode_enabled = true
 text = "[font_size=24][b]Deadlock Playground[/b][/font_size]
-[color=#A35A4E]v1.0.1[/color]
+[color=#A35A4E]v1.1.0-beta2[/color]
 
 An open-source, community-driven tool designed to view, inspect, pose, and paint 3D character models from Valve's Deadlock for art reference, virtual photography, skin creation, and modding.
 

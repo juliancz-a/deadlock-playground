@@ -24,6 +24,11 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 WORKSPACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 RELEASE_HUB_DIR = os.path.dirname(__file__)
@@ -31,17 +36,19 @@ CONFIG_PATH = os.path.join(RELEASE_HUB_DIR, "release_config.json")
 CHANGELOG_PATH = os.path.join(WORKSPACE_DIR, "web", "src", "data", "changelog.json")
 PORT = 5173
 
-# Global SSE message queue
+# Global SSE message queue & history
 log_clients = []
 log_lock = threading.Lock()
 pipeline_running = False
+recent_events = []
+MAX_RECENT_EVENTS = 300
 
 DEFAULT_CONFIG = {
     "repo_owner": "juliancz-a",
     "repo_name": "deadlock-playground",
     "github_token": "",
     "gamebanana_id": "24316",
-    "gamebanana_url": "https://gamebanana.com/tools/updates/add/24316",
+    "gamebanana_url": "https://gamebanana.com/tools/edit/24316",
     "default_branch": "main",
     "search_paths": [
         os.path.join(WORKSPACE_DIR, "releases"),
@@ -78,6 +85,9 @@ def broadcast_event(event_type, **kwargs):
     }
     msg = f"data: {json.dumps(payload)}\n\n"
     with log_lock:
+        recent_events.append(payload)
+        if len(recent_events) > MAX_RECENT_EVENTS:
+            recent_events.pop(0)
         dead = []
         for q in log_clients:
             try:
@@ -145,19 +155,27 @@ def run_cmd(cmd, cwd=WORKSPACE_DIR, check=True):
     return stdout.strip()
 
 def copy_to_clipboard(text):
-    """Copies text to Windows clipboard reliably."""
+    """Copies text to Windows clipboard reliably with full UTF-8 support."""
     try:
-        proc = subprocess.Popen(['powershell', '-NoProfile', '-Command', '$input | Set-Clipboard'], stdin=subprocess.PIPE, text=True)
-        proc.communicate(input=text)
-        return True
-    except Exception as e:
-        try:
-            proc = subprocess.Popen(['clip'], stdin=subprocess.PIPE, text=True)
-            proc.communicate(input=text)
+        proc = subprocess.Popen(
+            ['powershell', '-NoProfile', '-Command', '[Console]::InputEncoding = [System.Text.Encoding]::UTF8; $input | Set-Clipboard'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        proc.communicate(input=text.encode('utf-8'))
+        if proc.returncode == 0:
             return True
-        except Exception as e2:
-            log_error(f"Failed to copy to clipboard: {e2}")
-            return False
+    except Exception as e:
+        log_warn(f"PowerShell clipboard copy exception: {e}")
+        
+    try:
+        proc = subprocess.Popen(['clip'], stdin=subprocess.PIPE)
+        proc.communicate(input=text.encode('utf-16le'))
+        return True
+    except Exception as e2:
+        log_error(f"Failed to copy to clipboard: {e2}")
+        return False
 
 def open_file_in_explorer(file_path):
     """Selects and highlights a file in Windows Explorer."""
@@ -181,45 +199,101 @@ def get_file_sha256(filepath):
     return h.hexdigest()
 
 def detect_existing_releases(config):
-    found = []
+    """Scans configured paths and returns both a directory tree and a flat list of releases."""
+    roots = []
+    all_items = []
+    
     for base in config.get("search_paths", []):
         if not os.path.exists(base):
             continue
+        norm_base = os.path.normpath(base)
+        root_entry = {
+            "root_path": norm_base,
+            "root_name": os.path.basename(norm_base) or norm_base,
+            "children": []
+        }
         try:
-            for root, dirs, files in os.walk(base):
-                # Search up to 2 levels deep
-                rel = os.path.relpath(root, base)
-                depth = len(rel.split(os.sep)) if rel != "." else 0
-                if depth > 2:
-                    continue
-                for f in files:
-                    if f.endswith((".7z", ".zip")) and "deadlock-playground" in f.lower():
-                        full_p = os.path.join(root, f)
-                        stat = os.stat(full_p)
-                        found.append({
-                            "name": f,
-                            "path": full_p,
+            for entry in os.scandir(norm_base):
+                if entry.is_file() and entry.name.endswith((".7z", ".zip")) and "deadlock-playground" in entry.name.lower():
+                    try:
+                        stat = entry.stat()
+                        item = {
+                            "name": entry.name,
+                            "path": os.path.normpath(entry.path),
                             "size_mb": round(stat.st_size / (1024 * 1024), 2),
                             "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
                             "is_folder": False
-                        })
-                for d in dirs:
-                    if d.startswith("1.") or "beta" in d.lower():
-                        folder_p = os.path.join(root, d)
-                        exe_p = os.path.join(folder_p, "deadlock-playground.exe")
+                        }
+                        root_entry["children"].append(item)
+                        all_items.append(item)
+                    except Exception:
+                        pass
+                elif entry.is_dir():
+                    dir_name = entry.name
+                    folder_p = os.path.normpath(entry.path)
+                    exe_p = os.path.join(folder_p, "deadlock-playground.exe")
+                    try:
+                        stat = entry.stat()
                         if os.path.exists(exe_p):
-                            found.append({
-                                "name": f"{d} (Godot Build Folder)",
+                            item = {
+                                "name": f"{dir_name} (Build Folder)",
                                 "path": folder_p,
                                 "size_mb": 0,
-                                "modified": datetime.fromtimestamp(os.stat(folder_p).st_mtime).strftime("%Y-%m-%d %H:%M"),
-                                "is_folder": True
-                            })
+                                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                                "is_folder": True,
+                                "is_build_folder": True
+                            }
+                            root_entry["children"].append(item)
+                            all_items.append(item)
+                        else:
+                            sub_items = []
+                            for sub in os.scandir(folder_p):
+                                if sub.is_file() and sub.name.endswith((".7z", ".zip")) and "deadlock-playground" in sub.name.lower():
+                                    s_stat = sub.stat()
+                                    sub_item = {
+                                        "name": sub.name,
+                                        "path": os.path.normpath(sub.path),
+                                        "size_mb": round(s_stat.st_size / (1024 * 1024), 2),
+                                        "modified": datetime.fromtimestamp(s_stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                                        "is_folder": False
+                                    }
+                                    sub_items.append(sub_item)
+                                    all_items.append(sub_item)
+                                elif sub.is_dir():
+                                    sub_exe = os.path.join(sub.path, "deadlock-playground.exe")
+                                    if os.path.exists(sub_exe):
+                                        s_stat = sub.stat()
+                                        sub_item = {
+                                            "name": f"{sub.name} (Build Folder)",
+                                            "path": os.path.normpath(sub.path),
+                                            "size_mb": 0,
+                                            "modified": datetime.fromtimestamp(s_stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                                            "is_folder": True,
+                                            "is_build_folder": True
+                                        }
+                                        sub_items.append(sub_item)
+                                        all_items.append(sub_item)
+                            if sub_items:
+                                sub_items.sort(key=lambda x: x["modified"], reverse=True)
+                                root_entry["children"].append({
+                                    "name": dir_name,
+                                    "path": folder_p,
+                                    "is_group": True,
+                                    "children": sub_items
+                                })
+                    except Exception:
+                        pass
         except Exception as e:
-            print(f"[Detect] Error walking {base}: {e}")
-    # Sort newest modified first
-    found.sort(key=lambda x: x["modified"], reverse=True)
-    return found
+            print(f"[Detect] Error walking {norm_base}: {e}")
+            
+        if root_entry["children"]:
+            roots.append(root_entry)
+
+    all_items.sort(key=lambda x: x["modified"], reverse=True)
+    return {
+        "roots": roots,
+        "items": all_items
+    }
 
 def package_folder_to_zip(folder_path, output_zip_path, progress_callback=None):
     """Zips a folder with progress logging."""
@@ -269,10 +343,17 @@ def execute_pipeline(payload):
     steps = payload.get("steps", {})
     
     tag_name = f"v{version}"
-    is_prerelease = "beta" in version.lower() or "alpha" in version.lower()
+    if "is_prerelease" in payload:
+        is_prerelease = bool(payload["is_prerelease"])
+    elif payload.get("release_type") == "prerelease":
+        is_prerelease = True
+    elif payload.get("release_type") == "latest":
+        is_prerelease = False
+    else:
+        is_prerelease = "beta" in version.lower() or "alpha" in version.lower()
     
-    broadcast_event("pipeline_start", version=version, title=title, dry_run=dry_run)
-    log_info(f"=== Starting Deadlock Playground Release Pipeline v{version} ===", step=0, progress=0)
+    broadcast_event("pipeline_start", version=version, title=title, dry_run=dry_run, is_prerelease=is_prerelease)
+    log_info(f"=== Starting Deadlock Playground Release Pipeline v{version} ({'Pre-Release' if is_prerelease else 'Latest Release'}) ===", step=0, progress=0)
     if dry_run:
         log_warn("DRY RUN MODE ENABLED: No files will be committed, no tags pushed, no releases published.")
         
@@ -327,37 +408,39 @@ def execute_pipeline(payload):
                 
             full_title = f"Version {version} — {title}" if not title.startswith("Version") else title
             
+            badge_title = "Pre-Release" if is_prerelease else "Latest Release"
+            badge_color = "slate" if is_prerelease else "gold"
+            
             # Format history item
             new_history_item = {
                 "version": version,
                 "date": date_str,
                 "title": full_title,
-                "badge": "Latest Release",
-                "badgeType": "gold",
+                "badge": badge_title,
+                "badgeType": badge_color,
                 "videoUrl": "",
                 "highlights": [h.strip() for h in highlights if h.strip()]
             }
             
-            # Demote previous latest
             history = changelog_data.get("history", [])
-            for item in history:
-                if item.get("badge") == "Latest Release":
-                    item["badge"] = "Release"
-                    item["badgeType"] = "slate"
+            # Only demote previous latest and update latestVersion if this release is marked as Latest
+            if not is_prerelease:
+                for item in history:
+                    if item.get("badge") == "Latest Release":
+                        item["badge"] = "Release"
+                        item["badgeType"] = "slate"
+                changelog_data["latestVersion"] = version
+                changelog_data["publishedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                changelog_data["title"] = full_title
+                changelog_data["markdown"] = markdown or f"### {full_title}\n\n" + "\n".join(f"* {h}" for h in highlights)
                     
             history.insert(0, new_history_item)
-            
-            # Update root fields
-            changelog_data["latestVersion"] = version
-            changelog_data["publishedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            changelog_data["title"] = full_title
-            changelog_data["markdown"] = markdown or f"### {full_title}\n\n" + "\n".join(f"* {h}" for h in highlights)
             changelog_data["history"] = history
             
             if not dry_run:
                 with open(CHANGELOG_PATH, "w", encoding="utf-8") as f:
                     json.dump(changelog_data, f, indent=2, ensure_ascii=False)
-                log_success(f"Successfully updated {CHANGELOG_PATH} with version {version}!", step=2, progress=40)
+                log_success(f"Successfully updated {CHANGELOG_PATH} with version {version} ({badge_title})!", step=2, progress=40)
             else:
                 log_info(f"[Dry Run] Prepared updated changelog JSON for version {version}", step=2, progress=40)
         else:
@@ -418,7 +501,8 @@ def execute_pipeline(payload):
         # STEP 5: GITHUB RELEASE CREATION & ASSET UPLOAD
         # ----------------------------------------------------------------------
         if steps.get("github_release", True):
-            log_info(f"[Step 5/6] Creating GitHub Release for tag '{tag_name}'...", step=5, progress=80)
+            rel_label = "Pre-Release" if is_prerelease else "Latest Release"
+            log_info(f"[Step 5/6] Creating GitHub Release ({rel_label}) for tag '{tag_name}'...", step=5, progress=80)
             if not github_token and not dry_run:
                 raise ValueError("GitHub Personal Access Token is required to create a GitHub Release. Enter it in settings.")
             elif not github_token and dry_run:
@@ -438,7 +522,8 @@ def execute_pipeline(payload):
                 "name": f"Version {version} — {title}",
                 "body": body_content,
                 "draft": False,
-                "prerelease": is_prerelease
+                "prerelease": is_prerelease,
+                "make_latest": "false" if is_prerelease else "true"
             }
             
             if not dry_run:
@@ -455,14 +540,19 @@ def execute_pipeline(payload):
                 try:
                     with urllib.request.urlopen(req) as resp:
                         release_info = json.loads(resp.read().decode("utf-8"))
-                        log_success(f"Created GitHub Release: {release_info.get('html_url')}", step=5, progress=85)
+                        log_success(f"Created GitHub Release ({rel_label}): {release_info.get('html_url')}", step=5, progress=85)
                 except urllib.error.HTTPError as he:
                     if he.code == 422: # Already exists
-                        log_warn(f"Release for tag '{tag_name}' already exists. Fetching existing release ID...")
+                        log_warn(f"Release for tag '{tag_name}' already exists. Updating release metadata...")
                         get_req = urllib.request.Request(f"{api_url}/tags/{tag_name}", headers=headers)
                         with urllib.request.urlopen(get_req) as g_resp:
                             release_info = json.loads(g_resp.read().decode("utf-8"))
-                            log_info(f"Found existing release ID: {release_info.get('id')}")
+                            rel_id = release_info.get("id")
+                            log_info(f"Found existing release ID: {rel_id}. Updating...")
+                            patch_req = urllib.request.Request(f"{api_url}/{rel_id}", data=json.dumps(req_data).encode("utf-8"), headers=headers, method="PATCH")
+                            with urllib.request.urlopen(patch_req) as p_resp:
+                                release_info = json.loads(p_resp.read().decode("utf-8"))
+                                log_success(f"Updated GitHub Release metadata: {release_info.get('html_url')}")
                     else:
                         err_body = he.read().decode("utf-8")
                         raise RuntimeError(f"GitHub API error {he.code}: {err_body}")
@@ -500,7 +590,7 @@ def execute_pipeline(payload):
                         asset_resp = json.loads(up_resp.read().decode("utf-8"))
                         log_success(f"Asset uploaded successfully! Download URL: {asset_resp.get('browser_download_url')}", step=5, progress=92)
             else:
-                log_info(f"[Dry Run] Would call GitHub API to create release '{tag_name}' and upload '{os.path.basename(final_archive)}'", step=5, progress=92)
+                log_info(f"[Dry Run] Would call GitHub API to create release '{tag_name}' ({rel_label}) and upload '{os.path.basename(final_archive)}'", step=5, progress=92)
         else:
             log_info("[Step 5/6] Skipped GitHub release upload.", step=5, progress=92)
 
@@ -528,8 +618,8 @@ def execute_pipeline(payload):
                 open_file_in_explorer(final_archive)
                 
             # 4. Open GameBanana in default browser
-            gb_url = config.get("gamebanana_url", "https://gamebanana.com/tools/updates/add/24316")
-            log_info(f"Opening GameBanana update form: {gb_url}")
+            gb_url = config.get("gamebanana_url", "https://gamebanana.com/tools/edit/24316")
+            log_info(f"Opening GameBanana edit page: {gb_url}")
             webbrowser.open(gb_url)
             log_success("GameBanana submission page opened in your browser! Simply drag the highlighted archive and press Ctrl+V to paste your changelog.", step=6, progress=100)
         else:
@@ -609,7 +699,7 @@ class ReleaseHubHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
                 
-            releases = detect_existing_releases(config)
+            releases_data = detect_existing_releases(config)
             
             data = {
                 "latest_version": current_ver,
@@ -618,8 +708,9 @@ class ReleaseHubHandler(BaseHTTPRequestHandler):
                 "has_github_token": bool(config.get("github_token")),
                 "github_owner": config.get("repo_owner", "juliancz-a"),
                 "github_repo": config.get("repo_name", "deadlock-playground"),
-                "gamebanana_url": config.get("gamebanana_url", "https://gamebanana.com/tools/updates/add/24316"),
-                "detected_releases": releases,
+                "gamebanana_url": config.get("gamebanana_url", "https://gamebanana.com/tools/edit/24316"),
+                "detected_releases": releases_data.get("items", []),
+                "detected_tree": releases_data.get("roots", []),
                 "pipeline_running": pipeline_running
             }
             
@@ -631,37 +722,57 @@ class ReleaseHubHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_bytes)
             
-        elif path == "/api/logs":
-            # Server-Sent Events (SSE) stream
+        elif path == "/api/refresh-releases":
+            config = load_config()
+            releases_data = detect_existing_releases(config)
+            resp = json.dumps(releases_data).encode("utf-8")
             self.send_response(200)
             self.send_cors_headers()
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.end_headers()
+            self.wfile.write(resp)
+
+        elif path == "/api/poll-logs":
+            with log_lock:
+                logs_copy = list(recent_events)
+            resp = json.dumps({"status": "ok", "logs": logs_copy, "running": pipeline_running}).encode("utf-8")
+            self.send_response(200)
+            self.send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.end_headers()
+            self.wfile.write(resp)
+            
+        elif path == "/api/logs":
+            # Server-Sent Events (SSE) stream with auto-reconnect & history replay
+            self.send_response(200)
+            self.send_cors_headers()
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
             self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             
-            client_queue = queue.Queue(maxsize=200)
+            client_queue = queue.Queue(maxsize=1000)
             with log_lock:
                 log_clients.append(client_queue)
-                
-            # Send initial ping
-            init_msg = f"data: {json.dumps({'type': 'init', 'message': 'Connected to Release Hub SSE stream', 'running': pipeline_running})}\n\n"
-            self.wfile.write(init_msg.encode("utf-8"))
-            self.wfile.flush()
-            
+                # Replay recent events so browser immediately shows console logs & current progress
+                for evt in recent_events:
+                    client_queue.put_nowait(f"data: {json.dumps(evt)}\n\n")
+                    
             try:
                 while True:
-                    msg = client_queue.get(timeout=30)
-                    self.wfile.write(msg.encode("utf-8"))
-                    self.wfile.flush()
-            except queue.Empty:
-                # Keep-alive heartbeat
-                heartbeat = ": ping\n\n".encode("utf-8")
-                try:
-                    self.wfile.write(heartbeat)
-                    self.wfile.flush()
-                except Exception:
-                    pass
+                    try:
+                        msg = client_queue.get(timeout=10)
+                        self.wfile.write(msg.encode("utf-8"))
+                        self.wfile.flush()
+                    except queue.Empty:
+                        # Keep-alive heartbeat (comment in SSE)
+                        self.wfile.write(b": ping\n\n")
+                        self.wfile.flush()
+            except (ConnectionResetError, BrokenPipeError):
+                pass
             except Exception:
                 pass
             finally:
@@ -672,68 +783,81 @@ class ReleaseHubHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Endpoint not found")
 
     def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length) if length > 0 else b"{}"
-        
         try:
-            payload = json.loads(body.decode("utf-8"))
-        except Exception:
-            payload = {}
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
             
-        if path == "/api/save-config":
-            cfg = load_config()
-            if "github_token" in payload and payload["github_token"]:
-                cfg["github_token"] = payload["github_token"].strip()
-            if "repo_owner" in payload:
-                cfg["repo_owner"] = payload["repo_owner"].strip()
-            if "repo_name" in payload:
-                cfg["repo_name"] = payload["repo_name"].strip()
-            if "gamebanana_url" in payload:
-                cfg["gamebanana_url"] = payload["gamebanana_url"].strip()
-            save_config(cfg)
-            
-            resp = json.dumps({"status": "ok", "message": "Settings saved successfully"}).encode("utf-8")
-            self.send_response(200)
-            self.send_cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(resp)))
-            self.end_headers()
-            self.wfile.write(resp)
-            
-        elif path == "/api/run-pipeline":
-            global pipeline_running
-            if pipeline_running:
-                resp = json.dumps({"status": "error", "message": "Pipeline is already running"}).encode("utf-8")
-                self.send_response(409)
-            else:
-                thread = threading.Thread(target=execute_pipeline, args=(payload,), daemon=True)
-                thread.start()
-                resp = json.dumps({"status": "started", "message": "Release pipeline launched"}).encode("utf-8")
-                self.send_response(200)
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                payload = {}
                 
-            self.send_cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(resp)))
-            self.end_headers()
-            self.wfile.write(resp)
-            
-        elif path == "/api/open-explorer":
-            p = payload.get("path", "")
-            success = open_file_in_explorer(p)
-            resp = json.dumps({"status": "ok" if success else "error"}).encode("utf-8")
-            self.send_response(200)
-            self.send_cors_headers()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(resp)))
-            self.end_headers()
-            self.wfile.write(resp)
-        else:
-            self.send_error(404, "Endpoint not found")
+            if path == "/api/save-config":
+                cfg = load_config()
+                if "github_token" in payload and payload["github_token"]:
+                    cfg["github_token"] = payload["github_token"].strip()
+                if "repo_owner" in payload:
+                    cfg["repo_owner"] = payload["repo_owner"].strip()
+                if "repo_name" in payload:
+                    cfg["repo_name"] = payload["repo_name"].strip()
+                if "gamebanana_url" in payload:
+                    cfg["gamebanana_url"] = payload["gamebanana_url"].strip()
+                save_config(cfg)
+                
+                resp = json.dumps({"status": "ok", "message": "Settings saved successfully"}).encode("utf-8")
+                self.send_response(200)
+                self.send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+                
+            elif path == "/api/run-pipeline":
+                global pipeline_running
+                if pipeline_running:
+                    resp = json.dumps({"status": "error", "message": "Pipeline is already running"}).encode("utf-8")
+                    self.send_response(409)
+                else:
+                    thread = threading.Thread(target=execute_pipeline, args=(payload,), daemon=True)
+                    thread.start()
+                    resp = json.dumps({"status": "started", "message": "Release pipeline launched"}).encode("utf-8")
+                    self.send_response(200)
+                    
+                self.send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+                
+            elif path == "/api/open-explorer":
+                p = payload.get("path", "")
+                success = open_file_in_explorer(p)
+                resp = json.dumps({"status": "ok" if success else "error"}).encode("utf-8")
+                self.send_response(200)
+                self.send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+            else:
+                self.send_error(404, "Endpoint not found")
+        except Exception as e:
+            traceback.print_exc()
+            err_resp = json.dumps({"status": "error", "message": str(e)}).encode("utf-8")
+            try:
+                self.send_response(500)
+                self.send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(err_resp)))
+                self.end_headers()
+                self.wfile.write(err_resp)
+            except Exception:
+                pass
 
 def start_server():
-    server = HTTPServer(("127.0.0.1", PORT), ReleaseHubHandler)
+    server = ThreadedHTTPServer(("127.0.0.1", PORT), ReleaseHubHandler)
     url = f"http://127.0.0.1:{PORT}"
     print(f"\n=======================================================")
     print(f" Deadlock Playground - Release Hub Online")

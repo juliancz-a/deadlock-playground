@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -11,6 +12,177 @@ using SharpCompress.Common;
 using SharpCompress.Readers;
 
 namespace DeadlockPlayground.Tools;
+
+/// <summary>
+/// Represents a normalized Semantic Version with full support for pre-release precedence comparison.
+/// </summary>
+public readonly struct SemanticVersion : IComparable<SemanticVersion>, IEquatable<SemanticVersion>
+{
+    public Version BaseVersion { get; }
+    public string PreRelease { get; }
+    public bool HasPreRelease => !string.IsNullOrEmpty(PreRelease);
+
+    public SemanticVersion(Version baseVersion, string preRelease = "")
+    {
+        BaseVersion = baseVersion ?? new Version(0, 0, 0, 0);
+        PreRelease = preRelease?.Trim().ToLowerInvariant() ?? "";
+    }
+
+    public static bool TryParse(string versionString, out SemanticVersion semVer)
+    {
+        semVer = default;
+        if (string.IsNullOrWhiteSpace(versionString)) return false;
+
+        string sanitized = versionString.Trim().TrimStart('v', 'V').Trim();
+
+        // Strip build metadata (+build...)
+        int plusIdx = sanitized.IndexOf('+');
+        if (plusIdx >= 0)
+        {
+            sanitized = sanitized.Substring(0, plusIdx);
+        }
+
+        string preRelease = "";
+        int hyphenIdx = sanitized.IndexOf('-');
+        if (hyphenIdx >= 0)
+        {
+            preRelease = sanitized.Substring(hyphenIdx + 1).Trim();
+            sanitized = sanitized.Substring(0, hyphenIdx);
+        }
+
+        var parts = sanitized.Split('.');
+        if (parts.Length == 1 && int.TryParse(parts[0], out var maj))
+            sanitized = $"{maj}.0.0";
+        else if (parts.Length == 2 && int.TryParse(parts[0], out var m) && int.TryParse(parts[1], out var min))
+            sanitized = $"{m}.{min}.0";
+
+        if (!Version.TryParse(sanitized, out var parsed))
+        {
+            return false;
+        }
+
+        var normalizedBase = new Version(
+            Math.Max(0, parsed.Major),
+            Math.Max(0, parsed.Minor),
+            Math.Max(0, parsed.Build),
+            Math.Max(0, parsed.Revision)
+        );
+
+        semVer = new SemanticVersion(normalizedBase, preRelease);
+        return true;
+    }
+
+    public int CompareTo(SemanticVersion other)
+    {
+        // 1. Compare major, minor, build, revision
+        int baseCmp = BaseVersion.CompareTo(other.BaseVersion);
+        if (baseCmp != 0) return baseCmp;
+
+        // 2. SemVer 2.0: When major.minor.patch are equal,
+        // a pre-release version has lower precedence than a normal (stable) version.
+        if (!HasPreRelease && other.HasPreRelease)
+            return 1; // Stable is newer than pre-release
+        if (HasPreRelease && !other.HasPreRelease)
+            return -1; // Pre-release is older than stable
+        if (!HasPreRelease && !other.HasPreRelease)
+            return 0; // Both are stable and equal
+
+        // 3. Both have pre-release identifiers (e.g. "beta2" vs "beta")
+        return ComparePreReleaseIdentifiers(PreRelease, other.PreRelease);
+    }
+
+    private static int ComparePreReleaseIdentifiers(string preA, string preB)
+    {
+        if (string.Equals(preA, preB, StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        var tokensA = SplitPreReleaseTokens(preA);
+        var tokensB = SplitPreReleaseTokens(preB);
+
+        int minLen = Math.Min(tokensA.Count, tokensB.Count);
+        for (int i = 0; i < minLen; i++)
+        {
+            string tA = tokensA[i];
+            string tB = tokensB[i];
+
+            bool isNumA = int.TryParse(tA, out int numA);
+            bool isNumB = int.TryParse(tB, out int numB);
+
+            if (isNumA && isNumB)
+            {
+                int cmp = numA.CompareTo(numB);
+                if (cmp != 0) return cmp;
+            }
+            else if (isNumA)
+            {
+                return -1;
+            }
+            else if (isNumB)
+            {
+                return 1;
+            }
+            else
+            {
+                int cmp = string.Compare(tA, tB, StringComparison.OrdinalIgnoreCase);
+                if (cmp != 0) return cmp;
+            }
+        }
+
+        return tokensA.Count.CompareTo(tokensB.Count);
+    }
+
+    private static List<string> SplitPreReleaseTokens(string pre)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(pre)) return result;
+
+        var current = new System.Text.StringBuilder();
+        bool? currentIsDigit = null;
+
+        foreach (char c in pre)
+        {
+            if (c == '.' || c == '-' || c == '_')
+            {
+                if (current.Length > 0)
+                {
+                    result.Add(current.ToString());
+                    current.Clear();
+                    currentIsDigit = null;
+                }
+                continue;
+            }
+
+            bool isDigit = char.IsDigit(c);
+            if (currentIsDigit.HasValue && currentIsDigit.Value != isDigit)
+            {
+                result.Add(current.ToString());
+                current.Clear();
+            }
+
+            current.Append(c);
+            currentIsDigit = isDigit;
+        }
+
+        if (current.Length > 0)
+        {
+            result.Add(current.ToString());
+        }
+
+        return result;
+    }
+
+    public bool Equals(SemanticVersion other) => CompareTo(other) == 0;
+    public override bool Equals(object obj) => obj is SemanticVersion other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(BaseVersion, PreRelease);
+    public override string ToString() => HasPreRelease ? $"{BaseVersion}-{PreRelease}" : BaseVersion.ToString();
+
+    public static bool operator >(SemanticVersion a, SemanticVersion b) => a.CompareTo(b) > 0;
+    public static bool operator <(SemanticVersion a, SemanticVersion b) => a.CompareTo(b) < 0;
+    public static bool operator >=(SemanticVersion a, SemanticVersion b) => a.CompareTo(b) >= 0;
+    public static bool operator <=(SemanticVersion a, SemanticVersion b) => a.CompareTo(b) <= 0;
+    public static bool operator ==(SemanticVersion a, SemanticVersion b) => a.CompareTo(b) == 0;
+    public static bool operator !=(SemanticVersion a, SemanticVersion b) => a.CompareTo(b) != 0;
+}
 
 /// <summary>
 /// Result data model for a GitHub release update check.
@@ -98,60 +270,32 @@ public static class UpdateChecker
     /// </summary>
     public static bool TryParseVersion(string versionString, out Version version)
     {
+        if (SemanticVersion.TryParse(versionString, out var semVer))
+        {
+            version = semVer.BaseVersion;
+            return true;
+        }
         version = null;
-        if (string.IsNullOrWhiteSpace(versionString))
-        {
-            return false;
-        }
-
-        // Sanitize leading 'v' or 'V' and trim whitespace
-        string sanitized = versionString.Trim().TrimStart('v', 'V').Trim();
-
-        // Isolate numeric version core if pre-release or build metadata exists (e.g. 1.2.0-rc1+build100)
-        int hyphenIdx = sanitized.IndexOf('-');
-        if (hyphenIdx >= 0)
-        {
-            sanitized = sanitized.Substring(0, hyphenIdx);
-        }
-
-        int plusIdx = sanitized.IndexOf('+');
-        if (plusIdx >= 0)
-        {
-            sanitized = sanitized.Substring(0, plusIdx);
-        }
-
-        if (!Version.TryParse(sanitized, out var parsed))
-        {
-            return false;
-        }
-
-        // Normalize to 4 components (Major, Minor, Build, Revision) to avoid -1 comparison quirks
-        version = new Version(
-            Math.Max(0, parsed.Major),
-            Math.Max(0, parsed.Minor),
-            Math.Max(0, parsed.Build),
-            Math.Max(0, parsed.Revision)
-        );
-
-        return true;
+        return false;
     }
 
     /// <summary>
-    /// Compares a remote version tag against a local version string.
-    /// Returns true only if remoteVersion > localVersion.
+    /// Compares a remote version tag against a local version string using Semantic Versioning rules.
+    /// Handles pre-releases (e.g. 1.1.0-beta2 > 1.1.0-beta, and 1.1.0 > 1.1.0-beta2).
     /// </summary>
     public static bool IsRemoteVersionNewer(string remoteTag, string localVersionString)
     {
-        if (TryParseVersion(remoteTag, out var remoteVer) && TryParseVersion(localVersionString, out var localVer))
+        if (SemanticVersion.TryParse(remoteTag, out var remoteSemVer) &&
+            SemanticVersion.TryParse(localVersionString, out var localSemVer))
         {
-            return remoteVer > localVer;
+            return remoteSemVer > localSemVer;
         }
         return false;
     }
 
     /// <summary>
     /// Queries the GitHub Release endpoint asynchronously, extracts the latest release information,
-    /// parses the assets array for a Windows release zip, and determines whether an update is available.
+    /// parses the assets array for a Windows release zip or 7z archive, and determines whether an update is available.
     /// </summary>
     public static async Task<UpdateCheckResult> CheckForUpdatesAsync(
         string repoOwner = DefaultRepoOwner,
@@ -162,7 +306,8 @@ public static class UpdateChecker
 
         try
         {
-            string url = $"https://api.github.com/repos/{repoOwner}/{repoName}/releases/latest";
+            // Query releases?per_page=1 to retrieve the latest published release (including pre-releases)
+            string url = $"https://api.github.com/repos/{repoOwner}/{repoName}/releases?per_page=1";
             using var response = await _apiHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
@@ -181,6 +326,23 @@ public static class UpdateChecker
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
             var root = jsonDoc.RootElement;
+
+            // Handle array response from /releases or single object from /releases/latest
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                if (root.GetArrayLength() == 0)
+                {
+                    return new UpdateCheckResult(
+                        IsUpdateAvailable: false,
+                        RemoteVersionTag: string.Empty,
+                        RemoteVersionClean: string.Empty,
+                        LocalVersion: localVersion,
+                        ReleaseUrl: string.Empty,
+                        DirectZipUrl: string.Empty
+                    );
+                }
+                root = root[0];
+            }
 
             string tagName = root.TryGetProperty("tag_name", out var tagElem) ? tagElem.GetString() ?? string.Empty : string.Empty;
             string htmlUrl = root.TryGetProperty("html_url", out var urlElem) ? urlElem.GetString() ?? string.Empty : string.Empty;
