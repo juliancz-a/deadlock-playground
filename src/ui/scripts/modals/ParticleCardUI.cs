@@ -41,6 +41,7 @@ public partial class ParticleCardUI : PanelContainer
     {
         CustomMinimumSize = new Vector2(210, 220);
         MouseFilter = MouseFilterEnum.Stop;
+        MouseDefaultCursorShape = CursorShape.PointingHand;
 
         InitStyles();
         BuildUI();
@@ -109,7 +110,8 @@ public partial class ParticleCardUI : PanelContainer
         var vbox = new VBoxContainer
         {
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         vbox.AddThemeConstantOverride("separation", 6);
         AddChild(vbox);
@@ -120,7 +122,8 @@ public partial class ParticleCardUI : PanelContainer
             CustomMinimumSize = new Vector2(198, 140),
             SizeFlagsHorizontal = SizeFlags.Fill,
             SizeFlagsVertical = SizeFlags.Fill,
-            ClipContents = true
+            ClipContents = true,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         var thumbStyle = new StyleBoxFlat
         {
@@ -137,7 +140,8 @@ public partial class ParticleCardUI : PanelContainer
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _thumbPanel.AddChild(_thumbRect);
         vbox.AddChild(_thumbPanel);
@@ -148,7 +152,8 @@ public partial class ParticleCardUI : PanelContainer
             Text = Entry?.VariantName ?? "Particle Variant",
             HorizontalAlignment = HorizontalAlignment.Center,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            SizeFlagsHorizontal = SizeFlags.Fill
+            SizeFlagsHorizontal = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _lblVariant.AddThemeColorOverride("font_color", new Color(0.95f, 0.95f, 0.95f, 1.0f));
         _lblVariant.AddThemeFontSizeOverride("font_size", 14);
@@ -160,7 +165,8 @@ public partial class ParticleCardUI : PanelContainer
             Text = AbilityName ?? "Ability",
             HorizontalAlignment = HorizontalAlignment.Center,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            SizeFlagsHorizontal = SizeFlags.Fill
+            SizeFlagsHorizontal = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _lblAbility.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 0.95f));
         _lblAbility.AddThemeFontSizeOverride("font_size", 13);

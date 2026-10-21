@@ -16,6 +16,21 @@ public static class UserSettings
     private static bool _showStudioBackground = true;
     private static int _maxFps = 60; // 0 = uncapped
     private static bool _vsync = true;
+    private static bool _enableDiagnosticLogs = true;
+
+    public static bool EnableDiagnosticLogs
+    {
+        get => _enableDiagnosticLogs;
+        set
+        {
+            if (_enableDiagnosticLogs != value)
+            {
+                _enableDiagnosticLogs = value;
+                SaveSettings();
+                EnableDiagnosticLogsChanged?.Invoke(value);
+            }
+        }
+    }
 
     public static bool ToonEnabled
     {
@@ -121,6 +136,7 @@ public static class UserSettings
     public static event Action<int> ShadowQualityChanged;
     public static event Action<bool> ShowStudioBackgroundChanged;
     public static event Action PerformanceSettingsChanged;
+    public static event Action<bool> EnableDiagnosticLogsChanged;
 
     static UserSettings()
     {
@@ -139,6 +155,7 @@ public static class UserSettings
             _maxFps = (int)config.GetValue(SectionName, "MaxFps", 60);
             _vsync = (bool)config.GetValue(SectionName, "VSync", true);
             _cameraZoomSensitivity = (float)config.GetValue(SectionName, "CameraZoomSensitivity", 0.25f);
+            _enableDiagnosticLogs = (bool)config.GetValue(SectionName, "EnableDiagnosticLogs", true);
         }
     }
 
@@ -153,6 +170,7 @@ public static class UserSettings
         config.SetValue(SectionName, "MaxFps", _maxFps);
         config.SetValue(SectionName, "VSync", _vsync);
         config.SetValue(SectionName, "CameraZoomSensitivity", _cameraZoomSensitivity);
+        config.SetValue(SectionName, "EnableDiagnosticLogs", _enableDiagnosticLogs);
 
         // Limpiar clave obsoleta si existía de versiones previas
         if (config.HasSectionKey(SectionName, "StudioEnvironment"))
@@ -161,6 +179,12 @@ public static class UserSettings
         }
 
         config.Save(ConfigPath);
+    }
+
+    public static void ResetGeneralDefaults()
+    {
+        EnableDiagnosticLogs = true;
+        SaveSettings();
     }
 
     public static void ResetGraphicsDefaults()

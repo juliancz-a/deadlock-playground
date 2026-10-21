@@ -47,6 +47,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
 | **Valve / VRF Renderer Reference** | [docs/vrf_deadlock_renderer_reference.md](file:///d:/GameDev/deadlock-playground/docs/vrf_deadlock_renderer_reference.md) | Valve's Deadlock NPR toon lighting math (`citadel.slang`), `NprGain`, `NprToonDiffuse`, `NprSteppedSpecular`, and VRF shader decoding rules. |
 | **Hero Particle Editor System** | [docs/hero_particle_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_particle_editor_system.md) | VData indexing, particle picker modal, 3D stage lifecycle, Pose Tab simulation scrubbing, and 2D particle texture repainting. |
 | **Dynamic Changelog & Web Showcase** | [docs/dynamic_changelog_and_website_system.md](file:///d:/GameDev/deadlock-playground/docs/dynamic_changelog_and_website_system.md) | Astro web showcase (`web/`), `@tabler/icons`, custom theme cursor, static `/api/changelog.json` endpoint, Cloudflare Pages hosting, and Godot `ChangelogFeedService.cs` integration. |
+| **Release Automation Pipeline** | [docs/release_automation_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/release_automation_pipeline.md) | Release Hub web UI (`tools/release_hub/`), web `changelog.json` sync, GitHub tag/release asset upload, and GameBanana assisted workflow. |
 
 ---
 
@@ -112,14 +113,13 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Components: `res://ui/scenes/components/*.tscn` and `res://ui/scripts/components/*.cs`
 
 ### D. Skeletal Animation & Additive Ingestion Rules
-1. **Coordinate Space Conversion for Additive Quaternions (Z-Up to Y-Up)**:
-   - Source 2 authors animations in Z-Up space. For additive delta sequences (recoil, firing, aiming), converting raw components `(convRot.X, convRot.Y, convRot.Z, convRot.W)` directly into Godot causes a -90 degree pitch around the X-axis for root and spine joints.
-   - Always convert additive Source 2 delta quaternions to Godot's bone space:
-     ```csharp
-     var correctedRot = new Godot.Quaternion(convRot.X, convRot.Z, -convRot.Y, convRot.W).Normalized();
-     ```
-   - In `BakeConversion`, skip `SourceToGltfRotation` multiplication on root joints when `isAdditive == true` (`isRoot && !isAdditive`) so root/pelvis deltas align with the imported skeleton's coordinate frame without receiving double rotation.
-2. **Preserve Pelvis Elevation Track**:
+1. **VRF Additive Delta Extraction & Hemisphere Normalization**:
+   - In Source 2, modern clips (`ClipAnimation` / `.vnmclip`) author additive bones directly as deltas around Identity `(0, 0, 0, 1)`, while legacy sequences (`SequenceAnimation` / `.vanim`) neutralize unkeyed channels.
+   - Always extract additive deltas using VRF's built-in `info.VrfAnimation.GetAdditiveDelta(b, frame.Bones[b])` with `frame.ClearToIdentity()`. Do NOT use arbitrary $W$ thresholds or subtract BindPose on clips that are already authored deltas.
+   - Enforce positive quaternion hemisphere normalization ($W \ge 0$, negating $q$ if $W < 0$) to eliminate antipodal $180^\circ$ rotation flips and long-arc interpolations.
+   - Prune identity and static tracks (`IsIdentityOrStaticTrack`) so un-animated joints (lower limbs, weapon mount) receive no tracks in additive clips, allowing them to cleanly inherit the base combat stance in `ComposeOverIdle`.
+   - In `ComposeOverIdle`, root and pelvis bones strictly preserve `baseIdleRot` so character stance and hips remain vertical.
+2. **Preserve Pelvis Elevation Track & Overwrite Collapsed Keys**:
    - Stripping all `Position3D` tracks from additive sequences leaves the `pelvis` bone at local $(0, 0, 0)$ relative to `root`, dropping the character's hips to the floor.
    - While limb translation tracks (arms, legs, head) must be omitted so joints evaluate against rest, the `pelvis` bone MUST retain its default rest height:
      ```csharp
@@ -130,11 +130,22 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
          godotAnim.PositionTrackInsertKey(pTrack, 0.0, skeleton.GetBoneRest(pelvisIdx).Origin);
      }
      ```
-   - In `StripAdditivePositionTracks`, always skip tracks targeting `:pelvis` and verify the pelvis position track exists.
+   - In `StripAdditivePositionTracks`, inspect any existing `:pelvis` track. If it holds collapsed delta keys (`Length() < 0.25m`), remove the collapsed track and re-insert the skeleton's true rest elevation (`skeleton.GetBoneRest(pelvisIdx).Origin`).
 3. **Additive Layer Classification & Default Stance Protection**:
    - Firing deltas (`recoil`, `primary_fire_aimed`, `shoot`, `burst`, `_add`, `_delta`) are authored as runtime additive modifiers, not standalone base poses.
    - Categorize these sequences into `"Additive Layers"` in `DeadlockAnimLoader.ClassifyCategory`.
    - In `PoseTabUI.cs`, present `"Additive Layers"` as a distinct subcategory collapsed by default, and exclude it from `AutoSelectDefaultIdle()` so partial overlays are never accidentally loaded as default stances.
+4. **Generic Structural Detection of Collapsed Limb Positions (`ShouldStripPositionTracks`)**:
+   - Additive reactions (e.g. `flinch_back`, `landing_impact`, `melee_hit`, `lean`) or delta clips often lack recoil/fire keywords.
+   - Do NOT hardcode animation names. Use `DeadlockAnimLoader.HasCollapsedOrDeltaPositionTracks`: inspect Godot `Position3D` tracks for child bones with physical rest lengths $> 0.04m$.
+   - If child bone keys sit at $(0, 0, 0)$ (`Length() < 0.02m`), the clip contains raw delta positions that crush the skeleton into a flat origin box.
+   - In `PlayerTabUI.cs`, guard playback using `DeadlockAnimLoader.ShouldStripPositionTracks(anim, skeleton, name)` so any collapsed sequence has limb tracks stripped and hips restored automatically.
+   - In `VpkLoaderTest.cs`, initialize `GltfModelExporter` with `ComposeAdditiveAnimations = true` so pre-exported glTF sequences compose additive deltas directly onto bind pose.
+5. **Base Idle Underlay for Additive Sequences (`ComposeOverIdle` & Position Locking)**:
+   - Additive sequences (reactions, flinches, recoil deltas) only key reacting joints (spine/head), leaving arms, legs, and weapon attachment unkeyed.
+   - In `ComposeOverIdle`, non-pelvis limb bones (arms, legs, spine, neck) **strictly preserve their `baseIdlePos`** (`idleBonePos[boneName]`), preventing additive position tracks or origin snaps from stretching joints or launching the character into the air.
+   - Pelvis preserves base idle stance elevation `basePelvisPos` and only receives small, clamped relative elevation deltas (`delta.Length() <= 0.25m`).
+   - Unkeyed joints inherit the hero's default standing idle pose (`primary_stand_idle` / `stand_idle`), keeping arms holding weapons and feet planted, while delta rotation keys are composed on top of base idle orientations (`(baseIdleRot * deltaRot).Normalized()`).
 
 ### E. Mandatory Documentation Synchronization & Maintenance
 > [!IMPORTANT]

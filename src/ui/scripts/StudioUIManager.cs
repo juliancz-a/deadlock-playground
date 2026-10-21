@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Core;
+using DeadlockPlayground.Painter;
 
 public partial class StudioUIManager : CanvasLayer
 {
@@ -15,6 +17,8 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnAbout;
     [Export] private Button _btnQuit;
     [Export] private Button _btnNews;
+    [Export] private MenuButton _btnAdjustments;
+    [Export] private MenuButton _btnFileMenu;
 
     [ExportCategory("Tab Navigation Buttons")]
     [Export] private Button _btnTabCharacter;
@@ -67,6 +71,8 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnAboutClose;
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
+    [Export] private ColorAdjustmentModalUI _colorAdjustmentModal;
+    [Export] private ExportBaseTexturesModalUI _exportBaseTexturesModal;
 
     private Control _unreadBadge;
     private CharacterIKManager _currentIKManager;
@@ -110,6 +116,7 @@ public partial class StudioUIManager : CanvasLayer
 
     public override void _Ready()
     {
+        StartupDiagnosticTracker.Mark("MainUI: _Ready begin");
         Instance = this;
         GetTree().AutoAcceptQuit = false;
         GetViewport().TransparentBg = false;
@@ -125,14 +132,17 @@ public partial class StudioUIManager : CanvasLayer
                             win.Mode == Window.ModeEnum.Fullscreen ||
                             win.Mode == Window.ModeEnum.ExclusiveFullscreen;
         }
+        StartupDiagnosticTracker.Mark("MainUI: window configured");
 
         _pathManager = new GamePathManager();
+        StartupDiagnosticTracker.Mark("MainUI: GamePathManager created");
 
         // Restore persisted gizmo display settings (bone opacity, wireframe opacity, etc.)
         // before any tab or subsystem reads GizmoDisplaySettings values.
         GizmoDisplaySettings.LoadConfig();
 
         LinkNodes();
+        StartupDiagnosticTracker.Mark("MainUI: LinkNodes done (Topbar/Modals linked)");
         CreateToastUI();
 
         // Check if application was restarted after an update swap
@@ -143,16 +153,21 @@ public partial class StudioUIManager : CanvasLayer
 
         CreateUpdateNotificationUI();
         CreateFallbackDialog();
+        StartupDiagnosticTracker.Mark("MainUI: Toast/Update/Fallback dialogs created");
         InitTabs();
+        StartupDiagnosticTracker.Mark("MainUI: InitTabs done (Tabs/Painter initialized)");
         ConnectEvents();
+        StartupDiagnosticTracker.Mark("MainUI: ConnectEvents done");
         InitializePaths();
         ApplyCurrentGraphicsSettings();
         ApplySubViewportOptimizations();
+        StartupDiagnosticTracker.Mark("MainUI: graphics settings applied");
 
         UpdateCharacterDependencyState(false);
 
         // Switch to default Character tab
         SwitchTab(0);
+        StartupDiagnosticTracker.Mark("MainUI: default tab selected");
 
         UpdateNewsBadgeState();
 
@@ -161,9 +176,12 @@ public partial class StudioUIManager : CanvasLayer
         UpdateModChangesBadge();
 
         PlaygroundThemeHelper.AutoDecorate(this);
+        StartupDiagnosticTracker.Mark("MainUI: theme decoration done");
 
         // Non-blocking update check on application startup
+        StartupDiagnosticTracker.Mark("MainUI: starting background update check");
         _ = CheckUpdatesOnStartupAsync();
+        StartupDiagnosticTracker.Mark("MainUI: _Ready complete");
     }
 
     public override void _Notification(int what)
@@ -270,6 +288,8 @@ public partial class StudioUIManager : CanvasLayer
         if (focusOwner is LineEdit or TextEdit) return;
 
         // Block shortcuts when modal dialogs are open
+        if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
+
         if ((_settingsModal != null && _settingsModal.Visible) ||
             (_feedbackModal != null && _feedbackModal.Visible) ||
             (_aboutModal != null && _aboutModal.Visible) ||
@@ -294,6 +314,61 @@ public partial class StudioUIManager : CanvasLayer
             ToggleFullscreen();
             GetViewport().SetInputAsHandled();
             return;
+        }
+
+        // Color Adjustments shortcuts (Only active in Paint Tab)
+        if (_currentTabIndex == 8 && _tabPaint != null)
+        {
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.U)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.HueSaturation);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.B)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.ColorBalance);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.I)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.Invert);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && key.ShiftPressed && !key.AltPressed && key.Keycode == Key.U)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.Desaturate);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+
+            // File Menu Shortcuts (Paint Tab)
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.O)
+            {
+                _tabPaint?.OpenLoadProjectDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.S)
+            {
+                _tabPaint?.OpenSaveProjectDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && key.ShiftPressed && !key.AltPressed && key.Keycode == Key.I)
+            {
+                _tabPaint?.OpenImportImageDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.E)
+            {
+                _tabPaint?.OpenExportModDialog();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
         }
 
         // Camera Actions
@@ -414,6 +489,59 @@ public partial class StudioUIManager : CanvasLayer
             {
                 topBarHBox.AddChild(_btnModChanges);
             }
+        }
+
+        _btnAdjustments ??= GetNodeOrNull<MenuButton>("MainHUD/VBoxContainer/TopBar/HBoxContainer/AdjustmentsMenuButton")
+                         ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/AdjustmentsMenuButton")
+                         ?? GetTree().Root.FindChild("AdjustmentsMenuButton", true, false) as MenuButton;
+
+        if (_btnAdjustments != null)
+        {
+            _btnAdjustments.Visible = (_currentTabIndex == 8);
+            var popup = _btnAdjustments.GetPopup();
+            popup.Clear();
+            popup.AddItem("Brightness / Contrast...", (int)AdjustmentType.BrightnessContrast);
+            popup.AddItem("Hue / Saturation...", (int)AdjustmentType.HueSaturation);
+            popup.SetItemAccelerator(1, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.U));
+            popup.AddItem("Color Balance...", (int)AdjustmentType.ColorBalance);
+            popup.SetItemAccelerator(2, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.B));
+            popup.AddItem("Exposure...", (int)AdjustmentType.Exposure);
+            popup.AddSeparator();
+            popup.AddItem("Invert", (int)AdjustmentType.Invert);
+            popup.SetItemAccelerator(5, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.I));
+            popup.AddItem("Desaturate", (int)AdjustmentType.Desaturate);
+            popup.SetItemAccelerator(6, (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskShift | (long)Key.U));
+
+            popup.AboutToPopup += OnAdjustmentsMenuAboutToPopup;
+            popup.IdPressed += (id) => HandleAdjustmentTriggered((AdjustmentType)id);
+        }
+
+        _btnFileMenu ??= GetNodeOrNull<MenuButton>("MainHUD/VBoxContainer/TopBar/HBoxContainer/FileMenuButton")
+                      ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/FileMenuButton")
+                      ?? GetTree().Root.FindChild("FileMenuButton", true, false) as MenuButton;
+
+        if (_btnFileMenu != null)
+        {
+            _btnFileMenu.Visible = (_currentTabIndex == 8);
+            var popup = _btnFileMenu.GetPopup();
+            popup.Clear();
+            popup.AddItem("New / Reset Workspace...", 0);
+            popup.AddItem("Open Project (.dpp)...", 1);
+            popup.SetItemAccelerator(popup.GetItemIndex(1), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.O));
+            popup.AddItem("Save Project (.dpp)...", 2);
+            popup.SetItemAccelerator(popup.GetItemIndex(2), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.S));
+            popup.AddSeparator();
+            popup.AddItem("Import Image as Layer (.png / .jpg)...", 3);
+            popup.SetItemAccelerator(popup.GetItemIndex(3), (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskShift | (long)Key.I));
+            popup.AddItem("Export Base Textures...", 4);
+            popup.AddItem("Export Layers (Baked PNG) (.png)...", 5);
+            popup.AddItem("Export Active Layer Only (.png)...", 6);
+            popup.AddSeparator();
+            popup.AddItem("Export Mod (.vpk)...", 7);
+            popup.SetItemAccelerator(popup.GetItemIndex(7), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.E));
+            popup.AddItem("Open Deadlock Addons Folder", 8);
+
+            popup.IdPressed += OnFileMenuItemPressed;
         }
 
         // Tab Buttons
@@ -579,6 +707,32 @@ public partial class StudioUIManager : CanvasLayer
             {
                 _changelogModal = modalScene.Instantiate<ChangelogModalUI>();
                 _modalsLayer.AddChild(_changelogModal);
+            }
+        }
+
+        _colorAdjustmentModal ??= GetNodeOrNull<ColorAdjustmentModalUI>("MainHUD/ModalsLayer/ColorAdjustmentModal")
+                               ?? GetTree().Root.FindChild("ColorAdjustmentModal", true, false) as ColorAdjustmentModalUI;
+
+        if (_colorAdjustmentModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/ColorAdjustmentModal.tscn");
+            if (modalScene != null)
+            {
+                _colorAdjustmentModal = modalScene.Instantiate<ColorAdjustmentModalUI>();
+                _modalsLayer.AddChild(_colorAdjustmentModal);
+            }
+        }
+
+        _exportBaseTexturesModal ??= GetNodeOrNull<ExportBaseTexturesModalUI>("MainHUD/ModalsLayer/ExportBaseTexturesModal")
+                                  ?? GetTree().Root.FindChild("ExportBaseTexturesModal", true, false) as ExportBaseTexturesModalUI;
+
+        if (_exportBaseTexturesModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/ExportBaseTexturesModal.tscn");
+            if (modalScene != null)
+            {
+                _exportBaseTexturesModal = modalScene.Instantiate<ExportBaseTexturesModalUI>();
+                _modalsLayer.AddChild(_exportBaseTexturesModal);
             }
         }
 
@@ -775,9 +929,15 @@ public partial class StudioUIManager : CanvasLayer
             if (_btnOpenUVCanvas != null) _btnOpenUVCanvas.Visible = false;
             if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
+            if (_btnAdjustments != null) _btnAdjustments.Visible = false;
+            if (_btnFileMenu != null) _btnFileMenu.Visible = false;
+            _colorAdjustmentModal?.CancelAndClose();
+            _exportBaseTexturesModal?.Close();
         }
       else if (tabIndex == 8)
         {
+            if (_btnAdjustments != null) _btnAdjustments.Visible = true;
+            if (_btnFileMenu != null) _btnFileMenu.Visible = true;
             var hero = GetVpkLoader()?.CurrentHeroNode;
             if (hero != null && _tabPaint?.CurrentHero == null)
             {
@@ -1377,6 +1537,8 @@ public partial class StudioUIManager : CanvasLayer
             || (_fallbackPathDialog != null && _fallbackPathDialog.Visible)
             || (_modChangesModal != null && _modChangesModal.Visible)
             || (_unsavedChangesModal != null && _unsavedChangesModal.Visible)
+            || (_colorAdjustmentModal != null && _colorAdjustmentModal.Visible)
+            || (_exportBaseTexturesModal != null && _exportBaseTexturesModal.Visible)
             || (particleModal != null && particleModal.Visible)
             || (heroModal != null && heroModal.Visible)
             || (extraModelModal != null && extraModelModal.Visible)
@@ -1394,12 +1556,141 @@ public partial class StudioUIManager : CanvasLayer
 
         if (_modalBackdrop != null)
         {
-            _modalBackdrop.Visible = anyModalOpen;
+            bool isAdjustmentOpen = _colorAdjustmentModal != null && _colorAdjustmentModal.Visible;
+            _modalBackdrop.Visible = anyModalOpen && !isAdjustmentOpen;
         }
 
         if (anyModalOpen)
         {
             _quickColorPalette?.ClosePopup();
+        }
+    }
+
+    private void OnAdjustmentsMenuAboutToPopup()
+    {
+        var activeLayer = _tabPaint?.LayerManager?.ActiveLayer;
+        bool canAdjust = activeLayer != null && activeLayer.IsVisible && !activeLayer.IsLocked;
+        var popup = _btnAdjustments?.GetPopup();
+        if (popup != null)
+        {
+            for (int i = 0; i < popup.ItemCount; i++)
+            {
+                if (!popup.IsItemSeparator(i))
+                {
+                    popup.SetItemDisabled(i, !canAdjust);
+                }
+            }
+        }
+    }
+
+    private void HandleAdjustmentTriggered(AdjustmentType type)
+    {
+        if (_currentTabIndex != 8 || _tabPaint == null) return;
+        var layer = _tabPaint.LayerManager?.ActiveLayer;
+        if (layer == null)
+        {
+            ShowToast("No active paint layer selected.");
+            return;
+        }
+        if (!layer.IsVisible)
+        {
+            ShowToast($"Cannot adjust layer '{layer.Name}' because it is hidden.");
+            return;
+        }
+        if (layer.IsLocked)
+        {
+            ShowToast($"Cannot adjust layer '{layer.Name}' because it is locked.");
+            return;
+        }
+
+        if (type == AdjustmentType.Invert || type == AdjustmentType.Desaturate)
+        {
+            _tabPaint.ApplyImmediateAdjustment(type);
+        }
+        else
+        {
+            _tabPaint.OpenAdjustmentModal(type);
+        }
+    }
+
+    private void OnFileMenuItemPressed(long id)
+    {
+        switch (id)
+        {
+            case 0:
+                _tabPaint?.PromptResetWorkspace();
+                break;
+            case 1:
+                _tabPaint?.OpenLoadProjectDialog();
+                break;
+            case 2:
+                _tabPaint?.OpenSaveProjectDialog();
+                break;
+            case 3:
+                _tabPaint?.OpenImportImageDialog();
+                break;
+            case 4:
+                OpenExportBaseTexturesModal();
+                break;
+            case 5:
+                _tabPaint?.OpenExportBakedPngDialog();
+                break;
+            case 6:
+                _tabPaint?.OpenExportActiveLayerDialog();
+                break;
+            case 7:
+                _tabPaint?.OpenExportModDialog();
+                break;
+            case 8:
+                OpenAddonsFolder();
+                break;
+        }
+    }
+
+    public void OpenExportBaseTexturesModal()
+    {
+        if (_exportBaseTexturesModal != null && _tabPaint != null)
+        {
+            _exportBaseTexturesModal.Open(_tabPaint);
+        }
+        else
+        {
+            _tabPaint?.OpenExportBaseTexturesModal();
+        }
+    }
+
+    public void OpenAddonsFolder()
+    {
+        string addonsDir = _tabCharacter?.GetResolvedAddonsDir();
+        if (string.IsNullOrEmpty(addonsDir) || !Directory.Exists(addonsDir))
+        {
+            var pathManager = new GamePathManager();
+            pathManager.LoadConfig();
+            if (!string.IsNullOrEmpty(pathManager.CurrentGamePath))
+            {
+                addonsDir = Path.Combine(pathManager.CurrentGamePath, "game", "citadel", "addons");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(addonsDir))
+        {
+            try
+            {
+                if (!Directory.Exists(addonsDir))
+                {
+                    Directory.CreateDirectory(addonsDir);
+                }
+                OS.ShellOpen(addonsDir);
+                ShowToast("Addons Folder", addonsDir);
+            }
+            catch (Exception ex)
+            {
+                ShowToast("Error opening folder", ex.Message);
+            }
+        }
+        else
+        {
+            ShowToast("Deadlock addons folder not found", "Configure game path in Settings");
         }
     }
 
@@ -1978,7 +2269,9 @@ public partial class StudioUIManager : CanvasLayer
     {
         try
         {
+            StartupDiagnosticTracker.Log("Update check: started");
             var result = await UpdateChecker.CheckForUpdatesAsync().ConfigureAwait(false);
+            StartupDiagnosticTracker.Log("Update check: finished");
             if (result.IsUpdateAvailable && (!string.IsNullOrEmpty(result.ReleaseUrl) || !string.IsNullOrEmpty(result.DirectZipUrl)))
             {
                 Callable.From(() =>
@@ -2017,6 +2310,7 @@ public partial class StudioUIManager : CanvasLayer
     private async void InitializePaths()
     {
         ShowLoading(true, "Detecting Deadlock path...");
+        StartupDiagnosticTracker.Mark("MainUI: InitializePaths begin");
 
         if (string.IsNullOrEmpty(_pathManager.CurrentGamePath) || !_pathManager.ValidateDeadlockPath(_pathManager.CurrentGamePath))
         {
@@ -2037,6 +2331,7 @@ public partial class StudioUIManager : CanvasLayer
 
         UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
         ShowLoading(false);
+        StartupDiagnosticTracker.Mark("MainUI: InitializePaths done");
     }
 
     private void UpdateVpkLoaderPath(string basePath)

@@ -85,6 +85,7 @@ namespace DeadlockPlayground.Tools
             // 1. Texture Paint
             AddDefault("Texture Paint", "paint_brush", "Brush", "Switch to standard Brush painting tool", Key.B);
             AddDefault("Texture Paint", "paint_eraser", "Eraser", "Switch to Eraser tool", Key.E);
+            AddDefault("Texture Paint", "paint_eyedropper", "Eyedropper", "Sample raw material color from surface", Key.I);
             AddDefault("Texture Paint", "paint_bucket", "Bucket Fill", "Switch to Submesh / Island Bucket Fill tool", Key.G);
             AddDefault("Texture Paint", "paint_wand", "Magic Wand", "Switch to Magic Wand color-range mask tool", Key.W);
             AddDefault("Texture Paint", "paint_select_rect", "Rectangular Selection", "Switch to Rectangular selection tool", Key.M);
@@ -376,7 +377,7 @@ namespace DeadlockPlayground.Tools
         public static string GetFullPainterCheatsheet()
         {
             EnsureInitialized();
-            return $"[{GetShortcutText("paint_brush")}] Brush  [{GetShortcutText("paint_eraser")}] Erase  [{GetShortcutText("paint_bucket")}] Fill  [{GetShortcutText("paint_wand")}] Wand  [{GetShortcutText("paint_decal")}] Decal  [{GetShortcutText("paint_text")}] Text  [{GetShortcutText("paint_mirror")}] Mirror  [{GetShortcutText("brush_size_down")}/{GetShortcutText("brush_size_up")}] Size  [{GetShortcutText("paint_uv_toggle")}] 2D UV";
+            return $"[{GetShortcutText("paint_brush")}] Brush  [{GetShortcutText("paint_eraser")}] Erase  [{GetShortcutText("paint_eyedropper")}] Pick  [{GetShortcutText("paint_bucket")}] Fill  [{GetShortcutText("paint_wand")}] Wand  [{GetShortcutText("paint_decal")}] Decal  [{GetShortcutText("paint_text")}] Text  [{GetShortcutText("paint_mirror")}] Mirror  [{GetShortcutText("brush_size_down")}/{GetShortcutText("brush_size_up")}] Size  [{GetShortcutText("paint_uv_toggle")}] 2D UV";
         }
 
         public static string GetNavigationCheatsheet()

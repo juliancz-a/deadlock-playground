@@ -170,6 +170,31 @@ custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
 text = "Browse..."
 
+[node name="DiagnosticLogsRow" type="HBoxContainer" parent="VBoxContainer/TabContainer/General/VBox" unique_id=1849201948]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="VBoxContainer/TabContainer/General/VBox/DiagnosticLogsRow" unique_id=1849201949]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="DiagnosticLogsLabel" type="Label" parent="VBoxContainer/TabContainer/General/VBox/DiagnosticLogsRow/VBox" unique_id=1849201950]
+layout_mode = 2
+text = "Startup Diagnostic Logs"
+
+[node name="DiagnosticLogsDesc" type="Label" parent="VBoxContainer/TabContainer/General/VBox/DiagnosticLogsRow/VBox" unique_id=1849201951]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.68, 0.75, 1)
+theme_override_font_sizes/font_size = 11
+text = "Write startup diagnostics and crash watchdog checkpoints to log files"
+
+[node name="ChkDiagnosticLogs" type="CheckBox" parent="VBoxContainer/TabContainer/General/VBox/DiagnosticLogsRow" unique_id=1849201952]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Enable or disable writing startup diagnostic and watchdog log files to the logs folder"
+button_pressed = true
+text = "Enabled"
+
 [node name="BtnResetGeneral" type="Button" parent="VBoxContainer/TabContainer/General/VBox" unique_id=1171433277]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(160, 30)

@@ -20,6 +20,7 @@ config/icon="uid://67nlgu7dndiv"
 
 [autoload]
 
+StartupDiagnostics="*res://tools/scripts/diagnostics/StartupDiagnosticsNode.cs"
 DiscordRpcService="*uid://diukumx2opmi8"
 
 [display]
@@ -30,6 +31,7 @@ window/size/mode=2
 window/subwindows/embed_subwindows=false
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/per_pixel_transparency/allowed=true
 
 [dotnet]
 
@@ -37,7 +39,7 @@ project/assembly_name="Deadlock_Playground"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/discord-rpc-gd/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
+enabled=PackedStringArray("res://addons/Gizmo3DSharp/plugin.cfg", "res://addons/gpu_texture_painter/plugin.cfg")
 
 [file_customization]
 
@@ -58,7 +60,3 @@ theme/custom="res://assets/themes/PlaygroundTheme.tres"
 [physics]
 
 3d/physics_engine="Jolt Physics"
-
-[rendering]
-
-rendering_device/driver.windows="d3d12"

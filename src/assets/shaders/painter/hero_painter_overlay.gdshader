@@ -1,5 +1,9 @@
 shader_type spatial;
-render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
+// Lit overlay: painted pixels are shaded exactly like the base material underneath (same BRDF, lights, ambient,
+// normal map, AO, roughness/metallic/specular) so a colour picked from the raw albedo looks seamless in 3D.
+// The camera-brush data pass (layer 21) stays exact: it writes UV/depth data through EMISSION with ALBEDO and
+// SPECULAR forced to zero, and the brush viewport has ambient + reflected light disabled (camera_brush_viewport.tscn).
+render_mode blend_mix, depth_draw_always, cull_disabled, diffuse_burley, specular_schlick_ggx;
 
 uniform sampler2D overlay_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D active_layer_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -20,8 +24,29 @@ uniform bool show_stencil_pattern = true;
 
 uniform bool smooth_bicubic = false;
 
+// Base-material PBR mirror (filled by SkinLayerManager.ApplyBasePbrToOverlay from the authentic base material)
+uniform sampler2D normal_texture : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D ao_texture : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool use_normal_map = false;
+uniform bool normal_is_source2 = false; // true: Source 2 hemi-octahedron RG + roughness in B (source2_pbr family)
+uniform float normal_scale : hint_range(-16.0, 16.0) = 1.0;
+uniform bool use_ao_texture = false;
+uniform float ao_light_affect : hint_range(0.0, 1.0) = 0.0;
+uniform float roughness : hint_range(0.0, 1.0) = 0.65;
+uniform float metallic : hint_range(0.0, 1.0) = 0.0;
+uniform float specular : hint_range(0.0, 1.0) = 0.5;
+uniform vec3 uv1_scale = vec3(1.0);
+uniform vec3 uv1_offset = vec3(0.0);
+uniform bool use_vertex_color = false;
+
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
+
+vec3 decode_hemi_octahedron(vec2 e) {
+	vec2 t = e * 2.0 - 1.0;
+	vec3 n = vec3(t.x + t.y, t.x - t.y, 1.0 - abs(t.x) - abs(t.y));
+	return normalize(n);
+}
 
 float get_luminance(vec3 c) {
 	return dot(c, vec3(0.299, 0.587, 0.114));
@@ -191,8 +216,14 @@ void fragment() {
 		uint index_sign_bit = (atlas_index & 0x4u) << uint(31 - 2);
 		uint index_exp_bits = (atlas_index & 0x3u) << 24u;
 		float b = uintBitsToFloat(exponential_bit | distance_bits | index_sign_bit | index_exp_bits);
-		ALBEDO = vec3(v_atlas_uv - vec2(0.5), b);
+		// Data travels through EMISSION only. ALBEDO/SPECULAR/METALLIC are zero so diffuse, specular, ambient and
+		// reflection terms (all multiplied by albedo or F0) contribute exactly nothing.
+		ALBEDO = vec3(0.0);
+		METALLIC = 0.0;
 		SPECULAR = 0.0;
+		ROUGHNESS = 1.0;
+		AO = 1.0;
+		AO_LIGHT_AFFECT = 0.0;
 		EMISSION = vec3(v_atlas_uv - vec2(0.5), b);
 		// Alpha must be strictly 1.0 so the framebuffer data is never blended or scaled by the compositor
 		ALPHA = 1.0;
@@ -255,6 +286,10 @@ void fragment() {
 		// Straight RGB is preserved accurately by alpha-weighted filtering without division artifacts
 		vec3 final_color = clamp(paint.rgb, vec3(0.0), vec3(1.0));
 
+		// Selection visuals (marching ants / stencil hatch) are editor aids: they are emitted unlit.
+		vec3 emit_col = vec3(0.0);
+		float lit_weight = 1.0;
+
 		if (show_selection_mask) {
 			ivec2 mask_size = textureSize(selection_mask, 0);
 			if (mask_size.x > 1) {
@@ -276,15 +311,17 @@ void fragment() {
 				if (is_edge) {
 					// Animated marching ants outline (alternating black & white dashes)
 					float ant = sin((FRAGCOORD.x + FRAGCOORD.y + TIME * 16.0) * 0.4);
-					vec3 ant_color = (ant > 0.0) ? vec3(1.0, 1.0, 1.0) : vec3(0.05, 0.05, 0.05);
-					final_color = ant_color;
+					emit_col = (ant > 0.0) ? vec3(1.0, 1.0, 1.0) : vec3(0.05, 0.05, 0.05);
+					lit_weight = 0.0;
 					final_alpha = 1.0;
 				} else if (m_center < 0.5 && show_stencil_pattern) {
 					// UNSELECTED / UNPAINTABLE area has protective stencil overlay
 					float stripe = sin((FRAGCOORD.x - FRAGCOORD.y) * 0.25);
 					vec3 hatch_col = (stripe > 0.0) ? vec3(0.06, 0.06, 0.10) : vec3(0.01, 0.01, 0.03);
 					float protect_alpha = 0.45;
-					final_color = mix(final_color, hatch_col, protect_alpha);
+					// Paint stays lit (scaled by the remaining weight); the hatch itself is emitted unlit.
+					lit_weight = 1.0 - protect_alpha;
+					emit_col = hatch_col * protect_alpha;
 					final_alpha = max(final_alpha, protect_alpha);
 				}
 				// If m_center >= 0.5: Paintable area is 100% pristine, clear and untinted!
@@ -295,7 +332,30 @@ void fragment() {
 			discard;
 		}
 
-		ALBEDO = final_color;
+		// Mirror the base material's surface response so painted pixels light identically to unpainted ones.
+		vec2 base_uv = UV * uv1_scale.xy + uv1_offset.xy;
+		float rough = roughness;
+		if (use_normal_map) {
+			vec4 n_sample = texture(normal_texture, base_uv);
+			if (normal_is_source2) {
+				NORMAL_MAP = decode_hemi_octahedron(n_sample.rg) * 0.5 + 0.5;
+				rough = n_sample.b * roughness;
+			} else {
+				NORMAL_MAP = n_sample.rgb;
+			}
+			NORMAL_MAP_DEPTH = normal_scale;
+		}
+		if (use_ao_texture) {
+			AO = texture(ao_texture, base_uv).r;
+			AO_LIGHT_AFFECT = ao_light_affect;
+		}
+
+		vec3 v_col = (use_vertex_color && length(COLOR.rgb) > 0.001) ? COLOR.rgb : vec3(1.0);
+		ALBEDO = final_color * lit_weight * v_col;
+		EMISSION = emit_col;
 		ALPHA = final_alpha;
+		ROUGHNESS = rough;
+		METALLIC = metallic;
+		SPECULAR = specular;
 	}
 }

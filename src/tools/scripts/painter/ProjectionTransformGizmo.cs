@@ -23,6 +23,7 @@ namespace DeadlockPlayground.Painter
         public bool IsActive { get; set; } = false;
         public bool IsText { get; set; } = false;
         public bool Is3DProjection { get; set; } = false;
+        public bool IsImportedLayerPlacement { get; set; } = false;
 
         // Position & dimensions in atlas pixel coordinates
         private Vector2 _center = new Vector2(1024, 1024);
@@ -128,6 +129,18 @@ namespace DeadlockPlayground.Painter
             GizmoChanged?.Invoke();
         }
 
+        public void FitToFullUV(int atlasWidth, int atlasHeight)
+        {
+            if (atlasWidth <= 0) atlasWidth = 2048;
+            if (atlasHeight <= 0) atlasHeight = 2048;
+            Center = new Vector2(atlasWidth * 0.5f, atlasHeight * 0.5f);
+            RotationDegrees = 0f;
+            Size = new Vector2(atlasWidth, atlasHeight);
+            Has3DPlacement = false;
+            Is3DProjection = false;
+            GizmoChanged?.Invoke();
+        }
+
         public void Deactivate()
         {
             IsActive = false;
@@ -135,6 +148,7 @@ namespace DeadlockPlayground.Painter
             _activeHandle = ProjectionGizmoHandle.None;
             Has3DPlacement = false;
             Is3DProjection = false;
+            Texture = null;
             GizmoCancelled?.Invoke();
             GizmoChanged?.Invoke();
         }

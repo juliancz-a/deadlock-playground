@@ -1,4 +1,5 @@
 using Godot;
+using DeadlockPlayground.Core;
 using System;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -21,6 +22,7 @@ public class GamePathManager
 
     public void LoadConfig()
     {
+        StartupDiagnosticTracker.Mark("GamePathManager: config load start");
         var config = new ConfigFile();
         Error err = config.Load(ConfigPath);
         if (err == Error.Ok)
@@ -30,6 +32,7 @@ public class GamePathManager
             CurrentCsdkPath = (string)config.GetValue("Paths", "CsdkPath", "");
             CurrentResourceCompilerPath = (string)config.GetValue("Paths", "ResourceCompilerPath", "");
         }
+        StartupDiagnosticTracker.Mark($"GamePathManager: config load end (err={err}, gamePath='{CurrentGamePath}')");
     }
 
     public void SaveConfig(string gamePath, string savePath)
@@ -131,7 +134,23 @@ public class GamePathManager
 
     public async Task<string> AutoDetectDeadlockPathAsync()
     {
-        return await Task.Run(() => 
+        return await Task.Run(AutoDetectDeadlockPath).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Synchronous auto-detection (registry + libraryfolders.vdf). Safe to call from any thread;
+    /// never touches the Godot synchronization context.
+    /// </summary>
+    public string AutoDetectDeadlockPath()
+    {
+        StartupDiagnosticTracker.Log("GamePathManager: auto-detect start");
+        string detected = AutoDetectDeadlockPathCore();
+        StartupDiagnosticTracker.Log($"GamePathManager: auto-detect end (result='{detected ?? "<null>"}')");
+        return detected;
+    }
+
+    private string AutoDetectDeadlockPathCore()
+    {
         {
             try
             {
@@ -210,7 +229,7 @@ public class GamePathManager
                 GD.PrintErr($"[GamePathManager] Auto-detect failed: {ex.Message}");
             }
             return null;
-        });
+        }
     }
 
     public bool ValidateDeadlockPath(string baseLibraryPath)

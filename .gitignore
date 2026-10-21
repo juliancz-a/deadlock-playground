@@ -27,3 +27,7 @@ DESIGN.md
 
 #web
 */node_modules/
+
+# Release hub configuration & credentials
+tools/release_hub/release_config.json
+releases/

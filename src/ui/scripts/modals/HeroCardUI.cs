@@ -145,6 +145,7 @@ public partial class HeroCardUI : PanelContainer
     {
         CustomMinimumSize = new Vector2(170, 240);
         MouseFilter = MouseFilterEnum.Stop;
+        MouseDefaultCursorShape = CursorShape.PointingHand;
 
         InitStyles();
         BuildUI();
@@ -241,7 +242,8 @@ public partial class HeroCardUI : PanelContainer
         var vbox = new VBoxContainer
         {
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         vbox.AddThemeConstantOverride("separation", 6);
         AddChild(vbox);
@@ -252,7 +254,8 @@ public partial class HeroCardUI : PanelContainer
             CustomMinimumSize = new Vector2(158, 170),
             SizeFlagsHorizontal = SizeFlags.Fill,
             SizeFlagsVertical = SizeFlags.ExpandFill,
-            ClipContents = true
+            ClipContents = true,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         var thumbStyle = new StyleBoxFlat
         {
@@ -270,7 +273,8 @@ public partial class HeroCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             SizeFlagsVertical = SizeFlags.Fill,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _thumbPanel.AddChild(_thumbRect);
 
@@ -278,7 +282,8 @@ public partial class HeroCardUI : PanelContainer
         _tagPanel = new PanelContainer
         {
             SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
-            SizeFlagsVertical = SizeFlags.ShrinkBegin
+            SizeFlagsVertical = SizeFlags.ShrinkBegin,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _tagPanel.SetAnchorsPreset(LayoutPreset.TopLeft);
         var tagStyle = new StyleBoxFlat
@@ -297,7 +302,8 @@ public partial class HeroCardUI : PanelContainer
 
         _lblTag = new Label
         {
-            Text = "Hero"
+            Text = "Hero",
+            MouseFilter = MouseFilterEnum.Ignore
         };
         var colusFont = PlaygroundThemeHelper.GetFontColus();
         if (colusFont != null)
@@ -314,7 +320,8 @@ public partial class HeroCardUI : PanelContainer
             Text = Hero?.DisplayName ?? "Hero Name",
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         if (colusFont != null)
         {
@@ -330,7 +337,8 @@ public partial class HeroCardUI : PanelContainer
             Text = Hero?.InternalCodename ?? "",
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _lblCodename.AddThemeFontSizeOverride("font_size", 13);
         _lblCodename.AddThemeColorOverride("font_color", new Color(0.78f, 0.82f, 0.90f, 1.0f));

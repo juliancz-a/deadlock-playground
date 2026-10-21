@@ -12,14 +12,13 @@
 [ext_resource type="Texture2D" uid="uid://c04gv60nyqptd" path="res://assets/at-icons/mirror.svg" id="10_icon_mirror"]
 [ext_resource type="Texture2D" uid="uid://ufndp46u28jp" path="res://assets/at-icons/undo.svg" id="11_icon_undo"]
 [ext_resource type="Texture2D" uid="uid://cr5vunpgwpj3y" path="res://assets/at-icons/redo.svg" id="12_icon_redo"]
-[ext_resource type="Texture2D" uid="uid://40drwhprmtjg" path="res://assets/at-icons/trash.svg" id="13_icon_trash"]
-[ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="14_5yohq"]
 [ext_resource type="Texture2D" uid="uid://mgjva1c5mhu8" path="res://assets/at-icons/cog.svg" id="15_icon_cog"]
 [ext_resource type="Texture2D" uid="uid://b3vs7211skkc4" path="res://assets/at-icons/folder.svg" id="16_icon_folder"]
-[ext_resource type="Texture2D" uid="uid://df23948skslkj" path="res://assets/at-icons/selection_square.svg" id="17_icon_selection"]
-[ext_resource type="Texture2D" uid="uid://ci801sqr7y66" path="res://assets/at-icons/square.svg" id="18_icon_square"]
-[ext_resource type="Texture2D" uid="uid://ci801cir7y66" path="res://assets/at-icons/circle.svg" id="19_icon_circle"]
-[ext_resource type="Texture2D" uid="uid://ci801lin7y66" path="res://assets/icons/line.svg" id="20_icon_line"]
+[ext_resource type="Texture2D" uid="uid://ddhhor2ubpin8" path="res://assets/at-icons/selection_square.svg" id="17_icon_selection"]
+[ext_resource type="Texture2D" uid="uid://uouvml4ycbco" path="res://assets/at-icons/square.svg" id="18_icon_square"]
+[ext_resource type="Texture2D" uid="uid://cikk7ardnvuy6" path="res://assets/icons/line.png" id="19_45sj5"]
+[ext_resource type="Texture2D" uid="uid://dj5e8qoobqwpp" path="res://assets/at-icons/circle.svg" id="19_icon_circle"]
+[ext_resource type="Texture2D" uid="uid://d1qeixgt233i4" path="res://assets/icons/eye-dropper.png" id="21_icon_eyedropper"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_root"]
 
@@ -50,18 +49,6 @@ corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 shadow_color = Color(0, 0, 0, 0.45)
 shadow_size = 8
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hint"]
-bg_color = Color(0.6, 0.6, 0.6, 0)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.25, 0.28, 0.35, 0.6)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
 
 [node name="FloatingBrushPalette" type="PanelContainer" unique_id=417247387]
 offset_left = 16.0
@@ -136,6 +123,17 @@ layout_mode = 2
 tooltip_text = "Eraser [E]"
 toggle_mode = true
 icon = ExtResource("5_icon_eraser")
+icon_alignment = 1
+expand_icon = true
+
+[node name="BtnEyedropper" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=134801694]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Eyedropper [I]
+Sample raw material color from surface"
+toggle_mode = true
+icon = ExtResource("21_icon_eyedropper")
 icon_alignment = 1
 expand_icon = true
 
@@ -304,9 +302,9 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
+tooltip_text = "Discard backfacing and occluded geometry (Blender occlusion behavior)"
 button_pressed = true
 text = "Front Faces Only"
-tooltip_text = "Discard backfacing and occluded geometry (Blender occlusion behavior)"
 
 [node name="HSeparator" type="HSeparator" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1339120719]
 layout_mode = 2
@@ -336,6 +334,26 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
 theme_override_font_sizes/font_size = 10
 text = "Tip: Hold Alt + Click while using any tool to sample/select submesh."
+autowrap_mode = 2
+
+[node name="EyedropperOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2079485697]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LblEyedropperInstructions" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EyedropperOptions" unique_id=1809195693]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
+theme_override_font_sizes/font_size = 11
+text = "Click anywhere on the character (3D viewport) or 2D UV Canvas to sample the raw material albedo color."
+autowrap_mode = 2
+
+[node name="LblEyedropperTip" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EyedropperOptions" unique_id=1564773588]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
+theme_override_font_sizes/font_size = 10
+text = "Samples unlit texture data directly, ignoring 3D shadows and lighting."
 autowrap_mode = 2
 
 [node name="BrushOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1689130778]
@@ -850,6 +868,13 @@ horizontal_alignment = 2
 layout_mode = 2
 theme_override_constants/separation = 6
 
+[node name="BtnFitDecalUV" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/DecalActionsRow" unique_id=2071959396]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Fit Full UV (1:1)"
+
 [node name="BtnBakeDecal" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/DecalActionsRow" unique_id=2071959394]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
@@ -1091,23 +1116,23 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "Cancel (Esc)"
 
-[node name="ShapeOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1409135799]
+[node name="ShapeOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=214607349]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="ShapeTypeRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions" unique_id=1468267399]
+[node name="ShapeTypeRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions" unique_id=1040087069]
 layout_mode = 2
 
-[node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=153065799]
+[node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=334467508]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
 theme_override_font_sizes/font_size = 11
 text = "Shape:"
 
-[node name="BtnShapeSquare" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=1099380791]
+[node name="BtnShapeSquare" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=1305912496]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
@@ -1119,7 +1144,7 @@ icon = ExtResource("18_icon_square")
 icon_alignment = 1
 expand_icon = true
 
-[node name="BtnShapeCircle" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=1099380792]
+[node name="BtnShapeCircle" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=1410412449]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
@@ -1130,14 +1155,14 @@ icon = ExtResource("19_icon_circle")
 icon_alignment = 1
 expand_icon = true
 
-[node name="BtnShapeLine" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=1099380793]
+[node name="BtnShapeLine" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=2021378161]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Line"
 toggle_mode = true
-icon = ExtResource("20_icon_line")
+icon = ExtResource("19_45sj5")
 icon_alignment = 1
 expand_icon = true
 
@@ -1151,7 +1176,7 @@ theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
 theme_override_font_sizes/font_size = 11
 text = "Fill Mode:"
 
-[node name="OptShapeFillMode" type="OptionButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/FillModeRow" unique_id=1099380794]
+[node name="OptShapeFillMode" type="OptionButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/FillModeRow" unique_id=32921818]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -1266,7 +1291,6 @@ size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = -180.0
 max_value = 180.0
-value = 0.0
 
 [node name="LblShapeRot" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeRotRow" unique_id=46847897]
 unique_name_in_owner = true
@@ -1276,11 +1300,11 @@ theme_override_font_sizes/font_size = 11
 text = "0°"
 horizontal_alignment = 2
 
-[node name="ShapeActionsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions" unique_id=1468267398]
+[node name="ShapeActionsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions" unique_id=357117981]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="BtnCommitShape" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeActionsRow" unique_id=1099380795]
+[node name="BtnCommitShape" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeActionsRow" unique_id=534040800]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3

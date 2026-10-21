@@ -43,6 +43,7 @@ public partial class ModCardUI : PanelContainer
     {
         CustomMinimumSize = new Vector2(170, 230);
         MouseFilter = MouseFilterEnum.Stop;
+        MouseDefaultCursorShape = CursorShape.PointingHand;
 
         InitStyles();
         BuildUI();
@@ -142,7 +143,8 @@ public partial class ModCardUI : PanelContainer
         var vbox = new VBoxContainer
         {
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         vbox.AddThemeConstantOverride("separation", 6);
         AddChild(vbox);
@@ -152,7 +154,8 @@ public partial class ModCardUI : PanelContainer
             CustomMinimumSize = new Vector2(158, 170),
             SizeFlagsHorizontal = SizeFlags.Fill,
             SizeFlagsVertical = SizeFlags.ExpandFill,
-            ClipContents = true
+            ClipContents = true,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         var thumbStyle = new StyleBoxFlat
         {
@@ -170,7 +173,8 @@ public partial class ModCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             SizeFlagsVertical = SizeFlags.Fill,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         thumbPanel.AddChild(_thumbRect);
 
@@ -178,7 +182,8 @@ public partial class ModCardUI : PanelContainer
         var iconCenter = new CenterContainer
         {
             SizeFlagsHorizontal = SizeFlags.Fill,
-            SizeFlagsVertical = SizeFlags.Fill
+            SizeFlagsVertical = SizeFlags.Fill,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         var iconRect = new TextureRect
         {
@@ -186,7 +191,8 @@ public partial class ModCardUI : PanelContainer
             CustomMinimumSize = new Vector2(40, 40),
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            Modulate = new Color(0.40f, 0.75f, 1.0f, 0.6f)
+            Modulate = new Color(0.40f, 0.75f, 1.0f, 0.6f),
+            MouseFilter = MouseFilterEnum.Ignore
         };
         iconCenter.AddChild(iconRect);
         thumbPanel.AddChild(iconCenter);
@@ -195,7 +201,8 @@ public partial class ModCardUI : PanelContainer
         _tagPanel = new PanelContainer
         {
             SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
-            SizeFlagsVertical = SizeFlags.ShrinkBegin
+            SizeFlagsVertical = SizeFlags.ShrinkBegin,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _tagPanel.SetAnchorsPreset(LayoutPreset.TopLeft);
         var tagStyle = new StyleBoxFlat
@@ -214,7 +221,7 @@ public partial class ModCardUI : PanelContainer
 
         var colusFont = PlaygroundThemeHelper.GetFontColus();
 
-        _lblTag = new Label { Text = "Mod" };
+        _lblTag = new Label { Text = "Mod", MouseFilter = MouseFilterEnum.Ignore };
         if (colusFont != null)
         {
             _lblTag.AddThemeFontOverride("font", colusFont);
@@ -228,7 +235,8 @@ public partial class ModCardUI : PanelContainer
             Text = "Mod Title",
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         if (colusFont != null)
         {
@@ -243,7 +251,8 @@ public partial class ModCardUI : PanelContainer
             Text = "Hero Target",
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _lblHero.AddThemeFontSizeOverride("font_size", 13);
         _lblHero.AddThemeColorOverride("font_color", new Color(0.78f, 0.82f, 0.90f, 1.0f));
@@ -254,7 +263,8 @@ public partial class ModCardUI : PanelContainer
             Text = "*.vpk",
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
-            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _lblFilename.AddThemeFontSizeOverride("font_size", 13);
         _lblFilename.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f, 1.0f));

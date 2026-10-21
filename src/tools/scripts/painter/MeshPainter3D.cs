@@ -42,6 +42,8 @@ namespace DeadlockPlayground.Painter
             set
             {
                 _isPaintingActive = value;
+                // Lazy init: the CameraBrush (SubViewport + compute shader) is only built once painting is first activated.
+                if (value && IsInsideTree() && _worldViewport != null) EnsureCameraBrush();
                 if (_selectionOverlay3D != null && GodotObject.IsInstanceValid(_selectionOverlay3D))
                 {
                     _selectionOverlay3D.Visible = value;
@@ -131,7 +133,7 @@ namespace DeadlockPlayground.Painter
                 if (Math.Abs(_brushHardness - value) > 0.005f)
                 {
                     _brushHardness = value;
-                    GenerateProceduralBrushTextures();
+                    if (_brushTexturesGenerated) GenerateProceduralBrushTextures();
                     _lastShapeType = (BrushShapeType)(-1);
                     SyncCameraBrushProperties();
                 }
@@ -953,10 +955,36 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
+                bool wasImported = _projectionGizmo.IsImportedLayerPlacement;
+                _projectionGizmo.IsImportedLayerPlacement = false;
+
                 _decalStamper?.HidePreview();
-                if (_previewDecalNode != null) _previewDecalNode.Visible = false;
+                if (_previewDecalNode != null && GodotObject.IsInstanceValid(_previewDecalNode))
+                {
+                    _previewDecalNode.Visible = false;
+                    _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, null);
+                }
+
+                if (wasImported)
+                {
+                    _decalStamper?.SetDecalTexture(null);
+                    _brushPalette ??= GetTree()?.Root?.FindChild("FloatingBrushPalette", true, false) as FloatingBrushPaletteUI;
+                    if (_brushPalette != null)
+                    {
+                        _brushPalette.SelectTool(BrushToolMode.Paint);
+                    }
+                    else
+                    {
+                        ToolMode = BrushToolMode.Paint;
+                    }
+                }
+
                 _selectionOverlay3D?.QueueRedraw();
                 _brushPalette?.SyncProjectionControls();
+
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as DeadlockPlayground.UI.UVCanvas2DUI
+                            ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+                uvCanvas?.QueueCanvasRedraw();
             }
             EmitSignal(SignalName.StrokeFinished);
             return success;
@@ -985,6 +1013,11 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
+            if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen)
+            {
+                return true;
+            }
+
             if (StudioUIManager.Instance != null && StudioUIManager.Instance.IsAnyModalOpen())
             {
                 return true;
@@ -1155,8 +1188,9 @@ namespace DeadlockPlayground.Painter
         private byte[] _preStrokeAtlasData;
         private bool _isActionClickDown = false;
 
-        // Cached procedural brush textures
+        // Cached procedural brush textures (generated lazily on first GetBrushTexture call)
         private readonly Dictionary<BrushShapeType, Texture2D> _brushTextures = new();
+        private bool _brushTexturesGenerated = false;
 
         private BrushShapeType _lastShapeType = (BrushShapeType)(-1);
         private float _lastBrushSize = -1f;
@@ -1168,9 +1202,8 @@ namespace DeadlockPlayground.Painter
 
         public override void _Ready()
         {
-            GenerateProceduralBrushTextures();
+            // Brush textures and the CameraBrush are intentionally NOT created here (deferred startup).
             EnsureCursorGizmo();
-            EnsureCameraBrush();
             GizmoDisplaySettings.OnSettingsChanged += ApplyOutlineSettings;
             ApplyOutlineSettings();
 
@@ -1217,7 +1250,7 @@ namespace DeadlockPlayground.Painter
             _cameraBrush.Set("projection", 1); // 1 = PROJECTION_ORTHOGONAL (constant radius pencil)
             _cameraBrush.Set("resolution", new Vector2I(256, 256));
             _cameraBrush.Set("max_distance", 0.35f);
-            _cameraBrush.Set("draw_speed", 35.0f);
+            _cameraBrush.Set("draw_speed", 250.0f);
             _cameraBrush.Set("drawing", false);
 
             var targetParent = _worldViewport as Node ?? _camera as Node ?? this;
@@ -1231,6 +1264,7 @@ namespace DeadlockPlayground.Painter
 
             SyncCameraBrushProperties(force: true);
             GD.Print("[MeshPainter3D] Initialized and added CameraBrush to scene!");
+            DeadlockPlayground.Core.StartupDiagnosticTracker.Log("Painter: CameraBrush created lazily (compute shader + SubViewport)");
         }
 
         private void EnsureMirrorCameraBrush()
@@ -1255,7 +1289,7 @@ namespace DeadlockPlayground.Painter
             _mirrorCameraBrush.Set("projection", 1);
             _mirrorCameraBrush.Set("resolution", new Vector2I(256, 256));
             _mirrorCameraBrush.Set("max_distance", 0.35f);
-            _mirrorCameraBrush.Set("draw_speed", 35.0f);
+            _mirrorCameraBrush.Set("draw_speed", 250.0f);
             _mirrorCameraBrush.Set("drawing", false);
             targetParent.AddChild(_mirrorCameraBrush);
             AttachMirrorCameraBrushWorld();
@@ -1388,7 +1422,8 @@ namespace DeadlockPlayground.Painter
 
             if (force || Math.Abs(_lastBrushFlow - BrushFlow) > 0.01f)
             {
-                float speed = Mathf.Max(5.0f, BrushFlow * 35.0f);
+                // Ensure flow 1.0 delivers 100% full opacity on strokes across any framerate (up to 240Hz)
+                float speed = Mathf.Max(10.0f, BrushFlow * 250.0f);
                 _cameraBrush.Set("draw_speed", speed);
                 if (_mirrorCameraBrush != null && GodotObject.IsInstanceValid(_mirrorCameraBrush))
                 {
@@ -2434,28 +2469,35 @@ namespace DeadlockPlayground.Painter
                     var tex = _decalStamper?.DecalTexture;
                     if (tex != null && _previewDecalNode != null)
                     {
-                        _previewDecalNode.Visible = true;
-                        _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, tex);
-                        if (!(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                        if (_projectionGizmo != null && _projectionGizmo.IsActive && !_projectionGizmo.Has3DPlacement)
                         {
-                            float scale = _decalStamper?.DecalScale ?? 0.25f;
-                            float rotDeg = _decalStamper?.RotationDegrees ?? 0.0f;
-                            float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
+                            _previewDecalNode.Visible = false;
+                        }
+                        else
+                        {
+                            _previewDecalNode.Visible = true;
+                            _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, tex);
+                            if (!(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
+                            {
+                                float scale = _decalStamper?.DecalScale ?? 0.25f;
+                                float rotDeg = _decalStamper?.RotationDegrees ?? 0.0f;
+                                float aspect = (tex.GetHeight() > 0) ? (float)tex.GetWidth() / tex.GetHeight() : 1.0f;
 
-                            float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
-                            float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
-                            float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
-                            float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
-                            float sizeX = uvSpanU * unitsU;
-                            float sizeZ = uvSpanV * unitsV;
-                            float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
-                            _previewDecalNode.NormalFade = 0.65f;
-                            _previewDecalNode.UpperFade = 0.3f;
-                            _previewDecalNode.LowerFade = 0.3f;
-                            _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
+                                float unitsU = (hit.WorldUnitsPerU > 1e-4f && hit.WorldUnitsPerU < 20.0f) ? hit.WorldUnitsPerU : 0.5f;
+                                float unitsV = (hit.WorldUnitsPerV > 1e-4f && hit.WorldUnitsPerV < 20.0f) ? hit.WorldUnitsPerV : 0.5f;
+                                float uvSpanU = (aspect >= 1.0f) ? scale : scale * aspect;
+                                float uvSpanV = (aspect >= 1.0f) ? scale / aspect : scale;
+                                float sizeX = uvSpanU * unitsU;
+                                float sizeZ = uvSpanV * unitsV;
+                                float depthY = Mathf.Clamp(Mathf.Min(sizeX, sizeZ) * 0.40f, 0.03f, 0.25f);
+                                _previewDecalNode.NormalFade = 0.65f;
+                                _previewDecalNode.UpperFade = 0.3f;
+                                _previewDecalNode.LowerFade = 0.3f;
+                                _previewDecalNode.Size = new Vector3(sizeX, depthY, sizeZ);
 
-                            Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
-                            _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.20f));
+                                Basis basis = CreateOrthonormalDecalBasis(tangent, normal, bitangent, rotDeg);
+                                _previewDecalNode.Transform = new Transform3D(basis, hit.HitPositionWorld + normal * (depthY * 0.20f));
+                            }
                         }
                     }
                     else if (_previewDecalNode != null && !(_projectionGizmo != null && _projectionGizmo.IsActive && _projectionGizmo.Has3DPlacement))
@@ -2553,7 +2595,7 @@ namespace DeadlockPlayground.Painter
             _brushPalette ??= GetTree()?.Root?.FindChild("FloatingBrushPalette", true, false) as FloatingBrushPaletteUI;
 
             EnsureCursorGizmo();
-            EnsureCameraBrush();
+            // CameraBrush creation deferred until painting is activated or a mesh is targeted.
             AttachCameraBrushWorld();
 
             if (_layerManager != null)
@@ -2606,6 +2648,7 @@ namespace DeadlockPlayground.Painter
 
             if (_currentMesh != null)
             {
+                EnsureCameraBrush();
                 _raycaster.BuildFromMesh(_currentMesh, -1);
                 _layerManager?.SetupForMesh(_currentMesh, surfaceIndex);
                 int atlasW = _layerManager?.CanvasSize.X ?? 2048;
@@ -2792,10 +2835,18 @@ namespace DeadlockPlayground.Painter
                     var camera = _worldViewport?.GetCamera3D() ?? _camera;
                     if (camera != null)
                     {
-                        var hit = _raycaster.IntersectRay(_currentMesh, camera.ProjectRayOrigin(pos), camera.ProjectRayNormal(pos), cullBackfaces: FrontFacesOnly);
+                        Vector3 origin = camera.ProjectRayOrigin(pos);
+                        Vector3 dir = camera.ProjectRayNormal(pos);
+                        var hit = (_currentMesh != null) ? _raycaster.IntersectRay(_currentMesh, origin, dir, cullBackfaces: FrontFacesOnly) : default;
                         if (hit.Hit)
                         {
                             SampleColorAtUV(hit.HitUV, hit.HitSurfaceIndex);
+                            GetViewport()?.SetInputAsHandled();
+                        }
+                        else if (RaycastAllSubmeshes(origin, dir, out var otherSub, out var otherHit))
+                        {
+                            MeshHierarchy?.SelectTarget(otherSub, otherSub.SurfaceIndex);
+                            SampleColorAtUV(otherHit.HitUV, otherHit.HitSurfaceIndex);
                             GetViewport()?.SetInputAsHandled();
                         }
                     }
@@ -4221,6 +4272,7 @@ namespace DeadlockPlayground.Painter
         {
             if (_projectionGizmo != null && _projectionGizmo.IsActive)
             {
+                bool wasImported = _projectionGizmo.IsImportedLayerPlacement;
                 _isDraggingGizmo3D = false;
                 _activeGizmoHandle3D = ProjectionGizmoHandle.None;
                 _projectionGizmo.Deactivate();
@@ -4229,7 +4281,24 @@ namespace DeadlockPlayground.Painter
                 if (_previewDecalNode != null && GodotObject.IsInstanceValid(_previewDecalNode))
                 {
                     _previewDecalNode.Visible = false;
+                    _previewDecalNode.SetTexture(Decal.DecalTexture.Albedo, null);
                 }
+
+                if (wasImported)
+                {
+                    _projectionGizmo.IsImportedLayerPlacement = false;
+                    _decalStamper?.SetDecalTexture(null);
+                    _brushPalette ??= GetTree()?.Root?.FindChild("FloatingBrushPalette", true, false) as FloatingBrushPaletteUI;
+                    if (_brushPalette != null)
+                    {
+                        _brushPalette.SelectTool(BrushToolMode.Paint);
+                    }
+                    else
+                    {
+                        ToolMode = BrushToolMode.Paint;
+                    }
+                }
+
                 _selectionOverlay3D?.QueueRedraw();
                 _brushPalette?.SyncProjectionControls();
             }
@@ -4608,26 +4677,46 @@ namespace DeadlockPlayground.Painter
 
         private void SampleColorAtUV(Vector2 uv, int surfaceIndex)
         {
-            var img = _layerManager.BakeCompositeImage(surfaceIndex);
-            if (img == null) return;
+            if (_layerManager == null) return;
+            _layerManager.EnsureCpuCompositeBufferSynced();
 
-            int px = Mathf.Clamp((int)(uv.X * img.GetWidth()), 0, img.GetWidth() - 1);
-            int py = Mathf.Clamp((int)(uv.Y * img.GetHeight()), 0, img.GetHeight() - 1);
+            Vector2 p = Vector2.Zero;
+            Vector2 s = Vector2.One;
+            if (_currentMesh != null && _currentMesh.MaterialOverlay is ShaderMaterial sm)
+            {
+                var posVar = sm.GetShaderParameter("position_in_atlas");
+                var sizeVar = sm.GetShaderParameter("size_in_atlas");
+                if (posVar.VariantType == Variant.Type.Vector2 && sizeVar.VariantType == Variant.Type.Vector2)
+                {
+                    p = posVar.AsVector2();
+                    s = sizeVar.AsVector2();
+                }
+            }
 
-            Color sampled = img.GetPixel(px, py);
+            Vector2 atlasUv = uv * s + p;
+            int atlasW = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+            int atlasH = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+
+            int px = Mathf.Clamp((int)(atlasUv.X * atlasW), 0, atlasW - 1);
+            int py = Mathf.Clamp((int)(atlasUv.Y * atlasH), 0, atlasH - 1);
+
+            Color sampled = _layerManager.GetVisibleColorAtAtlasPx(px, py);
             BrushColor = sampled;
+            _brushPalette?.SetUniversalColor(sampled);
             EmitSignal(SignalName.ColorSampled, sampled);
-            GD.Print($"[MeshPainter3D] Sampled color at ({px}, {py}): {sampled.ToHtml()}");
+            GD.Print($"[MeshPainter3D] Sampled color at atlas ({px}, {py}): {sampled.ToHtml()}");
         }
 
         public Texture2D GetBrushTexture(BrushShapeType type)
         {
+            if (!_brushTexturesGenerated) GenerateProceduralBrushTextures();
             if (_brushTextures.TryGetValue(type, out var tex)) return tex;
             return null;
         }
 
         private void GenerateProceduralBrushTextures()
         {
+            _brushTexturesGenerated = true;
             int texSize = 256;
 
             // 1. Soft Circle (Respects BrushHardness with smooth Hermite falloff)

@@ -5,7 +5,7 @@
 [ext_resource type="Texture2D" uid="uid://cn4yq50qo3u8k" path="res://assets/logo/dl-playground-logo.svg" id="3_074og"]
 [ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="3_theme"]
 [ext_resource type="Script" uid="uid://ccjoj2llg5baq" path="res://ui/scripts/StudioUIManager.cs" id="5_studio_ui"]
-[ext_resource type="PackedScene" path="res://ui/scenes/tabs/CharacterTab.tscn" id="6_char_tab"]
+[ext_resource type="PackedScene" uid="uid://dikiyyrp7b08b" path="res://ui/scenes/tabs/CharacterTab.tscn" id="6_char_tab"]
 [ext_resource type="PackedScene" uid="uid://bj84jmt2jj101" path="res://ui/scenes/tabs/BonesTab.tscn" id="7_bones_tab"]
 [ext_resource type="PackedScene" uid="uid://c0f244rs3jgfn" path="res://ui/scenes/tabs/CameraTab.tscn" id="8_cam_tab"]
 [ext_resource type="PackedScene" path="res://ui/scenes/tabs/PoseTab.tscn" id="9_pose_tab"]
@@ -18,7 +18,6 @@
 [ext_resource type="Shader" uid="uid://bh86e204ret45" path="res://assets/shaders/crt_shader.gdshader" id="16_crt_shader"]
 [ext_resource type="Shader" uid="uid://82snm4ouah2f" path="res://assets/shaders/glitch_shader.gdshader" id="17_glitch_shader"]
 [ext_resource type="Script" uid="uid://cs3b1veljanln" path="res://tools/scripts/GizmoOverlaySync.cs" id="18_gizmo_sync"]
-[ext_resource type="Texture2D" uid="uid://djdwwfcdcwicj" path="res://assets/backgrounds/background_00.jpg" id="19_bg0"]
 [ext_resource type="Script" uid="uid://gx8t7tkvo5gi" path="res://ui/scripts/CameraControlPadUI.cs" id="20_cam_pad"]
 [ext_resource type="PackedScene" uid="uid://bpxn82lam7x10" path="res://ui/scenes/FloatingBrushPalette.tscn" id="21_brush_palette"]
 [ext_resource type="PackedScene" uid="uid://c7k2p8b1mx5yq" path="res://ui/scenes/components/PaintModExportPanel.tscn" id="22_paint_mod_export"]
@@ -33,6 +32,74 @@
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="30_kq58d"]
 [ext_resource type="PackedScene" uid="uid://bkc7qpal8tx01" path="res://ui/scenes/components/QuickColorPalette.tscn" id="31_quick_palette"]
 [ext_resource type="PackedScene" path="res://ui/scenes/modals/ChangelogModal.tscn" id="32_changelog_modal"]
+[ext_resource type="PackedScene" uid="uid://ccanx3q4pj08j" path="res://ui/scenes/modals/ColorAdjustmentModal.tscn" id="33_color_adj_modal"]
+[ext_resource type="PackedScene" uid="uid://c6exportbasetexmodal" path="res://ui/scenes/modals/ExportBaseTexturesModal.tscn" id="34_export_base_tex_modal"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_adj_btn_normal"]
+content_margin_left = 14.0
+content_margin_top = 5.0
+content_margin_right = 14.0
+content_margin_bottom = 5.0
+bg_color = Color(0.17828444, 0.26307657, 0.4157025, 0.9490196)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.5, 0.75, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_adj_btn_pressed"]
+content_margin_left = 14.0
+content_margin_top = 5.0
+content_margin_right = 14.0
+content_margin_bottom = 5.0
+bg_color = Color(0.11, 0.16, 0.27, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.9, 0.82, 0.65, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_adj_btn_hover"]
+content_margin_left = 14.0
+content_margin_top = 5.0
+content_margin_right = 14.0
+content_margin_bottom = 5.0
+bg_color = Color(0.22, 0.35, 0.55, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.55, 0.72, 0.95, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_adj_btn_disabled"]
+content_margin_left = 14.0
+content_margin_top = 5.0
+content_margin_right = 14.0
+content_margin_bottom = 5.0
+bg_color = Color(0.12, 0.15, 0.2, 0.4)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.25, 0.3, 0.38, 0.3)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_unread_badge"]
 bg_color = Color(0.96, 0.62, 0.07, 1)
@@ -40,8 +107,6 @@ corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
-
-[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
 [sub_resource type="Animation" id="Animation_cegan"]
 length = 0.001
@@ -142,15 +207,16 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_quickColorPalette", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnAdjustments", "_btnFileMenu", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_quickColorPalette", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_colorAdjustmentModal", "_exportBaseTexturesModal")]
 layer = 2
 script = ExtResource("5_studio_ui")
-_quickColorPalette = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
-_btnNews = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/NewsButton")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
 _btnFeedback = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/FeedbackButton")
 _btnAbout = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AboutButton")
 _btnQuit = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/QuitButton")
+_btnNews = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/NewsButton")
+_btnAdjustments = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/AdjustmentsMenuButton")
+_btnFileMenu = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/FileMenuButton")
 _btnTabCharacter = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CharacterButton")
 _btnTabBones = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/BonesButton")
 _btnTabCamera = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/CameraButton")
@@ -165,6 +231,7 @@ _paintModExportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/Pa
 _navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge")
 _btnQuickXRay = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickXRay")
 _btnQuickFullscreen = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickActionsStrip/HBoxContainer/BtnQuickFullscreen")
+_quickColorPalette = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/QuickColorPalette")
 _modalsLayer = NodePath("MainHUD/ModalsLayer")
 _modalBackdrop = NodePath("MainHUD/ModalsLayer/ModalBackdrop")
 _settingsModal = NodePath("MainHUD/ModalsLayer/SettingsModal")
@@ -177,6 +244,8 @@ _loadingLogLabel = NodePath("MainHUD/ModalsLayer/LoadingOverlay/VBox/LogLabel")
 _btnAboutClose = NodePath("MainHUD/ModalsLayer/AboutModal/MarginContainer/VBoxContainer/HeaderBar/BtnClose")
 _gameFolderDialog = NodePath("MainHUD/ModalsLayer/GameFolderDialog")
 _saveFolderDialog = NodePath("MainHUD/ModalsLayer/ScreenshotFolderDialog")
+_colorAdjustmentModal = NodePath("MainHUD/ModalsLayer/ColorAdjustmentModal")
+_exportBaseTexturesModal = NodePath("MainHUD/ModalsLayer/ExportBaseTexturesModal")
 
 [node name="MainHUD" type="Control" parent="UIRoot" unique_id=1389755641]
 layout_mode = 3
@@ -222,6 +291,41 @@ texture = ExtResource("3_074og")
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
 text = "Deadlock Playground"
+
+[node name="_Spacer2" type="Control" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1934308471]
+custom_maximum_size = Vector2(72, -1)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AdjustmentsMenuButton" type="MenuButton" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1987162598]
+visible = false
+layout_mode = 2
+theme_override_colors/font_pressed_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_disabled_color = Color(0.5, 0.55, 0.62, 0.5)
+theme_override_fonts/font = ExtResource("30_kq58d")
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBoxFlat_adj_btn_normal")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_adj_btn_pressed")
+theme_override_styles/hover = SubResource("StyleBoxFlat_adj_btn_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_adj_btn_disabled")
+text = "ADJUSTMENTS ▾"
+flat = false
+
+[node name="FileMenuButton" type="MenuButton" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1987162650]
+visible = false
+layout_mode = 2
+theme_override_colors/font_pressed_color = Color(0.9, 0.82, 0.65, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_disabled_color = Color(0.5, 0.55, 0.62, 0.5)
+theme_override_fonts/font = ExtResource("30_kq58d")
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBoxFlat_adj_btn_normal")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_adj_btn_pressed")
+theme_override_styles/hover = SubResource("StyleBoxFlat_adj_btn_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_adj_btn_disabled")
+text = "FILE ▾"
+flat = false
 
 [node name="_Spacer" type="Control" parent="UIRoot/MainHUD/VBoxContainer/TopBar/HBoxContainer" unique_id=1906916890]
 layout_mode = 2
@@ -455,7 +559,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-texture = ExtResource("19_bg0")
 expand_mode = 1
 stretch_mode = 6
 
@@ -741,7 +844,6 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-
 [node name="ModalBackdrop" type="ColorRect" parent="UIRoot/MainHUD/ModalsLayer" unique_id=987162534]
 visible = false
 material = SubResource("ShaderMaterial_modal_backdrop")
@@ -772,6 +874,13 @@ visible = false
 layout_mode = 1
 
 [node name="ChangelogModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=184693799 instance=ExtResource("32_changelog_modal")]
+layout_mode = 1
+
+[node name="ColorAdjustmentModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1987162599 instance=ExtResource("33_color_adj_modal")]
+visible = false
+layout_mode = 1
+
+[node name="ExportBaseTexturesModal" parent="UIRoot/MainHUD/ModalsLayer" unique_id=1987162651 instance=ExtResource("34_export_base_tex_modal")]
 visible = false
 layout_mode = 1
 

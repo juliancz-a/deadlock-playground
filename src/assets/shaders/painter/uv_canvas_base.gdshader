@@ -25,10 +25,6 @@ void fragment() {
     }
 
     vec3 rgb = base_sample.rgb;
-    // Unpremultiply / unscale if color was scaled by alpha in texture
-    if (base_sample.a > 0.001 && base_sample.a < 0.999) {
-        rgb = rgb / max(0.01, base_sample.a);
-    }
 
     // Convert from linear HDR half-float to sRGB for accurate 2D canvas presentation
     COLOR = vec4(linear_to_srgb(rgb), 1.0);

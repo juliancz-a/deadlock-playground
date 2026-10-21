@@ -1,7 +1,6 @@
 [gd_resource type="Theme" format=3 uid="uid://c8modal7theme"]
 
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="1_colus"]
-[ext_resource type="FontFile" uid="uid://b54vaqwgncgu5" path="res://assets/fonts/dahlia-bold.otf" id="2_dahlia"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_hover"]
 content_margin_left = 14.0

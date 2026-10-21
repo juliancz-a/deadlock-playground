@@ -178,10 +178,15 @@ public partial class VpkLoaderTest : Node3D
 
     public List<DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo> CurrentHeroAnimations { get; private set; } = new();
 
-    public Godot.Animation DecodeAnimation(DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info, Skeleton3D skeleton, AnimationPlayer animPlayer)
+    public Godot.Animation DecodeAnimation(
+        DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo info,
+        Skeleton3D skeleton,
+        AnimationPlayer animPlayer,
+        DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo idleInfo = null,
+        string targetAnimName = null)
     {
         if (_currentVrfModel == null || info == null || skeleton == null || animPlayer == null) return null;
-        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel);
+        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel, idleInfo, targetAnimName);
     }
 
 	private void EmitLoadProgress(string msg)
@@ -362,6 +367,7 @@ public partial class VpkLoaderTest : Node3D
 		HeroName = heroKey;
 		HeroModelName = Path.GetFileNameWithoutExtension(internalRoute);
 		EmitSignal(SignalName.LoadStarted);
+		DeadlockPlayground.Core.StartupDiagnosticTracker.Log($"VpkLoader: loading '{displayName}' ({internalRoute})");
 		EmitSignal(SignalName.LoadProgress, $"Reading archive for '{displayName}'...");
 
 		// 1. Cleanup old hero completely
@@ -472,6 +478,7 @@ public partial class VpkLoaderTest : Node3D
 				var exporter = new GltfModelExporter(fileLoader)
 				{
 					ExportAnimations = true, // REQUIRED: Generates Skeleton3D, joints, skins, and inverse bind matrices
+					ComposeAdditiveAnimations = true, // Composes additive sequences over bind pose so exported animations don't collapse to 0
 					AdaptTextures = true,
 					ExportMaterials = false,
 					ExportExtras = false,
