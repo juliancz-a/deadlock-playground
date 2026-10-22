@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="1_theme"]
 [ext_resource type="Script" path="res://ui/scripts/components/AnimationStudioDock.cs" id="2_dock_script"]
@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/animation/ClipAndPoseView.tscn" id="5_clip_view"]
 [ext_resource type="Texture2D" uid="uid://c6l8op4loopsvg" path="res://assets/icons/loop.svg" id="6_loop"]
 [ext_resource type="Texture2D" uid="uid://cspk7sparklessvg" path="res://assets/icons/sparkles.svg" id="7_sparkles"]
+[ext_resource type="Texture2D" path="res://assets/at-icons/file_arrow_down.svg" id="8_import"]
 
 [node name="AnimationStudioDock" type="PanelContainer"]
 anchors_preset = 12
@@ -190,6 +191,17 @@ custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 tooltip_text = "Redo (Ctrl+Y)"
 text = "⟳"
+
+[node name="Sep5" type="VSeparator" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
+layout_mode = 2
+
+[node name="BtnImportAnim" type="Button" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Import external animation (.glb, .gltf, .fbx from Mixamo, Mesh2Motion, etc.) and retarget to Deadlock skeleton"
+icon = ExtResource("8_import")
+text = "Import Anim (.glb/.fbx)..."
+expand_icon = true
 
 [node name="ContentContainer" type="MarginContainer" parent="RootVBox"]
 unique_name_in_owner = true

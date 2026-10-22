@@ -1,15 +1,32 @@
 {
-  "latestVersion": "1.1.0-beta2",
-  "publishedAt": "2026-10-21T04:15:01Z",
-  "title": "Version 1.1.0-beta2 — New Painting Tweaking Menus, Diagnostic Tools & UI Fixes",
-  "markdown": "### Version 1.1.0-beta2 — New Painting Tweaking Tabs, Diagnostic Tools & UI Fixes\n\n#### Highlights & Changes:\n* → New Painting Tab for Tweaking (File & Adjustments)\n* A- Adjustments: Brightness, Contrast, Hue, Saturation, Lightness, Invert, and Color Balance with real-time layer preview.\n* B- File: Export Base Textures, enhanced PNG import pipeline, and more...\n* → Eye-dropper & Line Shape tool icons updated.\n* → New Custom Eye-Dropper.\n* → Diagnostic Tool for tracking app activities and hardware. New \"logs/\" folder for generation of log files.\n* → New Option in Settings/General for toggling log generation.\n* → Attempt to fix Additive animations (emotes/reactions). Still WIP.",
+  "latestVersion": "1.2.0-beta",
+  "publishedAt": "2026-10-22T05:00:00Z",
+  "title": "Version 1.2.0-beta — External Animation Importer & Humanoid Retargeting System (Mixamo / Mesh2Motion / .glb / .fbx)",
+  "markdown": "### Version 1.2.0-beta — External Animation Importer & Humanoid Retargeting System\n\n#### Highlights & Changes:\n* → **External Animation Importer (.glb / .gltf / .fbx)**: Load external humanoid animations directly into Animation Studio from top toolbar, Clip & Pose tab, and sidebar.\n* → **Automatic Humanoid Bone Mapper**: Intelligent dictionary auto-matching Mixamo (`mixamorig:`), Mesh2Motion, Unreal Mannequin, Unity Humanoid, and Blender Rigify rigs to Deadlock Source 2 skeletons.\n* → **Interactive Retargeting Preview Modal (`AnimationRetargetModalUI`)**: Complete bone mapping table with group color badges and search filtering.\n* → **Live Calibration Sliders**: Arm T-Pose / A-Pose pitch calibration (-60° to +60°), Spine posture pitch, Pelvis height scaling (0.5x to 1.5x), and Lock Horizontal Root Motion (In-Place).\n* → **Hierarchical Model-Space Quaternion Retargeting**: Pure model-space orientation alignment eliminating local joint axis differences, with positive hemisphere normalization preventing 180° flips.\n* → **VPK Replacement Mode**: Overwrite active hero animations to compile Mixamo/Mesh2Motion sequences directly into `.vnmclip_c` VPK mods.\n* → **1-Click Web Links**: Direct buttons to browse animation collections on Mixamo and Mesh2Motion.",
   "history": [
+    {
+      "version": "1.2.0-beta",
+      "date": "October 22, 2026",
+      "title": "Version 1.2.0-beta — External Animation Importer & Humanoid Retargeting System",
+      "badge": "Latest Release",
+      "badgeType": "gold",
+      "videoUrl": "",
+      "highlights": [
+        "→ External Animation Importer (.glb / .gltf / .fbx) integrated into Animation Studio Top Bar, Clip & Pose tab, and sidebar.",
+        "→ Automatic Humanoid Bone Mapper auto-detecting Mixamo, Mesh2Motion, Unreal Mannequin, Unity Humanoid, and Blender Rigify skeletons.",
+        "→ Interactive Retargeting Modal (AnimationRetargetModalUI) with interactive bone mapping table and status readouts.",
+        "→ Live Calibration Controls: Arm T-Pose vs. A-Pose Pitch Offset (-60° to +60°), Spine Posture Pitch, Pelvis Height Scale (0.5x to 1.5x), and Lock Horizontal Root Motion (In-Place).",
+        "→ Hierarchical Model-Space Quaternion Retargeting Math solving local axis differences with positive hemisphere quaternion normalization (W >= 0).",
+        "→ VPK Replacement Mode: Apply retargeted animations to active hero sequence for instant compilation into .vnmclip_c and VPK mod export.",
+        "→ 1-Click web buttons to browse animation libraries on Mixamo and Mesh2Motion."
+      ]
+    },
     {
       "version": "1.1.0-beta2",
       "date": "October 21, 2026",
       "title": "Version 1.1.0-beta2 — New Painting Tweaking Menus, Diagnostic Tools & UI Fixes",
-      "badge": "Latest Release",
-      "badgeType": "gold",
+      "badge": "Release",
+      "badgeType": "slate",
       "videoUrl": "",
       "highlights": [
         "→ New Painting menu buttons for Tweaking (File & Adjustments)",

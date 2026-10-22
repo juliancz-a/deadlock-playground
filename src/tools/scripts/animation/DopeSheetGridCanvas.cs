@@ -64,6 +64,10 @@ namespace DeadlockPlayground.Animation
         private Skeleton3D _skeleton;
         private readonly List<TrackRowInfo> _trackRows = new();
         private readonly List<SelectedKeyInfo> _selectedKeys = new();
+        private readonly List<double> _cachedSummaryTimes = new();
+        private bool _isSummaryTimesDirty = true;
+        private readonly Vector2[] _diamondPoly = new Vector2[4];
+        private readonly Vector2[] _diamondOutline = new Vector2[5];
 
         // Drag & Tool States
         private enum DragMode { None, ScrubPlayhead, PanCanvas, BoxSelect, DragKeys, ScaleKeys }
@@ -109,6 +113,7 @@ namespace DeadlockPlayground.Animation
             _fps = fps > 0 ? fps : 30f;
             _duration = anim != null ? Math.Max(0.01, anim.Length) : 1.0;
             _selectedKeys.Clear();
+            _isSummaryTimesDirty = true;
             RebuildTrackRows();
             QueueRedraw();
         }
@@ -132,6 +137,7 @@ namespace DeadlockPlayground.Animation
         public void RebuildTrackRows()
         {
             _trackRows.Clear();
+            _isSummaryTimesDirty = true;
             if (_skeleton == null) return;
 
             // Map skeleton bones to Animation tracks (1:1 with bone list)
@@ -365,26 +371,39 @@ namespace DeadlockPlayground.Animation
 
             if (_activeAnimation == null) return;
 
-            // Collect all unique frame times across all tracks
-            var summaryTimes = new HashSet<double>();
-            for (int t = 0; t < _activeAnimation.GetTrackCount(); t++)
+            // Rebuild unique frame times cache across all tracks only when invalidated
+            if (_isSummaryTimesDirty)
             {
-                int kCount = _activeAnimation.TrackGetKeyCount(t);
-                for (int k = 0; k < kCount; k++)
+                _cachedSummaryTimes.Clear();
+                var set = new HashSet<double>();
+                for (int t = 0; t < _activeAnimation.GetTrackCount(); t++)
                 {
-                    summaryTimes.Add(Math.Round(_activeAnimation.TrackGetKeyTime(t, k), 4));
+                    int kCount = _activeAnimation.TrackGetKeyCount(t);
+                    for (int k = 0; k < kCount; k++)
+                    {
+                        set.Add(Math.Round(_activeAnimation.TrackGetKeyTime(t, k), 4));
+                    }
                 }
+                _cachedSummaryTimes.AddRange(set);
+                _cachedSummaryTimes.Sort();
+                _isSummaryTimesDirty = false;
             }
 
             float centerY = y + SummaryRowHeight * 0.5f;
-            foreach (double t in summaryTimes)
+            bool hasSelection = _selectedKeys.Count > 0;
+            float lastDrawnSummaryX = -9999f;
+            foreach (double t in _cachedSummaryTimes)
             {
                 float x = XFromTime(t);
                 if (x < -10 || x > size.X + 10) continue;
 
-                bool anySelected = _selectedKeys.Any(k => Math.Abs(k.Time - t) < 0.001);
+                bool anySelected = hasSelection && _selectedKeys.Any(k => Math.Abs(k.Time - t) < 0.001);
+                // Screen-space LOD: skip redundant overlapping diamonds when unselected
+                if (!anySelected && (x - lastDrawnSummaryX) < 3.5f) continue;
+
                 Color col = anySelected ? ColorDiamondSummarySelected : ColorDiamondSummary;
                 DrawDiamond(new Vector2(x, centerY), DiamondRadius + 1f, col);
+                lastDrawnSummaryX = x;
             }
         }
 
@@ -425,28 +444,42 @@ namespace DeadlockPlayground.Animation
             if (_activeAnimation == null || trackIdx < 0 || trackIdx >= _activeAnimation.GetTrackCount()) return;
 
             int kCount = _activeAnimation.TrackGetKeyCount(trackIdx);
+            bool hasSelection = _selectedKeys.Count > 0;
+            float lastDrawnKeyX = -9999f;
             for (int k = 0; k < kCount; k++)
             {
                 double t = _activeAnimation.TrackGetKeyTime(trackIdx, k);
                 float x = XFromTime(t);
                 if (x < -10 || x > width + 10) continue;
 
-                bool isSelected = _selectedKeys.Any(sel => sel.TrackIdx == trackIdx && Math.Abs(sel.Time - t) < 0.001);
+                bool isSelected = hasSelection && _selectedKeys.Any(sel => sel.TrackIdx == trackIdx && Math.Abs(sel.Time - t) < 0.001);
+                // Screen-space LOD: skip redundant overlapping diamonds when unselected
+                if (!isSelected && (x - lastDrawnKeyX) < 3.5f) continue;
+
                 Color col = isSelected ? ColorDiamondSelected : ColorDiamondNormal;
                 DrawDiamond(new Vector2(x, centerY), DiamondRadius, col);
+                lastDrawnKeyX = x;
             }
         }
 
         private void DrawDiamond(Vector2 center, float radius, Color color)
         {
-            Vector2[] points = [
-                center + new Vector2(0, -radius),
-                center + new Vector2(radius, 0),
-                center + new Vector2(0, radius),
-                center + new Vector2(-radius, 0)
-            ];
-            DrawColoredPolygon(points, color);
-            DrawPolyline(points.Concat([points[0]]).ToArray(), color.Darkened(0.4f), 1.2f);
+            float cx = center.X;
+            float cy = center.Y;
+
+            _diamondOutline[0] = new Vector2(cx, cy - radius);
+            _diamondOutline[1] = new Vector2(cx + radius, cy);
+            _diamondOutline[2] = new Vector2(cx, cy + radius);
+            _diamondOutline[3] = new Vector2(cx - radius, cy);
+            _diamondOutline[4] = _diamondOutline[0];
+
+            _diamondPoly[0] = _diamondOutline[0];
+            _diamondPoly[1] = _diamondOutline[1];
+            _diamondPoly[2] = _diamondOutline[2];
+            _diamondPoly[3] = _diamondOutline[3];
+
+            DrawColoredPolygon(_diamondPoly, color);
+            DrawPolyline(_diamondOutline, color.Darkened(0.4f), 1.2f);
         }
 
         private void DrawPlayhead(Vector2 size)

@@ -125,6 +125,22 @@ public partial class PlayerTabUI : VBoxContainer
             _chkIdleUnderlay.Toggled += OnIdleUnderlayToggled;
             animGroup.AddChild(_chkIdleUnderlay);
             animGroup.MoveChild(_chkIdleUnderlay, 1);
+
+            var btnImportAnim = new Button
+            {
+                Name = "BtnImportExternalAnimSide",
+                Text = "Import Animation (.glb/.fbx)...",
+                TooltipText = "Import external animation (.glb, .gltf, .fbx from Mixamo, Mesh2Motion, etc.) and retarget to Deadlock skeleton"
+            };
+            var impIcon = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg");
+            if (impIcon != null) btnImportAnim.Icon = impIcon;
+            btnImportAnim.Pressed += () =>
+            {
+                EnsureAnimationStudioDockMounted();
+                _animStudioDock?.OpenImportFileDialog();
+            };
+            animGroup.AddChild(btnImportAnim);
+            animGroup.MoveChild(btnImportAnim, 2);
         }
 
         var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
@@ -572,7 +588,7 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
-    private void PopulateAnimationTreeFromPlayer()
+    public void PopulateAnimationTreeFromPlayer()
     {
         if (_animPlayer == null) return;
 
@@ -596,7 +612,10 @@ public partial class PlayerTabUI : VBoxContainer
             }
             string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
             string displayName = DeadlockAnimLoader.FormatDisplayName(cleanName);
-            string category = DeadlockAnimLoader.ClassifyCategory(cleanName);
+            bool isRetargeted = (anim != null && anim.HasMeta("is_retargeted") && (bool)anim.GetMeta("is_retargeted")) ||
+                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(animName) ||
+                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(cleanName);
+            string category = isRetargeted ? "Remapped" : DeadlockAnimLoader.ClassifyCategory(cleanName);
             float duration = (float)(anim?.Length ?? 0.1f);
             bool isLooping = DeadlockAnimLoader.DetermineLooping(cleanName, category);
 
@@ -646,6 +665,8 @@ public partial class PlayerTabUI : VBoxContainer
         // Defined category order matching prompt requirements
         string[] categories = new[]
         {
+            "Remapped",
+            "Exported",
             "Idle",
             "Locomotion",
             "Combat",
@@ -669,10 +690,15 @@ public partial class PlayerTabUI : VBoxContainer
             if (itemsInCategory.Count == 0) continue;
 
             TreeItem categoryItem = _animTree.CreateItem(root);
-            categoryItem.SetIcon(0, _iconFolder);
+            var iconCat = (category == "Remapped" || category == "Exported")
+                ? (GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg") ?? _iconFolder)
+                : _iconFolder;
+            categoryItem.SetIcon(0, iconCat);
             categoryItem.SetIconMaxWidth(0, 16);
             Color catColor = category switch
             {
+                "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
+                "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
                 "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
                 "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
                 _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)

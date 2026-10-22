@@ -80,6 +80,10 @@ namespace DeadlockPlayground.Animation
         private float _modalPivotValue = 0.0f;
         private readonly Dictionary<CurveKey, (double Time, float Value, Vector2 InHandle, Vector2 OutHandle)> _modalInitialKeyStates = new();
 
+        // Pre-allocated Bezier polyline buffers for zero-allocation drawing
+        private readonly Vector2[] _bezierBuffer6 = new Vector2[7];
+        private readonly Vector2[] _bezierBuffer18 = new Vector2[19];
+
         // Visual Colors
         private static readonly Color ColorBg = new(0.11f, 0.12f, 0.14f, 1f);
         private static readonly Color ColorGridLine = new(0.18f, 0.20f, 0.23f, 0.6f);
@@ -675,7 +679,9 @@ namespace DeadlockPlayground.Animation
             int startFrame = (int)Math.Floor(visibleStartTime * _fps);
             int endFrame = (int)Math.Ceiling(visibleEndTime * _fps) + 1;
 
-            for (int f = startFrame; f <= endFrame; f++)
+            int frameStep = (_pixelsPerSecond > 80f) ? 1 : ((_pixelsPerSecond > 30f) ? 5 : (int)Math.Max(1, Math.Round(_fps)));
+
+            for (int f = startFrame; f <= endFrame; f += frameStep)
             {
                 double t = f / (double)_fps;
                 float x = XFromTime(t);
@@ -691,16 +697,21 @@ namespace DeadlockPlayground.Animation
             var keys = curve.Keys;
             if (keys.Count == 0) return;
 
+            // Frustum cull bounds for curve segments
+            double tMin = TimeFromX(-30);
+            double tMax = TimeFromX(size.X + 30);
+
             // Draw connecting Bezier spline segments
             for (int i = 0; i < keys.Count - 1; i++)
             {
                 var k0 = keys[i];
                 var k1 = keys[i + 1];
 
+                // Frustum culling: skip segments outside visible viewport
+                if (k1.Time < tMin || k0.Time > tMax) continue;
+
                 Vector2 p0 = CanvasPoint(k0.Time, k0.Value);
                 Vector2 p3 = CanvasPoint(k1.Time, k1.Value);
-                Vector2 p1 = CanvasPoint(k0.Time + k0.OutHandle.X, k0.Value + k0.OutHandle.Y);
-                Vector2 p2 = CanvasPoint(k1.Time + k1.InHandle.X, k1.Value + k1.InHandle.Y);
 
                 if (k0.Interp == InterpolationMode.Constant)
                 {
@@ -713,22 +724,54 @@ namespace DeadlockPlayground.Animation
                 }
                 else
                 {
-                    int segments = 24;
-                    var poly = new Vector2[segments + 1];
-                    for (int s = 0; s <= segments; s++)
+                    // Adaptive Tessellation based on pixel width
+                    float dx = Mathf.Abs(p3.X - p0.X);
+                    if (dx < 6.0f)
                     {
-                        float t = s / (float)segments;
-                        poly[s] = SampleCubicBezier(p0, p1, p2, p3, t);
+                        // Sub-pixel or tiny span: straight line is visually identical
+                        DrawLine(p0, p3, curve.ChannelColor, 2.0f, antialiased: true);
                     }
-                    DrawPolyline(poly, curve.ChannelColor, 2.0f, antialiased: true);
+                    else
+                    {
+                        Vector2 p1 = CanvasPoint(k0.Time + k0.OutHandle.X, k0.Value + k0.OutHandle.Y);
+                        Vector2 p2 = CanvasPoint(k1.Time + k1.InHandle.X, k1.Value + k1.InHandle.Y);
+
+                        if (dx < 40.0f)
+                        {
+                            // Moderate span: 6 segments is smooth and low cost
+                            for (int s = 0; s <= 6; s++)
+                            {
+                                float t = s / 6.0f;
+                                _bezierBuffer6[s] = SampleCubicBezier(p0, p1, p2, p3, t);
+                            }
+                            DrawPolyline(_bezierBuffer6, curve.ChannelColor, 2.0f, antialiased: true);
+                        }
+                        else
+                        {
+                            // Wide span: 18 segments for smooth curvature
+                            for (int s = 0; s <= 18; s++)
+                            {
+                                float t = s / 18.0f;
+                                _bezierBuffer18[s] = SampleCubicBezier(p0, p1, p2, p3, t);
+                            }
+                            DrawPolyline(_bezierBuffer18, curve.ChannelColor, 2.0f, antialiased: true);
+                        }
+                    }
                 }
             }
 
             // Draw keyframe points and handles
+            float lastDrawnKeyX = -9999f;
             foreach (var k in keys)
             {
                 Vector2 p = CanvasPoint(k.Time, k.Value);
                 if (p.X < -20 || p.X > size.X + 20) continue;
+
+                // Screen-space LOD: skip redundant unselected key dots that clump within 3 pixels
+                if (!k.IsSelected && Mathf.Abs(p.X - lastDrawnKeyX) < 3.0f)
+                {
+                    continue;
+                }
 
                 // Handles (if selected)
                 if (k.IsSelected)
@@ -747,6 +790,7 @@ namespace DeadlockPlayground.Animation
                 Color ptCol = k.IsSelected ? Colors.Gold : curve.ChannelColor.Lightened(0.3f);
                 DrawCircle(p, 4.5f, ptCol);
                 DrawArc(p, 4.5f, 0, Mathf.Tau, 12, Colors.Black, 1.2f);
+                lastDrawnKeyX = p.X;
             }
         }
 

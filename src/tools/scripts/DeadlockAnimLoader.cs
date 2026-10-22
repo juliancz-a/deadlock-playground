@@ -352,11 +352,27 @@ public static class DeadlockAnimLoader
     }
 
     /// <summary>
+    /// Explicit registry of retargeted/remapped animation names to guarantee "Remapped" category assignment.
+    /// </summary>
+    public static readonly HashSet<string> KnownRemappedAnimations = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Classifies an animation into semantic categories based on clip keywords.
     /// </summary>
     public static string ClassifyCategory(string cleanName, bool isVrfAdditive = false)
     {
         string lower = cleanName.ToLowerInvariant();
+
+        // 0. Remapped / Imported External Animations
+        if (KnownRemappedAnimations.Contains(cleanName) ||
+            lower.StartsWith("retarget") || lower.Contains("retarget") ||
+            lower.StartsWith("remap") || lower.Contains("remap") ||
+            lower.StartsWith("imported") || lower.Contains("imported"))
+            return "Remapped";
+
+        // Exported / Custom modified animations
+        if (lower.StartsWith("exported") || lower.Contains("export_") || lower.StartsWith("custom_"))
+            return "Exported";
 
         // 1. Reactions: hit, flinch, stun, death, die, impact, react
         if (lower.Contains("hit") || lower.Contains("flinch") || lower.Contains("stun") || lower.Contains("death") ||
@@ -419,6 +435,7 @@ public static class DeadlockAnimLoader
     {
         string lower = cleanName.ToLowerInvariant();
         if (lower.Contains("loop") || lower.Contains("cycle")) return true;
+        if (category == "Remapped" || category == "Exported") return true;
         if (category == "Idle") return true;
         if (category == "Additive Layers") return false;
         if (category == "Locomotion")
@@ -432,6 +449,8 @@ public static class DeadlockAnimLoader
 
     public static int GetCategoryPriority(string category) => category switch
     {
+        "Remapped" => 0,
+        "Exported" => 0,
         "Idle" => 1,
         "Locomotion" => 2,
         "Combat" => 3,

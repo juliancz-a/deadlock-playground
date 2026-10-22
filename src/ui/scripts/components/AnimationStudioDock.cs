@@ -97,6 +97,13 @@ namespace DeadlockPlayground.UI
         private Button _btnExportGlb;
         private Label _lblExportStatus;
 
+        // External Animation Import Controls
+        private Button _btnImportAnim;
+        private Button _btnImportExternalAnim;
+        private Button _btnBrowseMixamo;
+        private Button _btnBrowseMesh2Motion;
+        private FileDialog _fileDialogImport;
+
         // Bone Quick-Control Inspector Controls
         private Label _lblActiveBone;
         private Label _lblBoneRotX;
@@ -218,6 +225,17 @@ namespace DeadlockPlayground.UI
 
             // Dope Sheet Nodes (inside instanced DopeSheetView)
             _boneSearch = FindSceneNode<LineEdit>("BoneSearch");
+            if (_boneSearch != null)
+            {
+                _boneSearch.AddThemeFontSizeOverride("font_size", 13);
+            }
+            var lblSummary = FindSceneNode<Label>("LblSummaryRow");
+            if (lblSummary != null)
+            {
+                var fontColus = PlaygroundThemeHelper.GetFontColus();
+                if (fontColus != null) lblSummary.AddThemeFontOverride("font", fontColus);
+                lblSummary.AddThemeFontSizeOverride("font_size", 13);
+            }
             _boneScrollContainer = FindSceneNode<ScrollContainer>("BoneScrollContainer");
             _boneRowsVBox = FindSceneNode<VBoxContainer>("BoneRowsVBox");
             _dopeSheetCanvas = FindSceneNode<DopeSheetGridCanvas>("DopeSheetCanvas");
@@ -256,6 +274,26 @@ namespace DeadlockPlayground.UI
             _btnMirrorWholeAnim = FindSceneNode<Button>("BtnMirrorWholeAnim");
             _btnExportGlb = FindSceneNode<Button>("BtnExportGlb");
             _lblExportStatus = FindSceneNode<Label>("LblExportStatus");
+
+            // External Animation Import & Browse Nodes
+            _btnImportAnim = FindSceneNode<Button>("BtnImportAnim");
+            _btnImportExternalAnim = FindSceneNode<Button>("BtnImportExternalAnim");
+            _btnBrowseMixamo = FindSceneNode<Button>("BtnBrowseMixamo");
+            _btnBrowseMesh2Motion = FindSceneNode<Button>("BtnBrowseMesh2Motion");
+
+            var importIcon = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg");
+            if (importIcon != null)
+            {
+                if (_btnImportAnim != null && _btnImportAnim.Icon == null) _btnImportAnim.Icon = importIcon;
+                if (_btnImportExternalAnim != null && _btnImportExternalAnim.Icon == null) _btnImportExternalAnim.Icon = importIcon;
+            }
+
+            var globeIcon = GD.Load<Texture2D>("res://assets/at-icons/globe.svg");
+            if (globeIcon != null)
+            {
+                if (_btnBrowseMixamo != null && _btnBrowseMixamo.Icon == null) _btnBrowseMixamo.Icon = globeIcon;
+                if (_btnBrowseMesh2Motion != null && _btnBrowseMesh2Motion.Icon == null) _btnBrowseMesh2Motion.Icon = globeIcon;
+            }
 
             // Bone Quick-Control Inspector Nodes
             _lblActiveBone = FindSceneNode<Label>("LblActiveBone") ?? GetNodeOrNull<Label>("%LblActiveBone");
@@ -502,6 +540,12 @@ namespace DeadlockPlayground.UI
             }
             if (_btnExportGlb != null) _btnExportGlb.Pressed += ExportToGlb;
 
+            // External Animation Import & Web Browse Signals
+            if (_btnImportAnim != null) _btnImportAnim.Pressed += OpenImportFileDialog;
+            if (_btnImportExternalAnim != null) _btnImportExternalAnim.Pressed += OpenImportFileDialog;
+            if (_btnBrowseMixamo != null) _btnBrowseMixamo.Pressed += () => OS.ShellOpen("https://www.mixamo.com");
+            if (_btnBrowseMesh2Motion != null) _btnBrowseMesh2Motion.Pressed += () => OS.ShellOpen("https://mesh2motion.com");
+
             // Bone Quick-Control Inspector
             if (_sliderBoneRotX != null) _sliderBoneRotX.ValueChanged += (v) => OnBoneSliderChanged(v, 0);
             if (_sliderBoneRotY != null) _sliderBoneRotY.ValueChanged += (v) => OnBoneSliderChanged(v, 1);
@@ -584,6 +628,7 @@ namespace DeadlockPlayground.UI
             popup.AddItem("Paste Mirror Pose [Ctrl+Shift+V]", 7);
             popup.AddSeparator();
             popup.AddItem("Export Animation to .GLB...", 8);
+            popup.AddItem("Import External Animation (.glb/.fbx)...", 9);
             popup.IdPressed += OnKeyActionMenuItem;
         }
 
@@ -944,7 +989,12 @@ namespace DeadlockPlayground.UI
                 };
                 rowBtn.SetMeta("bone_name", bName);
 
-                rowBtn.AddThemeFontSizeOverride("font_size", 11);
+                var fontColus = PlaygroundThemeHelper.GetFontColus();
+                if (fontColus != null)
+                {
+                    rowBtn.AddThemeFontOverride("font", fontColus);
+                }
+                rowBtn.AddThemeFontSizeOverride("font_size", 13);
 
                 bool isSelected = !string.IsNullOrEmpty(_selectedBoneName) && _selectedBoneName.Equals(bName, StringComparison.OrdinalIgnoreCase);
                 ApplyBoneButtonStyle(rowBtn, isSelected, isHover: false);
@@ -1558,6 +1608,7 @@ namespace DeadlockPlayground.UI
                     CommitAutoKeyForCurrentPose();
                     break;
                 case 8: ExportToGlb(); break;
+                case 9: OpenImportFileDialog(); break;
             }
         }
 
@@ -1591,6 +1642,146 @@ namespace DeadlockPlayground.UI
                 GD.PrintErr($"[AnimationStudio] GLB export error: {ex.Message}");
             }
         }
+
+        #region External Animation Importing & Retargeting
+        public void OpenImportFileDialog()
+        {
+            if (_skeleton == null)
+            {
+                GD.PrintErr("[AnimationStudio] Cannot import animation: no active Skeleton3D bound.");
+                return;
+            }
+
+            if (_fileDialogImport == null)
+            {
+                _fileDialogImport = new FileDialog
+                {
+                    Name = "ExternalAnimFileDialog",
+                    Title = "Select External Animation (.glb, .gltf, .fbx)",
+                    FileMode = FileDialog.FileModeEnum.OpenFile,
+                    Access = FileDialog.AccessEnum.Filesystem,
+                    Filters = new string[]
+                    {
+                        "*.glb ; glTF 2.0 Binary (*.glb)",
+                        "*.gltf ; glTF 2.0 Text (*.gltf)",
+                        "*.fbx ; FilmBox 3D (*.fbx)"
+                    },
+                    UseNativeDialog = true
+                };
+
+                _fileDialogImport.FileSelected += (path) =>
+                {
+                    Callable.From(() => OnExternalAnimFileSelected(path)).CallDeferred();
+                };
+                AddChild(_fileDialogImport);
+            }
+
+            _fileDialogImport.PopupCentered(new Vector2I(900, 560));
+        }
+
+        private void OnExternalAnimFileSelected(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return;
+
+            GD.Print($"[AnimationStudio] Loading external animation file: {filePath}");
+            var loadResult = ExternalAnimationLoader.Load(filePath);
+
+            if (!loadResult.Success)
+            {
+                GD.PrintErr($"[AnimationStudio] Failed to load external animation: {loadResult.ErrorMessage}");
+                if (_lblExportStatus != null)
+                {
+                    _lblExportStatus.Text = $"Import failed: {loadResult.ErrorMessage}";
+                    _lblExportStatus.Modulate = Colors.Coral;
+                }
+                return;
+            }
+
+            // Instantiate Retarget Modal
+            var modalScene = GD.Load<PackedScene>("res://scenes/ui/animation/AnimationRetargetModalUI.tscn")
+                          ?? GD.Load<PackedScene>("res://ui/scenes/modals/AnimationRetargetModalUI.tscn");
+
+            AnimationRetargetModalUI modal = modalScene != null
+                ? modalScene.Instantiate<AnimationRetargetModalUI>()
+                : new AnimationRetargetModalUI();
+
+            modal.Name = "AnimationRetargetModal";
+
+            var modalsLayer = GetTree()?.Root?.FindChild("ModalsLayer", true, false) as Control;
+            if (modalsLayer != null)
+            {
+                modalsLayer.Visible = true;
+                modalsLayer.AddChild(modal);
+            }
+            else
+            {
+                AddChild(modal);
+            }
+
+            modal.ModalClosed += () =>
+            {
+                var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                            ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                studioUI?.UpdateModalsState();
+            };
+
+            modal.RetargetCompleted += OnExternalRetargetCompleted;
+            modal.Open(loadResult, _skeleton, _animPlayer, _activeAnimName);
+        }
+
+        private void OnExternalRetargetCompleted(Godot.Animation retargetedAnim, string clipName, bool overwriteSelected)
+        {
+            if (retargetedAnim == null || _animPlayer == null || _skeleton == null) return;
+
+            string targetKey = overwriteSelected && !string.IsNullOrEmpty(_activeAnimName)
+                ? _activeAnimName
+                : (string.IsNullOrEmpty(clipName) ? "retarget_clip" : clipName);
+
+            retargetedAnim.SetMeta("is_retargeted", true);
+            DeadlockAnimLoader.KnownRemappedAnimations.Add(targetKey);
+            string cleanTargetKey = DeadlockAnimLoader.SanitizePoseName(targetKey);
+            DeadlockAnimLoader.KnownRemappedAnimations.Add(cleanTargetKey);
+
+            var animLib = _animPlayer.HasAnimationLibrary("")
+                ? _animPlayer.GetAnimationLibrary("")
+                : new AnimationLibrary();
+
+            if (!_animPlayer.HasAnimationLibrary(""))
+            {
+                _animPlayer.AddAnimationLibrary("", animLib);
+            }
+
+            if (animLib.HasAnimation(targetKey))
+            {
+                animLib.RemoveAnimation(targetKey);
+            }
+            animLib.AddAnimation(targetKey, retargetedAnim);
+
+            // Re-bind Animation Studio target to retargeted animation
+            BindTarget(_skeleton, _animPlayer, retargetedAnim, targetKey, fps: 30f);
+
+            // Emit AnimationModified signal -> triggers ModWorkspaceSession.StageAnimation
+            EmitSignal(SignalName.AnimationModified, targetKey);
+
+            // Refresh PlayerTabUI animation tree so the new animation shows up under "Remapped"
+            var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                         ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+            playerTab?.PopulateAnimationTreeFromPlayer();
+
+            // Seek playhead to frame 0 and apply pose
+            ScrubToTime(0.0);
+
+            if (_lblExportStatus != null)
+            {
+                _lblExportStatus.Text = overwriteSelected
+                    ? $"Replaced '{targetKey}' with retargeted animation (staged for VPK export)!"
+                    : $"Imported & retargeted '{targetKey}' into studio!";
+                _lblExportStatus.Modulate = new Color(0.40f, 0.85f, 1.0f);
+            }
+
+            GD.Print($"[AnimationStudio] Successfully applied retargeted animation '{targetKey}'. Overwrite: {overwriteSelected}");
+        }
+        #endregion
         #endregion
     }
 }

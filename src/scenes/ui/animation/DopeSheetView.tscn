@@ -40,9 +40,9 @@ theme_override_constants/separation = 2
 
 [node name="BoneSearch" type="LineEdit" parent="BoneListPanel/BoneHeaderPanel/VBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 24)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 13
 placeholder_text = "Filter bones..."
 clear_button_enabled = true
 
@@ -50,7 +50,7 @@ clear_button_enabled = true
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 13
 text = "● All Channels (Summary)"
 vertical_alignment = 1
 
