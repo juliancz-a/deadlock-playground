@@ -6,6 +6,8 @@ using System.Linq;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.Particles;
+using DeadlockPlayground.UI;
+using DeadlockPlayground.Workspace;
 
 public partial class PlayerTabUI : VBoxContainer
 {
@@ -19,6 +21,8 @@ public partial class PlayerTabUI : VBoxContainer
     [Export] private OptionButton _optSpeed;
     [Export] private Button _btnApplyPose;
     [Export] private Button _btnResetAllPoses;
+
+    private AnimationStudioDock _animStudioDock;
 
     private Skeleton3D _skeleton;
     private AnimationPlayer _animPlayer;
@@ -128,10 +132,39 @@ public partial class PlayerTabUI : VBoxContainer
         {
             SetParticleStage(stage);
         }
+
+        InitAnimationStudioDock();
+    }
+
+    public override void _ExitTree()
+    {
+        SkeletonGizmoManager.OnBonePoseChanged -= OnGizmoBonePoseChanged;
+        if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock))
+        {
+            _animStudioDock.AnimationModified -= OnAnimStudioAnimationModified;
+            _animStudioDock.VisibilityToggled -= OnAnimStudioVisibilityToggled;
+        }
     }
 
     public override void _Notification(int what)
     {
+        if (what == NotificationVisibilityChanged)
+        {
+            bool isVis = IsVisibleInTree();
+            if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock))
+            {
+                _animStudioDock.Visible = isVis;
+                if (isVis)
+                {
+                    _animStudioDock.UpdateFloatingViewportControls();
+                }
+                else
+                {
+                    _animStudioDock.ResetFloatingViewportControls();
+                }
+            }
+        }
+
         if (what == NotificationVisibilityChanged && IsVisibleInTree())
         {
             if (_particleStage == null)
@@ -151,6 +184,102 @@ public partial class PlayerTabUI : VBoxContainer
             {
                 OnParticleStageUnloaded();
             }
+        }
+    }
+
+    private void InitAnimationStudioDock()
+    {
+        Callable.From(EnsureAnimationStudioDockMounted).CallDeferred();
+        SkeletonGizmoManager.OnBonePoseChanged += OnGizmoBonePoseChanged;
+    }
+
+    private void EnsureAnimationStudioDockMounted()
+    {
+        if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock)) return;
+
+        var viewportArea = GetTree()?.Root?.FindChild("ViewportArea", true, false) as Control;
+        if (viewportArea != null)
+        {
+            _animStudioDock = viewportArea.FindChild("AnimationStudioDock", true, false) as AnimationStudioDock;
+            if (_animStudioDock == null)
+            {
+                var dockScene = GD.Load<PackedScene>("res://scenes/ui/animation/AnimationStudioDock.tscn")
+                             ?? GD.Load<PackedScene>("res://ui/scenes/components/AnimationStudioDock.tscn");
+                if (dockScene != null)
+                {
+                    _animStudioDock = dockScene.Instantiate<AnimationStudioDock>();
+                    viewportArea.AddChild(_animStudioDock);
+                }
+            }
+
+            if (_animStudioDock != null)
+            {
+                _animStudioDock.Visible = IsVisibleInTree();
+                _animStudioDock.AnimationModified += OnAnimStudioAnimationModified;
+                _animStudioDock.VisibilityToggled += OnAnimStudioVisibilityToggled;
+
+                if (_skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+                {
+                    var anim = _animPlayer.GetAnimation(_activeAnimName);
+                    if (anim != null)
+                    {
+                        _animStudioDock.BindTarget(_skeleton, _animPlayer, anim, _activeAnimName, fps: 30f);
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnAnimStudioVisibilityToggled(bool isOpen)
+    {
+    }
+
+    public void ToggleAnimationStudio()
+    {
+        EnsureAnimationStudioDockMounted();
+        if (_animStudioDock != null)
+        {
+            _animStudioDock.ToggleOpen();
+        }
+    }
+
+    private void OnGizmoBonePoseChanged(int boneIdx, Vector3 pos, Quaternion rot)
+    {
+        _animStudioDock?.OnBoneTransformedByGizmo(boneIdx, pos, rot);
+    }
+
+    private void OnAnimStudioAnimationModified(string animName)
+    {
+        NotifyPoseChanged(animName);
+
+        try
+        {
+            if (_animPlayer != null && _animPlayer.HasAnimation(animName) && _skeleton != null)
+            {
+                var anim = _animPlayer.GetAnimation(animName);
+                FindVpkLoader();
+                string heroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename ?? "";
+                string heroDisplayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
+                string modelVpkPath = _vpkLoader?.LastLoadedHeroEntry?.VmdlRelativePath ?? "";
+
+                if (!string.IsNullOrEmpty(heroId) && anim != null)
+                {
+                    ModWorkspaceSession.Instance.StageAnimation(
+                        heroId: heroId,
+                        heroDisplayName: heroDisplayName,
+                        modelVpkPath: modelVpkPath,
+                        animName: animName,
+                        cleanName: animName,
+                        godotAnim: anim,
+                        fps: 30f,
+                        skeleton: _skeleton
+                    );
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PlayerTabUI] Failed to stage modified animation to workspace: {ex.Message}");
         }
     }
 
@@ -386,6 +515,11 @@ public partial class PlayerTabUI : VBoxContainer
     public void SetSkeleton(Skeleton3D skeleton)
     {
         _skeleton = skeleton;
+        if (_animStudioDock != null && _skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+        {
+            var curAnim = _animPlayer.GetAnimation(_activeAnimName);
+            _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
+        }
     }
 
     public void SetAnimationPlayer(AnimationPlayer animPlayer)
@@ -410,6 +544,12 @@ public partial class PlayerTabUI : VBoxContainer
 
         PopulateAnimationTreeFromPlayer();
         AutoSelectDefaultIdle();
+
+        if (_animStudioDock != null && _skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+        {
+            var curAnim = _animPlayer.GetAnimation(_activeAnimName);
+            _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
+        }
     }
 
     private void OnAnimationFinished(StringName animName)
@@ -859,6 +999,7 @@ public partial class PlayerTabUI : VBoxContainer
         ProceduralClothSolver.MarkDirty();
         ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         NotifyPoseChanged(_activeAnimName);
+        _animStudioDock?.BindTarget(_skeleton, _animPlayer, playAnim, playAnimName, fps: (float)(info?.Fps ?? 30f));
     }
 
     public void ApplyPoseFromAnimation(string animName)
@@ -906,6 +1047,7 @@ public partial class PlayerTabUI : VBoxContainer
             ProceduralClothSolver.MarkDirty();
             ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
             NotifyPoseChanged(animName);
+            _animStudioDock?.BindTarget(_skeleton, _animPlayer, godotAnim, animName, fps: 30f);
         }
     }
 

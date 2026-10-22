@@ -1,0 +1,141 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://tools/scripts/animation/GraphEditorCanvas.cs" id="2_graph_canvas"]
+
+[node name="GraphEditorView" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme = ExtResource("1_theme")
+theme_override_constants/separation = 0
+
+[node name="GraphToolbarPanel" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="GraphToolbarPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 2
+
+[node name="GraphToolbar" type="HBoxContainer" parent="GraphToolbarPanel/Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblCurveTitle" type="Label" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+layout_mode = 2
+text = "Transform Curves"
+
+[node name="Sep1" type="VSeparator" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+layout_mode = 2
+
+[node name="LblFrame" type="Label" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+layout_mode = 2
+text = "Frame:"
+
+[node name="SpinKeyFrame" type="SpinBox" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(70, 24)
+layout_mode = 2
+max_value = 9999.0
+editable = false
+
+[node name="LblValue" type="Label" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+layout_mode = 2
+text = "Value:"
+
+[node name="SpinKeyValue" type="SpinBox" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(85, 24)
+layout_mode = 2
+min_value = -9999.0
+max_value = 9999.0
+step = 0.1
+editable = false
+
+[node name="Sep2" type="VSeparator" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+layout_mode = 2
+
+[node name="BtnNormalize" type="Button" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Normalize curves to [-1, 1] range for visual comparison"
+toggle_mode = true
+text = "Normalize"
+
+[node name="BtnFitView" type="Button" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Frame all visible curves to fit canvas bounds (Home)"
+text = "Fit View (Home)"
+
+[node name="Sep3" type="VSeparator" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+layout_mode = 2
+
+[node name="LblTransformMode" type="Label" parent="GraphToolbarPanel/Margin/GraphToolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(250, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+
+[node name="GraphSplit" type="HSplitContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+split_offset = 220
+
+[node name="ChannelsPanel" type="VBoxContainer" parent="GraphSplit"]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="ChannelHeader" type="PanelContainer" parent="GraphSplit/ChannelsPanel"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="GraphSplit/ChannelsPanel/ChannelHeader"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 2
+
+[node name="LblActiveBoneChannel" type="Label" parent="GraphSplit/ChannelsPanel/ChannelHeader/Margin"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Selected Bone Channels"
+
+[node name="ChannelScroll" type="ScrollContainer" parent="GraphSplit/ChannelsPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ChannelListVBox" type="VBoxContainer" parent="GraphSplit/ChannelsPanel/ChannelScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="CanvasContainer" type="MarginContainer" parent="GraphSplit"]
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="GraphCanvas" type="Control" parent="GraphSplit/CanvasContainer"]
+unique_name_in_owner = true
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2_graph_canvas")

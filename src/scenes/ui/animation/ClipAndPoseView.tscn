@@ -1,0 +1,342 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="1_theme"]
+
+[node name="ClipAndPoseView" type="ScrollContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme = ExtResource("1_theme")
+horizontal_scroll_mode = 0
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="MainVBox" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="ClipParamsPanel" type="PanelContainer" parent="Margin/MainVBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Margin/MainVBox/ClipParamsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="Margin/MainVBox/ClipParamsPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblTitle" type="Label" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Clip Parameters"
+
+[node name="Grid" type="GridContainer" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 14
+theme_override_constants/v_separation = 8
+columns = 4
+
+[node name="LblFps" type="Label" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+text = "FPS (Sampling Rate):"
+
+[node name="SpinFps" type="SpinBox" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 120.0
+value = 30.0
+
+[node name="LblDuration" type="Label" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+text = "Duration (Seconds):"
+
+[node name="SpinDuration" type="SpinBox" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.05
+max_value = 60.0
+step = 0.01
+value = 1.0
+
+[node name="LblLoop" type="Label" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+text = "Loop Mode:"
+
+[node name="ChkLooping" type="CheckBox" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Looping Animation"
+
+[node name="LblAdditive" type="Label" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+text = "Additive Layer:"
+
+[node name="ChkAdditive" type="CheckBox" parent="Margin/MainVBox/ClipParamsPanel/Margin/VBox/Grid"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Is Additive Reaction / Delta"
+
+[node name="QuickAssistantsPanel" type="PanelContainer" parent="Margin/MainVBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Margin/MainVBox/QuickAssistantsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderBox" type="VBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="LblTitle" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/HeaderBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Quick Animation Assistants"
+
+[node name="LblSubtitle" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/HeaderBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 0.8)
+theme_override_font_sizes/font_size = 11
+text = "Casual-friendly helpers to polish loops, smooth jitter, or generate living motion without manual curve editing."
+
+[node name="Grid" type="GridContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 12
+columns = 2
+
+[node name="Assistant1" type="VBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="BtnMakeLoopSeamless" type="Button" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant1"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Cross-blends end frames into Frame 0 to make any animation loop seamlessly without a pop"
+text = "Make Loop Seamless (1-Click)"
+
+[node name="HBoxLoop" type="HBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant1"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LblBlend" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant1/HBoxLoop"]
+layout_mode = 2
+text = "Blend Window:"
+
+[node name="SpinLoopBlendFrames" type="SpinBox" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant1/HBoxLoop"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 30.0
+value = 6.0
+suffix = "frames"
+
+[node name="Assistant2" type="VBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="BtnSmoothCurves" type="Button" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant2"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Applies Gaussian filter to remove jitter and robotic movement from selected bone"
+text = "Smooth Curves / Clean Jitter"
+
+[node name="HBoxSmooth" type="HBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant2"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LblSmooth" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant2/HBoxSmooth"]
+layout_mode = 2
+text = "Strength:"
+
+[node name="SliderSmoothStrength" type="HSlider" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant2/HBoxSmooth"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.1
+max_value = 1.0
+step = 0.05
+value = 0.5
+
+[node name="Assistant3" type="VBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="HBoxAmplifyLabel" type="HBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant3"]
+layout_mode = 2
+
+[node name="LblAmp" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant3/HBoxAmplifyLabel"]
+layout_mode = 2
+text = "Amplify Motion:"
+
+[node name="LblAmplifyValue" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant3/HBoxAmplifyLabel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.8, 0.4, 1)
+text = "100%"
+
+[node name="SliderAmplifyMotion" type="HSlider" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant3"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 200.0
+step = 5.0
+value = 100.0
+
+[node name="BtnApplyAmplify" type="Button" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant3"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Scales bone motion deltas relative to Frame 0 (50%=subtle, 150%=exaggerated)"
+text = "Apply Amplification"
+
+[node name="Assistant4" type="VBoxContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="BtnGenerateBreathing" type="Button" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Adds organic breathing rhythm and body sway into a static pose or animation"
+text = "Generate Breathing / Idle Motion"
+
+[node name="GridBreathing" type="GridContainer" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 4
+columns = 2
+
+[node name="LblBreathInt" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4/GridBreathing"]
+layout_mode = 2
+text = "Intensity:"
+
+[node name="SliderBreathingIntensity" type="HSlider" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4/GridBreathing"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.1
+max_value = 2.0
+step = 0.1
+value = 1.0
+
+[node name="LblSway" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4/GridBreathing"]
+layout_mode = 2
+text = "Sway:"
+
+[node name="SliderSwayIntensity" type="HSlider" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4/GridBreathing"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 2.0
+step = 0.1
+value = 0.5
+
+[node name="LblSpeed" type="Label" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4/GridBreathing"]
+layout_mode = 2
+text = "Speed:"
+
+[node name="SpinBreathingSpeed" type="SpinBox" parent="Margin/MainVBox/QuickAssistantsPanel/Margin/VBox/Grid/Assistant4/GridBreathing"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 6.0
+max_value = 30.0
+value = 14.0
+suffix = "bpm"
+
+[node name="PoseToolsPanel" type="PanelContainer" parent="Margin/MainVBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Margin/MainVBox/PoseToolsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="Margin/MainVBox/PoseToolsPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblTitle" type="Label" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Pose Library & Mirroring"
+
+[node name="HBoxPoseButtons" type="HBoxContainer" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnCopyPose" type="Button" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox/HBoxPoseButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Copy Pose"
+
+[node name="BtnPastePose" type="Button" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox/HBoxPoseButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Paste Pose"
+
+[node name="BtnPasteMirrorPose" type="Button" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox/HBoxPoseButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Paste Mirror Pose (L ↔ R)"
+
+[node name="BtnMirrorWholeAnim" type="Button" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox/HBoxPoseButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Mirrors every keyframe across the sagittal axis for the entire animation timeline"
+text = "Mirror Whole Animation (Flip Clip)"
+
+[node name="ExportPanel" type="PanelContainer" parent="Margin/MainVBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="Margin/MainVBox/ExportPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="HBoxExport" type="HBoxContainer" parent="Margin/MainVBox/ExportPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BtnExportGlb" type="Button" parent="Margin/MainVBox/ExportPanel/Margin/HBoxExport"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Export Animation to .GLB..."
+
+[node name="LblExportStatus" type="Label" parent="Margin/MainVBox/ExportPanel/Margin/HBoxExport"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.8, 0.6, 1)

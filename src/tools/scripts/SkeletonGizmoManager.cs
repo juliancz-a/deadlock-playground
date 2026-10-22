@@ -28,6 +28,9 @@ public partial class SkeletonGizmoManager : Node3D
     [ExportCategory("Debug Wireframe")]
     [Export] public Material XRayMaterial { get; set; }
 
+    public static event Action<int, Vector3, Quaternion> OnBonePoseChanged;
+    public static event Action<int> OnBoneSelected;
+
     private BoneLayerManager _boneLayerManager;
     public BoneLayerManager LayerManager => _boneLayerManager;
 
@@ -40,6 +43,8 @@ public partial class SkeletonGizmoManager : Node3D
     private bool _isGizmoDragging = false;
     private bool _areDotsGloballyEnabled = true;
     private bool _isGizmoEnabled = true;
+
+    public int SelectedBoneIdx => _selectedBoneIdx;
 
     public bool IsGizmoEnabled
     {
@@ -223,6 +228,50 @@ public partial class SkeletonGizmoManager : Node3D
                 }
             }
         }
+        else if (@event is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            if (_selectedBoneIdx != -1 && TargetSkeleton != null)
+            {
+                if (key.Keycode == Key.G && key.AltPressed)
+                {
+                    TargetSkeleton.SetBonePosePosition(_selectedBoneIdx, TargetSkeleton.GetBoneRest(_selectedBoneIdx).Origin);
+                    ProceduralClothSolver.Conform(TargetSkeleton);
+                    SpawnOrMoveGizmo();
+                    UIManager?.UpdateSlidersFromBone();
+                    Vector3 p = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+                    Quaternion r = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+                    OnBonePoseChanged?.Invoke(_selectedBoneIdx, p, r);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (key.Keycode == Key.R && key.AltPressed)
+                {
+                    TargetSkeleton.SetBonePoseRotation(_selectedBoneIdx, TargetSkeleton.GetBoneRest(_selectedBoneIdx).Basis.GetRotationQuaternion());
+                    ProceduralClothSolver.Conform(TargetSkeleton);
+                    SpawnOrMoveGizmo();
+                    UIManager?.UpdateSlidersFromBone();
+                    Vector3 p = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+                    Quaternion r = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+                    OnBonePoseChanged?.Invoke(_selectedBoneIdx, p, r);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (key.Keycode == Key.G && !key.CtrlPressed && !key.AltPressed)
+                {
+                    if (_gizmo != null)
+                    {
+                        _gizmo.Mode = Gizmo3D.ToolMode.Move;
+                        GetViewport().SetInputAsHandled();
+                    }
+                }
+                else if (key.Keycode == Key.R && !key.CtrlPressed && !key.AltPressed)
+                {
+                    if (_gizmo != null)
+                    {
+                        _gizmo.Mode = Gizmo3D.ToolMode.Rotate;
+                        GetViewport().SetInputAsHandled();
+                    }
+                }
+            }
+        }
     }
 
     public void SelectBone(int boneIdx)
@@ -235,6 +284,7 @@ public partial class SkeletonGizmoManager : Node3D
         }
 
         SpawnOrMoveGizmo();
+        OnBoneSelected?.Invoke(boneIdx);
     }
 
     private void SpawnOrMoveGizmo()
@@ -311,6 +361,10 @@ public partial class SkeletonGizmoManager : Node3D
         }
 
         ProceduralClothSolver.Conform(TargetSkeleton);
+
+        Vector3 finalPos = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+        Quaternion finalRot = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+        OnBonePoseChanged?.Invoke(_selectedBoneIdx, finalPos, finalRot);
 
         if (UIManager != null)
         {

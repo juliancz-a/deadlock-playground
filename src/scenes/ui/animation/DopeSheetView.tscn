@@ -1,0 +1,87 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://tools/scripts/animation/DopeSheetGridCanvas.cs" id="2_dope_canvas"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_header_panel"]
+content_margin_left = 6.0
+content_margin_top = 2.0
+content_margin_right = 6.0
+content_margin_bottom = 0.0
+bg_color = Color(0.14, 0.15, 0.17, 1)
+border_width_bottom = 1
+border_color = Color(0.2, 0.22, 0.25, 0.7)
+
+[node name="DopeSheetView" type="HSplitContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme = ExtResource("1_theme")
+split_offset = 240
+
+[node name="BoneListPanel" type="VBoxContainer" parent="."]
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="BoneHeaderPanel" type="PanelContainer" parent="BoneListPanel"]
+custom_minimum_size = Vector2(0, 54)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_header_panel")
+
+[node name="VBox" type="VBoxContainer" parent="BoneListPanel/BoneHeaderPanel"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="BoneSearch" type="LineEdit" parent="BoneListPanel/BoneHeaderPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+placeholder_text = "Filter bones..."
+clear_button_enabled = true
+
+[node name="LblSummaryRow" type="Label" parent="BoneListPanel/BoneHeaderPanel/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "● All Channels (Summary)"
+vertical_alignment = 1
+
+[node name="BoneScrollContainer" type="ScrollContainer" parent="BoneListPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="BoneRowsVBox" type="VBoxContainer" parent="BoneListPanel/BoneScrollContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+
+[node name="TimelinePanel" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 0
+
+[node name="GridMargin" type="MarginContainer" parent="TimelinePanel"]
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DopeSheetCanvas" type="Control" parent="TimelinePanel/GridMargin"]
+unique_name_in_owner = true
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2_dope_canvas")

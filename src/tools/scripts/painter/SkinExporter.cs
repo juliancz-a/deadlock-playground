@@ -296,8 +296,9 @@ namespace DeadlockPlayground.Painter
                 }                
                 int workspaceTexCount = workspaceAssets.Sum(a => a.ModifiedTextures.Count);
                 int workspaceVpcfCount = workspaceAssets.Count(a => a.Category == "ParticleVFX" && !string.IsNullOrEmpty(a.ParticleOverridesFile));
+                int workspaceAnimCount = workspaceAssets.Sum(a => a.Animations?.Count ?? 0);
 
-                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0)
+                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0 && workspaceAnimCount == 0)
                 {
                     string err = "No modified submeshes or workspace assets selected for compilation. Base game submeshes were left untouched.";
                     progress?.Report(new ExportProgressReport(0.15f, $"[WARNING] {err}", ExportLogLevel.Warning));
@@ -727,6 +728,34 @@ namespace DeadlockPlayground.Painter
                                     string internalVtexPath = originalVtexCPath.Replace('\\', '/').TrimStart('/');
                                     package.AddFile(internalVtexPath, vtexData);
                                     progress?.Report(new ExportProgressReport(0.90f, $"[INFO] Added intercepted texture to VPK: {internalVtexPath} ({vtexData.Length / 1024} KB)"));
+                                }
+                            }
+
+                            // Include any staged workspace animations
+                            if (workspaceSession != null)
+                            {
+                                foreach (var asset in workspaceAssets)
+                                {
+                                    if (asset.Animations != null)
+                                    {
+                                        foreach (var animEntry in asset.Animations)
+                                        {
+                                            if (!string.IsNullOrEmpty(animEntry.RelativeVnmclipPath))
+                                            {
+                                                string fullClipPath = Path.Combine(workspaceSession.SessionDir, animEntry.RelativeVnmclipPath);
+                                                if (File.Exists(fullClipPath))
+                                                {
+                                                    byte[] clipData = File.ReadAllBytes(fullClipPath);
+                                                    string targetVpkPath = !string.IsNullOrEmpty(animEntry.TargetVpkPath)
+                                                        ? animEntry.TargetVpkPath
+                                                        : $"models/heroes/{config.HeroCodename}/animations/{animEntry.CleanName}.vnmclip_c";
+                                                    targetVpkPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
+                                                    package.AddFile(targetVpkPath, clipData);
+                                                    progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
 

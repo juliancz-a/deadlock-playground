@@ -1,0 +1,5 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/animation/AnimationStudioDock.tscn" id="1_dock_scene"]
+
+[node name="AnimationStudioDock" instance=ExtResource("1_dock_scene")]

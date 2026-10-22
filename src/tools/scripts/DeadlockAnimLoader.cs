@@ -328,14 +328,13 @@ public static class DeadlockAnimLoader
 
 
         // 1. Procedural / Blend space matrices that are not discrete anim clips
-        if (lower.Contains('@') || lower.Contains("aim_matrix") || lower.Contains("turn_matrix") ||
-            lower.Contains("corrective_") || lower.Contains("blend_space") || lower.Contains("ik_calc"))
+        if (lower.Contains("corrective_") || lower.Contains("blend_space") || lower.Contains("ik_calc"))
         {
             return true;
         }
 
         // 2. Procedural / Helper sequences
-        if (lower.Contains("ragdoll") || lower.Contains("lean_"))
+        if (lower.Contains("ragdoll"))
         {
             return true;
         }
@@ -405,6 +404,9 @@ public static class DeadlockAnimLoader
                lower.Contains("shot") ||
                lower.Contains("burst") ||
                lower.Contains("aimed") ||
+               lower.Contains("aim_matrix") ||
+               lower.Contains("turn_matrix") ||
+               lower.Contains("lean_") ||
                lower.Contains("_add") ||
                lower.Contains("_delta") ||
                lower.Contains("delta_");
@@ -549,8 +551,9 @@ public static class DeadlockAnimLoader
         {
             if (clipAnim.Clip.TrackCompressionSettings.Length != vrfSkeleton.Bones.Length)
             {
-                GD.Print($"[AnimLoader] Skipping decoding of clip '{registerName}' (incompatible bone count: {clipAnim.Clip.TrackCompressionSettings.Length} vs skeleton {vrfSkeleton.Bones.Length}).");
-                return null;
+                // In AnimGraph 2, partial clips (weapons, aiming, gestures) only author a subset of joints.
+                // VRF's DecodeFrame safely decodes tracks up to Math.Min(tracks.Length, skeleton.Bones.Length).
+                GD.Print($"[AnimLoader] Clip '{registerName}' has {clipAnim.Clip.TrackCompressionSettings.Length} tracks for {vrfSkeleton.Bones.Length} bones. Decoding partial tracks safely.");
             }
         }
 

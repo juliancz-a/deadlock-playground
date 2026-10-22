@@ -1136,18 +1136,29 @@ public partial class StudioUIManager : CanvasLayer
         if (_btnQuickXRay != null)
         {
             _btnQuickXRay.ToggleMode = true;
+            _btnQuickXRay.Text = _btnQuickXRay.ButtonPressed ? "X-Ray: ON" : "X-Ray: OFF";
             _btnQuickXRay.Toggled += (pressed) =>
             {
+                _btnQuickXRay.Text = pressed ? "X-Ray: ON" : "X-Ray: OFF";
                 _tabBones?.SetXRay(pressed);
+                if (_currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
+                {
+                    bool showGizmo = (_currentTabIndex == 1) || pressed;
+                    _currentSkeletonGizmoManager.SetGizmoEnabled(showGizmo);
+                }
             };
 
             if (_tabBones != null)
             {
                 _tabBones.OnXRayToggled += (pressed) =>
                 {
-                    if (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed != pressed)
+                    if (_btnQuickXRay != null)
                     {
-                        _btnQuickXRay.ButtonPressed = pressed;
+                        if (_btnQuickXRay.ButtonPressed != pressed)
+                        {
+                            _btnQuickXRay.ButtonPressed = pressed;
+                        }
+                        _btnQuickXRay.Text = pressed ? "X-Ray: ON" : "X-Ray: OFF";
                     }
                 };
             }
