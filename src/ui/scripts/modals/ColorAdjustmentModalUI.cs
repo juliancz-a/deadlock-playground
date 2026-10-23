@@ -76,6 +76,7 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     private Vector2 _dragMouseStart;
     private Vector2 _dragPositionStart;
     private bool _suppressSliderEvents = false;
+    private bool _isSamplingUnderlyingComposite = false;
 
     public override void _Ready()
     {
@@ -186,7 +187,7 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             return;
         }
 
-        if (_activeLayer.IsLocked)
+        if (_activeLayer.IsLocked && !_layerManager.IsBaseTextureActive)
         {
             StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{_activeLayer.Name}' because it is locked.");
             return;
@@ -206,10 +207,6 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _activeLayer.GpuData = new byte[expectedLen];
         }
 
-        // Cache pre-adjustment backup buffer
-        _backupBuffer = new byte[expectedLen];
-        Buffer.BlockCopy(_activeLayer.GpuData, 0, _backupBuffer, 0, expectedLen);
-
         // Check active selection mask
         _hasSelection = false;
         _selectionMaskBuffer = null;
@@ -220,6 +217,23 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _selectionMaskBuffer = sel.Buffer;
             _maskW = sel.Width;
             _maskH = sel.Height;
+        }
+
+        // Cache pre-adjustment backup buffer
+        _backupBuffer = new byte[expectedLen];
+
+        // GIMP / Photopea Merge-Into-Layer Behavior:
+        // If target region on active paint layer is completely empty, auto-sample visible pixels underneath!
+        _isSamplingUnderlyingComposite = false;
+        if (!_layerManager.IsBaseTextureActive && _layerManager.IsLayerRegionEmpty(_activeLayer, _selectionMaskBuffer, _maskW, _maskH))
+        {
+            _isSamplingUnderlyingComposite = true;
+            byte[] comp = _layerManager.SampleVisibleCompositeUnderneath(_layerManager.ActiveLayerIndex);
+            Buffer.BlockCopy(comp, 0, _backupBuffer, 0, expectedLen);
+        }
+        else
+        {
+            Buffer.BlockCopy(_activeLayer.GpuData, 0, _backupBuffer, 0, expectedLen);
         }
 
         _currentType = type;
@@ -297,10 +311,11 @@ public partial class ColorAdjustmentModalUI : PanelContainer
 
         if (_lblSubtitle != null)
         {
-            string layerName = _activeLayer != null ? _activeLayer.Name : "Active Layer";
+            string layerName = _layerManager != null && _layerManager.IsBaseTextureActive ? "BASE TEXTURE" : (_activeLayer != null ? _activeLayer.Name : "Active Layer");
+            string modeHint = _isSamplingUnderlyingComposite ? " [Auto-Sampling Visible Underneath]" : "";
             _lblSubtitle.Text = _hasSelection
-                ? $"Target: {layerName}  •  [Selection Mask Active]"
-                : $"Target: {layerName}";
+                ? $"Target: {layerName}{modeHint}  •  [Selection Mask Active]"
+                : $"Target: {layerName}{modeHint}";
         }
 
         _suppressSliderEvents = false;
@@ -425,13 +440,21 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 p,
                 _hasSelection ? _selectionMaskBuffer : null,
                 _maskW,
-                _maskH
+                _maskH,
+                _isSamplingUnderlyingComposite
             );
         }
         else
         {
-            // Restore pristine backup buffer when Preview is unchecked
-            Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            if (_isSamplingUnderlyingComposite)
+            {
+                Array.Clear(_activeLayer.GpuData, 0, _activeLayer.GpuData.Length);
+            }
+            else
+            {
+                // Restore pristine backup buffer when Preview is unchecked
+                Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            }
         }
 
         _layerManager.SyncActiveLayerGpuTexture();
@@ -446,8 +469,15 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     {
         if (_backupBuffer != null && _activeLayer != null && _activeLayer.GpuData != null && _layerManager != null)
         {
-            // Restore pristine backup buffer back to CPU and GPU
-            Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            if (_isSamplingUnderlyingComposite)
+            {
+                Array.Clear(_activeLayer.GpuData, 0, _activeLayer.GpuData.Length);
+            }
+            else
+            {
+                // Restore pristine backup buffer back to CPU and GPU
+                Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            }
             _layerManager.SyncActiveLayerGpuTexture();
             _layerManager.RecompositeGpuLayers();
             _layerManager.UpdateStandaloneComposite();
@@ -473,7 +503,14 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
 
             // 1. Temporarily restore pristine backup into active layer so RecordGpuUndoSnapshot captures pristine state!
-            Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            if (_isSamplingUnderlyingComposite)
+            {
+                Array.Clear(_activeLayer.GpuData, 0, _activeLayer.GpuData.Length);
+            }
+            else
+            {
+                Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            }
             _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
 
             // 2. Compute final adjusted pixels from _backupBuffer into _activeLayer.GpuData
@@ -486,7 +523,8 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 p,
                 _hasSelection ? _selectionMaskBuffer : null,
                 _maskW,
-                _maskH
+                _maskH,
+                _isSamplingUnderlyingComposite
             );
 
             // 3. Sync modified CPU buffer to GPU layer texture & composite

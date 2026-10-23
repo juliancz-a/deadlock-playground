@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using DeadlockPlayground.UI;
 
 public partial class OrbitCamera : Node3D
 {
@@ -226,7 +227,7 @@ public partial class OrbitCamera : Node3D
         }
 
         // 3. Block initiating camera zoom/orbit/pan if modal is open or mouse is hovering over any UI element
-        if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
+        if (ColorAdjustmentModalUI.IsOpen || GradientMapModalUI.IsOpen || FilterModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
 
         if (StudioUIManager.Instance != null && StudioUIManager.Instance.IsAnyModalOpen())
         {

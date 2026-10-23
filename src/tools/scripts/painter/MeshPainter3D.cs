@@ -1013,7 +1013,7 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
-            if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen)
+            if (ColorAdjustmentModalUI.IsOpen || GradientMapModalUI.IsOpen || FilterModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen)
             {
                 return true;
             }

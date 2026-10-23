@@ -492,6 +492,8 @@ public partial class PaintTabUI : VBoxContainer
             || (_modDialogInstance != null && _modDialogInstance.Visible)
             || (_progressDialogInstance != null && _progressDialogInstance.Visible)
             || ColorAdjustmentModalUI.IsOpen
+            || GradientMapModalUI.IsOpen
+            || FilterModalUI.IsOpen
             || ExportBaseTexturesModalUI.IsOpen
             || IsRenameDialogOpen;
     }
@@ -693,6 +695,195 @@ public partial class PaintTabUI : VBoxContainer
         }
     }
 
+    public void OpenGradientMapModal()
+    {
+        var modal = GetTree()?.Root?.FindChild("GradientMapModal", true, false) as GradientMapModalUI;
+        if (modal != null)
+        {
+            modal.Open(this, _layerManager, _painter);
+        }
+        else
+        {
+            GD.PrintErr("[PaintTabUI] GradientMapModal node not found in scene tree.");
+        }
+    }
+
+    public void OpenFilterModal(FilterType type)
+    {
+        var modal = GetTree()?.Root?.FindChild("FilterModal", true, false) as FilterModalUI;
+        if (modal != null)
+        {
+            modal.Open(type, this, _layerManager, _painter);
+        }
+        else
+        {
+            GD.PrintErr("[PaintTabUI] FilterModal node not found in scene tree.");
+        }
+    }
+
+    public void ApplyImmediateFilter(FilterType type)
+    {
+        if (_layerManager == null) return;
+        var layer = _layerManager.ActiveLayer;
+        if (layer == null)
+        {
+            StudioUIManager.Instance?.ShowToast("No active paint layer selected.");
+            return;
+        }
+        if (!layer.IsVisible)
+        {
+            StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is hidden.");
+            return;
+        }
+        if (layer.IsLocked && !_layerManager.IsBaseTextureActive)
+        {
+            StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is locked.");
+            return;
+        }
+
+        _layerManager.EnsureCpuSynced();
+        int w = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+        int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+        int bufLen = w * h * 8;
+        if (layer.GpuData == null || layer.GpuData.Length != bufLen)
+        {
+            layer.DecompressGpuData(bufLen);
+        }
+        if (layer.GpuData == null || layer.GpuData.Length != bufLen) return;
+
+        byte[] maskBuffer = null;
+        int maskW = 0, maskH = 0;
+        var sel = _painter?.SelectionMask ?? _painter?.MagicWandTool?.SelectionMask;
+        if (sel != null && sel.HasSelection && sel.UseSelectionMask && sel.Buffer != null)
+        {
+            maskBuffer = sel.Buffer;
+            maskW = sel.Width;
+            maskH = sel.Height;
+        }
+
+        byte[] backup = new byte[bufLen];
+        bool isSamplingUnderlying = false;
+        if (!_layerManager.IsBaseTextureActive && _layerManager.IsLayerRegionEmpty(layer, maskBuffer, maskW, maskH))
+        {
+            isSamplingUnderlying = true;
+            byte[] comp = _layerManager.SampleVisibleCompositeUnderneath(_layerManager.ActiveLayerIndex);
+            Buffer.BlockCopy(comp, 0, backup, 0, bufLen);
+        }
+        else
+        {
+            Buffer.BlockCopy(layer.GpuData, 0, backup, 0, bufLen);
+        }
+
+        _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
+
+        var p = FilterParameters.Default(type);
+        FilterModalUI.LastFilterParameters = p;
+        FilterEngine.ApplyFilter(backup, layer.GpuData, w, h, p, maskBuffer, maskW, maskH, isSamplingUnderlying);
+
+        _layerManager.SyncActiveLayerGpuTexture();
+        _layerManager.RecompositeGpuLayers();
+        _layerManager.UpdateStandaloneComposite();
+        _layerManager.SyncGpuStrokeToComposite();
+        _layerManager.SetActiveContextHasPaintStrokes(true);
+
+        if (!string.IsNullOrEmpty(_layerManager.ActiveMaterialKey) && _meshHierarchy != null)
+        {
+            _meshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+        }
+        RegisterActiveStrokeMetadata();
+
+        _layerManager.NotifyStackChanged();
+        _brushPalette?.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+        var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+        uvCanvas?.QueueCanvasRedraw();
+
+        StudioUIManager.Instance?.ShowToast($"{type} Filter Applied");
+    }
+
+    public void RepeatLastFilter()
+    {
+        if (FilterModalUI.LastFilterParameters == null)
+        {
+            StudioUIManager.Instance?.ShowToast("No filter to repeat.");
+            return;
+        }
+
+        var p = FilterModalUI.LastFilterParameters.Value;
+        if (_layerManager == null) return;
+        var layer = _layerManager.ActiveLayer;
+        if (layer == null)
+        {
+            StudioUIManager.Instance?.ShowToast("No active paint layer selected.");
+            return;
+        }
+        if (!layer.IsVisible)
+        {
+            StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is hidden.");
+            return;
+        }
+        if (layer.IsLocked && !_layerManager.IsBaseTextureActive)
+        {
+            StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is locked.");
+            return;
+        }
+
+        _layerManager.EnsureCpuSynced();
+        int w = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
+        int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
+        int bufLen = w * h * 8;
+        if (layer.GpuData == null || layer.GpuData.Length != bufLen)
+        {
+            layer.DecompressGpuData(bufLen);
+        }
+        if (layer.GpuData == null || layer.GpuData.Length != bufLen) return;
+
+        byte[] maskBuffer = null;
+        int maskW = 0, maskH = 0;
+        var sel = _painter?.SelectionMask ?? _painter?.MagicWandTool?.SelectionMask;
+        if (sel != null && sel.HasSelection && sel.UseSelectionMask && sel.Buffer != null)
+        {
+            maskBuffer = sel.Buffer;
+            maskW = sel.Width;
+            maskH = sel.Height;
+        }
+
+        byte[] backup = new byte[bufLen];
+        bool isSamplingUnderlying = false;
+        if (!_layerManager.IsBaseTextureActive && _layerManager.IsLayerRegionEmpty(layer, maskBuffer, maskW, maskH))
+        {
+            isSamplingUnderlying = true;
+            byte[] comp = _layerManager.SampleVisibleCompositeUnderneath(_layerManager.ActiveLayerIndex);
+            Buffer.BlockCopy(comp, 0, backup, 0, bufLen);
+        }
+        else
+        {
+            Buffer.BlockCopy(layer.GpuData, 0, backup, 0, bufLen);
+        }
+
+        _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
+
+        FilterEngine.ApplyFilter(backup, layer.GpuData, w, h, p, maskBuffer, maskW, maskH, isSamplingUnderlying);
+
+        _layerManager.SyncActiveLayerGpuTexture();
+        _layerManager.RecompositeGpuLayers();
+        _layerManager.UpdateStandaloneComposite();
+        _layerManager.SyncGpuStrokeToComposite();
+        _layerManager.SetActiveContextHasPaintStrokes(true);
+
+        if (!string.IsNullOrEmpty(_layerManager.ActiveMaterialKey) && _meshHierarchy != null)
+        {
+            _meshHierarchy.MarkMaterialDirty(_layerManager.ActiveMaterialKey, _layerManager);
+        }
+        RegisterActiveStrokeMetadata();
+
+        _layerManager.NotifyStackChanged();
+        _brushPalette?.UpdateUndoRedoState(_layerManager.CanUndo, _layerManager.CanRedo);
+        var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+        uvCanvas?.QueueCanvasRedraw();
+
+        StudioUIManager.Instance?.ShowToast($"Repeated {p.Type}");
+    }
+
     public void ApplyImmediateAdjustment(AdjustmentType type)
     {
         if (_layerManager == null) return;
@@ -707,7 +898,7 @@ public partial class PaintTabUI : VBoxContainer
             StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{layer.Name}' because it is hidden.");
             return;
         }
-        if (layer.IsLocked)
+        if (layer.IsLocked && !_layerManager.IsBaseTextureActive)
         {
             StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{layer.Name}' because it is locked.");
             return;
@@ -723,10 +914,7 @@ public partial class PaintTabUI : VBoxContainer
         }
         if (layer.GpuData == null || layer.GpuData.Length != bufLen) return;
 
-        // 1. Record Undo snapshot BEFORE applying change
-        _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
-
-        // 2. Check active selection mask
+        // Check active selection mask
         byte[] maskBuffer = null;
         int maskW = 0, maskH = 0;
         var sel = _painter?.SelectionMask ?? _painter?.MagicWandTool?.SelectionMask;
@@ -737,12 +925,24 @@ public partial class PaintTabUI : VBoxContainer
             maskH = sel.Height;
         }
 
-        // 3. Make temporary copy of current pixel data to read from
         byte[] backup = new byte[bufLen];
-        Buffer.BlockCopy(layer.GpuData, 0, backup, 0, bufLen);
+        bool isSamplingUnderlying = false;
+        if (!_layerManager.IsBaseTextureActive && _layerManager.IsLayerRegionEmpty(layer, maskBuffer, maskW, maskH))
+        {
+            isSamplingUnderlying = true;
+            byte[] comp = _layerManager.SampleVisibleCompositeUnderneath(_layerManager.ActiveLayerIndex);
+            Buffer.BlockCopy(comp, 0, backup, 0, bufLen);
+        }
+        else
+        {
+            Buffer.BlockCopy(layer.GpuData, 0, backup, 0, bufLen);
+        }
+
+        // 1. Record Undo snapshot BEFORE applying change
+        _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
 
         var p = ColorAdjustmentParams.Default(type);
-        ColorAdjustmentEngine.ApplyAdjustment(backup, layer.GpuData, w, h, p, maskBuffer, maskW, maskH);
+        ColorAdjustmentEngine.ApplyAdjustment(backup, layer.GpuData, w, h, p, maskBuffer, maskW, maskH, isSamplingUnderlying);
 
         // 4. Synchronize GPU texture and composite
         _layerManager.SyncActiveLayerGpuTexture();
@@ -2940,6 +3140,74 @@ public partial class PaintTabUI : VBoxContainer
             _layersListContainer.AddChild(row);
         }
 
+        // Pinned bottom row: 🔒 BASE TEXTURE
+        var baseRow = new HBoxContainer();
+
+        var baseBtnWrapper = new Control
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.Fill,
+            CustomMinimumSize = new Vector2(0, 26),
+            ClipContents = true
+        };
+
+        var baseSelectBtn = new Button
+        {
+            Text = "🔒 BASE TEXTURE",
+            Alignment = HorizontalAlignment.Left,
+            ClipText = true,
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            TooltipText = "Base Texture (Vanilla .vtex_c). Can be modified via adjustments, filters, or painting."
+        };
+        baseSelectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        baseSelectBtn.OffsetLeft = 0;
+        baseSelectBtn.OffsetTop = 0;
+        baseSelectBtn.OffsetRight = 0;
+        baseSelectBtn.OffsetBottom = 0;
+
+        if (_layerManager.IsBaseTextureActive)
+        {
+            baseSelectBtn.Modulate = new Color(1.0f, 0.85f, 0.4f, 1.0f);
+        }
+
+        baseSelectBtn.Pressed += () => _layerManager.SelectBaseTexture();
+        baseSelectBtn.GuiInput += (ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Right && mb.Pressed)
+            {
+                ShowBaseTextureContextMenu(mb.GlobalPosition);
+            }
+        };
+        baseBtnWrapper.AddChild(baseSelectBtn);
+
+        EnsureRenameButtonStyles();
+        _iconRefresh ??= GD.Load<Texture2D>("res://assets/at-icons/arrow_counterclockwise.svg");
+        var resetBaseBtn = new Button
+        {
+            Icon = _iconRefresh,
+            ExpandIcon = true,
+            IconAlignment = HorizontalAlignment.Center,
+            CustomMinimumSize = new Vector2(26, 26),
+            TooltipText = "Reset Base Texture to pristine vanilla texture",
+            SizeFlagsVertical = SizeFlags.ShrinkCenter
+        };
+        resetBaseBtn.AddThemeStyleboxOverride("normal", _renameBtnNormalStyle);
+        resetBaseBtn.AddThemeStyleboxOverride("hover", _renameBtnHoverStyle);
+        resetBaseBtn.AddThemeStyleboxOverride("pressed", _renameBtnPressedStyle);
+        resetBaseBtn.AddThemeStyleboxOverride("disabled", _renameBtnDisabledStyle);
+        resetBaseBtn.AddThemeStyleboxOverride("focus", _renameBtnNormalStyle);
+
+        resetBaseBtn.Pressed += () =>
+        {
+            _layerManager.ResetBaseTexture();
+            RefreshLayersListUI();
+            StudioUIManager.Instance?.ShowToast("Base Texture restored to vanilla");
+        };
+
+        baseRow.AddChild(baseBtnWrapper);
+        baseRow.AddChild(resetBaseBtn);
+        _layersListContainer.AddChild(baseRow);
+
         UpdateActiveLayerUI();
     }
 
@@ -2949,6 +3217,45 @@ public partial class PaintTabUI : VBoxContainer
     }
 
     private PopupMenu _layerContextMenu;
+    private PopupMenu _baseContextMenu;
+    private Texture2D _iconRefresh;
+
+    private void ShowBaseTextureContextMenu(Vector2 screenPos)
+    {
+        if (_layerManager == null) return;
+
+        if (_baseContextMenu == null)
+        {
+            _baseContextMenu = new PopupMenu();
+            _baseContextMenu.Name = "BaseTextureContextMenu";
+            AddChild(_baseContextMenu);
+        }
+
+        _baseContextMenu.Clear();
+        _baseContextMenu.AddItem("Reset to Vanilla Texture", 0);
+
+        var connections = _baseContextMenu.GetSignalConnectionList("id_pressed");
+        foreach (var conn in connections)
+        {
+            if (conn.TryGetValue("callable", out var cVal) && cVal.VariantType == Variant.Type.Callable)
+            {
+                _baseContextMenu.Disconnect("id_pressed", cVal.AsCallable());
+            }
+        }
+
+        _baseContextMenu.IdPressed += (id) =>
+        {
+            if (id == 0)
+            {
+                _layerManager.ResetBaseTexture();
+                RefreshLayersListUI();
+                StudioUIManager.Instance?.ShowToast("Base Texture restored to vanilla");
+            }
+        };
+
+        _baseContextMenu.Position = (Vector2I)screenPos;
+        _baseContextMenu.Popup();
+    }
 
     private void ShowLayerContextMenu(int layerIdx, Vector2 screenPos)
     {
@@ -3086,22 +3393,27 @@ public partial class PaintTabUI : VBoxContainer
     private void UpdateActiveLayerUI()
     {
         if (_layerManager == null) return;
+        bool isBase = _layerManager.IsBaseTextureActive;
         var activeLayer = _layerManager.ActiveLayer;
         if (activeLayer == null) return;
+
+        if (_btnDeleteLayer != null) _btnDeleteLayer.Disabled = isBase;
+        if (_btnMoveUp != null) _btnMoveUp.Disabled = isBase || (_layerManager.ActiveLayerIndex >= _layerManager.Layers.Count - 1);
+        if (_btnMoveDown != null) _btnMoveDown.Disabled = isBase || (_layerManager.ActiveLayerIndex <= 0);
 
         if (_optLayerBlend != null)
         {
             _optLayerBlend.Select((int)activeLayer.BlendMode);
-            _optLayerBlend.Disabled = activeLayer.IsLocked;
+            _optLayerBlend.Disabled = isBase || activeLayer.IsLocked;
         }
 
         if (_sliderLayerOpacity != null)
         {
-            _sliderLayerOpacity.SetValueNoSignal(activeLayer.Opacity);
-            _sliderLayerOpacity.Editable = !activeLayer.IsLocked;
+            _sliderLayerOpacity.SetValueNoSignal(isBase ? 1.0f : activeLayer.Opacity);
+            _sliderLayerOpacity.Editable = !isBase && !activeLayer.IsLocked;
             if (_lblLayerOpacity != null)
             {
-                _lblLayerOpacity.Text = $"{Mathf.RoundToInt(activeLayer.Opacity * 100)}%";
+                _lblLayerOpacity.Text = $"{Mathf.RoundToInt((isBase ? 1.0f : activeLayer.Opacity) * 100)}%";
             }
         }
 

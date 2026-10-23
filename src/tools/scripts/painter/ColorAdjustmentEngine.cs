@@ -149,7 +149,8 @@ namespace DeadlockPlayground.Painter
             ColorAdjustmentParams parameters,
             byte[] selectionMask = null,
             int maskWidth = 0,
-            int maskHeight = 0)
+            int maskHeight = 0,
+            bool isSamplingUnderlying = false)
         {
             if (sourceBuffer == null || targetBuffer == null || width <= 0 || height <= 0) return;
             int totalBytes = width * height * 8;
@@ -345,18 +346,48 @@ namespace DeadlockPlayground.Painter
                             float finalLinG = SrgbToLinear(adjG);
                             float finalLinB = SrgbToLinear(adjB);
 
-                            // Apply selection mask weighting if active
-                            if (hasMask && maskWeight < 0.999f)
+                            if (isSamplingUnderlying)
                             {
-                                finalLinR = linR + (finalLinR - linR) * maskWeight;
-                                finalLinG = linG + (finalLinG - linG) * maskWeight;
-                                finalLinB = linB + (finalLinB - linB) * maskWeight;
+                                if (hasMask)
+                                {
+                                    if (maskWeight > 0.005f)
+                                    {
+                                        dstHalf[idx * 4 + 0] = (Half)finalLinR;
+                                        dstHalf[idx * 4 + 1] = (Half)finalLinG;
+                                        dstHalf[idx * 4 + 2] = (Half)finalLinB;
+                                        dstHalf[idx * 4 + 3] = (Half)maskWeight;
+                                    }
+                                    else
+                                    {
+                                        dstHalf[idx * 4 + 0] = (Half)0f;
+                                        dstHalf[idx * 4 + 1] = (Half)0f;
+                                        dstHalf[idx * 4 + 2] = (Half)0f;
+                                        dstHalf[idx * 4 + 3] = (Half)0f;
+                                    }
+                                }
+                                else
+                                {
+                                    dstHalf[idx * 4 + 0] = (Half)finalLinR;
+                                    dstHalf[idx * 4 + 1] = (Half)finalLinG;
+                                    dstHalf[idx * 4 + 2] = (Half)finalLinB;
+                                    dstHalf[idx * 4 + 3] = (Half)1.0f;
+                                }
                             }
+                            else
+                            {
+                                // Apply selection mask weighting if active
+                                if (hasMask && maskWeight < 0.999f)
+                                {
+                                    finalLinR = linR + (finalLinR - linR) * maskWeight;
+                                    finalLinG = linG + (finalLinG - linG) * maskWeight;
+                                    finalLinB = linB + (finalLinB - linB) * maskWeight;
+                                }
 
-                            dstHalf[idx * 4 + 0] = (Half)finalLinR;
-                            dstHalf[idx * 4 + 1] = (Half)finalLinG;
-                            dstHalf[idx * 4 + 2] = (Half)finalLinB;
-                            dstHalf[idx * 4 + 3] = aHalf; // Original Alpha ALWAYS preserved!
+                                dstHalf[idx * 4 + 0] = (Half)finalLinR;
+                                dstHalf[idx * 4 + 1] = (Half)finalLinG;
+                                dstHalf[idx * 4 + 2] = (Half)finalLinB;
+                                dstHalf[idx * 4 + 3] = aHalf; // Original Alpha ALWAYS preserved!
+                            }
                         }
                     });
                 }

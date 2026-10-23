@@ -1,0 +1,773 @@
+[gd_scene format=3 uid="uid://c8fltrmodal"]
+
+[ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://ui/scripts/modals/FilterModalUI.cs" id="2_script"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="3_colus"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal_root"]
+content_margin_left = 18.0
+content_margin_top = 14.0
+content_margin_right = 18.0
+content_margin_bottom = 16.0
+bg_color = Color(0.09, 0.1, 0.13, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.68, 0.32, 0.8)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.65)
+shadow_size = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_normal"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.25, 0.2, 0.11, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.68, 0.32, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_hover"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.38, 0.3, 0.15, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 0.85, 0.45, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_pressed"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.18, 0.14, 0.08, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.7, 0.55, 0.25, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="FilterModal" type="PanelContainer" node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_panelBlur", "_panelMotionBlur", "_panelUnsharpMask", "_panelAddNoise", "_panelMedian", "_panelMosaic", "_panelHalftone", "_panelEmboss", "_panelOilPaint", "_panelChromaticAberration", "_panelOutlineStroke", "_panelHighPass", "_sliderBlurRadius", "_lblBlurRadiusVal", "_sliderMotionAngle", "_lblMotionAngleVal", "_sliderMotionDistance", "_lblMotionDistanceVal", "_sliderUnsharpAmount", "_lblUnsharpAmountVal", "_sliderUnsharpRadius", "_lblUnsharpRadiusVal", "_sliderUnsharpThreshold", "_lblUnsharpThresholdVal", "_sliderNoiseAmount", "_lblNoiseAmountVal", "_chkNoiseMonochromatic", "_optNoiseDist", "_sliderMedianRadius", "_lblMedianRadiusVal", "_sliderMosaicCellSize", "_lblMosaicCellSizeVal", "_sliderHalftoneDotSize", "_lblHalftoneDotSizeVal", "_sliderHalftoneLevels", "_lblHalftoneLevelsVal", "_sliderEmbossAngle", "_lblEmbossAngleVal", "_sliderEmbossHeight", "_lblEmbossHeightVal", "_sliderEmbossAmount", "_lblEmbossAmountVal", "_sliderOilRadius", "_lblOilRadiusVal", "_sliderShiftX", "_lblShiftXVal", "_sliderShiftY", "_lblShiftYVal", "_sliderOutlineThickness", "_lblOutlineThicknessVal", "_colorPickerOutline", "_optOutlinePos", "_sliderHighPassRadius", "_lblHighPassRadiusVal", "_chkPreview", "_btnReset", "_btnCancel", "_btnApply")]
+clip_contents = true
+custom_minimum_size = Vector2(400, 260)
+offset_right = 400.0
+offset_bottom = 280.0
+theme = ExtResource("1_theme")
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
+script = ExtResource("2_script")
+_headerContainer = NodePath("VBoxContainer/HeaderBar")
+_lblTitle = NodePath("VBoxContainer/HeaderBar/VBoxTitle/Title")
+_lblSubtitle = NodePath("VBoxContainer/HeaderBar/VBoxTitle/Subtitle")
+_btnClose = NodePath("VBoxContainer/HeaderBar/BtnClose")
+_panelBlur = NodePath("VBoxContainer/PanelsContainer/PanelBlur")
+_panelMotionBlur = NodePath("VBoxContainer/PanelsContainer/PanelMotionBlur")
+_panelUnsharpMask = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask")
+_panelAddNoise = NodePath("VBoxContainer/PanelsContainer/PanelAddNoise")
+_panelMedian = NodePath("VBoxContainer/PanelsContainer/PanelMedian")
+_panelMosaic = NodePath("VBoxContainer/PanelsContainer/PanelMosaic")
+_panelHalftone = NodePath("VBoxContainer/PanelsContainer/PanelHalftone")
+_panelEmboss = NodePath("VBoxContainer/PanelsContainer/PanelEmboss")
+_panelOilPaint = NodePath("VBoxContainer/PanelsContainer/PanelOilPaint")
+_panelChromaticAberration = NodePath("VBoxContainer/PanelsContainer/PanelChromaticAberration")
+_panelOutlineStroke = NodePath("VBoxContainer/PanelsContainer/PanelOutlineStroke")
+_panelHighPass = NodePath("VBoxContainer/PanelsContainer/PanelHighPass")
+_sliderBlurRadius = NodePath("VBoxContainer/PanelsContainer/PanelBlur/RadiusRow/SliderBlurRadius")
+_lblBlurRadiusVal = NodePath("VBoxContainer/PanelsContainer/PanelBlur/RadiusRow/LblBlurRadiusVal")
+_sliderMotionAngle = NodePath("VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow/SliderMotionAngle")
+_lblMotionAngleVal = NodePath("VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow/LblMotionAngleVal")
+_sliderMotionDistance = NodePath("VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow/SliderMotionDist")
+_lblMotionDistanceVal = NodePath("VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow/LblMotionDistVal")
+_sliderUnsharpAmount = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow/SliderAmount")
+_lblUnsharpAmountVal = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow/LblAmountVal")
+_sliderUnsharpRadius = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow/SliderRadius")
+_lblUnsharpRadiusVal = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow/LblRadiusVal")
+_sliderUnsharpThreshold = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow/SliderThresh")
+_lblUnsharpThresholdVal = NodePath("VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow/LblThreshVal")
+_sliderNoiseAmount = NodePath("VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow/SliderNoiseAmount")
+_lblNoiseAmountVal = NodePath("VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow/LblNoiseAmountVal")
+_chkNoiseMonochromatic = NodePath("VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow/ChkMonochromatic")
+_optNoiseDist = NodePath("VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow/OptDist")
+_sliderMedianRadius = NodePath("VBoxContainer/PanelsContainer/PanelMedian/RadiusRow/SliderMedianRadius")
+_lblMedianRadiusVal = NodePath("VBoxContainer/PanelsContainer/PanelMedian/RadiusRow/LblMedianRadiusVal")
+_sliderMosaicCellSize = NodePath("VBoxContainer/PanelsContainer/PanelMosaic/CellRow/SliderCellSize")
+_lblMosaicCellSizeVal = NodePath("VBoxContainer/PanelsContainer/PanelMosaic/CellRow/LblCellSizeVal")
+_sliderHalftoneDotSize = NodePath("VBoxContainer/PanelsContainer/PanelHalftone/DotRow/SliderDotSize")
+_lblHalftoneDotSizeVal = NodePath("VBoxContainer/PanelsContainer/PanelHalftone/DotRow/LblDotSizeVal")
+_sliderHalftoneLevels = NodePath("VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow/SliderLevels")
+_lblHalftoneLevelsVal = NodePath("VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow/LblLevelsVal")
+_sliderEmbossAngle = NodePath("VBoxContainer/PanelsContainer/PanelEmboss/AngleRow/SliderAngle")
+_lblEmbossAngleVal = NodePath("VBoxContainer/PanelsContainer/PanelEmboss/AngleRow/LblAngleVal")
+_sliderEmbossHeight = NodePath("VBoxContainer/PanelsContainer/PanelEmboss/HeightRow/SliderHeight")
+_lblEmbossHeightVal = NodePath("VBoxContainer/PanelsContainer/PanelEmboss/HeightRow/LblHeightVal")
+_sliderEmbossAmount = NodePath("VBoxContainer/PanelsContainer/PanelEmboss/AmountRow/SliderAmount")
+_lblEmbossAmountVal = NodePath("VBoxContainer/PanelsContainer/PanelEmboss/AmountRow/LblAmountVal")
+_sliderOilRadius = NodePath("VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow/SliderOilRadius")
+_lblOilRadiusVal = NodePath("VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow/LblOilRadiusVal")
+_sliderShiftX = NodePath("VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow/SliderShiftX")
+_lblShiftXVal = NodePath("VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow/LblShiftXVal")
+_sliderShiftY = NodePath("VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow/SliderShiftY")
+_lblShiftYVal = NodePath("VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow/LblShiftYVal")
+_sliderOutlineThickness = NodePath("VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow/SliderThickness")
+_lblOutlineThicknessVal = NodePath("VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow/LblThicknessVal")
+_colorPickerOutline = NodePath("VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow/ColorPickerOutline")
+_optOutlinePos = NodePath("VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow/OptOutlinePos")
+_sliderHighPassRadius = NodePath("VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow/SliderHighPassRadius")
+_lblHighPassRadiusVal = NodePath("VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow/LblHighPassRadiusVal")
+_chkPreview = NodePath("VBoxContainer/FooterBar/ChkPreview")
+_btnReset = NodePath("VBoxContainer/FooterBar/BtnReset")
+_btnCancel = NodePath("VBoxContainer/FooterBar/BtnCancel")
+_btnApply = NodePath("VBoxContainer/FooterBar/BtnApply")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderBar" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="VBoxTitle" type="VBoxContainer" parent="VBoxContainer/HeaderBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="Title" type="Label" parent="VBoxContainer/HeaderBar/VBoxTitle"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.85, 0.55, 1)
+theme_override_fonts/font = ExtResource("3_colus")
+theme_override_font_sizes/font_size = 16
+text = "FILTER"
+
+[node name="Subtitle" type="Label" parent="VBoxContainer/HeaderBar/VBoxTitle"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.68, 0.75, 1)
+theme_override_font_sizes/font_size = 11
+text = "Apply raster filter"
+
+[node name="BtnClose" type="Button" parent="VBoxContainer/HeaderBar"]
+custom_minimum_size = Vector2(26, 26)
+layout_mode = 2
+size_flags_vertical = 4
+text = "✕"
+
+[node name="HSeparator1" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="PanelsContainer" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="PanelBlur" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RadiusRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelBlur"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelBlur/RadiusRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Radius:"
+
+[node name="SliderBlurRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelBlur/RadiusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.5
+max_value = 50.0
+step = 0.5
+value = 4.0
+
+[node name="LblBlurRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelBlur/RadiusRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "4.0px"
+horizontal_alignment = 2
+
+[node name="PanelMotionBlur" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AngleRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelMotionBlur"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Angle:"
+
+[node name="SliderMotionAngle" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 360.0
+value = 0.0
+
+[node name="LblMotionAngleVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0°"
+horizontal_alignment = 2
+
+[node name="DistRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelMotionBlur"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Distance:"
+
+[node name="SliderMotionDist" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 60.0
+value = 12.0
+
+[node name="LblMotionDistVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "12px"
+horizontal_alignment = 2
+
+[node name="PanelUnsharpMask" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AmountRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Amount:"
+
+[node name="SliderAmount" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 300.0
+value = 100.0
+
+[node name="LblAmountVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "100%"
+horizontal_alignment = 2
+
+[node name="RadiusRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Radius:"
+
+[node name="SliderRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 20.0
+step = 0.5
+value = 2.0
+
+[node name="LblRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "2.0px"
+horizontal_alignment = 2
+
+[node name="ThreshRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Threshold:"
+
+[node name="SliderThresh" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 50.0
+value = 0.0
+
+[node name="LblThreshVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0"
+horizontal_alignment = 2
+
+[node name="PanelAddNoise" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AmountRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelAddNoise"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Amount:"
+
+[node name="SliderNoiseAmount" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 100.0
+value = 15.0
+
+[node name="LblNoiseAmountVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "15%"
+horizontal_alignment = 2
+
+[node name="OptionsRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelAddNoise"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ChkMonochromatic" type="CheckBox" parent="VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+button_pressed = true
+text = "Monochromatic"
+
+[node name="LblDist" type="Label" parent="VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Dist:"
+
+[node name="OptDist" type="OptionButton" parent="VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+
+[node name="PanelMedian" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RadiusRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelMedian"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMedian/RadiusRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Radius:"
+
+[node name="SliderMedianRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMedian/RadiusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 5.0
+value = 2.0
+
+[node name="LblMedianRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMedian/RadiusRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "2px"
+horizontal_alignment = 2
+
+[node name="PanelMosaic" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CellRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelMosaic"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMosaic/CellRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Cell Size:"
+
+[node name="SliderCellSize" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMosaic/CellRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 2.0
+max_value = 64.0
+value = 8.0
+
+[node name="LblCellSizeVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMosaic/CellRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "8px"
+horizontal_alignment = 2
+
+[node name="PanelHalftone" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DotRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelHalftone"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/DotRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Dot Size:"
+
+[node name="SliderDotSize" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelHalftone/DotRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 2.0
+max_value = 32.0
+value = 6.0
+
+[node name="LblDotSizeVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/DotRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "6px"
+horizontal_alignment = 2
+
+[node name="LevelsRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelHalftone"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Levels:"
+
+[node name="SliderLevels" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 2.0
+max_value = 16.0
+value = 4.0
+
+[node name="LblLevelsVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "4"
+horizontal_alignment = 2
+
+[node name="PanelEmboss" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="AngleRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelEmboss"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AngleRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Angle:"
+
+[node name="SliderAngle" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelEmboss/AngleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -180.0
+max_value = 180.0
+value = 45.0
+
+[node name="LblAngleVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AngleRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "45°"
+horizontal_alignment = 2
+
+[node name="HeightRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelEmboss"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/HeightRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Height:"
+
+[node name="SliderHeight" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelEmboss/HeightRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 10.0
+step = 0.5
+value = 2.0
+
+[node name="LblHeightVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/HeightRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "2.0px"
+horizontal_alignment = 2
+
+[node name="AmountRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelEmboss"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AmountRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Amount:"
+
+[node name="SliderAmount" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelEmboss/AmountRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 500.0
+value = 100.0
+
+[node name="LblAmountVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AmountRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "100%"
+horizontal_alignment = 2
+
+[node name="PanelOilPaint" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RadiusRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelOilPaint"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Radius:"
+
+[node name="SliderOilRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 8.0
+value = 3.0
+
+[node name="LblOilRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "3px"
+horizontal_alignment = 2
+
+[node name="PanelChromaticAberration" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ShiftXRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Shift X:"
+
+[node name="SliderShiftX" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -20.0
+max_value = 20.0
+value = 4.0
+
+[node name="LblShiftXVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "4px"
+horizontal_alignment = 2
+
+[node name="ShiftYRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Shift Y:"
+
+[node name="SliderShiftY" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = -20.0
+max_value = 20.0
+value = 0.0
+
+[node name="LblShiftYVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "0px"
+horizontal_alignment = 2
+
+[node name="PanelOutlineStroke" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ThicknessRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Thickness:"
+
+[node name="SliderThickness" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 25.0
+value = 3.0
+
+[node name="LblThicknessVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "3px"
+horizontal_alignment = 2
+
+[node name="StyleRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LblColor" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Color:"
+
+[node name="ColorPickerOutline" type="ColorPickerButton" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
+custom_minimum_size = Vector2(36, 24)
+layout_mode = 2
+color = Color(0.85, 0.68, 0.32, 1)
+
+[node name="LblPos" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Position:"
+
+[node name="OptOutlinePos" type="OptionButton" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+
+[node name="PanelHighPass" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RadiusRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelHighPass"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Radius:"
+
+[node name="SliderHighPassRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 50.0
+step = 0.5
+value = 10.0
+
+[node name="LblHighPassRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow"]
+custom_minimum_size = Vector2(45, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "10.0px"
+horizontal_alignment = 2
+
+[node name="HSeparator2" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="FooterBar" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ChkPreview" type="CheckBox" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+button_pressed = true
+text = "Preview"
+
+[node name="BtnReset" type="Button" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+size_flags_horizontal = 10
+theme_override_font_sizes/font_size = 11
+text = "Reset"
+
+[node name="BtnCancel" type="Button" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Cancel"
+
+[node name="BtnApply" type="Button" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_colus")
+theme_override_font_sizes/font_size = 12
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_apply_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_apply_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_apply_pressed")
+text = "Apply"
