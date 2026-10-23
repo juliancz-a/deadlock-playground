@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 using DeadlockPlayground.Materials;
 
@@ -24,6 +25,8 @@ namespace DeadlockPlayground.Painter
 
         // Exact compiled color texture path for direct in-place VPK replacement
         public string OriginalColorVtexCPath { get; set; }
+        public string OriginalSecondaryColorVtexCPath { get; set; }
+        public List<string> AllColorVtexCPaths { get; set; } = new();
 
         // Original Source 2 material texture parameters
         public string OriginalNormalVtex { get; set; }
@@ -747,21 +750,110 @@ namespace DeadlockPlayground.Painter
             if (mat.HasMeta("OriginalShader")) info.OriginalShader = mat.GetMeta("OriginalShader").AsString();
             if (mat.HasMeta("OriginalColorVtexCPath"))
             {
-                info.OriginalColorVtexCPath = mat.GetMeta("OriginalColorVtexCPath").AsString();
+                string orig = mat.GetMeta("OriginalColorVtexCPath").AsString();
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(orig))
+                    info.OriginalColorVtexCPath = orig;
             }
             else if (mat.HasMeta("TextureParam_g_tColor"))
             {
                 string raw = mat.GetMeta("TextureParam_g_tColor").AsString().Replace('\\', '/').Trim().TrimStart('/');
-                if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
-                else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
-                info.OriginalColorVtexCPath = raw;
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalColorVtexCPath = raw;
+                }
             }
             else if (mat.HasMeta("TextureParam_TextureColor"))
             {
                 string raw = mat.GetMeta("TextureParam_TextureColor").AsString().Replace('\\', '/').Trim().TrimStart('/');
-                if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
-                else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
-                info.OriginalColorVtexCPath = raw;
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalColorVtexCPath = raw;
+                }
+            }
+
+            if (mat.HasMeta("OriginalSecondaryColorVtexCPath"))
+            {
+                string sec = mat.GetMeta("OriginalSecondaryColorVtexCPath").AsString();
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(sec))
+                {
+                    info.OriginalSecondaryColorVtexCPath = sec;
+                }
+            }
+            else if (mat.HasMeta("TextureParam_TextureColor2"))
+            {
+                string raw = mat.GetMeta("TextureParam_TextureColor2").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalSecondaryColorVtexCPath = raw;
+                }
+            }
+            else if (mat.HasMeta("TextureParam_g_tColor2"))
+            {
+                string raw = mat.GetMeta("TextureParam_g_tColor2").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalSecondaryColorVtexCPath = raw;
+                }
+            }
+            else if (mat.HasMeta("TextureParam_g_tAltColor_Reveal"))
+            {
+                string raw = mat.GetMeta("TextureParam_g_tAltColor_Reveal").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalSecondaryColorVtexCPath = raw;
+                }
+            }
+            else if (mat.HasMeta("TextureParam_g_tAltColor"))
+            {
+                string raw = mat.GetMeta("TextureParam_g_tAltColor").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalSecondaryColorVtexCPath = raw;
+                }
+            }
+            else if (mat.HasMeta("TextureParam_TextureColorB"))
+            {
+                string raw = mat.GetMeta("TextureParam_TextureColorB").AsString().Replace('\\', '/').Trim().TrimStart('/');
+                if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(raw))
+                {
+                    if (raw.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) raw += "_c";
+                    else if (!raw.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) raw += ".vtex_c";
+                    info.OriginalSecondaryColorVtexCPath = raw;
+                }
+            }
+
+            info.AllColorVtexCPaths.Clear();
+            if (mat.HasMeta("OriginalAllColorVtexCPaths"))
+            {
+                string allStr = mat.GetMeta("OriginalAllColorVtexCPaths").AsString();
+                if (!string.IsNullOrEmpty(allStr))
+                {
+                    foreach (var p in allStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(p) && !info.AllColorVtexCPaths.Contains(p, StringComparer.OrdinalIgnoreCase))
+                            info.AllColorVtexCPaths.Add(p);
+                    }
+                }
+            }
+            if (!string.IsNullOrEmpty(info.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(info.OriginalColorVtexCPath) && !info.AllColorVtexCPaths.Contains(info.OriginalColorVtexCPath, StringComparer.OrdinalIgnoreCase))
+            {
+                info.AllColorVtexCPaths.Add(info.OriginalColorVtexCPath);
+            }
+            if (!string.IsNullOrEmpty(info.OriginalSecondaryColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(info.OriginalSecondaryColorVtexCPath) && !info.AllColorVtexCPaths.Contains(info.OriginalSecondaryColorVtexCPath, StringComparer.OrdinalIgnoreCase))
+            {
+                info.AllColorVtexCPaths.Add(info.OriginalSecondaryColorVtexCPath);
             }
 
             if (mat.HasMeta("TextureParam_g_tNormalRoughness")) info.OriginalNormalVtex = mat.GetMeta("TextureParam_g_tNormalRoughness").AsString();

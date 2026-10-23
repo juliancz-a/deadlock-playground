@@ -948,6 +948,7 @@ namespace DeadlockPlayground.Painter
             {
                 string[] candidateParams = { 
                     "g_tColor", "g_tColor1", "g_tColorA", "g_tColor0", "g_tColor2", "g_tColorB", 
+                    "g_tAltColor_Reveal", "g_tAltColor",
                     "u_texture_color", "texture_albedo", "albedo_texture", "color_map", "g_tNprTransmissiveColor" 
                 };
                 foreach (var param in candidateParams)
