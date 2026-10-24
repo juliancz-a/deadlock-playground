@@ -12,7 +12,10 @@ namespace DeadlockPlayground.Painter
         ColorBalance = 2,
         Exposure = 3,
         Invert = 4,
-        Desaturate = 5
+        Desaturate = 5,
+        Levels = 6,
+        Posterize = 7,
+        Threshold = 8
     }
 
     public struct ColorAdjustmentParams
@@ -40,6 +43,17 @@ namespace DeadlockPlayground.Painter
         public float Offset;
         public float Gamma;
 
+        // Levels (inBlack: 0..253, gamma: 0.1..5.0, inWhite: 2..255, outBlack: 0..255, outWhite: 0..255)
+        public float InBlack;
+        public float LevelsGamma;
+        public float InWhite;
+        public float OutBlack;
+        public float OutWhite;
+
+        // Posterize / Threshold
+        public int PosterizeLevels;
+        public float ThresholdValue;
+
         public static ColorAdjustmentParams Default(AdjustmentType type)
         {
             return new ColorAdjustmentParams
@@ -57,7 +71,14 @@ namespace DeadlockPlayground.Painter
                 PreserveLuminosity = true,
                 Exposure = 0.0f,
                 Offset = 0.0f,
-                Gamma = 1.0f
+                Gamma = 1.0f,
+                InBlack = 0.0f,
+                LevelsGamma = 1.0f,
+                InWhite = 255.0f,
+                OutBlack = 0.0f,
+                OutWhite = 255.0f,
+                PosterizeLevels = 4,
+                ThresholdValue = 128.0f
             };
         }
     }
@@ -181,6 +202,19 @@ namespace DeadlockPlayground.Painter
             float expMult = MathF.Pow(2.0f, parameters.Exposure);
             float expOffset = parameters.Offset;
             float invGamma = (parameters.Gamma > 0.001f) ? (1.0f / parameters.Gamma) : 1.0f;
+
+            // Levels precomputation
+            float inB = parameters.InBlack / 255.0f;
+            float inW = parameters.InWhite / 255.0f;
+            float outB = parameters.OutBlack / 255.0f;
+            float outW = parameters.OutWhite / 255.0f;
+            float invLevelsRange = 1.0f / MathF.Max(0.001f, inW - inB);
+            float invLevelsGamma = 1.0f / MathF.Max(0.01f, parameters.LevelsGamma);
+
+            // Posterize / Threshold precomputation
+            int postLevels = Math.Clamp(parameters.PosterizeLevels, 2, 32);
+            float postStep = postLevels - 1;
+            float threshVal = Math.Clamp(parameters.ThresholdValue / 255.0f, 0.0f, 1.0f);
 
             AdjustmentType type = parameters.Type;
 
@@ -338,6 +372,32 @@ namespace DeadlockPlayground.Painter
                                     adjR = Math.Clamp(MathF.Pow(rExp, invGamma), 0.0f, 1.0f);
                                     adjG = Math.Clamp(MathF.Pow(gExp, invGamma), 0.0f, 1.0f);
                                     adjB = Math.Clamp(MathF.Pow(bExp, invGamma), 0.0f, 1.0f);
+                                    break;
+
+                                case AdjustmentType.Levels:
+                                    float rLev = Math.Clamp((sR - inB) * invLevelsRange, 0.0f, 1.0f);
+                                    float gLev = Math.Clamp((sG - inB) * invLevelsRange, 0.0f, 1.0f);
+                                    float bLev = Math.Clamp((sB - inB) * invLevelsRange, 0.0f, 1.0f);
+                                    rLev = MathF.Pow(rLev, invLevelsGamma);
+                                    gLev = MathF.Pow(gLev, invLevelsGamma);
+                                    bLev = MathF.Pow(bLev, invLevelsGamma);
+                                    adjR = Math.Clamp(outB + rLev * (outW - outB), 0.0f, 1.0f);
+                                    adjG = Math.Clamp(outB + gLev * (outW - outB), 0.0f, 1.0f);
+                                    adjB = Math.Clamp(outB + bLev * (outW - outB), 0.0f, 1.0f);
+                                    break;
+
+                                case AdjustmentType.Posterize:
+                                    adjR = MathF.Round(sR * postStep) / postStep;
+                                    adjG = MathF.Round(sG * postStep) / postStep;
+                                    adjB = MathF.Round(sB * postStep) / postStep;
+                                    break;
+
+                                case AdjustmentType.Threshold:
+                                    float lumThresh = 0.299f * sR + 0.587f * sG + 0.114f * sB;
+                                    float binVal = (lumThresh >= threshVal) ? 1.0f : 0.0f;
+                                    adjR = binVal;
+                                    adjG = binVal;
+                                    adjB = binVal;
                                     break;
                             }
 

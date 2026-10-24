@@ -328,6 +328,12 @@ public partial class StudioUIManager : CanvasLayer
                 GetViewport()?.SetInputAsHandled();
                 return;
             }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.L)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.Levels);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
             if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.B)
             {
                 HandleAdjustmentTriggered(AdjustmentType.ColorBalance);
@@ -521,6 +527,10 @@ public partial class StudioUIManager : CanvasLayer
             popup.AddItem("Color Balance...", (int)AdjustmentType.ColorBalance);
             popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.ColorBalance), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.B));
             popup.AddItem("Exposure...", (int)AdjustmentType.Exposure);
+            popup.AddItem("Levels...", (int)AdjustmentType.Levels);
+            popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.Levels), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.L));
+            popup.AddItem("Posterize...", (int)AdjustmentType.Posterize);
+            popup.AddItem("Threshold...", (int)AdjustmentType.Threshold);
             popup.AddItem("Gradient Map...", 100);
             popup.SetItemAccelerator(popup.GetItemIndex(100), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.G));
             popup.AddSeparator();
@@ -1703,6 +1713,34 @@ public partial class StudioUIManager : CanvasLayer
         {
             _quickColorPalette?.ClosePopup();
         }
+    }
+
+    public void CloseActiveAdjustmentOrFilterModals(Node exceptModal = null)
+    {
+        _colorAdjustmentModal ??= GetNodeOrNull<ColorAdjustmentModalUI>("MainHUD/ModalsLayer/ColorAdjustmentModal")
+                               ?? GetTree()?.Root?.FindChild("ColorAdjustmentModal", true, false) as ColorAdjustmentModalUI;
+        _gradientMapModal ??= GetNodeOrNull<GradientMapModalUI>("MainHUD/ModalsLayer/GradientMapModal")
+                           ?? GetTree()?.Root?.FindChild("GradientMapModal", true, false) as GradientMapModalUI;
+        _filterModal ??= GetNodeOrNull<FilterModalUI>("MainHUD/ModalsLayer/FilterModal")
+                      ?? GetTree()?.Root?.FindChild("FilterModal", true, false) as FilterModalUI;
+
+        if (_colorAdjustmentModal != null && _colorAdjustmentModal != exceptModal && _colorAdjustmentModal.Visible)
+        {
+            _colorAdjustmentModal.CancelAndClose();
+        }
+        if (_gradientMapModal != null && _gradientMapModal != exceptModal && _gradientMapModal.Visible)
+        {
+            _gradientMapModal.CancelAndClose();
+        }
+        if (_filterModal != null && _filterModal != exceptModal && _filterModal.Visible)
+        {
+            _filterModal.CancelAndClose();
+        }
+    }
+
+    public static void CloseAnyActiveAdjustmentOrFilterModal(Node exceptModal = null)
+    {
+        Instance?.CloseActiveAdjustmentOrFilterModals(exceptModal);
     }
 
     private void OnAdjustmentsMenuAboutToPopup()

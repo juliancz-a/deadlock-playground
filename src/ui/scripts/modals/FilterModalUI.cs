@@ -225,6 +225,8 @@ namespace DeadlockPlayground.UI
 
         public void Open(FilterType type, PaintTabUI paintTab, SkinLayerManager layerManager, MeshPainter3D painter)
         {
+            StudioUIManager.CloseAnyActiveAdjustmentOrFilterModal(this);
+
             _paintTab = paintTab;
             _layerManager = layerManager;
             _painter = painter;
@@ -296,15 +298,38 @@ namespace DeadlockPlayground.UI
             OnParametersChanged();
         }
 
+        public void ClampPositionToScreen(Vector2? candidatePos = null)
+        {
+            var vp = GetViewport();
+            if (vp == null) return;
+            Vector2 vpSize = vp.GetVisibleRect().Size;
+            if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+            float maxAllowedH = vpSize.Y * 0.85f;
+            float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : Size.X;
+            float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : Size.Y;
+            if (modalH > maxAllowedH)
+            {
+                modalH = maxAllowedH;
+                CustomMinimumSize = new Vector2(modalW, modalH);
+                Size = new Vector2(modalW, modalH);
+            }
+
+            Vector2 target = candidatePos ?? Position;
+            float clampedX = Mathf.Clamp(target.X, 20f, Mathf.Max(20f, vpSize.X - modalW - 20f));
+            float clampedY = Mathf.Clamp(target.Y, 20f, Mathf.Max(20f, vpSize.Y - modalH - 20f));
+            Position = new Vector2(clampedX, clampedY);
+        }
+
         private void CenterOrPositionModal()
         {
             var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
             float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380;
             float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 300;
 
-            float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 350, vpSize.X - modalW - 20);
-            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 50, vpSize.Y - modalH - 50);
-            Position = new Vector2(targetX, targetY);
+            float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 20f, vpSize.X - modalW - 20f);
+            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, vpSize.Y - modalH - 20f);
+            ClampPositionToScreen(new Vector2(targetX, targetY));
         }
 
         private void SetupModalForType(FilterType type)
@@ -695,7 +720,26 @@ namespace DeadlockPlayground.UI
             }
             else if (ev is InputEventMouseMotion mm && _isDraggingModal)
             {
-                Position = _dragPositionStart + (mm.GlobalPosition - _dragMouseStart);
+                ClampPositionToScreen(_dragPositionStart + (mm.GlobalPosition - _dragMouseStart));
+            }
+        }
+
+        public override void _Input(InputEvent @event)
+        {
+            if (!Visible) return;
+
+            if (_isDraggingModal)
+            {
+                if (@event is InputEventMouseMotion mm)
+                {
+                    ClampPositionToScreen(_dragPositionStart + (mm.GlobalPosition - _dragMouseStart));
+                    GetViewport()?.SetInputAsHandled();
+                }
+                else if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && !mb.Pressed)
+                {
+                    _isDraggingModal = false;
+                    GetViewport()?.SetInputAsHandled();
+                }
             }
         }
 

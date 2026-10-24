@@ -128,6 +128,7 @@ public partial class PaintTabUI : VBoxContainer
 
     private Button _btnAddLayer;
     private Button _btnDeleteLayer;
+    private Button _btnAlphaLock;
     private Button _btnMoveUp;
     private Button _btnMoveDown;
     private VBoxContainer _layersListContainer;
@@ -311,12 +312,30 @@ public partial class PaintTabUI : VBoxContainer
         // Layers
         _btnAddLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnAddLayer");
         _btnDeleteLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnDeleteLayer");
+        _btnAlphaLock = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnAlphaLock");
         _btnMoveUp = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnMoveUp");
         _btnMoveDown = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnMoveDown");
         _layersListContainer = GetNodeOrNull<VBoxContainer>("LayersCard/VBox/ScrollContainer/LayersListContainer");
         _optLayerBlend = GetNodeOrNull<OptionButton>("LayersCard/VBox/HBoxBlend/OptLayerBlend");
         _sliderLayerOpacity = GetNodeOrNull<HSlider>("LayersCard/VBox/HBoxOpacity/SliderLayerOpacity");
         _lblLayerOpacity = GetNodeOrNull<Label>("LayersCard/VBox/HBoxOpacity/LblLayerOpacity");
+
+        _iconAlphaLock ??= GD.Load<Texture2D>("res://assets/at-icons/checkerboard.svg");
+        _iconLock ??= GD.Load<Texture2D>("res://assets/at-icons/lock.svg");
+        if (_btnAlphaLock != null)
+        {
+            _btnAlphaLock.Icon = _iconAlphaLock;
+            _btnAlphaLock.ExpandIcon = true;
+            _btnAlphaLock.IconAlignment = HorizontalAlignment.Center;
+            _btnAlphaLock.Toggled += (locked) =>
+            {
+                if (_layerManager?.ActiveLayer != null && !_layerManager.IsBaseTextureActive)
+                {
+                    _layerManager.ActiveLayer.IsAlphaLocked = locked;
+                    StudioUIManager.Instance?.ShowToast(locked ? "Alpha Locked" : "Alpha Unlocked");
+                }
+            };
+        }
 
         // Export
         _btnExportPng = GetNodeOrNull<Button>("ExportCard/VBox/BtnExportPng");
@@ -2663,7 +2682,7 @@ public partial class PaintTabUI : VBoxContainer
                 {
                     Text = "[SHARED]",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                    TooltipText = "⚠️ Shared Global Material\nThis texture is used globally across heroes and environment effects in Deadlock.\nModifying it will affect all heroes and abilities that use it in-game."
+                    TooltipText = "[!] Shared Global Material\nThis texture is used globally across heroes and environment effects in Deadlock.\nModifying it will affect all heroes and abilities that use it in-game."
                 };
                 if (colus != null) sharedBadge.AddThemeFontOverride("font", colus);
                 sharedBadge.AddThemeFontSizeOverride("font_size", 11);
@@ -2678,7 +2697,7 @@ public partial class PaintTabUI : VBoxContainer
                     FocusMode = Control.FocusModeEnum.None,
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
                     Modulate = new Color(1.0f, 0.45f, 0.45f, 1.0f),
-                    TooltipText = "⚠️ Shared Global Material\nThis texture is NOT exclusive to this hero.\nClick to learn what shared materials mean in Deadlock."
+                    TooltipText = "[!] Shared Global Material\nThis texture is NOT exclusive to this hero.\nClick to learn what shared materials mean in Deadlock."
                 };
 
                 string capturedPath = vtexPath;
@@ -2687,7 +2706,7 @@ public partial class PaintTabUI : VBoxContainer
                     var dialog = new AcceptDialog
                     {
                         Title = "Shared Texture Warning",
-                        DialogText = $"⚠️ SHARED GLOBAL MATERIAL\n\nTexture:\n{capturedPath}\n\nThis texture is a global game effect asset shared across multiple heroes and environmental systems in Deadlock.\n\nModifying or repainting this texture will alter its visual appearance across ALL heroes and abilities that reference it in-game, not just the currently selected hero."
+                        DialogText = $"[!] SHARED GLOBAL MATERIAL\n\nTexture:\n{capturedPath}\n\nThis texture is a global game effect asset shared across multiple heroes and environmental systems in Deadlock.\n\nModifying or repainting this texture will alter its visual appearance across ALL heroes and abilities that reference it in-game, not just the currently selected hero."
                     };
                     dialog.Confirmed += () => dialog.QueueFree();
                     dialog.Canceled += () => dialog.QueueFree();
@@ -3083,9 +3102,12 @@ public partial class PaintTabUI : VBoxContainer
                 ClipContents = true
             };
 
+            _iconLock ??= GD.Load<Texture2D>("res://assets/at-icons/lock.svg");
             var selectBtn = new Button
             {
-                Text = layer.IsLocked ? $"🔒 {layer.Name}" : layer.Name,
+                Text = (layer.IsLocked ? " " : "") + layer.Name,
+                Icon = layer.IsLocked ? _iconLock : null,
+                ExpandIcon = true,
                 Alignment = HorizontalAlignment.Left,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
@@ -3151,9 +3173,12 @@ public partial class PaintTabUI : VBoxContainer
             ClipContents = true
         };
 
+        _iconLock ??= GD.Load<Texture2D>("res://assets/at-icons/lock.svg");
         var baseSelectBtn = new Button
         {
-            Text = "🔒 BASE TEXTURE",
+            Text = " BASE TEXTURE",
+            Icon = _iconLock,
+            ExpandIcon = true,
             Alignment = HorizontalAlignment.Left,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
@@ -3219,6 +3244,8 @@ public partial class PaintTabUI : VBoxContainer
     private PopupMenu _layerContextMenu;
     private PopupMenu _baseContextMenu;
     private Texture2D _iconRefresh;
+    private Texture2D _iconAlphaLock;
+    private Texture2D _iconLock;
 
     private void ShowBaseTextureContextMenu(Vector2 screenPos)
     {
@@ -3261,6 +3288,8 @@ public partial class PaintTabUI : VBoxContainer
     {
         if (_layerManager == null || layerIdx < 0 || layerIdx >= _layerManager.Layers.Count) return;
 
+        int targetIdx = layerIdx;
+
         if (_layerContextMenu == null)
         {
             _layerContextMenu = new PopupMenu();
@@ -3270,8 +3299,16 @@ public partial class PaintTabUI : VBoxContainer
 
         _layerContextMenu.Clear();
         _layerContextMenu.AddItem("Rename Layer", 0);
-        _layerContextMenu.AddItem("Delete Layer (This Material)", 1);
-        _layerContextMenu.AddItem("Delete Layer (Across All Materials)", 2);
+        _layerContextMenu.AddItem("Duplicate Layer", 1);
+        _layerContextMenu.AddItem("Merge Down", 2);
+        if (targetIdx <= 0)
+        {
+            _layerContextMenu.SetItemDisabled(_layerContextMenu.GetItemIndex(2), true);
+        }
+        _layerContextMenu.AddItem("Select Layer Alpha", 3);
+        _layerContextMenu.AddSeparator();
+        _layerContextMenu.AddItem("Delete Layer (This Material)", 4);
+        _layerContextMenu.AddItem("Delete Layer (Across All Materials)", 5);
 
         // Clear previous signal connections
         var connections = _layerContextMenu.GetSignalConnectionList("id_pressed");
@@ -3283,7 +3320,6 @@ public partial class PaintTabUI : VBoxContainer
             }
         }
 
-        int targetIdx = layerIdx;
         _layerContextMenu.IdPressed += (id) =>
         {
             if (id == 0)
@@ -3292,10 +3328,44 @@ public partial class PaintTabUI : VBoxContainer
             }
             else if (id == 1)
             {
+                _layerManager.SelectLayer(targetIdx);
+                _layerManager.DuplicateActiveLayer();
+                RefreshLayersListUI();
+                StudioUIManager.Instance?.ShowToast("Layer Duplicated");
+            }
+            else if (id == 2)
+            {
+                _layerManager.SelectLayer(targetIdx);
+                _layerManager.MergeDownActiveLayer();
+                RefreshLayersListUI();
+                StudioUIManager.Instance?.ShowToast("Layer Merged Down");
+            }
+            else if (id == 3)
+            {
+                _layerManager.SelectLayer(targetIdx);
+                byte[] alphaMask = _layerManager.ExtractActiveLayerAlphaMask(out int mw, out int mh);
+                if (alphaMask != null)
+                {
+                    var sel = _painter?.SelectionMask;
+                    if (sel != null)
+                    {
+                        sel.SetBuffer(alphaMask, mw, mh);
+                        if (_painter?.MagicWandTool != null)
+                        {
+                            _painter.MagicWandTool.UseSelectionMask = true;
+                        }
+                    }
+                    var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
+                    uvCanvas?.QueueCanvasRedraw();
+                    StudioUIManager.Instance?.ShowToast("Layer Alpha Selected");
+                }
+            }
+            else if (id == 4)
+            {
                 CheckAndUnregisterIfMaterialClean(_layerManager.ActiveMaterialKey);
                 _layerManager.DeleteLayer(targetIdx);
             }
-            else if (id == 2)
+            else if (id == 5)
             {
                 _layerManager.DeleteLayerAcrossAllMaterials(targetIdx);
             }
@@ -3398,6 +3468,11 @@ public partial class PaintTabUI : VBoxContainer
         if (activeLayer == null) return;
 
         if (_btnDeleteLayer != null) _btnDeleteLayer.Disabled = isBase;
+        if (_btnAlphaLock != null)
+        {
+            _btnAlphaLock.Disabled = isBase || activeLayer.IsLocked;
+            _btnAlphaLock.SetPressedNoSignal(!isBase && activeLayer.IsAlphaLocked);
+        }
         if (_btnMoveUp != null) _btnMoveUp.Disabled = isBase || (_layerManager.ActiveLayerIndex >= _layerManager.Layers.Count - 1);
         if (_btnMoveDown != null) _btnMoveDown.Disabled = isBase || (_layerManager.ActiveLayerIndex <= 0);
 

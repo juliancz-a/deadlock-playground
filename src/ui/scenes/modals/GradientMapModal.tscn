@@ -73,9 +73,9 @@ corner_radius_bottom_left = 5
 
 [node name="GradientMapModal" type="PanelContainer" node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_gradientRampPreview", "_stopMarkersTrack", "_colorPickerStop", "_spinStopPosition", "_btnDeleteStop", "_chkReverse", "_chkDither", "_optBlendMode", "_sliderOpacity", "_lblOpacityVal", "_listBuiltinPresets", "_listImportedPresets", "_btnImportGrd", "_chkPreview", "_btnReset", "_btnCancel", "_btnApply")]
 clip_contents = true
-custom_minimum_size = Vector2(460, 520)
-offset_right = 460.0
-offset_bottom = 540.0
+custom_minimum_size = Vector2(480, 580)
+offset_right = 480.0
+offset_bottom = 580.0
 theme = ExtResource("1_theme")
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
 script = ExtResource("2_script")
@@ -243,13 +243,13 @@ layout_mode = 2
 metadata/_tab_index = 0
 
 [node name="ListBuiltin" type="ItemList" parent="VBoxContainer/PresetsTabs/Built-in Presets"]
-custom_minimum_size = Vector2(0, 110)
+custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 15
 max_columns = 2
 same_column_width = true
-fixed_icon_size = Vector2i(64, 16)
+fixed_icon_size = Vector2i(80, 22)
 
 [node name="Imported (.grd)" type="VBoxContainer" parent="VBoxContainer/PresetsTabs"]
 visible = false
@@ -262,13 +262,13 @@ size_flags_vertical = 3
 theme_override_constants/separation = 6
 
 [node name="ListImported" type="ItemList" parent="VBoxContainer/PresetsTabs/Imported (.grd)/VBox"]
-custom_minimum_size = Vector2(0, 90)
+custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 15
 max_columns = 2
 same_column_width = true
-fixed_icon_size = Vector2i(64, 16)
+fixed_icon_size = Vector2i(80, 22)
 
 [node name="BtnImportGrd" type="Button" parent="VBoxContainer/PresetsTabs/Imported (.grd)/VBox"]
 layout_mode = 2

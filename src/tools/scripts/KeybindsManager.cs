@@ -94,6 +94,7 @@ namespace DeadlockPlayground.Tools
             AddDefault("Texture Paint", "paint_selection_invert", "Invert Selection", "Invert active selection mask", Key.I, ctrl: true, shift: true);
             AddDefault("Texture Paint", "paint_selection_clear", "Clear Selection", "Clear active selection mask", Key.D, ctrl: true);
             AddDefault("Texture Paint", "paint_decal", "Decal Stamper", "Switch to Decal projection stamper", Key.K);
+            AddDefault("Texture Paint", "paint_clone", "Clone Stamp", "Switch to Clone Stamp tool", Key.S);
             AddDefault("Texture Paint", "paint_text", "Text Projector", "Toggle 3D Text Projector panel", Key.T);
             AddDefault("Texture Paint", "paint_mirror", "Mirror Symmetry", "Toggle 3D Axis Symmetry painting", Key.N);
             AddDefault("Texture Paint", "paint_undo", "Undo", "Undo painter stroke", Key.Z, ctrl: true);

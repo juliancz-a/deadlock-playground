@@ -64,7 +64,7 @@ namespace DeadlockPlayground.UI
 
         private readonly List<GradientStop> _currentStops = new();
         private int _selectedStopIndex = 0;
-        private int _draggingStopIndex = -1;
+        private bool _isDraggingStop = false;
 
         private List<GradientDefinition> _builtInPresets = new();
         private List<GradientDefinition> _importedPresets = new();
@@ -222,6 +222,8 @@ namespace DeadlockPlayground.UI
 
         public void Open(PaintTabUI paintTab, SkinLayerManager layerManager, MeshPainter3D painter)
         {
+            StudioUIManager.CloseAnyActiveAdjustmentOrFilterModal(this);
+
             _paintTab = paintTab;
             _layerManager = layerManager;
             _painter = painter;
@@ -299,15 +301,38 @@ namespace DeadlockPlayground.UI
             OnParametersChanged();
         }
 
+        public void ClampPositionToScreen(Vector2? candidatePos = null)
+        {
+            var vp = GetViewport();
+            if (vp == null) return;
+            Vector2 vpSize = vp.GetVisibleRect().Size;
+            if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+            float maxAllowedH = vpSize.Y * 0.85f;
+            float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : Size.X;
+            float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : Size.Y;
+            if (modalH > maxAllowedH)
+            {
+                modalH = maxAllowedH;
+                CustomMinimumSize = new Vector2(modalW, modalH);
+                Size = new Vector2(modalW, modalH);
+            }
+
+            Vector2 target = candidatePos ?? Position;
+            float clampedX = Mathf.Clamp(target.X, 20f, Mathf.Max(20f, vpSize.X - modalW - 20f));
+            float clampedY = Mathf.Clamp(target.Y, 20f, Mathf.Max(20f, vpSize.Y - modalH - 20f));
+            Position = new Vector2(clampedX, clampedY);
+        }
+
         private void CenterOrPositionModal()
         {
             var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-            float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 440;
-            float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 480;
+            float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 480;
+            float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 580;
 
-            float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 350, vpSize.X - modalW - 20);
-            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.3f, 40, vpSize.Y - modalH - 40);
-            Position = new Vector2(targetX, targetY);
+            float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 20f, vpSize.X - modalW - 20f);
+            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.3f, 20f, vpSize.Y - modalH - 20f);
+            ClampPositionToScreen(new Vector2(targetX, targetY));
         }
 
         private GradientDefinition CreateCurrentGradientDefinition()
@@ -331,7 +356,7 @@ namespace DeadlockPlayground.UI
                 _listBuiltinPresets.Clear();
                 foreach (var p in _builtInPresets)
                 {
-                    var img = p.GeneratePreviewImage(64, 16);
+                    var img = p.GeneratePreviewImage(80, 22);
                     var tex = ImageTexture.CreateFromImage(img);
                     _listBuiltinPresets.AddItem(p.Name, tex);
                 }
@@ -347,7 +372,7 @@ namespace DeadlockPlayground.UI
             _listImportedPresets.Clear();
             foreach (var p in _importedPresets)
             {
-                var img = p.GeneratePreviewImage(64, 16);
+                var img = p.GeneratePreviewImage(80, 22);
                 var tex = ImageTexture.CreateFromImage(img);
                 _listImportedPresets.AddItem(p.Name, tex);
             }
@@ -437,6 +462,55 @@ namespace DeadlockPlayground.UI
             _gradientRampPreview.Texture = ImageTexture.CreateFromImage(img);
         }
 
+        private int FindStopNearTrackPosition(float localX, float trackWidth, float tolerancePx = 16f)
+        {
+            int bestIdx = -1;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < _currentStops.Count; i++)
+            {
+                float markerX = _currentStops[i].Position * trackWidth;
+                float dist = MathF.Abs(localX - markerX);
+                if (dist <= tolerancePx && dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestIdx = i;
+                }
+            }
+            return bestIdx;
+        }
+
+        private void UpdateMarkerBorderHighlight()
+        {
+            if (_stopMarkersTrack == null) return;
+            var children = _stopMarkersTrack.GetChildren();
+            for (int i = 0; i < children.Count; i++)
+            {
+                if (children[i] is PanelContainer marker)
+                {
+                    var style = marker.GetThemeStylebox("panel") as StyleBoxFlat;
+                    if (style != null)
+                    {
+                        style.BorderColor = (i == _selectedStopIndex) ? new Color(1, 0.85f, 0.2f, 1f) : new Color(0.15f, 0.15f, 0.15f, 0.9f);
+                    }
+                }
+            }
+        }
+
+        private void UpdateMarkersDisplayPositionsOnly()
+        {
+            if (_stopMarkersTrack == null) return;
+            float trackWidth = _stopMarkersTrack.Size.X > 0 ? _stopMarkersTrack.Size.X : 256f;
+            var children = _stopMarkersTrack.GetChildren();
+            for (int i = 0; i < _currentStops.Count && i < children.Count; i++)
+            {
+                if (children[i] is Control marker)
+                {
+                    float markerX = _currentStops[i].Position * trackWidth;
+                    marker.Position = new Vector2(markerX - 7, 0);
+                }
+            }
+        }
+
         private void UpdateMarkersDisplay()
         {
             if (_stopMarkersTrack == null) return;
@@ -478,37 +552,16 @@ namespace DeadlockPlayground.UI
 
         private void OnMarkerGuiInput(InputEvent ev, int stopIdx)
         {
-            if (ev is InputEventMouseButton mb)
+            if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
             {
-                if (mb.ButtonIndex == MouseButton.Left)
+                if (mb.Pressed)
                 {
-                    if (mb.Pressed)
-                    {
-                        _selectedStopIndex = stopIdx;
-                        _draggingStopIndex = stopIdx;
-                        UpdateSelectedStopUI();
-                        UpdateMarkersDisplay();
-                        GetViewport()?.SetInputAsHandled();
-                    }
-                    else
-                    {
-                        _draggingStopIndex = -1;
-                    }
+                    _selectedStopIndex = stopIdx;
+                    _isDraggingStop = true;
+                    UpdateSelectedStopUI();
+                    UpdateMarkerBorderHighlight();
+                    GetViewport()?.SetInputAsHandled();
                 }
-            }
-            else if (ev is InputEventMouseMotion mm && _draggingStopIndex == stopIdx)
-            {
-                float trackWidth = _stopMarkersTrack.Size.X > 0 ? _stopMarkersTrack.Size.X : 256f;
-                float localX = mm.GlobalPosition.X - _stopMarkersTrack.GlobalPosition.X;
-                float newPos = Mathf.Clamp(localX / trackWidth, 0f, 1f);
-
-                _currentStops[_selectedStopIndex] = new GradientStop(newPos, _currentStops[_selectedStopIndex].Color);
-                SortStopsAndMaintainSelection();
-                UpdateRampPreview();
-                UpdateMarkersDisplay();
-                UpdateSelectedStopUI();
-                OnParametersChanged();
-                GetViewport()?.SetInputAsHandled();
             }
         }
 
@@ -518,27 +571,61 @@ namespace DeadlockPlayground.UI
             {
                 float rampW = _gradientRampPreview.Size.X > 0 ? _gradientRampPreview.Size.X : 256f;
                 float localX = Mathf.Clamp(mb.Position.X, 0f, rampW);
-                float t = localX / rampW;
-
-                Color picked = EvaluateCurrentRamp(t);
-                _currentStops.Add(new GradientStop(t, picked));
-                SortStopsAndMaintainSelection();
-                _selectedStopIndex = _currentStops.FindIndex(s => Mathf.IsEqualApprox(s.Position, t));
-                if (_selectedStopIndex < 0) _selectedStopIndex = 0;
-
-                UpdateSelectedStopUI();
-                UpdateRampPreview();
-                UpdateMarkersDisplay();
-                OnParametersChanged();
+                int hit = FindStopNearTrackPosition(localX, rampW, 16f);
+                if (hit >= 0)
+                {
+                    _selectedStopIndex = hit;
+                    _isDraggingStop = true;
+                    UpdateSelectedStopUI();
+                    UpdateMarkerBorderHighlight();
+                }
+                else
+                {
+                    float t = Mathf.Clamp(localX / rampW, 0f, 1f);
+                    Color picked = EvaluateCurrentRamp(t);
+                    _currentStops.Add(new GradientStop(t, picked));
+                    SortStopsAndMaintainSelection();
+                    _selectedStopIndex = _currentStops.FindIndex(s => Mathf.IsEqualApprox(s.Position, t));
+                    if (_selectedStopIndex < 0) _selectedStopIndex = 0;
+                    _isDraggingStop = true;
+                    UpdateSelectedStopUI();
+                    UpdateRampPreview();
+                    UpdateMarkersDisplay();
+                    OnParametersChanged();
+                }
                 GetViewport()?.SetInputAsHandled();
             }
         }
 
         private void OnTrackGuiInput(InputEvent ev)
         {
-            if (ev is InputEventMouseButton mb && !mb.Pressed)
+            if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
             {
-                _draggingStopIndex = -1;
+                float trackWidth = _stopMarkersTrack.Size.X > 0 ? _stopMarkersTrack.Size.X : 256f;
+                float localX = Mathf.Clamp(mb.Position.X, 0f, trackWidth);
+                int hit = FindStopNearTrackPosition(localX, trackWidth, 16f);
+                if (hit >= 0)
+                {
+                    _selectedStopIndex = hit;
+                    _isDraggingStop = true;
+                    UpdateSelectedStopUI();
+                    UpdateMarkerBorderHighlight();
+                }
+                else
+                {
+                    float t = Mathf.Clamp(localX / trackWidth, 0f, 1f);
+                    Color picked = EvaluateCurrentRamp(t);
+                    _currentStops.Add(new GradientStop(t, picked));
+                    SortStopsAndMaintainSelection();
+                    _selectedStopIndex = _currentStops.FindIndex(s => Mathf.IsEqualApprox(s.Position, t));
+                    if (_selectedStopIndex < 0) _selectedStopIndex = 0;
+                    _isDraggingStop = true;
+                    UpdateSelectedStopUI();
+                    UpdateRampPreview();
+                    UpdateMarkersDisplay();
+                    OnParametersChanged();
+                }
+                GetViewport()?.SetInputAsHandled();
             }
         }
 
@@ -748,7 +835,62 @@ namespace DeadlockPlayground.UI
             }
             else if (ev is InputEventMouseMotion mm && _isDraggingModal)
             {
-                Position = _dragPositionStart + (mm.GlobalPosition - _dragMouseStart);
+                ClampPositionToScreen(_dragPositionStart + (mm.GlobalPosition - _dragMouseStart));
+            }
+        }
+
+        public override void _Input(InputEvent @event)
+        {
+            if (!Visible) return;
+
+            if (_isDraggingStop)
+            {
+                if (@event is InputEventMouseMotion mm)
+                {
+                    if (_stopMarkersTrack != null && _selectedStopIndex >= 0 && _selectedStopIndex < _currentStops.Count)
+                    {
+                        float trackWidth = _stopMarkersTrack.Size.X > 0 ? _stopMarkersTrack.Size.X : 256f;
+                        float localX = mm.GlobalPosition.X - _stopMarkersTrack.GlobalPosition.X;
+                        float newPos = Mathf.Clamp(localX / trackWidth, 0f, 1f);
+
+                        _currentStops[_selectedStopIndex] = new GradientStop(newPos, _currentStops[_selectedStopIndex].Color);
+                        UpdateMarkersDisplayPositionsOnly();
+
+                        _suppressEvents = true;
+                        if (_spinStopPosition != null)
+                        {
+                            _spinStopPosition.Value = Mathf.RoundToInt(newPos * 100f);
+                        }
+                        _suppressEvents = false;
+
+                        UpdateRampPreview();
+                        OnParametersChanged();
+                    }
+                    GetViewport()?.SetInputAsHandled();
+                }
+                else if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && !mb.Pressed)
+                {
+                    _isDraggingStop = false;
+                    SortStopsAndMaintainSelection();
+                    UpdateSelectedStopUI();
+                    UpdateRampPreview();
+                    UpdateMarkersDisplay();
+                    OnParametersChanged();
+                    GetViewport()?.SetInputAsHandled();
+                }
+            }
+            else if (_isDraggingModal)
+            {
+                if (@event is InputEventMouseMotion mm)
+                {
+                    ClampPositionToScreen(_dragPositionStart + (mm.GlobalPosition - _dragMouseStart));
+                    GetViewport()?.SetInputAsHandled();
+                }
+                else if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && !mb.Pressed)
+                {
+                    _isDraggingModal = false;
+                    GetViewport()?.SetInputAsHandled();
+                }
             }
         }
 

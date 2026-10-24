@@ -458,6 +458,205 @@ theme_override_font_sizes/font_size = 13
 text = "1.00"
 horizontal_alignment = 2
 
+[node name="LevelsContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162570]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="InBlackRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer" unique_id=1987162571]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/InBlackRow" unique_id=1987162572]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "In Black:"
+
+[node name="InBlackSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/InBlackRow" unique_id=1987162573]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 253.0
+step = 1.0
+scrollable = false
+
+[node name="InBlackVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/InBlackRow" unique_id=1987162574]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="LevelsGammaRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer" unique_id=1987162575]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/LevelsGammaRow" unique_id=1987162576]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Gamma:"
+
+[node name="LevelsGammaSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/LevelsGammaRow" unique_id=1987162577]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 0.1
+max_value = 5.0
+step = 0.05
+value = 1.0
+scrollable = false
+
+[node name="LevelsGammaVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/LevelsGammaRow" unique_id=1987162578]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "1.00"
+horizontal_alignment = 2
+
+[node name="InWhiteRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer" unique_id=1987162579]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/InWhiteRow" unique_id=1987162580]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "In White:"
+
+[node name="InWhiteSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/InWhiteRow" unique_id=1987162581]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 2.0
+max_value = 255.0
+step = 1.0
+value = 255.0
+scrollable = false
+
+[node name="InWhiteVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/InWhiteRow" unique_id=1987162582]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "255"
+horizontal_alignment = 2
+
+[node name="OutBlackRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer" unique_id=1987162583]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/OutBlackRow" unique_id=1987162584]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Out Black:"
+
+[node name="OutBlackSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/OutBlackRow" unique_id=1987162585]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 255.0
+step = 1.0
+scrollable = false
+
+[node name="OutBlackVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/OutBlackRow" unique_id=1987162586]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "0"
+horizontal_alignment = 2
+
+[node name="OutWhiteRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer" unique_id=1987162587]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/OutWhiteRow" unique_id=1987162588]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Out White:"
+
+[node name="OutWhiteSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/OutWhiteRow" unique_id=1987162589]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 255.0
+step = 1.0
+value = 255.0
+scrollable = false
+
+[node name="OutWhiteVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/LevelsContainer/OutWhiteRow" unique_id=1987162590]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "255"
+horizontal_alignment = 2
+
+[node name="PosterizeContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162591]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PosterizeLevelsRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/PosterizeContainer" unique_id=1987162592]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/PosterizeContainer/PosterizeLevelsRow" unique_id=1987162593]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Levels:"
+
+[node name="PosterizeLevelsSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/PosterizeContainer/PosterizeLevelsRow" unique_id=1987162594]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 2.0
+max_value = 32.0
+step = 1.0
+value = 4.0
+scrollable = false
+
+[node name="PosterizeLevelsVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/PosterizeContainer/PosterizeLevelsRow" unique_id=1987162595]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "4"
+horizontal_alignment = 2
+
+[node name="ThresholdContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer" unique_id=1987162596]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ThresholdRow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/ContentContainer/ThresholdContainer" unique_id=1987162597]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ThresholdContainer/ThresholdRow" unique_id=1987162598]
+custom_minimum_size = Vector2(85, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Threshold:"
+
+[node name="ThresholdSlider" type="HSlider" parent="MarginContainer/VBoxContainer/ContentContainer/ThresholdContainer/ThresholdRow" unique_id=1987162599]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 255.0
+step = 1.0
+value = 128.0
+scrollable = false
+
+[node name="ThresholdVal" type="Label" parent="MarginContainer/VBoxContainer/ContentContainer/ThresholdContainer/ThresholdRow" unique_id=1987162600]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "128"
+horizontal_alignment = 2
+
 [node name="FooterSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1987162561]
 layout_mode = 2
 

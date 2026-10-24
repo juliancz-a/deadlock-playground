@@ -28,6 +28,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Button _btnToolSelection;
     private Button _btnToolWand;
     private Button _btnToolDecal;
+    private Button _btnToolClone;
     private Button _btnToolText;
     private Button _btnToolShape;
     private ColorPickerButton _btnColor;
@@ -65,6 +66,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private Control _bucketFillOptions;
     private Control _wandOptions;
     private Control _decalOptions;
+    private Control _cloneOptions;
+    private CheckBox _chkCloneSampleAllLayers;
+    private Button _btnResetCloneSource;
+    private Label _lblCloneStatus;
     private Control _textOptions;
     private Control _shapeOptions;
 
@@ -213,6 +218,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToolSelection != null) _btnToolSelection.Modulate = idleCol;
         if (_btnToolWand != null) _btnToolWand.Modulate = idleCol;
         if (_btnToolDecal != null) _btnToolDecal.Modulate = idleCol;
+        if (_btnToolClone != null) _btnToolClone.Modulate = idleCol;
         if (_btnToolText != null) _btnToolText.Modulate = idleCol;
         if (_btnToolShape != null) _btnToolShape.Modulate = idleCol;
         if (_btnMirror != null) _btnMirror.Modulate = idleCol;
@@ -224,7 +230,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     private void UpdatePinVisuals()
     {
         if (_btnPin == null) return;
-        _btnPin.Text = IsPinned ? "📌" : "📍";
+        _btnPin.Text = IsPinned ? "PIN" : "UNPIN";
         _btnPin.Modulate = IsPinned ? new Color(1.0f, 0.85f, 0.4f, 1.0f) : new Color(0.6f, 0.6f, 0.6f, 1.0f);
         _btnPin.TooltipText = IsPinned ? "Panel Pinned (Click to Unpin)" : "Panel Unpinned (Click to Pin)";
     }
@@ -344,6 +350,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             _btnToolWand.IconAlignment = HorizontalAlignment.Center;
         }
         _btnToolDecal = ResolveNode<Button>("BtnDecal", "BtnDecal");
+        _btnToolClone = ResolveNode<Button>("BtnClone", "BtnClone");
         _btnToolText = ResolveNode<Button>("BtnText", "BtnText");
         _btnToolShape = ResolveNode<Button>("BtnShape", "BtnShape");
         _btnColor = ResolveNode<ColorPickerButton>("BtnColor", "BtnColor");
@@ -364,7 +371,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         // Set up Radio ButtonGroup so tools are mutually exclusive
         _toolButtonGroup = new ButtonGroup();
-        var mutualButtons = new[] { _btnToolSelect, _btnToolBrush, _btnToolErase, _btnToolEyedropper, _btnToolFill, _btnToolSelection, _btnToolWand, _btnToolDecal, _btnToolText, _btnToolShape };
+        var mutualButtons = new[] { _btnToolSelect, _btnToolBrush, _btnToolErase, _btnToolEyedropper, _btnToolFill, _btnToolSelection, _btnToolWand, _btnToolDecal, _btnToolClone, _btnToolText, _btnToolShape };
         foreach (var btn in mutualButtons)
         {
             if (btn != null)
@@ -397,6 +404,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         _wandOptions = ResolveNode<Control>("MagicWandOptions", "MagicWandOptions");
         _selectionOptions = ResolveNode<Control>("SelectionOptions", "SelectionOptions");
         _decalOptions = ResolveNode<Control>("DecalOptions", "DecalOptions");
+        _cloneOptions = ResolveNode<Control>("CloneOptions", "CloneOptions");
+        _chkCloneSampleAllLayers = ResolveNode<CheckBox>("ChkCloneSampleAllLayers", "ChkCloneSampleAllLayers");
+        _btnResetCloneSource = ResolveNode<Button>("BtnResetCloneSource", "BtnResetCloneSource");
+        _lblCloneStatus = ResolveNode<Label>("LblCloneStatus", "LblCloneStatus");
         _textOptions = ResolveNode<Control>("TextOptions", "TextOptions");
         _shapeOptions = ResolveNode<Control>("ShapeOptions", "ShapeOptions");
 
@@ -562,8 +573,30 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             _btnToolWand.Pressed += () => OnToolButtonClicked(BrushToolMode.MagicWand);
         }
         if (_btnToolDecal != null) _btnToolDecal.Pressed += () => OnToolButtonClicked(BrushToolMode.Decal);
+        if (_btnToolClone != null) _btnToolClone.Pressed += () => OnToolButtonClicked(BrushToolMode.Clone);
         if (_btnToolText != null) _btnToolText.Pressed += () => OnToolButtonClicked(BrushToolMode.Text);
         if (_btnToolShape != null) _btnToolShape.Pressed += () => OnToolButtonClicked(BrushToolMode.Shape);
+
+        if (_chkCloneSampleAllLayers != null)
+        {
+            _chkCloneSampleAllLayers.ButtonPressed = _painter?.CloneSampleAllLayers ?? true;
+            _chkCloneSampleAllLayers.Toggled += (on) =>
+            {
+                if (_painter != null) _painter.CloneSampleAllLayers = on;
+            };
+        }
+        if (_btnResetCloneSource != null)
+        {
+            _btnResetCloneSource.Pressed += () =>
+            {
+                if (_painter != null)
+                {
+                    _painter.HasCloneSource = false;
+                    UpdateCloneUI();
+                    QueueCanvasRedraw();
+                }
+            };
+        }
 
         if (_chkFrontFacesOnly != null)
         {
@@ -1443,6 +1476,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 if (_sliderBrushHardness != null) _painter.BrushHardness = (float)_sliderBrushHardness.Value;
                 if (_sliderBrushFlow != null) _painter.BrushFlow = (float)_sliderBrushFlow.Value;
             }
+            else if (mode == BrushToolMode.Clone)
+            {
+                if (_sliderBrushSize != null) _painter.BrushSize = (float)_sliderBrushSize.Value;
+                if (_sliderBrushHardness != null) _painter.BrushHardness = (float)_sliderBrushHardness.Value;
+                if (_sliderBrushFlow != null) _painter.BrushFlow = (float)_sliderBrushFlow.Value;
+            }
             _painter.SyncCameraBrushProperties(force: true);
         }
 
@@ -1455,6 +1494,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         UpdateButtonState(_btnToolSelection, mode == BrushToolMode.Selection);
         UpdateButtonState(_btnToolWand, mode == BrushToolMode.MagicWand);
         UpdateButtonState(_btnToolDecal, mode == BrushToolMode.Decal);
+        UpdateButtonState(_btnToolClone, mode == BrushToolMode.Clone);
         UpdateButtonState(_btnToolText, mode == BrushToolMode.Text);
         UpdateButtonState(_btnToolShape, mode == BrushToolMode.Shape);
 
@@ -1509,6 +1549,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             if (_sliderTextRot != null) _sliderTextRot.SetValueNoSignal(tRot);
             if (_lblTextRot != null) _lblTextRot.Text = $"{Mathf.RoundToInt(tRot)}°";
         }
+        else if (mode == BrushToolMode.Clone)
+        {
+            UpdateCloneUI();
+        }
         else if (mode != BrushToolMode.Decal && mode != BrushToolMode.Text)
         {
             if (_painter?.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive)
@@ -1545,6 +1589,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_wandOptions != null) _wandOptions.Visible = (mode == BrushToolMode.MagicWand);
         if (_selectionOptions != null) _selectionOptions.Visible = (mode == BrushToolMode.Selection);
         if (_decalOptions != null) _decalOptions.Visible = (mode == BrushToolMode.Decal);
+        if (_cloneOptions != null) _cloneOptions.Visible = (mode == BrushToolMode.Clone);
         if (_textOptions != null) _textOptions.Visible = (mode == BrushToolMode.Text);
         if (_shapeOptions != null) _shapeOptions.Visible = (mode == BrushToolMode.Shape);
 
@@ -1555,6 +1600,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 BrushToolMode.SelectSubmesh => "SUBMESH SELECTOR",
                 BrushToolMode.Paint => "BRUSH OPTIONS",
                 BrushToolMode.Erase => "ERASER OPTIONS",
+                BrushToolMode.Clone => "CLONE STAMP",
                 BrushToolMode.Eyedropper => "EYEDROPPER",
                 BrushToolMode.BucketFill => "BUCKET FILL",
                 BrushToolMode.Selection => "SELECTION TOOLKIT",
@@ -1645,6 +1691,7 @@ public void UpdateTooltipsAndKeymaps()
         if (_btnToolSelection != null) _btnToolSelection.TooltipText = $"Selection Toolkit [M / L / P]\nLeft-click to select, right-click for modes";
         if (_btnToolWand != null) _btnToolWand.TooltipText = $"Magic Wand Mask [{KeybindsManager.GetShortcutText("paint_wand")}]\nClick surface to sample color range";
         if (_btnToolDecal != null) _btnToolDecal.TooltipText = $"Decal Stamper [{KeybindsManager.GetShortcutText("paint_decal")}]";
+        if (_btnToolClone != null) _btnToolClone.TooltipText = $"Clone Stamp [{KeybindsManager.GetShortcutText("paint_clone")}]\nAlt+Click in 2D canvas to set source";
         if (_btnToolText != null) _btnToolText.TooltipText = $"Text Projector [{KeybindsManager.GetShortcutText("paint_text")}]";
         if (_btnToolShape != null) _btnToolShape.TooltipText = "Shape Tool [U]\nRectangle, Circle, Line";
         if (_btnMirror != null) _btnMirror.TooltipText = $"Mirror Symmetry [{KeybindsManager.GetShortcutText("paint_mirror")}]";
@@ -1655,6 +1702,7 @@ public void UpdateTooltipsAndKeymaps()
         {
             _lblKeymapHint.Text = $"[{KeybindsManager.GetShortcutText("paint_brush")}] Brush   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_eraser")}] Erase   " +
+                                  $"[{KeybindsManager.GetShortcutText("paint_clone")}] Clone   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_eyedropper")}] Pick   " +
                                   $"[{KeybindsManager.GetShortcutText("paint_bucket")}] Fill   " +
                                   $"[M/L/P] Select   " +
@@ -1711,6 +1759,8 @@ public void UpdateTooltipsAndKeymaps()
             _chkAntiAliasing.SetPressedNoSignal(wand.AntiAliasing);
         }
 
+        UpdateCloneUI();
+
         bool hasMask = (wand?.HasSelection == true) || (_painter?.SelectionMask?.HasSelection == true);
         if (_btnClearMask != null)
         {
@@ -1746,6 +1796,22 @@ public void UpdateTooltipsAndKeymaps()
         }
         UpdateSelectTargetLabel();
         UpdateUndoRedoState(_painter?.LayerManager?.CanUndo ?? false, _painter?.LayerManager?.CanRedo ?? false);
+        UpdateCloneUI();
+    }
+
+    public void UpdateCloneUI()
+    {
+        if (_lblCloneStatus == null) return;
+        if (_painter != null && _painter.HasCloneSource)
+        {
+            _lblCloneStatus.Text = $"Source: ({_painter.CloneSourceAtlasPx.X}, {_painter.CloneSourceAtlasPx.Y})";
+            _lblCloneStatus.Modulate = new Color(0.4f, 0.9f, 0.5f, 1.0f);
+        }
+        else
+        {
+            _lblCloneStatus.Text = "Source: None set (Alt+Click in canvas)";
+            _lblCloneStatus.Modulate = new Color(0.9f, 0.6f, 0.3f, 1.0f);
+        }
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -1862,6 +1928,13 @@ public void UpdateTooltipsAndKeymaps()
         if (@event.IsActionPressed("paint_decal"))
         {
             SelectTool(BrushToolMode.Decal, forceFlyoutOpen: true);
+            GetViewport()?.SetInputAsHandled();
+            return;
+        }
+
+        if (@event.IsActionPressed("paint_clone") || (keyEvent.Keycode == Key.S && !keyEvent.CtrlPressed && !keyEvent.AltPressed && !keyEvent.ShiftPressed))
+        {
+            SelectTool(BrushToolMode.Clone, forceFlyoutOpen: true);
             GetViewport()?.SetInputAsHandled();
             return;
         }

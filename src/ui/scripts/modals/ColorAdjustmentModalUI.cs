@@ -21,6 +21,9 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     [Export] private VBoxContainer _containerHueSaturation;
     [Export] private VBoxContainer _containerColorBalance;
     [Export] private VBoxContainer _containerExposure;
+    [Export] private VBoxContainer _containerLevels;
+    [Export] private VBoxContainer _containerPosterize;
+    [Export] private VBoxContainer _containerThreshold;
 
     [ExportCategory("Brightness / Contrast Controls")]
     [Export] private HSlider _sliderBrightness;
@@ -54,6 +57,26 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     [Export] private HSlider _sliderGamma;
     [Export] private Label _lblGammaVal;
 
+    [ExportCategory("Levels Controls")]
+    [Export] private HSlider _sliderInBlack;
+    [Export] private Label _lblInBlackVal;
+    [Export] private HSlider _sliderLevelsGamma;
+    [Export] private Label _lblLevelsGammaVal;
+    [Export] private HSlider _sliderInWhite;
+    [Export] private Label _lblInWhiteVal;
+    [Export] private HSlider _sliderOutBlack;
+    [Export] private Label _lblOutBlackVal;
+    [Export] private HSlider _sliderOutWhite;
+    [Export] private Label _lblOutWhiteVal;
+
+    [ExportCategory("Posterize Controls")]
+    [Export] private HSlider _sliderPosterizeLevels;
+    [Export] private Label _lblPosterizeLevelsVal;
+
+    [ExportCategory("Threshold Controls")]
+    [Export] private HSlider _sliderThreshold;
+    [Export] private Label _lblThresholdVal;
+
     [ExportCategory("Footer Controls")]
     [Export] private CheckBox _chkPreview;
     [Export] private Button _btnReset;
@@ -83,8 +106,32 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         Visible = false;
         IsOpen = false;
 
+        ResolveFallbackNodes();
         WireSignals();
         SetupScrollableProtection();
+    }
+
+    private void ResolveFallbackNodes()
+    {
+        _containerLevels ??= FindChild("LevelsContainer", true, false) as VBoxContainer;
+        _sliderInBlack ??= FindChild("InBlackSlider", true, false) as HSlider;
+        _lblInBlackVal ??= FindChild("InBlackVal", true, false) as Label;
+        _sliderLevelsGamma ??= FindChild("LevelsGammaSlider", true, false) as HSlider;
+        _lblLevelsGammaVal ??= FindChild("LevelsGammaVal", true, false) as Label;
+        _sliderInWhite ??= FindChild("InWhiteSlider", true, false) as HSlider;
+        _lblInWhiteVal ??= FindChild("InWhiteVal", true, false) as Label;
+        _sliderOutBlack ??= FindChild("OutBlackSlider", true, false) as HSlider;
+        _lblOutBlackVal ??= FindChild("OutBlackVal", true, false) as Label;
+        _sliderOutWhite ??= FindChild("OutWhiteSlider", true, false) as HSlider;
+        _lblOutWhiteVal ??= FindChild("OutWhiteVal", true, false) as Label;
+
+        _containerPosterize ??= FindChild("PosterizeContainer", true, false) as VBoxContainer;
+        _sliderPosterizeLevels ??= FindChild("PosterizeLevelsSlider", true, false) as HSlider;
+        _lblPosterizeLevelsVal ??= FindChild("PosterizeLevelsVal", true, false) as Label;
+
+        _containerThreshold ??= FindChild("ThresholdContainer", true, false) as VBoxContainer;
+        _sliderThreshold ??= FindChild("ThresholdSlider", true, false) as HSlider;
+        _lblThresholdVal ??= FindChild("ThresholdVal", true, false) as Label;
     }
 
     private void SetupScrollableProtection()
@@ -94,7 +141,10 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _sliderBrightness, _sliderContrast,
             _sliderHue, _sliderSaturation, _sliderLightness,
             _sliderCyanRed, _sliderMagentaGreen, _sliderYellowBlue,
-            _sliderExposure, _sliderOffset, _sliderGamma
+            _sliderExposure, _sliderOffset, _sliderGamma,
+            _sliderInBlack, _sliderLevelsGamma, _sliderInWhite,
+            _sliderOutBlack, _sliderOutWhite,
+            _sliderPosterizeLevels, _sliderThreshold
         };
 
         foreach (var s in sliders)
@@ -142,6 +192,15 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         if (_sliderExposure != null) _sliderExposure.ValueChanged += (v) => OnSliderOrOptionChanged();
         if (_sliderOffset != null) _sliderOffset.ValueChanged += (v) => OnSliderOrOptionChanged();
         if (_sliderGamma != null) _sliderGamma.ValueChanged += (v) => OnSliderOrOptionChanged();
+
+        if (_sliderInBlack != null) _sliderInBlack.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderLevelsGamma != null) _sliderLevelsGamma.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderInWhite != null) _sliderInWhite.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderOutBlack != null) _sliderOutBlack.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderOutWhite != null) _sliderOutWhite.ValueChanged += (v) => OnSliderOrOptionChanged();
+
+        if (_sliderPosterizeLevels != null) _sliderPosterizeLevels.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderThreshold != null) _sliderThreshold.ValueChanged += (v) => OnSliderOrOptionChanged();
     }
 
     private void OnHeaderGuiInput(InputEvent @event)
@@ -164,12 +223,14 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         }
         else if (@event is InputEventMouseMotion mm && _isDraggingModal)
         {
-            Position = _dragPositionStart + (mm.GlobalPosition - _dragMouseStart);
+            ClampPositionToScreen(_dragPositionStart + (mm.GlobalPosition - _dragMouseStart));
         }
     }
 
     public void Open(AdjustmentType type, PaintTabUI paintTab)
     {
+        StudioUIManager.CloseAnyActiveAdjustmentOrFilterModal(this);
+
         _paintTab = paintTab;
         _layerManager = paintTab?.LayerManager;
         _painter = paintTab?.Painter;
@@ -245,22 +306,44 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         if (_chkPreview != null)
             _chkPreview.ButtonPressed = true;
 
-        // Position modal nicely in the upper-right / center area of the viewport
+        // Position modal nicely in the viewport clamped to screen margins
         CenterOrPositionModal();
         UpdateValueLabels();
         StudioUIManager.Instance?.UpdateModalsState();
     }
 
+    public void ClampPositionToScreen(Vector2? candidatePos = null)
+    {
+        var vp = GetViewport();
+        if (vp == null) return;
+        Vector2 vpSize = vp.GetVisibleRect().Size;
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        float maxAllowedH = vpSize.Y * 0.85f;
+        float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : Size.X;
+        float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : Size.Y;
+        if (modalH > maxAllowedH)
+        {
+            modalH = maxAllowedH;
+            CustomMinimumSize = new Vector2(modalW, modalH);
+            Size = new Vector2(modalW, modalH);
+        }
+
+        Vector2 target = candidatePos ?? Position;
+        float clampedX = Mathf.Clamp(target.X, 20f, Mathf.Max(20f, vpSize.X - modalW - 20f));
+        float clampedY = Mathf.Clamp(target.Y, 20f, Mathf.Max(20f, vpSize.Y - modalH - 20f));
+        Position = new Vector2(clampedX, clampedY);
+    }
+
     private void CenterOrPositionModal()
     {
         var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-        float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380;
-        float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 320;
+        float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 400;
+        float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 340;
 
-        // Place on the right-center side so the 3D model in the center is visible
-        float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 400, vpSize.X - modalW - 20);
-        float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 50, vpSize.Y - modalH - 50);
-        Position = new Vector2(targetX, targetY);
+        float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 20f, vpSize.X - modalW - 20f);
+        float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, vpSize.Y - modalH - 20f);
+        ClampPositionToScreen(new Vector2(targetX, targetY));
     }
 
     private void SetupModalForType(AdjustmentType type)
@@ -272,6 +355,9 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         if (_containerHueSaturation != null) _containerHueSaturation.Visible = (type == AdjustmentType.HueSaturation);
         if (_containerColorBalance != null) _containerColorBalance.Visible = (type == AdjustmentType.ColorBalance);
         if (_containerExposure != null) _containerExposure.Visible = (type == AdjustmentType.Exposure);
+        if (_containerLevels != null) _containerLevels.Visible = (type == AdjustmentType.Levels);
+        if (_containerPosterize != null) _containerPosterize.Visible = (type == AdjustmentType.Posterize);
+        if (_containerThreshold != null) _containerThreshold.Visible = (type == AdjustmentType.Threshold);
 
         string titleText = "Adjustments";
         switch (type)
@@ -303,6 +389,25 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 if (_sliderExposure != null) _sliderExposure.Value = 0;
                 if (_sliderOffset != null) _sliderOffset.Value = 0;
                 if (_sliderGamma != null) _sliderGamma.Value = 1.0;
+                break;
+
+            case AdjustmentType.Levels:
+                titleText = "Levels";
+                if (_sliderInBlack != null) _sliderInBlack.Value = 0;
+                if (_sliderLevelsGamma != null) _sliderLevelsGamma.Value = 1.0;
+                if (_sliderInWhite != null) _sliderInWhite.Value = 255;
+                if (_sliderOutBlack != null) _sliderOutBlack.Value = 0;
+                if (_sliderOutWhite != null) _sliderOutWhite.Value = 255;
+                break;
+
+            case AdjustmentType.Posterize:
+                titleText = "Posterize";
+                if (_sliderPosterizeLevels != null) _sliderPosterizeLevels.Value = 4;
+                break;
+
+            case AdjustmentType.Threshold:
+                titleText = "Threshold";
+                if (_sliderThreshold != null) _sliderThreshold.Value = 128;
                 break;
         }
 
@@ -350,6 +455,22 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 if (_sliderOffset != null) _sliderOffset.Value = 0;
                 if (_sliderGamma != null) _sliderGamma.Value = 1.0;
                 break;
+
+            case AdjustmentType.Levels:
+                if (_sliderInBlack != null) _sliderInBlack.Value = 0;
+                if (_sliderLevelsGamma != null) _sliderLevelsGamma.Value = 1.0;
+                if (_sliderInWhite != null) _sliderInWhite.Value = 255;
+                if (_sliderOutBlack != null) _sliderOutBlack.Value = 0;
+                if (_sliderOutWhite != null) _sliderOutWhite.Value = 255;
+                break;
+
+            case AdjustmentType.Posterize:
+                if (_sliderPosterizeLevels != null) _sliderPosterizeLevels.Value = 4;
+                break;
+
+            case AdjustmentType.Threshold:
+                if (_sliderThreshold != null) _sliderThreshold.Value = 128;
+                break;
         }
         _suppressSliderEvents = false;
         UpdateValueLabels();
@@ -383,6 +504,23 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _lblOffsetVal.Text = $"{_sliderOffset.Value:+0.000;-0.000;0.000}";
         if (_lblGammaVal != null && _sliderGamma != null)
             _lblGammaVal.Text = $"{_sliderGamma.Value:0.00}";
+
+        if (_lblInBlackVal != null && _sliderInBlack != null)
+            _lblInBlackVal.Text = $"{Mathf.RoundToInt(_sliderInBlack.Value)}";
+        if (_lblLevelsGammaVal != null && _sliderLevelsGamma != null)
+            _lblLevelsGammaVal.Text = $"{_sliderLevelsGamma.Value:0.00}";
+        if (_lblInWhiteVal != null && _sliderInWhite != null)
+            _lblInWhiteVal.Text = $"{Mathf.RoundToInt(_sliderInWhite.Value)}";
+        if (_lblOutBlackVal != null && _sliderOutBlack != null)
+            _lblOutBlackVal.Text = $"{Mathf.RoundToInt(_sliderOutBlack.Value)}";
+        if (_lblOutWhiteVal != null && _sliderOutWhite != null)
+            _lblOutWhiteVal.Text = $"{Mathf.RoundToInt(_sliderOutWhite.Value)}";
+
+        if (_lblPosterizeLevelsVal != null && _sliderPosterizeLevels != null)
+            _lblPosterizeLevelsVal.Text = $"{Mathf.RoundToInt(_sliderPosterizeLevels.Value)}";
+
+        if (_lblThresholdVal != null && _sliderThreshold != null)
+            _lblThresholdVal.Text = $"{Mathf.RoundToInt(_sliderThreshold.Value)}";
     }
 
     private ColorAdjustmentParams GetCurrentParams()
@@ -414,6 +552,22 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 p.Exposure = _sliderExposure != null ? (float)_sliderExposure.Value : 0f;
                 p.Offset = _sliderOffset != null ? (float)_sliderOffset.Value : 0f;
                 p.Gamma = _sliderGamma != null ? (float)_sliderGamma.Value : 1.0f;
+                break;
+
+            case AdjustmentType.Levels:
+                p.InBlack = _sliderInBlack != null ? (float)_sliderInBlack.Value : 0f;
+                p.LevelsGamma = _sliderLevelsGamma != null ? (float)_sliderLevelsGamma.Value : 1.0f;
+                p.InWhite = _sliderInWhite != null ? (float)_sliderInWhite.Value : 255f;
+                p.OutBlack = _sliderOutBlack != null ? (float)_sliderOutBlack.Value : 0f;
+                p.OutWhite = _sliderOutWhite != null ? (float)_sliderOutWhite.Value : 255f;
+                break;
+
+            case AdjustmentType.Posterize:
+                p.PosterizeLevels = _sliderPosterizeLevels != null ? Mathf.RoundToInt(_sliderPosterizeLevels.Value) : 4;
+                break;
+
+            case AdjustmentType.Threshold:
+                p.ThresholdValue = _sliderThreshold != null ? (float)_sliderThreshold.Value : 128f;
                 break;
         }
 
