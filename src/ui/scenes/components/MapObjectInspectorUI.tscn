@@ -1,0 +1,293 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/components/MapObjectInspectorUI.cs" id="1_inspector"]
+
+[node name="MapObjectInspectorUI" type="PanelContainer"]
+custom_minimum_size = Vector2(280, 0)
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = 40.0
+offset_right = -20.0
+offset_bottom = -40.0
+grow_horizontal = 0
+grow_vertical = 2
+script = ExtResource("1_inspector")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TitleLabel" type="Label" parent="VBox"]
+layout_mode = 2
+theme_type_variation = &"HeaderSmall"
+text = "Object Inspector"
+
+[node name="TypeLabel" type="Label" parent="VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.75, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "Type: prop_dynamic"
+
+[node name="NameEdit" type="LineEdit" parent="VBox"]
+layout_mode = 2
+placeholder_text = "Object Name"
+
+[node name="ModelLabel" type="Label" parent="VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = "Model: wooden_crate.vmdl"
+autowrap_mode = 3
+
+[node name="HSeparator1" type="HSeparator" parent="VBox"]
+layout_mode = 2
+
+[node name="TransformHeader" type="Label" parent="VBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Transform"
+
+[node name="PosGrid" type="GridContainer" parent="VBox"]
+layout_mode = 2
+columns = 4
+
+[node name="LabelPos" type="Label" parent="VBox/PosGrid"]
+layout_mode = 2
+text = "Pos:"
+
+[node name="PosX" type="SpinBox" parent="VBox/PosGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -1000.0
+max_value = 1000.0
+step = 0.05
+suffix = "m"
+
+[node name="PosY" type="SpinBox" parent="VBox/PosGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -1000.0
+max_value = 1000.0
+step = 0.05
+suffix = "m"
+
+[node name="PosZ" type="SpinBox" parent="VBox/PosGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -1000.0
+max_value = 1000.0
+step = 0.05
+suffix = "m"
+
+[node name="RotGrid" type="GridContainer" parent="VBox"]
+layout_mode = 2
+columns = 4
+
+[node name="LabelRot" type="Label" parent="VBox/RotGrid"]
+layout_mode = 2
+text = "Rot:"
+
+[node name="RotX" type="SpinBox" parent="VBox/RotGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -360.0
+max_value = 360.0
+step = 1.0
+suffix = "°"
+
+[node name="RotY" type="SpinBox" parent="VBox/RotGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -360.0
+max_value = 360.0
+step = 1.0
+suffix = "°"
+
+[node name="RotZ" type="SpinBox" parent="VBox/RotGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = -360.0
+max_value = 360.0
+step = 1.0
+suffix = "°"
+
+[node name="ScaleGrid" type="GridContainer" parent="VBox"]
+layout_mode = 2
+columns = 4
+
+[node name="LabelScale" type="Label" parent="VBox/ScaleGrid"]
+layout_mode = 2
+text = "Scale:"
+
+[node name="ScaleX" type="SpinBox" parent="VBox/ScaleGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.01
+max_value = 100.0
+step = 0.05
+value = 1.0
+
+[node name="ScaleY" type="SpinBox" parent="VBox/ScaleGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.01
+max_value = 100.0
+step = 0.05
+value = 1.0
+
+[node name="ScaleZ" type="SpinBox" parent="VBox/ScaleGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.01
+max_value = 100.0
+step = 0.05
+value = 1.0
+
+[node name="UniformScaleCheck" type="CheckBox" parent="VBox"]
+layout_mode = 2
+button_pressed = true
+text = "Uniform Scale (XYZ)"
+
+[node name="HSeparator2" type="HSeparator" parent="VBox"]
+layout_mode = 2
+
+[node name="VisualHeader" type="Label" parent="VBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Appearance & Physics"
+
+[node name="TintRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBox/TintRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Color Tint (rendercolor):"
+
+[node name="TintPicker" type="ColorPickerButton" parent="VBox/TintRow"]
+custom_minimum_size = Vector2(48, 24)
+layout_mode = 2
+color = Color(1, 1, 1, 1)
+
+[node name="SolidLabel" type="Label" parent="VBox"]
+layout_mode = 2
+text = "In-Game Physics Collision:"
+
+[node name="SolidModeOption" type="OptionButton" parent="VBox"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="LightGroup" type="VBoxContainer" parent="VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HSeparator3" type="HSeparator" parent="VBox/LightGroup"]
+layout_mode = 2
+
+[node name="LightHeader" type="Label" parent="VBox/LightGroup"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Lighting Properties"
+
+[node name="LightColorRow" type="HBoxContainer" parent="VBox/LightGroup"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBox/LightGroup/LightColorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Light Color:"
+
+[node name="LightColorPicker" type="ColorPickerButton" parent="VBox/LightGroup/LightColorRow"]
+custom_minimum_size = Vector2(48, 24)
+layout_mode = 2
+color = Color(1, 1, 1, 1)
+
+[node name="EnergyRow" type="HBoxContainer" parent="VBox/LightGroup"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBox/LightGroup/EnergyRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Brightness:"
+
+[node name="LightEnergySlider" type="HSlider" parent="VBox/LightGroup/EnergyRow"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+size_flags_vertical = 4
+min_value = 0.1
+max_value = 10.0
+step = 0.1
+value = 1.0
+
+[node name="LightEnergyLabel" type="Label" parent="VBox/LightGroup/EnergyRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "1.0x"
+
+[node name="RangeRow" type="HBoxContainer" parent="VBox/LightGroup"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBox/LightGroup/RangeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Range:"
+
+[node name="LightRangeSlider" type="HSlider" parent="VBox/LightGroup/RangeRow"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+size_flags_vertical = 4
+min_value = 1.0
+max_value = 50.0
+step = 0.5
+value = 8.0
+
+[node name="LightRangeLabel" type="Label" parent="VBox/LightGroup/RangeRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "8.0 m"
+
+[node name="AngleRow" type="HBoxContainer" parent="VBox/LightGroup"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="VBox/LightGroup/AngleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Spot Angle:"
+
+[node name="SpotAngleSlider" type="HSlider" parent="VBox/LightGroup/AngleRow"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+size_flags_vertical = 4
+min_value = 10.0
+max_value = 90.0
+step = 1.0
+value = 45.0
+
+[node name="SpotAngleLabel" type="Label" parent="VBox/LightGroup/AngleRow"]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+text = "45°"
+
+[node name="HSeparator4" type="HSeparator" parent="VBox"]
+layout_mode = 2
+
+[node name="ActionsGrid" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnDuplicate" type="Button" parent="VBox/ActionsGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Duplicate"
+autowrap_mode = 2
+
+[node name="BtnDelete" type="Button" parent="VBox/ActionsGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.4, 0.4, 1)
+text = "Delete"
+autowrap_mode = 2

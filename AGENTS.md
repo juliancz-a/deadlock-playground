@@ -49,6 +49,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
 | **Hero Animation Editor System** | [docs/hero_animation_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_animation_editor_system.md) | Blender-style bottom dock (Dope Sheet, Graph Editor F-Curves), bone gizmo Auto-Keying, pose mirroring, AnimGraph 2 binary .vnmclip_c patcher, .dpp session schema, and VPK mod export. |
 | **Dynamic Changelog & Web Showcase** | [docs/dynamic_changelog_and_website_system.md](file:///d:/GameDev/deadlock-playground/docs/dynamic_changelog_and_website_system.md) | Astro web showcase (`web/`), `@tabler/icons`, custom theme cursor, static `/api/changelog.json` endpoint, Cloudflare Pages hosting, and Godot `ChangelogFeedService.cs` integration. |
 | **Release Automation Pipeline** | [docs/release_automation_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/release_automation_pipeline.md) | Release Hub web UI (`tools/release_hub/`), web `changelog.json` sync, GitHub tag/release asset upload, and GameBanana assisted workflow. |
+| **3D Map / Stage Environment Loader** | [docs/map_stage_environment_loader_system.md](file:///d:/GameDev/deadlock-playground/docs/map_stage_environment_loader_system.md) | Deadlock map loader (`dl_hideout.vpk`), direct GPU block compressed textures (`BC7`/`BC1`), direct VBIB-to-`ArrayMesh`, real-time light synthesis, spatial radius culling, and dedicated `Maps (Dev)` tab. |
 
 ---
 

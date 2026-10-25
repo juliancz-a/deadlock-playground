@@ -1,0 +1,136 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/modals/MapConsoleCommandsDialog.cs" id="1_commands_dialog"]
+
+[node name="MapConsoleCommandsDialog" type="Window"]
+title = "Deadlock In-Game Console Testing Helper"
+initial_position = 2
+size = Vector2i(540, 420)
+transient = true
+exclusive = true
+script = ExtResource("1_commands_dialog")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="VBox" type="VBoxContainer" parent="Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_type_variation = &"HeaderSmall"
+text = "In-Game Deadlock Testing Commands"
+
+[node name="Subtitle" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.75, 1)
+theme_override_font_sizes/font_size = 12
+text = "Open Deadlock's console with F7 or ~ (tilde) and paste these commands to walk around your map:"
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CmdList" type="VBoxContainer" parent="Panel/Margin/VBox/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="Row1" type="HBoxContainer" parent="Panel/Margin/VBox/Scroll/CmdList"]
+layout_mode = 2
+
+[node name="Desc" type="Label" parent="Panel/Margin/VBox/Scroll/CmdList/Row1"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Launch Hideout Mod:"
+
+[node name="Cmd" type="LineEdit" parent="Panel/Margin/VBox/Scroll/CmdList/Row1"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "sv_cheats 1; map dl_hideout"
+editable = false
+
+[node name="BtnCopy1" type="Button" parent="Panel/Margin/VBox/Scroll/CmdList/Row1"]
+layout_mode = 2
+text = "Copy"
+
+[node name="Row2" type="HBoxContainer" parent="Panel/Margin/VBox/Scroll/CmdList"]
+layout_mode = 2
+
+[node name="Desc" type="Label" parent="Panel/Margin/VBox/Scroll/CmdList/Row2"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Fly / Ghost Mode:"
+
+[node name="Cmd" type="LineEdit" parent="Panel/Margin/VBox/Scroll/CmdList/Row2"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "noclip"
+editable = false
+
+[node name="BtnCopy2" type="Button" parent="Panel/Margin/VBox/Scroll/CmdList/Row2"]
+layout_mode = 2
+text = "Copy"
+
+[node name="Row3" type="HBoxContainer" parent="Panel/Margin/VBox/Scroll/CmdList"]
+layout_mode = 2
+
+[node name="Desc" type="Label" parent="Panel/Margin/VBox/Scroll/CmdList/Row3"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Draw Collision/Hitboxes:"
+
+[node name="Cmd" type="LineEdit" parent="Panel/Margin/VBox/Scroll/CmdList/Row3"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "r_drawothermodels 2"
+editable = false
+
+[node name="BtnCopy3" type="Button" parent="Panel/Margin/VBox/Scroll/CmdList/Row3"]
+layout_mode = 2
+text = "Copy"
+
+[node name="Row4" type="HBoxContainer" parent="Panel/Margin/VBox/Scroll/CmdList"]
+layout_mode = 2
+
+[node name="Desc" type="Label" parent="Panel/Margin/VBox/Scroll/CmdList/Row4"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Invulnerability (God):"
+
+[node name="Cmd" type="LineEdit" parent="Panel/Margin/VBox/Scroll/CmdList/Row4"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "god"
+editable = false
+
+[node name="BtnCopy4" type="Button" parent="Panel/Margin/VBox/Scroll/CmdList/Row4"]
+layout_mode = 2
+text = "Copy"
+
+[node name="StatusToastLabel" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+
+[node name="Footer" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+alignment = 2
+
+[node name="BtnClose" type="Button" parent="Panel/Margin/VBox/Footer"]
+custom_minimum_size = Vector2(100, 32)
+layout_mode = 2
+text = "Close"

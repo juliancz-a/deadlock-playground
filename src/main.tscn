@@ -36,6 +36,7 @@
 [ext_resource type="PackedScene" uid="uid://c6exportbasetexmodal" path="res://ui/scenes/modals/ExportBaseTexturesModal.tscn" id="34_export_base_tex_modal"]
 [ext_resource type="PackedScene" uid="uid://b8gradmapmodal" path="res://ui/scenes/modals/GradientMapModal.tscn" id="35_gradient_map_modal"]
 [ext_resource type="PackedScene" uid="uid://c8fltrmodal" path="res://ui/scenes/modals/FilterModal.tscn" id="36_filter_modal"]
+[ext_resource type="PackedScene" path="res://ui/scenes/tabs/MapsDevTab.tscn" id="37_maps_dev_tab"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
 
@@ -209,7 +210,7 @@ bg_color = Color(0, 0, 0, 0.45)
 
 [node name="Main" type="Node3D" unique_id=1495603949]
 
-[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnAdjustments", "_btnFilter", "_btnFileMenu", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_quickColorPalette", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_colorAdjustmentModal", "_gradientMapModal", "_filterModal", "_exportBaseTexturesModal")]
+[node name="UIRoot" type="CanvasLayer" parent="." unique_id=934845657 node_paths=PackedStringArray("_btnSettings", "_btnFeedback", "_btnAbout", "_btnQuit", "_btnNews", "_btnAdjustments", "_btnFilter", "_btnFileMenu", "_btnTabCharacter", "_btnTabBones", "_btnTabCamera", "_btnTabPose", "_btnTabScene", "_btnTabEffects", "_btnTabLighting", "_btnTabShading", "_btnTabPaint", "_btnTabMapsDev", "_tabMapsDev", "_exportPanel", "_paintModExportPanel", "_navBadge", "_btnQuickXRay", "_btnQuickFullscreen", "_quickColorPalette", "_modalsLayer", "_modalBackdrop", "_settingsModal", "_feedbackModal", "_aboutModal", "_changelogModal", "_loadingOverlay", "_loadingLabel", "_loadingLogLabel", "_btnAboutClose", "_gameFolderDialog", "_saveFolderDialog", "_colorAdjustmentModal", "_gradientMapModal", "_filterModal", "_exportBaseTexturesModal")]
 layer = 2
 script = ExtResource("5_studio_ui")
 _btnSettings = NodePath("MainHUD/VBoxContainer/TopBar/HBoxContainer/SettingsButton")
@@ -229,6 +230,8 @@ _btnTabEffects = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContain
 _btnTabLighting = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/LightButton")
 _btnTabShading = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/ShadingButton")
 _btnTabPaint = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PaintButton")
+_btnTabMapsDev = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/MapsDevButton")
+_tabMapsDev = NodePath("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer/MapsDevTab")
 _exportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
 _paintModExportPanel = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/PaintModExportPanel")
 _navBadge = NodePath("MainHUD/VBoxContainer/MainSplit/ViewportArea/BottomBadgesContainer/NavBadge")
@@ -480,6 +483,14 @@ size_flags_horizontal = 3
 toggle_mode = true
 text = "Paint"
 
+[node name="MapsDevButton" type="Button" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid" unique_id=1988451299]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Maps (Dev)"
+autowrap_mode = 2
+
 [node name="HSeparator" type="HSeparator" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer" unique_id=333301085]
 layout_mode = 2
 
@@ -538,6 +549,10 @@ visible = false
 layout_mode = 2
 
 [node name="PaintTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1849204999 instance=ExtResource("15_paint_tab")]
+visible = false
+layout_mode = 2
+
+[node name="MapsDevTab" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer" unique_id=1849204990 instance=ExtResource("37_maps_dev_tab")]
 visible = false
 layout_mode = 2
 

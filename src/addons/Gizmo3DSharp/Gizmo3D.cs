@@ -1349,6 +1349,11 @@ void fragment() {
         return item;
     }
 
+    /// <summary>
+    /// Tests if a screen coordinate intersects any interactive gizmo handle without modifying edit state.
+    /// </summary>
+    public bool TestHit(Vector2 screenpos) => TransformGizmoSelect(screenpos, true);
+
     bool TransformGizmoSelect(Vector2 screenpos, bool highlightOnly = false)
     {
         if (!Visible)

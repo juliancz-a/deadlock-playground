@@ -31,6 +31,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnTabLighting;
     [Export] private Button _btnTabShading;
     [Export] private Button _btnTabPaint;
+    [Export] private Button _btnTabMapsDev;
 
     [ExportCategory("Tab Sub-Scene Instances (in Editor)")]
     [Export] private Container _tabContentContainer;
@@ -43,6 +44,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private LightingTabUI _tabLighting;
     [Export] private ShadingTabUI _tabShading;
     [Export] private PaintTabUI _tabPaint;
+    [Export] private DeadlockPlayground.UI.MapsDevTabUI _tabMapsDev;
 
     [ExportCategory("Floating & Overlay Panels")]
     [Export] private ExportPanelUI _exportPanel;
@@ -665,6 +667,9 @@ public partial class StudioUIManager : CanvasLayer
                         ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/ShadingButton");
         _btnTabPaint ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/PaintButton")
                       ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/PaintButton");
+        _btnTabMapsDev ??= GetNodeOrNull<Button>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabGrid/MapsDevButton")
+                       ?? GetNodeOrNull<Button>("MainHUD/LeftPanel/VBoxContainer/TabGrid/MapsDevButton")
+                       ?? FindChild("MapsDevButton", true, false) as Button;
 
         // Tab Content
         _tabContentContainer ??= GetNodeOrNull<Container>("MainHUD/VBoxContainer/MainSplit/LeftPanel/VBoxContainer/TabContentPanel/MarginContainer/ScrollContainer/TabContentContainer")
@@ -678,6 +683,8 @@ public partial class StudioUIManager : CanvasLayer
         _tabLighting ??= _tabContentContainer?.GetNodeOrNull<LightingTabUI>("LightingTab");
         _tabShading ??= _tabContentContainer?.GetNodeOrNull<ShadingTabUI>("ShadingTab");
         _tabPaint ??= _tabContentContainer?.GetNodeOrNull<PaintTabUI>("PaintTab");
+        _tabMapsDev ??= _tabContentContainer?.GetNodeOrNull<DeadlockPlayground.UI.MapsDevTabUI>("MapsDevTab")
+                     ?? FindChild("MapsDevTab", true, false) as DeadlockPlayground.UI.MapsDevTabUI;
 
         // Floating Panels & Quick Actions
         _exportPanel ??= GetNodeOrNull<ExportPanelUI>("MainHUD/VBoxContainer/MainSplit/ViewportArea/ExportPanel")
@@ -976,7 +983,8 @@ public partial class StudioUIManager : CanvasLayer
             _tabEffects,
             _tabLighting,
             _tabShading,
-            _tabPaint
+            _tabPaint,
+            _tabMapsDev
         };
 
         _tabButtons = new Button[]
@@ -989,7 +997,8 @@ public partial class StudioUIManager : CanvasLayer
             _btnTabEffects,
             _btnTabLighting,
             _btnTabShading,
-            _btnTabPaint
+            _btnTabPaint,
+            _btnTabMapsDev
         };
 
         for (int i = 0; i < _tabButtons.Length; i++)
@@ -1670,6 +1679,8 @@ public partial class StudioUIManager : CanvasLayer
         var extraModelModal = _modalsLayer?.FindChild("ExtraModelPickerModal", true, false) as Control;
         var modModal = _modalsLayer?.FindChild("ModPickerModal", true, false) as Control;
         var retargetModal = _modalsLayer?.FindChild("AnimationRetargetModal", true, false) as Control;
+        var assetBrowserModal = _modalsLayer?.FindChild("MapAssetBrowserUI", true, false) as Control;
+        var consoleCommandsModal = _modalsLayer?.FindChild("MapConsoleCommandsDialog", true, false) as Control;
 
         return (_settingsModal != null && _settingsModal.Visible)
             || (_feedbackModal != null && _feedbackModal.Visible)
@@ -1689,7 +1700,9 @@ public partial class StudioUIManager : CanvasLayer
             || (heroModal != null && heroModal.Visible)
             || (extraModelModal != null && extraModelModal.Visible)
             || (modModal != null && modModal.Visible)
-            || (retargetModal != null && retargetModal.Visible);
+            || (retargetModal != null && retargetModal.Visible)
+            || (assetBrowserModal != null && assetBrowserModal.Visible)
+            || (consoleCommandsModal != null && consoleCommandsModal.Visible);
     }
 
     public void UpdateModalsState()

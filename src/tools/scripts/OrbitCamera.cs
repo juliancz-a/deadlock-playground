@@ -27,8 +27,10 @@ public partial class OrbitCamera : Node3D
     [Export] public float OrthoSizeMax = 20.0f;
     [Export] public float OrthoSizeSensitivity = 0.25f;
     [Export] public bool LockOrbitInOrtho { get; set; } = true;
+    [Export] public bool IsMapNavigationMode { get; set; } = false;
 
     private Camera3D _camera;
+    public Camera3D Camera => _camera;
     private bool _isOrbiting = false;
     private bool _isPanning = false;
 
@@ -45,6 +47,12 @@ public partial class OrbitCamera : Node3D
     private Vector3 _currentPan;
 
     public event Action<float, float, float> OnCameraRotated;
+
+    public Vector3 PanTarget
+    {
+        get => _targetPan;
+        set => RecenterOnTarget(value);
+    }
 
     public float PitchDegrees => Mathf.RadToDeg(_pitch);
     public float YawDegrees => Mathf.RadToDeg(_yaw);
@@ -100,9 +108,13 @@ public partial class OrbitCamera : Node3D
         Vector3 up = Vector3.Up;
         Vector3 move = right * deltaX + up * deltaY;
         _targetPan += move;
-        _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
-        _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
-        _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+
+        if (!SceneEnvironmentManager.Is3DMapStageActive && !IsMapNavigationMode)
+        {
+            _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
+            _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
+            _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+        }
     }
 
     public void NudgeRotation(float deltaPitchDeg, float deltaYawDeg)
@@ -115,11 +127,18 @@ public partial class OrbitCamera : Node3D
     public void RecenterOnTarget(Vector3? targetCenter = null, float? targetZoom = null)
     {
         Vector3 center = targetCenter ?? new Vector3(0, 1.0f, 0);
-        _targetPan = new Vector3(
-            Mathf.Clamp(center.X, MinPanLimit.X, MaxPanLimit.X),
-            Mathf.Clamp(center.Y, MinPanLimit.Y, MaxPanLimit.Y),
-            Mathf.Clamp(center.Z, MinPanLimit.Z, MaxPanLimit.Z)
-        );
+        if (SceneEnvironmentManager.Is3DMapStageActive || IsMapNavigationMode)
+        {
+            _targetPan = center;
+        }
+        else
+        {
+            _targetPan = new Vector3(
+                Mathf.Clamp(center.X, MinPanLimit.X, MaxPanLimit.X),
+                Mathf.Clamp(center.Y, MinPanLimit.Y, MaxPanLimit.Y),
+                Mathf.Clamp(center.Z, MinPanLimit.Z, MaxPanLimit.Z)
+            );
+        }
         if (targetZoom.HasValue)
         {
             SetTargetZoom(targetZoom.Value);
@@ -202,9 +221,12 @@ public partial class OrbitCamera : Node3D
                 Vector3 right = GlobalTransform.Basis.X.Normalized();
                 Vector3 up = GlobalTransform.Basis.Y.Normalized();
                 _targetPan += (-right * mouseMotionEvent.Relative.X + up * mouseMotionEvent.Relative.Y) * panFactor;
-                _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
-                _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
-                _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+                if (!SceneEnvironmentManager.Is3DMapStageActive && !IsMapNavigationMode)
+                {
+                    _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
+                    _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
+                    _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+                }
                 GetViewport()?.SetInputAsHandled();
                 return;
             }
@@ -455,25 +477,39 @@ public partial class OrbitCamera : Node3D
             }
         }
 
-        // Handle Panning (WASD / QE or configured keybinds)
+        // Handle Panning / Navigation (WASD / QE or configured keybinds)
         if (!isTyping)
         {
             Vector3 inputDir = Vector3.Zero;
             float speedMult = Input.IsPhysicalKeyPressed(Key.Shift) ? 2.5f : 1.0f;
             
-            bool moveUp = InputMap.HasAction("camera_pan_up") ? Input.IsActionPressed("camera_pan_up") : Input.IsPhysicalKeyPressed(Key.W);
-            bool moveDown = InputMap.HasAction("camera_pan_down") ? Input.IsActionPressed("camera_pan_down") : Input.IsPhysicalKeyPressed(Key.S);
-            bool moveLeft = InputMap.HasAction("camera_pan_left") ? Input.IsActionPressed("camera_pan_left") : Input.IsPhysicalKeyPressed(Key.A);
-            bool moveRight = InputMap.HasAction("camera_pan_right") ? Input.IsActionPressed("camera_pan_right") : Input.IsPhysicalKeyPressed(Key.D);
-            bool elevUp = InputMap.HasAction("camera_elevate_up") ? Input.IsActionPressed("camera_elevate_up") : Input.IsPhysicalKeyPressed(Key.E);
-            bool elevDown = InputMap.HasAction("camera_elevate_down") ? Input.IsActionPressed("camera_elevate_down") : Input.IsPhysicalKeyPressed(Key.Q);
+            bool keyW = InputMap.HasAction("camera_pan_up") ? Input.IsActionPressed("camera_pan_up") : Input.IsPhysicalKeyPressed(Key.W);
+            bool keyS = InputMap.HasAction("camera_pan_down") ? Input.IsActionPressed("camera_pan_down") : Input.IsPhysicalKeyPressed(Key.S);
+            bool keyA = InputMap.HasAction("camera_pan_left") ? Input.IsActionPressed("camera_pan_left") : Input.IsPhysicalKeyPressed(Key.A);
+            bool keyD = InputMap.HasAction("camera_pan_right") ? Input.IsActionPressed("camera_pan_right") : Input.IsPhysicalKeyPressed(Key.D);
+            bool keyE = InputMap.HasAction("camera_elevate_up") ? Input.IsActionPressed("camera_elevate_up") : Input.IsPhysicalKeyPressed(Key.E);
+            bool keyQ = InputMap.HasAction("camera_elevate_down") ? Input.IsActionPressed("camera_elevate_down") : Input.IsPhysicalKeyPressed(Key.Q);
 
-            if (moveUp) inputDir.Y += 1;
-            if (moveDown) inputDir.Y -= 1;
-            if (moveLeft) inputDir.X -= 1;
-            if (moveRight) inputDir.X += 1;
-            if (elevUp) inputDir.Y += 1;
-            if (elevDown) inputDir.Y -= 1;
+            if (IsMapNavigationMode)
+            {
+                // Map Mode: W/S = Forward/Backward, A/D = Left/Right, E/Q = Elevate Up/Down
+                if (keyW) inputDir.Z += 1;
+                if (keyS) inputDir.Z -= 1;
+                if (keyA) inputDir.X -= 1;
+                if (keyD) inputDir.X += 1;
+                if (keyE) inputDir.Y += 1;
+                if (keyQ) inputDir.Y -= 1;
+            }
+            else
+            {
+                // Hero Mode: W/S = Pan Up/Down (+Y / -Y), A/D = Pan Left/Right (-X / +X), E/Q = Forward/Backward (+Z / -Z)
+                if (keyW) inputDir.Y += 1;
+                if (keyS) inputDir.Y -= 1;
+                if (keyA) inputDir.X -= 1;
+                if (keyD) inputDir.X += 1;
+                if (keyE) inputDir.Z += 1;
+                if (keyQ) inputDir.Z -= 1;
+            }
 
             if (inputDir != Vector3.Zero)
             {
@@ -490,17 +526,43 @@ public partial class OrbitCamera : Node3D
 
                 Vector3 moveDir = (right * inputDir.X + up * inputDir.Y + forward * inputDir.Z).Normalized();
                 
-                _targetPan += moveDir * (PanSpeed * speedMult) * fDelta;
+                bool isStage = SceneEnvironmentManager.Is3DMapStageActive || IsMapNavigationMode;
+                float baseSpeed = isStage ? PanSpeed * 1.6f : PanSpeed;
 
-                // Clamp Target Pan within bounding box
-                _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
-                _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
-                _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+                _targetPan += moveDir * (baseSpeed * speedMult) * fDelta;
+
+                // Completely bypass clamping when 3D Map Stage is active or in Map Navigation mode
+                if (!isStage)
+                {
+                    _targetPan.X = Mathf.Clamp(_targetPan.X, MinPanLimit.X, MaxPanLimit.X);
+                    _targetPan.Y = Mathf.Clamp(_targetPan.Y, MinPanLimit.Y, MaxPanLimit.Y);
+                    _targetPan.Z = Mathf.Clamp(_targetPan.Z, MinPanLimit.Z, MaxPanLimit.Z);
+                }
             }
         }
 
         // Apply Pan smoothly
         _currentPan = _currentPan.Lerp(_targetPan, PanLerpSpeed * fDelta);
         Position = _currentPan;
+    }
+
+    /// <summary>
+    /// Expands camera pan bounding limits and max zoom for navigating large 3D map stages.
+    /// </summary>
+    public void SetStagePanLimits(float radiusMeters = 200f)
+    {
+        MinPanLimit = new Vector3(-radiusMeters, -60f, -radiusMeters);
+        MaxPanLimit = new Vector3(radiusMeters, 120f, radiusMeters);
+        ZoomMax = Math.Max(60f, radiusMeters);
+    }
+
+    /// <summary>
+    /// Restores default studio pan limits tailored for character inspection.
+    /// </summary>
+    public void ResetDefaultPanLimits()
+    {
+        MinPanLimit = new Vector3(-10f, -2f, -10f);
+        MaxPanLimit = new Vector3(10f, 10f, 10f);
+        ZoomMax = 20.0f;
     }
 }

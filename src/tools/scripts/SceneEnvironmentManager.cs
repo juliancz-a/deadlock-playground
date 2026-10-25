@@ -15,6 +15,12 @@ public static class SceneEnvironmentManager
     /// </summary>
     public static bool IsTransparentMode { get; set; } = false;
 
+    /// <summary>
+    /// When true, a 3D Map / Stage environment is active in the world viewport.
+    /// Configures non-transparent viewport, procedural sky, ambient sky lighting, and hides 2D canvas backdrops.
+    /// </summary>
+    public static bool Is3DMapStageActive { get; set; } = false;
+
     public static Sky ActiveStudioSky
     {
         get => _activeStudioSky;
@@ -74,6 +80,32 @@ public static class SceneEnvironmentManager
             }
 
             // Explicitly hide both background rects so no image bleeds through
+            if (bgTextureRect != null) bgTextureRect.Visible = false;
+            if (bgRect != null) bgRect.Visible = false;
+            if (stagePlatform != null) stagePlatform.Visible = false;
+            return;
+        }
+
+        // 3D Map / Stage Environment Mode:
+        // Render full 3D environment with procedural sky, ambient lighting, and non-transparent viewport.
+        if (Is3DMapStageActive)
+        {
+            if (worldViewport != null)
+            {
+                worldViewport.TransparentBg = false;
+            }
+
+            if (worldEnv?.Environment != null)
+            {
+                worldEnv.Environment.BackgroundMode = Godot.Environment.BGMode.Sky;
+                worldEnv.Environment.Sky = EnsureStudioSky(worldEnv);
+                worldEnv.Environment.AmbientLightSource = Godot.Environment.AmbientSource.Sky;
+                worldEnv.Environment.AmbientLightEnergy = 0.65f;
+                worldEnv.Environment.ReflectedLightSource = Godot.Environment.ReflectionSource.Sky;
+                worldEnv.Environment.TonemapMode = Godot.Environment.ToneMapper.Filmic;
+                worldEnv.Environment.TonemapExposure = 1.0f;
+            }
+
             if (bgTextureRect != null) bgTextureRect.Visible = false;
             if (bgRect != null) bgRect.Visible = false;
             if (stagePlatform != null) stagePlatform.Visible = false;

@@ -131,6 +131,7 @@ public static class PlaygroundThemeHelper
         if (button == null) return;
         button.ThemeTypeVariation = VarTabButton;
         button.ToggleMode = true;
+        button.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         UpdateTabButtonState(button, active);
     }
 

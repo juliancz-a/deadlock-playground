@@ -313,7 +313,7 @@ namespace DeadlockPlayground.Painter
             return IntersectRay(meshInstance, worldRayOrigin, worldRayDir, cullBackfaces);
         }
 
-        private static bool RayIntersectsAabb(in Vector3 rayOrigin, in Vector3 rayDir, in Aabb aabb)
+        public static bool RayIntersectsAabb(in Vector3 rayOrigin, in Vector3 rayDir, in Aabb aabb)
         {
             Vector3 min = aabb.Position;
             Vector3 max = aabb.Position + aabb.Size;
@@ -340,7 +340,7 @@ namespace DeadlockPlayground.Painter
             return tmax >= MathF.Max(0f, tmin);
         }
 
-        private static bool RayIntersectsTriangle(
+        public static bool RayIntersectsTriangle(
             in Vector3 rayOrigin, in Vector3 rayDir,
             in Vector3 v0, in Vector3 v1, in Vector3 v2,
             out float t, out float u, out float v)

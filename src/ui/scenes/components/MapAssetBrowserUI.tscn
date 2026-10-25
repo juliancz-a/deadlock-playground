@@ -1,0 +1,86 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/components/MapAssetBrowserUI.cs" id="1_asset_browser"]
+
+[node name="MapAssetBrowserUI" type="PanelContainer" node_paths=PackedStringArray("_categoryOption", "_searchBar", "_cardsGrid", "_resultsCountLabel", "_btnClose")]
+custom_minimum_size = Vector2(960, 640)
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -480.0
+offset_top = -320.0
+offset_right = 480.0
+offset_bottom = 320.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_asset_browser")
+_categoryOption = NodePath("VBox/HeaderBox/FilterRow/CategoryOption")
+_searchBar = NodePath("VBox/HeaderBox/FilterRow/SearchBar")
+_cardsGrid = NodePath("VBox/Scroll/CardsGrid")
+_resultsCountLabel = NodePath("VBox/FooterBox/ResultsCountLabel")
+_btnClose = NodePath("VBox/TitleRow/BtnClose")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="VBox/TitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"HeaderSmall"
+text = "Deadlock Prop Catalog"
+autowrap_mode = 2
+
+[node name="BtnClose" type="Button" parent="VBox/TitleRow"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+text = "✕"
+
+[node name="HeaderBox" type="VBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FilterRow" type="HBoxContainer" parent="VBox/HeaderBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CategoryOption" type="OptionButton" parent="VBox/HeaderBox/FilterRow"]
+custom_minimum_size = Vector2(220, 32)
+layout_mode = 2
+
+[node name="SearchBar" type="LineEdit" parent="VBox/HeaderBox/FilterRow"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Search props by model name or keyword..."
+clear_button_enabled = true
+
+[node name="Scroll" type="ScrollContainer" parent="VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="CardsGrid" type="GridContainer" parent="VBox/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
+columns = 5
+
+[node name="FooterBox" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ResultsCountLabel" type="Label" parent="VBox/FooterBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+theme_override_font_sizes/font_size = 12
+text = "Ready to browse"
+autowrap_mode = 2

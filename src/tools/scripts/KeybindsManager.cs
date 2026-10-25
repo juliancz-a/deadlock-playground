@@ -107,8 +107,8 @@ namespace DeadlockPlayground.Tools
             AddDefault("Texture Paint", "paint_uv_toggle", "Toggle 2D UV Canvas", "Toggle docked 2D UV Texture Canvas", Key.U);
 
             // 2. Camera
-            AddDefault("Camera", "camera_pan_up", "Move Up", "Move camera viewport up (W)", Key.W);
-            AddDefault("Camera", "camera_pan_down", "Move Down", "Move camera viewport down (S)", Key.S);
+            AddDefault("Camera", "camera_pan_up", "Move Forward", "Move camera viewport forward (W)", Key.W);
+            AddDefault("Camera", "camera_pan_down", "Move Backward", "Move camera viewport backward (S)", Key.S);
             AddDefault("Camera", "camera_pan_left", "Move Left", "Move camera viewport left (A)", Key.A);
             AddDefault("Camera", "camera_pan_right", "Move Right", "Move camera viewport right (D)", Key.D);
             AddDefault("Camera", "camera_elevate_up", "Elevate Up", "Raise camera elevation (E)", Key.E);

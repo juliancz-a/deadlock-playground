@@ -1,0 +1,605 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/scripts/tabs/MapsDevTabUI.cs" id="1_maps_tab"]
+[ext_resource type="PackedScene" path="res://ui/scenes/components/MapObjectInspectorUI.tscn" id="2_inspector"]
+
+[node name="MapsDevTab" type="VBoxContainer" node_paths=PackedStringArray("_btnSubTabStageViewer", "_btnSubTabMapCreator", "_stageViewerContainer", "_forgeContainer", "_toggleStageActive", "_presetOption", "_presetDescLabel", "_radiusSlider", "_radiusValueLabel", "_btnRadiusRoom", "_btnRadiusHall", "_btnRadiusWing", "_btnRadiusFull", "_qualityOption", "_checkCenterOnHero", "_checkMapNavigation", "_statLoadTime", "_statMeshes", "_statMaterials", "_statLights", "_statTextures", "_statMissingTextures", "_btnAuditTextures", "_btnInspectSurface", "_btnDumpUntinted", "_surfaceInspectPanel", "_inspectDetailsLabel", "_btnUnloadStage", "_btnReloadStage", "_btnNewBlankCanvas", "_btnEditHideoutStage", "_btnGizmoMove", "_btnGizmoRotate", "_btnGizmoScale", "_checkSnapEnabled", "_snapDistOption", "_snapAngleOption", "_btnOpenCatalog", "_btnSpawnPlayerStart", "_btnSpawnOmniLight", "_btnSpawnSpotLight", "_btnSpawnSunLight", "_btnSpawnTargetDummy", "_btnSpawnShopZone", "_btnUndo", "_btnRedo", "_btnSaveMap", "_btnLoadMap", "_btnExportVpk", "_btnConsoleCommands", "_forgeStatusLabel", "_objectInspectorUI")]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+script = ExtResource("1_maps_tab")
+_btnSubTabStageViewer = NodePath("SubTabHeader/BtnSubTabStageViewer")
+_btnSubTabMapCreator = NodePath("SubTabHeader/BtnSubTabMapCreator")
+_stageViewerContainer = NodePath("StageViewerContainer")
+_forgeContainer = NodePath("ForgeContainer")
+_toggleStageActive = NodePath("StageViewerContainer/StageMasterBox/ToggleStageActive")
+_presetOption = NodePath("StageViewerContainer/PresetGroup/PresetOption")
+_presetDescLabel = NodePath("StageViewerContainer/PresetGroup/PresetDescLabel")
+_radiusSlider = NodePath("StageViewerContainer/RadiusGroup/SliderBox/RadiusSlider")
+_radiusValueLabel = NodePath("StageViewerContainer/RadiusGroup/SliderBox/RadiusValueLabel")
+_btnRadiusRoom = NodePath("StageViewerContainer/RadiusGroup/QuickButtons/BtnRadiusRoom")
+_btnRadiusHall = NodePath("StageViewerContainer/RadiusGroup/QuickButtons/BtnRadiusHall")
+_btnRadiusWing = NodePath("StageViewerContainer/RadiusGroup/QuickButtons/BtnRadiusWing")
+_btnRadiusFull = NodePath("StageViewerContainer/RadiusGroup/QuickButtons/BtnRadiusFull")
+_qualityOption = NodePath("StageViewerContainer/QualityGroup/QualityOption")
+_checkCenterOnHero = NodePath("StageViewerContainer/AlignmentGroup/CheckCenterOnHero")
+_checkMapNavigation = NodePath("StageViewerContainer/NavigationGroup/CheckMapNavigation")
+_statLoadTime = NodePath("StageViewerContainer/DiagnosticsGroup/StatsGrid/LoadTimeVal")
+_statMeshes = NodePath("StageViewerContainer/DiagnosticsGroup/StatsGrid/MeshesVal")
+_statMaterials = NodePath("StageViewerContainer/DiagnosticsGroup/StatsGrid/MaterialsVal")
+_statLights = NodePath("StageViewerContainer/DiagnosticsGroup/StatsGrid/LightsVal")
+_statTextures = NodePath("StageViewerContainer/DiagnosticsGroup/StatsGrid/TexturesVal")
+_statMissingTextures = NodePath("StageViewerContainer/DiagnosticsGroup/StatsGrid/MissingTexVal")
+_btnAuditTextures = NodePath("StageViewerContainer/DiagnosticsGroup/BtnAuditTextures")
+_btnInspectSurface = NodePath("StageViewerContainer/DiagnosticsGroup/InspectRow/BtnInspectSurface")
+_btnDumpUntinted = NodePath("StageViewerContainer/DiagnosticsGroup/InspectRow/BtnDumpUntinted")
+_surfaceInspectPanel = NodePath("StageViewerContainer/DiagnosticsGroup/SurfaceInspectPanel")
+_inspectDetailsLabel = NodePath("StageViewerContainer/DiagnosticsGroup/SurfaceInspectPanel/InspectDetailsLabel")
+_btnUnloadStage = NodePath("StageViewerContainer/ActionsBox/BtnUnloadStage")
+_btnReloadStage = NodePath("StageViewerContainer/ActionsBox/BtnReloadStage")
+_btnNewBlankCanvas = NodePath("ForgeContainer/StartingModesBox/ButtonsRow/BtnNewBlankCanvas")
+_btnEditHideoutStage = NodePath("ForgeContainer/StartingModesBox/ButtonsRow/BtnEditHideoutStage")
+_btnGizmoMove = NodePath("ForgeContainer/GizmoBox/GizmoModeRow/BtnGizmoMove")
+_btnGizmoRotate = NodePath("ForgeContainer/GizmoBox/GizmoModeRow/BtnGizmoRotate")
+_btnGizmoScale = NodePath("ForgeContainer/GizmoBox/GizmoModeRow/BtnGizmoScale")
+_checkSnapEnabled = NodePath("ForgeContainer/GizmoBox/SnapRow/CheckSnapEnabled")
+_snapDistOption = NodePath("ForgeContainer/GizmoBox/SnapRow/SnapDistOption")
+_snapAngleOption = NodePath("ForgeContainer/GizmoBox/SnapRow/SnapAngleOption")
+_btnOpenCatalog = NodePath("ForgeContainer/SpawnersBox/BtnOpenCatalog")
+_btnSpawnPlayerStart = NodePath("ForgeContainer/SpawnersBox/EntitiesGrid/BtnSpawnPlayerStart")
+_btnSpawnOmniLight = NodePath("ForgeContainer/SpawnersBox/EntitiesGrid/BtnSpawnOmniLight")
+_btnSpawnSpotLight = NodePath("ForgeContainer/SpawnersBox/EntitiesGrid/BtnSpawnSpotLight")
+_btnSpawnSunLight = NodePath("ForgeContainer/SpawnersBox/EntitiesGrid/BtnSpawnSunLight")
+_btnSpawnTargetDummy = NodePath("ForgeContainer/SpawnersBox/EntitiesGrid/BtnSpawnTargetDummy")
+_btnSpawnShopZone = NodePath("ForgeContainer/SpawnersBox/EntitiesGrid/BtnSpawnShopZone")
+_btnUndo = NodePath("ForgeContainer/ProjectBox/HistoryRow/BtnUndo")
+_btnRedo = NodePath("ForgeContainer/ProjectBox/HistoryRow/BtnRedo")
+_btnSaveMap = NodePath("ForgeContainer/ProjectBox/SaveLoadRow/BtnSaveMap")
+_btnLoadMap = NodePath("ForgeContainer/ProjectBox/SaveLoadRow/BtnLoadMap")
+_btnExportVpk = NodePath("ForgeContainer/ExportBox/BtnExportVpk")
+_btnConsoleCommands = NodePath("ForgeContainer/ExportBox/BtnConsoleCommands")
+_forgeStatusLabel = NodePath("ForgeContainer/ForgeStatusLabel")
+_objectInspectorUI = NodePath("ForgeContainer/MapObjectInspectorUI")
+
+[node name="SubTabHeader" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BtnSubTabStageViewer" type="Button" parent="SubTabHeader"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+text = "Stage Viewer"
+autowrap_mode = 2
+
+[node name="BtnSubTabMapCreator" type="Button" parent="SubTabHeader"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Map Creator (Forge)"
+autowrap_mode = 2
+
+[node name="HSeparatorTop" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="StageViewerContainer" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="StageMasterBox" type="HBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="StageViewerContainer/StageMasterBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"HeaderSmall"
+text = "Enable 3D Hideout Stage"
+autowrap_mode = 2
+
+[node name="ToggleStageActive" type="CheckButton" parent="StageViewerContainer/StageMasterBox"]
+layout_mode = 2
+
+[node name="HSeparator1" type="HSeparator" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="PresetGroup" type="VBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="StageViewerContainer/PresetGroup"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Stage Preset / Room"
+
+[node name="PresetOption" type="OptionButton" parent="StageViewerContainer/PresetGroup"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+
+[node name="PresetDescLabel" type="Label" parent="StageViewerContainer/PresetGroup"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.75, 0.78, 1)
+theme_override_font_sizes/font_size = 12
+text = "Select a landmark stage spot inside the hideout."
+autowrap_mode = 2
+
+[node name="HSeparator2" type="HSeparator" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="RadiusGroup" type="VBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="StageViewerContainer/RadiusGroup"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Spatial Radius Culling"
+
+[node name="SliderBox" type="HBoxContainer" parent="StageViewerContainer/RadiusGroup"]
+layout_mode = 2
+
+[node name="RadiusSlider" type="HSlider" parent="StageViewerContainer/RadiusGroup/SliderBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 15.0
+max_value = 100.0
+value = 35.0
+
+[node name="RadiusValueLabel" type="Label" parent="StageViewerContainer/RadiusGroup/SliderBox"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = "35 m"
+horizontal_alignment = 2
+
+[node name="QuickButtons" type="GridContainer" parent="StageViewerContainer/RadiusGroup"]
+layout_mode = 2
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+columns = 2
+
+[node name="BtnRadiusRoom" type="Button" parent="StageViewerContainer/RadiusGroup/QuickButtons"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "25m Room"
+autowrap_mode = 2
+
+[node name="BtnRadiusHall" type="Button" parent="StageViewerContainer/RadiusGroup/QuickButtons"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "35m Hall"
+autowrap_mode = 2
+
+[node name="BtnRadiusWing" type="Button" parent="StageViewerContainer/RadiusGroup/QuickButtons"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "50m Wing"
+autowrap_mode = 2
+
+[node name="BtnRadiusFull" type="Button" parent="StageViewerContainer/RadiusGroup/QuickButtons"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Full Map"
+autowrap_mode = 2
+
+[node name="HSeparator3" type="HSeparator" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="QualityGroup" type="VBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="StageViewerContainer/QualityGroup"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Texture Quality (VRAM Cap)"
+
+[node name="QualityOption" type="OptionButton" parent="StageViewerContainer/QualityGroup"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+
+[node name="AlignmentGroup" type="VBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="CheckCenterOnHero" type="CheckBox" parent="StageViewerContainer/AlignmentGroup"]
+layout_mode = 2
+button_pressed = true
+text = "Center Stage on Hero Origin (0, 0, 0)"
+autowrap_mode = 2
+
+[node name="NavigationGroup" type="VBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="CheckMapNavigation" type="CheckBox" parent="StageViewerContainer/NavigationGroup"]
+layout_mode = 2
+button_pressed = false
+text = "FPS / Map WASD Navigation (W/S = Forward/Back)"
+autowrap_mode = 2
+
+[node name="HSeparator4" type="HSeparator" parent="StageViewerContainer"]
+layout_mode = 2
+
+[node name="DiagnosticsGroup" type="VBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="StageViewerContainer/DiagnosticsGroup"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Stage Diagnostics"
+
+[node name="StatsGrid" type="GridContainer" parent="StageViewerContainer/DiagnosticsGroup"]
+layout_mode = 2
+columns = 2
+
+[node name="LoadTimeLbl" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+text = "Load Time:"
+autowrap_mode = 2
+
+[node name="LoadTimeVal" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+text = "--"
+
+[node name="MeshesLbl" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+text = "Meshes Instantiated:"
+autowrap_mode = 2
+
+[node name="MeshesVal" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+text = "--"
+
+[node name="MaterialsLbl" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+text = "Materials Cached:"
+autowrap_mode = 2
+
+[node name="MaterialsVal" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+text = "--"
+
+[node name="LightsLbl" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+text = "Real-Time Lights:"
+autowrap_mode = 2
+
+[node name="LightsVal" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+text = "--"
+
+[node name="TexturesLbl" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+text = "Textures Loaded:"
+autowrap_mode = 2
+
+[node name="TexturesVal" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+text = "--"
+
+[node name="MissingTexLbl" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+text = "Missing Textures:"
+autowrap_mode = 2
+
+[node name="MissingTexVal" type="Label" parent="StageViewerContainer/DiagnosticsGroup/StatsGrid"]
+layout_mode = 2
+text = "0"
+
+[node name="BtnAuditTextures" type="Button" parent="StageViewerContainer/DiagnosticsGroup"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Audit Textures & Materials (Console Log)"
+autowrap_mode = 2
+
+[node name="InspectRow" type="HBoxContainer" parent="StageViewerContainer/DiagnosticsGroup"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnInspectSurface" type="Button" parent="StageViewerContainer/DiagnosticsGroup/InspectRow"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Inspect Surface Material"
+autowrap_mode = 2
+
+[node name="BtnDumpUntinted" type="Button" parent="StageViewerContainer/DiagnosticsGroup/InspectRow"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Dump Untinted Materials"
+autowrap_mode = 2
+
+[node name="SurfaceInspectPanel" type="PanelContainer" parent="StageViewerContainer/DiagnosticsGroup"]
+visible = false
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 2
+
+[node name="InspectDetailsLabel" type="RichTextLabel" parent="StageViewerContainer/DiagnosticsGroup/SurfaceInspectPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+fit_content = false
+scroll_active = true
+text = "[color=#888899]Inspect Mode active. Left-click any 3D surface in the viewport to inspect its material properties.[/color]"
+
+[node name="ActionsBox" type="HBoxContainer" parent="StageViewerContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnReloadStage" type="Button" parent="StageViewerContainer/ActionsBox"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reload Stage"
+autowrap_mode = 2
+
+[node name="BtnUnloadStage" type="Button" parent="StageViewerContainer/ActionsBox"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Unload / Free VRAM"
+autowrap_mode = 2
+
+[node name="ForgeContainer" type="VBoxContainer" parent="."]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="StartingModesBox" type="VBoxContainer" parent="ForgeContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="ForgeContainer/StartingModesBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Forge Starting Mode"
+
+[node name="ButtonsRow" type="GridContainer" parent="ForgeContainer/StartingModesBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+columns = 2
+
+[node name="BtnNewBlankCanvas" type="Button" parent="ForgeContainer/StartingModesBox/ButtonsRow"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "New Blank Canvas"
+autowrap_mode = 2
+
+[node name="BtnEditHideoutStage" type="Button" parent="ForgeContainer/StartingModesBox/ButtonsRow"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Edit Hideout Stage"
+autowrap_mode = 2
+
+[node name="HSeparatorF1" type="HSeparator" parent="ForgeContainer"]
+layout_mode = 2
+
+[node name="GizmoBox" type="VBoxContainer" parent="ForgeContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="ForgeContainer/GizmoBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "3D Transform Gizmo & Snapping"
+
+[node name="GizmoModeRow" type="HBoxContainer" parent="ForgeContainer/GizmoBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnGizmoMove" type="Button" parent="ForgeContainer/GizmoBox/GizmoModeRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Move (W)"
+autowrap_mode = 2
+
+[node name="BtnGizmoRotate" type="Button" parent="ForgeContainer/GizmoBox/GizmoModeRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Rotate (E)"
+autowrap_mode = 2
+
+[node name="BtnGizmoScale" type="Button" parent="ForgeContainer/GizmoBox/GizmoModeRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Scale (R)"
+autowrap_mode = 2
+
+[node name="SnapRow" type="HBoxContainer" parent="ForgeContainer/GizmoBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CheckSnapEnabled" type="CheckBox" parent="ForgeContainer/GizmoBox/SnapRow"]
+layout_mode = 2
+button_pressed = true
+text = "Grid Snap"
+
+[node name="SnapDistOption" type="OptionButton" parent="ForgeContainer/GizmoBox/SnapRow"]
+custom_minimum_size = Vector2(90, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SnapAngleOption" type="OptionButton" parent="ForgeContainer/GizmoBox/SnapRow"]
+custom_minimum_size = Vector2(85, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HSeparatorF2" type="HSeparator" parent="ForgeContainer"]
+layout_mode = 2
+
+[node name="SpawnersBox" type="VBoxContainer" parent="ForgeContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="ForgeContainer/SpawnersBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Props & Gameplay Entities"
+
+[node name="BtnOpenCatalog" type="Button" parent="ForgeContainer/SpawnersBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "Browse Deadlock Props Catalog"
+autowrap_mode = 2
+
+[node name="EntitiesGrid" type="GridContainer" parent="ForgeContainer/SpawnersBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 2
+
+[node name="BtnSpawnPlayerStart" type="Button" parent="ForgeContainer/SpawnersBox/EntitiesGrid"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Player Spawn"
+autowrap_mode = 2
+
+[node name="BtnSpawnOmniLight" type="Button" parent="ForgeContainer/SpawnersBox/EntitiesGrid"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Point Light"
+autowrap_mode = 2
+
+[node name="BtnSpawnSpotLight" type="Button" parent="ForgeContainer/SpawnersBox/EntitiesGrid"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Spot Light"
+autowrap_mode = 2
+
+[node name="BtnSpawnSunLight" type="Button" parent="ForgeContainer/SpawnersBox/EntitiesGrid"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Sun / Sky"
+autowrap_mode = 2
+
+[node name="BtnSpawnTargetDummy" type="Button" parent="ForgeContainer/SpawnersBox/EntitiesGrid"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Target Dummy"
+autowrap_mode = 2
+
+[node name="BtnSpawnShopZone" type="Button" parent="ForgeContainer/SpawnersBox/EntitiesGrid"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Shop Zone"
+autowrap_mode = 2
+
+[node name="HSeparatorF3" type="HSeparator" parent="ForgeContainer"]
+layout_mode = 2
+
+[node name="ProjectBox" type="VBoxContainer" parent="ForgeContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="ForgeContainer/ProjectBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "History & Map Project"
+
+[node name="HistoryRow" type="HBoxContainer" parent="ForgeContainer/ProjectBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnUndo" type="Button" parent="ForgeContainer/ProjectBox/HistoryRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Undo (Ctrl+Z)"
+autowrap_mode = 2
+
+[node name="BtnRedo" type="Button" parent="ForgeContainer/ProjectBox/HistoryRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Redo (Ctrl+Y)"
+autowrap_mode = 2
+
+[node name="SaveLoadRow" type="HBoxContainer" parent="ForgeContainer/ProjectBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnSaveMap" type="Button" parent="ForgeContainer/ProjectBox/SaveLoadRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Save (.dpmap)"
+autowrap_mode = 2
+
+[node name="BtnLoadMap" type="Button" parent="ForgeContainer/ProjectBox/SaveLoadRow"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Load (.dpmap)"
+autowrap_mode = 2
+
+[node name="HSeparatorF4" type="HSeparator" parent="ForgeContainer"]
+layout_mode = 2
+
+[node name="ExportBox" type="VBoxContainer" parent="ForgeContainer"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Label" type="Label" parent="ForgeContainer/ExportBox"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Compile to Playable Source 2 Map"
+
+[node name="BtnExportVpk" type="Button" parent="ForgeContainer/ExportBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "Compile & Export Playable .VPK"
+autowrap_mode = 2
+
+[node name="BtnConsoleCommands" type="Button" parent="ForgeContainer/ExportBox"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+text = "In-Game Console Helper"
+autowrap_mode = 2
+
+[node name="ForgeStatusLabel" type="Label" parent="ForgeContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.75, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "Ready. Select a starting mode to begin forging."
+autowrap_mode = 2
+
+[node name="HSeparatorF5" type="HSeparator" parent="ForgeContainer"]
+layout_mode = 2
+
+[node name="MapObjectInspectorUI" parent="ForgeContainer" instance=ExtResource("2_inspector")]
+visible = false
+layout_mode = 2
