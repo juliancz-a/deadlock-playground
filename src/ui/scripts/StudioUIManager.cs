@@ -280,6 +280,14 @@ public partial class StudioUIManager : CanvasLayer
 
             if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Windowed";
         }
+
+        var animDock = FindChild("AnimationStudioDock", true, false) as AnimationStudioDock;
+        animDock?.RefreshLayout();
+        Callable.From(() =>
+        {
+            var dock = FindChild("AnimationStudioDock", true, false) as AnimationStudioDock;
+            dock?.RefreshLayout();
+        }).CallDeferred();
     }
 
     public override void _UnhandledKeyInput(InputEvent @event)
@@ -1047,7 +1055,7 @@ public partial class StudioUIManager : CanvasLayer
             }
             if (!hasActiveParticle && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
             {
-                bool showGizmo = (tabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+                bool showGizmo = (tabIndex == 1) || (tabIndex == 3) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
                 _currentSkeletonGizmoManager.SetGizmoEnabled(showGizmo);
             }
             _tabShading?.SetPaintingModeActive(false);
@@ -1139,7 +1147,7 @@ public partial class StudioUIManager : CanvasLayer
         }
         if (tabIndex != 8 && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
         {
-            bool showBones = (tabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+            bool showBones = (tabIndex == 1) || (tabIndex == 3) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
             _currentSkeletonGizmoManager.SetGizmoEnabled(showBones);
         }
     }
@@ -1437,11 +1445,11 @@ public partial class StudioUIManager : CanvasLayer
         _currentSkeletonGizmoManager = null;
         _currentIKManager = null;
 
+        _tabBones?.SetSkeleton(skeleton);
+        _tabPlayer?.SetSkeleton(skeleton);
+
         if (skeleton != null)
         {
-            _tabBones?.SetSkeleton(skeleton);
-            _tabPlayer?.SetSkeleton(skeleton);
-
             ProceduralClothSolver.Conform(skeleton);
 
             // Configure SkeletonGizmoManager

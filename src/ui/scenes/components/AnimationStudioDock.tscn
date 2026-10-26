@@ -1,5 +1,11 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://crfnkq4gdy50w"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/animation/AnimationStudioDock.tscn" id="1_dock_scene"]
 
-[node name="AnimationStudioDock" instance=ExtResource("1_dock_scene")]
+[node name="AnimationStudioDock" unique_id=956735042 instance=ExtResource("1_dock_scene")]
+
+[node name="MenuQuickTools" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar" index="11"]
+expand_icon = true
+
+[node name="DopeSheetView" parent="RootVBox/ContentContainer/BodyHBox" index="0"]
+split_offsets = PackedInt32Array(240)

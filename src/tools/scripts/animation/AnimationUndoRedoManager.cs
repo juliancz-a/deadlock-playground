@@ -284,4 +284,110 @@ namespace DeadlockPlayground.Animation
             _skeleton.ForceUpdateAllBoneTransforms();
         }
     }
+
+    /// <summary>
+    /// Command for applying an additive delta rotation and position offset across all keyframes of a bone track in an animation.
+    /// </summary>
+    public class ApplyAdditiveClipOffsetCommand : IAnimationCommand
+    {
+        private readonly Godot.Animation _anim;
+        private readonly int _rotTrack;
+        private readonly int _posTrack;
+        private readonly string _boneName;
+
+        public struct KeyBackup<T>
+        {
+            public double Time;
+            public T Value;
+        }
+
+        private readonly List<KeyBackup<Quaternion>> _oldRotKeys = new();
+        private readonly List<KeyBackup<Quaternion>> _newRotKeys = new();
+        private readonly List<KeyBackup<Vector3>> _oldPosKeys = new();
+        private readonly List<KeyBackup<Vector3>> _newPosKeys = new();
+
+        public string Description => $"Apply Additive Clip Offset to {_boneName}";
+
+        public ApplyAdditiveClipOffsetCommand(
+            Godot.Animation anim,
+            int rotTrack,
+            int posTrack,
+            string boneName,
+            Quaternion deltaRot,
+            Vector3 deltaPos)
+        {
+            _anim = anim;
+            _rotTrack = rotTrack;
+            _posTrack = posTrack;
+            _boneName = boneName;
+
+            if (_anim != null && _rotTrack >= 0 && _rotTrack < _anim.GetTrackCount())
+            {
+                int count = _anim.TrackGetKeyCount(_rotTrack);
+                for (int k = 0; k < count; k++)
+                {
+                    double t = _anim.TrackGetKeyTime(_rotTrack, k);
+                    Quaternion oldQ = _anim.TrackGetKeyValue(_rotTrack, k).AsQuaternion();
+                    Quaternion newQ = (oldQ * deltaRot).Normalized();
+                    if (newQ.W < 0)
+                    {
+                        newQ = new Quaternion(-newQ.X, -newQ.Y, -newQ.Z, -newQ.W);
+                    }
+                    _oldRotKeys.Add(new KeyBackup<Quaternion> { Time = t, Value = oldQ });
+                    _newRotKeys.Add(new KeyBackup<Quaternion> { Time = t, Value = newQ });
+                }
+            }
+
+            if (_anim != null && _posTrack >= 0 && _posTrack < _anim.GetTrackCount() && deltaPos.LengthSquared() > 1e-6f)
+            {
+                int count = _anim.TrackGetKeyCount(_posTrack);
+                for (int k = 0; k < count; k++)
+                {
+                    double t = _anim.TrackGetKeyTime(_posTrack, k);
+                    Vector3 oldP = _anim.TrackGetKeyValue(_posTrack, k).AsVector3();
+                    Vector3 newP = oldP + deltaPos;
+                    _oldPosKeys.Add(new KeyBackup<Vector3> { Time = t, Value = oldP });
+                    _newPosKeys.Add(new KeyBackup<Vector3> { Time = t, Value = newP });
+                }
+            }
+        }
+
+        public void Execute()
+        {
+            if (_anim == null) return;
+            if (_rotTrack >= 0 && _rotTrack < _anim.GetTrackCount())
+            {
+                for (int k = 0; k < _newRotKeys.Count; k++)
+                {
+                    _anim.TrackSetKeyValue(_rotTrack, k, _newRotKeys[k].Value);
+                }
+            }
+            if (_posTrack >= 0 && _posTrack < _anim.GetTrackCount())
+            {
+                for (int k = 0; k < _newPosKeys.Count; k++)
+                {
+                    _anim.TrackSetKeyValue(_posTrack, k, _newPosKeys[k].Value);
+                }
+            }
+        }
+
+        public void Undo()
+        {
+            if (_anim == null) return;
+            if (_rotTrack >= 0 && _rotTrack < _anim.GetTrackCount())
+            {
+                for (int k = 0; k < _oldRotKeys.Count; k++)
+                {
+                    _anim.TrackSetKeyValue(_rotTrack, k, _oldRotKeys[k].Value);
+                }
+            }
+            if (_posTrack >= 0 && _posTrack < _anim.GetTrackCount())
+            {
+                for (int k = 0; k < _oldPosKeys.Count; k++)
+                {
+                    _anim.TrackSetKeyValue(_posTrack, k, _oldPosKeys[k].Value);
+                }
+            }
+        }
+    }
 }

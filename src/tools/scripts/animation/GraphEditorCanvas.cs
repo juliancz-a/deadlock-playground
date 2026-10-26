@@ -116,10 +116,27 @@ namespace DeadlockPlayground.Animation
             }
         }
 
+        private PlayheadOverlay _playheadOverlay;
+        private readonly List<CurveKey> _selectionCache = new();
+        private bool _selectionCacheDirty = true;
+
         public override void _Ready()
         {
             ClipContents = true;
             FocusMode = FocusModeEnum.Click;
+            _playheadOverlay = new PlayheadOverlay();
+            _playheadOverlay.TopY = 0f;
+            AddChild(_playheadOverlay);
+        }
+
+        public override void _Notification(int what)
+        {
+            base._Notification(what);
+            if (what == NotificationResized && _playheadOverlay != null)
+            {
+                _playheadOverlay.Size = Size;
+                _playheadOverlay.PlayheadX = XFromTime(_currentTime);
+            }
         }
 
         public void SetUndoRedoManager(AnimationUndoRedoManager undoRedo)
@@ -129,11 +146,17 @@ namespace DeadlockPlayground.Animation
 
         public void SetAnimationAndBone(Godot.Animation anim, Skeleton3D skeleton, string boneName, float fps = 30f)
         {
+            if (_activeAnimation == anim && _skeleton == skeleton && _activeBoneName == boneName && Math.Abs(_fps - fps) < 0.01)
+            {
+                return;
+            }
+
             _activeAnimation = anim;
-            _skeleton = skeleton;
+            _skeleton = (skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion()) ? skeleton : null;
             _activeBoneName = boneName;
             _fps = fps > 0 ? fps : 30f;
             _duration = anim != null ? Math.Max(0.01, anim.Length) : 1.0;
+            _selectionCacheDirty = true;
             RebuildCurves();
             QueueRedraw();
         }
@@ -141,13 +164,16 @@ namespace DeadlockPlayground.Animation
         public void SetPlayheadTime(double time)
         {
             _currentTime = Math.Clamp(time, 0.0, _duration);
-            QueueRedraw();
+            if (_playheadOverlay != null)
+            {
+                _playheadOverlay.PlayheadX = XFromTime(_currentTime);
+            }
         }
 
         public void RebuildCurves()
         {
             _curves.Clear();
-            if (_activeAnimation == null || _skeleton == null || string.IsNullOrEmpty(_activeBoneName))
+            if (_activeAnimation == null || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_activeBoneName))
             {
                 EmitSignal(SignalName.CurvesRebuilt);
                 return;
@@ -271,6 +297,117 @@ namespace DeadlockPlayground.Animation
             QueueRedraw();
         }
 
+        public void FitSelectedView()
+        {
+            var selected = GetSelectedKeys();
+            if (selected.Count == 0)
+            {
+                FitView();
+                return;
+            }
+
+            double minT = selected.Min(k => k.Time);
+            double maxT = selected.Max(k => k.Time);
+            float minV = selected.Min(k => k.Value);
+            float maxV = selected.Max(k => k.Value);
+
+            double spanT = Math.Max(0.1, maxT - minT);
+            float spanV = Math.Max(1.0f, maxV - minV);
+
+            float canvasW = Math.Max(100f, Size.X - 80f);
+            float canvasH = Math.Max(100f, Size.Y - 80f);
+
+            _pixelsPerSecond = Mathf.Clamp((float)(canvasW / spanT), 30f, 1000f);
+            _pixelsPerValueUnit = Mathf.Clamp(canvasH / spanV, 2f, 500f);
+
+            _scrollX = (float)(minT * _pixelsPerSecond) - 40f;
+            float centerV = (minV + maxV) * 0.5f;
+            _scrollY = centerV * _pixelsPerValueUnit;
+
+            QueueRedraw();
+        }
+
+        public void SelectChannel(ChannelCurve targetCurve, bool addToSelection = false)
+        {
+            _selectionCacheDirty = true;
+            if (!addToSelection)
+            {
+                foreach (var c in _curves)
+                {
+                    foreach (var k in c.Keys) k.IsSelected = false;
+                }
+            }
+            if (targetCurve != null && targetCurve.IsVisible && !targetCurve.IsLocked)
+            {
+                foreach (var k in targetCurve.Keys) k.IsSelected = true;
+            }
+            NotifyKeySelectionChanged();
+            QueueRedraw();
+        }
+
+        public void IsolateChannel(ChannelCurve targetCurve)
+        {
+            if (targetCurve == null) return;
+
+            bool isOnlyVisible = targetCurve.IsVisible && _curves.All(c => c == targetCurve ? c.IsVisible : !c.IsVisible);
+
+            if (isOnlyVisible)
+            {
+                foreach (var c in _curves) c.IsVisible = true;
+            }
+            else
+            {
+                foreach (var c in _curves) c.IsVisible = (c == targetCurve);
+            }
+
+            _selectionCacheDirty = true;
+            QueueRedraw();
+        }
+
+        public enum EasePreset { Linear, EaseIn, EaseOut, EaseInOut, Constant }
+
+        public void SetSelectedEasePreset(EasePreset preset)
+        {
+            var selected = GetSelectedKeys();
+            if (selected.Count == 0) return;
+
+            foreach (var k in selected)
+            {
+                switch (preset)
+                {
+                    case EasePreset.Linear:
+                        k.Mode = TangentMode.Vector;
+                        break;
+                    case EasePreset.EaseIn:
+                        k.Mode = TangentMode.Free;
+                        k.InHandle = new Vector2(k.InHandle.X, 0f);
+                        break;
+                    case EasePreset.EaseOut:
+                        k.Mode = TangentMode.Free;
+                        k.OutHandle = new Vector2(k.OutHandle.X, 0f);
+                        break;
+                    case EasePreset.EaseInOut:
+                        k.Mode = TangentMode.Aligned;
+                        k.InHandle = new Vector2(k.InHandle.X, 0f);
+                        k.OutHandle = new Vector2(k.OutHandle.X, 0f);
+                        break;
+                    case EasePreset.Constant:
+                        k.Mode = TangentMode.Free;
+                        k.OutHandle = new Vector2(0f, 0f);
+                        break;
+                }
+            }
+
+            foreach (var curve in _curves)
+            {
+                ComputeAutoTangents(curve);
+            }
+
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            QueueRedraw();
+        }
+
         public void SetSelectedKeyValue(float newValue)
         {
             var selected = GetSelectedKeys();
@@ -314,14 +451,25 @@ namespace DeadlockPlayground.Animation
 
         public List<CurveKey> GetSelectedKeys()
         {
-            return _curves.Where(c => c.IsVisible && !c.IsLocked)
-                          .SelectMany(c => c.Keys)
-                          .Where(k => k.IsSelected)
-                          .ToList();
+            if (_selectionCacheDirty)
+            {
+                _selectionCache.Clear();
+                foreach (var curve in _curves)
+                {
+                    if (!curve.IsVisible || curve.IsLocked) continue;
+                    foreach (var k in curve.Keys)
+                    {
+                        if (k.IsSelected) _selectionCache.Add(k);
+                    }
+                }
+                _selectionCacheDirty = false;
+            }
+            return _selectionCache;
         }
 
         public void ToggleSelectAll()
         {
+            _selectionCacheDirty = true;
             bool anySelected = _curves.Any(c => c.Keys.Any(k => k.IsSelected));
             foreach (var curve in _curves)
             {
@@ -336,8 +484,64 @@ namespace DeadlockPlayground.Animation
             QueueRedraw();
         }
 
+        public void DeleteSelectedKeys()
+        {
+            var selected = GetSelectedKeys();
+            if (selected.Count == 0) return;
+
+            foreach (var curve in _curves)
+            {
+                if (!curve.IsVisible || curve.IsLocked) continue;
+                curve.Keys.RemoveAll(k => k.IsSelected);
+                ComputeAutoTangents(curve);
+            }
+
+            _selectionCacheDirty = true;
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            NotifyKeySelectionChanged();
+            QueueRedraw();
+        }
+
+        public void DuplicateSelectedKeys()
+        {
+            var selected = GetSelectedKeys();
+            if (selected.Count == 0) return;
+
+            double offset = 1.0 / _fps;
+            foreach (var curve in _curves)
+            {
+                if (!curve.IsVisible || curve.IsLocked) continue;
+                var newlyAdded = new List<CurveKey>();
+                foreach (var k in curve.Keys.Where(k => k.IsSelected).ToList())
+                {
+                    k.IsSelected = false;
+                    var dup = new CurveKey
+                    {
+                        Time = Math.Clamp(k.Time + offset, 0.0, _duration),
+                        Value = k.Value,
+                        Mode = k.Mode,
+                        InHandle = k.InHandle,
+                        OutHandle = k.OutHandle,
+                        IsSelected = true
+                    };
+                    newlyAdded.Add(dup);
+                }
+                curve.Keys.AddRange(newlyAdded);
+                curve.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+                ComputeAutoTangents(curve);
+            }
+
+            _selectionCacheDirty = true;
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            NotifyKeySelectionChanged();
+            QueueRedraw();
+        }
+
         private void NotifyKeySelectionChanged()
         {
+            _selectionCacheDirty = true;
             var sel = GetSelectedKeys();
             if (sel.Count > 0)
             {
@@ -606,12 +810,7 @@ namespace DeadlockPlayground.Animation
                 DrawChannelCurve(curve, size);
             }
 
-            // 4. Playhead
-            float playX = XFromTime(_currentTime);
-            if (playX >= 0 && playX <= size.X)
-            {
-                DrawLine(new Vector2(playX, 0), new Vector2(playX, size.Y), ColorPlayhead, 1.8f);
-            }
+            // 4. Playhead is drawn by _playheadOverlay
 
             // 5. Marquee Box Selection
             if (_currentDragMode == DragMode.BoxSelect && _boxSelectRect.Size.Length() > 2f)

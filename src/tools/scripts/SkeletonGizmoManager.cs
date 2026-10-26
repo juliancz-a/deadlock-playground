@@ -29,6 +29,7 @@ public partial class SkeletonGizmoManager : Node3D
     [Export] public Material XRayMaterial { get; set; }
 
     public static event Action<int, Vector3, Quaternion> OnBonePoseChanged;
+    public static event Action<int, Vector3, Quaternion> OnBoneTransformEnded;
     public static event Action<int> OnBoneSelected;
 
     private BoneLayerManager _boneLayerManager;
@@ -187,6 +188,12 @@ public partial class SkeletonGizmoManager : Node3D
         _gizmo.TransformEnd += (mode) => {
             _isGizmoDragging = false;
             IKManager?.ResumeIKForBone(_selectedBoneIdx);
+            if (_selectedBoneIdx != -1 && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
+            {
+                Vector3 finalPos = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+                Quaternion finalRot = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+                OnBoneTransformEnded?.Invoke(_selectedBoneIdx, finalPos, finalRot);
+            }
         };
     }
 
@@ -230,7 +237,7 @@ public partial class SkeletonGizmoManager : Node3D
         }
         else if (@event is InputEventKey key && key.Pressed && !key.Echo)
         {
-            if (_selectedBoneIdx != -1 && TargetSkeleton != null)
+            if (_selectedBoneIdx != -1 && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
             {
                 if (key.Keycode == Key.G && key.AltPressed)
                 {
@@ -291,7 +298,7 @@ public partial class SkeletonGizmoManager : Node3D
     {
         if (_gizmo == null || _dummyTarget == null) return;
 
-        if (_selectedBoneIdx == -1 || TargetSkeleton == null)
+        if (_selectedBoneIdx == -1 || !GodotObject.IsInstanceValid(TargetSkeleton) || TargetSkeleton.IsQueuedForDeletion())
         {
             _gizmo.ClearSelection();
             _gizmo.Visible = false;
@@ -336,7 +343,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void HandleGizmoTransformChanged(Transform3D globalTransform)
     {
-        if (_selectedBoneIdx == -1 || TargetSkeleton == null) return;
+        if (_selectedBoneIdx == -1 || !GodotObject.IsInstanceValid(TargetSkeleton) || TargetSkeleton.IsQueuedForDeletion()) return;
 
         // Convert Gizmo's GlobalTransform to the Bone's Local Pose (relative to parent)
         Transform3D skelGlobal = TargetSkeleton.GlobalTransform;
@@ -416,7 +423,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     public override void _Process(double delta)
     {
-        if (GodotObject.IsInstanceValid(_skeletonMeshInstance) && _skeletonMeshInstance.Visible && GodotObject.IsInstanceValid(TargetSkeleton))
+        if (GodotObject.IsInstanceValid(_skeletonMeshInstance) && _skeletonMeshInstance.Visible && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
         {
             DrawSkeleton();
         }
@@ -434,7 +441,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void DrawSkeleton()
     {
-        if (!GodotObject.IsInstanceValid(TargetSkeleton) || !GodotObject.IsInstanceValid(_immediateMesh)) return;
+        if (!GodotObject.IsInstanceValid(TargetSkeleton) || TargetSkeleton.IsQueuedForDeletion() || !GodotObject.IsInstanceValid(_immediateMesh)) return;
 
         _immediateMesh.ClearSurfaces();
         _immediateMesh.SurfaceBegin(Mesh.PrimitiveType.Lines);

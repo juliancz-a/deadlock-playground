@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace DeadlockPlayground.Animation
@@ -399,5 +400,207 @@ namespace DeadlockPlayground.Animation
             anim.TrackSetPath(track, $"%GeneralSkeleton:{boneName}");
             return track;
         }
+
+        #region New Studio Editing Tools (P4)
+        /// <summary>
+        /// Reduces redundant keyframes on baked or high-density curves using tolerance-based decimation.
+        /// Returns total number of removed keyframes.
+        /// </summary>
+        public static int ReduceKeys(Godot.Animation anim, string boneName = null, float maxAngleDeg = 0.5f, float maxPosDist = 0.002f)
+        {
+            if (anim == null) return 0;
+            int totalRemoved = 0;
+
+            for (int t = 0; t < anim.GetTrackCount(); t++)
+            {
+                if (!string.IsNullOrEmpty(boneName))
+                {
+                    string path = anim.TrackGetPath(t).ToString();
+                    if (!path.EndsWith($":{boneName}", StringComparison.OrdinalIgnoreCase)) continue;
+                }
+
+                int kCount = anim.TrackGetKeyCount(t);
+                if (kCount <= 2) continue;
+
+                var type = anim.TrackGetType(t);
+                if (type != Godot.Animation.TrackType.Position3D && type != Godot.Animation.TrackType.Rotation3D) continue;
+
+                var keysToRemove = new List<int>();
+                int prevKept = 0;
+
+                for (int k = 1; k < kCount - 1; k++)
+                {
+                    double t0 = anim.TrackGetKeyTime(t, prevKept);
+                    double t1 = anim.TrackGetKeyTime(t, k);
+                    double t2 = anim.TrackGetKeyTime(t, k + 1);
+
+                    if (t2 <= t0) continue;
+                    float factor = (float)((t1 - t0) / (t2 - t0));
+
+                    bool canRemove = false;
+
+                    if (type == Godot.Animation.TrackType.Position3D)
+                    {
+                        Vector3 p0 = (Vector3)anim.TrackGetKeyValue(t, prevKept);
+                        Vector3 p1 = (Vector3)anim.TrackGetKeyValue(t, k);
+                        Vector3 p2 = (Vector3)anim.TrackGetKeyValue(t, k + 1);
+
+                        Vector3 expected = p0.Lerp(p2, factor);
+                        if (p1.DistanceTo(expected) <= maxPosDist)
+                        {
+                            canRemove = true;
+                        }
+                    }
+                    else if (type == Godot.Animation.TrackType.Rotation3D)
+                    {
+                        Quaternion q0 = ((Quaternion)anim.TrackGetKeyValue(t, prevKept)).Normalized();
+                        Quaternion q1 = ((Quaternion)anim.TrackGetKeyValue(t, k)).Normalized();
+                        Quaternion q2 = ((Quaternion)anim.TrackGetKeyValue(t, k + 1)).Normalized();
+
+                        Quaternion expected = q0.Slerp(q2, factor).Normalized();
+                        float angle = Mathf.RadToDeg(q1.AngleTo(expected));
+                        if (angle <= maxAngleDeg)
+                        {
+                            canRemove = true;
+                        }
+                    }
+
+                    if (canRemove)
+                    {
+                        keysToRemove.Add(k);
+                    }
+                    else
+                    {
+                        prevKept = k;
+                    }
+                }
+
+                for (int r = keysToRemove.Count - 1; r >= 0; r--)
+                {
+                    anim.TrackRemoveKey(t, keysToRemove[r]);
+                    totalRemoved++;
+                }
+            }
+
+            return totalRemoved;
+        }
+
+        /// <summary>
+        /// Scales the animation playback speed and length by timeScale.
+        /// e.g. timeScale = 2.0 makes it twice as fast (duration halved).
+        /// </summary>
+        public static void RetimeClip(Godot.Animation anim, double timeScale)
+        {
+            if (anim == null || timeScale <= 0.001) return;
+
+            for (int t = 0; t < anim.GetTrackCount(); t++)
+            {
+                int kCount = anim.TrackGetKeyCount(t);
+                var keys = new List<(double Time, Variant Value, float Transition)>();
+                for (int k = 0; k < kCount; k++)
+                {
+                    double newT = anim.TrackGetKeyTime(t, k) / timeScale;
+                    var val = anim.TrackGetKeyValue(t, k);
+                    float tr = anim.TrackGetKeyTransition(t, k);
+                    keys.Add((newT, val, tr));
+                }
+
+                while (anim.TrackGetKeyCount(t) > 0)
+                {
+                    anim.TrackRemoveKey(t, 0);
+                }
+
+                foreach (var (kTime, kVal, kTr) in keys)
+                {
+                    anim.TrackInsertKey(t, kTime, kVal, kTr);
+                }
+            }
+
+            anim.Length = Math.Max(0.01, anim.Length / timeScale);
+        }
+
+        /// <summary>
+        /// Reverses the animation sequence from end to beginning.
+        /// </summary>
+        public static void ReverseClip(Godot.Animation anim)
+        {
+            if (anim == null || anim.Length <= 0.001) return;
+            double dur = anim.Length;
+
+            for (int t = 0; t < anim.GetTrackCount(); t++)
+            {
+                int kCount = anim.TrackGetKeyCount(t);
+                var keys = new List<(double Time, Variant Value, float Transition)>();
+                for (int k = 0; k < kCount; k++)
+                {
+                    double newT = dur - anim.TrackGetKeyTime(t, k);
+                    var val = anim.TrackGetKeyValue(t, k);
+                    float tr = anim.TrackGetKeyTransition(t, k);
+                    keys.Add((newT, val, tr));
+                }
+
+                keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+
+                while (anim.TrackGetKeyCount(t) > 0)
+                {
+                    anim.TrackRemoveKey(t, 0);
+                }
+
+                foreach (var (kTime, kVal, kTr) in keys)
+                {
+                    anim.TrackInsertKey(t, kTime, kVal, kTr);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Trims the animation to the specified [startTime, endTime] time window,
+        /// shifting remaining keyframes so the trimmed segment begins at 0.0.
+        /// </summary>
+        public static void TrimToRange(Godot.Animation anim, double startTime, double endTime)
+        {
+            if (anim == null || endTime <= startTime) return;
+            startTime = Math.Max(0.0, startTime);
+            endTime = Math.Min(anim.Length, endTime);
+
+            for (int t = 0; t < anim.GetTrackCount(); t++)
+            {
+                int kCount = anim.TrackGetKeyCount(t);
+                var keys = new List<(double Time, Variant Value, float Transition)>();
+
+                for (int k = 0; k < kCount; k++)
+                {
+                    double time = anim.TrackGetKeyTime(t, k);
+                    if (time >= startTime && time <= endTime)
+                    {
+                        keys.Add((time - startTime, anim.TrackGetKeyValue(t, k), anim.TrackGetKeyTransition(t, k)));
+                    }
+                }
+
+                while (anim.TrackGetKeyCount(t) > 0)
+                {
+                    anim.TrackRemoveKey(t, 0);
+                }
+
+                foreach (var (kTime, kVal, kTr) in keys)
+                {
+                    anim.TrackInsertKey(t, kTime, kVal, kTr);
+                }
+            }
+
+            anim.Length = Math.Max(0.01, endTime - startTime);
+        }
+
+        /// <summary>
+        /// Gets all canonical bone names belonging to a humanoid bone group.
+        /// </summary>
+        public static List<string> GetBonesForGroup(HumanoidBoneMapper.BoneGroup group)
+        {
+            return HumanoidBoneMapper.Definitions
+                .Where(d => d.Group == group)
+                .Select(d => d.CanonicalName)
+                .ToList();
+        }
+        #endregion
     }
 }

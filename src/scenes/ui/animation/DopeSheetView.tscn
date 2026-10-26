@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="1_theme"]
 [ext_resource type="Script" path="res://tools/scripts/animation/DopeSheetGridCanvas.cs" id="2_dope_canvas"]
+[ext_resource type="Script" path="res://tools/scripts/animation/BoneListCanvas.cs" id="3_bone_canvas"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_header_panel"]
 content_margin_left = 6.0
@@ -51,20 +52,28 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 theme_override_font_sizes/font_size = 13
-text = "● All Channels (Summary)"
+text = "All Channels (Summary)"
 vertical_alignment = 1
 
-[node name="BoneScrollContainer" type="ScrollContainer" parent="BoneListPanel"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-horizontal_scroll_mode = 0
-
-[node name="BoneRowsVBox" type="VBoxContainer" parent="BoneListPanel/BoneScrollContainer"]
-unique_name_in_owner = true
+[node name="BoneListHBox" type="HBoxContainer" parent="BoneListPanel"]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_constants/separation = 0
+
+[node name="BoneListCanvas" type="Control" parent="BoneListPanel/BoneListHBox"]
+unique_name_in_owner = true
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("3_bone_canvas")
+
+[node name="BoneListVScrollBar" type="VScrollBar" parent="BoneListPanel/BoneListHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(10, 0)
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="TimelinePanel" type="VBoxContainer" parent="."]
 layout_mode = 2

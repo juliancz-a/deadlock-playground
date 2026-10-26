@@ -60,8 +60,8 @@ namespace DeadlockPlayground.UI
 
         // Dope Sheet View Controls
         private LineEdit _boneSearch;
-        private ScrollContainer _boneScrollContainer;
-        private VBoxContainer _boneRowsVBox;
+        private BoneListCanvas _boneListCanvas;
+        private VScrollBar _boneListVScrollBar;
         private DopeSheetGridCanvas _dopeSheetCanvas;
 
         // Graph Editor View Controls
@@ -114,7 +114,13 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderBoneRotZ;
         private Button _btnResetBonePose;
         private Button _btnDeselectBone;
+        private Button _btnToggleAdditiveOffsetMode;
+        private Button _btnApplyOffsetToAllFrames;
         private bool _isUpdatingBoneSliders = false;
+        private bool _isAdditiveClipOffsetMode = false;
+        private Quaternion _baselineBoneRot = Quaternion.Identity;
+        private Vector3 _baselineBonePos = Vector3.Zero;
+        private bool _hasBaselinePose = false;
 
         // Active State
         private Skeleton3D _skeleton;
@@ -132,10 +138,80 @@ namespace DeadlockPlayground.UI
         // Undo/Redo & Subsystems
         private readonly AnimationUndoRedoManager _undoRedo = new();
 
-        // Bone Row Button Styles
-        private StyleBoxFlat _boneBtnNormalStyle;
-        private StyleBoxFlat _boneBtnHoverStyle;
-        private StyleBoxFlat _boneBtnSelectedStyle;
+        private const float EdgeMargin = 4f;
+
+        // Dock Outer Frame & Border Styling
+        private static readonly StyleBoxFlat DockPanelStyle = new()
+        {
+            BgColor = new Color(0.09f, 0.10f, 0.11f, 0.98f),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderColor = new Color(0.247059f, 0.364706f, 0.301961f, 0.8f),
+            CornerRadiusTopLeft = 6,
+            CornerRadiusTopRight = 6,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusBottomLeft = 4,
+            ShadowColor = new Color(0f, 0f, 0f, 0.45f),
+            ShadowSize = 6,
+            ShadowOffset = new Vector2(0f, -2f)
+        };
+
+        // Menu Button Styles (Quick Tools, Key Actions)
+        private static readonly StyleBoxFlat MenuBtnNormal = new()
+        {
+            ContentMarginLeft = 10f,
+            ContentMarginRight = 10f,
+            ContentMarginTop = 4f,
+            ContentMarginBottom = 4f,
+            BgColor = new Color(0.133333f, 0.12549f, 0.129412f, 0.85f),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderColor = new Color(0.247059f, 0.364706f, 0.301961f, 0.7f),
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusBottomLeft = 4
+        };
+
+        private static readonly StyleBoxFlat MenuBtnHover = new()
+        {
+            ContentMarginLeft = 10f,
+            ContentMarginRight = 10f,
+            ContentMarginTop = 4f,
+            ContentMarginBottom = 4f,
+            BgColor = new Color(0.247059f, 0.364706f, 0.301961f, 0.95f),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderColor = new Color(0.447059f, 0.580392f, 0.498039f, 1f),
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusBottomLeft = 4
+        };
+
+        private static readonly StyleBoxFlat MenuBtnPressed = new()
+        {
+            ContentMarginLeft = 10f,
+            ContentMarginRight = 10f,
+            ContentMarginTop = 4f,
+            ContentMarginBottom = 4f,
+            BgColor = new Color(0.447059f, 0.580392f, 0.498039f, 1f),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderColor = new Color(0.937255f, 0.870588f, 0.74902f, 1f),
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusBottomLeft = 4
+        };
 
         // Resizing State
         private bool _isResizingHeight = false;
@@ -143,22 +219,91 @@ namespace DeadlockPlayground.UI
         private float _dragStartHeight = 320f;
         private float _currentDockHeight = 320f;
 
+        private AnimationStudioKeymap _keymap;
+        private const string ConfigPath = "user://animation_studio.cfg";
+        private const string SectionName = "AnimationStudio";
+
         public bool IsOpen => _isOpen;
         public bool IsAutoKeyEnabled => _isAutoKeyEnabled;
+        public DopeSheetGridCanvas DopeSheetCanvas => _dopeSheetCanvas;
+        public GraphEditorCanvas GraphEditorCanvas => _graphEditorCanvas;
+        public StudioTab CurrentTab => _currentTab;
+
+        public void Undo() => _undoRedo.Undo();
+        public void Redo() => _undoRedo.Redo();
+        public void CopyPose() => AnimationMirrorHelper.CopyPose(_skeleton);
+        public void PastePose()
+        {
+            AnimationMirrorHelper.PastePose(_skeleton);
+            CommitAutoKeyForCurrentPose();
+        }
+        public void PasteMirrorPose()
+        {
+            AnimationMirrorHelper.PasteMirrorPose(_skeleton);
+            CommitAutoKeyForCurrentPose();
+        }
 
         public override void _Ready()
         {
             ZIndex = 5;
+            AddThemeStyleboxOverride("panel", DockPanelStyle);
             BindSceneNodes();
             ConnectSignals();
 
+            if (GetTree()?.Root != null)
+            {
+                GetTree().Root.SizeChanged += OnViewportRootSizeChanged;
+            }
+
             // Dock starts collapsed: only header bar (44px) visible
+            InitDockIcons();
             CollapseDock();
+
+            _keymap = new AnimationStudioKeymap(this);
+            LoadDockSettings();
 
             _undoRedo.HistoryChanged += UpdateUndoRedoButtons;
             UpdateUndoRedoButtons();
 
             SkeletonGizmoManager.OnBoneSelected += OnViewportBoneSelected;
+            SkeletonGizmoManager.OnBoneTransformEnded += OnViewportBoneTransformEnded;
+
+            AnimationTransportService.Instance.PlaybackStateChanged += OnTransportPlaybackStateChanged;
+            AnimationTransportService.Instance.TimeChanged += OnTransportTimeChanged;
+            AnimationTransportService.Instance.LoopChanged += OnTransportLoopChanged;
+        }
+
+        public override void _UnhandledKeyInput(InputEvent @event)
+        {
+            if (@event is InputEventKey key && _keymap != null && _keymap.HandleKeyInput(key))
+            {
+                GetViewport().SetInputAsHandled();
+            }
+        }
+
+        private void LoadDockSettings()
+        {
+            var config = new ConfigFile();
+            if (config.Load(ConfigPath) == Error.Ok)
+            {
+                _currentDockHeight = (float)config.GetValue(SectionName, "DockHeight", 320.0f);
+                _currentDockHeight = Mathf.Clamp(_currentDockHeight, MinDockHeight, MaxDockHeight);
+                int savedTab = (int)config.GetValue(SectionName, "LastTab", 0);
+                if (savedTab >= 0 && savedTab <= 2)
+                {
+                    SwitchTab((StudioTab)savedTab);
+                }
+            }
+        }
+
+        private void SaveDockSettings()
+        {
+            var config = new ConfigFile();
+            config.Load(ConfigPath);
+            config.SetValue(SectionName, "DockHeight", _currentDockHeight);
+            config.SetValue(SectionName, "IsOpen", _isOpen);
+            config.SetValue(SectionName, "LastTab", (int)_currentTab);
+            config.Save(ConfigPath);
         }
 
         private T FindSceneNode<T>(string name) where T : class
@@ -236,8 +381,8 @@ namespace DeadlockPlayground.UI
                 if (fontColus != null) lblSummary.AddThemeFontOverride("font", fontColus);
                 lblSummary.AddThemeFontSizeOverride("font_size", 13);
             }
-            _boneScrollContainer = FindSceneNode<ScrollContainer>("BoneScrollContainer");
-            _boneRowsVBox = FindSceneNode<VBoxContainer>("BoneRowsVBox");
+            _boneListCanvas = FindSceneNode<BoneListCanvas>("BoneListCanvas");
+            _boneListVScrollBar = FindSceneNode<VScrollBar>("BoneListVScrollBar");
             _dopeSheetCanvas = FindSceneNode<DopeSheetGridCanvas>("DopeSheetCanvas");
 
             // Graph Editor Nodes (inside instanced GraphEditorView)
@@ -305,6 +450,44 @@ namespace DeadlockPlayground.UI
             _sliderBoneRotZ = FindSceneNode<HSlider>("SliderBoneRotZ") ?? GetNodeOrNull<HSlider>("%SliderBoneRotZ");
             _btnResetBonePose = FindSceneNode<Button>("BtnResetBonePose") ?? GetNodeOrNull<Button>("%BtnResetBonePose");
             _btnDeselectBone = FindSceneNode<Button>("BtnDeselectBone") ?? GetNodeOrNull<Button>("%BtnDeselectBone");
+            _btnToggleAdditiveOffsetMode = FindSceneNode<Button>("BtnToggleAdditiveOffsetMode") ?? GetNodeOrNull<Button>("%BtnToggleAdditiveOffsetMode");
+            _btnApplyOffsetToAllFrames = FindSceneNode<Button>("BtnApplyOffsetToAllFrames") ?? GetNodeOrNull<Button>("%BtnApplyOffsetToAllFrames");
+        }
+
+        private void InitDockIcons()
+        {
+            DockIcons.Apply(_btnToggleCollapse, _isOpen ? "arrow_down" : "arrow_up", "Toggle Animation Studio Dock (Ctrl+Space)");
+            DockIcons.Apply(_btnRewindStart, "arrow_left_to_line", "Rewind to Start (Shift+Left)");
+            DockIcons.Apply(_btnStepBack, "previous", "Step Backward 1 Frame (Left Arrow)");
+            DockIcons.Apply(_btnPlayPause, AnimationTransportService.Instance.IsPlaying ? "pause" : "play", "Play/Pause (Space)");
+            DockIcons.Apply(_btnStepNext, "next", "Step Forward 1 Frame (Right Arrow)");
+            DockIcons.Apply(_btnJumpEnd, "arrow_right_to_line", "Jump to End (Shift+Right)");
+            DockIcons.Apply(_btnLoop, "arrows_clockwise", "Toggle Loop Playback");
+            DockIcons.Apply(_btnAutoKey, "circle", "Toggle Auto-Keying (I)");
+            DockIcons.Apply(_btnUndo, "undo", "Undo (Ctrl+Z)");
+            DockIcons.Apply(_btnRedo, "redo", "Redo (Ctrl+Y)");
+
+            if (_btnTabDopeSheet != null)
+            {
+                var icon = DockIcons.Load("film");
+                if (icon != null) _btnTabDopeSheet.Icon = icon;
+            }
+            if (_btnTabGraphEditor != null)
+            {
+                var icon = DockIcons.Load("line_graph");
+                if (icon != null) _btnTabGraphEditor.Icon = icon;
+            }
+            if (_btnTabClipSettings != null)
+            {
+                var icon = DockIcons.Load("sliders");
+                if (icon != null) _btnTabClipSettings.Icon = icon;
+            }
+
+            if (_btnCopyPose != null) DockIcons.Apply(_btnCopyPose, "duplicate", "Copy Pose (Ctrl+C)", iconOnly: false);
+            if (_btnPastePose != null) DockIcons.Apply(_btnPastePose, "duplicate", "Paste Pose (Ctrl+V)", iconOnly: false);
+            if (_btnPasteMirrorPose != null) DockIcons.Apply(_btnPasteMirrorPose, "mirror_horizontally", "Paste Mirrored Pose (Ctrl+Shift+V)", iconOnly: false);
+            if (_btnMirrorWholeAnim != null) DockIcons.Apply(_btnMirrorWholeAnim, "mirror_horizontally", "Mirror Whole Animation", iconOnly: false);
+            if (_btnExportGlb != null) DockIcons.Apply(_btnExportGlb, "file_arrow_down", "Export Animation to .GLB", iconOnly: false);
         }
 
         private void ConnectSignals()
@@ -324,14 +507,19 @@ namespace DeadlockPlayground.UI
             if (_btnTabClipSettings != null) _btnTabClipSettings.Pressed += () => SwitchTab(StudioTab.ClipSettings);
 
             // Transport
-            if (_btnRewindStart != null) _btnRewindStart.Pressed += () => ScrubToFrame(0);
-            if (_btnStepBack != null) _btnStepBack.Pressed += () => StepFrame(-1);
+            if (_btnRewindStart != null) _btnRewindStart.Pressed += () => AnimationTransportService.Instance.Seek(0.0);
+            if (_btnStepBack != null) _btnStepBack.Pressed += () => AnimationTransportService.Instance.Step(-1);
             if (_btnPlayPause != null) _btnPlayPause.Toggled += OnPlayPauseToggled;
-            if (_btnStepNext != null) _btnStepNext.Pressed += () => StepFrame(1);
-            if (_btnJumpEnd != null) _btnJumpEnd.Pressed += () => ScrubToFrame(GetTotalFrames() - 1);
+            if (_btnStepNext != null) _btnStepNext.Pressed += () => AnimationTransportService.Instance.Step(1);
+            if (_btnJumpEnd != null) _btnJumpEnd.Pressed += () => AnimationTransportService.Instance.Seek(AnimationTransportService.Instance.Length);
+            if (_btnLoop != null)
+            {
+                _btnLoop.ToggleMode = true;
+                _btnLoop.Toggled += (looping) => AnimationTransportService.Instance.SetLoop(looping);
+            }
 
             // Frame Input
-            if (_spinCurrentFrame != null) _spinCurrentFrame.ValueChanged += (val) => ScrubToFrame((int)val);
+            if (_spinCurrentFrame != null) _spinCurrentFrame.ValueChanged += (val) => AnimationTransportService.Instance.Seek((int)val / (double)_fps);
 
             // Auto-Key
             if (_btnAutoKey != null)
@@ -363,10 +551,8 @@ namespace DeadlockPlayground.UI
                 // Synchronized scrolling
                 _dopeSheetCanvas.VerticalScrollChanged += (scrollY) =>
                 {
-                    if (_boneScrollContainer != null)
-                    {
-                        _boneScrollContainer.ScrollVertical = (int)scrollY;
-                    }
+                    if (_boneListCanvas != null) _boneListCanvas.ScrollY = scrollY;
+                    if (_boneListVScrollBar != null) _boneListVScrollBar.SetValueNoSignal(scrollY);
                 };
 
                 _dopeSheetCanvas.TrackHovered += (idx, boneName) =>
@@ -381,19 +567,31 @@ namespace DeadlockPlayground.UI
                 };
             }
 
-            if (_boneScrollContainer != null)
+            if (_boneListCanvas != null)
             {
-                var vScroll = _boneScrollContainer.GetVScrollBar();
-                if (vScroll != null)
+                _boneListCanvas.BoneSelected += (bone) =>
                 {
-                    vScroll.ValueChanged += (val) =>
-                    {
-                        if (_dopeSheetCanvas != null)
-                        {
-                            _dopeSheetCanvas.ScrollY = (float)val;
-                        }
-                    };
-                }
+                    SelectBone(bone);
+                    ScrollToBoneRow(bone);
+                };
+                _boneListCanvas.BoneHovered += (bone) =>
+                {
+                    _dopeSheetCanvas?.SetHoveredTrackByBone(bone);
+                };
+                _boneListCanvas.ScrollChanged += (scrollY) =>
+                {
+                    if (_dopeSheetCanvas != null) _dopeSheetCanvas.ScrollY = scrollY;
+                    if (_boneListVScrollBar != null) _boneListVScrollBar.SetValueNoSignal(scrollY);
+                };
+            }
+
+            if (_boneListVScrollBar != null)
+            {
+                _boneListVScrollBar.ValueChanged += (val) =>
+                {
+                    if (_boneListCanvas != null) _boneListCanvas.ScrollY = (float)val;
+                    if (_dopeSheetCanvas != null) _dopeSheetCanvas.ScrollY = (float)val;
+                };
             }
 
             if (_boneSearch != null)
@@ -547,16 +745,38 @@ namespace DeadlockPlayground.UI
             if (_btnBrowseMesh2Motion != null) _btnBrowseMesh2Motion.Pressed += () => OS.ShellOpen("https://mesh2motion.com");
 
             // Bone Quick-Control Inspector
-            if (_sliderBoneRotX != null) _sliderBoneRotX.ValueChanged += (v) => OnBoneSliderChanged(v, 0);
-            if (_sliderBoneRotY != null) _sliderBoneRotY.ValueChanged += (v) => OnBoneSliderChanged(v, 1);
-            if (_sliderBoneRotZ != null) _sliderBoneRotZ.ValueChanged += (v) => OnBoneSliderChanged(v, 2);
+            if (_sliderBoneRotX != null)
+            {
+                _sliderBoneRotX.ValueChanged += (v) => OnBoneSliderChanged(v, 0);
+                _sliderBoneRotX.DragEnded += (valChanged) => { if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip(); };
+            }
+            if (_sliderBoneRotY != null)
+            {
+                _sliderBoneRotY.ValueChanged += (v) => OnBoneSliderChanged(v, 1);
+                _sliderBoneRotY.DragEnded += (valChanged) => { if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip(); };
+            }
+            if (_sliderBoneRotZ != null)
+            {
+                _sliderBoneRotZ.ValueChanged += (v) => OnBoneSliderChanged(v, 2);
+                _sliderBoneRotZ.DragEnded += (valChanged) => { if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip(); };
+            }
             if (_btnResetBonePose != null) _btnResetBonePose.Pressed += OnResetBonePosePressed;
             if (_btnDeselectBone != null) _btnDeselectBone.Pressed += () => SelectBone("");
+            if (_btnToggleAdditiveOffsetMode != null) _btnToggleAdditiveOffsetMode.Toggled += OnToggleAdditiveOffsetMode;
+            if (_btnApplyOffsetToAllFrames != null) _btnApplyOffsetToAllFrames.Pressed += ApplyCurrentBoneTweakToEntireClip;
         }
 
         private void SetupQuickToolsMenu()
         {
             if (_menuQuickTools == null) return;
+            _menuQuickTools.Flat = false;
+            _menuQuickTools.ExpandIcon = true;
+            _menuQuickTools.AddThemeConstantOverride("icon_max_width", 16);
+            _menuQuickTools.AddThemeStyleboxOverride("normal", MenuBtnNormal);
+            _menuQuickTools.AddThemeStyleboxOverride("hover", MenuBtnHover);
+            _menuQuickTools.AddThemeStyleboxOverride("pressed", MenuBtnPressed);
+            _menuQuickTools.AddThemeStyleboxOverride("focus", MenuBtnHover);
+
             var popup = _menuQuickTools.GetPopup();
             popup.Clear();
             popup.AddItem("Make Loop Seamless (1-Click)", 0);
@@ -567,7 +787,41 @@ namespace DeadlockPlayground.UI
             popup.AddItem("Dampen Motion (-50%)", 4);
             popup.AddSeparator();
             popup.AddItem("Mirror Whole Animation (Flip Clip)", 5);
-            popup.AddItem("Paste Mirrored Pose (L ↔ R)", 6);
+            popup.AddItem("Paste Mirrored Pose (L/R)", 6);
+            popup.AddSeparator();
+            popup.AddItem("Reduce Keys (Active Bone Curve)", 7);
+            popup.AddItem("Reduce Keys (Whole Animation)", 8);
+            popup.AddSeparator();
+            popup.AddItem("Retime Clip (0.5x Slower)", 9);
+            popup.AddItem("Retime Clip (2.0x Faster)", 10);
+            popup.AddItem("Reverse Entire Clip", 11);
+            popup.AddItem("Trim Clip to Playhead Range", 12);
+            popup.AddSeparator();
+            popup.AddItem("Select Bone Group: Arms", 13);
+            popup.AddItem("Select Bone Group: Legs", 14);
+            popup.AddItem("Select Bone Group: Spine / Core", 15);
+            popup.AddItem("Select Bone Group: Head", 16);
+            popup.AddItem("Select Bone Group: Fingers", 17);
+
+            var mirrorIcon = DockIcons.Load("mirror_horizontally");
+            if (mirrorIcon != null)
+            {
+                popup.SetItemIcon(popup.GetItemIndex(5), mirrorIcon);
+                popup.SetItemIcon(popup.GetItemIndex(6), mirrorIcon);
+            }
+            var scissorsIcon = DockIcons.Load("scissors");
+            if (scissorsIcon != null)
+            {
+                popup.SetItemIcon(popup.GetItemIndex(7), scissorsIcon);
+                popup.SetItemIcon(popup.GetItemIndex(8), scissorsIcon);
+                popup.SetItemIcon(popup.GetItemIndex(12), scissorsIcon);
+            }
+            var reverseIcon = DockIcons.Load("reverse");
+            if (reverseIcon != null)
+            {
+                popup.SetItemIcon(popup.GetItemIndex(11), reverseIcon);
+            }
+
             popup.IdPressed += OnQuickToolsMenuItem;
         }
 
@@ -608,12 +862,83 @@ namespace DeadlockPlayground.UI
                     AnimationMirrorHelper.PasteMirrorPose(_skeleton);
                     CommitAutoKeyForCurrentPose();
                     break;
+                case 7:
+                    AnimationAssistantHelper.ReduceKeys(_activeAnimation, _selectedBoneName);
+                    OnCanvasKeyframesModified();
+                    break;
+                case 8:
+                    AnimationAssistantHelper.ReduceKeys(_activeAnimation, null);
+                    OnCanvasKeyframesModified();
+                    break;
+                case 9:
+                    AnimationAssistantHelper.RetimeClip(_activeAnimation, 0.5);
+                    OnCanvasKeyframesModified();
+                    break;
+                case 10:
+                    AnimationAssistantHelper.RetimeClip(_activeAnimation, 2.0);
+                    OnCanvasKeyframesModified();
+                    break;
+                case 11:
+                    AnimationAssistantHelper.ReverseClip(_activeAnimation);
+                    OnCanvasKeyframesModified();
+                    break;
+                case 12:
+                    AnimationAssistantHelper.TrimToRange(_activeAnimation, 0.0, _currentTime > 0.05 ? _currentTime : AnimationTransportService.Instance.Length);
+                    OnCanvasKeyframesModified();
+                    break;
+                case 13:
+                    SelectBoneGroup(HumanoidBoneMapper.BoneGroup.LeftArm, HumanoidBoneMapper.BoneGroup.RightArm);
+                    break;
+                case 14:
+                    SelectBoneGroup(HumanoidBoneMapper.BoneGroup.LeftLeg, HumanoidBoneMapper.BoneGroup.RightLeg);
+                    break;
+                case 15:
+                    SelectBoneGroup(HumanoidBoneMapper.BoneGroup.Pelvis, HumanoidBoneMapper.BoneGroup.Spine);
+                    break;
+                case 16:
+                    SelectBoneGroup(HumanoidBoneMapper.BoneGroup.Head);
+                    break;
+                case 17:
+                    SelectBoneGroup(HumanoidBoneMapper.BoneGroup.LeftHandFingers, HumanoidBoneMapper.BoneGroup.RightHandFingers);
+                    break;
+            }
+        }
+
+        private void SelectBoneGroup(params HumanoidBoneMapper.BoneGroup[] groups)
+        {
+            if (_activeAnimation == null || _skeleton == null) return;
+            var targetBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in groups)
+            {
+                foreach (var b in AnimationAssistantHelper.GetBonesForGroup(g))
+                {
+                    targetBones.Add(b);
+                }
+            }
+
+            if (_dopeSheetCanvas != null)
+            {
+                _dopeSheetCanvas.SelectKeysForBones(targetBones);
+                foreach (var row in _dopeSheetCanvas.TrackRows)
+                {
+                    if (targetBones.Contains(row.BoneName))
+                    {
+                        SelectBone(row.BoneName);
+                        break;
+                    }
+                }
             }
         }
 
         private void SetupKeyActionsMenu()
         {
             if (_menuKeyActions == null) return;
+            _menuKeyActions.Flat = false;
+            _menuKeyActions.AddThemeStyleboxOverride("normal", MenuBtnNormal);
+            _menuKeyActions.AddThemeStyleboxOverride("hover", MenuBtnHover);
+            _menuKeyActions.AddThemeStyleboxOverride("pressed", MenuBtnPressed);
+            _menuKeyActions.AddThemeStyleboxOverride("focus", MenuBtnHover);
+
             var popup = _menuKeyActions.GetPopup();
             popup.Clear();
             popup.AddItem("Insert Keyframe (Selected Bone) [I]", 0);
@@ -629,6 +954,20 @@ namespace DeadlockPlayground.UI
             popup.AddSeparator();
             popup.AddItem("Export Animation to .GLB...", 8);
             popup.AddItem("Import External Animation (.glb/.fbx)...", 9);
+            popup.AddSeparator();
+            popup.AddItem("Apply Current Bone Tweak to Entire Clip", 10);
+            var pinIcon = DockIcons.Load("pin");
+            if (pinIcon != null)
+            {
+                popup.SetItemIcon(popup.GetItemIndex(10), pinIcon);
+            }
+            popup.AddItem("Toggle Additive Clip Offset Mode", 11);
+            popup.AddSeparator();
+            popup.AddItem("Set Ease: Linear", 12);
+            popup.AddItem("Set Ease: Ease In", 13);
+            popup.AddItem("Set Ease: Ease Out", 14);
+            popup.AddItem("Set Ease: Ease In-Out", 15);
+            popup.AddItem("Set Ease: Constant", 16);
             popup.IdPressed += OnKeyActionMenuItem;
         }
 
@@ -643,8 +982,17 @@ namespace DeadlockPlayground.UI
             _isOpen = true;
             if (height > 0) _currentDockHeight = Mathf.Clamp(height, MinDockHeight, MaxDockHeight);
             if (_contentContainer != null) _contentContainer.Visible = true;
-            if (_btnToggleCollapse != null) _btnToggleCollapse.Text = "▼";
+            if (_btnToggleCollapse != null)
+            {
+                _btnToggleCollapse.Text = "";
+                _btnToggleCollapse.Icon = DockIcons.Load("arrow_down");
+            }
             ApplyDockHeight(_currentDockHeight);
+            SaveDockSettings();
+            if (_boneListCanvas == null || _boneListCanvas.BoneCount == 0)
+            {
+                PopulateBoneList();
+            }
             EmitSignal(SignalName.VisibilityToggled, true);
         }
 
@@ -652,8 +1000,13 @@ namespace DeadlockPlayground.UI
         {
             _isOpen = false;
             if (_contentContainer != null) _contentContainer.Visible = false;
-            if (_btnToggleCollapse != null) _btnToggleCollapse.Text = "▲";
+            if (_btnToggleCollapse != null)
+            {
+                _btnToggleCollapse.Text = "";
+                _btnToggleCollapse.Icon = DockIcons.Load("arrow_up");
+            }
             ApplyDockHeight(HeaderBarHeight);
+            SaveDockSettings();
             EmitSignal(SignalName.VisibilityToggled, false);
         }
 
@@ -662,11 +1015,11 @@ namespace DeadlockPlayground.UI
             float h = Mathf.Max(height, HeaderBarHeight);
 
             // In Godot, for anchors_preset = 12 (bottom-wide):
-            // Firmly anchor the bottom edge to parent's bottom (offset 0) and top edge to -h.
-            SetAnchorAndOffset(Side.Left, 0.0f, 0f);
-            SetAnchorAndOffset(Side.Right, 1.0f, 0f);
-            SetAnchorAndOffset(Side.Top, 1.0f, -h);
-            SetAnchorAndOffset(Side.Bottom, 1.0f, 0f);
+            // Firmly anchor with EdgeMargin so all borders remain cleanly visible inside the screen.
+            SetAnchorAndOffset(Side.Left, 0.0f, EdgeMargin);
+            SetAnchorAndOffset(Side.Right, 1.0f, -EdgeMargin);
+            SetAnchorAndOffset(Side.Top, 1.0f, -(h + EdgeMargin));
+            SetAnchorAndOffset(Side.Bottom, 1.0f, -EdgeMargin);
             CustomMinimumSize = new Vector2(0, h);
 
             UpdateFloatingViewportControls();
@@ -706,6 +1059,7 @@ namespace DeadlockPlayground.UI
             if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && !mb.Pressed)
             {
                 _isResizingHeight = false;
+                SaveDockSettings();
                 GetViewport().SetInputAsHandled();
                 return;
             }
@@ -715,7 +1069,7 @@ namespace DeadlockPlayground.UI
                 float deltaY = _dragStartMouseY - mm.GlobalPosition.Y;
                 float targetH = _dragStartHeight + deltaY;
 
-                if (targetH < HeaderBarHeight + 16f)
+                if (targetH < 120f)
                 {
                     if (_isOpen)
                     {
@@ -728,10 +1082,14 @@ namespace DeadlockPlayground.UI
                     {
                         _isOpen = true;
                         if (_contentContainer != null) _contentContainer.Visible = true;
-                        if (_btnToggleCollapse != null) _btnToggleCollapse.Text = "▼";
+                        if (_btnToggleCollapse != null)
+                        {
+                            _btnToggleCollapse.Text = "";
+                            _btnToggleCollapse.Icon = DockIcons.Load("arrow_down");
+                        }
                         EmitSignal(SignalName.VisibilityToggled, true);
                     }
-                    _currentDockHeight = Mathf.Clamp(targetH, HeaderBarHeight + 20f, MaxDockHeight);
+                    _currentDockHeight = Mathf.Clamp(targetH, MinDockHeight, MaxDockHeight);
                     ApplyDockHeight(_currentDockHeight);
                 }
                 GetViewport().SetInputAsHandled();
@@ -751,12 +1109,21 @@ namespace DeadlockPlayground.UI
         #endregion
 
         #region Floating Viewport Controls Management
+        private Rect2 _origCamPadOffsets;
+        private Rect2 _origBadgesOffsets;
+        private Rect2 _origQuickStripOffsets;
+        private bool _hasSavedOrigOffsets = false;
+
         private void ResolveViewportControls()
         {
             if (_cachedViewportArea == null || !GodotObject.IsInstanceValid(_cachedViewportArea))
             {
                 _cachedViewportArea = GetParent() as Control 
                                    ?? GetTree()?.Root?.FindChild("ViewportArea", true, false) as Control;
+                if (_cachedViewportArea != null && !_cachedViewportArea.IsConnected(Control.SignalName.Resized, Callable.From(OnViewportAreaResized)))
+                {
+                    _cachedViewportArea.Connect(Control.SignalName.Resized, Callable.From(OnViewportAreaResized));
+                }
             }
 
             if (_cachedViewportArea != null && GodotObject.IsInstanceValid(_cachedViewportArea))
@@ -764,7 +1131,39 @@ namespace DeadlockPlayground.UI
                 _cachedCamPad ??= _cachedViewportArea.FindChild("CameraControlPad", true, false) as Control;
                 _cachedQuickStrip ??= _cachedViewportArea.FindChild("QuickActionsStrip", true, false) as Control;
                 _cachedBadges ??= _cachedViewportArea.FindChild("BottomBadgesContainer", true, false) as Control;
+
+                if (!_hasSavedOrigOffsets)
+                {
+                    if (_cachedCamPad != null) _origCamPadOffsets = new Rect2(_cachedCamPad.OffsetLeft, _cachedCamPad.OffsetTop, _cachedCamPad.OffsetRight, _cachedCamPad.OffsetBottom);
+                    if (_cachedBadges != null) _origBadgesOffsets = new Rect2(_cachedBadges.OffsetLeft, _cachedBadges.OffsetTop, _cachedBadges.OffsetRight, _cachedBadges.OffsetBottom);
+                    if (_cachedQuickStrip != null) _origQuickStripOffsets = new Rect2(_cachedQuickStrip.OffsetLeft, _cachedQuickStrip.OffsetTop, _cachedQuickStrip.OffsetRight, _cachedQuickStrip.OffsetBottom);
+                    _hasSavedOrigOffsets = true;
+                }
             }
+        }
+
+        private void OnViewportAreaResized()
+        {
+            CallDeferred(MethodName.RefreshLayout);
+        }
+
+        private void OnViewportRootSizeChanged()
+        {
+            CallDeferred(MethodName.RefreshLayout);
+        }
+
+        public void RefreshLayout()
+        {
+            ResolveViewportControls();
+
+            float vpHeight = _cachedViewportArea?.Size.Y ?? Size.Y;
+            float maxAllowedDockH = Mathf.Clamp(vpHeight * 0.65f, MinDockHeight, MaxDockHeight);
+            if (_currentDockHeight > maxAllowedDockH)
+            {
+                _currentDockHeight = maxAllowedDockH;
+            }
+
+            ApplyDockHeight(_isOpen ? _currentDockHeight : HeaderBarHeight);
         }
 
         public void UpdateFloatingViewportControls()
@@ -772,29 +1171,59 @@ namespace DeadlockPlayground.UI
             ResolveViewportControls();
 
             bool isDockActive = Visible && IsVisibleInTree();
+            float vpHeight = _cachedViewportArea?.Size.Y ?? 1080f;
+            float maxAllowedDockH = Mathf.Clamp(vpHeight * 0.65f, MinDockHeight, MaxDockHeight);
+            if (_currentDockHeight > maxAllowedDockH) _currentDockHeight = maxAllowedDockH;
+
             float dockH = isDockActive ? (_isOpen ? _currentDockHeight : HeaderBarHeight) : 0f;
-            float bottom = -(dockH + 14f); // 14px clear margin above dock top
+            float bottom = -(dockH + EdgeMargin + 14f); // 14px clear margin above dock top border
+            float minTopSafe = -vpHeight + 54f; // Safe margin below top headers
+            float usableHeight = vpHeight - dockH;
 
             if (_cachedCamPad != null && GodotObject.IsInstanceValid(_cachedCamPad))
             {
                 _cachedCamPad.ZIndex = 20;
                 float padH = Mathf.Max(124f, _cachedCamPad.GetCombinedMinimumSize().Y);
-                _cachedCamPad.OffsetBottom = bottom;
-                _cachedCamPad.OffsetTop = bottom - padH;
+                float padBottom = Mathf.Clamp(bottom, minTopSafe + padH, -12f);
+                _cachedCamPad.OffsetBottom = padBottom;
+                _cachedCamPad.OffsetTop = padBottom - padH;
             }
 
             if (_cachedBadges != null && GodotObject.IsInstanceValid(_cachedBadges))
             {
                 _cachedBadges.ZIndex = 20;
-                _cachedBadges.OffsetBottom = bottom;
-                _cachedBadges.OffsetTop = bottom - 30f;
+                if (usableHeight < 220f)
+                {
+                    _cachedBadges.Visible = false;
+                }
+                else
+                {
+                    _cachedBadges.Visible = true;
+                    float badgeBottom = Mathf.Clamp(bottom, minTopSafe + 30f, -12f);
+                    _cachedBadges.OffsetBottom = badgeBottom;
+                    _cachedBadges.OffsetTop = badgeBottom - 30f;
+                }
             }
 
             if (_cachedQuickStrip != null && GodotObject.IsInstanceValid(_cachedQuickStrip))
             {
                 _cachedQuickStrip.ZIndex = 20;
-                _cachedQuickStrip.OffsetBottom = bottom - 38f;
-                _cachedQuickStrip.OffsetTop = bottom - 70f;
+                if (usableHeight < 280f)
+                {
+                    // Relocate to top-right when bottom is cramped
+                    _cachedQuickStrip.AnchorTop = 0f;
+                    _cachedQuickStrip.AnchorBottom = 0f;
+                    _cachedQuickStrip.OffsetTop = 14f;
+                    _cachedQuickStrip.OffsetBottom = 46f;
+                }
+                else
+                {
+                    _cachedQuickStrip.AnchorTop = 1f;
+                    _cachedQuickStrip.AnchorBottom = 1f;
+                    float quickBottom = Mathf.Clamp(bottom - 38f, minTopSafe + 32f, -48f);
+                    _cachedQuickStrip.OffsetBottom = quickBottom;
+                    _cachedQuickStrip.OffsetTop = quickBottom - 32f;
+                }
             }
         }
 
@@ -804,20 +1233,29 @@ namespace DeadlockPlayground.UI
 
             if (_cachedCamPad != null && GodotObject.IsInstanceValid(_cachedCamPad))
             {
-                _cachedCamPad.OffsetBottom = -12f;
-                _cachedCamPad.OffsetTop = -136f;
+                _cachedCamPad.OffsetLeft = _hasSavedOrigOffsets ? _origCamPadOffsets.Position.X : _cachedCamPad.OffsetLeft;
+                _cachedCamPad.OffsetTop = _hasSavedOrigOffsets ? _origCamPadOffsets.Position.Y : -136f;
+                _cachedCamPad.OffsetRight = _hasSavedOrigOffsets ? _origCamPadOffsets.Size.X : _cachedCamPad.OffsetRight;
+                _cachedCamPad.OffsetBottom = _hasSavedOrigOffsets ? _origCamPadOffsets.Size.Y : -12f;
             }
 
             if (_cachedBadges != null && GodotObject.IsInstanceValid(_cachedBadges))
             {
-                _cachedBadges.OffsetBottom = -12f;
-                _cachedBadges.OffsetTop = -42f;
+                _cachedBadges.Visible = true;
+                _cachedBadges.OffsetLeft = _hasSavedOrigOffsets ? _origBadgesOffsets.Position.X : _cachedBadges.OffsetLeft;
+                _cachedBadges.OffsetTop = _hasSavedOrigOffsets ? _origBadgesOffsets.Position.Y : -42f;
+                _cachedBadges.OffsetRight = _hasSavedOrigOffsets ? _origBadgesOffsets.Size.X : _cachedBadges.OffsetRight;
+                _cachedBadges.OffsetBottom = _hasSavedOrigOffsets ? _origBadgesOffsets.Size.Y : -12f;
             }
 
             if (_cachedQuickStrip != null && GodotObject.IsInstanceValid(_cachedQuickStrip))
             {
-                _cachedQuickStrip.OffsetBottom = -48f;
-                _cachedQuickStrip.OffsetTop = -80f;
+                _cachedQuickStrip.AnchorTop = 1f;
+                _cachedQuickStrip.AnchorBottom = 1f;
+                _cachedQuickStrip.OffsetLeft = _hasSavedOrigOffsets ? _origQuickStripOffsets.Position.X : _cachedQuickStrip.OffsetLeft;
+                _cachedQuickStrip.OffsetTop = _hasSavedOrigOffsets ? _origQuickStripOffsets.Position.Y : -80f;
+                _cachedQuickStrip.OffsetRight = _hasSavedOrigOffsets ? _origQuickStripOffsets.Size.X : _cachedQuickStrip.OffsetRight;
+                _cachedQuickStrip.OffsetBottom = _hasSavedOrigOffsets ? _origQuickStripOffsets.Size.Y : -48f;
             }
         }
 
@@ -829,7 +1267,7 @@ namespace DeadlockPlayground.UI
             {
                 if (Visible && IsVisibleInTree())
                 {
-                    UpdateFloatingViewportControls();
+                    RefreshLayout();
                 }
                 else
                 {
@@ -840,15 +1278,22 @@ namespace DeadlockPlayground.UI
             {
                 if (Visible && IsVisibleInTree())
                 {
-                    UpdateFloatingViewportControls();
+                    RefreshLayout();
                 }
             }
         }
 
         public override void _ExitTree()
         {
-            base._ExitTree();
+            if (GetTree()?.Root != null)
+            {
+                GetTree().Root.SizeChanged -= OnViewportRootSizeChanged;
+            }
             SkeletonGizmoManager.OnBoneSelected -= OnViewportBoneSelected;
+            SkeletonGizmoManager.OnBoneTransformEnded -= OnViewportBoneTransformEnded;
+            AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
+            AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
+            AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
             ResetFloatingViewportControls();
         }
         #endregion
@@ -869,27 +1314,47 @@ namespace DeadlockPlayground.UI
             {
                 _graphEditorCanvas?.SetAnimationAndBone(_activeAnimation, _skeleton, _selectedBoneName, _fps);
             }
+            else if (tab == StudioTab.DopeSheet && (_boneListCanvas == null || _boneListCanvas.BoneCount == 0))
+            {
+                PopulateBoneList();
+            }
         }
         #endregion
 
         #region Target Binding
         public void BindTarget(Skeleton3D skeleton, AnimationPlayer animPlayer, Godot.Animation godotAnim, string animName, float fps = 30f)
         {
+            if (skeleton == null || !GodotObject.IsInstanceValid(skeleton) || skeleton.IsQueuedForDeletion())
+            {
+                _skeleton = null;
+                _animPlayer = null;
+                _activeAnimation = null;
+                _activeAnimName = "";
+                _dopeSheetCanvas?.SetAnimation(null, null, fps);
+                _graphEditorCanvas?.SetAnimationAndBone(null, null, "", fps);
+                return;
+            }
+
             _skeleton = skeleton;
             _animPlayer = animPlayer;
             _activeAnimation = godotAnim;
             _activeAnimName = animName;
             _fps = fps > 0 ? fps : 30f;
 
+            AnimationTransportService.Instance.Bind(_animPlayer, _skeleton, _activeAnimName, _fps);
+
             if (_spinFps != null) _spinFps.SetValueNoSignal(_fps);
             if (_spinDuration != null && godotAnim != null) _spinDuration.SetValueNoSignal(godotAnim.Length);
-            if (_chkLooping != null && godotAnim != null) _chkLooping.SetPressedNoSignal(godotAnim.LoopMode != Godot.Animation.LoopModeEnum.None);
+            if (_chkLooping != null) _chkLooping.SetPressedNoSignal(AnimationTransportService.Instance.IsLooping);
+            if (_btnLoop != null) _btnLoop.SetPressedNoSignal(AnimationTransportService.Instance.IsLooping);
             if (_chkAdditive != null && godotAnim != null) _chkAdditive.SetPressedNoSignal(godotAnim.HasMeta("is_additive") && godotAnim.GetMeta("is_additive").AsBool());
+
+            // SetAnimation & SetAnimationAndBone MUST precede SetFilter so RebuildTrackRows has the new skeleton reference!
+            _dopeSheetCanvas?.SetAnimation(godotAnim, skeleton, _fps);
+            _graphEditorCanvas?.SetAnimationAndBone(godotAnim, skeleton, _selectedBoneName, _fps);
 
             string filter = _boneSearch?.Text?.Trim().ToLowerInvariant() ?? "";
             _dopeSheetCanvas?.SetFilter(filter);
-            _dopeSheetCanvas?.SetAnimation(godotAnim, skeleton, _fps);
-            _graphEditorCanvas?.SetAnimationAndBone(godotAnim, skeleton, _selectedBoneName, _fps);
 
             PopulateBoneList();
             UpdateTotalFramesLabel();
@@ -905,170 +1370,74 @@ namespace DeadlockPlayground.UI
         #endregion
 
         #region Bone List (Dope Sheet Left Panel)
-        private void InitBoneRowStyles()
+
+
+        private static Skeleton3D FindSkeletonRecursive(Node node)
         {
-            if (_boneBtnNormalStyle != null) return;
-
-            _boneBtnNormalStyle = new StyleBoxFlat
+            if (node == null || !GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion()) return null;
+            if (node is Skeleton3D sk && GodotObject.IsInstanceValid(sk) && !sk.IsQueuedForDeletion()) return sk;
+            int childCount = node.GetChildCount();
+            for (int i = 0; i < childCount; i++)
             {
-                BgColor = new Color(0, 0, 0, 0),
-                ContentMarginLeft = 8,
-                ContentMarginRight = 4,
-                ContentMarginTop = 0,
-                ContentMarginBottom = 0
-            };
-
-            _boneBtnHoverStyle = new StyleBoxFlat
-            {
-                BgColor = new Color(1f, 1f, 1f, 0.08f),
-                CornerRadiusTopLeft = 3,
-                CornerRadiusBottomLeft = 3,
-                CornerRadiusTopRight = 3,
-                CornerRadiusBottomRight = 3,
-                ContentMarginLeft = 8,
-                ContentMarginRight = 4,
-                ContentMarginTop = 0,
-                ContentMarginBottom = 0
-            };
-
-            _boneBtnSelectedStyle = new StyleBoxFlat
-            {
-                BgColor = new Color(0.20f, 0.40f, 0.70f, 0.90f), // Deep active blue
-                BorderWidthLeft = 3,
-                BorderColor = new Color(0.40f, 0.85f, 1.0f, 1.0f), // Cyan indicator
-                CornerRadiusTopRight = 3,
-                CornerRadiusBottomRight = 3,
-                ContentMarginLeft = 8,
-                ContentMarginRight = 4,
-                ContentMarginTop = 0,
-                ContentMarginBottom = 0
-            };
+                var found = FindSkeletonRecursive(node.GetChild(i));
+                if (found != null) return found;
+            }
+            return null;
         }
 
         private void PopulateBoneList()
         {
-            if (_boneRowsVBox == null)
+            if (_boneListCanvas == null)
             {
                 BindSceneNodes();
-                if (_boneRowsVBox == null) return;
+                if (_boneListCanvas == null) return;
             }
 
-            InitBoneRowStyles();
-
-            foreach (var child in _boneRowsVBox.GetChildren())
-            {
-                _boneRowsVBox.RemoveChild(child);
-                child.QueueFree();
-            }
-
-            if (_skeleton == null)
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion())
             {
                 var vpk = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
-                _skeleton = vpk?.CurrentHeroNode?.FindChild("Skeleton3D", true, false) as Skeleton3D
-                         ?? GetTree()?.Root?.FindChild("Skeleton3D", true, false) as Skeleton3D;
+                _skeleton = FindSkeletonRecursive(vpk?.CurrentHeroNode)
+                         ?? FindSkeletonRecursive(GetTree()?.Root);
             }
 
-            if (_skeleton == null) return;
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion()) return;
 
             string filter = _boneSearch?.Text?.Trim().ToLowerInvariant() ?? "";
             int boneCount = _skeleton.GetBoneCount();
 
+            var filteredBones = new List<string>(boneCount);
             for (int i = 0; i < boneCount; i++)
             {
                 string bName = _skeleton.GetBoneName(i);
                 if (!string.IsNullOrEmpty(filter) && !bName.ToLowerInvariant().Contains(filter)) continue;
+                filteredBones.Add(bName);
+            }
 
-                var rowBtn = new Button
-                {
-                    Name = $"Row_{bName}",
-                    Text = bName,
-                    Alignment = HorizontalAlignment.Left,
-                    CustomMinimumSize = new Vector2(0, 26),
-                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                    FocusMode = FocusModeEnum.None
-                };
-                rowBtn.SetMeta("bone_name", bName);
+            _boneListCanvas.SetBones(filteredBones);
+            _boneListCanvas.SelectedBone = _selectedBoneName;
 
-                var fontColus = PlaygroundThemeHelper.GetFontColus();
-                if (fontColus != null)
-                {
-                    rowBtn.AddThemeFontOverride("font", fontColus);
-                }
-                rowBtn.AddThemeFontSizeOverride("font_size", 13);
-
-                bool isSelected = !string.IsNullOrEmpty(_selectedBoneName) && _selectedBoneName.Equals(bName, StringComparison.OrdinalIgnoreCase);
-                ApplyBoneButtonStyle(rowBtn, isSelected, isHover: false);
-
-                string capturedName = bName;
-                rowBtn.Pressed += () => SelectBone(capturedName);
-                rowBtn.MouseEntered += () =>
-                {
-                    _dopeSheetCanvas?.SetHoveredTrackByBone(capturedName);
-                    HighlightBoneRow(capturedName, isHover: true);
-                };
-                rowBtn.MouseExited += () =>
-                {
-                    _dopeSheetCanvas?.SetHoveredTrackByBone("");
-                    HighlightBoneRow(capturedName, isHover: false);
-                };
-
-                _boneRowsVBox.AddChild(rowBtn);
+            if (_boneListVScrollBar != null)
+            {
+                float totalH = filteredBones.Count * BoneListCanvas.TrackRowHeight;
+                float visibleH = _boneListCanvas.Size.Y > 0 ? _boneListCanvas.Size.Y : 200f;
+                _boneListVScrollBar.MinValue = 0;
+                _boneListVScrollBar.MaxValue = totalH;
+                _boneListVScrollBar.Page = visibleH;
+                _boneListVScrollBar.Visible = totalH > visibleH;
+                _boneListVScrollBar.SetValueNoSignal(_boneListCanvas.ScrollY);
             }
 
             if (!string.IsNullOrEmpty(_selectedBoneName))
             {
-                HighlightBoneRow(_selectedBoneName, isHover: false);
                 ScrollToBoneRow(_selectedBoneName);
             }
         }
 
         private void HighlightBoneRow(string boneName, bool isHover)
         {
-            if (_boneRowsVBox == null) return;
-            foreach (var child in _boneRowsVBox.GetChildren())
+            if (_boneListCanvas != null)
             {
-                if (child is Button btn)
-                {
-                    string btnBone = btn.HasMeta("bone_name")
-                        ? btn.GetMeta("bone_name").AsString()
-                        : (btn.Name.ToString().StartsWith("Row_") ? btn.Name.ToString().Substring(4) : btn.Name.ToString());
-
-                    bool isSelected = !string.IsNullOrEmpty(_selectedBoneName) && _selectedBoneName.Equals(btnBone, StringComparison.OrdinalIgnoreCase);
-                    bool isTarget = !string.IsNullOrEmpty(boneName) && boneName.Equals(btnBone, StringComparison.OrdinalIgnoreCase);
-
-                    ApplyBoneButtonStyle(btn, isSelected, isHover && isTarget);
-                }
-            }
-        }
-
-        private void ApplyBoneButtonStyle(Button btn, bool isSelected, bool isHover)
-        {
-            if (isSelected)
-            {
-                btn.AddThemeStyleboxOverride("normal", _boneBtnSelectedStyle);
-                btn.AddThemeStyleboxOverride("hover", _boneBtnSelectedStyle);
-                btn.AddThemeStyleboxOverride("pressed", _boneBtnSelectedStyle);
-                btn.AddThemeStyleboxOverride("focus", _boneBtnSelectedStyle);
-                btn.AddThemeColorOverride("font_color", Colors.White);
-                btn.AddThemeColorOverride("font_hover_color", Colors.White);
-            }
-            else if (isHover)
-            {
-                btn.AddThemeStyleboxOverride("normal", _boneBtnHoverStyle);
-                btn.AddThemeStyleboxOverride("hover", _boneBtnHoverStyle);
-                btn.AddThemeStyleboxOverride("pressed", _boneBtnNormalStyle);
-                btn.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
-                btn.AddThemeColorOverride("font_color", Colors.White);
-                btn.AddThemeColorOverride("font_hover_color", Colors.White);
-            }
-            else
-            {
-                btn.AddThemeStyleboxOverride("normal", _boneBtnNormalStyle);
-                btn.AddThemeStyleboxOverride("hover", _boneBtnHoverStyle);
-                btn.AddThemeStyleboxOverride("pressed", _boneBtnNormalStyle);
-                btn.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
-                btn.AddThemeColorOverride("font_color", new Color(0.82f, 0.86f, 0.90f, 0.85f));
-                btn.AddThemeColorOverride("font_hover_color", Colors.White);
+                _boneListCanvas.HoveredBone = isHover ? boneName : "";
             }
         }
 
@@ -1076,8 +1445,10 @@ namespace DeadlockPlayground.UI
         {
             _selectedBoneName = boneName;
 
-            // Highlight bone row
-            HighlightBoneRow(boneName, isHover: false);
+            if (_boneListCanvas != null)
+            {
+                _boneListCanvas.SelectedBone = boneName;
+            }
 
             // Sync with DopeSheet and GraphEditor
             _dopeSheetCanvas?.SelectTrackByBone(boneName);
@@ -1107,18 +1478,19 @@ namespace DeadlockPlayground.UI
             }
 
             UpdateBoneQuickControlInspector();
+            CaptureBaselinePose();
         }
 
         private void OnViewportBoneSelected(int boneIdx)
         {
-            if (_skeleton == null)
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion())
             {
-                if (_gizmoManager != null && _gizmoManager.TargetSkeleton != null)
+                if (_gizmoManager != null && _gizmoManager.TargetSkeleton != null && GodotObject.IsInstanceValid(_gizmoManager.TargetSkeleton) && !_gizmoManager.TargetSkeleton.IsQueuedForDeletion())
                 {
                     _skeleton = _gizmoManager.TargetSkeleton;
                 }
             }
-            if (_skeleton == null) return;
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion()) return;
 
             string boneName = (boneIdx >= 0 && boneIdx < _skeleton.GetBoneCount()) ? _skeleton.GetBoneName(boneIdx) : "";
             if (string.Equals(_selectedBoneName, boneName, StringComparison.OrdinalIgnoreCase))
@@ -1143,36 +1515,11 @@ namespace DeadlockPlayground.UI
 
         private void ScrollToBoneRow(string boneName)
         {
-            if (string.IsNullOrEmpty(boneName) || _boneRowsVBox == null || _boneScrollContainer == null) return;
-
-            int index = 0;
-            foreach (var child in _boneRowsVBox.GetChildren())
+            if (string.IsNullOrEmpty(boneName) || _boneListCanvas == null) return;
+            _boneListCanvas.ScrollToBone(boneName);
+            if (_boneListVScrollBar != null)
             {
-                if (child is Button btn)
-                {
-                    string btnBone = btn.HasMeta("bone_name")
-                        ? btn.GetMeta("bone_name").AsString()
-                        : (btn.Name.ToString().StartsWith("Row_") ? btn.Name.ToString().Substring(4) : btn.Name.ToString());
-                    if (btnBone.Equals(boneName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        float targetY = index * 26f;
-                        float currentScroll = _boneScrollContainer.ScrollVertical;
-                        float visibleHeight = _boneScrollContainer.Size.Y;
-                        if (visibleHeight <= 0) visibleHeight = 150f;
-
-                        if (targetY < currentScroll || targetY + 26f > currentScroll + visibleHeight)
-                        {
-                            int newScroll = Mathf.Max(0, (int)(targetY - visibleHeight / 2f + 13f));
-                            _boneScrollContainer.ScrollVertical = newScroll;
-                            if (_dopeSheetCanvas != null)
-                            {
-                                _dopeSheetCanvas.ScrollY = newScroll;
-                            }
-                        }
-                        break;
-                    }
-                    index++;
-                }
+                _boneListVScrollBar.SetValueNoSignal(_boneListCanvas.ScrollY);
             }
         }
         #endregion
@@ -1197,16 +1544,35 @@ namespace DeadlockPlayground.UI
                 var row = new HBoxContainer
                 {
                     CustomMinimumSize = new Vector2(0, 24),
-                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    MouseFilter = Control.MouseFilterEnum.Pass
                 };
                 row.AddThemeConstantOverride("separation", 6);
+
+                var capturedCurve = curve;
+                row.GuiInput += (ev) =>
+                {
+                    if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+                    {
+                        if (mb.CtrlPressed)
+                        {
+                            _graphEditorCanvas.IsolateChannel(capturedCurve);
+                        }
+                        else
+                        {
+                            _graphEditorCanvas.SelectChannel(capturedCurve, addToSelection: mb.ShiftPressed);
+                        }
+                        GetViewport().SetInputAsHandled();
+                    }
+                };
 
                 // Color swatch
                 var swatch = new ColorRect
                 {
                     CustomMinimumSize = new Vector2(10, 10),
                     Color = curve.ChannelColor,
-                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    MouseFilter = Control.MouseFilterEnum.Ignore
                 };
                 row.AddChild(swatch);
 
@@ -1215,23 +1581,23 @@ namespace DeadlockPlayground.UI
                 {
                     Text = curve.Name,
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                    MouseFilter = Control.MouseFilterEnum.Ignore
                 };
                 row.AddChild(lbl);
 
                 // Visibility toggle button
                 var btnEye = new Button
                 {
-                    Text = curve.IsVisible ? "Vis" : "Hide",
                     Flat = true,
-                    CustomMinimumSize = new Vector2(32, 20)
+                    CustomMinimumSize = new Vector2(24, 20)
                 };
-                btnEye.AddThemeFontSizeOverride("font_size", 10);
-                var capturedCurve = curve;
+                DockIcons.Apply(btnEye, curve.IsVisible ? "eye" : "eye_closed", "Toggle Visibility (Ctrl+Click row to Isolate)");
+                btnEye.Modulate = curve.IsVisible ? Colors.White : new Color(0.6f, 0.6f, 0.6f, 0.7f);
                 btnEye.Pressed += () =>
                 {
                     capturedCurve.IsVisible = !capturedCurve.IsVisible;
-                    btnEye.Text = capturedCurve.IsVisible ? "Vis" : "Hide";
+                    DockIcons.Apply(btnEye, capturedCurve.IsVisible ? "eye" : "eye_closed", "Toggle Visibility (Ctrl+Click row to Isolate)");
                     btnEye.Modulate = capturedCurve.IsVisible ? Colors.White : new Color(0.6f, 0.6f, 0.6f, 0.7f);
                     _graphEditorCanvas.QueueRedraw();
                 };
@@ -1240,16 +1606,15 @@ namespace DeadlockPlayground.UI
                 // Lock button
                 var btnLock = new Button
                 {
-                    Text = curve.IsLocked ? "Lock" : "Free",
                     Flat = true,
-                    CustomMinimumSize = new Vector2(32, 20)
+                    CustomMinimumSize = new Vector2(24, 20)
                 };
-                btnLock.AddThemeFontSizeOverride("font_size", 10);
+                DockIcons.Apply(btnLock, "lock", "Toggle Lock");
+                btnLock.Modulate = curve.IsLocked ? new Color(1f, 0.5f, 0.5f, 1f) : new Color(0.6f, 0.6f, 0.6f, 0.7f);
                 btnLock.Pressed += () =>
                 {
                     capturedCurve.IsLocked = !capturedCurve.IsLocked;
-                    btnLock.Text = capturedCurve.IsLocked ? "Lock" : "Free";
-                    btnLock.Modulate = capturedCurve.IsLocked ? new Color(1f, 0.5f, 0.5f, 1f) : Colors.White;
+                    btnLock.Modulate = capturedCurve.IsLocked ? new Color(1f, 0.5f, 0.5f, 1f) : new Color(0.6f, 0.6f, 0.6f, 0.7f);
                 };
                 row.AddChild(btnLock);
 
@@ -1261,7 +1626,7 @@ namespace DeadlockPlayground.UI
         #region 3D Bone Gizmo & Direct Controls
         private void UpdateBoneQuickControlInspector()
         {
-            if (_skeleton == null || string.IsNullOrEmpty(_selectedBoneName))
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_selectedBoneName))
             {
                 if (_lblActiveBone != null) _lblActiveBone.Text = "No Bone Selected";
                 SetBoneSlidersEnabled(false);
@@ -1300,7 +1665,7 @@ namespace DeadlockPlayground.UI
 
         private void OnBoneSliderChanged(double val, int axis)
         {
-            if (_isUpdatingBoneSliders || _skeleton == null || string.IsNullOrEmpty(_selectedBoneName)) return;
+            if (_isUpdatingBoneSliders || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_selectedBoneName)) return;
 
             int boneIdx = _skeleton.FindBone(_selectedBoneName);
             if (boneIdx == -1) return;
@@ -1320,7 +1685,7 @@ namespace DeadlockPlayground.UI
             ProceduralClothSolver.Conform(_skeleton);
 
             // Auto-Keying trigger
-            if (_isAutoKeyEnabled)
+            if (_isAutoKeyEnabled && !_isAdditiveClipOffsetMode)
             {
                 Vector3 curPos = _skeleton.GetBonePosePosition(boneIdx);
                 InsertKeyframeForBone(_selectedBoneName, curPos, newRot);
@@ -1329,7 +1694,7 @@ namespace DeadlockPlayground.UI
 
         private void OnResetBonePosePressed()
         {
-            if (_skeleton == null || string.IsNullOrEmpty(_selectedBoneName)) return;
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_selectedBoneName)) return;
             int boneIdx = _skeleton.FindBone(_selectedBoneName);
             if (boneIdx == -1) return;
 
@@ -1355,54 +1720,71 @@ namespace DeadlockPlayground.UI
         #endregion
 
         #region Transport & Playback
+        public void SetTransportEnabled(bool enabled)
+        {
+            if (_btnPlayPause != null) _btnPlayPause.Disabled = !enabled;
+            if (_btnRewindStart != null) _btnRewindStart.Disabled = !enabled;
+            if (_btnStepBack != null) _btnStepBack.Disabled = !enabled;
+            if (_btnStepNext != null) _btnStepNext.Disabled = !enabled;
+            if (_btnJumpEnd != null) _btnJumpEnd.Disabled = !enabled;
+            if (_btnLoop != null) _btnLoop.Disabled = !enabled;
+            if (_spinCurrentFrame != null) _spinCurrentFrame.Editable = enabled;
+        }
+
         private void OnPlayPauseToggled(bool isPlaying)
         {
-            if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
-
             if (isPlaying)
             {
-                if (_btnPlayPause != null) _btnPlayPause.Text = "⏸";
-                _animPlayer.Play(_activeAnimName);
+                AnimationTransportService.Instance.Play();
             }
             else
             {
-                if (_btnPlayPause != null) _btnPlayPause.Text = "▶";
-                _animPlayer.Pause();
+                AnimationTransportService.Instance.Pause();
             }
+        }
+
+        private void OnTransportPlaybackStateChanged(bool isPlaying)
+        {
+            if (_btnPlayPause != null)
+            {
+                _btnPlayPause.SetPressedNoSignal(isPlaying);
+                DockIcons.Apply(_btnPlayPause, isPlaying ? "pause" : "play", isPlaying ? "Pause Playback" : "Play Animation");
+            }
+        }
+
+        private void OnTransportLoopChanged(bool looping)
+        {
+            _btnLoop?.SetPressedNoSignal(looping);
+            _chkLooping?.SetPressedNoSignal(looping);
+        }
+
+        private string _cachedTimeText = "";
+        private int _cachedFrame = -1;
+
+        private void OnTransportTimeChanged(double time)
+        {
+            _currentTime = time;
+            int frame = (int)Math.Round(_currentTime * _fps);
+            if (frame != _cachedFrame)
+            {
+                _cachedFrame = frame;
+                _spinCurrentFrame?.SetValueNoSignal(frame);
+            }
+
+            string timeStr = $"({_currentTime:F2}s)";
+            if (_lblTimeDisplay != null && timeStr != _cachedTimeText)
+            {
+                _cachedTimeText = timeStr;
+                _lblTimeDisplay.Text = timeStr;
+            }
+
+            _dopeSheetCanvas?.SetPlayheadTime(_currentTime);
+            _graphEditorCanvas?.SetPlayheadTime(_currentTime);
         }
 
         public override void _Process(double delta)
         {
-            if (Visible && IsVisibleInTree())
-            {
-                ResolveViewportControls();
-                float expectedBottom = -((_isOpen ? _currentDockHeight : HeaderBarHeight) + 14f);
-                if (_cachedCamPad != null && GodotObject.IsInstanceValid(_cachedCamPad))
-                {
-                    if (Mathf.Abs(_cachedCamPad.OffsetBottom - expectedBottom) > 1.0f)
-                    {
-                        UpdateFloatingViewportControls();
-                    }
-                }
-            }
-
-            if (_isOpen && _animPlayer != null && _animPlayer.IsPlaying())
-            {
-                _currentTime = _animPlayer.CurrentAnimationPosition;
-                int frame = (int)Math.Round(_currentTime * _fps);
-                _spinCurrentFrame?.SetValueNoSignal(frame);
-                if (_lblTimeDisplay != null) _lblTimeDisplay.Text = $"({_currentTime:F2}s)";
-
-                _dopeSheetCanvas?.SetPlayheadTime(_currentTime);
-                _graphEditorCanvas?.SetPlayheadTime(_currentTime);
-
-                if (_skeleton != null)
-                {
-                    _skeleton.ForceUpdateAllBoneTransforms();
-                    ProceduralClothSolver.MarkDirty();
-                    ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-                }
-            }
+            AnimationTransportService.Instance.Tick(delta);
         }
 
         private void ScrubToFrame(int frame)
@@ -1413,33 +1795,14 @@ namespace DeadlockPlayground.UI
 
         private void StepFrame(int delta)
         {
-            int curFrame = (int)Math.Round(_currentTime * _fps);
-            ScrubToFrame(curFrame + delta);
+            AnimationTransportService.Instance.Step(delta);
         }
 
         public void ScrubToTime(double time)
         {
-            double dur = _activeAnimation != null ? Math.Max(0.01, _activeAnimation.Length) : 1.0;
-            _currentTime = Math.Clamp(time, 0.0, dur);
-
-            int frame = (int)Math.Round(_currentTime * _fps);
-            _spinCurrentFrame?.SetValueNoSignal(frame);
-            if (_lblTimeDisplay != null) _lblTimeDisplay.Text = $"({_currentTime:F2}s)";
-
-            _dopeSheetCanvas?.SetPlayheadTime(_currentTime);
-            _graphEditorCanvas?.SetPlayheadTime(_currentTime);
-
-            if (_animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
-            {
-                _animPlayer.Seek(_currentTime, update: true);
-            }
-
-            if (_skeleton != null)
-            {
-                _skeleton.ForceUpdateAllBoneTransforms();
-                ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-            }
+            AnimationTransportService.Instance.Seek(time, update: true, conformCloth: true);
+            CaptureBaselinePose();
+            UpdateBoneQuickControlInspector();
         }
 
         private void OnCanvasScrubbed(double time)
@@ -1501,14 +1864,132 @@ namespace DeadlockPlayground.UI
 
         public void OnBoneTransformedByGizmo(int boneIdx, Vector3 newPos, Quaternion newRot)
         {
-            if (!_isOpen || !_isAutoKeyEnabled || _skeleton == null || boneIdx < 0 || boneIdx >= _skeleton.GetBoneCount()) return;
+            if (!_isOpen || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || boneIdx < 0 || boneIdx >= _skeleton.GetBoneCount()) return;
             string boneName = _skeleton.GetBoneName(boneIdx);
-            InsertKeyframeForBone(boneName, newPos, newRot);
+            if (_isAdditiveClipOffsetMode)
+            {
+                UpdateBoneQuickControlInspector();
+            }
+            else if (_isAutoKeyEnabled)
+            {
+                InsertKeyframeForBone(boneName, newPos, newRot);
+            }
+        }
+
+        private void OnViewportBoneTransformEnded(int boneIdx, Vector3 pos, Quaternion rot)
+        {
+            if (!_isOpen || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion()) return;
+            if (_isAdditiveClipOffsetMode)
+            {
+                ApplyCurrentBoneTweakToEntireClip();
+            }
+        }
+
+        private void CaptureBaselinePose()
+        {
+            if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_selectedBoneName))
+            {
+                _hasBaselinePose = false;
+                return;
+            }
+            int boneIdx = _skeleton.FindBone(_selectedBoneName);
+            if (boneIdx == -1)
+            {
+                _hasBaselinePose = false;
+                return;
+            }
+            _baselineBoneRot = _skeleton.GetBonePoseRotation(boneIdx);
+            _baselineBonePos = _skeleton.GetBonePosePosition(boneIdx);
+            _hasBaselinePose = true;
+        }
+
+        private void OnToggleAdditiveOffsetMode(bool enabled)
+        {
+            _isAdditiveClipOffsetMode = enabled;
+            if (_btnToggleAdditiveOffsetMode != null)
+            {
+                DockIcons.Apply(_btnToggleAdditiveOffsetMode, "pin", "Clip Offset Mode", iconOnly: false);
+                _btnToggleAdditiveOffsetMode.Text = enabled ? "Clip Offset: ON" : "Clip Offset: OFF";
+                _btnToggleAdditiveOffsetMode.Modulate = enabled ? new Color(0.4f, 1.0f, 0.5f) : Colors.White;
+            }
+            if (enabled)
+            {
+                CaptureBaselinePose();
+            }
+        }
+
+        public void ApplyCurrentBoneTweakToEntireClip()
+        {
+            if (_activeAnimation == null || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_selectedBoneName))
+            {
+                return;
+            }
+
+            int boneIdx = _skeleton.FindBone(_selectedBoneName);
+            if (boneIdx == -1) return;
+
+            if (!_hasBaselinePose)
+            {
+                CaptureBaselinePose();
+                return;
+            }
+
+            Vector3 curPos = _skeleton.GetBonePosePosition(boneIdx);
+            Quaternion curRot = _skeleton.GetBonePoseRotation(boneIdx).Normalized();
+
+            Quaternion deltaRot = (_baselineBoneRot.Inverse() * curRot).Normalized();
+            Vector3 deltaPos = curPos - _baselineBonePos;
+
+            // Check if there is meaningful difference
+            float rotAngle = 2f * Mathf.Acos(Mathf.Clamp(Mathf.Abs(deltaRot.W), 0f, 1f));
+            if (rotAngle < 0.001f && deltaPos.LengthSquared() < 1e-6f)
+            {
+                return;
+            }
+
+            ApplyAdditiveOffsetToWholeClip(_selectedBoneName, deltaRot, deltaPos);
+
+            // Update baseline to current pose after applying
+            _baselineBoneRot = curRot;
+            _baselineBonePos = curPos;
+        }
+
+        public void ApplyAdditiveOffsetToWholeClip(string boneName, Quaternion deltaRot, Vector3 deltaPos)
+        {
+            if (_activeAnimation == null || _skeleton == null || string.IsNullOrEmpty(boneName)) return;
+
+            string skelPath = _animPlayer != null ? _animPlayer.GetPathTo(_skeleton) : "Skeleton3D";
+            int rotTrack = FindOrCreateTrack(Godot.Animation.TrackType.Rotation3D, $"{skelPath}:{boneName}");
+            int posTrack = FindOrCreateTrack(Godot.Animation.TrackType.Position3D, $"{skelPath}:{boneName}");
+
+            // Ensure tracks have at least baseline keys if they were empty
+            if (_activeAnimation.TrackGetKeyCount(rotTrack) == 0)
+            {
+                _activeAnimation.RotationTrackInsertKey(rotTrack, 0.0, _baselineBoneRot);
+                if (_activeAnimation.Length > 0.01)
+                {
+                    _activeAnimation.RotationTrackInsertKey(rotTrack, _activeAnimation.Length, _baselineBoneRot);
+                }
+            }
+            if (deltaPos.LengthSquared() > 1e-6f && _activeAnimation.TrackGetKeyCount(posTrack) == 0)
+            {
+                _activeAnimation.PositionTrackInsertKey(posTrack, 0.0, _baselineBonePos);
+                if (_activeAnimation.Length > 0.01)
+                {
+                    _activeAnimation.PositionTrackInsertKey(posTrack, _activeAnimation.Length, _baselineBonePos);
+                }
+            }
+
+            var cmd = new ApplyAdditiveClipOffsetCommand(_activeAnimation, rotTrack, posTrack, boneName, deltaRot, deltaPos);
+            _undoRedo.Execute(cmd);
+
+            OnCanvasKeyframesModified();
+            GD.Print($"[AnimationStudio] Applied additive clip offset to '{boneName}' across all keyframes.");
         }
 
         private void CommitAutoKeyForCurrentPose()
         {
-            if (!_isAutoKeyEnabled || _skeleton == null) return;
+            if (!_isAutoKeyEnabled || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion()) return;
             for (int i = 0; i < _skeleton.GetBoneCount(); i++)
             {
                 string bName = _skeleton.GetBoneName(i);
@@ -1609,6 +2090,17 @@ namespace DeadlockPlayground.UI
                     break;
                 case 8: ExportToGlb(); break;
                 case 9: OpenImportFileDialog(); break;
+                case 10: ApplyCurrentBoneTweakToEntireClip(); break;
+                case 11:
+                    bool newToggled = !_isAdditiveClipOffsetMode;
+                    if (_btnToggleAdditiveOffsetMode != null) _btnToggleAdditiveOffsetMode.ButtonPressed = newToggled;
+                    else OnToggleAdditiveOffsetMode(newToggled);
+                    break;
+                case 12: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.Linear); break;
+                case 13: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseIn); break;
+                case 14: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseOut); break;
+                case 15: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseInOut); break;
+                case 16: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.Constant); break;
             }
         }
 

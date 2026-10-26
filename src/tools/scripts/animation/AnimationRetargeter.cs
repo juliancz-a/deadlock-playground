@@ -14,8 +14,28 @@ namespace DeadlockPlayground.Animation
     /// </summary>
     public static class AnimationRetargeter
     {
+        public enum SourcePoseMode
+        {
+            AutoDetect,    // Dynamic vector alignment
+            StrictTPose,   // Mixamo / Mesh2Motion standard T-Pose
+            APose,         // A-Pose (30° / 45°)
+            FrameZero      // Use Frame 0 as reference pose
+        }
+
+        public enum SpineRetargetMode
+        {
+            SmoothSpline4Bone, // Recommended: Smoothly resamples 3 source spines across Deadlock's 4 spines with zero kinks
+            DirectBoneMap      // Direct 1:1 bone mapping
+        }
+
         public class RetargetOptions
         {
+            /// <summary>Source skeleton reference pose calibration mode.</summary>
+            public SourcePoseMode PoseMode { get; set; } = SourcePoseMode.AutoDetect;
+
+            /// <summary>Spine chain distribution mode.</summary>
+            public SpineRetargetMode SpineMode { get; set; } = SpineRetargetMode.SmoothSpline4Bone;
+
             /// <summary>Optional manual arm pitch tweak in degrees (-60° to +60°). Defaults to 0° (0° = 100% dynamic vector alignment from bone geometry).</summary>
             public float ArmPitchOffsetDeg { get; set; } = 0f;
 
@@ -28,8 +48,26 @@ namespace DeadlockPlayground.Animation
             /// <summary>Pelvis vertical displacement height scale (0.5x to 1.5x)</summary>
             public float PelvisHeightScale { get; set; } = 1.0f;
 
-            /// <summary>Zeros out horizontal translation deltas (X, Z), keeping in-place root motion</summary>
-            public bool LockHorizontalRootMotion { get; set; } = true;
+            /// <summary>Manual vertical ground / floor offset in meters (-0.50m to +0.50m). Defaults to 0.00m.</summary>
+            public float FloorOffsetMeters { get; set; } = 0.0f;
+
+            /// <summary>Subtracts linear travel drift so locomotion clips play in-place while preserving local pelvic sway and weight shift.</summary>
+            public bool LockHorizontalRootMotion { get; set; } = false;
+
+            /// <summary>Dynamically adjusts pelvis height each frame so character feet plant firmly on the floor (Y = 0) without mid-air floating.</summary>
+            public bool AutoGroundFeet { get; set; } = true;
+
+            /// <summary>Applies per-leg analytic two-bone inverse kinematics to guarantee both feet plant firmly on the floor simultaneously without floating.</summary>
+            public bool EnableFootIK { get; set; } = true;
+
+            /// <summary>Soft-IK reach curve starting at 92% of leg length to prevent knee popping at full extension.</summary>
+            public bool SoftIK { get; set; } = true;
+
+            /// <summary>Temporal smoothing filter over baked knee flexion and pole vector trajectory to eliminate frame-to-frame snaps.</summary>
+            public bool SmoothKnees { get; set; } = true;
+
+            /// <summary>Derives knee bend-plane pole vector from authentic rest anatomy instead of FK cross-product noise.</summary>
+            public bool AnatomicalKneePole { get; set; } = true;
 
             /// <summary>Target evaluation frame rate (defaults to 30 FPS)</summary>
             public float TargetFps { get; set; } = 30f;
@@ -159,6 +197,18 @@ namespace DeadlockPlayground.Animation
                 return Quaternion.Identity;
             }
             return q.Normalized();
+        }
+
+        /// <summary>
+        /// Scales a rotation delta quaternion by a scalar factor using shortest-arc Slerp.
+        /// </summary>
+        public static Quaternion ScaleRotationDelta(Quaternion delta, float factor)
+        {
+            if (delta.W < 0)
+            {
+                delta = new Quaternion(-delta.X, -delta.Y, -delta.Z, -delta.W);
+            }
+            return SafeNormalize(Quaternion.Identity.Slerp(delta, factor));
         }
 
         /// <summary>
@@ -509,7 +559,69 @@ namespace DeadlockPlayground.Animation
             int[] sourceOrder = GetTopologicalOrder(sourceSkeleton);
             int[] targetOrder = GetTopologicalOrder(targetSkeleton);
 
+            // 0. Index Source Animation Tracks (indexed upfront so Frame 0 pose can be sampled if requested)
+            var sourceRotTracks = new int[sourceBoneCount];
+            var sourcePosTracks = new int[sourceBoneCount];
+            Array.Fill(sourceRotTracks, -1);
+            Array.Fill(sourcePosTracks, -1);
+
+            int srcTrackCount = sourceAnim.GetTrackCount();
+            for (int tr = 0; tr < srcTrackCount; tr++)
+            {
+                string path = sourceAnim.TrackGetPath(tr).ToString();
+                string boneName = path;
+                int colonIdx = boneName.LastIndexOf(':');
+                if (colonIdx != -1) boneName = boneName[(colonIdx + 1)..];
+                int slashIdx = boneName.LastIndexOf('/');
+                if (slashIdx != -1) boneName = boneName[(slashIdx + 1)..];
+
+                int s = FindBoneCaseInsensitive(sourceSkeleton, boneName);
+                if (s == -1)
+                {
+                    string clean = HumanoidBoneMapper.CleanBoneName(boneName);
+                    for (int i = 0; i < sourceBoneCount; i++)
+                    {
+                        if (HumanoidBoneMapper.CleanBoneName(sourceSkeleton.GetBoneName(i)) == clean)
+                        {
+                            s = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (s != -1)
+                {
+                    var type = sourceAnim.TrackGetType(tr);
+                    if (type == Godot.Animation.TrackType.Rotation3D)
+                    {
+                        sourceRotTracks[s] = tr;
+                    }
+                    else if (type == Godot.Animation.TrackType.Position3D)
+                    {
+                        sourcePosTracks[s] = tr;
+                    }
+                    else if (type == Godot.Animation.TrackType.Value)
+                    {
+                        string prop = path.Contains(':') ? path[(path.LastIndexOf(':') + 1)..].ToLowerInvariant() : "";
+                        if (prop.Contains("rot") || prop.Contains("quaternion")) sourceRotTracks[s] = tr;
+                        else if (prop.Contains("pos") || prop.Contains("loc")) sourcePosTracks[s] = tr;
+                    }
+                }
+            }
+
             // 1. Compute Model-Space Rest Transforms for Source Skeleton
+            // If sourceSkeleton is nested under an Armature or parent Node3D, evaluate full model space (+Y Up)
+            Transform3D sourceToModel = Transform3D.Identity;
+            Node currSource = sourceSkeleton;
+            while (currSource != null && currSource.GetParent() != null)
+            {
+                if (currSource.GetParent() is Node3D parent3D)
+                {
+                    sourceToModel = parent3D.Transform * sourceToModel;
+                }
+                currSource = currSource.GetParent();
+            }
+
             var sourceRestGlobalRot = new Quaternion[sourceBoneCount];
             var sourceRestGlobalPos = new Vector3[sourceBoneCount];
             for (int i = 0; i < sourceBoneCount; i++)
@@ -522,13 +634,26 @@ namespace DeadlockPlayground.Animation
             {
                 int p = sourceSkeleton.GetBoneParent(s);
                 Transform3D localRest = sourceSkeleton.GetBoneRest(s);
-                Quaternion localRot = SafeNormalize(localRest.Basis.GetRotationQuaternion());
-                Vector3 localPos = localRest.Origin;
+                Quaternion localRot;
+                Vector3 localPos;
+
+                if (options.PoseMode == SourcePoseMode.FrameZero && sourceRotTracks[s] != -1)
+                {
+                    localRot = SafeInterpolateRotation(sourceAnim, sourceRotTracks[s], 0.0, localRest);
+                    localPos = sourcePosTracks[s] != -1
+                        ? SafeInterpolatePosition(sourceAnim, sourcePosTracks[s], 0.0, localRest)
+                        : localRest.Origin;
+                }
+                else
+                {
+                    localRot = SafeNormalize(localRest.Basis.GetRotationQuaternion());
+                    localPos = localRest.Origin;
+                }
 
                 if (p == -1)
                 {
-                    sourceRestGlobalRot[s] = localRot;
-                    sourceRestGlobalPos[s] = localPos;
+                    sourceRestGlobalRot[s] = SafeNormalize(sourceToModel.Basis.GetRotationQuaternion() * localRot);
+                    sourceRestGlobalPos[s] = sourceToModel * localPos;
                 }
                 else
                 {
@@ -591,22 +716,9 @@ namespace DeadlockPlayground.Animation
             for (int t = 0; t < targetBoneCount; t++)
             {
                 string targetName = targetSkeleton.GetBoneName(t);
-                if (boneMapping != null && boneMapping.TryGetValue(targetName, out string sourceName) && !string.IsNullOrEmpty(sourceName))
+                if (boneMapping != null && boneMapping.TryGetValue(targetName, out string sourceName) && !string.IsNullOrWhiteSpace(sourceName))
                 {
-                    int s = sourceSkeleton.FindBone(sourceName);
-                    if (s == -1)
-                    {
-                        string cleanS = HumanoidBoneMapper.CleanBoneName(sourceName);
-                        for (int i = 0; i < sourceBoneCount; i++)
-                        {
-                            if (HumanoidBoneMapper.CleanBoneName(sourceSkeleton.GetBoneName(i)) == cleanS)
-                            {
-                                s = i;
-                                break;
-                            }
-                        }
-                    }
-
+                    int s = FindBoneCaseInsensitive(sourceSkeleton, sourceName);
                     if (s != -1)
                     {
                         targetToSourceIndex[t] = s;
@@ -621,19 +733,11 @@ namespace DeadlockPlayground.Animation
 
             if (mappedPelvisTargetIndex == -1)
             {
-                int pIdx = targetSkeleton.FindBone("pelvis");
-                if (pIdx != -1)
-                {
-                    mappedPelvisTargetIndex = pIdx;
-                    for (int s = 0; s < sourceBoneCount; s++)
-                    {
-                        if (IsPelvisOrHips(sourceSkeleton.GetBoneName(s)))
-                        {
-                            mappedPelvisSourceIndex = s;
-                            break;
-                        }
-                    }
-                }
+                mappedPelvisTargetIndex = FindBoneCaseInsensitive(targetSkeleton, "pelvis");
+            }
+            if (mappedPelvisSourceIndex == -1)
+            {
+                mappedPelvisSourceIndex = FindBoneByNames(sourceSkeleton, "pelvis", "hips", "hip");
             }
 
             // 6. Zero-Hardcode Rest Pose Alignment (Hierarchical Vector-to-Vector Matching)
@@ -662,10 +766,10 @@ namespace DeadlockPlayground.Animation
             Quaternion leftArmTweak = SafeNormalize(new Quaternion(Vector3.Up, -armClearRad) * new Quaternion(Vector3.Back, armPitchRad));
             Quaternion rightArmTweak = SafeNormalize(new Quaternion(Vector3.Up, armClearRad) * new Quaternion(Vector3.Back, -armPitchRad));
 
-            void AlignLimbSegment(string targetParentName, string targetChildName, Quaternion userTweak)
+            void AlignLimbSegment(string targetParentName, string targetChildName, Quaternion userTweak, Vector3? targetHinge = null, Vector3? sourceHinge = null)
             {
-                int tP = targetSkeleton.FindBone(targetParentName);
-                int tC = targetSkeleton.FindBone(targetChildName);
+                int tP = FindBoneCaseInsensitive(targetSkeleton, targetParentName);
+                int tC = FindBoneCaseInsensitive(targetSkeleton, targetChildName);
                 if (tP == -1 || tC == -1) return;
 
                 int sP = targetToSourceIndex[tP];
@@ -676,7 +780,29 @@ namespace DeadlockPlayground.Animation
                 Vector3 uT = (targetAlignedRestGlobalPos[tC] - targetAlignedRestGlobalPos[tP]).Normalized();
 
                 Quaternion qAlign = ShortestArc(uT, uS);
-                Quaternion qFinal = SafeNormalize(userTweak * qAlign);
+
+                // If hinge vectors are supplied (e.g. finger curl plane), align the hinge axis around uS
+                Quaternion qRoll = Quaternion.Identity;
+                if (targetHinge.HasValue && sourceHinge.HasValue &&
+                    targetHinge.Value.LengthSquared() > 1e-6f && sourceHinge.Value.LengthSquared() > 1e-6f)
+                {
+                    Vector3 hT_rot = qAlign * targetHinge.Value;
+                    Vector3 hT_perp = hT_rot - uS * hT_rot.Dot(uS);
+                    Vector3 hS_perp = sourceHinge.Value - uS * sourceHinge.Value.Dot(uS);
+
+                    if (hT_perp.LengthSquared() > 1e-6f && hS_perp.LengthSquared() > 1e-6f)
+                    {
+                        hT_perp = hT_perp.Normalized();
+                        hS_perp = hS_perp.Normalized();
+
+                        float cosTheta = Math.Clamp(hT_perp.Dot(hS_perp), -1f, 1f);
+                        float sinTheta = (hT_perp.Cross(hS_perp)).Dot(uS);
+                        float rollAngle = Mathf.Atan2(sinTheta, cosTheta);
+                        qRoll = new Quaternion(uS, rollAngle);
+                    }
+                }
+
+                Quaternion qFinal = SafeNormalize(userTweak * qRoll * qAlign);
 
                 if (Math.Abs(qFinal.W) < 0.999999f)
                 {
@@ -691,7 +817,7 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            // Align limb chains hierarchically
+            // Align limb chains hierarchically (Arms & Legs ONLY)
             // Left Arm
             AlignLimbSegment("arm_upper_L", "arm_lower_L", leftArmTweak);
             AlignLimbSegment("arm_lower_L", "hand_L", Quaternion.Identity);
@@ -700,18 +826,148 @@ namespace DeadlockPlayground.Animation
             AlignLimbSegment("arm_upper_R", "arm_lower_R", rightArmTweak);
             AlignLimbSegment("arm_lower_R", "hand_R", Quaternion.Identity);
 
-            // Left Leg
-            AlignLimbSegment("leg_upper_L", "leg_lower_L", Quaternion.Identity);
-            AlignLimbSegment("leg_lower_L", "ankle_L", Quaternion.Identity);
-            AlignLimbSegment("ankle_L", "ball_L", Quaternion.Identity);
+            // Hand & Finger alignments in rest pose
+            // Aligns hand model-space rest direction with middle finger knuckle
+            AlignLimbSegment("hand_L", "finger_middle_0_L", Quaternion.Identity);
+            AlignLimbSegment("hand_R", "finger_middle_0_R", Quaternion.Identity);
 
-            // Right Leg
-            AlignLimbSegment("leg_upper_R", "leg_lower_R", Quaternion.Identity);
-            AlignLimbSegment("leg_lower_R", "ankle_R", Quaternion.Identity);
-            AlignLimbSegment("ankle_R", "ball_R", Quaternion.Identity);
+            Vector3 ComputePalmNormal(Skeleton3D sk, Vector3[] restPos, string handName, string indexName, string pinkyName, string middleName, bool isLeft)
+            {
+                int tHand = FindBoneCaseInsensitive(sk, handName);
+                int tIndex = FindBoneCaseInsensitive(sk, indexName);
+                int tPinky = FindBoneCaseInsensitive(sk, pinkyName);
+                int tMiddle = FindBoneCaseInsensitive(sk, middleName);
+                if (tHand == -1 || tIndex == -1 || tPinky == -1)
+                {
+                    return isLeft ? Vector3.Forward : Vector3.Back;
+                }
+                Vector3 pHand = restPos[tHand];
+                Vector3 pIndex = restPos[tIndex];
+                Vector3 pPinky = restPos[tPinky];
+                Vector3 pMiddle = tMiddle != -1 ? restPos[tMiddle] : 0.5f * (pIndex + pPinky);
 
-            // Head
-            AlignLimbSegment("neck_0", "head", Quaternion.Identity);
+                Vector3 vAcross = (pIndex - pPinky).Normalized();
+                Vector3 vAlong = (pMiddle - pHand).Normalized();
+                Vector3 nPalm = vAcross.Cross(vAlong);
+                if (nPalm.LengthSquared() < 1e-4f)
+                {
+                    return isLeft ? Vector3.Forward : Vector3.Back;
+                }
+                nPalm = nPalm.Normalized();
+                if (isLeft && nPalm.Z < 0f && Math.Abs(nPalm.Z) > 0.3f) nPalm = -nPalm;
+                if (!isLeft && nPalm.Z > 0f && Math.Abs(nPalm.Z) > 0.3f) nPalm = -nPalm;
+                return nPalm;
+            }
+
+            Vector3 palmNormTL = ComputePalmNormal(targetSkeleton, targetAlignedRestGlobalPos, "hand_L", "finger_index_0_L", "finger_pinky_0_L", "finger_middle_0_L", true);
+            Vector3 palmNormTR = ComputePalmNormal(targetSkeleton, targetAlignedRestGlobalPos, "hand_R", "finger_index_0_R", "finger_pinky_0_R", "finger_middle_0_R", false);
+
+            int tHandL_bone = FindBoneCaseInsensitive(targetSkeleton, "hand_L");
+            int tHandR_bone = FindBoneCaseInsensitive(targetSkeleton, "hand_R");
+            int sHandL_bone = tHandL_bone != -1 ? targetToSourceIndex[tHandL_bone] : -1;
+            int sHandR_bone = tHandR_bone != -1 ? targetToSourceIndex[tHandR_bone] : -1;
+
+            int sIndexL_bone = targetToSourceIndex[FindBoneCaseInsensitive(targetSkeleton, "finger_index_0_L")];
+            int sPinkyL_bone = targetToSourceIndex[FindBoneCaseInsensitive(targetSkeleton, "finger_pinky_0_L")];
+            int sMiddleL_bone = targetToSourceIndex[FindBoneCaseInsensitive(targetSkeleton, "finger_middle_0_L")];
+
+            int sIndexR_bone = targetToSourceIndex[FindBoneCaseInsensitive(targetSkeleton, "finger_index_0_R")];
+            int sPinkyR_bone = targetToSourceIndex[FindBoneCaseInsensitive(targetSkeleton, "finger_pinky_0_R")];
+            int sMiddleR_bone = targetToSourceIndex[FindBoneCaseInsensitive(targetSkeleton, "finger_middle_0_R")];
+
+            Vector3 palmNormSL = (sHandL_bone != -1 && sIndexL_bone != -1 && sPinkyL_bone != -1)
+                ? ComputePalmNormal(sourceSkeleton, sourceRestGlobalPos, sourceSkeleton.GetBoneName(sHandL_bone), sourceSkeleton.GetBoneName(sIndexL_bone), sourceSkeleton.GetBoneName(sPinkyL_bone), sMiddleL_bone != -1 ? sourceSkeleton.GetBoneName(sMiddleL_bone) : "", true)
+                : palmNormTL;
+
+            Vector3 palmNormSR = (sHandR_bone != -1 && sIndexR_bone != -1 && sPinkyR_bone != -1)
+                ? ComputePalmNormal(sourceSkeleton, sourceRestGlobalPos, sourceSkeleton.GetBoneName(sHandR_bone), sourceSkeleton.GetBoneName(sIndexR_bone), sourceSkeleton.GetBoneName(sPinkyR_bone), sMiddleR_bone != -1 ? sourceSkeleton.GetBoneName(sMiddleR_bone) : "", false)
+                : palmNormTR;
+
+            void AlignFingerChainFull(string fingerPrefix, bool isLeft)
+            {
+                string suffix = isLeft ? "_L" : "_R";
+                string p0 = $"finger_{fingerPrefix}_0{suffix}";
+                string p1 = $"finger_{fingerPrefix}_1{suffix}";
+                string p2 = $"finger_{fingerPrefix}_2{suffix}";
+                string pEnd = $"finger_{fingerPrefix}_end{suffix}";
+
+                int t0 = FindBoneCaseInsensitive(targetSkeleton, p0);
+                int t1 = FindBoneCaseInsensitive(targetSkeleton, p1);
+                int t2 = FindBoneCaseInsensitive(targetSkeleton, p2);
+                int tEnd = FindBoneCaseInsensitive(targetSkeleton, pEnd);
+                if (t0 == -1 || t1 == -1) return;
+
+                int s0 = targetToSourceIndex[t0];
+                int s1 = targetToSourceIndex[t1];
+                int s2 = t2 != -1 ? targetToSourceIndex[t2] : -1;
+                int sEnd = tEnd != -1 ? targetToSourceIndex[tEnd] : -1;
+
+                Vector3 palmNormT = isLeft ? palmNormTL : palmNormTR;
+                Vector3 palmNormS = isLeft ? palmNormSL : palmNormSR;
+
+                // 1. Phalanx 0 -> 1
+                Vector3 dirT0 = (targetAlignedRestGlobalPos[t1] - targetAlignedRestGlobalPos[t0]).Normalized();
+                Vector3 hT0 = palmNormT.Cross(dirT0).Normalized();
+                Vector3 hS0 = Vector3.Zero;
+                if (s0 != -1 && s1 != -1)
+                {
+                    Vector3 dirS0 = (sourceRestGlobalPos[s1] - sourceRestGlobalPos[s0]).Normalized();
+                    hS0 = palmNormS.Cross(dirS0).Normalized();
+                }
+                AlignLimbSegment(p0, p1, Quaternion.Identity, hT0, hS0);
+
+                // 2. Phalanx 1 -> 2
+                if (t2 != -1)
+                {
+                    Vector3 dirT1 = (targetAlignedRestGlobalPos[t2] - targetAlignedRestGlobalPos[t1]).Normalized();
+                    Vector3 hT1 = palmNormT.Cross(dirT1).Normalized();
+                    Vector3 hS1 = Vector3.Zero;
+                    if (s1 != -1 && s2 != -1)
+                    {
+                        Vector3 dirS1 = (sourceRestGlobalPos[s2] - sourceRestGlobalPos[s1]).Normalized();
+                        hS1 = palmNormS.Cross(dirS1).Normalized();
+                    }
+                    AlignLimbSegment(p1, p2, Quaternion.Identity, hT1, hS1);
+                }
+
+                // 3. Phalanx 2 -> end
+                if (t2 != -1 && tEnd != -1)
+                {
+                    Vector3 dirT2 = (targetAlignedRestGlobalPos[tEnd] - targetAlignedRestGlobalPos[t2]).Normalized();
+                    Vector3 hT2 = palmNormT.Cross(dirT2).Normalized();
+                    Vector3 hS2 = Vector3.Zero;
+                    if (s2 != -1 && sEnd != -1)
+                    {
+                        Vector3 dirS2 = (sourceRestGlobalPos[sEnd] - sourceRestGlobalPos[s2]).Normalized();
+                        hS2 = palmNormS.Cross(dirS2).Normalized();
+                    }
+                    AlignLimbSegment(p2, pEnd, Quaternion.Identity, hT2, hS2);
+                }
+            }
+
+            // Left Hand Finger phalanges (with palm-normal derived curl hinges)
+            AlignFingerChainFull("thumb", true);
+            AlignFingerChainFull("index", true);
+            AlignFingerChainFull("middle", true);
+            AlignFingerChainFull("ring", true);
+            AlignFingerChainFull("pinky", true);
+
+            // Right Hand Finger phalanges (with palm-normal derived curl hinges)
+            AlignFingerChainFull("thumb", false);
+            AlignFingerChainFull("index", false);
+            AlignFingerChainFull("middle", false);
+            AlignFingerChainFull("ring", false);
+            AlignFingerChainFull("pinky", false);
+
+            // Note: Single-vector ShortestArc alignment is strictly OMITTED on:
+            // 1. leg_upper_L/R -> leg_lower_L/R -> ankle_L/R (humanoid legs stand vertically on the floor; full 3D Two-Bone IK solves leg poses directly onto G_T,ankle(t))
+            // 2. ankle_L/R -> ball_L/R (feet in rest pose are already flat on the floor; ShortestArc pitches feet when heel/boot heights differ)
+            // 3. Axial core bones (pelvis, spine_0..3, neck_0, head; to prevent S-curve sagittal angle distortion and axial twist)
+            // Both feet and axial core bones preserve direct upright rest-pose alignment: Q_offset = (Q_yawAlign * G_S,rest)^-1 * G_T,rest.
+
+            // Toe ball to toe end tip (if ball_end is mapped)
+            AlignLimbSegment("ball_L", "ball_end_L", Quaternion.Identity);
+            AlignLimbSegment("ball_R", "ball_end_R", Quaternion.Identity);
 
             // 7. Anatomical Ratio-Based Clavicle Scaling
             float clavicleWeightL = 1.0f;
@@ -719,10 +975,10 @@ namespace DeadlockPlayground.Animation
 
             float ComputeClavicleWeight(string clavName, string upperName, string lowerName, string handName)
             {
-                int tClav = targetSkeleton.FindBone(clavName);
-                int tUpper = targetSkeleton.FindBone(upperName);
-                int tLower = targetSkeleton.FindBone(lowerName);
-                int tHand = targetSkeleton.FindBone(handName);
+                int tClav = FindBoneCaseInsensitive(targetSkeleton, clavName);
+                int tUpper = FindBoneCaseInsensitive(targetSkeleton, upperName);
+                int tLower = FindBoneCaseInsensitive(targetSkeleton, lowerName);
+                int tHand = FindBoneCaseInsensitive(targetSkeleton, handName);
 
                 if (tClav == -1 || tUpper == -1 || tLower == -1 || tHand == -1) return 1.0f;
 
@@ -751,100 +1007,31 @@ namespace DeadlockPlayground.Animation
             clavicleWeightL = ComputeClavicleWeight("clavicle_L", "arm_upper_L", "arm_lower_L", "hand_L");
             clavicleWeightR = ComputeClavicleWeight("clavicle_R", "arm_upper_R", "arm_lower_R", "hand_R");
 
-            // 8. Spine Chain Redistribution Parameterization
-            var targetSpineIndices = new List<int>();
-            for (int i = 0; i < 10; i++)
+            // 8. Spine Posture Pitch Tweak
+            // Axial core bones (pelvis, spine_0..3, neck_0, head) preserve direct upright rest pose alignment
+            // Q_offset = G_S,rest^-1 * G_T,rest. Optional spine posture pitch is applied to the lowest mapped spine joint.
+            if (Math.Abs(options.SpinePitchOffsetDeg) > 0.01f)
             {
-                int idx = targetSkeleton.FindBone($"spine_{i}");
-                if (idx != -1) targetSpineIndices.Add(idx);
-            }
-            if (targetSpineIndices.Count == 0)
-            {
-                for (int i = 0; i < targetBoneCount; i++)
+                float spinePitchRad = Mathf.DegToRad(options.SpinePitchOffsetDeg);
+                Quaternion spineTweak = SafeNormalize(new Quaternion(Vector3.Right, spinePitchRad));
+
+                int spinePitchBone = FindBoneCaseInsensitive(targetSkeleton, "spine_0");
+                if (spinePitchBone == -1 || targetToSourceIndex[spinePitchBone] == -1)
                 {
-                    if (IsSpineBone(targetSkeleton.GetBoneName(i))) targetSpineIndices.Add(i);
-                }
-            }
-            targetSpineIndices.Sort((a, b) => Array.IndexOf(targetOrder, a).CompareTo(Array.IndexOf(targetOrder, b)));
-
-            int targetSpineCount = targetSpineIndices.Count;
-            var targetSpineStartU = new float[targetSpineCount];
-            var targetSpineEndU = new float[targetSpineCount];
-
-            if (targetSpineCount > 0)
-            {
-                var targetLengths = new float[targetSpineCount];
-                float totalTLen = 0f;
-                int neckIdx = targetSkeleton.FindBone("neck_0");
-
-                for (int j = 0; j < targetSpineCount; j++)
-                {
-                    int currBone = targetSpineIndices[j];
-                    int nextBone = j < targetSpineCount - 1 ? targetSpineIndices[j + 1] : neckIdx;
-                    float segLen = 0.12f;
-                    if (nextBone != -1)
+                    for (int i = 0; i < 4; i++)
                     {
-                        segLen = (targetRestGlobalPos[nextBone] - targetRestGlobalPos[currBone]).Length();
+                        int sp = FindBoneCaseInsensitive(targetSkeleton, $"spine_{i}");
+                        if (sp != -1 && targetToSourceIndex[sp] != -1)
+                        {
+                            spinePitchBone = sp;
+                            break;
+                        }
                     }
-                    segLen = Math.Max(0.001f, segLen);
-                    targetLengths[j] = segLen;
-                    totalTLen += segLen;
                 }
 
-                float accumU = 0f;
-                for (int j = 0; j < targetSpineCount; j++)
+                if (spinePitchBone != -1)
                 {
-                    targetSpineStartU[j] = accumU;
-                    accumU += targetLengths[j] / totalTLen;
-                    targetSpineEndU[j] = j == targetSpineCount - 1 ? 1.0f : accumU;
-                }
-            }
-
-            var sourceSpineIndices = new List<int>();
-            foreach (int t in targetSpineIndices)
-            {
-                int s = targetToSourceIndex[t];
-                if (s != -1 && !sourceSpineIndices.Contains(s))
-                {
-                    sourceSpineIndices.Add(s);
-                }
-            }
-            if (sourceSpineIndices.Count == 0)
-            {
-                for (int s = 0; s < sourceBoneCount; s++)
-                {
-                    if (IsSpineBone(sourceSkeleton.GetBoneName(s))) sourceSpineIndices.Add(s);
-                }
-            }
-            sourceSpineIndices.Sort((a, b) => Array.IndexOf(sourceOrder, a).CompareTo(Array.IndexOf(sourceOrder, b)));
-
-            int sourceSpineCount = sourceSpineIndices.Count;
-            var sourceSpineEndU = new float[sourceSpineCount];
-            if (sourceSpineCount > 0)
-            {
-                var sLengths = new float[sourceSpineCount];
-                float totalSLen = 0f;
-                int sNeck = FindBoneByNames(sourceSkeleton, "neck_0", "neck", "neck1", "head");
-
-                for (int k = 0; k < sourceSpineCount; k++)
-                {
-                    int currBone = sourceSpineIndices[k];
-                    int nextBone = k < sourceSpineCount - 1 ? sourceSpineIndices[k + 1] : sNeck;
-                    float segLen = 0.12f;
-                    if (nextBone != -1)
-                    {
-                        segLen = (sourceRestGlobalPos[nextBone] - sourceRestGlobalPos[currBone]).Length();
-                    }
-                    segLen = Math.Max(0.001f, segLen);
-                    sLengths[k] = segLen;
-                    totalSLen += segLen;
-                }
-
-                float accumSU = 0f;
-                for (int k = 0; k < sourceSpineCount; k++)
-                {
-                    accumSU += sLengths[k] / totalSLen;
-                    sourceSpineEndU[k] = k == sourceSpineCount - 1 ? 1.0f : accumSU;
+                    targetAlignedRestGlobalRot[spinePitchBone] = SafeNormalize(spineTweak * targetAlignedRestGlobalRot[spinePitchBone]);
                 }
             }
 
@@ -864,55 +1051,108 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            // 10. Index Source Animation Tracks
-            var sourceRotTracks = new int[sourceBoneCount];
-            var sourcePosTracks = new int[sourceBoneCount];
-            Array.Fill(sourceRotTracks, -1);
-            Array.Fill(sourcePosTracks, -1);
+            // Setup Foot Grounding rest measurements (lowest foot bone relative to floor Y = 0)
+            int tAnkleL = FindBoneByNames(targetSkeleton, "ankle_L", "ankle_l", "foot_L", "foot_l");
+            int tAnkleR = FindBoneByNames(targetSkeleton, "ankle_R", "ankle_r", "foot_R", "foot_r");
+            int sAnkleL = tAnkleL != -1 && targetToSourceIndex[tAnkleL] != -1 ? targetToSourceIndex[tAnkleL] : FindBoneByNames(sourceSkeleton, "ankle_l", "foot_l", "leftfoot", "ankle_L");
+            int sAnkleR = tAnkleR != -1 && targetToSourceIndex[tAnkleR] != -1 ? targetToSourceIndex[tAnkleR] : FindBoneByNames(sourceSkeleton, "ankle_r", "foot_r", "rightfoot", "ankle_R");
 
-            int srcTrackCount = sourceAnim.GetTrackCount();
-            for (int tr = 0; tr < srcTrackCount; tr++)
+            // Recursive Foot Subtree collection (including attachfoot, sole, ball, ball_end, heels)
+            var tFootSubtreeL = CollectFootSubtreeBones(targetSkeleton, tAnkleL, "_l");
+            var tFootSubtreeR = CollectFootSubtreeBones(targetSkeleton, tAnkleR, "_r");
+            var sFootSubtreeL = CollectFootSubtreeBones(sourceSkeleton, sAnkleL, "_l");
+            var sFootSubtreeR = CollectFootSubtreeBones(sourceSkeleton, sAnkleR, "_r");
+
+            float targetSoleRestYL = float.MaxValue;
+            foreach (int b in tFootSubtreeL) targetSoleRestYL = Math.Min(targetSoleRestYL, targetRestGlobalPos[b].Y);
+            if (targetSoleRestYL == float.MaxValue) targetSoleRestYL = 0f;
+
+            float targetSoleRestYR = float.MaxValue;
+            foreach (int b in tFootSubtreeR) targetSoleRestYR = Math.Min(targetSoleRestYR, targetRestGlobalPos[b].Y);
+            if (targetSoleRestYR == float.MaxValue) targetSoleRestYR = 0f;
+
+            float sourceSoleRestYL = float.MaxValue;
+            foreach (int b in sFootSubtreeL) sourceSoleRestYL = Math.Min(sourceSoleRestYL, sourceRestGlobalPos[b].Y);
+            if (sourceSoleRestYL == float.MaxValue) sourceSoleRestYL = 0f;
+
+            float sourceSoleRestYR = float.MaxValue;
+            foreach (int b in sFootSubtreeR) sourceSoleRestYR = Math.Min(sourceSoleRestYR, sourceRestGlobalPos[b].Y);
+            if (sourceSoleRestYR == float.MaxValue) sourceSoleRestYR = 0f;
+
+            // Leg IK Chain Discovery
+            int tLegLowerL = tAnkleL != -1 ? targetSkeleton.GetBoneParent(tAnkleL) : -1;
+            int tLegUpperL = tLegLowerL != -1 ? targetSkeleton.GetBoneParent(tLegLowerL) : -1;
+            if (tLegUpperL == -1) tLegUpperL = FindBoneByNames(targetSkeleton, "leg_upper_L", "leg_upper_l", "thigh_L", "thigh_l");
+            if (tLegLowerL == -1) tLegLowerL = FindBoneByNames(targetSkeleton, "leg_lower_L", "leg_lower_l", "calf_L", "calf_l", "shin_l");
+
+            int tLegLowerR = tAnkleR != -1 ? targetSkeleton.GetBoneParent(tAnkleR) : -1;
+            int tLegUpperR = tLegLowerR != -1 ? targetSkeleton.GetBoneParent(tLegLowerR) : -1;
+            if (tLegUpperR == -1) tLegUpperR = FindBoneByNames(targetSkeleton, "leg_upper_R", "leg_upper_r", "thigh_R", "thigh_r");
+            if (tLegLowerR == -1) tLegLowerR = FindBoneByNames(targetSkeleton, "leg_lower_R", "leg_lower_r", "calf_R", "calf_r", "shin_r");
+
+            int tBallL = FindBoneByNames(targetSkeleton, "ball_L", "ball_l", "toe_L", "toe_l", "toes_l");
+            int tBallR = FindBoneByNames(targetSkeleton, "ball_R", "ball_r", "toe_R", "toe_r", "toes_r");
+
+            Vector3 hingeRestL = ComputeRestKneeHingeAxis(targetSkeleton, targetRestGlobalPos, targetRestGlobalRot, tLegUpperL, tLegLowerL, tAnkleL, tBallL, mappedPelvisTargetIndex);
+            Vector3 hingeRestR = ComputeRestKneeHingeAxis(targetSkeleton, targetRestGlobalPos, targetRestGlobalRot, tLegUpperR, tLegLowerR, tAnkleR, tBallR, mappedPelvisTargetIndex);
+
+            Vector3 localHingeL = tLegUpperL != -1 ? (targetRestGlobalRot[tLegUpperL].Inverse() * hingeRestL) : Vector3.Right;
+            Vector3 localHingeR = tLegUpperR != -1 ? (targetRestGlobalRot[tLegUpperR].Inverse() * hingeRestR) : Vector3.Right;
+
+            Vector3 restCharFwd = Vector3.Zero;
+            if (tBallL != -1 && tAnkleL != -1)
             {
-                string path = sourceAnim.TrackGetPath(tr).ToString();
-                string boneName = path;
-                int colonIdx = boneName.LastIndexOf(':');
-                if (colonIdx != -1) boneName = boneName[(colonIdx + 1)..];
-                int slashIdx = boneName.LastIndexOf('/');
-                if (slashIdx != -1) boneName = boneName[(slashIdx + 1)..];
-
-                int s = sourceSkeleton.FindBone(boneName);
-                if (s == -1)
-                {
-                    string clean = HumanoidBoneMapper.CleanBoneName(boneName);
-                    for (int i = 0; i < sourceBoneCount; i++)
-                    {
-                        if (HumanoidBoneMapper.CleanBoneName(sourceSkeleton.GetBoneName(i)) == clean)
-                        {
-                            s = i;
-                            break;
-                        }
-                    }
-                }
-
-                if (s != -1)
-                {
-                    var type = sourceAnim.TrackGetType(tr);
-                    if (type == Godot.Animation.TrackType.Rotation3D)
-                    {
-                        sourceRotTracks[s] = tr;
-                    }
-                    else if (type == Godot.Animation.TrackType.Position3D)
-                    {
-                        sourcePosTracks[s] = tr;
-                    }
-                    else if (type == Godot.Animation.TrackType.Value)
-                    {
-                        string prop = path.Contains(':') ? path[(path.LastIndexOf(':') + 1)..].ToLowerInvariant() : "";
-                        if (prop.Contains("rot") || prop.Contains("quaternion")) sourceRotTracks[s] = tr;
-                        else if (prop.Contains("pos") || prop.Contains("loc")) sourcePosTracks[s] = tr;
-                    }
-                }
+                Vector3 toeDir = targetRestGlobalPos[tBallL] - targetRestGlobalPos[tAnkleL];
+                toeDir.Y = 0f;
+                if (toeDir.LengthSquared() > 1e-4f) restCharFwd = toeDir.Normalized();
             }
+            if (restCharFwd.LengthSquared() < 1e-4f && mappedPelvisTargetIndex != -1)
+            {
+                Vector3 pelvFwd = targetRestGlobalRot[mappedPelvisTargetIndex] * new Vector3(0f, 0f, 1f);
+                pelvFwd.Y = 0f;
+                if (pelvFwd.LengthSquared() > 1e-4f) restCharFwd = pelvFwd.Normalized();
+            }
+            if (restCharFwd.LengthSquared() < 1e-4f)
+            {
+                restCharFwd = new Vector3(0f, 0f, 1f);
+            }
+
+            Vector3 pelvisLocalFwd = mappedPelvisTargetIndex != -1
+                ? (targetRestGlobalRot[mappedPelvisTargetIndex].Inverse() * restCharFwd).Normalized()
+                : new Vector3(0f, 0f, 1f);
+
+            Vector3 downRestL = (tLegUpperL != -1 && tAnkleL != -1)
+                ? (targetRestGlobalPos[tAnkleL] - targetRestGlobalPos[tLegUpperL]).Normalized()
+                : new Vector3(0f, -1f, 0f);
+            Vector3 restKneeFwdL = downRestL.Cross(hingeRestL).Normalized();
+            if (restKneeFwdL.Dot(restCharFwd) < 0f) restKneeFwdL = -restKneeFwdL;
+            Vector3 restKneeFwdLocalL = tLegUpperL != -1 ? (targetRestGlobalRot[tLegUpperL].Inverse() * restKneeFwdL) : new Vector3(0f, 0f, 1f);
+
+            Vector3 downRestR = (tLegUpperR != -1 && tAnkleR != -1)
+                ? (targetRestGlobalPos[tAnkleR] - targetRestGlobalPos[tLegUpperR]).Normalized()
+                : new Vector3(0f, -1f, 0f);
+            Vector3 restKneeFwdR = downRestR.Cross(hingeRestR).Normalized();
+            if (restKneeFwdR.Dot(restCharFwd) < 0f) restKneeFwdR = -restKneeFwdR;
+            Vector3 restKneeFwdLocalR = tLegUpperR != -1 ? (targetRestGlobalRot[tLegUpperR].Inverse() * restKneeFwdR) : new Vector3(0f, 0f, 1f);
+
+            List<int> leftLegDescendants = tLegUpperL != -1 ? CollectDescendantsInTopologicalOrder(targetSkeleton, targetOrder, tLegUpperL) : new List<int>();
+            List<int> rightLegDescendants = tLegUpperR != -1 ? CollectDescendantsInTopologicalOrder(targetSkeleton, targetOrder, tLegUpperR) : new List<int>();
+
+            // Setup Continuous 4-Bone Spine Resampling (Spline Slerp)
+            int tSpine0 = FindBoneCaseInsensitive(targetSkeleton, "spine_0");
+            int tSpine1 = FindBoneCaseInsensitive(targetSkeleton, "spine_1");
+            int tSpine2 = FindBoneCaseInsensitive(targetSkeleton, "spine_2");
+            int tSpine3 = FindBoneCaseInsensitive(targetSkeleton, "spine_3");
+
+            bool is4SpineTarget = tSpine0 != -1 && tSpine1 != -1 && tSpine2 != -1 && tSpine3 != -1;
+            int sLowerSpine = tSpine0 != -1 ? targetToSourceIndex[tSpine0] : -1;
+            int sMidSpine = tSpine2 != -1 && targetToSourceIndex[tSpine2] != -1
+                ? targetToSourceIndex[tSpine2]
+                : (tSpine1 != -1 ? targetToSourceIndex[tSpine1] : -1);
+            int sChestSpine = tSpine3 != -1 ? targetToSourceIndex[tSpine3] : -1;
+            bool canUseSmoothSpline = is4SpineTarget && sLowerSpine != -1 && sMidSpine != -1 && sChestSpine != -1 &&
+                                      targetToSourceIndex[tSpine1] != -1 &&
+                                      options.SpineMode == SpineRetargetMode.SmoothSpline4Bone;
 
             // 11. Initialize Destination Animation
             var retargetedAnim = new Godot.Animation
@@ -936,45 +1176,81 @@ namespace DeadlockPlayground.Animation
 
             var bakedRotations = new Quaternion[targetBoneCount, frameCount];
             var bakedPelvisPos = new Vector3[frameCount];
+            var frameTargetGlobalRot = new Quaternion[targetBoneCount, frameCount];
+            var frameTargetGlobalPos = new Vector3[targetBoneCount, frameCount];
+            var goalAnklePosL = new Vector3[frameCount];
+            var goalAnklePosR = new Vector3[frameCount];
+            var rawPelvisDrop = new float[frameCount];
 
-            float pelvisScaleFactor = 1.0f;
-            if (mappedPelvisSourceIndex != -1 && mappedPelvisTargetIndex != -1)
-            {
-                float srcH = Math.Abs(sourceRestGlobalPos[mappedPelvisSourceIndex].Y);
-                float tgtH = Math.Abs(targetRestGlobalPos[mappedPelvisTargetIndex].Y);
-                if (srcH > 0.05f && tgtH > 0.05f)
-                {
-                    pelvisScaleFactor = (tgtH / srcH) * options.PelvisHeightScale;
-                }
-                else
-                {
-                    pelvisScaleFactor = options.PelvisHeightScale;
-                }
-            }
+            // Measure Target Leg Segment Lengths & Maximum Straight-Leg Reach from Rest Pose
+            float lThighL = (tLegUpperL != -1 && tLegLowerL != -1)
+                ? (targetRestGlobalPos[tLegLowerL] - targetRestGlobalPos[tLegUpperL]).Length()
+                : 0.42f;
+            float lCalfL = (tLegLowerL != -1 && tAnkleL != -1)
+                ? (targetRestGlobalPos[tAnkleL] - targetRestGlobalPos[tLegLowerL]).Length()
+                : 0.40f;
+            float rMaxL = (lThighL + lCalfL) * 0.992f;
 
-            int tClavL = targetSkeleton.FindBone("clavicle_L");
-            int tClavR = targetSkeleton.FindBone("clavicle_R");
+            float lThighR = (tLegUpperR != -1 && tLegLowerR != -1)
+                ? (targetRestGlobalPos[tLegLowerR] - targetRestGlobalPos[tLegUpperR]).Length()
+                : 0.42f;
+            float lCalfR = (tLegLowerR != -1 && tAnkleR != -1)
+                ? (targetRestGlobalPos[tAnkleR] - targetRestGlobalPos[tLegLowerR]).Length()
+                : 0.40f;
+            float rMaxR = (lThighR + lCalfR) * 0.992f;
+
+            // Leg Length Scaling s_leg = (L_T,leg / L_S,leg) * PelvisHeightScale
+            float lS_LegL = (mappedPelvisSourceIndex != -1 && sAnkleL != -1)
+                ? (sourceRestGlobalPos[mappedPelvisSourceIndex] - sourceRestGlobalPos[sAnkleL]).Length()
+                : 0.90f;
+            float lS_LegR = (mappedPelvisSourceIndex != -1 && sAnkleR != -1)
+                ? (sourceRestGlobalPos[mappedPelvisSourceIndex] - sourceRestGlobalPos[sAnkleR]).Length()
+                : 0.90f;
+            float lS_Leg = (sAnkleL != -1 && sAnkleR != -1) ? 0.5f * (lS_LegL + lS_LegR) : (sAnkleL != -1 ? lS_LegL : (sAnkleR != -1 ? lS_LegR : 0.90f));
+
+            float lT_LegL = (mappedPelvisTargetIndex != -1 && tAnkleL != -1)
+                ? (targetRestGlobalPos[mappedPelvisTargetIndex] - targetRestGlobalPos[tAnkleL]).Length()
+                : 0.90f;
+            float lT_LegR = (mappedPelvisTargetIndex != -1 && tAnkleR != -1)
+                ? (targetRestGlobalPos[mappedPelvisTargetIndex] - targetRestGlobalPos[tAnkleR]).Length()
+                : 0.90f;
+            float lT_Leg = (tAnkleL != -1 && tAnkleR != -1) ? 0.5f * (lT_LegL + lT_LegR) : (tAnkleL != -1 ? lT_LegL : (tAnkleR != -1 ? lT_LegR : 0.90f));
+
+            float sLeg = (lT_Leg / Math.Max(0.01f, lS_Leg)) * options.PelvisHeightScale;
+            float motionScale = sLeg;
+
+            // Pre-sample source hips at t=0 and t=animLength to compute linear root drift velocity
+            Vector3 srcHipsStart = mappedPelvisSourceIndex != -1
+                ? SampleSourceBoneModelPos(sourceSkeleton, sourceAnim, sourceRotTracks, sourcePosTracks, sourceToModel, mappedPelvisSourceIndex, 0.0)
+                : Vector3.Zero;
+            Vector3 srcHipsEnd = mappedPelvisSourceIndex != -1
+                ? SampleSourceBoneModelPos(sourceSkeleton, sourceAnim, sourceRotTracks, sourcePosTracks, sourceToModel, mappedPelvisSourceIndex, animLength)
+                : Vector3.Zero;
+            Vector3 totalDriftXZ = new Vector3(srcHipsEnd.X - srcHipsStart.X, 0f, srcHipsEnd.Z - srcHipsStart.Z);
+
+            int tClavL = FindBoneCaseInsensitive(targetSkeleton, "clavicle_L");
+            int tClavR = FindBoneCaseInsensitive(targetSkeleton, "clavicle_R");
             int sClavL = tClavL != -1 ? targetToSourceIndex[tClavL] : -1;
             int sClavR = tClavR != -1 ? targetToSourceIndex[tClavR] : -1;
 
-            int tArmUpperL = targetSkeleton.FindBone("arm_upper_L");
-            int tArmLowerL = targetSkeleton.FindBone("arm_lower_L");
-            int tHandL = targetSkeleton.FindBone("hand_L");
+            int tArmUpperL = FindBoneCaseInsensitive(targetSkeleton, "arm_upper_L");
+            int tArmLowerL = FindBoneCaseInsensitive(targetSkeleton, "arm_lower_L");
+            int tHandL = FindBoneCaseInsensitive(targetSkeleton, "hand_L");
 
-            int tArmUpperR = targetSkeleton.FindBone("arm_upper_R");
-            int tArmLowerR = targetSkeleton.FindBone("arm_lower_R");
-            int tHandR = targetSkeleton.FindBone("hand_R");
+            int tArmUpperR = FindBoneCaseInsensitive(targetSkeleton, "arm_upper_R");
+            int tArmLowerR = FindBoneCaseInsensitive(targetSkeleton, "arm_lower_R");
+            int tHandR = FindBoneCaseInsensitive(targetSkeleton, "hand_R");
 
-            float spinePitchRad = Mathf.DegToRad(options.SpinePitchOffsetDeg);
-            Quaternion spineTweak = SafeNormalize(new Quaternion(Vector3.Right, spinePitchRad));
-
-            var sourceCumRotKnots = new Quaternion[sourceSpineCount + 1];
+            int tTwistL0 = FindBoneByNames(targetSkeleton, "arm_lower_L_TWIST", "arm_lower_twist_L", "arm_lower_l_twist", "wrist_helper_L");
+            int tTwistL1 = FindBoneByNames(targetSkeleton, "arm_lower_L_TWIST1", "arm_lower_twist_1_L", "arm_lower_l_twist1");
+            int tTwistR0 = FindBoneByNames(targetSkeleton, "arm_lower_R_TWIST", "arm_lower_twist_R", "arm_lower_r_twist", "wrist_helper_R");
+            int tTwistR1 = FindBoneByNames(targetSkeleton, "arm_lower_R_TWIST1", "arm_lower_twist_1_R", "arm_lower_r_twist1");
 
             for (int f = 0; f < frameCount; f++)
             {
                 double time = Math.Min(animLength, f * (1.0 / fps));
 
-                // A. Forward Kinematics on Source Skeleton
+                // A. Forward Kinematics on Source Skeleton (including root & Armature transforms)
                 foreach (int s in sourceOrder)
                 {
                     int p = sourceSkeleton.GetBoneParent(s);
@@ -985,8 +1261,8 @@ namespace DeadlockPlayground.Animation
 
                     if (p == -1)
                     {
-                        currentSourceGlobalRot[s] = localRot;
-                        currentSourceGlobalPos[s] = localPos;
+                        currentSourceGlobalRot[s] = SafeNormalize(sourceToModel.Basis.GetRotationQuaternion() * localRot);
+                        currentSourceGlobalPos[s] = sourceToModel * localPos;
                     }
                     else
                     {
@@ -995,67 +1271,40 @@ namespace DeadlockPlayground.Animation
                     }
                 }
 
-                // B. Compute Cumulative Source Spine Rotations for Arc-Length Sampling
-                if (sourceSpineCount > 0)
-                {
-                    sourceCumRotKnots[0] = Quaternion.Identity;
-                    for (int k = 0; k < sourceSpineCount; k++)
-                    {
-                        int sBone = sourceSpineIndices[k];
-                        Quaternion sRestLocal = SafeNormalize(sourceSkeleton.GetBoneRest(sBone).Basis.GetRotationQuaternion());
-                        Quaternion sLocalDelta = SafeNormalize(sRestLocal.Inverse() * currentSourceLocalRot[sBone]);
-                        sourceCumRotKnots[k + 1] = SafeNormalize(sourceCumRotKnots[k] * sLocalDelta);
-                    }
-                }
-
-                Quaternion SampleCumulativeSourceRotation(float u)
-                {
-                    if (sourceSpineCount == 0 || u <= 0.0001f) return Quaternion.Identity;
-                    if (u >= 0.9999f) return sourceCumRotKnots[sourceSpineCount];
-
-                    float prevU = 0f;
-                    for (int k = 0; k < sourceSpineCount; k++)
-                    {
-                        float currU = sourceSpineEndU[k];
-                        if (u >= prevU && u <= currU)
-                        {
-                            float range = Math.Max(1e-4f, currU - prevU);
-                            float alpha = Mathf.Clamp((u - prevU) / range, 0f, 1f);
-                            return SafeNormalize(sourceCumRotKnots[k].Slerp(sourceCumRotKnots[k + 1], alpha));
-                        }
-                        prevU = currU;
-                    }
-                    return sourceCumRotKnots[sourceSpineCount];
-                }
-
-                // C. Target Skeleton Evaluation in Topological Order
+                // B. Target Skeleton Evaluation in Strict Topological Parent-to-Child Order
                 foreach (int t in targetOrder)
                 {
                     int p = targetSkeleton.GetBoneParent(t);
                     int s = targetToSourceIndex[t];
 
-                    if (targetSpineIndices.Contains(t) && targetSpineCount > 0)
+                    if (canUseSmoothSpline && (t == tSpine0 || t == tSpine1 || t == tSpine2 || t == tSpine3))
                     {
-                        // Spine bone redistribution along normalized arc length
-                        int spineIdx = targetSpineIndices.IndexOf(t);
-                        float uStart = targetSpineStartU[spineIdx];
-                        float uEnd = targetSpineEndU[spineIdx];
-
-                        Quaternion cStart = SampleCumulativeSourceRotation(uStart);
-                        Quaternion cEnd = SampleCumulativeSourceRotation(uEnd);
-                        Quaternion deltaL = SafeNormalize(cStart.Inverse() * cEnd);
-
-                        Quaternion localRest = SafeNormalize(targetSkeleton.GetBoneRest(t).Basis.GetRotationQuaternion());
-                        Quaternion localRot = SafeNormalize(localRest * deltaL);
-
-                        if (spineIdx == 0 && Math.Abs(options.SpinePitchOffsetDeg) > 0.01f)
+                        // Continuous Spine Chain Resampling (Spline Slerp) across all 4 vertebrae
+                        if (t == tSpine0)
                         {
-                            localRot = SafeNormalize(spineTweak * localRot);
+                            Quaternion dLower = SafeNormalize(currentSourceGlobalRot[sLowerSpine] * sourceRestGlobalRot[sLowerSpine].Inverse());
+                            Quaternion d0 = ScaleRotationDelta(dLower, 0.75f);
+                            currentTargetGlobalRot[t] = SafeNormalize(d0 * targetAlignedRestGlobalRot[t]);
                         }
-
-                        currentTargetGlobalRot[t] = p == -1
-                            ? localRot
-                            : SafeNormalize(currentTargetGlobalRot[p] * localRot);
+                        else if (t == tSpine1)
+                        {
+                            Quaternion dLower = SafeNormalize(currentSourceGlobalRot[sLowerSpine] * sourceRestGlobalRot[sLowerSpine].Inverse());
+                            Quaternion dMid = SafeNormalize(currentSourceGlobalRot[sMidSpine] * sourceRestGlobalRot[sMidSpine].Inverse());
+                            Quaternion dBlend = SafeNormalize(dLower.Slerp(dMid, 0.5f));
+                            Quaternion d1 = ScaleRotationDelta(dBlend, 0.75f);
+                            currentTargetGlobalRot[t] = SafeNormalize(d1 * targetAlignedRestGlobalRot[t]);
+                        }
+                        else if (t == tSpine2)
+                        {
+                            Quaternion dMid = SafeNormalize(currentSourceGlobalRot[sMidSpine] * sourceRestGlobalRot[sMidSpine].Inverse());
+                            Quaternion d2 = ScaleRotationDelta(dMid, 0.75f);
+                            currentTargetGlobalRot[t] = SafeNormalize(d2 * targetAlignedRestGlobalRot[t]);
+                        }
+                        else if (t == tSpine3)
+                        {
+                            // Upper chest reaches the exact target chest orientation for clavicle/neck integrity
+                            currentTargetGlobalRot[t] = SafeNormalize(currentSourceGlobalRot[sChestSpine] * qOffset[t]);
+                        }
                     }
                     else if (t == tClavL && sClavL != -1)
                     {
@@ -1073,12 +1322,12 @@ namespace DeadlockPlayground.Animation
                     }
                     else if (s != -1)
                     {
-                        // Mapped limb / head / finger bone
+                        // Mapped bone: hierarchical model-space alignment
                         currentTargetGlobalRot[t] = SafeNormalize(currentSourceGlobalRot[s] * qOffset[t]);
                     }
                     else
                     {
-                        // Unmapped bone: preserve rest relative to parent
+                        // Unmapped bone (e.g. [NONE / SKIP] intermediate spine_1): strictly propagate from animated parent
                         Quaternion localRestRot = SafeNormalize(targetSkeleton.GetBoneRest(t).Basis.GetRotationQuaternion());
                         currentTargetGlobalRot[t] = p == -1
                             ? localRestRot
@@ -1089,15 +1338,20 @@ namespace DeadlockPlayground.Animation
                     if (t == mappedPelvisTargetIndex && mappedPelvisSourceIndex != -1)
                     {
                         Vector3 srcDisp = currentSourceGlobalPos[mappedPelvisSourceIndex] - sourceRestGlobalPos[mappedPelvisSourceIndex];
-                        srcDisp *= pelvisScaleFactor;
+                        srcDisp *= motionScale;
 
                         if (options.LockHorizontalRootMotion)
                         {
-                            srcDisp.X = 0f;
-                            srcDisp.Z = 0f;
+                            // Subtract linear drift velocity line across the duration, preserving local pelvic weight-shift sway!
+                            float driftAlpha = animLength > 0.0001 ? (float)(time / animLength) : 0f;
+                            Vector3 currentDriftXZ = totalDriftXZ * driftAlpha * motionScale;
+                            srcDisp.X -= currentDriftXZ.X;
+                            srcDisp.Z -= currentDriftXZ.Z;
                         }
 
-                        currentTargetGlobalPos[t] = targetAlignedRestGlobalPos[t] + srcDisp;
+                        Vector3 targetPos = targetRestGlobalPos[t] + srcDisp;
+                        targetPos.Y += options.FloorOffsetMeters;
+                        currentTargetGlobalPos[t] = targetPos;
                     }
                     else
                     {
@@ -1108,11 +1362,292 @@ namespace DeadlockPlayground.Animation
                     }
                 }
 
-                // D. Per-Frame Volumetric Torso & Limb Anti-Clipping Solver
-                SolveArmTorsoClearance(tArmUpperL, tArmLowerL, tHandL, torsoProfile, targetSkeleton, currentTargetGlobalRot, currentTargetGlobalPos);
-                SolveArmTorsoClearance(tArmUpperR, tArmLowerR, tHandR, torsoProfile, targetSkeleton, currentTargetGlobalRot, currentTargetGlobalPos);
+                // C. Volumetric Torso & Limb Anti-Clipping Solver (Opt-in via ArmClearanceOffsetDeg slider)
+                // Gated off by default so face-touching poses (like Crying.fbx) do not have their hands repelled from the face!
+                if (options.ArmClearanceOffsetDeg > 0.01f)
+                {
+                    SolveArmTorsoClearance(tArmUpperL, tArmLowerL, tHandL, torsoProfile, targetSkeleton, currentTargetGlobalRot, currentTargetGlobalPos);
+                    SolveArmTorsoClearance(tArmUpperR, tArmLowerR, tHandR, torsoProfile, targetSkeleton, currentTargetGlobalRot, currentTargetGlobalPos);
+                }
 
-                // E. Store Final Parent-Local Rotations and Pelvis Positions
+                // Distribute forearm pronation/supination twist across Deadlock wrist helper bones
+                DistributeForearmTwist(targetSkeleton, tArmLowerL, tHandL, tTwistL0, tTwistL1, currentTargetGlobalRot);
+                DistributeForearmTwist(targetSkeleton, tArmLowerR, tHandR, tTwistR0, tTwistR1, currentTargetGlobalRot);
+
+                // Step 1: Compute 3D Model-Space Target Ankle Goals G_T,ankle(t)
+                Vector3 deltaAnkleS_L = (sAnkleL != -1)
+                    ? (currentSourceGlobalPos[sAnkleL] - sourceRestGlobalPos[sAnkleL])
+                    : Vector3.Zero;
+                Vector3 deltaAnkleS_R = (sAnkleR != -1)
+                    ? (currentSourceGlobalPos[sAnkleR] - sourceRestGlobalPos[sAnkleR])
+                    : Vector3.Zero;
+
+                Vector3 goalL = (tAnkleL != -1 ? targetRestGlobalPos[tAnkleL] : Vector3.Zero)
+                    + deltaAnkleS_L * motionScale
+                    + new Vector3(0f, options.FloorOffsetMeters, 0f);
+
+                Vector3 goalR = (tAnkleR != -1 ? targetRestGlobalPos[tAnkleR] : Vector3.Zero)
+                    + deltaAnkleS_R * motionScale
+                    + new Vector3(0f, options.FloorOffsetMeters, 0f);
+
+                if (options.LockHorizontalRootMotion)
+                {
+                    float driftAlpha = animLength > 0.0001 ? (float)(time / animLength) : 0f;
+                    Vector3 currentDriftXZ = totalDriftXZ * driftAlpha * motionScale;
+                    goalL.X -= currentDriftXZ.X;
+                    goalL.Z -= currentDriftXZ.Z;
+                    goalR.X -= currentDriftXZ.X;
+                    goalR.Z -= currentDriftXZ.Z;
+                }
+
+                if (options.AutoGroundFeet)
+                {
+                    float minAnkleYL = (tAnkleL != -1 ? targetRestGlobalPos[tAnkleL].Y : 0.08f) + options.FloorOffsetMeters;
+                    float minAnkleYR = (tAnkleR != -1 ? targetRestGlobalPos[tAnkleR].Y : 0.08f) + options.FloorOffsetMeters;
+                    if (goalL.Y < minAnkleYL) goalL.Y = minAnkleYL;
+                    if (goalR.Y < minAnkleYR) goalR.Y = minAnkleYR;
+                }
+
+                goalAnklePosL[f] = goalL;
+                goalAnklePosR[f] = goalR;
+
+                // Step 2: Measure straight-leg reach and compute vertical drop deltaY needed so legs can reach ankle goals
+                float deltaYL = 0f;
+                float rLimitL = rMaxL * 0.995f;
+                if (tLegUpperL != -1 && tAnkleL != -1)
+                {
+                    Vector3 hipPosL = currentTargetGlobalPos[tLegUpperL];
+                    Vector3 vL = hipPosL - goalL;
+                    float dL = vL.Length();
+                    if (dL > rLimitL && hipPosL.Y > goalL.Y)
+                    {
+                        float dXZ2 = vL.X * vL.X + vL.Z * vL.Z;
+                        if (rLimitL * rLimitL <= dXZ2)
+                        {
+                            deltaYL = vL.Y;
+                        }
+                        else
+                        {
+                            deltaYL = vL.Y - Mathf.Sqrt(rLimitL * rLimitL - dXZ2);
+                        }
+                    }
+                }
+
+                float deltaYR = 0f;
+                float rLimitR = rMaxR * 0.995f;
+                if (tLegUpperR != -1 && tAnkleR != -1)
+                {
+                    Vector3 hipPosR = currentTargetGlobalPos[tLegUpperR];
+                    Vector3 vR = hipPosR - goalR;
+                    float dR = vR.Length();
+                    if (dR > rLimitR && hipPosR.Y > goalR.Y)
+                    {
+                        float dXZ2 = vR.X * vR.X + vR.Z * vR.Z;
+                        if (rLimitR * rLimitR <= dXZ2)
+                        {
+                            deltaYR = vR.Y;
+                        }
+                        else
+                        {
+                            deltaYR = vR.Y - Mathf.Sqrt(rLimitR * rLimitR - dXZ2);
+                        }
+                    }
+                }
+
+                rawPelvisDrop[f] = Math.Max(0f, Math.Max(deltaYL, deltaYR));
+
+                // Cache frame FK poses before post-processing pass
+                for (int t = 0; t < targetBoneCount; t++)
+                {
+                    frameTargetGlobalRot[t, f] = currentTargetGlobalRot[t];
+                    frameTargetGlobalPos[t, f] = currentTargetGlobalPos[t];
+                }
+            }
+
+            // D2. Smooth Pelvis Reach Clamp (3-frame Gaussian kernel [0.25, 0.50, 0.25])
+            var smoothedPelvisDrop = new float[frameCount];
+            for (int f = 0; f < frameCount; f++)
+            {
+                int fPrev = Math.Max(0, f - 1);
+                int fNext = Math.Min(frameCount - 1, f + 1);
+                smoothedPelvisDrop[f] = 0.25f * rawPelvisDrop[fPrev] + 0.5f * rawPelvisDrop[f] + 0.25f * rawPelvisDrop[fNext];
+            }
+
+            // D3. Final Baking & Two-Bone Foot IK Pass
+            // Applies smoothed pelvis reach clamping and 3D Two-Bone IK onto G_T,ankle(t)
+            for (int f = 0; f < frameCount; f++)
+            {
+                for (int t = 0; t < targetBoneCount; t++)
+                {
+                    currentTargetGlobalRot[t] = frameTargetGlobalRot[t, f];
+                    currentTargetGlobalPos[t] = frameTargetGlobalPos[t, f];
+                }
+
+                float dropY = smoothedPelvisDrop[f];
+                if (dropY > 1e-5f)
+                {
+                    if (mappedPelvisTargetIndex != -1)
+                    {
+                        currentTargetGlobalPos[mappedPelvisTargetIndex].Y -= dropY;
+                    }
+                    for (int t = 0; t < targetBoneCount; t++)
+                    {
+                        if (t != mappedPelvisTargetIndex && targetSkeleton.GetBoneParent(t) != -1)
+                        {
+                            currentTargetGlobalPos[t].Y -= dropY;
+                        }
+                    }
+                }
+
+                // Step 3: Solve Full 3D Twist-Free Analytic Two-Bone IK Onto G_T,ankle(t)
+                if (options.EnableFootIK)
+                {
+                    Vector3 charFwdCurrent = restCharFwd;
+                    if (mappedPelvisTargetIndex != -1)
+                    {
+                        Vector3 curPelvFwd = currentTargetGlobalRot[mappedPelvisTargetIndex] * pelvisLocalFwd;
+                        curPelvFwd.Y = 0f;
+                        if (curPelvFwd.LengthSquared() > 1e-4f) charFwdCurrent = curPelvFwd.Normalized();
+                    }
+
+                    // Left Leg Two-Bone IK
+                    if (tLegUpperL != -1 && tLegLowerL != -1 && tAnkleL != -1)
+                    {
+                        Vector3 hipPos = currentTargetGlobalPos[tLegUpperL];
+                        Vector3 kneePos = currentTargetGlobalPos[tLegLowerL];
+                        Vector3 anklePos = currentTargetGlobalPos[tAnkleL];
+                        Vector3 goalAnklePos = goalAnklePosL[f];
+                        Vector3 frameHingeL = currentTargetGlobalRot[tLegUpperL] * localHingeL;
+
+                        // Cache pre-IK local rotations and local positions for all descendants of leg_upper_L
+                        var localRotBeforeIK = new Quaternion[targetBoneCount];
+                        var localPosBeforeIK = new Vector3[targetBoneCount];
+                        foreach (int b in leftLegDescendants)
+                        {
+                            int p = targetSkeleton.GetBoneParent(b);
+                            if (p != -1)
+                            {
+                                localRotBeforeIK[b] = SafeNormalize(currentTargetGlobalRot[p].Inverse() * currentTargetGlobalRot[b]);
+                                localPosBeforeIK[b] = currentTargetGlobalRot[p].Inverse() * (currentTargetGlobalPos[b] - currentTargetGlobalPos[p]);
+                            }
+                        }
+
+                        SolveTwoBoneIK(
+                            hipPos, kneePos, anklePos, goalAnklePos,
+                            currentTargetGlobalRot[tLegUpperL],
+                            currentTargetGlobalRot[tLegLowerL],
+                            currentTargetGlobalRot[tAnkleL],
+                            frameHingeL,
+                            restKneeFwdLocalL,
+                            charFwdCurrent,
+                            options.SoftIK,
+                            options.AnatomicalKneePole,
+                            out Quaternion newHipRotL,
+                            out Quaternion newKneeRotL,
+                            out Quaternion newAnkleRotL,
+                            out Vector3 solvedKneeL,
+                            out Vector3 solvedAnkleL);
+
+                        currentTargetGlobalRot[tLegUpperL] = newHipRotL;
+                        currentTargetGlobalRot[tLegLowerL] = newKneeRotL;
+                        currentTargetGlobalRot[tAnkleL] = newAnkleRotL;
+
+                        currentTargetGlobalPos[tLegLowerL] = solvedKneeL;
+                        currentTargetGlobalPos[tAnkleL] = solvedAnkleL;
+                        Vector3 newAnklePos = solvedAnkleL;
+
+                        // Re-propagate model-space transforms to all descendant and helper bones in topological order
+                        foreach (int b in leftLegDescendants)
+                        {
+                            if (b == tLegLowerL || b == tAnkleL) continue;
+                            int p = targetSkeleton.GetBoneParent(b);
+                            if (p != -1)
+                            {
+                                currentTargetGlobalRot[b] = SafeNormalize(currentTargetGlobalRot[p] * localRotBeforeIK[b]);
+                                currentTargetGlobalPos[b] = currentTargetGlobalPos[p] + currentTargetGlobalRot[p] * localPosBeforeIK[b];
+                            }
+                        }
+
+                        Vector3 footDispL = newAnklePos - anklePos;
+                        foreach (int b in tFootSubtreeL)
+                        {
+                            if (b != tAnkleL && !leftLegDescendants.Contains(b))
+                            {
+                                currentTargetGlobalPos[b] += footDispL;
+                            }
+                        }
+                    }
+
+                    // Right Leg Two-Bone IK
+                    if (tLegUpperR != -1 && tLegLowerR != -1 && tAnkleR != -1)
+                    {
+                        Vector3 hipPos = currentTargetGlobalPos[tLegUpperR];
+                        Vector3 kneePos = currentTargetGlobalPos[tLegLowerR];
+                        Vector3 anklePos = currentTargetGlobalPos[tAnkleR];
+                        Vector3 goalAnklePos = goalAnklePosR[f];
+                        Vector3 frameHingeR = currentTargetGlobalRot[tLegUpperR] * localHingeR;
+
+                        // Cache pre-IK local rotations and local positions for all descendants of leg_upper_R
+                        var localRotBeforeIK = new Quaternion[targetBoneCount];
+                        var localPosBeforeIK = new Vector3[targetBoneCount];
+                        foreach (int b in rightLegDescendants)
+                        {
+                            int p = targetSkeleton.GetBoneParent(b);
+                            if (p != -1)
+                            {
+                                localRotBeforeIK[b] = SafeNormalize(currentTargetGlobalRot[p].Inverse() * currentTargetGlobalRot[b]);
+                                localPosBeforeIK[b] = currentTargetGlobalRot[p].Inverse() * (currentTargetGlobalPos[b] - currentTargetGlobalPos[p]);
+                            }
+                        }
+
+                        SolveTwoBoneIK(
+                            hipPos, kneePos, anklePos, goalAnklePos,
+                            currentTargetGlobalRot[tLegUpperR],
+                            currentTargetGlobalRot[tLegLowerR],
+                            currentTargetGlobalRot[tAnkleR],
+                            frameHingeR,
+                            restKneeFwdLocalR,
+                            charFwdCurrent,
+                            options.SoftIK,
+                            options.AnatomicalKneePole,
+                            out Quaternion newHipRotR,
+                            out Quaternion newKneeRotR,
+                            out Quaternion newAnkleRotR,
+                            out Vector3 solvedKneeR,
+                            out Vector3 solvedAnkleR);
+
+                        currentTargetGlobalRot[tLegUpperR] = newHipRotR;
+                        currentTargetGlobalRot[tLegLowerR] = newKneeRotR;
+                        currentTargetGlobalRot[tAnkleR] = newAnkleRotR;
+
+                        currentTargetGlobalPos[tLegLowerR] = solvedKneeR;
+                        currentTargetGlobalPos[tAnkleR] = solvedAnkleR;
+                        Vector3 newAnklePos = solvedAnkleR;
+
+                        // Re-propagate model-space transforms to all descendant and helper bones in topological order
+                        foreach (int b in rightLegDescendants)
+                        {
+                            if (b == tLegLowerR || b == tAnkleR) continue;
+                            int p = targetSkeleton.GetBoneParent(b);
+                            if (p != -1)
+                            {
+                                currentTargetGlobalRot[b] = SafeNormalize(currentTargetGlobalRot[p] * localRotBeforeIK[b]);
+                                currentTargetGlobalPos[b] = currentTargetGlobalPos[p] + currentTargetGlobalRot[p] * localPosBeforeIK[b];
+                            }
+                        }
+
+                        Vector3 footDispR = newAnklePos - anklePos;
+                        foreach (int b in tFootSubtreeR)
+                        {
+                            if (b != tAnkleR && !rightLegDescendants.Contains(b))
+                            {
+                                currentTargetGlobalPos[b] += footDispR;
+                            }
+                        }
+                    }
+                }
+
+                // Bake parent-local rotations from final currentTargetGlobalRot
                 for (int t = 0; t < targetBoneCount; t++)
                 {
                     int p = targetSkeleton.GetBoneParent(t);
@@ -1145,17 +1680,55 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            // 13. Track Generation & RDP Curve Simplification
+            // Optional: Gaussian Temporal Smoothing on Leg Joints to Eliminate Micro-Jitter
+            if (options.SmoothKnees && frameCount > 2)
+            {
+                int[] legBonesToSmooth = new int[] { tLegUpperL, tLegLowerL, tLegUpperR, tLegLowerR };
+                foreach (int b in legBonesToSmooth)
+                {
+                    if (b == -1) continue;
+                    var tempSmoothed = new Quaternion[frameCount];
+                    for (int f = 0; f < frameCount; f++)
+                    {
+                        int fPrev = retargetedAnim.LoopMode != Godot.Animation.LoopModeEnum.None
+                            ? (f - 1 + frameCount) % frameCount
+                            : Math.Max(0, f - 1);
+                        int fNext = retargetedAnim.LoopMode != Godot.Animation.LoopModeEnum.None
+                            ? (f + 1) % frameCount
+                            : Math.Min(frameCount - 1, f + 1);
+
+                        Quaternion q0 = bakedRotations[b, fPrev];
+                        Quaternion q1 = bakedRotations[b, f];
+                        Quaternion q2 = bakedRotations[b, fNext];
+
+                        if (q0.Dot(q1) < 0f) q0 = -q0;
+                        if (q2.Dot(q1) < 0f) q2 = -q2;
+
+                        tempSmoothed[f] = new Quaternion(
+                            0.2f * q0.X + 0.6f * q1.X + 0.2f * q2.X,
+                            0.2f * q0.Y + 0.6f * q1.Y + 0.2f * q2.Y,
+                            0.2f * q0.Z + 0.6f * q1.Z + 0.2f * q2.Z,
+                            0.2f * q0.W + 0.6f * q1.W + 0.2f * q2.W
+                        ).Normalized();
+                    }
+                    for (int f = 0; f < frameCount; f++)
+                    {
+                        bakedRotations[b, f] = tempSmoothed[f];
+                    }
+                }
+            }
+
+            // 13. Track Generation & Selective Lossless Baking vs. RDP Simplification
             int totalInsertedKeys = 0;
             var rdpKeyIndices = new List<int>(frameCount);
             const float RotToleranceRad = 0.0087f; // ~0.5° tolerance preserves exact 3D pose
-            const float PosToleranceMeters = 0.0015f; // 1.5 mm tolerance
 
             for (int t = 0; t < targetBoneCount; t++)
             {
-                if (targetToSourceIndex[t] == -1 && !targetSpineIndices.Contains(t)) continue;
-
                 string bName = targetSkeleton.GetBoneName(t);
+                bool isForearmTwist = (t == tTwistL0 || t == tTwistL1 || t == tTwistR0 || t == tTwistR1);
+                if (targetToSourceIndex[t] == -1 && !isForearmTwist) continue;
+
                 Quaternion restRot = SafeNormalize(targetSkeleton.GetBoneRest(t).Basis.GetRotationQuaternion());
 
                 bool isStatic = true;
@@ -1169,7 +1742,7 @@ namespace DeadlockPlayground.Animation
                     }
                 }
 
-                if (isStatic && Math.Abs(bakedRotations[t, 0].Dot(restRot)) >= 0.9999f)
+                if (isStatic && !isForearmTwist && Math.Abs(bakedRotations[t, 0].Dot(restRot)) >= 0.9999f)
                 {
                     continue;
                 }
@@ -1177,11 +1750,24 @@ namespace DeadlockPlayground.Animation
                 int rotTr = retargetedAnim.AddTrack(Godot.Animation.TrackType.Rotation3D);
                 retargetedAnim.TrackSetPath(rotTr, $"{skeletonPrefix}:{bName}");
 
-                if (isStatic)
+                bool isPelvisOrLeg = IsPelvisOrLegOrFoot(bName);
+
+                if (isStatic && !isForearmTwist)
                 {
                     retargetedAnim.RotationTrackInsertKey(rotTr, 0.0, bakedRotations[t, 0]);
                     retargetedAnim.RotationTrackInsertKey(rotTr, animLength, bakedRotations[t, 0]);
                     totalInsertedKeys += 2;
+                }
+                else if (isPelvisOrLeg || isForearmTwist)
+                {
+                    // Lossless frame baking on Pelvis, Leg/Foot, and Forearm Twist joints:
+                    // preserves exact per-frame FK cancellation between hip translation and knee/ankle rotation so planted feet NEVER wobble or slide!
+                    for (int f = 0; f < frameCount; f++)
+                    {
+                        double currTime = Math.Min(animLength, f * (1.0 / fps));
+                        retargetedAnim.RotationTrackInsertKey(rotTr, currTime, bakedRotations[t, f]);
+                        totalInsertedKeys++;
+                    }
                 }
                 else
                 {
@@ -1208,15 +1794,8 @@ namespace DeadlockPlayground.Animation
                 int posTr = retargetedAnim.AddTrack(Godot.Animation.TrackType.Position3D);
                 retargetedAnim.TrackSetPath(posTr, $"{skeletonPrefix}:{pName}");
 
-                rdpKeyIndices.Clear();
-                rdpKeyIndices.Add(0);
-                SimplifyPositionCurveRdp(bakedPelvisPos, 0, frameCount - 1, fps, animLength, PosToleranceMeters, rdpKeyIndices);
-                if (frameCount > 1)
-                {
-                    rdpKeyIndices.Add(frameCount - 1);
-                }
-
-                foreach (int f in rdpKeyIndices)
+                // Lossless frame baking on Pelvis translation: keeps hip displacement synchronized 1:1 with knee/ankle rotations
+                for (int f = 0; f < frameCount; f++)
                 {
                     double currTime = Math.Min(animLength, f * (1.0 / fps));
                     retargetedAnim.PositionTrackInsertKey(posTr, currTime, bakedPelvisPos[f]);
@@ -1311,6 +1890,393 @@ namespace DeadlockPlayground.Animation
             }
         }
 
+        /// <summary>
+        /// Recursively collects all bones in the foot subtree rooted at rootBone (including rootBone itself and all descendants),
+        /// plus any bones on the same side matching foot/heel/sole/ball/attach keywords.
+        /// </summary>
+        public static List<int> CollectFootSubtreeBones(Skeleton3D skeleton, int rootBone, string sideSuffix = "")
+        {
+            var result = new List<int>();
+            if (skeleton == null || rootBone < 0 || rootBone >= skeleton.GetBoneCount()) return result;
+
+            var inSubtree = new HashSet<int>();
+            inSubtree.Add(rootBone);
+
+            int boneCount = skeleton.GetBoneCount();
+            for (int i = 0; i < boneCount; i++)
+            {
+                if (i == rootBone) continue;
+                int curr = i;
+                while (curr != -1)
+                {
+                    int p = skeleton.GetBoneParent(curr);
+                    if (p == rootBone || inSubtree.Contains(p))
+                    {
+                        inSubtree.Add(i);
+                        break;
+                    }
+                    curr = p;
+                }
+            }
+
+            // Also check for hero-specific foot attachment bones on the same side (e.g. attachfoot_l, heel_l, sole_l)
+            if (!string.IsNullOrEmpty(sideSuffix))
+            {
+                string normSide = sideSuffix.ToLowerInvariant();
+                for (int i = 0; i < boneCount; i++)
+                {
+                    if (inSubtree.Contains(i)) continue;
+                    string name = skeleton.GetBoneName(i).ToLowerInvariant();
+                    bool matchSide = name.EndsWith(normSide) || name.Contains(normSide + "_") || name.Contains("_" + normSide);
+                    if (matchSide && (name.Contains("foot") || name.Contains("sole") || name.Contains("heel") || name.Contains("toe") || name.Contains("ball") || name.Contains("attach")))
+                    {
+                        inSubtree.Add(i);
+                    }
+                }
+            }
+
+            result.AddRange(inSubtree);
+            return result;
+        }
+
+        /// <summary>
+        /// Collects all descendant bones of a given root bone in strict topological (parent-before-child) order.
+        /// </summary>
+        public static List<int> CollectDescendantsInTopologicalOrder(Skeleton3D skeleton, int[] topologicalOrder, int rootBone)
+        {
+            var result = new List<int>();
+            if (skeleton == null || rootBone < 0 || rootBone >= skeleton.GetBoneCount()) return result;
+            var descendants = new HashSet<int> { rootBone };
+
+            foreach (int b in topologicalOrder)
+            {
+                if (b == rootBone) continue;
+                int p = skeleton.GetBoneParent(b);
+                if (p != -1 && descendants.Contains(p))
+                {
+                    descendants.Add(b);
+                    result.Add(b);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Computes the true anatomical knee hinge axis in rest pose.
+        /// Rotations around this axis bend the knee forward in the direction of the toes / character forward,
+        /// pointing along the character's Right (+X in character model space).
+        /// </summary>
+        public static Vector3 ComputeRestKneeHingeAxis(
+            Skeleton3D skeleton,
+            Vector3[] restGlobalPos,
+            Quaternion[] restGlobalRot,
+            int tLegUpper,
+            int tLegLower,
+            int tAnkle,
+            int tBall,
+            int tPelvis)
+        {
+            // Character anatomical forward and down directions
+            Vector3 fwd = Vector3.Zero;
+            if (tAnkle != -1 && tBall != -1)
+            {
+                Vector3 toeDir = restGlobalPos[tBall] - restGlobalPos[tAnkle];
+                toeDir.Y = 0f;
+                if (toeDir.LengthSquared() > 1e-4f)
+                {
+                    fwd = toeDir.Normalized();
+                }
+            }
+            if (fwd.LengthSquared() < 1e-4f && tPelvis != -1)
+            {
+                Vector3 pelvFwd = restGlobalRot[tPelvis] * new Vector3(0f, 0f, 1f);
+                pelvFwd.Y = 0f;
+                if (pelvFwd.LengthSquared() > 1e-4f) fwd = pelvFwd.Normalized();
+            }
+            if (fwd.LengthSquared() < 1e-4f)
+            {
+                fwd = new Vector3(0f, 0f, 1f); // Deadlock character forward (+Z)
+            }
+
+            Vector3 down = (tLegUpper != -1 && tAnkle != -1)
+                ? (restGlobalPos[tAnkle] - restGlobalPos[tLegUpper]).Normalized()
+                : new Vector3(0f, -1f, 0f);
+
+            // Anatomical knee flexion rotates around Right = Forward x Down
+            Vector3 charRight = fwd.Cross(down);
+            if (charRight.LengthSquared() > 1e-4f)
+            {
+                charRight = charRight.Normalized();
+            }
+            else
+            {
+                charRight = Vector3.Right;
+            }
+
+            if (tLegUpper != -1 && tLegLower != -1 && tAnkle != -1)
+            {
+                Vector3 u1 = restGlobalPos[tLegLower] - restGlobalPos[tLegUpper];
+                Vector3 u2 = restGlobalPos[tAnkle] - restGlobalPos[tLegLower];
+                Vector3 nRest = u1.Cross(u2);
+                if (nRest.LengthSquared() > 1e-6f)
+                {
+                    Vector3 hinge = nRest.Normalized();
+                    if (hinge.Dot(charRight) < 0f) hinge = -hinge;
+                    return hinge;
+                }
+            }
+
+            return charRight;
+        }
+
+        /// <summary>
+        /// Analytic closed-form Twist-Free Two-Bone Inverse Kinematics solver.
+        /// Rotates the upper joint (hip/shoulder) and middle joint (knee/elbow) using pure
+        /// Delta-Angle Law of Cosines flexions in the anatomical bend plane, followed by a minimal-twist swing
+        /// to reach the goal effector position, strictly preserving 100% of the FK axial roll and knee turnout.
+        /// Features soft-IK ease-in, anatomical knee pole projection, hyperextension prevention, and forward-bend clamping.
+        /// </summary>
+        public static void SolveTwoBoneIK(
+            Vector3 hipPos,
+            Vector3 kneePos,
+            Vector3 anklePos,
+            Vector3 goalEffectorPos,
+            Quaternion hipRot,
+            Quaternion kneeRot,
+            Quaternion ankleRot,
+            Vector3 anatomicalHingeRef,
+            Vector3 restKneeFwdLocal,
+            Vector3 charFwd,
+            bool softIK,
+            bool anatomicalKneePole,
+            out Quaternion newHipRot,
+            out Quaternion newKneeRot,
+            out Quaternion newAnkleRot,
+            out Vector3 solvedKneePos,
+            out Vector3 solvedAnklePos)
+        {
+            Vector3 u1 = kneePos - hipPos;
+            float L1 = u1.Length();
+            Vector3 u2 = anklePos - kneePos;
+            float L2 = u2.Length();
+            float L_total = L1 + L2;
+
+            if (L1 < 1e-4f || L2 < 1e-4f)
+            {
+                newHipRot = hipRot;
+                newKneeRot = kneeRot;
+                newAnkleRot = ankleRot;
+                solvedKneePos = kneePos;
+                solvedAnklePos = anklePos;
+                return;
+            }
+
+            Vector3 d0 = anklePos - hipPos;
+            float D_fk = d0.Length();
+            if (D_fk < 1e-4f) D_fk = 1e-4f;
+            Vector3 d0_hat = d0 / D_fk;
+
+            Vector3 d = goalEffectorPos - hipPos;
+            float dLen = d.Length();
+            float minReach = Math.Abs(L1 - L2) + 0.005f;
+
+            // Soft-IK reach ease-in: only eases in the final 1.5% of leg extension to prevent popping
+            // preserving natural straight legs without compressing into a permanent squat
+            float maxReach = L_total * 0.998f;
+            float D_goal;
+            if (softIK)
+            {
+                float dSoft = 0.985f * L_total;
+                if (dLen > dSoft)
+                {
+                    float diff = maxReach - dSoft;
+                    D_goal = maxReach - diff * Mathf.Exp(-(dLen - dSoft) / Math.Max(1e-4f, diff));
+                }
+                else
+                {
+                    D_goal = dLen;
+                }
+                D_goal = Math.Clamp(D_goal, minReach, maxReach);
+            }
+            else
+            {
+                D_goal = Math.Clamp(dLen, minReach, maxReach);
+            }
+
+            Vector3 u_goal = dLen > 1e-4f ? (d / dLen) : d0_hat;
+
+            // 1. Calculate raw FK knee bend direction directly from perpendicular projection
+            Vector3 u1_perp = u1 - d0_hat * u1.Dot(d0_hat);
+            float h_knee = u1_perp.Length();
+
+            Vector3 fwdRef = charFwd.LengthSquared() > 1e-4f ? charFwd.Normalized() : new Vector3(0f, 0f, 1f);
+
+            // 2. Anatomical pole vector in current frame
+            Vector3 anatomicalPole = (anatomicalKneePole && restKneeFwdLocal.LengthSquared() > 1e-4f)
+                ? (hipRot * restKneeFwdLocal).Normalized()
+                : fwdRef;
+
+            Vector3 poleProj = anatomicalPole - d0_hat * anatomicalPole.Dot(d0_hat);
+            Vector3 p_anat = poleProj.LengthSquared() > 1e-4f ? poleProj.Normalized() : fwdRef;
+
+            Vector3 p_hat;
+            if (h_knee > 0.003f)
+            {
+                Vector3 p_fk = u1_perp / h_knee;
+
+                // Check if knee is trying to hyperextend backwards against anatomical forward
+                if (p_fk.Dot(p_anat) < -0.05f)
+                {
+                    p_hat = p_anat;
+                }
+                else if (anatomicalKneePole && h_knee < 0.020f)
+                {
+                    float weight = Math.Clamp((h_knee - 0.003f) / 0.017f, 0f, 1f);
+                    p_hat = (p_fk * weight + p_anat * (1f - weight)).Normalized();
+                }
+                else
+                {
+                    p_hat = p_fk;
+                }
+            }
+            else
+            {
+                p_hat = p_anat;
+            }
+
+            if (p_hat.Dot(p_anat) < 0f)
+            {
+                p_hat = p_anat;
+            }
+
+            // 3. Law of Cosines target angle in bend plane with hyperextension clamp
+            float cosBeta = Math.Clamp((L1 * L1 + L2 * L2 - D_goal * D_goal) / (2.0f * L1 * L2), -1.0f, 1.0f);
+            float beta_ik = Mathf.Acos(cosBeta);
+
+            // Knee flexion angle: theta = pi - beta. Clamp theta in [1.5 deg, 160 deg]
+            float minFlex = 1.5f * (Mathf.Pi / 180f);
+            float maxFlex = 160f * (Mathf.Pi / 180f);
+            float flex = Math.Clamp(Mathf.Pi - beta_ik, minFlex, maxFlex);
+            beta_ik = Mathf.Pi - flex;
+
+            D_goal = Mathf.Sqrt(Math.Max(1e-4f, L1 * L1 + L2 * L2 - 2.0f * L1 * L2 * Mathf.Cos(beta_ik)));
+
+            float cosAlpha_ik = Math.Clamp((L1 * L1 + D_goal * D_goal - L2 * L2) / (2.0f * L1 * D_goal), -1.0f, 1.0f);
+            float alpha_ik = Mathf.Acos(cosAlpha_ik);
+
+            // 4. Target bone vectors in the FK bend plane
+            Vector3 u1_prime = (L1 * Mathf.Cos(alpha_ik)) * d0_hat + (L1 * Mathf.Sin(alpha_ik)) * p_hat;
+            Vector3 u2_prime = (D_goal * d0_hat) - u1_prime;
+
+            // 5. Swing the whole leg to match goal direction
+            Quaternion qSwing = ShortestArc(d0_hat, u_goal);
+
+            Vector3 u1_target = qSwing * u1_prime;
+            Vector3 u2_target = qSwing * u2_prime;
+
+            solvedKneePos = hipPos + u1_target;
+            solvedAnklePos = solvedKneePos + u2_target;
+
+            Quaternion qHipDelta = ShortestArc(u1, u1_target);
+            Quaternion qCalfDelta = ShortestArc(u2, u2_target);
+
+            newHipRot = SafeNormalize(qHipDelta * hipRot);
+            newKneeRot = SafeNormalize(qCalfDelta * kneeRot);
+            newAnkleRot = ankleRot;
+        }
+
+        public static void SolveTwoBoneIK(
+            Vector3 hipPos,
+            Vector3 kneePos,
+            Vector3 anklePos,
+            Vector3 goalEffectorPos,
+            Quaternion hipRot,
+            Quaternion kneeRot,
+            Quaternion ankleRot,
+            Vector3 anatomicalHingeRef,
+            Vector3 restKneeFwdLocal,
+            Vector3 charFwd,
+            bool softIK,
+            bool anatomicalKneePole,
+            out Quaternion newHipRot,
+            out Quaternion newKneeRot,
+            out Quaternion newAnkleRot)
+        {
+            SolveTwoBoneIK(
+                hipPos, kneePos, anklePos, goalEffectorPos,
+                hipRot, kneeRot, ankleRot,
+                anatomicalHingeRef, restKneeFwdLocal, charFwd,
+                softIK, anatomicalKneePole,
+                out newHipRot, out newKneeRot, out newAnkleRot,
+                out _, out _);
+        }
+
+        public static void SolveTwoBoneIK(
+            Vector3 hipPos,
+            Vector3 kneePos,
+            Vector3 anklePos,
+            Vector3 goalEffectorPos,
+            Quaternion hipRot,
+            Quaternion kneeRot,
+            Quaternion ankleRot,
+            Vector3 anatomicalHingeRef,
+            out Quaternion newHipRot,
+            out Quaternion newKneeRot,
+            out Quaternion newAnkleRot)
+        {
+            SolveTwoBoneIK(
+                hipPos, kneePos, anklePos, goalEffectorPos,
+                hipRot, kneeRot, ankleRot,
+                anatomicalHingeRef,
+                Vector3.Zero,
+                new Vector3(0f, 0f, 1f),
+                false,
+                false,
+                out newHipRot, out newKneeRot, out newAnkleRot);
+        }
+
+        public static void SolveTwoBoneIK(
+            Vector3 hipPos,
+            Vector3 kneePos,
+            Vector3 anklePos,
+            Vector3 goalEffectorPos,
+            Quaternion hipRot,
+            Quaternion kneeRot,
+            Quaternion ankleRot,
+            out Quaternion newHipRot,
+            out Quaternion newKneeRot,
+            out Quaternion newAnkleRot)
+        {
+            SolveTwoBoneIK(
+                hipPos, kneePos, anklePos, goalEffectorPos,
+                hipRot, kneeRot, ankleRot,
+                Vector3.Zero,
+                out newHipRot, out newKneeRot, out newAnkleRot);
+        }
+
+        public static int FindBoneCaseInsensitive(Skeleton3D skeleton, string boneName)
+        {
+            if (skeleton == null || string.IsNullOrWhiteSpace(boneName)) return -1;
+            int idx = skeleton.FindBone(boneName);
+            if (idx != -1) return idx;
+
+            int count = skeleton.GetBoneCount();
+            for (int i = 0; i < count; i++)
+            {
+                if (string.Equals(skeleton.GetBoneName(i), boneName, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+
+            string clean = HumanoidBoneMapper.CleanBoneName(boneName);
+            for (int i = 0; i < count; i++)
+            {
+                if (HumanoidBoneMapper.CleanBoneName(skeleton.GetBoneName(i)) == clean)
+                    return i;
+            }
+
+            return -1;
+        }
+
         private static int FindBoneByNames(Skeleton3D skeleton, params string[] names)
         {
             if (skeleton == null || names == null) return -1;
@@ -1320,6 +2286,18 @@ namespace DeadlockPlayground.Animation
             {
                 int idx = skeleton.FindBone(name);
                 if (idx != -1) return idx;
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                string bName = skeleton.GetBoneName(i);
+                foreach (string name in names)
+                {
+                    if (string.Equals(bName, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return i;
+                    }
+                }
             }
 
             for (int i = 0; i < count; i++)
@@ -1650,6 +2628,102 @@ namespace DeadlockPlayground.Animation
             if (string.IsNullOrEmpty(name)) return false;
             string lower = name.ToLowerInvariant();
             return lower.Contains("pelvis") || lower.Contains("hip") || lower.Contains("hips");
+        }
+
+        private static bool IsPelvisOrLegOrFoot(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            string lower = name.ToLowerInvariant();
+            return lower.Contains("pelvis") || lower.Contains("hip") ||
+                   lower.Contains("leg_") || lower.Contains("thigh") || lower.Contains("calf") ||
+                   lower.Contains("ankle") || lower.Contains("foot") || lower.Contains("ball") || lower.Contains("toe") ||
+                   lower.Contains("sole");
+        }
+
+        private static void DistributeForearmTwist(
+            Skeleton3D targetSkeleton,
+            int tArmLower,
+            int tHand,
+            int tTwist0,
+            int tTwist1,
+            Quaternion[] currentGlobalRot)
+        {
+            if (tArmLower == -1 || tHand == -1 || (tTwist0 == -1 && tTwist1 == -1)) return;
+
+            // Local rotation of hand relative to arm_lower
+            Quaternion qHandLocal = SafeNormalize(currentGlobalRot[tArmLower].Inverse() * currentGlobalRot[tHand]);
+            Quaternion qHandRestLocal = SafeNormalize(targetSkeleton.GetBoneRest(tHand).Basis.GetRotationQuaternion());
+            Quaternion qHandDelta = SafeNormalize(qHandLocal * qHandRestLocal.Inverse());
+
+            // Forearm axis in arm_lower local space (direction towards hand)
+            Vector3 boneAxis = targetSkeleton.GetBoneRest(tHand).Origin;
+            if (boneAxis.LengthSquared() < 1e-6f) boneAxis = Vector3.Right;
+            else boneAxis = boneAxis.Normalized();
+
+            // Swing-twist decomposition around boneAxis
+            Vector3 qVec = new Vector3(qHandDelta.X, qHandDelta.Y, qHandDelta.Z);
+            Vector3 proj = boneAxis * qVec.Dot(boneAxis);
+            Quaternion qTwist = SafeNormalize(new Quaternion(proj.X, proj.Y, proj.Z, qHandDelta.W));
+            if (qTwist.W < 0)
+            {
+                qTwist = new Quaternion(-qTwist.X, -qTwist.Y, -qTwist.Z, -qTwist.W);
+            }
+
+            if (tTwist0 != -1 && tTwist1 != -1)
+            {
+                Quaternion qT0 = SafeNormalize(Quaternion.Identity.Slerp(qTwist, 0.35f));
+                Quaternion qT1 = SafeNormalize(Quaternion.Identity.Slerp(qTwist, 0.70f));
+                currentGlobalRot[tTwist0] = SafeNormalize(currentGlobalRot[tArmLower] * qT0);
+                currentGlobalRot[tTwist1] = SafeNormalize(currentGlobalRot[tArmLower] * qT1);
+            }
+            else if (tTwist0 != -1)
+            {
+                Quaternion qT0 = SafeNormalize(Quaternion.Identity.Slerp(qTwist, 0.50f));
+                currentGlobalRot[tTwist0] = SafeNormalize(currentGlobalRot[tArmLower] * qT0);
+            }
+        }
+
+        private static Vector3 SampleSourceBoneModelPos(
+            Skeleton3D skeleton,
+            Godot.Animation anim,
+            int[] rotTracks,
+            int[] posTracks,
+            Transform3D toModel,
+            int boneIdx,
+            double time)
+        {
+            if (skeleton == null || boneIdx < 0 || boneIdx >= skeleton.GetBoneCount()) return Vector3.Zero;
+
+            var chain = new List<int>();
+            int curr = boneIdx;
+            while (curr != -1)
+            {
+                chain.Add(curr);
+                curr = skeleton.GetBoneParent(curr);
+            }
+            chain.Reverse();
+
+            Quaternion gRot = Quaternion.Identity;
+            Vector3 gPos = Vector3.Zero;
+
+            foreach (int s in chain)
+            {
+                int p = skeleton.GetBoneParent(s);
+                Quaternion lRot = SafeInterpolateRotation(anim, rotTracks[s], time, skeleton.GetBoneRest(s));
+                Vector3 lPos = SafeInterpolatePosition(anim, posTracks[s], time, skeleton.GetBoneRest(s));
+
+                if (p == -1)
+                {
+                    gRot = SafeNormalize(toModel.Basis.GetRotationQuaternion() * lRot);
+                    gPos = toModel * lPos;
+                }
+                else
+                {
+                    gPos = gPos + gRot * lPos;
+                    gRot = SafeNormalize(gRot * lRot);
+                }
+            }
+            return gPos;
         }
     }
 }

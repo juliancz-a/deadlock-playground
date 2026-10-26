@@ -114,6 +114,9 @@ namespace DeadlockPlayground.Animation
             new("ball_L", "Left Toe / Ball", BoneGroup.LeftLeg,
                 new[] { "ball_L", "ball_l", "toe_L", "toe_l", "toes_l" },
                 new[] { "lefttoebase", "ball_l", "toe.l", "l_toe", "b_l_toe", "left_toe", "bip_toe_l" }),
+            new("ball_end_L", "Left Toe End / Tip", BoneGroup.LeftLeg,
+                new[] { "ball_end_L", "ball_end_l", "toe_end_L", "toe_end_l" },
+                new[] { "lefttoe_end", "lefttoeend", "ball_leaf_l", "ball_left_end", "ball_end_l", "toe_end_l" }),
 
             // --- Right Leg Chain ---
             new("leg_upper_R", "Right Thigh / UpLeg", BoneGroup.RightLeg,
@@ -128,8 +131,14 @@ namespace DeadlockPlayground.Animation
             new("ball_R", "Right Toe / Ball", BoneGroup.RightLeg,
                 new[] { "ball_R", "ball_r", "toe_R", "toe_r", "toes_r" },
                 new[] { "righttoebase", "ball_r", "toe.r", "r_toe", "b_r_toe", "right_toe", "bip_toe_r" }),
+            new("ball_end_R", "Right Toe End / Tip", BoneGroup.RightLeg,
+                new[] { "ball_end_R", "ball_end_r", "toe_end_R", "toe_end_r" },
+                new[] { "righttoe_end", "righttoeend", "ball_leaf_r", "ball_right_end", "ball_end_r", "toe_end_r" }),
 
             // --- Left Hand Fingers ---
+            new("finger_thumb_meta_L", "Left Thumb Metacarpal", BoneGroup.LeftHandFingers,
+                new[] { "finger_thumb_meta_L", "finger_thumb_meta_l" },
+                Array.Empty<string>()),
             new("finger_thumb_0_L", "Left Thumb 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_thumb_0_L", "finger_thumb_0_l", "thumb_01_l", "thumb_0_l" },
                 new[] { "lefthandthumb1", "thumb_01_l", "thumb1_l", "thumb.01.l", "f_thumb01_l" }),
@@ -139,7 +148,13 @@ namespace DeadlockPlayground.Animation
             new("finger_thumb_2_L", "Left Thumb 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_thumb_2_L", "finger_thumb_2_l", "thumb_03_l", "thumb_2_l" },
                 new[] { "lefthandthumb3", "thumb_03_l", "thumb3_l", "thumb.03.l", "f_thumb03_l" }),
+            new("finger_thumb_end_L", "Left Thumb End / Tip", BoneGroup.LeftHandFingers,
+                new[] { "finger_thumb_end_L", "finger_thumb_end_l", "finger_thumb_leaf_l" },
+                new[] { "thumb_04_leaf_l", "lefthandthumb4", "thumb_04_l", "thumb_leaf_l", "thumb_end_l", "thumb.004.l" }),
 
+            new("finger_index_meta_L", "Left Index Metacarpal", BoneGroup.LeftHandFingers,
+                new[] { "finger_index_meta_L", "finger_index_meta_l" },
+                Array.Empty<string>()),
             new("finger_index_0_L", "Left Index 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_index_0_L", "finger_index_0_l", "index_01_l", "index_0_l" },
                 new[] { "lefthandindex1", "index_01_l", "index1_l", "index.01.l", "f_index01_l" }),
@@ -149,7 +164,13 @@ namespace DeadlockPlayground.Animation
             new("finger_index_2_L", "Left Index 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_index_2_L", "finger_index_2_l", "index_03_l", "index_2_l" },
                 new[] { "lefthandindex3", "index_03_l", "index3_l", "index.03.l", "f_index03_l" }),
+            new("finger_index_end_L", "Left Index End / Tip", BoneGroup.LeftHandFingers,
+                new[] { "finger_index_end_L", "finger_index_end_l", "finger_index_leaf_l" },
+                new[] { "index_04_leaf_l", "lefthandindex4", "index_04_l", "index_leaf_l", "index_end_l", "index.004.l" }),
 
+            new("finger_middle_meta_L", "Left Middle Metacarpal", BoneGroup.LeftHandFingers,
+                new[] { "finger_middle_meta_L", "finger_middle_meta_l" },
+                Array.Empty<string>()),
             new("finger_middle_0_L", "Left Middle 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_middle_0_L", "finger_middle_0_l", "middle_01_l", "middle_0_l" },
                 new[] { "lefthandmiddle1", "middle_01_l", "middle1_l", "middle.01.l", "f_middle01_l" }),
@@ -159,7 +180,13 @@ namespace DeadlockPlayground.Animation
             new("finger_middle_2_L", "Left Middle 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_middle_2_L", "finger_middle_2_l", "middle_03_l", "middle_2_l" },
                 new[] { "lefthandmiddle3", "middle_03_l", "middle3_l", "middle.03.l", "f_middle03_l" }),
+            new("finger_middle_end_L", "Left Middle End / Tip", BoneGroup.LeftHandFingers,
+                new[] { "finger_middle_end_L", "finger_middle_end_l", "finger_middle_leaf_l" },
+                new[] { "middle_04_leaf_l", "lefthandmiddle4", "middle_04_l", "middle_leaf_l", "middle_end_l", "middle.004.l" }),
 
+            new("finger_ring_meta_L", "Left Ring Metacarpal", BoneGroup.LeftHandFingers,
+                new[] { "finger_ring_meta_L", "finger_ring_meta_l" },
+                Array.Empty<string>()),
             new("finger_ring_0_L", "Left Ring 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_ring_0_L", "finger_ring_0_l", "ring_01_l", "ring_0_l" },
                 new[] { "lefthandring1", "ring_01_l", "ring1_l", "ring.01.l", "f_ring01_l" }),
@@ -169,7 +196,13 @@ namespace DeadlockPlayground.Animation
             new("finger_ring_2_L", "Left Ring 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_ring_2_L", "finger_ring_2_l", "ring_03_l", "ring_2_l" },
                 new[] { "lefthandring3", "ring_03_l", "ring3_l", "ring.03.l", "f_ring03_l" }),
+            new("finger_ring_end_L", "Left Ring End / Tip", BoneGroup.LeftHandFingers,
+                new[] { "finger_ring_end_L", "finger_ring_end_l", "finger_ring_leaf_l" },
+                new[] { "ring_04_leaf_l", "lefthandring4", "ring_04_l", "ring_leaf_l", "ring_end_l", "ring.004.l" }),
 
+            new("finger_pinky_meta_L", "Left Pinky Metacarpal", BoneGroup.LeftHandFingers,
+                new[] { "finger_pinky_meta_L", "finger_pinky_meta_l" },
+                Array.Empty<string>()),
             new("finger_pinky_0_L", "Left Pinky 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_pinky_0_L", "finger_pinky_0_l", "pinky_01_l", "pinky_0_l" },
                 new[] { "lefthandpinky1", "pinky_01_l", "pinky1_l", "pinky.01.l", "f_pinky01_l", "little_01_l" }),
@@ -179,8 +212,14 @@ namespace DeadlockPlayground.Animation
             new("finger_pinky_2_L", "Left Pinky 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_pinky_2_L", "finger_pinky_2_l", "pinky_03_l", "pinky_2_l" },
                 new[] { "lefthandpinky3", "pinky_03_l", "pinky3_l", "pinky.03.l", "f_pinky03_l", "little_03_l" }),
+            new("finger_pinky_end_L", "Left Pinky End / Tip", BoneGroup.LeftHandFingers,
+                new[] { "finger_pinky_end_L", "finger_pinky_end_l", "finger_pinky_leaf_l" },
+                new[] { "pinky_04_leaf_l", "lefthandpinky4", "pinky_04_l", "pinky_leaf_l", "pinky_end_l", "pinky.004.l", "little_04_leaf_l" }),
 
             // --- Right Hand Fingers ---
+            new("finger_thumb_meta_R", "Right Thumb Metacarpal", BoneGroup.RightHandFingers,
+                new[] { "finger_thumb_meta_R", "finger_thumb_meta_r" },
+                Array.Empty<string>()),
             new("finger_thumb_0_R", "Right Thumb 1", BoneGroup.RightHandFingers,
                 new[] { "finger_thumb_0_R", "finger_thumb_0_r", "thumb_01_r", "thumb_0_r" },
                 new[] { "righthandthumb1", "thumb_01_r", "thumb1_r", "thumb.01.r", "f_thumb01_r" }),
@@ -190,7 +229,13 @@ namespace DeadlockPlayground.Animation
             new("finger_thumb_2_R", "Right Thumb 3", BoneGroup.RightHandFingers,
                 new[] { "finger_thumb_2_R", "finger_thumb_2_r", "thumb_03_r", "thumb_2_r" },
                 new[] { "righthandthumb3", "thumb_03_r", "thumb3_r", "thumb.03.r", "f_thumb03_r" }),
+            new("finger_thumb_end_R", "Right Thumb End / Tip", BoneGroup.RightHandFingers,
+                new[] { "finger_thumb_end_R", "finger_thumb_end_r", "finger_thumb_leaf_r" },
+                new[] { "thumb_04_leaf_r", "righthandthumb4", "thumb_04_r", "thumb_leaf_r", "thumb_end_r", "thumb.004.r" }),
 
+            new("finger_index_meta_R", "Right Index Metacarpal", BoneGroup.RightHandFingers,
+                new[] { "finger_index_meta_R", "finger_index_meta_r" },
+                Array.Empty<string>()),
             new("finger_index_0_R", "Right Index 1", BoneGroup.RightHandFingers,
                 new[] { "finger_index_0_R", "finger_index_0_r", "index_01_r", "index_0_r" },
                 new[] { "righthandindex1", "index_01_r", "index1_r", "index.01.r", "f_index01_r" }),
@@ -200,7 +245,13 @@ namespace DeadlockPlayground.Animation
             new("finger_index_2_R", "Right Index 3", BoneGroup.RightHandFingers,
                 new[] { "finger_index_2_R", "finger_index_2_r", "index_03_r", "index_2_r" },
                 new[] { "righthandindex3", "index_03_r", "index3_r", "index.03.r", "f_index03_r" }),
+            new("finger_index_end_R", "Right Index End / Tip", BoneGroup.RightHandFingers,
+                new[] { "finger_index_end_R", "finger_index_end_r", "finger_index_leaf_r" },
+                new[] { "index_04_leaf_r", "righthandindex4", "index_04_r", "index_leaf_r", "index_end_r", "index.004.r" }),
 
+            new("finger_middle_meta_R", "Right Middle Metacarpal", BoneGroup.RightHandFingers,
+                new[] { "finger_middle_meta_R", "finger_middle_meta_r" },
+                Array.Empty<string>()),
             new("finger_middle_0_R", "Right Middle 1", BoneGroup.RightHandFingers,
                 new[] { "finger_middle_0_R", "finger_middle_0_r", "middle_01_r", "middle_0_r" },
                 new[] { "righthandmiddle1", "middle_01_r", "middle1_r", "middle.01.r", "f_middle01_r" }),
@@ -210,7 +261,13 @@ namespace DeadlockPlayground.Animation
             new("finger_middle_2_R", "Right Middle 3", BoneGroup.RightHandFingers,
                 new[] { "finger_middle_2_R", "finger_middle_2_r", "middle_03_r", "middle_2_r" },
                 new[] { "righthandmiddle3", "middle_03_r", "middle3_r", "middle.03.r", "f_middle03_r" }),
+            new("finger_middle_end_R", "Right Middle End / Tip", BoneGroup.RightHandFingers,
+                new[] { "finger_middle_end_R", "finger_middle_end_r", "finger_middle_leaf_r" },
+                new[] { "middle_04_leaf_r", "righthandmiddle4", "middle_04_r", "middle_leaf_r", "middle_end_r", "middle.004.r" }),
 
+            new("finger_ring_meta_R", "Right Ring Metacarpal", BoneGroup.RightHandFingers,
+                new[] { "finger_ring_meta_R", "finger_ring_meta_r" },
+                Array.Empty<string>()),
             new("finger_ring_0_R", "Right Ring 1", BoneGroup.RightHandFingers,
                 new[] { "finger_ring_0_R", "finger_ring_0_r", "ring_01_r", "ring_0_r" },
                 new[] { "righthandring1", "ring_01_r", "ring1_r", "ring.01.r", "f_ring01_r" }),
@@ -220,7 +277,13 @@ namespace DeadlockPlayground.Animation
             new("finger_ring_2_R", "Right Ring 3", BoneGroup.RightHandFingers,
                 new[] { "finger_ring_2_R", "finger_ring_2_r", "ring_03_r", "ring_2_r" },
                 new[] { "righthandring3", "ring_03_r", "ring3_r", "ring.03.r", "f_ring03_r" }),
+            new("finger_ring_end_R", "Right Ring End / Tip", BoneGroup.RightHandFingers,
+                new[] { "finger_ring_end_R", "finger_ring_end_r", "finger_ring_leaf_r" },
+                new[] { "ring_04_leaf_r", "righthandring4", "ring_04_r", "ring_leaf_r", "ring_end_r", "ring.004.r" }),
 
+            new("finger_pinky_meta_R", "Right Pinky Metacarpal", BoneGroup.RightHandFingers,
+                new[] { "finger_pinky_meta_R", "finger_pinky_meta_r" },
+                Array.Empty<string>()),
             new("finger_pinky_0_R", "Right Pinky 1", BoneGroup.RightHandFingers,
                 new[] { "finger_pinky_0_R", "finger_pinky_0_r", "pinky_01_r", "pinky_0_r" },
                 new[] { "righthandpinky1", "pinky_01_r", "pinky1_r", "pinky.01.r", "f_pinky01_r", "little_01_r" }),
@@ -229,7 +292,10 @@ namespace DeadlockPlayground.Animation
                 new[] { "righthandpinky2", "pinky_02_r", "pinky2_r", "pinky.02.r", "f_pinky02_r", "little_02_r" }),
             new("finger_pinky_2_R", "Right Pinky 3", BoneGroup.RightHandFingers,
                 new[] { "finger_pinky_2_R", "finger_pinky_2_r", "pinky_03_r", "pinky_2_r" },
-                new[] { "righthandpinky3", "pinky_03_r", "pinky3_r", "pinky.03.r", "f_pinky03_r", "little_03_r" })
+                new[] { "righthandpinky3", "pinky_03_r", "pinky3_r", "pinky.03.r", "f_pinky03_r", "little_03_r" }),
+            new("finger_pinky_end_R", "Right Pinky End / Tip", BoneGroup.RightHandFingers,
+                new[] { "finger_pinky_end_R", "finger_pinky_end_r", "finger_pinky_leaf_r" },
+                new[] { "pinky_04_leaf_r", "righthandpinky4", "pinky_04_r", "pinky_leaf_r", "pinky_end_r", "pinky.004.r", "little_04_leaf_r" })
         };
 
         /// <summary>
@@ -272,6 +338,32 @@ namespace DeadlockPlayground.Animation
         }
 
         /// <summary>
+        /// Identifies non-primary bones (sub-foot bones, procedural helpers, twist bones, cloth/attachments)
+        /// that must never be auto-mapped as primary humanoid limb joints.
+        /// </summary>
+        public static bool IsSecondaryOrHelperBone(string rawName)
+        {
+            if (string.IsNullOrWhiteSpace(rawName)) return false;
+            string clean = CleanBoneName(rawName);
+
+            // Sub-foot secondary bones (sole, foot_end, attachFoot, etc.)
+            // Note: ball_end and toe_end are valid mapped toe tips (e.g. ball_end_L/R, mixamorig:LeftToe_End)
+            if (clean.Contains("sole") || clean.Contains("foot_end"))
+                return true;
+
+            // Twist & procedural helper bones
+            if (clean.Contains("twist") || clean.Contains("helper") || clean.Contains("proc") || clean.Contains("notwist"))
+                return true;
+
+            // IK targets, offset handles, and cloth/attachment bones
+            if (clean.Contains("iktarget") || clean.Contains("ik_target") || clean.Contains("offset") ||
+                clean.Contains("cloth") || clean.Contains("strap") || clean.Contains("flap") || clean.Contains("attach"))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
         /// Finds the best target bone on the Deadlock skeleton corresponding to a BoneDefinition.
         /// </summary>
         public static string ResolveTargetBone(Skeleton3D targetSkeleton, BoneDefinition def)
@@ -288,7 +380,11 @@ namespace DeadlockPlayground.Animation
             foreach (var alias in def.TargetAliases)
             {
                 int idx = targetSkeleton.FindBone(alias);
-                if (idx != -1) return targetSkeleton.GetBoneName(idx);
+                if (idx != -1)
+                {
+                    string candidate = targetSkeleton.GetBoneName(idx);
+                    if (!IsSecondaryOrHelperBone(candidate)) return candidate;
+                }
             }
 
             // 3. Case-insensitive / normalized match across all bones in target skeleton
@@ -296,6 +392,8 @@ namespace DeadlockPlayground.Animation
             for (int b = 0; b < totalBones; b++)
             {
                 string tName = targetSkeleton.GetBoneName(b);
+                if (IsSecondaryOrHelperBone(tName)) continue;
+
                 string cleanT = CleanBoneName(tName);
 
                 foreach (var alias in def.TargetAliases)
@@ -319,7 +417,11 @@ namespace DeadlockPlayground.Animation
             var sourceBones = new List<string>(totalSource);
             for (int s = 0; s < totalSource; s++)
             {
-                sourceBones.Add(sourceSkeleton.GetBoneName(s));
+                string sName = sourceSkeleton.GetBoneName(s);
+                if (!IsSecondaryOrHelperBone(sName))
+                {
+                    sourceBones.Add(sName);
+                }
             }
 
             // 1. Exact match with any source alias
@@ -344,6 +446,15 @@ namespace DeadlockPlayground.Animation
                 var match = sourceBones.FirstOrDefault(b =>
                 {
                     string c = CleanBoneName(b);
+                    if (def.Group == BoneGroup.LeftHandFingers || def.Group == BoneGroup.RightHandFingers)
+                    {
+                        // Strict side checking for finger bones
+                        bool isLeftDef = def.Group == BoneGroup.LeftHandFingers;
+                        bool isLeftSource = c.Contains("left") || c.EndsWith("_l") || c.Contains("_l_");
+                        bool isRightSource = c.Contains("right") || c.EndsWith("_r") || c.Contains("_r_");
+                        if (isLeftDef && isRightSource && !c.Contains("left")) return false;
+                        if (!isLeftDef && isLeftSource && !c.Contains("right")) return false;
+                    }
                     return c.Contains(cleanAlias) || cleanAlias.Contains(c);
                 });
                 if (match != null) return match;
@@ -427,9 +538,9 @@ namespace DeadlockPlayground.Animation
             // Mid spine becomes spine_2 (Chest)
             mapping[targetSpine2Name] = !string.IsNullOrEmpty(mapped1) ? mapped1 : "";
 
-            // Lower-mid spine_1 is left unmapped so it smoothly maintains its natural rest curvature relative to spine_0
-            // rather than duplicating mapped1 (which causes 2x forward thoracic hunch, collapsing arms into jackets)
-            mapping[targetSpine1Name] = "";
+            // Lower-mid spine_1 is mapped to the mid spine joint so it is never left rigid/unmapped.
+            // Continuous Spine Chain Resampling (Spline Slerp) will smoothly resample all 4 vertebrae.
+            mapping[targetSpine1Name] = !string.IsNullOrEmpty(mapped1) ? mapped1 : (!string.IsNullOrEmpty(mapped0) ? mapped0 : "");
         }
 
         /// <summary>

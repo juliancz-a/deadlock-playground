@@ -8,6 +8,7 @@ using DeadlockPlayground.Tools;
 using DeadlockPlayground.Particles;
 using DeadlockPlayground.UI;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Animation;
 
 public partial class PlayerTabUI : VBoxContainer
 {
@@ -61,6 +62,10 @@ public partial class PlayerTabUI : VBoxContainer
         {
             _btnLoop.Icon = _iconLoop;
         }
+
+        AnimationTransportService.Instance.PlaybackStateChanged += OnTransportPlaybackStateChanged;
+        AnimationTransportService.Instance.TimeChanged += OnTransportTimeChanged;
+        AnimationTransportService.Instance.LoopChanged += OnTransportLoopChanged;
 
         if (_animSearch != null)
         {
@@ -155,6 +160,9 @@ public partial class PlayerTabUI : VBoxContainer
     public override void _ExitTree()
     {
         SkeletonGizmoManager.OnBonePoseChanged -= OnGizmoBonePoseChanged;
+        AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
+        AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
+        AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
         if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock))
         {
             _animStudioDock.AnimationModified -= OnAnimStudioAnimationModified;
@@ -456,6 +464,8 @@ public partial class PlayerTabUI : VBoxContainer
                 _chkAutoLoop.SetPressedNoSignal(_particleStage.AutoChargeLoop);
             }
         }
+        AnimationTransportService.Instance.SetParticleMode(true);
+        _animStudioDock?.SetTransportEnabled(false);
     }
 
     private void OnParticleStageUnloaded()
@@ -474,6 +484,8 @@ public partial class PlayerTabUI : VBoxContainer
             _timelineSlider.Step = 0.01;
             _timelineSlider.SetValueNoSignal(0.0);
         }
+        AnimationTransportService.Instance.SetParticleMode(false);
+        _animStudioDock?.SetTransportEnabled(true);
         UpdateTimeLabel(0.0f, _activeAnimLength);
 
         if (_particleControlsGroup != null)
@@ -503,34 +515,12 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer != null && _animPlayer.IsPlaying() && !_isUserDraggingSlider)
-        {
-            float currentPos = (float)_animPlayer.CurrentAnimationPosition;
-            _timelineSlider?.SetValueNoSignal(currentPos);
-            UpdateTimeLabel(currentPos, _activeAnimLength);
-
-            // Handle non-looping animation ending
-            if (!_isLooping && currentPos >= _activeAnimLength - 0.03f)
-            {
-                _animPlayer.Pause();
-                if (_btnPlayPause != null)
-                {
-                    _btnPlayPause.ButtonPressed = false;
-                    _btnPlayPause.Icon = _iconPlay;
-                }
-            }
-
-            if (_skeleton != null)
-            {
-                ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-            }
-        }
+        AnimationTransportService.Instance.Tick(delta);
     }
 
     public void SetSkeleton(Skeleton3D skeleton)
     {
-        _skeleton = skeleton;
+        _skeleton = (skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion()) ? skeleton : null;
         if (_animStudioDock != null && _skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
         {
             var curAnim = _animPlayer.GetAnimation(_activeAnimName);
@@ -556,12 +546,20 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
+        // Ensure _skeleton is valid and not pointing to a disposed old skeleton
+        if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion())
+        {
+            _skeleton = _animPlayer.GetNodeOrNull<Skeleton3D>(_animPlayer.RootNode)
+                     ?? _animPlayer.GetParent()?.FindChild("GeneralSkeleton", true, false) as Skeleton3D
+                     ?? _animPlayer.GetParent()?.FindChild("Skeleton3D", true, false) as Skeleton3D;
+        }
+
         _animPlayer.AnimationFinished += OnAnimationFinished;
 
         PopulateAnimationTreeFromPlayer();
         AutoSelectDefaultIdle();
 
-        if (_animStudioDock != null && _skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+        if (_animStudioDock != null && _skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion() && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
         {
             var curAnim = _animPlayer.GetAnimation(_activeAnimName);
             _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
@@ -998,34 +996,28 @@ public partial class PlayerTabUI : VBoxContainer
             _skeleton.ResetBonePose(i);
         }
 
+        AnimationTransportService.Instance.Bind(_animPlayer, _skeleton, playAnimName, (float)(info?.Fps ?? 30f));
+
         if (autoPlay)
         {
-            _animPlayer.Play(_activeAnimName);
-            if (_btnPlayPause != null)
-            {
-                _btnPlayPause.ButtonPressed = true;
-                _btnPlayPause.Icon = _iconPause;
-            }
+            AnimationTransportService.Instance.Play();
         }
         else
         {
-            // Evaluate at frame 0
-            _animPlayer.Play(_activeAnimName);
+            _animPlayer.Play(playAnimName);
             _animPlayer.Seek(0.0, update: true);
             _animPlayer.Pause();
-
-            if (_btnPlayPause != null)
-            {
-                _btnPlayPause.ButtonPressed = false;
-                _btnPlayPause.Icon = _iconPlay;
-            }
+            _animPlayer.Advance(0);
+            _skeleton.ForceUpdateAllBoneTransforms();
+            AnimationTransportService.Instance.Pause();
+            AnimationTransportService.Instance.Seek(0.0, update: true, conformCloth: true);
         }
 
-        _skeleton.ForceUpdateAllBoneTransforms();
-        ProceduralClothSolver.MarkDirty();
-        ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         NotifyPoseChanged(_activeAnimName);
-        _animStudioDock?.BindTarget(_skeleton, _animPlayer, playAnim, playAnimName, fps: (float)(info?.Fps ?? 30f));
+        if (_animStudioDock != null && _skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion())
+        {
+            _animStudioDock.BindTarget(_skeleton, _animPlayer, playAnim, playAnimName, fps: (float)(info?.Fps ?? 30f));
+        }
     }
 
     public void ApplyPoseFromAnimation(string animName)
@@ -1041,7 +1033,7 @@ public partial class PlayerTabUI : VBoxContainer
         {
             _activeAnimName = animName;
             var godotAnim = _animPlayer.GetAnimation(animName);
-            if (godotAnim != null)
+            if (godotAnim != null && _skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion())
             {
                 DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
                 if (DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, animName))
@@ -1120,28 +1112,13 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
-
         if (isPlaying)
         {
-            if (_animPlayer.CurrentAnimationPosition >= _activeAnimLength - 0.05f)
-            {
-                _animPlayer.Seek(0.0, update: true);
-            }
-            _animPlayer.Play(_activeAnimName);
-            if (_btnPlayPause != null) _btnPlayPause.Icon = _iconPause;
+            AnimationTransportService.Instance.Play();
         }
         else
         {
-            _animPlayer.Pause();
-            if (_btnPlayPause != null) _btnPlayPause.Icon = _iconPlay;
-
-            if (_skeleton != null)
-            {
-                _skeleton.ForceUpdateAllBoneTransforms();
-                ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-            }
+            AnimationTransportService.Instance.Pause();
         }
     }
 
@@ -1154,32 +1131,13 @@ public partial class PlayerTabUI : VBoxContainer
             UpdateTimeLabel(0.0f, _particleStage.Duration);
             if (_btnPlayPause != null)
             {
-                _btnPlayPause.ButtonPressed = false;
+                _btnPlayPause.SetPressedNoSignal(false);
                 _btnPlayPause.Icon = _iconPlay;
             }
             return;
         }
 
-        if (_animPlayer == null) return;
-
-        _animPlayer.Stop();
-        _animPlayer.Seek(0.0, update: true);
-
-        if (_btnPlayPause != null)
-        {
-            _btnPlayPause.ButtonPressed = false;
-            _btnPlayPause.Icon = _iconPlay;
-        }
-
-        _timelineSlider?.SetValueNoSignal(0.0);
-        UpdateTimeLabel(0.0f, _activeAnimLength);
-
-        if (_skeleton != null)
-        {
-            _skeleton.ForceUpdateAllBoneTransforms();
-            ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-        }
+        AnimationTransportService.Instance.Stop();
     }
 
     private void OnLoopToggled(bool looping)
@@ -1191,14 +1149,7 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
-        {
-            var anim = _animPlayer.GetAnimation(_activeAnimName);
-            if (anim != null)
-            {
-                anim.LoopMode = looping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None;
-            }
-        }
+        AnimationTransportService.Instance.SetLoop(looping);
     }
 
     private void OnSpeedSelected(long index)
@@ -1233,18 +1184,7 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
-
-        // Immediate seek to evaluate bone matrices in real time
-        _animPlayer.Seek(val, update: true);
-        UpdateTimeLabel((float)val, _activeAnimLength);
-
-        if (_skeleton != null)
-        {
-            _skeleton.ForceUpdateAllBoneTransforms();
-            ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-        }
+        AnimationTransportService.Instance.Seek(val, update: true, conformCloth: true);
     }
 
     private void OnApplyPosePressed()
@@ -1270,16 +1210,7 @@ public partial class PlayerTabUI : VBoxContainer
 
     public void ResetAllPoses()
     {
-        _animPlayer?.Stop();
-
-        if (_btnPlayPause != null)
-        {
-            _btnPlayPause.ButtonPressed = false;
-            _btnPlayPause.Icon = _iconPlay;
-        }
-
-        _timelineSlider?.SetValueNoSignal(0.0);
-        UpdateTimeLabel(0.0f, _activeAnimLength);
+        AnimationTransportService.Instance.Stop();
 
         if (_skeleton != null)
         {
@@ -1309,6 +1240,30 @@ public partial class PlayerTabUI : VBoxContainer
     {
         if (_timeLabel == null) return;
         _timeLabel.Text = $"{current:00.00}s / {total:00.00}s";
+    }
+
+    private void OnTransportPlaybackStateChanged(bool isPlaying)
+    {
+        if (_btnPlayPause != null)
+        {
+            _btnPlayPause.SetPressedNoSignal(isPlaying);
+            _btnPlayPause.Icon = isPlaying ? _iconPause : _iconPlay;
+        }
+    }
+
+    private void OnTransportTimeChanged(double time)
+    {
+        if (!_isUserDraggingSlider)
+        {
+            _timelineSlider?.SetValueNoSignal(time);
+            UpdateTimeLabel((float)time, _activeAnimLength);
+        }
+    }
+
+    private void OnTransportLoopChanged(bool looping)
+    {
+        _isLooping = looping;
+        _btnLoop?.SetPressedNoSignal(looping);
     }
 }
 

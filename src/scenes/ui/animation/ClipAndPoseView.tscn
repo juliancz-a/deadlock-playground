@@ -309,7 +309,7 @@ text = "Paste Pose"
 [node name="BtnPasteMirrorPose" type="Button" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox/HBoxPoseButtons"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Paste Mirror Pose (L ↔ R)"
+text = "Paste Mirror Pose (L/R)"
 
 [node name="BtnMirrorWholeAnim" type="Button" parent="Margin/MainVBox/PoseToolsPanel/Margin/VBox/HBoxPoseButtons"]
 unique_name_in_owner = true
