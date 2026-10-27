@@ -16,7 +16,7 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_top = -44.0
-grow_horizontal = 2
+grow_horizontal = 1
 grow_vertical = 0
 custom_minimum_size = Vector2(0, 44)
 theme = ExtResource("1_theme")
@@ -197,16 +197,20 @@ layout_mode = 2
 
 [node name="BtnUndo" type="Button" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(30, 28)
+custom_minimum_size = Vector2(32, 28)
 layout_mode = 2
 tooltip_text = "Undo (Ctrl+Z)"
+icon_alignment = 1
+expand_icon = true
 text = ""
 
 [node name="BtnRedo" type="Button" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(30, 28)
+custom_minimum_size = Vector2(32, 28)
 layout_mode = 2
 tooltip_text = "Redo (Ctrl+Y)"
+icon_alignment = 1
+expand_icon = true
 text = ""
 
 [node name="Sep5" type="VSeparator" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
@@ -217,8 +221,20 @@ unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Import external animation (.glb, .gltf, .fbx from Mixamo, Mesh2Motion, etc.) and retarget to Deadlock skeleton"
 icon = ExtResource("8_import")
-text = "Import Anim..."
+text = "Import..."
 expand_icon = true
+
+[node name="Sep6" type="VSeparator" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
+layout_mode = 2
+
+[node name="BtnShortcuts" type="Button" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 28)
+layout_mode = 2
+tooltip_text = "Animation Studio Shortcuts & Keymap Cheatsheet (F1 / ?)"
+icon_alignment = 1
+expand_icon = true
+text = ""
 
 [node name="ContentContainer" type="MarginContainer" parent="RootVBox"]
 unique_name_in_owner = true

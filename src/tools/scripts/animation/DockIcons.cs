@@ -89,6 +89,24 @@ namespace DeadlockPlayground.Animation
             CornerRadiusBottomLeft = 4
         };
 
+        private static readonly StyleBoxFlat IconBtnDisabled = new()
+        {
+            ContentMarginLeft = 4f,
+            ContentMarginRight = 4f,
+            ContentMarginTop = 3f,
+            ContentMarginBottom = 3f,
+            BgColor = new Color(0.133333f, 0.12549f, 0.129412f, 0.45f),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderColor = new Color(0.247059f, 0.364706f, 0.301961f, 0.25f),
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusBottomLeft = 4
+        };
+
         public static void Apply(Button btn, string iconName, string tooltip = null, bool iconOnly = true)
         {
             if (btn == null) return;
@@ -102,13 +120,15 @@ namespace DeadlockPlayground.Animation
                 {
                     btn.Text = "";
                     btn.IconAlignment = HorizontalAlignment.Center;
-                    btn.CustomMinimumSize = new Vector2(Mathf.Max(btn.CustomMinimumSize.X, 30f), 28f);
+                    btn.CustomMinimumSize = new Vector2(Mathf.Max(btn.CustomMinimumSize.X, 32f), 28f);
+                    btn.AddThemeConstantOverride("icon_max_width", 18);
 
                     btn.AddThemeStyleboxOverride("normal", IconBtnNormal);
                     btn.AddThemeStyleboxOverride("hover", IconBtnHover);
                     btn.AddThemeStyleboxOverride("pressed", IconBtnPressed);
                     btn.AddThemeStyleboxOverride("hover_pressed", IconBtnPressed);
                     btn.AddThemeStyleboxOverride("focus", IconBtnHover);
+                    btn.AddThemeStyleboxOverride("disabled", IconBtnDisabled);
                 }
             }
 

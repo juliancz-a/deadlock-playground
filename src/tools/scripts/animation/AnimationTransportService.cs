@@ -180,7 +180,8 @@ namespace DeadlockPlayground.Animation
                 _animPlayer.Seek(_currentTime, update: update);
                 if (!_isPlaying)
                 {
-                    _animPlayer.Advance(0);
+                    _animPlayer.Advance(0.0001);
+                    _animPlayer.Seek(_currentTime, update: true);
                     _skeleton?.ForceUpdateAllBoneTransforms();
                 }
             }

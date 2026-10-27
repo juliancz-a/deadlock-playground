@@ -35,7 +35,9 @@ public partial class PlayerTabUI : VBoxContainer
     private Button _btnRelease;
     private CheckBox _chkAutoLoop;
     private CheckBox _chkIdleUnderlay;
-    private bool _isIdleUnderlayEnabled = true;
+    private bool _isIdleUnderlayEnabled = false;
+    private CheckBox _chkInPlaceMotion;
+    private bool _isInPlaceMotionEnabled = true;
     private DeadlockAnimLoader.AnimSequenceInfo _activeAnimInfo;
 
     private List<DeadlockAnimLoader.AnimSequenceInfo> _currentHeroAnimations = new();
@@ -43,6 +45,8 @@ public partial class PlayerTabUI : VBoxContainer
     private float _activeAnimLength = 0.0f;
     private bool _isLooping = true;
     private bool _isUserDraggingSlider = false;
+    private readonly List<string> _decodedAnimLru = new();
+    private const int MaxCachedDecodedAnims = 5;
 
     private Texture2D _iconPlay;
     private Texture2D _iconPause;
@@ -131,6 +135,17 @@ public partial class PlayerTabUI : VBoxContainer
             animGroup.AddChild(_chkIdleUnderlay);
             animGroup.MoveChild(_chkIdleUnderlay, 1);
 
+            _chkInPlaceMotion = new CheckBox
+            {
+                Name = "ChkInPlaceMotion",
+                Text = "In-Place Motion",
+                ButtonPressed = _isInPlaceMotionEnabled,
+                TooltipText = "Locks horizontal root motion translation so the character stays centered in the viewport during runs/dashes/rolls."
+            };
+            _chkInPlaceMotion.Toggled += OnInPlaceMotionToggled;
+            animGroup.AddChild(_chkInPlaceMotion);
+            animGroup.MoveChild(_chkInPlaceMotion, 2);
+
             var btnImportAnim = new Button
             {
                 Name = "BtnImportExternalAnimSide",
@@ -145,7 +160,7 @@ public partial class PlayerTabUI : VBoxContainer
                 _animStudioDock?.OpenImportFileDialog();
             };
             animGroup.AddChild(btnImportAnim);
-            animGroup.MoveChild(btnImportAnim, 2);
+            animGroup.MoveChild(btnImportAnim, 3);
         }
 
         var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
@@ -586,16 +601,112 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
+    private void TrackDecodedAnimationLru(string animName)
+    {
+        if (string.IsNullOrEmpty(animName)) return;
+
+        _decodedAnimLru.Remove(animName);
+        _decodedAnimLru.Add(animName);
+
+        EvictOldDecodedAnimations();
+    }
+
+    private void EvictOldDecodedAnimations()
+    {
+        if (_animPlayer == null || !_animPlayer.HasAnimationLibrary("")) return;
+        if (_decodedAnimLru.Count <= MaxCachedDecodedAnims) return;
+
+        var animLib = _animPlayer.GetAnimationLibrary("");
+        var defaultIdle = FindDefaultIdleAnim();
+        string defaultIdleClean = defaultIdle?.CleanName ?? "";
+        string defaultIdleRaw = defaultIdle?.RawName ?? "";
+
+        for (int i = 0; i < _decodedAnimLru.Count && _decodedAnimLru.Count > MaxCachedDecodedAnims;)
+        {
+            string candidate = _decodedAnimLru[i];
+
+            // Never evict active animation or its underlaid variant
+            if (candidate.Equals(_activeAnimName, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals($"{_activeAnimName}_underlaid", StringComparison.OrdinalIgnoreCase))
+            {
+                i++;
+                continue;
+            }
+
+            // Never evict default idle (needed for underlaying additive clips)
+            if (candidate.Equals(defaultIdleClean, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals(defaultIdleRaw, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals($"{defaultIdleClean}_underlaid", StringComparison.OrdinalIgnoreCase))
+            {
+                i++;
+                continue;
+            }
+
+            if (animLib.HasAnimation(candidate))
+            {
+                var godotAnim = animLib.GetAnimation(candidate);
+                // Only evict dynamically decoded animations
+                if (godotAnim != null && godotAnim.HasMeta("decoded_by_anim_loader"))
+                {
+                    animLib.RemoveAnimation(candidate);
+                    GD.Print($"[AnimLoader] LRU Cache: Evicted dynamic animation '{candidate}' from memory.");
+                }
+            }
+
+            _decodedAnimLru.RemoveAt(i);
+        }
+    }
+
     public void PopulateAnimationTreeFromPlayer()
     {
         if (_animPlayer == null) return;
 
         _currentHeroAnimations.Clear();
-        var animList = _animPlayer.GetAnimationList();
+        FindVpkLoader();
 
+        var seenCleanNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Ingest metadata from VpkLoader if available (lazy loading with zero RAM bloat)
+        if (_vpkLoader?.CurrentHeroAnimations != null && _vpkLoader.CurrentHeroAnimations.Count > 0)
+        {
+            foreach (var vrfAnim in _vpkLoader.CurrentHeroAnimations)
+            {
+                if (seenCleanNames.Add(vrfAnim.CleanName))
+                {
+                    _currentHeroAnimations.Add(vrfAnim);
+                }
+            }
+        }
+
+        // 2. Also merge any local / pre-baked / imported / remapped animations already in AnimationPlayer
+        var animList = _animPlayer.GetAnimationList();
         foreach (var animName in animList)
         {
             var anim = _animPlayer.GetAnimation(animName);
+            string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
+
+            var existing = _currentHeroAnimations.FirstOrDefault(a =>
+                a.RawName.Equals(animName, StringComparison.OrdinalIgnoreCase) ||
+                a.CleanName.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
+
+            bool isRetargeted = (anim != null && anim.HasMeta("is_retargeted") && (bool)anim.GetMeta("is_retargeted")) ||
+                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(animName) ||
+                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(cleanName);
+
+            if (!isRetargeted && DeadlockAnimLoader.IsBlacklisted(animName, false, null))
+            {
+                continue;
+            }
+
+            if (existing != null)
+            {
+                if (isRetargeted)
+                {
+                    existing.Category = "Remapped";
+                }
+                continue;
+            }
+
             bool isAdditive = false;
             if (anim != null)
             {
@@ -608,25 +719,24 @@ public partial class PlayerTabUI : VBoxContainer
                     DeadlockAnimLoader.StripAdditivePositionTracks(anim, _skeleton);
                 }
             }
-            string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
             string displayName = DeadlockAnimLoader.FormatDisplayName(cleanName);
-            bool isRetargeted = (anim != null && anim.HasMeta("is_retargeted") && (bool)anim.GetMeta("is_retargeted")) ||
-                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(animName) ||
-                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(cleanName);
             string category = isRetargeted ? "Remapped" : DeadlockAnimLoader.ClassifyCategory(cleanName);
             float duration = (float)(anim?.Length ?? 0.1f);
             bool isLooping = DeadlockAnimLoader.DetermineLooping(cleanName, category);
 
-            _currentHeroAnimations.Add(new DeadlockAnimLoader.AnimSequenceInfo
+            if (seenCleanNames.Add(cleanName))
             {
-                RawName = animName,
-                CleanName = cleanName,
-                DisplayName = displayName,
-                Category = category,
-                Duration = duration,
-                IsLooping = isLooping,
-                IsAdditive = isAdditive
-            });
+                _currentHeroAnimations.Add(new DeadlockAnimLoader.AnimSequenceInfo
+                {
+                    RawName = animName,
+                    CleanName = cleanName,
+                    DisplayName = displayName,
+                    Category = category,
+                    Duration = duration,
+                    IsLooping = isLooping,
+                    IsAdditive = isAdditive
+                });
+            }
         }
 
         // Sort by category priority, then display name
@@ -665,12 +775,13 @@ public partial class PlayerTabUI : VBoxContainer
         {
             "Remapped",
             "Exported",
-            "Idle",
+            "Idles & Stances",
             "Locomotion",
-            "Combat",
-            "Abilities",
-            "Emotes & Expressions",
-            "Reactions",
+            "Traversal & Zipline",
+            "Combat & Attacks",
+            "Abilities & Magic",
+            "Reactions & Status",
+            "Emotes & Taunts",
             "Additive Layers",
             "Misc / Other"
         };
@@ -678,14 +789,39 @@ public partial class PlayerTabUI : VBoxContainer
         foreach (var category in categories)
         {
             var itemsInCategory = _currentHeroAnimations
-                .Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase))
+                .Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase) ||
+                            (category == "Idles & Stances" && a.Category.Equals("Idle", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Combat & Attacks" && a.Category.Equals("Combat", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Abilities & Magic" && a.Category.Equals("Abilities", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Reactions & Status" && a.Category.Equals("Reactions", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Emotes & Taunts" && a.Category.Equals("Emotes & Expressions", StringComparison.OrdinalIgnoreCase)))
                 .Where(a => string.IsNullOrEmpty(filter) ||
                             a.DisplayName.ToLowerInvariant().Contains(filter) ||
                             a.CleanName.ToLowerInvariant().Contains(filter) ||
                             a.RawName.ToLowerInvariant().Contains(filter))
                 .ToList();
 
-            if (itemsInCategory.Count == 0) continue;
+            if (itemsInCategory.Count == 0)
+            {
+                if (category == "Remapped" && string.IsNullOrEmpty(filter))
+                {
+                    TreeItem emptyCategory = _animTree.CreateItem(root);
+                    var iconEmpty = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg") ?? _iconFolder;
+                    emptyCategory.SetIcon(0, iconEmpty);
+                    emptyCategory.SetIconMaxWidth(0, 16);
+                    emptyCategory.SetCustomColor(0, new Color(0.31f, 0.93f, 0.69f, 0.8f));
+                    emptyCategory.SetCustomMinimumHeight(28);
+                    emptyCategory.SetText(0, "Imported / Remapped (0)");
+                    emptyCategory.SetSelectable(0, false);
+                    emptyCategory.Collapsed = true;
+
+                    TreeItem emptyPlaceholder = _animTree.CreateItem(emptyCategory);
+                    emptyPlaceholder.SetText(0, "(No imported animations yet)");
+                    emptyPlaceholder.SetCustomColor(0, new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                    emptyPlaceholder.SetSelectable(0, false);
+                }
+                continue;
+            }
 
             TreeItem categoryItem = _animTree.CreateItem(root);
             var iconCat = (category == "Remapped" || category == "Exported")
@@ -697,15 +833,23 @@ public partial class PlayerTabUI : VBoxContainer
             {
                 "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
                 "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
+                "Idles & Stances" or "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
+                "Locomotion" => new Color(0.45f, 0.85f, 0.95f, 1.0f),
+                "Traversal & Zipline" => new Color(0.55f, 0.90f, 0.70f, 1.0f),
+                "Combat & Attacks" or "Combat" => new Color(0.95f, 0.55f, 0.45f, 1.0f),
+                "Abilities & Magic" or "Abilities" => new Color(0.85f, 0.60f, 0.95f, 1.0f),
+                "Reactions & Status" or "Reactions" => new Color(0.95f, 0.75f, 0.45f, 1.0f),
+                "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.95f, 0.65f, 0.85f, 1.0f),
                 "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
-                "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
                 _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
             };
             categoryItem.SetCustomColor(0, catColor);
             categoryItem.SetCustomMinimumHeight(28);
-            categoryItem.SetText(0, $"{category} ({itemsInCategory.Count})");
+            categoryItem.SetText(0, category == "Remapped" ? $"Imported / Remapped ({itemsInCategory.Count})" : $"{category} ({itemsInCategory.Count})");
             categoryItem.SetSelectable(0, false);
-            categoryItem.Collapsed = (category == "Additive Layers");
+
+            // Collapsed by default when not searching!
+            categoryItem.Collapsed = string.IsNullOrEmpty(filter);
 
             foreach (var anim in itemsInCategory)
             {
@@ -718,6 +862,15 @@ public partial class PlayerTabUI : VBoxContainer
                 int minHeight = charLen > 40 ? 46 : (charLen > 22 ? 36 : 26);
                 item.SetCustomMinimumHeight(minHeight);
 
+                if (!anim.IsCompatible)
+                {
+                    item.SetText(0, $"⚠ {itemText} [Incompatible]");
+                    item.SetTooltipText(0, $"Incompatible prop/skeleton animation: {anim.IncompatibilityReason}\nRaw: {anim.RawName}");
+                    item.SetCustomColor(0, new Color(0.55f, 0.55f, 0.55f, 0.6f));
+                    item.SetSelectable(0, false);
+                    continue;
+                }
+
                 item.SetText(0, itemText);
                 item.SetTooltipText(0, $"{anim.DisplayName} ({anim.Duration:F2}s)\nRaw: {anim.RawName}");
                 item.SetMetadata(0, anim.RawName);
@@ -727,6 +880,7 @@ public partial class PlayerTabUI : VBoxContainer
                     _activeAnimName == $"{anim.CleanName}_underlaid" || _activeAnimName == $"{anim.RawName}_underlaid")
                 {
                     item.Select(0);
+                    categoryItem.Collapsed = false; // Auto-expand active category
                 }
             }
         }
@@ -738,6 +892,45 @@ public partial class PlayerTabUI : VBoxContainer
 
         if (_activeAnimInfo != null && _animPlayer != null)
         {
+            string clean = _activeAnimInfo.CleanName;
+            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+            if (animLib != null)
+            {
+                if (animLib.HasAnimation(clean)) animLib.RemoveAnimation(clean);
+                if (animLib.HasAnimation($"{clean}_underlaid")) animLib.RemoveAnimation($"{clean}_underlaid");
+                if (animLib.HasAnimation(_activeAnimInfo.RawName)) animLib.RemoveAnimation(_activeAnimInfo.RawName);
+                if (animLib.HasAnimation($"{_activeAnimInfo.RawName}_underlaid")) animLib.RemoveAnimation($"{_activeAnimInfo.RawName}_underlaid");
+            }
+
+            double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
+            bool wasPlaying = _animPlayer.IsPlaying();
+            SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
+            if (_animPlayer.HasAnimation(_activeAnimName))
+            {
+                _animPlayer.Seek(currentPos, update: true);
+                if (wasPlaying) _animPlayer.Play(_activeAnimName);
+                else _animPlayer.Pause();
+            }
+            _timelineSlider?.SetValueNoSignal(currentPos);
+            UpdateTimeLabel((float)currentPos, _activeAnimLength);
+        }
+    }
+
+    private void OnInPlaceMotionToggled(bool toggled)
+    {
+        _isInPlaceMotionEnabled = toggled;
+        if (_activeAnimInfo != null && _animPlayer != null)
+        {
+            string clean = _activeAnimInfo.CleanName;
+            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+            if (animLib != null)
+            {
+                if (animLib.HasAnimation(clean)) animLib.RemoveAnimation(clean);
+                if (animLib.HasAnimation($"{clean}_underlaid")) animLib.RemoveAnimation($"{clean}_underlaid");
+                if (animLib.HasAnimation(_activeAnimInfo.RawName)) animLib.RemoveAnimation(_activeAnimInfo.RawName);
+                if (animLib.HasAnimation($"{_activeAnimInfo.RawName}_underlaid")) animLib.RemoveAnimation($"{_activeAnimInfo.RawName}_underlaid");
+            }
+
             double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
             bool wasPlaying = _animPlayer.IsPlaying();
             SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
@@ -815,7 +1008,7 @@ public partial class PlayerTabUI : VBoxContainer
 
         // Tier 3: Any Idle-category animation containing "stand_idle" or "idle" without exclusion
         var idleMatch = _currentHeroAnimations.FirstOrDefault(a =>
-            a.Category == "Idle" &&
+            (a.Category == "Idles & Stances" || a.Category == "Idle") &&
             !IsExcluded(a.CleanName) &&
             (a.CleanName.Contains("stand_idle", StringComparison.OrdinalIgnoreCase) ||
              a.CleanName.Contains("idle", StringComparison.OrdinalIgnoreCase)));
@@ -823,7 +1016,7 @@ public partial class PlayerTabUI : VBoxContainer
 
         // Tier 4: Any non-additive, non-excluded Idle
         var anyIdle = _currentHeroAnimations.FirstOrDefault(a =>
-            a.Category == "Idle" && !IsExcluded(a.CleanName));
+            (a.Category == "Idles & Stances" || a.Category == "Idle") && !IsExcluded(a.CleanName));
         if (anyIdle != null) return anyIdle;
 
         // Tier 5: Fallback to any non-additive animation
@@ -836,19 +1029,54 @@ public partial class PlayerTabUI : VBoxContainer
     {
         if (info == null || _animPlayer == null) return null;
 
-        if (_animPlayer.HasAnimation(info.RawName))
+        string targetName = _animPlayer.HasAnimation(info.CleanName) ? info.CleanName :
+                           (_animPlayer.HasAnimation(info.RawName) ? info.RawName : null);
+
+        if (targetName != null)
         {
-            return _animPlayer.GetAnimation(info.RawName);
-        }
-        if (_animPlayer.HasAnimation(info.CleanName))
-        {
-            return _animPlayer.GetAnimation(info.CleanName);
+            var anim = _animPlayer.GetAnimation(targetName);
+            if (anim != null)
+            {
+                bool isDecodedByLoader = anim.HasMeta("decoded_by_anim_loader");
+                bool isStaleVersion = isDecodedByLoader
+                    ? (!anim.HasMeta("anim_loader_version") || anim.GetMeta("anim_loader_version").AsInt32() < 5)
+                    : false;
+
+                // Pre-baked GLTF clips always have root motion; if in-place mode is enabled, evict and decode via loader!
+                // For already decoded clips, verify that in_place matches the current user toggle.
+                bool isMismatchedInPlace = isDecodedByLoader
+                    ? (!anim.HasMeta("in_place") || anim.GetMeta("in_place").AsBool() != _isInPlaceMotionEnabled)
+                    : _isInPlaceMotionEnabled;
+
+                bool hasBrokenPrefix = false;
+                for (int t = 0; t < anim.GetTrackCount(); t++)
+                {
+                    if (anim.TrackGetPath(t).ToString().StartsWith("../"))
+                    {
+                        hasBrokenPrefix = true;
+                        break;
+                    }
+                }
+
+                if (!isStaleVersion && !hasBrokenPrefix && !isMismatchedInPlace)
+                {
+                    return anim;
+                }
+
+                // Stale broken or mismatched animation: remove it so it can be cleanly re-decoded
+                var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+                if (animLib != null && animLib.HasAnimation(targetName))
+                {
+                    animLib.RemoveAnimation(targetName);
+                }
+            }
         }
 
         FindVpkLoader();
         if (_vpkLoader != null && _skeleton != null)
         {
-            var decoded = _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer);
+            var defaultIdle = _isIdleUnderlayEnabled ? FindDefaultIdleAnim() : null;
+            var decoded = _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo: defaultIdle, inPlace: _isInPlaceMotionEnabled);
             if (decoded != null) return decoded;
         }
 
@@ -872,7 +1100,7 @@ public partial class PlayerTabUI : VBoxContainer
 
     private void HighlightTreeItem(string animKey)
     {
-        if (_animTree == null) return;
+        if (_animTree == null || string.IsNullOrEmpty(animKey)) return;
         TreeItem root = _animTree.GetRoot();
         if (root == null) return;
 
@@ -881,9 +1109,12 @@ public partial class PlayerTabUI : VBoxContainer
             foreach (TreeItem child in cat.GetChildren())
             {
                 string itemKey = child.GetMetadata(0).AsString();
-                if (itemKey == animKey || itemKey.EndsWith(animKey))
+                if (itemKey == animKey || itemKey.EndsWith(animKey) ||
+                    animKey.StartsWith(itemKey) || animKey.Contains(itemKey))
                 {
+                    cat.Collapsed = false; // Auto-expand category containing active clip
                     child.Select(0);
+                    _animTree.ScrollToItem(child);
                     return;
                 }
             }
@@ -892,13 +1123,15 @@ public partial class PlayerTabUI : VBoxContainer
 
     public void SelectAnimation(DeadlockAnimLoader.AnimSequenceInfo info, bool autoPlay = false)
     {
-        if (info == null || _animPlayer == null || _skeleton == null) return;
+        if (info == null || _animPlayer == null || _skeleton == null || !info.IsCompatible) return;
 
         _activeAnimInfo = info;
 
         var rawAnim = GetOrDecodeAnimation(info);
-        bool isAdditive = DeadlockAnimLoader.IsAdditiveAnimation(rawAnim, info, _skeleton);
-        if (info != null && info.Category == "Idle")
+        bool isAdditive = (info.Category == "Additive Layers") ||
+                          (info.VrfAnimation != null ? info.VrfAnimation.IsAdditive : info.IsAdditive) ||
+                          DeadlockAnimLoader.IsDeltaSequence(info);
+        if (info.Category == "Idles & Stances" || info.Category == "Idle")
         {
             isAdditive = false;
         }
@@ -946,7 +1179,7 @@ public partial class PlayerTabUI : VBoxContainer
             FindVpkLoader();
             if (_vpkLoader != null)
             {
-                _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo, targetAnim);
+                _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo, targetAnim, inPlace: _isInPlaceMotionEnabled);
             }
         }
 
@@ -957,10 +1190,12 @@ public partial class PlayerTabUI : VBoxContainer
             else return;
         }
 
+        TrackDecodedAnimationLru(targetAnim);
+
         var godotAnim = _animPlayer.GetAnimation(targetAnim);
         if (godotAnim == null) return;
 
-        // Configure animation playback parameters
+        // Configure animation playback parameters (preserve authored bone tracks; do not mutate or strip)
         DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
 
         string playAnimName = targetAnim;
@@ -1005,9 +1240,9 @@ public partial class PlayerTabUI : VBoxContainer
         else
         {
             _animPlayer.Play(playAnimName);
-            _animPlayer.Seek(0.0, update: true);
             _animPlayer.Pause();
-            _animPlayer.Advance(0);
+            _animPlayer.Seek(0.0, update: true);
+            _animPlayer.Advance(0.0001);
             _skeleton.ForceUpdateAllBoneTransforms();
             AnimationTransportService.Instance.Pause();
             AnimationTransportService.Instance.Seek(0.0, update: true, conformCloth: true);
@@ -1083,6 +1318,10 @@ public partial class PlayerTabUI : VBoxContainer
     private void OnSearchTextChanged(string newText)
     {
         PopulateAnimationTree();
+        if (string.IsNullOrEmpty(newText) && !string.IsNullOrEmpty(_activeAnimName))
+        {
+            HighlightTreeItem(_activeAnimName);
+        }
     }
 
     private void OnTreeItemSelected()
@@ -1097,7 +1336,7 @@ public partial class PlayerTabUI : VBoxContainer
         if (string.IsNullOrEmpty(animKey)) return;
 
         var info = _currentHeroAnimations.FirstOrDefault(a => a.RawName == animKey || a.CleanName == animKey);
-        if (info == null) return;
+        if (info == null || !info.IsCompatible) return;
 
         bool wasPlaying = _animPlayer != null && _animPlayer.IsPlaying();
         SelectAnimation(info, autoPlay: wasPlaying);

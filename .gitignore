@@ -9,6 +9,7 @@ tools/inspector
 src/tools/inspector
 docs/
 scratch_out
+*.log
 tools/dump_out
 tools/tools
 tools/dump_runner

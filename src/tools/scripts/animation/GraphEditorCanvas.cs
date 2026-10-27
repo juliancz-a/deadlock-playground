@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
+using DeadlockPlayground.Tools;
 
 namespace DeadlockPlayground.Animation
 {
@@ -17,6 +18,10 @@ namespace DeadlockPlayground.Animation
         [Signal] public delegate void KeySelectionChangedEventHandler(double time, float value, bool hasSelection);
         [Signal] public delegate void CurvesRebuiltEventHandler();
         [Signal] public delegate void ModalStatusChangedEventHandler(string statusText);
+        [Signal] public delegate void ActiveCurveChangedEventHandler(string curveName);
+        [Signal] public delegate void ModifiersModifiedEventHandler();
+        [Signal] public delegate void ModifiersSidebarToggledEventHandler();
+        [Signal] public delegate void ShortcutsRequestedEventHandler();
 
         public enum TangentMode { Free, Aligned, Vector, Auto }
         public enum InterpolationMode { Bezier, Linear, Constant }
@@ -45,13 +50,65 @@ namespace DeadlockPlayground.Animation
             public bool IsVisible { get; set; } = true;
             public bool IsLocked { get; set; } = false;
             public List<CurveKey> Keys { get; } = new();
+            public List<FCurveModifier> Modifiers { get; } = new();
+
+            public float EvaluateBase(double time)
+            {
+                if (Keys.Count == 0) return 0f;
+                if (Keys.Count == 1 || time <= Keys[0].Time) return Keys[0].Value;
+                if (time >= Keys[^1].Time) return Keys[^1].Value;
+
+                for (int i = 0; i < Keys.Count - 1; i++)
+                {
+                    if (time >= Keys[i].Time && time <= Keys[i + 1].Time)
+                    {
+                        double span = Keys[i + 1].Time - Keys[i].Time;
+                        if (span <= 1e-6) return Keys[i].Value;
+                        float factor = (float)((time - Keys[i].Time) / span);
+                        return Mathf.Lerp(Keys[i].Value, Keys[i + 1].Value, factor);
+                    }
+                }
+                return Keys[^1].Value;
+            }
+
+            public float Evaluate(double time, float fps)
+            {
+                float val = EvaluateBase(time);
+                if (Modifiers.Count == 0) return val;
+
+                for (int i = 0; i < Modifiers.Count; i++)
+                {
+                    var mod = Modifiers[i];
+                    if (mod.IsMuted) continue;
+                    val = mod.Evaluate(val, time, fps, this);
+                }
+                return val;
+            }
         }
 
         private readonly List<ChannelCurve> _curves = new();
         private Godot.Animation _activeAnimation;
         private Skeleton3D _skeleton;
         private string _activeBoneName = "";
+        private ChannelCurve _activeCurve = null;
         private AnimationUndoRedoManager _undoRedo;
+
+        public ChannelCurve ActiveCurve
+        {
+            get => _activeCurve;
+            set
+            {
+                if (_activeCurve != value)
+                {
+                    _activeCurve = value;
+                    EmitSignal(SignalName.ActiveCurveChanged, _activeCurve?.Name ?? "");
+                    QueueRedraw();
+                }
+            }
+        }
+
+        public double PlayheadTime => _currentTime;
+        public float Fps => _fps;
 
         // Viewport Transform
         private double _currentTime = 0.0;
@@ -172,9 +229,29 @@ namespace DeadlockPlayground.Animation
 
         public void RebuildCurves()
         {
+            var savedModifiers = new Dictionary<(int TrackIdx, int SubChannel), List<FCurveModifier>>();
+            var savedSelectedKeys = new HashSet<(int TrackIdx, int SubChannel, double Time)>();
+            foreach (var c in _curves)
+            {
+                if (c.Modifiers.Count > 0)
+                {
+                    savedModifiers[(c.TrackIdx, c.SubChannel)] = new List<FCurveModifier>(c.Modifiers);
+                }
+                foreach (var k in c.Keys)
+                {
+                    if (k.IsSelected)
+                    {
+                        savedSelectedKeys.Add((c.TrackIdx, c.SubChannel, k.Time));
+                    }
+                }
+            }
+            string prevActiveName = _activeCurve?.Name;
+
             _curves.Clear();
             if (_activeAnimation == null || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion() || string.IsNullOrEmpty(_activeBoneName))
             {
+                _activeCurve = null;
+                EmitSignal(SignalName.ActiveCurveChanged, "");
                 EmitSignal(SignalName.CurvesRebuilt);
                 return;
             }
@@ -254,6 +331,34 @@ namespace DeadlockPlayground.Animation
                 _curves.Add(curveRotZ);
             }
 
+            // Restore saved modifiers
+            foreach (var c in _curves)
+            {
+                if (savedModifiers.TryGetValue((c.TrackIdx, c.SubChannel), out var mods))
+                {
+                    c.Modifiers.AddRange(mods);
+                }
+            }
+
+            // Restore active curve
+            _activeCurve = _curves.FirstOrDefault(c => c.Name == prevActiveName) ?? _curves.FirstOrDefault();
+            EmitSignal(SignalName.ActiveCurveChanged, _activeCurve?.Name ?? "");
+
+            // Restore selected keys
+            if (savedSelectedKeys.Count > 0)
+            {
+                foreach (var c in _curves)
+                {
+                    foreach (var k in c.Keys)
+                    {
+                        if (savedSelectedKeys.Any(s => s.TrackIdx == c.TrackIdx && s.SubChannel == c.SubChannel && Math.Abs(s.Time - k.Time) < 0.001))
+                        {
+                            k.IsSelected = true;
+                        }
+                    }
+                }
+            }
+
             // Compute default automatic Bezier handles for all keys
             foreach (var curve in _curves)
             {
@@ -330,6 +435,7 @@ namespace DeadlockPlayground.Animation
         public void SelectChannel(ChannelCurve targetCurve, bool addToSelection = false)
         {
             _selectionCacheDirty = true;
+            ActiveCurve = targetCurve;
             if (!addToSelection)
             {
                 foreach (var c in _curves)
@@ -539,6 +645,51 @@ namespace DeadlockPlayground.Animation
             QueueRedraw();
         }
 
+        public void InsertKeyAtPlayhead()
+        {
+            if (_activeAnimation == null || _curves.Count == 0) return;
+
+            double snap = 1.0 / _fps;
+            double time = Math.Clamp(Math.Round(_currentTime / snap) * snap, 0.0, _duration);
+
+            var targetCurves = _curves.Where(c => c == _activeCurve).ToList();
+            if (targetCurves.Count == 0)
+            {
+                targetCurves = _curves.Where(c => c.IsVisible && !c.IsLocked).ToList();
+            }
+            if (targetCurves.Count == 0) targetCurves = _curves.ToList();
+
+            foreach (var curve in targetCurves)
+            {
+                float val = curve.Evaluate(time, _fps);
+                var existing = curve.Keys.FirstOrDefault(k => Math.Abs(k.Time - time) < 0.0001);
+                if (existing != null)
+                {
+                    existing.Value = val;
+                    existing.IsSelected = true;
+                }
+                else
+                {
+                    var newKey = new CurveKey
+                    {
+                        Time = time,
+                        Value = val,
+                        Mode = TangentMode.Aligned,
+                        IsSelected = true
+                    };
+                    curve.Keys.Add(newKey);
+                    curve.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+                }
+                ComputeAutoTangents(curve);
+            }
+
+            _selectionCacheDirty = true;
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            NotifyKeySelectionChanged();
+            QueueRedraw();
+        }
+
         private void NotifyKeySelectionChanged()
         {
             _selectionCacheDirty = true;
@@ -552,6 +703,14 @@ namespace DeadlockPlayground.Animation
             {
                 EmitSignal(SignalName.KeySelectionChanged, 0.0, 0f, false);
             }
+        }
+
+        public void StartBoxSelect()
+        {
+            _currentDragMode = DragMode.BoxSelect;
+            _dragStartMousePos = GetLocalMousePosition();
+            _boxSelectRect = new Rect2(_dragStartMousePos, Vector2.Zero);
+            QueueRedraw();
         }
 
         #region Modal Transforms (G / S / R)
@@ -659,9 +818,11 @@ namespace DeadlockPlayground.Animation
 
         private string GetModalStatusText()
         {
+            if (_modalMode == ModalTransformMode.None) return "";
+
             string modeName = _modalMode switch
             {
-                ModalTransformMode.Grab => "GRAB / MOVE",
+                ModalTransformMode.Grab => "GRAB",
                 ModalTransformMode.Scale => "SCALE",
                 ModalTransformMode.Rotate => "ROTATE",
                 _ => ""
@@ -669,12 +830,12 @@ namespace DeadlockPlayground.Animation
 
             string axisStr = _axisLock switch
             {
-                AxisLock.X => " [X-AXIS (TIME) LOCKED]",
-                AxisLock.Y => " [Y-AXIS (VALUE) LOCKED]",
+                AxisLock.X => " • Time (X) Locked",
+                AxisLock.Y => " • Value (Y) Locked",
                 _ => ""
             };
 
-            return $"[ {modeName}{axisStr} ]  (X: Lock Time, Y: Lock Value, Enter/LClick: Confirm, Esc/RClick: Cancel)";
+            return $"[ {modeName}{axisStr} ]  (X/Y: Lock Axis | ↵: Confirm | Esc: Cancel)";
         }
 
         private void UpdateModalTransform(Vector2 mousePos)
@@ -836,6 +997,23 @@ namespace DeadlockPlayground.Animation
                 // Pivot marker
                 DrawCircle(_modalPivotCanvas, 4f, Colors.Gold);
                 DrawArc(_modalPivotCanvas, 8f, 0, Mathf.Tau, 16, Colors.Gold, 1.2f);
+
+                // Floating On-Canvas Status HUD Pill
+                string hudText = GetModalStatusText();
+                if (!string.IsNullOrEmpty(hudText))
+                {
+                    var font = ThemeDB.FallbackFont;
+                    int fSize = 12;
+                    Vector2 strSize = font.GetStringSize(hudText, HorizontalAlignment.Left, -1, fSize);
+                    float padH = 14f;
+                    float padV = 6f;
+                    Vector2 pillPos = new Vector2(Mathf.Max(20f, (size.X - strSize.X - padH * 2) * 0.5f), size.Y - 38f);
+                    Rect2 pillRect = new Rect2(pillPos, new Vector2(strSize.X + padH * 2, strSize.Y + padV * 2));
+
+                    DrawRect(pillRect, new Color(0.08f, 0.09f, 0.12f, 0.92f), filled: true);
+                    DrawRect(pillRect, new Color(1.0f, 0.75f, 0.2f, 0.85f), filled: false, width: 1.5f);
+                    DrawString(font, new Vector2(pillPos.X + padH, pillPos.Y + padV + strSize.Y - 2), hudText, HorizontalAlignment.Left, -1, fSize, new Color(1.0f, 0.88f, 0.35f));
+                }
             }
         }
 
@@ -894,66 +1072,84 @@ namespace DeadlockPlayground.Animation
         private void DrawChannelCurve(ChannelCurve curve, Vector2 size)
         {
             var keys = curve.Keys;
-            if (keys.Count == 0) return;
+            if (keys.Count == 0 && curve.Modifiers.Count == 0) return;
 
             // Frustum cull bounds for curve segments
             double tMin = TimeFromX(-30);
             double tMax = TimeFromX(size.X + 30);
 
-            // Draw connecting Bezier spline segments
-            for (int i = 0; i < keys.Count - 1; i++)
+            if (curve.Modifiers.Count > 0 && curve.Modifiers.Any(m => !m.IsMuted))
             {
-                var k0 = keys[i];
-                var k1 = keys[i + 1];
-
-                // Frustum culling: skip segments outside visible viewport
-                if (k1.Time < tMin || k0.Time > tMax) continue;
-
-                Vector2 p0 = CanvasPoint(k0.Time, k0.Value);
-                Vector2 p3 = CanvasPoint(k1.Time, k1.Value);
-
-                if (k0.Interp == InterpolationMode.Constant)
+                // Sample modified curve across the canvas viewport
+                float stepPx = 4.0f;
+                int count = Mathf.Clamp((int)(size.X / stepPx) + 2, 20, 800);
+                var polyPoints = new Vector2[count];
+                for (int s = 0; s < count; s++)
                 {
-                    DrawLine(p0, new Vector2(p3.X, p0.Y), curve.ChannelColor, 2.0f, antialiased: true);
-                    DrawLine(new Vector2(p3.X, p0.Y), p3, curve.ChannelColor, 2.0f, antialiased: true);
+                    float sx = s * stepPx;
+                    double t = TimeFromX(sx);
+                    float val = curve.Evaluate(t, _fps);
+                    polyPoints[s] = CanvasPoint(t, val);
                 }
-                else if (k0.Interp == InterpolationMode.Linear)
+                DrawPolyline(polyPoints, curve.ChannelColor, 2.0f, antialiased: true);
+            }
+            else
+            {
+                // Draw connecting Bezier spline segments
+                for (int i = 0; i < keys.Count - 1; i++)
                 {
-                    DrawLine(p0, p3, curve.ChannelColor, 2.0f, antialiased: true);
-                }
-                else
-                {
-                    // Adaptive Tessellation based on pixel width
-                    float dx = Mathf.Abs(p3.X - p0.X);
-                    if (dx < 6.0f)
+                    var k0 = keys[i];
+                    var k1 = keys[i + 1];
+
+                    // Frustum culling: skip segments outside visible viewport
+                    if (k1.Time < tMin || k0.Time > tMax) continue;
+
+                    Vector2 p0 = CanvasPoint(k0.Time, k0.Value);
+                    Vector2 p3 = CanvasPoint(k1.Time, k1.Value);
+
+                    if (k0.Interp == InterpolationMode.Constant)
                     {
-                        // Sub-pixel or tiny span: straight line is visually identical
+                        DrawLine(p0, new Vector2(p3.X, p0.Y), curve.ChannelColor, 2.0f, antialiased: true);
+                        DrawLine(new Vector2(p3.X, p0.Y), p3, curve.ChannelColor, 2.0f, antialiased: true);
+                    }
+                    else if (k0.Interp == InterpolationMode.Linear)
+                    {
                         DrawLine(p0, p3, curve.ChannelColor, 2.0f, antialiased: true);
                     }
                     else
                     {
-                        Vector2 p1 = CanvasPoint(k0.Time + k0.OutHandle.X, k0.Value + k0.OutHandle.Y);
-                        Vector2 p2 = CanvasPoint(k1.Time + k1.InHandle.X, k1.Value + k1.InHandle.Y);
-
-                        if (dx < 40.0f)
+                        // Adaptive Tessellation based on pixel width
+                        float dx = Mathf.Abs(p3.X - p0.X);
+                        if (dx < 6.0f)
                         {
-                            // Moderate span: 6 segments is smooth and low cost
-                            for (int s = 0; s <= 6; s++)
-                            {
-                                float t = s / 6.0f;
-                                _bezierBuffer6[s] = SampleCubicBezier(p0, p1, p2, p3, t);
-                            }
-                            DrawPolyline(_bezierBuffer6, curve.ChannelColor, 2.0f, antialiased: true);
+                            // Sub-pixel or tiny span: straight line is visually identical
+                            DrawLine(p0, p3, curve.ChannelColor, 2.0f, antialiased: true);
                         }
                         else
                         {
-                            // Wide span: 18 segments for smooth curvature
-                            for (int s = 0; s <= 18; s++)
+                            Vector2 p1 = CanvasPoint(k0.Time + k0.OutHandle.X, k0.Value + k0.OutHandle.Y);
+                            Vector2 p2 = CanvasPoint(k1.Time + k1.InHandle.X, k1.Value + k1.InHandle.Y);
+
+                            if (dx < 40.0f)
                             {
-                                float t = s / 18.0f;
-                                _bezierBuffer18[s] = SampleCubicBezier(p0, p1, p2, p3, t);
+                                // Moderate span: 6 segments is smooth and low cost
+                                for (int s = 0; s <= 6; s++)
+                                {
+                                    float t = s / 6.0f;
+                                    _bezierBuffer6[s] = SampleCubicBezier(p0, p1, p2, p3, t);
+                                }
+                                DrawPolyline(_bezierBuffer6, curve.ChannelColor, 2.0f, antialiased: true);
                             }
-                            DrawPolyline(_bezierBuffer18, curve.ChannelColor, 2.0f, antialiased: true);
+                            else
+                            {
+                                // Wide span: 18 segments for smooth curvature
+                                for (int s = 0; s <= 18; s++)
+                                {
+                                    float t = s / 18.0f;
+                                    _bezierBuffer18[s] = SampleCubicBezier(p0, p1, p2, p3, t);
+                                }
+                                DrawPolyline(_bezierBuffer18, curve.ChannelColor, 2.0f, antialiased: true);
+                            }
                         }
                     }
                 }
@@ -1008,10 +1204,12 @@ namespace DeadlockPlayground.Animation
         {
             if (@event is InputEventMouseButton mb)
             {
+                AcceptEvent();
                 HandleMouseButton(mb);
             }
             else if (@event is InputEventMouseMotion mm)
             {
+                AcceptEvent();
                 HandleMouseMotion(mm);
             }
             else if (@event is InputEventKey key && key.Pressed && !key.Echo)
@@ -1051,31 +1249,55 @@ namespace DeadlockPlayground.Animation
             }
             else
             {
-                if (key.Keycode == Key.G && !key.CtrlPressed && !key.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_delete_keys", key))
+                {
+                    DeleteSelectedKeys();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_insert_key", key))
+                {
+                    InsertKeyAtPlayhead();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_duplicate_keys", key))
+                {
+                    DuplicateSelectedKeys();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_toggle_modifiers", key))
+                {
+                    EmitSignal(SignalName.ModifiersSidebarToggled);
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_transform_grab", key))
                 {
                     StartModalTransform(ModalTransformMode.Grab);
                     GetViewport().SetInputAsHandled();
                     return;
                 }
-                if (key.Keycode == Key.S && !key.CtrlPressed && !key.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_transform_scale", key))
                 {
                     StartModalTransform(ModalTransformMode.Scale);
                     GetViewport().SetInputAsHandled();
                     return;
                 }
-                if (key.Keycode == Key.R && !key.CtrlPressed && !key.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_transform_rotate", key))
                 {
                     StartModalTransform(ModalTransformMode.Rotate);
                     GetViewport().SetInputAsHandled();
                     return;
                 }
-                if (key.Keycode == Key.A && !key.CtrlPressed)
+                if (KeybindsManager.IsActionTriggered("anim_select_all", key))
                 {
                     ToggleSelectAll();
                     GetViewport().SetInputAsHandled();
                     return;
                 }
-                if (key.Keycode == Key.B && !key.CtrlPressed)
+                if (KeybindsManager.IsActionTriggered("anim_box_select", key))
                 {
                     _currentDragMode = DragMode.BoxSelect;
                     _dragStartMousePos = GetLocalMousePosition();
@@ -1083,9 +1305,21 @@ namespace DeadlockPlayground.Animation
                     GetViewport().SetInputAsHandled();
                     return;
                 }
-                if (key.Keycode == Key.Home)
+                if (KeybindsManager.IsActionTriggered("anim_fit_view", key))
                 {
                     FitView();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_fit_selected", key))
+                {
+                    FitSelectedView();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_cheatsheet", key))
+                {
+                    EmitSignal(SignalName.ShortcutsRequested);
                     GetViewport().SetInputAsHandled();
                     return;
                 }
@@ -1135,8 +1369,17 @@ namespace DeadlockPlayground.Animation
                 {
                     if (_currentDragMode == DragMode.DragKey || _currentDragMode == DragMode.DragInHandle || _currentDragMode == DragMode.DragOutHandle)
                     {
-                        BakeCurvesToGodotTracks();
-                        EmitSignal(SignalName.KeyframesModified);
+                        bool hasMoved = _dragStartMousePos.DistanceTo(pos) >= 3f;
+                        if (hasMoved)
+                        {
+                            if (_draggedCurve != null)
+                            {
+                                _draggedCurve.Keys.Sort((a, b) => a.Time.CompareTo(b.Time));
+                                ComputeAutoTangents(_draggedCurve);
+                            }
+                            BakeCurvesToGodotTracks();
+                            EmitSignal(SignalName.KeyframesModified);
+                        }
                     }
                     else if (_currentDragMode == DragMode.BoxSelect)
                     {
@@ -1230,8 +1473,6 @@ namespace DeadlockPlayground.Animation
                 _draggedKey.Time = Math.Clamp(TimeFromX(pos.X), 0.0, _duration);
                 _draggedKey.Value = ValueFromY(pos.Y);
                 if (_draggedCurve != null) ComputeAutoTangents(_draggedCurve);
-                BakeCurvesToGodotTracks();
-                EmitSignal(SignalName.KeyframesModified);
                 NotifyKeySelectionChanged();
                 QueueRedraw();
             }
@@ -1246,8 +1487,6 @@ namespace DeadlockPlayground.Animation
                 {
                     _draggedKey.OutHandle = new Vector2(-dt, -dv);
                 }
-                BakeCurvesToGodotTracks();
-                EmitSignal(SignalName.KeyframesModified);
                 QueueRedraw();
             }
             else if (_currentDragMode == DragMode.DragOutHandle && _draggedKey != null)
@@ -1261,8 +1500,6 @@ namespace DeadlockPlayground.Animation
                 {
                     _draggedKey.InHandle = new Vector2(-dt, -dv);
                 }
-                BakeCurvesToGodotTracks();
-                EmitSignal(SignalName.KeyframesModified);
                 QueueRedraw();
             }
         }
@@ -1293,26 +1530,34 @@ namespace DeadlockPlayground.Animation
                 {
                     if (!k.IsSelected) continue;
 
-                    Vector2 inPt = CanvasPoint(k.Time + k.InHandle.X, k.Value + k.InHandle.Y);
-                    if (pos.DistanceTo(inPt) <= 6f)
+                    if (k.InHandle.LengthSquared() > 0.001f)
                     {
-                        k.IsInHandleSelected = true;
-                        _currentDragMode = DragMode.DragInHandle;
-                        _draggedKey = k;
-                        _draggedCurve = curve;
-                        QueueRedraw();
-                        return true;
+                        Vector2 inPt = CanvasPoint(k.Time + k.InHandle.X, k.Value + k.InHandle.Y);
+                        if (pos.DistanceTo(inPt) <= 7f)
+                        {
+                            k.IsInHandleSelected = true;
+                            _currentDragMode = DragMode.DragInHandle;
+                            _draggedKey = k;
+                            _draggedCurve = curve;
+                            _dragStartMousePos = pos;
+                            QueueRedraw();
+                            return true;
+                        }
                     }
 
-                    Vector2 outPt = CanvasPoint(k.Time + k.OutHandle.X, k.Value + k.OutHandle.Y);
-                    if (pos.DistanceTo(outPt) <= 6f)
+                    if (k.OutHandle.LengthSquared() > 0.001f)
                     {
-                        k.IsOutHandleSelected = true;
-                        _currentDragMode = DragMode.DragOutHandle;
-                        _draggedKey = k;
-                        _draggedCurve = curve;
-                        QueueRedraw();
-                        return true;
+                        Vector2 outPt = CanvasPoint(k.Time + k.OutHandle.X, k.Value + k.OutHandle.Y);
+                        if (pos.DistanceTo(outPt) <= 7f)
+                        {
+                            k.IsOutHandleSelected = true;
+                            _currentDragMode = DragMode.DragOutHandle;
+                            _draggedKey = k;
+                            _draggedCurve = curve;
+                            _dragStartMousePos = pos;
+                            QueueRedraw();
+                            return true;
+                        }
                     }
                 }
             }
@@ -1327,16 +1572,18 @@ namespace DeadlockPlayground.Animation
                 foreach (var k in curve.Keys)
                 {
                     Vector2 pt = CanvasPoint(k.Time, k.Value);
-                    if (pos.DistanceTo(pt) <= 7f)
+                    if (pos.DistanceTo(pt) <= 10f)
                     {
                         if (!isShift)
                         {
                             DeselectAll();
                         }
                         k.IsSelected = true;
+                        ActiveCurve = curve;
                         _currentDragMode = DragMode.DragKey;
                         _draggedKey = k;
                         _draggedCurve = curve;
+                        _dragStartMousePos = pos;
                         NotifyKeySelectionChanged();
                         QueueRedraw();
                         return true;
@@ -1372,45 +1619,191 @@ namespace DeadlockPlayground.Animation
                 var trackType = _activeAnimation.TrackGetType(trackIdx);
                 var curveList = group.ToList();
 
+                var cX = curveList.FirstOrDefault(c => c.SubChannel == 0 || c.SubChannel == 3);
+                var cY = curveList.FirstOrDefault(c => c.SubChannel == 1 || c.SubChannel == 4);
+                var cZ = curveList.FirstOrDefault(c => c.SubChannel == 2 || c.SubChannel == 5);
+
+                bool hasActiveModifiers = curveList.Any(c => c.Modifiers.Any(m => !m.IsMuted));
+
+                // 1. Determine keyframe times to bake
+                List<double> bakeTimes;
+                if (hasActiveModifiers)
+                {
+                    // Dense baking for live viewport animation with modifiers
+                    int totalFrames = Math.Max(1, (int)Math.Round(_duration * _fps) + 1);
+                    bakeTimes = new List<double>(totalFrames);
+                    for (int f = 0; f < totalFrames; f++)
+                    {
+                        bakeTimes.Add(f / (double)_fps);
+                    }
+                }
+                else
+                {
+                    // Clean keyframe times from authored keys
+                    bakeTimes = curveList
+                        .SelectMany(c => c.Keys)
+                        .Select(k => Math.Round(k.Time * _fps) / (double)_fps)
+                        .Distinct()
+                        .OrderBy(t => t)
+                        .ToList();
+                }
+
+                // 2. Remove obsolete keys from Godot track (keys not in bakeTimes)
+                for (int k = _activeAnimation.TrackGetKeyCount(trackIdx) - 1; k >= 0; k--)
+                {
+                    double t = _activeAnimation.TrackGetKeyTime(trackIdx, k);
+                    if (!bakeTimes.Any(bt => Math.Abs(bt - t) < 0.0005))
+                    {
+                        _activeAnimation.TrackRemoveKey(trackIdx, k);
+                    }
+                }
+
+                // 3. Insert or update keyframe values
                 if (trackType == Godot.Animation.TrackType.Position3D)
                 {
-                    var cX = curveList.FirstOrDefault(c => c.SubChannel == 0);
-                    var cY = curveList.FirstOrDefault(c => c.SubChannel == 1);
-                    var cZ = curveList.FirstOrDefault(c => c.SubChannel == 2);
-
-                    int kCount = _activeAnimation.TrackGetKeyCount(trackIdx);
-                    for (int k = 0; k < kCount; k++)
+                    foreach (double t in bakeTimes)
                     {
-                        double t = _activeAnimation.TrackGetKeyTime(trackIdx, k);
-                        float x = cX != null ? SampleCurveAt(cX, t) : 0f;
-                        float y = cY != null ? SampleCurveAt(cY, t) : 0f;
-                        float z = cZ != null ? SampleCurveAt(cZ, t) : 0f;
-                        _activeAnimation.TrackSetKeyValue(trackIdx, k, new Vector3(x, y, z));
+                        float x = cX != null ? cX.Evaluate(t, _fps) : 0f;
+                        float y = cY != null ? cY.Evaluate(t, _fps) : 0f;
+                        float z = cZ != null ? cZ.Evaluate(t, _fps) : 0f;
+                        Vector3 val = new(x, y, z);
+
+                        int keyIdx = _activeAnimation.TrackFindKey(trackIdx, t, Godot.Animation.FindMode.Exact);
+                        if (keyIdx != -1)
+                        {
+                            _activeAnimation.TrackSetKeyValue(trackIdx, keyIdx, val);
+                        }
+                        else
+                        {
+                            _activeAnimation.PositionTrackInsertKey(trackIdx, t, val);
+                        }
                     }
                 }
                 else if (trackType == Godot.Animation.TrackType.Rotation3D)
                 {
-                    var cX = curveList.FirstOrDefault(c => c.SubChannel == 3);
-                    var cY = curveList.FirstOrDefault(c => c.SubChannel == 4);
-                    var cZ = curveList.FirstOrDefault(c => c.SubChannel == 5);
-
-                    int kCount = _activeAnimation.TrackGetKeyCount(trackIdx);
-                    for (int k = 0; k < kCount; k++)
+                    foreach (double t in bakeTimes)
                     {
-                        double t = _activeAnimation.TrackGetKeyTime(trackIdx, k);
-                        float degX = cX != null ? SampleCurveAt(cX, t) : 0f;
-                        float degY = cY != null ? SampleCurveAt(cY, t) : 0f;
-                        float degZ = cZ != null ? SampleCurveAt(cZ, t) : 0f;
+                        float degX = cX != null ? cX.Evaluate(t, _fps) : 0f;
+                        float degY = cY != null ? cY.Evaluate(t, _fps) : 0f;
+                        float degZ = cZ != null ? cZ.Evaluate(t, _fps) : 0f;
 
                         Vector3 eulerRad = new(Mathf.DegToRad(degX), Mathf.DegToRad(degY), Mathf.DegToRad(degZ));
                         Quaternion q = Quaternion.FromEuler(eulerRad).Normalized();
-                        _activeAnimation.TrackSetKeyValue(trackIdx, k, q);
+
+                        int keyIdx = _activeAnimation.TrackFindKey(trackIdx, t, Godot.Animation.FindMode.Exact);
+                        if (keyIdx != -1)
+                        {
+                            _activeAnimation.TrackSetKeyValue(trackIdx, keyIdx, q);
+                        }
+                        else
+                        {
+                            _activeAnimation.RotationTrackInsertKey(trackIdx, t, q);
+                        }
                     }
                 }
             }
         }
 
-        private static float SampleCurveAt(ChannelCurve curve, double time)
+        public bool AddModifier(ChannelCurve curve, FCurveModifier modifier)
+        {
+            if (curve == null || modifier == null) return false;
+
+            if (modifier is CyclesModifier)
+            {
+                if (curve.Modifiers.Any(m => m is GaussianSmoothModifier))
+                {
+                    GD.PrintErr("[GraphEditor] Cannot add Cycles Modifier: Incompatible with Gaussian Smooth Modifier.");
+                    return false;
+                }
+                curve.Modifiers.Insert(0, modifier);
+            }
+            else if (modifier is GaussianSmoothModifier)
+            {
+                if (curve.Modifiers.Any(m => m is CyclesModifier))
+                {
+                    GD.PrintErr("[GraphEditor] Cannot add Gaussian Smooth Modifier: Incompatible with Cycles Modifier.");
+                    return false;
+                }
+                curve.Modifiers.Insert(0, modifier);
+            }
+            else
+            {
+                curve.Modifiers.Add(modifier);
+            }
+
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            EmitSignal(SignalName.ModifiersModified);
+            QueueRedraw();
+            return true;
+        }
+
+        public void RemoveModifier(ChannelCurve curve, FCurveModifier modifier)
+        {
+            if (curve == null || modifier == null) return;
+            curve.Modifiers.Remove(modifier);
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            EmitSignal(SignalName.ModifiersModified);
+            QueueRedraw();
+        }
+
+        public void RemoveModifiers(ChannelCurve curve, ModifierRemoveMode mode, string typeName = null)
+        {
+            if (curve == null || curve.Modifiers.Count == 0) return;
+
+            switch (mode)
+            {
+                case ModifierRemoveMode.RemoveAll:
+                    curve.Modifiers.Clear();
+                    break;
+                case ModifierRemoveMode.RemoveFirst:
+                    curve.Modifiers.RemoveAt(0);
+                    break;
+                case ModifierRemoveMode.RemoveType:
+                    if (!string.IsNullOrEmpty(typeName))
+                    {
+                        curve.Modifiers.RemoveAll(m => m.TypeName.Equals(typeName, StringComparison.OrdinalIgnoreCase));
+                    }
+                    break;
+            }
+
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            EmitSignal(SignalName.ModifiersModified);
+            QueueRedraw();
+        }
+
+        public void MoveModifier(ChannelCurve curve, int index, int direction)
+        {
+            if (curve == null || index < 0 || index >= curve.Modifiers.Count) return;
+            int targetIdx = index + direction;
+            if (targetIdx < 0 || targetIdx >= curve.Modifiers.Count) return;
+
+            var mod = curve.Modifiers[index];
+            var targetMod = curve.Modifiers[targetIdx];
+
+            if (mod.RequiresFirst && targetIdx != 0) return;
+            if (targetMod.RequiresFirst && index != 0) return;
+
+            curve.Modifiers.RemoveAt(index);
+            curve.Modifiers.Insert(targetIdx, mod);
+
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            EmitSignal(SignalName.ModifiersModified);
+            QueueRedraw();
+        }
+
+        public void NotifyModifiersChanged()
+        {
+            BakeCurvesToGodotTracks();
+            EmitSignal(SignalName.KeyframesModified);
+            EmitSignal(SignalName.ModifiersModified);
+            QueueRedraw();
+        }
+
+        public static float SampleCurveAt(ChannelCurve curve, double time)
         {
             var keys = curve.Keys;
             if (keys.Count == 0) return 0f;

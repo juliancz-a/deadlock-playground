@@ -183,10 +183,11 @@ public partial class VpkLoaderTest : Node3D
         Skeleton3D skeleton,
         AnimationPlayer animPlayer,
         DeadlockPlayground.Tools.DeadlockAnimLoader.AnimSequenceInfo idleInfo = null,
-        string targetAnimName = null)
+        string targetAnimName = null,
+        bool inPlace = true)
     {
         if (_currentVrfModel == null || info == null || skeleton == null || animPlayer == null) return null;
-        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel, idleInfo, targetAnimName);
+        return DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(info, skeleton, animPlayer, _currentVrfModel, GetOrCreateFileLoader(), idleInfo, targetAnimName, inPlace);
     }
 
 	private void EmitLoadProgress(string msg)
@@ -515,7 +516,7 @@ public partial class VpkLoaderTest : Node3D
 						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
 
 						// Idle clips (take up to 4, prioritized)
-						if (categorized.TryGetValue("Idle", out var idles))
+						if (categorized.TryGetValue("Idles & Stances", out var idles) || categorized.TryGetValue("Idle", out idles))
 						{
 							selectedAnims.AddRange(idles.OrderBy(a =>
 							{
@@ -539,8 +540,14 @@ public partial class VpkLoaderTest : Node3D
 							}).Take(4));
 						}
 
+						// Traversal clips (jump, zipline, mantle, air - take up to 3)
+						if (categorized.TryGetValue("Traversal & Zipline", out var traversals))
+						{
+							selectedAnims.AddRange(traversals.Take(3));
+						}
+
 						// Combat clips (shoot, reload, melee, aim - take up to 4)
-						if (categorized.TryGetValue("Combat", out var combats))
+						if (categorized.TryGetValue("Combat & Attacks", out var combats) || categorized.TryGetValue("Combat", out combats))
 						{
 							selectedAnims.AddRange(combats.OrderBy(a =>
 							{
@@ -553,19 +560,19 @@ public partial class VpkLoaderTest : Node3D
 						}
 
 						// Abilities clips (take up to 3)
-						if (categorized.TryGetValue("Abilities", out var abilities))
+						if (categorized.TryGetValue("Abilities & Magic", out var abilities) || categorized.TryGetValue("Abilities", out abilities))
 						{
 							selectedAnims.AddRange(abilities.Take(3));
 						}
 
 						// Emotes & Expressions (take up to 3)
-						if (categorized.TryGetValue("Emotes & Expressions", out var emotes))
+						if (categorized.TryGetValue("Emotes & Taunts", out var emotes) || categorized.TryGetValue("Emotes & Expressions", out emotes))
 						{
 							selectedAnims.AddRange(emotes.Take(3));
 						}
 
 						// Reactions (take up to 2)
-						if (categorized.TryGetValue("Reactions", out var reactions))
+						if (categorized.TryGetValue("Reactions & Status", out var reactions) || categorized.TryGetValue("Reactions", out reactions))
 						{
 							selectedAnims.AddRange(reactions.Take(2));
 						}

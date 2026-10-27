@@ -212,6 +212,22 @@ public partial class SkeletonGizmoManager : Node3D
         if (!_isGizmoEnabled) return;
         if (@event is InputEventMouseButton mouseBtn && mouseBtn.Pressed && mouseBtn.ButtonIndex == MouseButton.Left)
         {
+            // Do not raycast or deselect bones if clicking over UI controls
+            var hovered = GetTree()?.Root?.GuiGetHoveredControl();
+            if (hovered != null)
+            {
+                bool isMainViewport = (hovered.Name == "SubViewportContainer" && hovered.GetParent()?.Name == "ViewportArea");
+                if (!isMainViewport) return;
+            }
+
+            // Also ignore if clicking anywhere within the AnimationStudioDock bounds
+            var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as Control;
+            if (animDock != null && animDock.Visible && animDock.IsVisibleInTree())
+            {
+                Vector2 mousePos = GetViewport()?.GetMousePosition() ?? Vector2.Zero;
+                if (animDock.GetGlobalRect().HasPoint(mousePos)) return;
+            }
+
             // If user clicked in empty space, deselect current bone
             var camera = GetViewport()?.GetCamera3D();
             if (camera != null)

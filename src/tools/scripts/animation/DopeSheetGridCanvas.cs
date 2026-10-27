@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
+using DeadlockPlayground.Tools;
 
 namespace DeadlockPlayground.Animation
 {
@@ -665,10 +666,12 @@ namespace DeadlockPlayground.Animation
         {
             if (@event is InputEventMouseButton mb)
             {
+                AcceptEvent();
                 HandleMouseButton(mb);
             }
             else if (@event is InputEventMouseMotion mm)
             {
+                AcceptEvent();
                 HandleMouseMotion(mm);
             }
             else if (@event is InputEventKey key && key.Pressed && !key.Echo)
@@ -929,20 +932,20 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            if (key.Keycode == Key.Delete || key.Keycode == Key.X)
+            if (KeybindsManager.IsActionTriggered("anim_delete_keys", key))
             {
                 DeleteSelectedKeys();
                 GetViewport().SetInputAsHandled();
             }
-            else if (key.Keycode == Key.D && key.ShiftPressed)
+            else if (KeybindsManager.IsActionTriggered("anim_duplicate_keys", key))
             {
                 DuplicateSelectedKeys();
                 GetViewport().SetInputAsHandled();
             }
-            else if (key.Keycode == Key.A)
+            else if (KeybindsManager.IsActionTriggered("anim_select_all", key))
             {
-                if (key.CtrlPressed || _selectedKeys.Count == 0) SelectAllKeys();
-                else DeselectAllKeys();
+                if (key.AltPressed || _selectedKeys.Count > 0) DeselectAllKeys();
+                else SelectAllKeys();
                 GetViewport().SetInputAsHandled();
             }
         }

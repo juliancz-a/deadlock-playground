@@ -122,6 +122,34 @@ namespace DeadlockPlayground.Tools
             AddDefault("Bones", "view_xray", "Toggle X-Ray", "Toggle Submesh Bone & Wireframe X-Ray mode", Key.X);
             AddDefault("Bones", "bones_ik_toggle", "Toggle IK Handles", "Toggle Inverse Kinematics limb handles", Key.I);
             AddDefault("Bones", "bones_reset_pose", "Reset Skeleton Pose", "Reset character skeleton to default bind pose", Key.P, ctrl: true);
+
+            // 4. Animation Studio Deck
+            AddDefault("Animation", "anim_toggle_dock", "Toggle Animation Dock", "Open or collapse bottom Animation Studio Dock", Key.Space, ctrl: true);
+            AddDefault("Animation", "anim_play_toggle", "Play / Pause", "Toggle animation playback transport", Key.Space);
+            AddDefault("Animation", "anim_step_prev", "Previous Frame", "Step playhead backward by 1 frame", Key.Left);
+            AddDefault("Animation", "anim_step_next", "Next Frame", "Step playhead forward by 1 frame", Key.Right);
+            AddDefault("Animation", "anim_seek_start", "Jump to Start", "Seek playhead to frame 0", Key.Left, shift: true, secKey: Key.Home);
+            AddDefault("Animation", "anim_seek_end", "Jump to End", "Seek playhead to end frame", Key.Right, shift: true, secKey: Key.End);
+            AddDefault("Animation", "anim_tab_dopesheet", "Dope Sheet Editor", "Switch to Dope Sheet editor tab", Key.Key1);
+            AddDefault("Animation", "anim_tab_grapheditor", "Graph Editor", "Switch to F-Curve Graph Editor tab", Key.Key2);
+            AddDefault("Animation", "anim_tab_clippose", "Clip & Pose Settings", "Switch to Clip & Pose settings tab", Key.Key3);
+            AddDefault("Animation", "anim_insert_key", "Insert Keyframe", "Insert keyframe at playhead for selected bone", Key.I);
+            AddDefault("Animation", "anim_delete_keys", "Delete Keyframes", "Delete selected keyframes from active curves/tracks", Key.Delete, secKey: Key.X);
+            AddDefault("Animation", "anim_duplicate_keys", "Duplicate Keyframes", "Duplicate selected keyframes offset by 1 frame", Key.D, shift: true);
+            AddDefault("Animation", "anim_select_all", "Select / Deselect All", "Toggle select all or deselect all keyframes", Key.A);
+            AddDefault("Animation", "anim_box_select", "Box Select Keys", "Activate rectangular marquee selection for keyframes", Key.B);
+            AddDefault("Animation", "anim_fit_view", "Fit View to Canvas", "Frame and center all visible keyframes or curves", Key.Home);
+            AddDefault("Animation", "anim_fit_selected", "Frame Selected Keys", "Frame and zoom in on selected keyframes", Key.Period, secKey: Key.KpPeriod);
+            AddDefault("Animation", "anim_transform_grab", "Grab / Move Keys", "Start interactive keyframe translation / retiming", Key.G);
+            AddDefault("Animation", "anim_transform_scale", "Scale Keys", "Start interactive keyframe scaling around playhead", Key.S);
+            AddDefault("Animation", "anim_transform_rotate", "Rotate Keys (Graph)", "Start interactive curve rotation on selected F-Curve keys", Key.R);
+            AddDefault("Animation", "anim_toggle_modifiers", "Toggle Modifiers Sidebar", "Toggle F-Curve Modifiers sidebar panel in Graph Editor", Key.N);
+            AddDefault("Animation", "anim_copy_pose", "Copy Pose", "Copy selected bone pose to clipboard", Key.C, ctrl: true);
+            AddDefault("Animation", "anim_paste_pose", "Paste Pose", "Paste bone pose from clipboard onto current frame", Key.V, ctrl: true);
+            AddDefault("Animation", "anim_paste_mirror_pose", "Paste Mirrored Pose", "Paste opposite mirrored bone pose onto current frame", Key.V, ctrl: true, shift: true);
+            AddDefault("Animation", "anim_undo", "Undo Animation", "Undo last animation or keyframe modification", Key.Z, ctrl: true);
+            AddDefault("Animation", "anim_redo", "Redo Animation", "Redo previously undone animation action", Key.Y, ctrl: true, secKey: Key.Z, secCtrl: true, secShift: true);
+            AddDefault("Animation", "anim_cheatsheet", "Shortcuts Cheatsheet", "Open Animation Editor Shortcuts Cheatsheet dialog", Key.F1, secKey: Key.Slash, secShift: true);
         }
 
         private static void AddDefault(string category, string action, string name, string desc, Key key, 
@@ -216,10 +244,17 @@ namespace DeadlockPlayground.Tools
         public static bool CheckConflict(string action, Key key, bool ctrl, bool shift, bool alt, out string conflictingActionName)
         {
             conflictingActionName = null;
+            string targetCat = _bindings.TryGetValue(action, out var cur) ? cur.Category : "";
+
             foreach (var kvp in _bindings)
             {
                 if (kvp.Key == action) continue;
                 var b = kvp.Value;
+
+                // Scope conflicts to the same category so paint and animation shortcuts don't block each other
+                if (!string.IsNullOrEmpty(targetCat) && !string.IsNullOrEmpty(b.Category) && b.Category != targetCat)
+                    continue;
+
                 if (b.Keycode == key && b.Ctrl == ctrl && b.Shift == shift && b.Alt == alt)
                 {
                     conflictingActionName = b.DisplayName;
@@ -259,12 +294,17 @@ namespace DeadlockPlayground.Tools
         public static void ForceRebind(string action, Key key, bool ctrl, bool shift, bool alt)
         {
             EnsureInitialized();
+            string targetCat = _bindings.TryGetValue(action, out var cur) ? cur.Category : "";
 
-            // Clear conflicting binding on other actions
+            // Clear conflicting binding on other actions in the same category
             foreach (var kvp in _bindings)
             {
                 if (kvp.Key == action) continue;
                 var b = kvp.Value;
+
+                if (!string.IsNullOrEmpty(targetCat) && !string.IsNullOrEmpty(b.Category) && b.Category != targetCat)
+                    continue;
+
                 if (b.Keycode == key && b.Ctrl == ctrl && b.Shift == shift && b.Alt == alt)
                 {
                     b.Keycode = Key.None;
@@ -286,6 +326,30 @@ namespace DeadlockPlayground.Tools
                 SaveKeybinds();
                 OnKeybindsChanged?.Invoke();
             }
+        }
+
+        /// <summary>
+        /// Fast, reliable shortcut tester that tests if an InputEventKey matches an action binding
+        /// against both primary and secondary keys with exact modifiers.
+        /// </summary>
+        public static bool IsActionTriggered(string action, InputEventKey keyEvent)
+        {
+            EnsureInitialized();
+            if (keyEvent == null || !keyEvent.Pressed || keyEvent.Echo) return false;
+            if (!_bindings.TryGetValue(action, out var b)) return false;
+
+            Key pressedKey = keyEvent.Keycode != Key.None ? keyEvent.Keycode : keyEvent.PhysicalKeycode;
+            bool ctrl = keyEvent.CtrlPressed || keyEvent.MetaPressed;
+            bool shift = keyEvent.ShiftPressed;
+            bool alt = keyEvent.AltPressed;
+
+            if (b.Keycode != Key.None && pressedKey == b.Keycode && ctrl == b.Ctrl && shift == b.Shift && alt == b.Alt)
+                return true;
+
+            if (b.SecondaryKeycode != Key.None && pressedKey == b.SecondaryKeycode && ctrl == b.SecondaryCtrl && shift == b.SecondaryShift && alt == b.SecondaryAlt)
+                return true;
+
+            return false;
         }
 
         public static void RegisterAllToInputMap()

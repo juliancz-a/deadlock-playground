@@ -1,10 +1,12 @@
 using Godot;
 using DeadlockPlayground.UI;
+using DeadlockPlayground.Tools;
 
 namespace DeadlockPlayground.Animation
 {
     /// <summary>
-    /// Blender-style hotkeys and centralized shortcut dispatcher for the Animation Studio Dock.
+    /// Centralized shortcut dispatcher for the Animation Studio Dock.
+    /// Fully integrated with KeybindsManager so users can customize any shortcut in Settings > Keybinds > Animation.
     /// Manages transport (Space, arrows), navigation (Home, Numpad .), modal transforms (G, S, R),
     /// keyframe editing (A, I, X, Del, Shift+D), clipboard (Ctrl+C, Ctrl+V), and tab switching.
     /// </summary>
@@ -26,7 +28,7 @@ namespace DeadlockPlayground.Animation
             if (focusOwner is LineEdit || focusOwner is TextEdit) return false;
 
             // 1. Toggle Dock Open / Closed (Global shortcut)
-            if (keyEvent.CtrlPressed && keyEvent.Keycode == Key.Space)
+            if (KeybindsManager.IsActionTriggered("anim_toggle_dock", keyEvent))
             {
                 _dock.ToggleOpen();
                 return true;
@@ -35,128 +37,138 @@ namespace DeadlockPlayground.Animation
             // If dock is collapsed, ignore all internal hotkeys
             if (!_dock.IsOpen) return false;
 
-            // 2. Transport & Playback Hotkeys
-            if (!keyEvent.CtrlPressed && !keyEvent.AltPressed)
+            // 2. Open Shortcuts Cheatsheet Modal (F1 / ?)
+            if (KeybindsManager.IsActionTriggered("anim_cheatsheet", keyEvent))
             {
-                if (keyEvent.Keycode == Key.Space)
-                {
-                    AnimationTransportService.Instance.TogglePlay();
-                    return true;
-                }
-
-                if (keyEvent.Keycode == Key.Left)
-                {
-                    if (keyEvent.ShiftPressed) AnimationTransportService.Instance.Seek(0.0);
-                    else AnimationTransportService.Instance.Step(-1);
-                    return true;
-                }
-
-                if (keyEvent.Keycode == Key.Right)
-                {
-                    if (keyEvent.ShiftPressed) AnimationTransportService.Instance.Seek(AnimationTransportService.Instance.Length);
-                    else AnimationTransportService.Instance.Step(1);
-                    return true;
-                }
-
-                // Tab Switching via 1, 2, 3
-                if (!keyEvent.ShiftPressed)
-                {
-                    if (keyEvent.Keycode == Key.Key1)
-                    {
-                        _dock.SwitchTab(AnimationStudioDock.StudioTab.DopeSheet);
-                        return true;
-                    }
-                    if (keyEvent.Keycode == Key.Key2)
-                    {
-                        _dock.SwitchTab(AnimationStudioDock.StudioTab.GraphEditor);
-                        return true;
-                    }
-                    if (keyEvent.Keycode == Key.Key3)
-                    {
-                        _dock.SwitchTab(AnimationStudioDock.StudioTab.ClipSettings);
-                        return true;
-                    }
-                }
+                _dock.OpenShortcutsCheatsheet();
+                return true;
             }
 
-            // 3. Poses & Clipboard (Ctrl shortcuts)
-            if (keyEvent.CtrlPressed)
+            // 3. Transport & Playback Hotkeys
+            if (KeybindsManager.IsActionTriggered("anim_play_toggle", keyEvent))
             {
-                if (keyEvent.Keycode == Key.Z)
-                {
-                    if (keyEvent.ShiftPressed) _dock.Redo();
-                    else _dock.Undo();
-                    return true;
-                }
-                if (keyEvent.Keycode == Key.Y)
-                {
-                    _dock.Redo();
-                    return true;
-                }
-                if (keyEvent.Keycode == Key.C)
-                {
-                    _dock.CopyPose();
-                    return true;
-                }
-                if (keyEvent.Keycode == Key.V)
-                {
-                    if (keyEvent.ShiftPressed) _dock.PasteMirrorPose();
-                    else _dock.PastePose();
-                    return true;
-                }
+                AnimationTransportService.Instance.TogglePlay();
+                return true;
             }
 
-            // 4. Keyframe Insert
-            if (keyEvent.Keycode == Key.I && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+            if (KeybindsManager.IsActionTriggered("anim_seek_start", keyEvent))
+            {
+                AnimationTransportService.Instance.Seek(0.0);
+                return true;
+            }
+
+            if (KeybindsManager.IsActionTriggered("anim_seek_end", keyEvent))
+            {
+                AnimationTransportService.Instance.Seek(AnimationTransportService.Instance.Length);
+                return true;
+            }
+
+            if (KeybindsManager.IsActionTriggered("anim_step_prev", keyEvent))
+            {
+                AnimationTransportService.Instance.Step(-1);
+                return true;
+            }
+
+            if (KeybindsManager.IsActionTriggered("anim_step_next", keyEvent))
+            {
+                AnimationTransportService.Instance.Step(1);
+                return true;
+            }
+
+            // 4. Tab Switching
+            if (KeybindsManager.IsActionTriggered("anim_tab_dopesheet", keyEvent))
+            {
+                _dock.SwitchTab(AnimationStudioDock.StudioTab.DopeSheet);
+                return true;
+            }
+            if (KeybindsManager.IsActionTriggered("anim_tab_grapheditor", keyEvent))
+            {
+                _dock.SwitchTab(AnimationStudioDock.StudioTab.GraphEditor);
+                return true;
+            }
+            if (KeybindsManager.IsActionTriggered("anim_tab_clippose", keyEvent))
+            {
+                _dock.SwitchTab(AnimationStudioDock.StudioTab.ClipSettings);
+                return true;
+            }
+
+            // 5. Poses & Clipboard
+            if (KeybindsManager.IsActionTriggered("anim_undo", keyEvent))
+            {
+                _dock.Undo();
+                return true;
+            }
+            if (KeybindsManager.IsActionTriggered("anim_redo", keyEvent))
+            {
+                _dock.Redo();
+                return true;
+            }
+            if (KeybindsManager.IsActionTriggered("anim_copy_pose", keyEvent))
+            {
+                _dock.CopyPose();
+                return true;
+            }
+            if (KeybindsManager.IsActionTriggered("anim_paste_mirror_pose", keyEvent))
+            {
+                _dock.PasteMirrorPose();
+                return true;
+            }
+            if (KeybindsManager.IsActionTriggered("anim_paste_pose", keyEvent))
+            {
+                _dock.PastePose();
+                return true;
+            }
+
+            // 6. Keyframe Insert
+            if (KeybindsManager.IsActionTriggered("anim_insert_key", keyEvent))
             {
                 _dock.InsertKeyframeForSelectedBone();
                 return true;
             }
 
-            // 5. Canvas-specific keybinds
+            // 7. Canvas-specific keybinds
             if (_dock.CurrentTab == AnimationStudioDock.StudioTab.DopeSheet)
             {
                 var dope = _dock.DopeSheetCanvas;
                 if (dope == null) return false;
 
-                if (keyEvent.Keycode == Key.Home)
+                if (KeybindsManager.IsActionTriggered("anim_fit_view", keyEvent))
                 {
                     dope.FrameAll();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.KpPeriod || keyEvent.Keycode == Key.Period)
+                if (KeybindsManager.IsActionTriggered("anim_fit_selected", keyEvent))
                 {
                     dope.FrameSelected();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.A)
+                if (KeybindsManager.IsActionTriggered("anim_select_all", keyEvent))
                 {
                     if (keyEvent.AltPressed) dope.DeselectAllKeys();
-                    else if (keyEvent.CtrlPressed) dope.SelectAllKeys();
                     else dope.SelectAllKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.Delete || keyEvent.Keycode == Key.X)
+                if (KeybindsManager.IsActionTriggered("anim_delete_keys", keyEvent))
                 {
                     dope.DeleteSelectedKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.D && keyEvent.ShiftPressed)
+                if (KeybindsManager.IsActionTriggered("anim_duplicate_keys", keyEvent))
                 {
                     dope.DuplicateSelectedKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.G && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_transform_grab", keyEvent))
                 {
                     dope.StartGrabKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.S && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_transform_scale", keyEvent))
                 {
                     dope.StartScaleKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.B && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_box_select", keyEvent))
                 {
                     dope.StartBoxSelect();
                     return true;
@@ -167,44 +179,54 @@ namespace DeadlockPlayground.Animation
                 var graph = _dock.GraphEditorCanvas;
                 if (graph == null) return false;
 
-                if (keyEvent.Keycode == Key.Home)
+                if (KeybindsManager.IsActionTriggered("anim_fit_view", keyEvent))
                 {
                     graph.FitView();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.KpPeriod || keyEvent.Keycode == Key.Period)
+                if (KeybindsManager.IsActionTriggered("anim_fit_selected", keyEvent))
                 {
                     graph.FitSelectedView();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.A)
+                if (KeybindsManager.IsActionTriggered("anim_select_all", keyEvent))
                 {
                     graph.ToggleSelectAll();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.Delete || keyEvent.Keycode == Key.X)
+                if (KeybindsManager.IsActionTriggered("anim_delete_keys", keyEvent))
                 {
                     graph.DeleteSelectedKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.D && keyEvent.ShiftPressed)
+                if (KeybindsManager.IsActionTriggered("anim_duplicate_keys", keyEvent))
                 {
                     graph.DuplicateSelectedKeys();
                     return true;
                 }
-                if (keyEvent.Keycode == Key.G && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_toggle_modifiers", keyEvent))
+                {
+                    _dock.ToggleModifiersSidebar();
+                    return true;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_transform_grab", keyEvent))
                 {
                     graph.StartModalTransform(GraphEditorCanvas.ModalTransformMode.Grab);
                     return true;
                 }
-                if (keyEvent.Keycode == Key.S && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_transform_scale", keyEvent))
                 {
                     graph.StartModalTransform(GraphEditorCanvas.ModalTransformMode.Scale);
                     return true;
                 }
-                if (keyEvent.Keycode == Key.R && !keyEvent.CtrlPressed && !keyEvent.AltPressed)
+                if (KeybindsManager.IsActionTriggered("anim_transform_rotate", keyEvent))
                 {
                     graph.StartModalTransform(GraphEditorCanvas.ModalTransformMode.Rotate);
+                    return true;
+                }
+                if (KeybindsManager.IsActionTriggered("anim_box_select", keyEvent))
+                {
+                    graph.StartBoxSelect();
                     return true;
                 }
             }

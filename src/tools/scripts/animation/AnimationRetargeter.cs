@@ -2480,53 +2480,7 @@ namespace DeadlockPlayground.Animation
         /// </summary>
         public static string ResolveSkeletonTrackPrefix(AnimationPlayer animPlayer, Skeleton3D skeleton)
         {
-            if (animPlayer != null)
-            {
-                var libNames = animPlayer.GetAnimationLibraryList();
-                foreach (var libName in libNames)
-                {
-                    var lib = animPlayer.GetAnimationLibrary(libName);
-                    if (lib == null) continue;
-                    var animList = lib.GetAnimationList();
-                    foreach (var aName in animList)
-                    {
-                        var anim = lib.GetAnimation(aName);
-                        if (anim == null || anim.GetTrackCount() == 0) continue;
-                        for (int t = 0; t < anim.GetTrackCount(); t++)
-                        {
-                            string p = anim.TrackGetPath(t).ToString();
-                            int cIdx = p.LastIndexOf(':');
-                            if (cIdx != -1)
-                            {
-                                string prefix = p.Substring(0, cIdx);
-                                if (!string.IsNullOrEmpty(prefix))
-                                {
-                                    return prefix;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (skeleton != null)
-                {
-                    Node rootNode = animPlayer.GetNodeOrNull(animPlayer.RootNode);
-                    if (rootNode != null)
-                    {
-                        string relPath = rootNode.GetPathTo(skeleton).ToString();
-                        if (!string.IsNullOrEmpty(relPath))
-                            return relPath;
-                    }
-                    return animPlayer.GetPathTo(skeleton).ToString();
-                }
-            }
-
-            if (skeleton != null)
-            {
-                return skeleton.Name.ToString();
-            }
-
-            return "GeneralSkeleton";
+            return DeadlockPlayground.Tools.DeadlockAnimLoader.GetSkeletonTrackPathPrefix(animPlayer, skeleton);
         }
 
         public enum SourceRigPoseType

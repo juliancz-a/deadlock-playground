@@ -1678,6 +1678,7 @@ public partial class StudioUIManager : CanvasLayer
         var extraModelModal = _modalsLayer?.FindChild("ExtraModelPickerModal", true, false) as Control;
         var modModal = _modalsLayer?.FindChild("ModPickerModal", true, false) as Control;
         var retargetModal = _modalsLayer?.FindChild("AnimationRetargetModal", true, false) as Control;
+        var shortcutsModal = _modalsLayer?.FindChild("AnimationShortcutsModal", true, false) as Control;
 
         return (_settingsModal != null && _settingsModal.Visible)
             || (_feedbackModal != null && _feedbackModal.Visible)
@@ -1697,7 +1698,8 @@ public partial class StudioUIManager : CanvasLayer
             || (heroModal != null && heroModal.Visible)
             || (extraModelModal != null && extraModelModal.Visible)
             || (modModal != null && modModal.Visible)
-            || (retargetModal != null && retargetModal.Visible);
+            || (retargetModal != null && retargetModal.Visible)
+            || (shortcutsModal != null && shortcutsModal.Visible);
     }
 
     public void UpdateModalsState()

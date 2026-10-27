@@ -69,10 +69,13 @@ namespace DeadlockPlayground.UI
         private SpinBox _spinKeyValue;
         private Button _btnNormalize;
         private Button _btnFitView;
+        private Button _btnToggleModifiers;
+        private Button _btnGraphShortcuts;
         private Label _lblTransformMode;
         private Label _lblActiveBoneChannel;
         private VBoxContainer _channelListVBox;
         private GraphEditorCanvas _graphEditorCanvas;
+        private GraphModifiersPanelUI _modifiersPanel;
 
         // Clip & Pose View Controls
         private SpinBox _spinFps;
@@ -99,6 +102,7 @@ namespace DeadlockPlayground.UI
 
         // External Animation Import Controls
         private Button _btnImportAnim;
+        private Button _btnShortcuts;
         private Button _btnImportExternalAnim;
         private Button _btnBrowseMixamo;
         private Button _btnBrowseMesh2Motion;
@@ -262,7 +266,11 @@ namespace DeadlockPlayground.UI
             _keymap = new AnimationStudioKeymap(this);
             LoadDockSettings();
 
-            _undoRedo.HistoryChanged += UpdateUndoRedoButtons;
+            _undoRedo.HistoryChanged += () =>
+            {
+                UpdateUndoRedoButtons();
+                OnCanvasKeyframesModified();
+            };
             UpdateUndoRedoButtons();
 
             SkeletonGizmoManager.OnBoneSelected += OnViewportBoneSelected;
@@ -394,6 +402,9 @@ namespace DeadlockPlayground.UI
             _lblActiveBoneChannel = FindSceneNode<Label>("LblActiveBoneChannel");
             _channelListVBox = FindSceneNode<VBoxContainer>("ChannelListVBox");
             _graphEditorCanvas = FindSceneNode<GraphEditorCanvas>("GraphCanvas");
+            _btnToggleModifiers = FindSceneNode<Button>("BtnToggleModifiers");
+            _btnGraphShortcuts = FindSceneNode<Button>("BtnGraphShortcuts");
+            _modifiersPanel = FindSceneNode<GraphModifiersPanelUI>("ModifiersPanel");
 
             // Clip & Pose Nodes (inside instanced ClipAndPoseView)
             _spinFps = FindSceneNode<SpinBox>("SpinFps");
@@ -422,6 +433,7 @@ namespace DeadlockPlayground.UI
 
             // External Animation Import & Browse Nodes
             _btnImportAnim = FindSceneNode<Button>("BtnImportAnim");
+            _btnShortcuts = FindSceneNode<Button>("BtnShortcuts");
             _btnImportExternalAnim = FindSceneNode<Button>("BtnImportExternalAnim");
             _btnBrowseMixamo = FindSceneNode<Button>("BtnBrowseMixamo");
             _btnBrowseMesh2Motion = FindSceneNode<Button>("BtnBrowseMesh2Motion");
@@ -546,7 +558,7 @@ namespace DeadlockPlayground.UI
             {
                 _dopeSheetCanvas.SetUndoRedoManager(_undoRedo);
                 _dopeSheetCanvas.PlayheadScrubbed += OnCanvasScrubbed;
-                _dopeSheetCanvas.KeyframesModified += OnCanvasKeyframesModified;
+                _dopeSheetCanvas.KeyframesModified += OnDopeSheetKeyframesModified;
 
                 // Synchronized scrolling
                 _dopeSheetCanvas.VerticalScrollChanged += (scrollY) =>
@@ -608,8 +620,27 @@ namespace DeadlockPlayground.UI
             {
                 _graphEditorCanvas.SetUndoRedoManager(_undoRedo);
                 _graphEditorCanvas.PlayheadScrubbed += OnCanvasScrubbed;
-                _graphEditorCanvas.KeyframesModified += OnCanvasKeyframesModified;
+                _graphEditorCanvas.KeyframesModified += OnGraphEditorKeyframesModified;
                 _graphEditorCanvas.CurvesRebuilt += RebuildChannelList;
+
+                _modifiersPanel?.BindCanvas(_graphEditorCanvas);
+                _graphEditorCanvas.ActiveCurveChanged += (name) =>
+                {
+                    _modifiersPanel?.BindCurve(_graphEditorCanvas.ActiveCurve, _fps);
+                    HighlightActiveChannelRow();
+                };
+
+                _graphEditorCanvas.ModifiersSidebarToggled += () =>
+                {
+                    if (_btnToggleModifiers != null)
+                    {
+                        _btnToggleModifiers.ButtonPressed = !_btnToggleModifiers.ButtonPressed;
+                    }
+                    else if (_modifiersPanel != null)
+                    {
+                        _modifiersPanel.Visible = !_modifiersPanel.Visible;
+                    }
+                };
 
                 _graphEditorCanvas.KeySelectionChanged += (time, value, hasSel) =>
                 {
@@ -629,9 +660,52 @@ namespace DeadlockPlayground.UI
                 {
                     if (_lblTransformMode != null)
                     {
-                        _lblTransformMode.Text = status;
+                        _lblTransformMode.Visible = !string.IsNullOrEmpty(status);
+                        _lblTransformMode.Text = !string.IsNullOrEmpty(status) && status.Contains(']')
+                            ? status.Substring(0, status.IndexOf(']') + 1)
+                            : status;
+                        if (!string.IsNullOrEmpty(status))
+                        {
+                            _lblTransformMode.TooltipText = "Modal Transform Active:\n" +
+                                "• X: Lock Time Axis\n" +
+                                "• Y: Lock Value Axis\n" +
+                                "• Enter / Left Click: Confirm Transform\n" +
+                                "• Escape / Right Click: Cancel Transform";
+                        }
                     }
                 };
+                _graphEditorCanvas.ShortcutsRequested += OpenShortcutsCheatsheet;
+            }
+
+            if (_btnShortcuts != null)
+            {
+                DockIcons.Apply(_btnShortcuts, "key", "Animation Studio Shortcuts & Keymap Cheatsheet (F1 / ?)", iconOnly: true);
+                _btnShortcuts.Pressed += OpenShortcutsCheatsheet;
+            }
+
+            if (_btnGraphShortcuts != null)
+            {
+                DockIcons.Apply(_btnGraphShortcuts, "key", "Animation Editor Shortcuts Cheatsheet (F1 / ?)", iconOnly: true);
+                _btnGraphShortcuts.Pressed += OpenShortcutsCheatsheet;
+            }
+
+            if (_btnToggleModifiers != null)
+            {
+                DockIcons.Apply(_btnToggleModifiers, "layers", "Toggle F-Curve Modifiers Sidebar (N)", iconOnly: false);
+                _btnToggleModifiers.Toggled += (on) =>
+                {
+                    if (_modifiersPanel != null) _modifiersPanel.Visible = on;
+                };
+            }
+
+            if (_modifiersPanel != null)
+            {
+                _modifiersPanel.PanelCloseRequested += () =>
+                {
+                    if (_btnToggleModifiers != null) _btnToggleModifiers.ButtonPressed = false;
+                    else _modifiersPanel.Visible = false;
+                };
+                _modifiersPanel.ModifiersChanged += OnCanvasKeyframesModified;
             }
 
             if (_spinKeyFrame != null)
@@ -1016,6 +1090,7 @@ namespace DeadlockPlayground.UI
 
             // In Godot, for anchors_preset = 12 (bottom-wide):
             // Firmly anchor with EdgeMargin so all borders remain cleanly visible inside the screen.
+            GrowHorizontal = GrowDirection.End;
             SetAnchorAndOffset(Side.Left, 0.0f, EdgeMargin);
             SetAnchorAndOffset(Side.Right, 1.0f, -EdgeMargin);
             SetAnchorAndOffset(Side.Top, 1.0f, -(h + EdgeMargin));
@@ -1313,6 +1388,7 @@ namespace DeadlockPlayground.UI
             if (tab == StudioTab.GraphEditor)
             {
                 _graphEditorCanvas?.SetAnimationAndBone(_activeAnimation, _skeleton, _selectedBoneName, _fps);
+                _modifiersPanel?.BindCurve(_graphEditorCanvas?.ActiveCurve, _fps);
             }
             else if (tab == StudioTab.DopeSheet && (_boneListCanvas == null || _boneListCanvas.BoneCount == 0))
             {
@@ -1552,17 +1628,32 @@ namespace DeadlockPlayground.UI
                 var capturedCurve = curve;
                 row.GuiInput += (ev) =>
                 {
-                    if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+                    if (ev is InputEventMouseButton mb && mb.Pressed)
                     {
-                        if (mb.CtrlPressed)
+                        if (mb.ButtonIndex == MouseButton.Left)
                         {
-                            _graphEditorCanvas.IsolateChannel(capturedCurve);
+                            _graphEditorCanvas.ActiveCurve = capturedCurve;
+                            _modifiersPanel?.BindCurve(capturedCurve, _fps);
+                            HighlightActiveChannelRow();
+
+                            if (mb.CtrlPressed)
+                            {
+                                _graphEditorCanvas.IsolateChannel(capturedCurve);
+                            }
+                            else
+                            {
+                                _graphEditorCanvas.SelectChannel(capturedCurve, addToSelection: mb.ShiftPressed);
+                            }
+                            GetViewport().SetInputAsHandled();
                         }
-                        else
+                        else if (mb.ButtonIndex == MouseButton.Right)
                         {
-                            _graphEditorCanvas.SelectChannel(capturedCurve, addToSelection: mb.ShiftPressed);
+                            _graphEditorCanvas.ActiveCurve = capturedCurve;
+                            _modifiersPanel?.BindCurve(capturedCurve, _fps);
+                            HighlightActiveChannelRow();
+                            ShowChannelContextMenu(capturedCurve, mb.GlobalPosition);
+                            GetViewport().SetInputAsHandled();
                         }
-                        GetViewport().SetInputAsHandled();
                     }
                 };
 
@@ -1585,6 +1676,19 @@ namespace DeadlockPlayground.UI
                     MouseFilter = Control.MouseFilterEnum.Ignore
                 };
                 row.AddChild(lbl);
+
+                // Modifiers indicator badge
+                if (curve.Modifiers.Count > 0)
+                {
+                    var badge = new Label
+                    {
+                        Text = $"[{curve.Modifiers.Count}M]",
+                        Modulate = new Color(0.4f, 0.85f, 1.0f, 0.9f),
+                        TooltipText = $"{curve.Modifiers.Count} Modifier(s) on this curve (Right-click to manage)"
+                    };
+                    badge.AddThemeFontSizeOverride("font_size", 10);
+                    row.AddChild(badge);
+                }
 
                 // Visibility toggle button
                 var btnEye = new Button
@@ -1620,6 +1724,96 @@ namespace DeadlockPlayground.UI
 
                 _channelListVBox.AddChild(row);
             }
+
+            HighlightActiveChannelRow();
+        }
+
+        private void HighlightActiveChannelRow()
+        {
+            if (_channelListVBox == null || _graphEditorCanvas == null) return;
+            var activeCurve = _graphEditorCanvas.ActiveCurve;
+            var children = _channelListVBox.GetChildren();
+            for (int i = 0; i < children.Count && i < _graphEditorCanvas.Curves.Count; i++)
+            {
+                if (children[i] is Control row)
+                {
+                    bool isActive = (_graphEditorCanvas.Curves[i] == activeCurve);
+                    row.Modulate = isActive ? Colors.White : new Color(0.85f, 0.85f, 0.85f, 0.9f);
+                }
+            }
+        }
+
+        private void ShowChannelContextMenu(GraphEditorCanvas.ChannelCurve curve, Vector2 globalPos)
+        {
+            if (curve == null || _graphEditorCanvas == null) return;
+
+            var popup = new PopupMenu();
+            popup.Name = "ChannelContextMenu";
+
+            var subAdd = new PopupMenu { Name = "SubAdd" };
+            subAdd.AddItem("Generator", 0);
+            subAdd.AddItem("Built-in Function", 1);
+            subAdd.AddItem("Envelope", 2);
+            subAdd.AddItem("Cycles", 3);
+            subAdd.AddItem("Noise", 4);
+            subAdd.AddItem("Limits", 5);
+            subAdd.AddItem("Stepped Interpolation", 6);
+            subAdd.AddItem("Smooth (Gaussian)", 7);
+
+            subAdd.IdPressed += (id) =>
+            {
+                FCurveModifier mod = id switch
+                {
+                    0 => new GeneratorModifier(),
+                    1 => new BuiltInFunctionModifier(),
+                    2 => new EnvelopeModifier(),
+                    3 => new CyclesModifier(),
+                    4 => new NoiseModifier(),
+                    5 => new LimitsModifier(),
+                    6 => new SteppedModifier(),
+                    7 => new GaussianSmoothModifier(),
+                    _ => null
+                };
+                if (mod != null)
+                {
+                    _graphEditorCanvas.AddModifier(curve, mod);
+                    _modifiersPanel?.RefreshModifierList();
+                    RebuildChannelList();
+                }
+            };
+            popup.AddChild(subAdd);
+            popup.AddSubmenuNodeItem("Add Modifier", subAdd);
+
+            var subDel = new PopupMenu { Name = "SubDel" };
+            subDel.AddItem("Remove All Modifiers", 10);
+            subDel.AddItem("Remove First Modifier", 11);
+            subDel.IdPressed += (id) =>
+            {
+                if (id == 10) _graphEditorCanvas.RemoveModifiers(curve, ModifierRemoveMode.RemoveAll);
+                else if (id == 11) _graphEditorCanvas.RemoveModifiers(curve, ModifierRemoveMode.RemoveFirst);
+                _modifiersPanel?.RefreshModifierList();
+                RebuildChannelList();
+            };
+            popup.AddChild(subDel);
+            popup.AddSubmenuNodeItem("Delete Modifiers", subDel);
+
+            popup.AddSeparator();
+            popup.AddItem("Isolate Channel", 20);
+            popup.AddItem("Toggle Visibility", 21);
+            popup.AddItem("Toggle Lock", 22);
+
+            popup.IdPressed += (id) =>
+            {
+                if (id == 20) _graphEditorCanvas.IsolateChannel(curve);
+                else if (id == 21) { curve.IsVisible = !curve.IsVisible; _graphEditorCanvas.QueueRedraw(); }
+                else if (id == 22) { curve.IsLocked = !curve.IsLocked; }
+                RebuildChannelList();
+            };
+
+            popup.PopupHide += () => popup.QueueFree();
+            AddChild(popup);
+            popup.Position = (Vector2I)globalPos;
+            popup.Popup();
         }
         #endregion
 
@@ -1810,11 +2004,34 @@ namespace DeadlockPlayground.UI
             ScrubToTime(time);
         }
 
+        private void OnDopeSheetKeyframesModified()
+        {
+            EmitSignal(SignalName.AnimationModified, _activeAnimName);
+            UpdateTotalFramesLabel();
+            _graphEditorCanvas?.RebuildCurves();
+            _dopeSheetCanvas?.QueueRedraw();
+            _graphEditorCanvas?.QueueRedraw();
+            ScrubToTime(_currentTime);
+        }
+
+        private void OnGraphEditorKeyframesModified()
+        {
+            EmitSignal(SignalName.AnimationModified, _activeAnimName);
+            UpdateTotalFramesLabel();
+            _dopeSheetCanvas?.RebuildTrackRows();
+            _dopeSheetCanvas?.QueueRedraw();
+            _graphEditorCanvas?.QueueRedraw();
+            ScrubToTime(_currentTime);
+        }
+
         private void OnCanvasKeyframesModified()
         {
             EmitSignal(SignalName.AnimationModified, _activeAnimName);
             UpdateTotalFramesLabel();
             _dopeSheetCanvas?.RebuildTrackRows();
+            _graphEditorCanvas?.RebuildCurves();
+            _dopeSheetCanvas?.QueueRedraw();
+            _graphEditorCanvas?.QueueRedraw();
             ScrubToTime(_currentTime);
         }
         #endregion
@@ -1835,7 +2052,7 @@ namespace DeadlockPlayground.UI
         {
             if (_activeAnimation == null || _skeleton == null) return;
 
-            string skelPath = _animPlayer != null ? _animPlayer.GetPathTo(_skeleton) : "Skeleton3D";
+            string skelPath = DeadlockPlayground.Tools.DeadlockAnimLoader.GetSkeletonTrackPathPrefix(_animPlayer, _skeleton);
             int posTrack = FindOrCreateTrack(Godot.Animation.TrackType.Position3D, $"{skelPath}:{boneName}");
             int rotTrack = FindOrCreateTrack(Godot.Animation.TrackType.Rotation3D, $"{skelPath}:{boneName}");
 
@@ -1847,11 +2064,8 @@ namespace DeadlockPlayground.UI
 
             _dopeSheetCanvas?.RebuildTrackRows();
             _dopeSheetCanvas?.QueueRedraw();
-            if (_currentTab == StudioTab.GraphEditor)
-            {
-                _graphEditorCanvas?.RebuildCurves();
-                _graphEditorCanvas?.QueueRedraw();
-            }
+            _graphEditorCanvas?.RebuildCurves();
+            _graphEditorCanvas?.QueueRedraw();
 
             EmitSignal(SignalName.AnimationModified, _activeAnimName);
         }
@@ -1958,7 +2172,7 @@ namespace DeadlockPlayground.UI
         {
             if (_activeAnimation == null || _skeleton == null || string.IsNullOrEmpty(boneName)) return;
 
-            string skelPath = _animPlayer != null ? _animPlayer.GetPathTo(_skeleton) : "Skeleton3D";
+            string skelPath = DeadlockPlayground.Tools.DeadlockAnimLoader.GetSkeletonTrackPathPrefix(_animPlayer, _skeleton);
             int rotTrack = FindOrCreateTrack(Godot.Animation.TrackType.Rotation3D, $"{skelPath}:{boneName}");
             int posTrack = FindOrCreateTrack(Godot.Animation.TrackType.Position3D, $"{skelPath}:{boneName}");
 
@@ -2219,6 +2433,48 @@ namespace DeadlockPlayground.UI
 
             modal.RetargetCompleted += OnExternalRetargetCompleted;
             modal.Open(loadResult, _skeleton, _animPlayer, _activeAnimName);
+        }
+
+        public void ToggleModifiersSidebar()
+        {
+            if (_btnToggleModifiers != null)
+            {
+                _btnToggleModifiers.ButtonPressed = !_btnToggleModifiers.ButtonPressed;
+            }
+            else if (_modifiersPanel != null)
+            {
+                _modifiersPanel.Visible = !_modifiersPanel.Visible;
+            }
+        }
+
+        public void OpenShortcutsCheatsheet()
+        {
+            var modalsLayer = GetTree()?.Root?.FindChild("ModalsLayer", true, false) as Control;
+            var modal = modalsLayer?.FindChild("AnimationShortcutsModal", true, false) as AnimationShortcutsModalUI;
+            if (modal == null)
+            {
+                modal = new AnimationShortcutsModalUI { Name = "AnimationShortcutsModal" };
+                if (modalsLayer != null)
+                {
+                    modalsLayer.AddChild(modal);
+                }
+                else
+                {
+                    AddChild(modal);
+                }
+
+                modal.ModalClosed += () =>
+                {
+                    var studioUI = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                                ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+                    studioUI?.UpdateModalsState();
+                };
+            }
+
+            modal.Open();
+            var uiMgr = GetTree()?.Root?.FindChild("UIRoot", true, false) as StudioUIManager
+                     ?? GetTree()?.Root?.FindChild("StudioUIManager", true, false) as StudioUIManager;
+            uiMgr?.UpdateModalsState();
         }
 
         private void OnExternalRetargetCompleted(Godot.Animation retargetedAnim, string clipName, bool overwriteSelected)
