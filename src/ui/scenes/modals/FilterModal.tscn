@@ -72,7 +72,7 @@ corner_radius_bottom_left = 5
 
 [node name="FilterModal" type="PanelContainer" node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_panelBlur", "_panelMotionBlur", "_panelUnsharpMask", "_panelAddNoise", "_panelMedian", "_panelMosaic", "_panelHalftone", "_panelEmboss", "_panelOilPaint", "_panelChromaticAberration", "_panelOutlineStroke", "_panelHighPass", "_sliderBlurRadius", "_lblBlurRadiusVal", "_sliderMotionAngle", "_lblMotionAngleVal", "_sliderMotionDistance", "_lblMotionDistanceVal", "_sliderUnsharpAmount", "_lblUnsharpAmountVal", "_sliderUnsharpRadius", "_lblUnsharpRadiusVal", "_sliderUnsharpThreshold", "_lblUnsharpThresholdVal", "_sliderNoiseAmount", "_lblNoiseAmountVal", "_chkNoiseMonochromatic", "_optNoiseDist", "_sliderMedianRadius", "_lblMedianRadiusVal", "_sliderMosaicCellSize", "_lblMosaicCellSizeVal", "_sliderHalftoneDotSize", "_lblHalftoneDotSizeVal", "_sliderHalftoneLevels", "_lblHalftoneLevelsVal", "_sliderEmbossAngle", "_lblEmbossAngleVal", "_sliderEmbossHeight", "_lblEmbossHeightVal", "_sliderEmbossAmount", "_lblEmbossAmountVal", "_sliderOilRadius", "_lblOilRadiusVal", "_sliderShiftX", "_lblShiftXVal", "_sliderShiftY", "_lblShiftYVal", "_sliderOutlineThickness", "_lblOutlineThicknessVal", "_colorPickerOutline", "_optOutlinePos", "_sliderHighPassRadius", "_lblHighPassRadiusVal", "_chkPreview", "_btnReset", "_btnCancel", "_btnApply")]
 clip_contents = true
-custom_minimum_size = Vector2(400, 260)
+custom_minimum_size = Vector2(400, 0)
 offset_right = 400.0
 offset_bottom = 280.0
 theme = ExtResource("1_theme")
@@ -177,7 +177,6 @@ layout_mode = 2
 
 [node name="PanelsContainer" type="VBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
-size_flags_vertical = 3
 theme_override_constants/separation = 8
 
 [node name="PanelBlur" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]

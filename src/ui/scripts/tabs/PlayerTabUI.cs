@@ -1074,32 +1074,91 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
-    private void OnInPlaceMotionToggled(bool toggled)
+   private void OnInPlaceMotionToggled(bool toggled)
     {
         _isInPlaceMotionEnabled = toggled;
-        if (_activeAnimInfo != null && _animPlayer != null)
+        if (_activeAnimInfo == null || _animPlayer == null || !GodotObject.IsInstanceValid(_animPlayer)) return;
+
+        string clean = _activeAnimInfo.CleanName;
+        var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+
+        // Check if current animation is a retargeted / imported animation (which does NOT exist in the VPK!)
+        Godot.Animation existingAnim = _animPlayer.HasAnimation(clean) ? _animPlayer.GetAnimation(clean)
+                                     : (_animPlayer.HasAnimation(_activeAnimInfo.RawName) ? _animPlayer.GetAnimation(_activeAnimInfo.RawName) : null);
+
+        bool isRetargeted = _activeAnimInfo.Category == "Remapped" ||
+                            (existingAnim != null && existingAnim.HasMeta("is_retargeted") && existingAnim.GetMeta("is_retargeted").AsBool()) ||
+                            DeadlockAnimLoader.KnownRemappedAnimations.Contains(clean) ||
+                            DeadlockAnimLoader.KnownRemappedAnimations.Contains(_activeAnimInfo.RawName);
+
+        if (isRetargeted && existingAnim != null)
         {
-            string clean = _activeAnimInfo.CleanName;
-            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
-            if (animLib != null)
+            // Toggle horizontal in-place lock non-destructively on the retargeted pelvis position track!
+            ToggleRetargetedAnimInPlace(existingAnim, toggled);
+            double pos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
+            _animPlayer.Seek(pos, update: true);
+            _skeleton?.ForceUpdateAllBoneTransforms();
+            return;
+        }
+
+        if (animLib != null)
+        {
+            if (animLib.HasAnimation(clean)) animLib.RemoveAnimation(clean);
+            if (animLib.HasAnimation($"{clean}_underlaid")) animLib.RemoveAnimation($"{clean}_underlaid");
+            if (animLib.HasAnimation(_activeAnimInfo.RawName)) animLib.RemoveAnimation(_activeAnimInfo.RawName);
+            if (animLib.HasAnimation($"{_activeAnimInfo.RawName}_underlaid")) animLib.RemoveAnimation($"{_activeAnimInfo.RawName}_underlaid");
+        }
+
+        double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
+        bool wasPlaying = _animPlayer.IsPlaying();
+        SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
+        if (_animPlayer.HasAnimation(_activeAnimName))
+        {
+            _animPlayer.Seek(currentPos, update: true);
+            if (wasPlaying) _animPlayer.Play(_activeAnimName);
+            else _animPlayer.Pause();
+        }
+        _timelineSlider?.SetValueNoSignal(currentPos);
+        UpdateTimeLabel((float)currentPos, _activeAnimLength);
+    }
+
+    private void ToggleRetargetedAnimInPlace(Godot.Animation anim, bool lockInPlace)
+    {
+        if (anim == null) return;
+        for (int t = 0; t < anim.GetTrackCount(); t++)
+        {
+            if (anim.TrackGetType(t) != Godot.Animation.TrackType.Position3D) continue;
+            string path = anim.TrackGetPath(t).ToString();
+            if (!path.EndsWith(":pelvis", StringComparison.OrdinalIgnoreCase) &&
+                !path.EndsWith(":root", StringComparison.OrdinalIgnoreCase))
             {
-                if (animLib.HasAnimation(clean)) animLib.RemoveAnimation(clean);
-                if (animLib.HasAnimation($"{clean}_underlaid")) animLib.RemoveAnimation($"{clean}_underlaid");
-                if (animLib.HasAnimation(_activeAnimInfo.RawName)) animLib.RemoveAnimation(_activeAnimInfo.RawName);
-                if (animLib.HasAnimation($"{_activeAnimInfo.RawName}_underlaid")) animLib.RemoveAnimation($"{_activeAnimInfo.RawName}_underlaid");
+                continue;
             }
 
-            double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
-            bool wasPlaying = _animPlayer.IsPlaying();
-            SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
-            if (_animPlayer.HasAnimation(_activeAnimName))
+            int keyCount = anim.TrackGetKeyCount(t);
+            if (keyCount == 0) continue;
+
+            string metaKey = $"orig_pos_track_{t}";
+            if (!anim.HasMeta(metaKey))
             {
-                _animPlayer.Seek(currentPos, update: true);
-                if (wasPlaying) _animPlayer.Play(_activeAnimName);
-                else _animPlayer.Pause();
+                var backup = new Godot.Collections.Array<Vector3>();
+                for (int k = 0; k < keyCount; k++)
+                {
+                    backup.Add(anim.TrackGetKeyValue(t, k).AsVector3());
+                }
+                anim.SetMeta(metaKey, backup);
             }
-            _timelineSlider?.SetValueNoSignal(currentPos);
-            UpdateTimeLabel((float)currentPos, _activeAnimLength);
+
+            var origKeys = anim.GetMeta(metaKey).AsGodotArray<Vector3>();
+            if (origKeys == null || origKeys.Count != keyCount) continue;
+
+            Vector3 anchor = origKeys[0];
+            for (int k = 0; k < keyCount; k++)
+            {
+                Vector3 orig = origKeys[k];
+                Vector3 val = lockInPlace ? new Vector3(anchor.X, orig.Y, anchor.Z) : orig;
+                anim.TrackSetKeyValue(t, k, val);
+            }
         }
     }
 

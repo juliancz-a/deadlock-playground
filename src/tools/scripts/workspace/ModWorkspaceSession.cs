@@ -943,7 +943,7 @@ namespace DeadlockPlayground.Workspace
             }
         }
 
-        public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry, Skeleton3D skeleton = null)
+public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry, Skeleton3D skeleton = null)
         {
             if (entry == null || string.IsNullOrEmpty(entry.RelativeJsonPath)) return null;
 
@@ -952,7 +952,6 @@ namespace DeadlockPlayground.Workspace
                 string fullJsonPath = Path.Combine(SessionDir, entry.RelativeJsonPath);
                 if (!File.Exists(fullJsonPath))
                 {
-                    // Fallback to legacy shared animations/ folder
                     string legacyPath = Path.Combine(SessionDir, "animations", Path.GetFileName(entry.RelativeJsonPath));
                     if (File.Exists(legacyPath))
                     {
@@ -980,10 +979,40 @@ namespace DeadlockPlayground.Workspace
                 anim.SetMeta("decoded_by_anim_loader", true);
                 anim.SetMeta("anim_loader_version", 5);
 
+                // Resolve the EXACT relative node path from the AnimationPlayer's RootNode to the Skeleton3D (NEVER use '%' unless UniqueNameInOwner is true!)
                 string skelPathPrefix = "";
-                if (skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion())
+                bool hasValidSkeleton = skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion();
+                if (hasValidSkeleton)
                 {
-                    skelPathPrefix = "%" + skeleton.Name;
+                    Node animRoot = null;
+                    var parent = skeleton.GetParent();
+                    while (parent != null)
+                    {
+                        var ap = parent.FindChild("AnimationPlayer", true, false) as AnimationPlayer;
+                        if (ap != null)
+                        {
+                            animRoot = ap.GetNodeOrNull(ap.RootNode) ?? ap.GetParent();
+                            break;
+                        }
+                        if (parent.Name.ToString().StartsWith("Hero_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                        parent = parent.GetParent();
+                    }
+
+                    if (animRoot != null && animRoot.IsInsideTree() && skeleton.IsInsideTree())
+                    {
+                        skelPathPrefix = animRoot.GetPathTo(skeleton).ToString();
+                    }
+                    else if (skeleton.UniqueNameInOwner)
+                    {
+                        skelPathPrefix = "%" + skeleton.Name;
+                    }
+                    else
+                    {
+                        skelPathPrefix = skeleton.Name.ToString();
+                    }
                 }
 
                 foreach (var trackData in fileModel.Tracks)
@@ -991,13 +1020,37 @@ namespace DeadlockPlayground.Workspace
                     if (string.IsNullOrEmpty(trackData.Path)) continue;
 
                     string trackPath = trackData.Path;
-                    if (!string.IsNullOrEmpty(skelPathPrefix))
+                    int colonIdx = trackPath.IndexOf(':');
+                    if (colonIdx >= 0)
                     {
-                        int colonIdx = trackPath.IndexOf(':');
-                        if (colonIdx >= 0)
+                        string boneName = trackPath.Substring(colonIdx + 1);
+
+                        // Skip bones that do not exist on this hero's Skeleton3D (e.g. spine_3 on a 3-spine hero) so Godot never logs track resolution warnings!
+                        if (hasValidSkeleton && skeleton.FindBone(boneName) < 0)
                         {
-                            string boneName = trackPath.Substring(colonIdx + 1);
+                            int matchedBoneIdx = -1;
+                            for (int b = 0; b < skeleton.GetBoneCount(); b++)
+                            {
+                                if (string.Equals(skeleton.GetBoneName(b), boneName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    matchedBoneIdx = b;
+                                    boneName = skeleton.GetBoneName(b);
+                                    break;
+                                }
+                            }
+                            if (matchedBoneIdx < 0)
+                            {
+                                continue;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(skelPathPrefix))
+                        {
                             trackPath = $"{skelPathPrefix}:{boneName}";
+                        }
+                        else if (trackPath.StartsWith("%"))
+                        {
+                            trackPath = trackPath.Substring(1);
                         }
                     }
 

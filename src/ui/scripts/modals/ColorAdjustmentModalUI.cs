@@ -90,6 +90,10 @@ public partial class ColorAdjustmentModalUI : PanelContainer
 
     private AdjustmentType _currentType = AdjustmentType.BrightnessContrast;
     private byte[] _backupBuffer = null;
+
+    private string _openedMaterialKey = "";
+    private int _openedW = 0;
+    private int _openedH = 0;
     private bool _hasSelection = false;
     private byte[] _selectionMaskBuffer = null;
     private int _maskW = 0;
@@ -106,6 +110,11 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         Visible = false;
         IsOpen = false;
 
+        // CRITICAL: Prevent parent anchors (AnchorBottom = 1.0) from stretching the modal to the bottom of the screen!
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+
         if (_lblTitle != null)
         {
             _lblTitle.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -118,11 +127,21 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         ResolveFallbackNodes();
         WireSignals();
         SetupScrollableProtection();
+        SetupModalForType(AdjustmentType.BrightnessContrast);
     }
 
     private void ResolveFallbackNodes()
     {
-        _containerLevels ??= FindChild("LevelsContainer", true, false) as VBoxContainer;
+        _containerBrightnessContrast ??= (FindChild("BrightnessContrastContainer", true, false) ?? FindChild("ContainerBrightnessContrast", true, false)) as VBoxContainer;
+        _containerHueSaturation ??= (FindChild("HueSaturationContainer", true, false) ?? FindChild("ContainerHueSaturation", true, false)) as VBoxContainer;
+        _containerColorBalance ??= (FindChild("ColorBalanceContainer", true, false) ?? FindChild("ContainerColorBalance", true, false)) as VBoxContainer;
+        _containerExposure ??= (FindChild("ExposureContainer", true, false) ?? FindChild("ContainerExposure", true, false)) as VBoxContainer;
+
+        _lblTitle ??= FindChild("Title", true, false) as Label;
+        _lblSubtitle ??= FindChild("Subtitle", true, false) as Label;
+        _headerContainer ??= FindChild("HeaderBar", true, false) as Control;
+        _btnClose ??= FindChild("BtnClose", true, false) as Button;
+        _containerLevels ??= (FindChild("LevelsContainer", true, false) ?? FindChild("ContainerLevels", true, false)) as VBoxContainer;
         _sliderInBlack ??= FindChild("InBlackSlider", true, false) as HSlider;
         _lblInBlackVal ??= FindChild("InBlackVal", true, false) as Label;
         _sliderLevelsGamma ??= FindChild("LevelsGammaSlider", true, false) as HSlider;
@@ -134,13 +153,23 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         _sliderOutWhite ??= FindChild("OutWhiteSlider", true, false) as HSlider;
         _lblOutWhiteVal ??= FindChild("OutWhiteVal", true, false) as Label;
 
-        _containerPosterize ??= FindChild("PosterizeContainer", true, false) as VBoxContainer;
+        _containerPosterize ??= (FindChild("PosterizeContainer", true, false) ?? FindChild("ContainerPosterize", true, false)) as VBoxContainer;
         _sliderPosterizeLevels ??= FindChild("PosterizeLevelsSlider", true, false) as HSlider;
         _lblPosterizeLevelsVal ??= FindChild("PosterizeLevelsVal", true, false) as Label;
 
-        _containerThreshold ??= FindChild("ThresholdContainer", true, false) as VBoxContainer;
+        _containerThreshold ??= (FindChild("ThresholdContainer", true, false) ?? FindChild("ContainerThreshold", true, false)) as VBoxContainer;
         _sliderThreshold ??= FindChild("ThresholdSlider", true, false) as HSlider;
         _lblThresholdVal ??= FindChild("ThresholdVal", true, false) as Label;
+
+        // Also resolve by slider parent if any container export wasn't named as expected
+        if (_containerBrightnessContrast == null && _sliderBrightness != null)
+            _containerBrightnessContrast = _sliderBrightness.GetParent()?.GetParent() as VBoxContainer ?? _sliderBrightness.GetParent() as VBoxContainer;
+        if (_containerHueSaturation == null && _sliderHue != null)
+            _containerHueSaturation = _sliderHue.GetParent()?.GetParent() as VBoxContainer ?? _sliderHue.GetParent() as VBoxContainer;
+        if (_containerColorBalance == null && _sliderCyanRed != null)
+            _containerColorBalance = _sliderCyanRed.GetParent()?.GetParent() as VBoxContainer ?? _sliderCyanRed.GetParent() as VBoxContainer;
+        if (_containerExposure == null && _sliderExposure != null)
+            _containerExposure = _sliderExposure.GetParent()?.GetParent() as VBoxContainer ?? _sliderExposure.GetParent() as VBoxContainer;
     }
 
     private void SetupScrollableProtection()
@@ -266,6 +295,10 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         int w = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
         int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
         int expectedLen = w * h * 8;
+        
+        _openedMaterialKey = _layerManager.ActiveMaterialKey ?? "";
+        _openedW = w;
+        _openedH = h;
 
         _layerManager.EnsureCpuSynced();
         if (_activeLayer.GpuData == null || _activeLayer.GpuData.Length != expectedLen)
@@ -331,17 +364,8 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
         float maxAllowedH = vpSize.Y * 0.85f;
 
-        float combinedW = GetCombinedMinimumSize().X;
-        float modalW = Mathf.Clamp(Mathf.Max(Size.X, combinedW), 320f, maxAllowedW);
-        float modalH = Mathf.Max(Size.Y, GetCombinedMinimumSize().Y);
-
-        CustomMinimumSize = new Vector2(Mathf.Min(CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380f, maxAllowedW), CustomMinimumSize.Y);
-        if (modalH > maxAllowedH)
-        {
-            modalH = maxAllowedH;
-            CustomMinimumSize = new Vector2(modalW, modalH);
-            Size = new Vector2(modalW, modalH);
-        }
+        float modalW = Mathf.Clamp(Size.X > 0 ? Size.X : 380f, 320f, maxAllowedW);
+        float modalH = Mathf.Clamp(Size.Y > 0 ? Size.Y : GetCombinedMinimumSize().Y, 160f, maxAllowedH);
 
         Vector2 target = candidatePos ?? Position;
         float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
@@ -351,18 +375,119 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         Position = new Vector2(clampedX, clampedY);
     }
 
+    private bool _isAdjustingRect = false;
+
+    public override void _Notification(int what)
+    {
+        base._Notification(what);
+        if ((what == NotificationResized || what == NotificationSortChildren || what == NotificationVisibilityChanged)
+            && Visible && !_isAdjustingRect)
+        {
+            EnforceCompactHeight();
+        }
+    }
+
+    private void EnforceCompactHeight()
+    {
+        if (!IsInsideTree() || _isAdjustingRect) return;
+        _isAdjustingRect = true;
+
+        // Ensure inner containers never expand vertically
+        if (GetChildCount() > 0 && GetChild(0) is Control rootChild)
+        {
+            rootChild.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            foreach (Node grandChild in rootChild.GetChildren())
+            {
+                if (grandChild is Control gc)
+                    gc.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            }
+        }
+
+        CustomMinimumSize = new Vector2(400f, 0f);
+        float exactMinH = GetCombinedMinimumSize().Y;
+        if (exactMinH > 50f && Mathf.Abs(Size.Y - exactMinH) > 2f)
+        {
+            SetAnchorsPreset(LayoutPreset.TopLeft);
+            Size = new Vector2(400f, exactMinH);
+        }
+
+        _isAdjustingRect = false;
+    }
     private void CenterOrPositionModal()
     {
+        if (!IsInsideTree()) return;
+        _isAdjustingRect = true;
+
         var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-        float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
-        float modalW = Mathf.Clamp(CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380f, 320f, maxAllowedW);
-        float modalH = Mathf.Clamp(CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 320f, 240f, vpSize.Y * 0.85f);
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        CustomMinimumSize = new Vector2(400f, 0f);
+        ResetSize();
+
+        float modalW = 400f;
+        float modalH = Mathf.Clamp(GetCombinedMinimumSize().Y, 150f, vpSize.Y * 0.85f);
+        Size = new Vector2(modalW, modalH);
 
         float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
         float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
-        float targetX = Mathf.Clamp(vpSize.X - modalW - 60f, 20f, maxX);
+        float targetX = Mathf.Clamp((vpSize.X - modalW) * 0.5f, 20f, maxX);
         float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
-        ClampPositionToScreen(new Vector2(targetX, targetY));
+        Position = new Vector2(targetX, targetY);
+
+        _isAdjustingRect = false;
+    }
+
+    private void ApplyCompactModalSize(bool reposition)
+    {
+        if (!IsInsideTree()) return;
+
+        var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        float modalW = Mathf.Clamp(380f, 320f, vpSize.X - 40f);
+
+        // Detach bottom anchor stretching completely
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        AnchorRight = 0f;
+        AnchorBottom = 0f;
+        GrowHorizontal = GrowDirection.End;
+        GrowVertical = GrowDirection.End;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+
+        foreach (Node child in GetChildren())
+        {
+            if (child is Control ctrl)
+            {
+                ctrl.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+                ctrl.CustomMinimumSize = new Vector2(ctrl.CustomMinimumSize.X, 0);
+            }
+        }
+
+        CustomMinimumSize = new Vector2(modalW, 0);
+        ResetSize();
+
+        float minH = GetCombinedMinimumSize().Y;
+        float modalH = Mathf.Clamp(minH, 160f, vpSize.Y * 0.85f);
+
+        Size = new Vector2(modalW, modalH);
+        OffsetRight = OffsetLeft + modalW;
+        OffsetBottom = OffsetTop + modalH;
+
+        if (reposition)
+        {
+            float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+            float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+            float targetX = Mathf.Clamp((vpSize.X - modalW) * 0.5f, 20f, maxX);
+            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
+            Position = new Vector2(targetX, targetY);
+        }
+        else
+        {
+            ClampPositionToScreen(Position);
+        }
     }
 
     private void SetupModalForType(AdjustmentType type)
@@ -594,7 +719,18 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     }
 
     private void OnSliderOrOptionChanged()
-    {
+    {   
+
+        // Si el usuario cambió de material o de capa mientras el modal estaba abierto, cancelar inmediatamente antes de corromper la GPU
+        if (_layerManager.ActiveLayer != _activeLayer ||
+            !string.Equals(_layerManager.ActiveMaterialKey ?? "", _openedMaterialKey, StringComparison.Ordinal) ||
+            _layerManager.CanvasSize.X != _openedW ||
+            _layerManager.CanvasSize.Y != _openedH)
+        {
+            CancelAndClose();
+            return;
+        }
+
         if (_suppressSliderEvents || _backupBuffer == null || _activeLayer == null || _layerManager == null) return;
         UpdateValueLabels();
 

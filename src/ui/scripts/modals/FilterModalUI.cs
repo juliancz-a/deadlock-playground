@@ -112,6 +112,10 @@ namespace DeadlockPlayground.UI
 
         private FilterType _currentType = FilterType.GaussianBlur;
         private byte[] _backupBuffer = null;
+
+        private string _openedMaterialKey = "";
+        private int _openedW = 0;
+        private int _openedH = 0;
         private bool _hasSelection = false;
         private byte[] _selectionMaskBuffer = null;
         private int _maskW = 0;
@@ -123,11 +127,16 @@ namespace DeadlockPlayground.UI
         private bool _isSamplingUnderlyingComposite = false;
         private bool _suppressEvents = false;
 
-        public override void _Ready()
+       public override void _Ready()
         {
             Visible = false;
             IsOpen = false;
             ClipContents = true;
+
+            // CRITICAL: Prevent parent anchors (AnchorBottom = 1.0) from stretching the modal to the bottom of the screen!
+            SetAnchorsPreset(LayoutPreset.TopLeft);
+            SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+            SizeFlagsVertical = SizeFlags.ShrinkBegin;
 
             if (_lblTitle != null)
             {
@@ -141,6 +150,7 @@ namespace DeadlockPlayground.UI
             WireSignals();
             SetupScrollableProtection();
             InitDropdowns();
+            SetupModalForType(FilterType.GaussianBlur);
         }
 
         private void SetupScrollableProtection()
@@ -257,6 +267,10 @@ namespace DeadlockPlayground.UI
             int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
             int expectedLen = w * h * 8;
 
+            _openedMaterialKey = _layerManager.ActiveMaterialKey ?? "";
+            _openedW = w;
+            _openedH = h;
+
             _layerManager.EnsureCpuSynced();
             if (_activeLayer.GpuData == null || _activeLayer.GpuData.Length != expectedLen)
             {
@@ -317,17 +331,8 @@ namespace DeadlockPlayground.UI
             float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
             float maxAllowedH = vpSize.Y * 0.85f;
 
-            float combinedW = GetCombinedMinimumSize().X;
-            float modalW = Mathf.Clamp(Mathf.Max(Size.X, combinedW), 320f, maxAllowedW);
-            float modalH = Mathf.Max(Size.Y, GetCombinedMinimumSize().Y);
-
-            CustomMinimumSize = new Vector2(Mathf.Min(CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380f, maxAllowedW), CustomMinimumSize.Y);
-            if (modalH > maxAllowedH)
-            {
-                modalH = maxAllowedH;
-                CustomMinimumSize = new Vector2(modalW, modalH);
-                Size = new Vector2(modalW, modalH);
-            }
+            float modalW = Mathf.Clamp(Size.X > 0 ? Size.X : 380f, 320f, maxAllowedW);
+            float modalH = Mathf.Clamp(Size.Y > 0 ? Size.Y : GetCombinedMinimumSize().Y, 180f, maxAllowedH);
 
             Vector2 target = candidatePos ?? Position;
             float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
@@ -337,18 +342,119 @@ namespace DeadlockPlayground.UI
             Position = new Vector2(clampedX, clampedY);
         }
 
-        private void CenterOrPositionModal()
-        {
-            var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-            float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
-            float modalW = Mathf.Clamp(CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380f, 320f, maxAllowedW);
-            float modalH = Mathf.Clamp(CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 320f, 240f, vpSize.Y * 0.85f);
+    private bool _isAdjustingRect = false;
 
-            float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
-            float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
-            float targetX = Mathf.Clamp(vpSize.X - modalW - 60f, 20f, maxX);
-            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
-            ClampPositionToScreen(new Vector2(targetX, targetY));
+    public override void _Notification(int what)
+    {
+        base._Notification(what);
+        if ((what == NotificationResized || what == NotificationSortChildren || what == NotificationVisibilityChanged)
+            && Visible && !_isAdjustingRect)
+        {
+            EnforceCompactHeight();
+        }
+    }
+
+    private void EnforceCompactHeight()
+    {
+        if (!IsInsideTree() || _isAdjustingRect) return;
+        _isAdjustingRect = true;
+
+        // Ensure inner containers never expand vertically
+        if (GetChildCount() > 0 && GetChild(0) is Control rootChild)
+        {
+            rootChild.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            foreach (Node grandChild in rootChild.GetChildren())
+            {
+                if (grandChild is Control gc)
+                    gc.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            }
+        }
+
+        CustomMinimumSize = new Vector2(400f, 0f);
+        float exactMinH = GetCombinedMinimumSize().Y;
+        if (exactMinH > 50f && Mathf.Abs(Size.Y - exactMinH) > 2f)
+        {
+            SetAnchorsPreset(LayoutPreset.TopLeft);
+            Size = new Vector2(400f, exactMinH);
+        }
+
+        _isAdjustingRect = false;
+    }
+    private void CenterOrPositionModal()
+    {
+        if (!IsInsideTree()) return;
+        _isAdjustingRect = true;
+
+        var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        CustomMinimumSize = new Vector2(400f, 0f);
+        ResetSize();
+
+        float modalW = 400f;
+        float modalH = Mathf.Clamp(GetCombinedMinimumSize().Y, 150f, vpSize.Y * 0.85f);
+        Size = new Vector2(modalW, modalH);
+
+        float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+        float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+        float targetX = Mathf.Clamp((vpSize.X - modalW) * 0.5f, 20f, maxX);
+        float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
+        Position = new Vector2(targetX, targetY);
+
+        _isAdjustingRect = false;
+    }
+
+      private void ApplyCompactModalSize(bool reposition)
+        {
+            if (!IsInsideTree()) return;
+
+            var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+            if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+            float modalW = Mathf.Clamp(380f, 320f, vpSize.X - 40f);
+
+            // Detach bottom anchor stretching completely
+            SetAnchorsPreset(LayoutPreset.TopLeft);
+            AnchorRight = 0f;
+            AnchorBottom = 0f;
+            GrowHorizontal = GrowDirection.End;
+            GrowVertical = GrowDirection.End;
+            SizeFlagsVertical = SizeFlags.ShrinkBegin;
+
+            foreach (Node child in GetChildren())
+            {
+                if (child is Control ctrl)
+                {
+                    ctrl.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+                    ctrl.CustomMinimumSize = new Vector2(ctrl.CustomMinimumSize.X, 0);
+                }
+            }
+
+            CustomMinimumSize = new Vector2(modalW, 0);
+            ResetSize();
+
+            float minH = GetCombinedMinimumSize().Y;
+            float modalH = Mathf.Clamp(minH, 160f, vpSize.Y * 0.85f);
+
+            Size = new Vector2(modalW, modalH);
+            OffsetRight = OffsetLeft + modalW;
+            OffsetBottom = OffsetTop + modalH;
+
+            if (reposition)
+            {
+                float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+                float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+                float targetX = Mathf.Clamp((vpSize.X - modalW) * 0.5f, 20f, maxX);
+                float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
+                Position = new Vector2(targetX, targetY);
+            }
+            else
+            {
+                ClampPositionToScreen(Position);
+            }
         }
 
         private void SetupModalForType(FilterType type)
@@ -591,6 +697,17 @@ namespace DeadlockPlayground.UI
 
         private void OnParametersChanged()
         {
+
+            // Si el usuario cambió de material o de capa mientras el modal estaba abierto, cancelar inmediatamente antes de corromper la GPU
+            if (_layerManager.ActiveLayer != _activeLayer ||
+                !string.Equals(_layerManager.ActiveMaterialKey ?? "", _openedMaterialKey, StringComparison.Ordinal) ||
+                _layerManager.CanvasSize.X != _openedW ||
+                _layerManager.CanvasSize.Y != _openedH)
+            {
+                CancelAndClose();
+                return;
+            }
+
             if (_suppressEvents || _backupBuffer == null || _activeLayer == null || _layerManager == null) return;
             UpdateValueLabels();
 
@@ -645,9 +762,19 @@ namespace DeadlockPlayground.UI
                 {
                     Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
                 }
-                _layerManager.SyncActiveLayerGpuTexture();
-                _layerManager.RecompositeGpuLayers();
-                _layerManager.UpdateStandaloneComposite();
+
+                bool isSameContext = _layerManager != null &&
+                     _layerManager.ActiveLayer == _activeLayer &&
+                     string.Equals(_layerManager.ActiveMaterialKey ?? "", _openedMaterialKey, StringComparison.Ordinal) &&
+                     _layerManager.CanvasSize.X == _openedW &&
+                     _layerManager.CanvasSize.Y == _openedH;
+
+                if (isSameContext)
+                {
+                    _layerManager.SyncActiveLayerGpuTexture();
+                    _layerManager.RecompositeGpuLayers();
+                }
+                    _layerManager.UpdateStandaloneComposite();
 
                 var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as DeadlockPlayground.UI.UVCanvas2DUI;
                 uvCanvas?.QueueCanvasRedraw();
@@ -694,8 +821,18 @@ namespace DeadlockPlayground.UI
                     _isSamplingUnderlyingComposite
                 );
 
-                _layerManager.SyncActiveLayerGpuTexture();
-                _layerManager.RecompositeGpuLayers();
+                bool isSameContext = _layerManager != null &&
+                     _layerManager.ActiveLayer == _activeLayer &&
+                     string.Equals(_layerManager.ActiveMaterialKey ?? "", _openedMaterialKey, StringComparison.Ordinal) &&
+                     _layerManager.CanvasSize.X == _openedW &&
+                     _layerManager.CanvasSize.Y == _openedH;
+
+                if(isSameContext)
+                {
+                    _layerManager.SyncActiveLayerGpuTexture();
+                    _layerManager.RecompositeGpuLayers();
+                }
+
                 _layerManager.UpdateStandaloneComposite();
                 _layerManager.SyncGpuStrokeToComposite();
                 _layerManager.SetActiveContextHasPaintStrokes(true);

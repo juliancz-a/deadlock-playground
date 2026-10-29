@@ -73,9 +73,11 @@ corner_radius_bottom_left = 5
 
 [node name="GradientMapModal" type="PanelContainer" node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_gradientRampPreview", "_stopMarkersTrack", "_colorPickerStop", "_spinStopPosition", "_btnDeleteStop", "_chkReverse", "_chkDither", "_optBlendMode", "_sliderOpacity", "_lblOpacityVal", "_listBuiltinPresets", "_listImportedPresets", "_btnImportGrd", "_chkPreview", "_btnReset", "_btnCancel", "_btnApply")]
 clip_contents = true
-custom_minimum_size = Vector2(480, 580)
-offset_right = 480.0
-offset_bottom = 580.0
+custom_minimum_size = Vector2(460, 0)
+offset_right = 460.0
+offset_bottom = 420.0
+size_flags_horizontal = 0
+size_flags_vertical = 0
 theme = ExtResource("1_theme")
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
 script = ExtResource("2_script")
@@ -103,7 +105,8 @@ _btnApply = NodePath("VBoxContainer/FooterBar/BtnApply")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 2
-theme_override_constants/separation = 10
+size_flags_vertical = 0
+theme_override_constants/separation = 8
 
 [node name="HeaderBar" type="HBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
@@ -143,13 +146,13 @@ theme_override_constants/separation = 4
 layout_mode = 2
 
 [node name="RampPreview" type="TextureRect" parent="VBoxContainer/RampSection/RampBorder"]
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 expand_mode = 1
 stretch_mode = 6
 
 [node name="MarkersTrack" type="Control" parent="VBoxContainer/RampSection"]
-custom_minimum_size = Vector2(0, 20)
+custom_minimum_size = Vector2(0, 18)
 layout_mode = 2
 
 [node name="StopControls" type="HBoxContainer" parent="VBoxContainer"]
@@ -234,41 +237,43 @@ horizontal_alignment = 2
 
 [node name="PresetsTabs" type="TabContainer" parent="VBoxContainer"]
 layout_mode = 2
-size_flags_vertical = 3
+size_flags_vertical = 0
 theme_override_font_sizes/font_size = 11
 current_tab = 0
 
 [node name="Built-in Presets" type="VBoxContainer" parent="VBoxContainer/PresetsTabs"]
 layout_mode = 2
+size_flags_vertical = 0
 metadata/_tab_index = 0
 
 [node name="ListBuiltin" type="ItemList" parent="VBoxContainer/PresetsTabs/Built-in Presets"]
-custom_minimum_size = Vector2(0, 240)
+custom_minimum_size = Vector2(0, 135)
 layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 15
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 13
 max_columns = 2
 same_column_width = true
-fixed_icon_size = Vector2i(80, 22)
+fixed_icon_size = Vector2i(72, 20)
 
 [node name="Imported (.grd)" type="VBoxContainer" parent="VBoxContainer/PresetsTabs"]
 visible = false
 layout_mode = 2
+size_flags_vertical = 0
 metadata/_tab_index = 1
 
 [node name="VBox" type="VBoxContainer" parent="VBoxContainer/PresetsTabs/Imported (.grd)"]
 layout_mode = 2
-size_flags_vertical = 3
+size_flags_vertical = 0
 theme_override_constants/separation = 6
 
 [node name="ListImported" type="ItemList" parent="VBoxContainer/PresetsTabs/Imported (.grd)/VBox"]
-custom_minimum_size = Vector2(0, 240)
+custom_minimum_size = Vector2(0, 110)
 layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 15
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 13
 max_columns = 2
 same_column_width = true
-fixed_icon_size = Vector2i(80, 22)
+fixed_icon_size = Vector2i(72, 20)
 
 [node name="BtnImportGrd" type="Button" parent="VBoxContainer/PresetsTabs/Imported (.grd)/VBox"]
 layout_mode = 2
