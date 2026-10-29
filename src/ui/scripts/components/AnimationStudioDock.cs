@@ -1398,6 +1398,94 @@ namespace DeadlockPlayground.UI
         #endregion
 
         #region Target Binding
+        public void SetSkeleton(Skeleton3D skeleton)
+        {
+            _skeleton = (skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion()) ? skeleton : null;
+        }
+
+        public void SetAnimationPlayer(AnimationPlayer animPlayer)
+        {
+            _animPlayer = (animPlayer != null && GodotObject.IsInstanceValid(animPlayer) && !animPlayer.IsQueuedForDeletion()) ? animPlayer : null;
+        }
+
+        public Skeleton3D ResolveActiveSkeleton()
+        {
+            if (_skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion())
+            {
+                return _skeleton;
+            }
+
+            if (_gizmoManager != null && GodotObject.IsInstanceValid(_gizmoManager.TargetSkeleton) && !_gizmoManager.TargetSkeleton.IsQueuedForDeletion())
+            {
+                _skeleton = _gizmoManager.TargetSkeleton;
+                return _skeleton;
+            }
+
+            var viewportArea = GetTree()?.Root?.FindChild("ViewportArea", true, false);
+            if (viewportArea != null)
+            {
+                var skel = viewportArea.FindChild("Skeleton3D", true, false) as Skeleton3D
+                        ?? viewportArea.FindChild("GeneralSkeleton", true, false) as Skeleton3D;
+                if (skel == null)
+                {
+                    skel = FindChildRecursive<Skeleton3D>(viewportArea);
+                }
+                if (skel != null && GodotObject.IsInstanceValid(skel) && !skel.IsQueuedForDeletion())
+                {
+                    _skeleton = skel;
+                    return _skeleton;
+                }
+            }
+
+            return null;
+        }
+
+        public AnimationPlayer ResolveActiveAnimPlayer()
+        {
+            if (_animPlayer != null && GodotObject.IsInstanceValid(_animPlayer) && !_animPlayer.IsQueuedForDeletion())
+            {
+                return _animPlayer;
+            }
+
+            var skel = ResolveActiveSkeleton();
+            if (skel != null)
+            {
+                var ap = skel.GetParent()?.FindChild("AnimationPlayer", true, false) as AnimationPlayer
+                      ?? skel.FindChild("AnimationPlayer", true, false) as AnimationPlayer;
+                if (ap != null && GodotObject.IsInstanceValid(ap) && !ap.IsQueuedForDeletion())
+                {
+                    _animPlayer = ap;
+                    return _animPlayer;
+                }
+            }
+
+            var viewportArea = GetTree()?.Root?.FindChild("ViewportArea", true, false);
+            if (viewportArea != null)
+            {
+                var ap = FindChildRecursive<AnimationPlayer>(viewportArea);
+                if (ap != null && GodotObject.IsInstanceValid(ap) && !ap.IsQueuedForDeletion())
+                {
+                    _animPlayer = ap;
+                    return _animPlayer;
+                }
+            }
+
+            return null;
+        }
+
+        private static T FindChildRecursive<T>(Node root) where T : class
+        {
+            if (root == null) return null;
+            foreach (Node child in root.GetChildren())
+            {
+                if (child is T match && GodotObject.IsInstanceValid(child) && !child.IsQueuedForDeletion())
+                    return match;
+                var sub = FindChildRecursive<T>(child);
+                if (sub != null) return sub;
+            }
+            return null;
+        }
+
         public void BindTarget(Skeleton3D skeleton, AnimationPlayer animPlayer, Godot.Animation godotAnim, string animName, float fps = 30f)
         {
             if (skeleton == null || !GodotObject.IsInstanceValid(skeleton) || skeleton.IsQueuedForDeletion())
@@ -2352,9 +2440,11 @@ namespace DeadlockPlayground.UI
         #region External Animation Importing & Retargeting
         public void OpenImportFileDialog()
         {
-            if (_skeleton == null)
+            var skel = ResolveActiveSkeleton();
+            if (skel == null)
             {
                 GD.PrintErr("[AnimationStudio] Cannot import animation: no active Skeleton3D bound.");
+                StudioUIManager.Instance?.ShowToast("Cannot import animation: no active character skeleton found.");
                 return;
             }
 
@@ -2432,7 +2522,17 @@ namespace DeadlockPlayground.UI
             };
 
             modal.RetargetCompleted += OnExternalRetargetCompleted;
-            modal.Open(loadResult, _skeleton, _animPlayer, _activeAnimName);
+
+            var skel = ResolveActiveSkeleton();
+            var ap = ResolveActiveAnimPlayer();
+            if (skel == null)
+            {
+                GD.PrintErr("[AnimationStudio] Cannot retarget: active character skeleton is missing or disposed.");
+                StudioUIManager.Instance?.ShowToast("Active character skeleton is missing or disposed.");
+                return;
+            }
+
+            modal.Open(loadResult, skel, ap, _activeAnimName);
         }
 
         public void ToggleModifiersSidebar()
@@ -2479,13 +2579,18 @@ namespace DeadlockPlayground.UI
 
         private void OnExternalRetargetCompleted(Godot.Animation retargetedAnim, string clipName, bool overwriteSelected)
         {
-            if (retargetedAnim == null || _animPlayer == null || _skeleton == null) return;
+            var skel = ResolveActiveSkeleton();
+            var ap = ResolveActiveAnimPlayer();
+            if (retargetedAnim == null || skel == null || ap == null) return;
 
             string targetKey = overwriteSelected && !string.IsNullOrEmpty(_activeAnimName)
                 ? _activeAnimName
                 : (string.IsNullOrEmpty(clipName) ? "retarget_clip" : clipName);
 
             retargetedAnim.SetMeta("is_retargeted", true);
+            retargetedAnim.SetMeta("decoded_by_anim_loader", true);
+            retargetedAnim.SetMeta("anim_loader_version", 5);
+            retargetedAnim.SetMeta("in_place", false);
             DeadlockAnimLoader.KnownRemappedAnimations.Add(targetKey);
             string cleanTargetKey = DeadlockAnimLoader.SanitizePoseName(targetKey);
             DeadlockAnimLoader.KnownRemappedAnimations.Add(cleanTargetKey);

@@ -44,6 +44,7 @@ public static class DeadlockAnimLoader
         public bool IsAdditive { get; set; }
         public bool IsCompatible { get; set; } = true;
         public string IncompatibilityReason { get; set; } = null;
+        public string VpkClipPath { get; set; } = string.Empty;
         public ValveResourceFormat.ResourceTypes.ModelAnimation.Animation VrfAnimation { get; set; }
     }
 
@@ -672,6 +673,24 @@ public static class DeadlockAnimLoader
                 }
             }
 
+            string vpkClipPath = string.Empty;
+            if (!string.IsNullOrEmpty(rawName) && rawName.Contains('/'))
+            {
+                string norm = rawName.Replace('\\', '/');
+                if (norm.EndsWith(".vnmclip", StringComparison.OrdinalIgnoreCase))
+                {
+                    vpkClipPath = norm + "_c";
+                }
+                else if (norm.EndsWith(".vnmclip_c", StringComparison.OrdinalIgnoreCase))
+                {
+                    vpkClipPath = norm;
+                }
+                else if (norm.Contains("/clips/"))
+                {
+                    vpkClipPath = norm + ".vnmclip_c";
+                }
+            }
+
             result.Add(new AnimSequenceInfo
             {
                 RawName = rawName,
@@ -685,6 +704,7 @@ public static class DeadlockAnimLoader
                 IsAdditive = isAdditive,
                 IsCompatible = isCompatible,
                 IncompatibilityReason = incompReason,
+                VpkClipPath = vpkClipPath,
                 VrfAnimation = anim
             });
         }
@@ -700,6 +720,66 @@ public static class DeadlockAnimLoader
 
         GD.Print($"[AnimLoader] Indexed {result.Count} discrete sequences across categories.");
         return result;
+    }
+
+    /// <summary>
+    /// Resolves the authentic Source 2 VPK path for a hero's animation clip (e.g. models/heroes_staging/archer/clips/stand_idle.vnmclip_c).
+    /// </summary>
+    public static string ResolveHeroClipVpkPath(string heroId, string modelVpkPath, string cleanName, Package package = null)
+    {
+        if (string.IsNullOrWhiteSpace(cleanName)) return string.Empty;
+        string cleanSearch = SanitizePoseName(cleanName).ToLowerInvariant();
+
+        // 1. If package is provided, query pkg.Entries["vnmclip_c"] for an exact or best hero match
+        if (package != null && package.Entries.TryGetValue("vnmclip_c", out var clips))
+        {
+            string heroFolder = !string.IsNullOrEmpty(heroId) ? heroId.ToLowerInvariant() : "";
+            string modelFolder = !string.IsNullOrEmpty(modelVpkPath) 
+                ? (Path.GetDirectoryName(modelVpkPath)?.Replace('\\', '/').ToLowerInvariant() ?? "") 
+                : "";
+
+            var heroClips = clips.Where(c =>
+            {
+                string dir = c.DirectoryName.ToLowerInvariant();
+                if (!string.IsNullOrEmpty(modelFolder) && dir.Contains(modelFolder)) return true;
+                if (!string.IsNullOrEmpty(heroFolder) && dir.Contains(heroFolder)) return true;
+                return false;
+            }).ToList();
+
+            if (heroClips.Count > 0)
+            {
+                var exact = heroClips.FirstOrDefault(c => string.Equals(c.FileName, cleanSearch, StringComparison.OrdinalIgnoreCase));
+                if (exact != null)
+                {
+                    return $"{exact.DirectoryName}/{exact.FileName}.{exact.TypeName}";
+                }
+
+                // Try suffix/prefix match
+                var fuzzy = heroClips.FirstOrDefault(c =>
+                    c.FileName.Equals(cleanSearch, StringComparison.OrdinalIgnoreCase) ||
+                    c.FileName.EndsWith($"_{cleanSearch}", StringComparison.OrdinalIgnoreCase) ||
+                    c.FileName.StartsWith($"{cleanSearch}_", StringComparison.OrdinalIgnoreCase) ||
+                    c.FileName.Contains(cleanSearch, StringComparison.OrdinalIgnoreCase));
+                if (fuzzy != null)
+                {
+                    return $"{fuzzy.DirectoryName}/{fuzzy.FileName}.{fuzzy.TypeName}";
+                }
+            }
+        }
+
+        // 2. Derive from modelVpkPath directory (e.g. models/heroes_staging/inferno_v4/inferno.vmdl_c -> models/heroes_staging/inferno_v4/clips/{cleanSearch}.vnmclip_c)
+        if (!string.IsNullOrEmpty(modelVpkPath))
+        {
+            string dir = Path.GetDirectoryName(modelVpkPath)?.Replace('\\', '/');
+            if (!string.IsNullOrEmpty(dir))
+            {
+                return $"{dir}/clips/{cleanSearch}.vnmclip_c";
+            }
+        }
+
+        // 3. Fallback based on heroId convention
+        string heroRoot = !string.IsNullOrEmpty(heroId) ? heroId : "hero";
+        return $"models/heroes_staging/{heroRoot}/clips/{cleanSearch}.vnmclip_c";
     }
 
     /// <summary>

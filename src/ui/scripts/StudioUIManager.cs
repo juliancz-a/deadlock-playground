@@ -1000,10 +1000,36 @@ public partial class StudioUIManager : CanvasLayer
             _btnTabPaint
         };
 
+        string[] tabIconPaths = new string[]
+        {
+            "res://assets/at-icons/person_body.svg",
+            "res://assets/at-icons/bone.svg",
+            "res://assets/at-icons/photo_camera.svg",
+            "res://assets/at-icons/clapperboard.svg",
+            "res://assets/at-icons/globe.svg",
+            "res://assets/at-icons/sparkles.svg",
+            "res://assets/at-icons/lightbulb.svg",
+            "res://assets/at-icons/sun.svg",
+            "res://assets/at-icons/brush.svg"
+        };
+
         for (int i = 0; i < _tabButtons.Length; i++)
         {
             if (_tabButtons[i] != null)
             {
+                if (i < tabIconPaths.Length && ResourceLoader.Exists(tabIconPaths[i]))
+                {
+                    var tex = GD.Load<Texture2D>(tabIconPaths[i]);
+                    if (tex != null)
+                    {
+                        _tabButtons[i].Icon = tex;
+                        _tabButtons[i].IconAlignment = HorizontalAlignment.Left;
+                        _tabButtons[i].VerticalIconAlignment = VerticalAlignment.Center;
+                        _tabButtons[i].ExpandIcon = false;
+                        _tabButtons[i].AddThemeConstantOverride("icon_max_width", 16);
+                        _tabButtons[i].AddThemeConstantOverride("h_separation", 6);
+                    }
+                }
                 PlaygroundThemeHelper.MakeTabButton(_tabButtons[i], i == _currentTabIndex);
                 int tabIdx = i;
                 _tabButtons[i].Pressed += () => SwitchTab(tabIdx);
@@ -2122,6 +2148,7 @@ public partial class StudioUIManager : CanvasLayer
     {
         _toastPanel = new PanelContainer();
         _toastPanel.Visible = false;
+        _toastPanel.ZIndex = 999;
 
         var margin = new MarginContainer();
         margin.AddThemeConstantOverride("margin_left", 16);

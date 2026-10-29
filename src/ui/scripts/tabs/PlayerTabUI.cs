@@ -34,8 +34,7 @@ public partial class PlayerTabUI : VBoxContainer
     private Label _labelCharge;
     private Button _btnRelease;
     private CheckBox _chkAutoLoop;
-    private CheckBox _chkIdleUnderlay;
-    private bool _isIdleUnderlayEnabled = false;
+    private const bool _isIdleUnderlayEnabled = false;
     private CheckBox _chkInPlaceMotion;
     private bool _isInPlaceMotionEnabled = true;
     private DeadlockAnimLoader.AnimSequenceInfo _activeAnimInfo;
@@ -70,6 +69,8 @@ public partial class PlayerTabUI : VBoxContainer
         AnimationTransportService.Instance.PlaybackStateChanged += OnTransportPlaybackStateChanged;
         AnimationTransportService.Instance.TimeChanged += OnTransportTimeChanged;
         AnimationTransportService.Instance.LoopChanged += OnTransportLoopChanged;
+        ModWorkspaceSession.Instance.OnAnimationDiscarded += OnWorkspaceAnimationDiscarded;
+        ModWorkspaceSession.Instance.OnWorkspaceCleared += OnWorkspaceCleared;
 
         if (_animSearch != null)
         {
@@ -124,17 +125,6 @@ public partial class PlayerTabUI : VBoxContainer
         var animGroup = GetNodeOrNull<VBoxContainer>("AnimGroup");
         if (animGroup != null)
         {
-            _chkIdleUnderlay = new CheckBox
-            {
-                Name = "ChkIdleUnderlay",
-                Text = "Underlay Idle Stance",
-                ButtonPressed = _isIdleUnderlayEnabled,
-                TooltipText = "Underlays the hero's base combat idle stance for additive and reaction sequences so limbs and weapons remain naturally posed."
-            };
-            _chkIdleUnderlay.Toggled += OnIdleUnderlayToggled;
-            animGroup.AddChild(_chkIdleUnderlay);
-            animGroup.MoveChild(_chkIdleUnderlay, 1);
-
             _chkInPlaceMotion = new CheckBox
             {
                 Name = "ChkInPlaceMotion",
@@ -178,6 +168,11 @@ public partial class PlayerTabUI : VBoxContainer
         AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
         AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
         AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
+        if (ModWorkspaceSession.Instance != null)
+        {
+            ModWorkspaceSession.Instance.OnAnimationDiscarded -= OnWorkspaceAnimationDiscarded;
+            ModWorkspaceSession.Instance.OnWorkspaceCleared -= OnWorkspaceCleared;
+        }
         if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock))
         {
             _animStudioDock.AnimationModified -= OnAnimStudioAnimationModified;
@@ -301,6 +296,14 @@ public partial class PlayerTabUI : VBoxContainer
                 string heroDisplayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
                 string modelVpkPath = _vpkLoader?.LastLoadedHeroEntry?.VmdlRelativePath ?? "";
 
+                var info = _currentHeroAnimations.FirstOrDefault(a => 
+                    a.CleanName.Equals(animName, StringComparison.OrdinalIgnoreCase) ||
+                    a.RawName.Equals(animName, StringComparison.OrdinalIgnoreCase));
+
+                string targetVpkPath = info != null && !string.IsNullOrEmpty(info.VpkClipPath)
+                    ? info.VpkClipPath
+                    : DeadlockAnimLoader.ResolveHeroClipVpkPath(heroId, modelVpkPath, animName, _vpkLoader?.GetOrCreateBasePackage());
+
                 if (!string.IsNullOrEmpty(heroId) && anim != null)
                 {
                     ModWorkspaceSession.Instance.StageAnimation(
@@ -311,7 +314,8 @@ public partial class PlayerTabUI : VBoxContainer
                         cleanName: animName,
                         godotAnim: anim,
                         fps: 30f,
-                        skeleton: _skeleton
+                        skeleton: _skeleton,
+                        targetVpkPath: targetVpkPath
                     );
                 }
             }
@@ -320,6 +324,102 @@ public partial class PlayerTabUI : VBoxContainer
         {
             GD.PrintErr($"[PlayerTabUI] Failed to stage modified animation to workspace: {ex.Message}");
         }
+    }
+
+    private void OnWorkspaceAnimationDiscarded(string heroId, string cleanName)
+    {
+        FindVpkLoader();
+        string curHeroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename ?? "";
+        if (!string.IsNullOrEmpty(curHeroId) && !string.Equals(curHeroId, heroId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        DeadlockAnimLoader.KnownRemappedAnimations.Remove(cleanName);
+        var matchingInfo = _currentHeroAnimations.FirstOrDefault(a =>
+            a.CleanName.Equals(cleanName, StringComparison.OrdinalIgnoreCase) ||
+            a.RawName.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
+        if (matchingInfo != null)
+        {
+            DeadlockAnimLoader.KnownRemappedAnimations.Remove(matchingInfo.CleanName);
+            DeadlockAnimLoader.KnownRemappedAnimations.Remove(matchingInfo.RawName);
+            matchingInfo.Category = DeadlockAnimLoader.ClassifyCategory(matchingInfo.CleanName);
+        }
+
+        if (_animPlayer != null)
+        {
+            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+            if (animLib != null)
+            {
+                if (animLib.HasAnimation(cleanName))
+                {
+                    var a = animLib.GetAnimation(cleanName);
+                    a?.RemoveMeta("is_retargeted");
+                    a?.RemoveMeta("decoded_by_anim_loader");
+                    animLib.RemoveAnimation(cleanName);
+                }
+                if (matchingInfo != null && animLib.HasAnimation(matchingInfo.RawName))
+                {
+                    var a = animLib.GetAnimation(matchingInfo.RawName);
+                    a?.RemoveMeta("is_retargeted");
+                    a?.RemoveMeta("decoded_by_anim_loader");
+                    animLib.RemoveAnimation(matchingInfo.RawName);
+                }
+            }
+
+            bool wasActive = string.Equals(_activeAnimName, cleanName, StringComparison.OrdinalIgnoreCase) ||
+                             (matchingInfo != null && string.Equals(_activeAnimName, matchingInfo.RawName, StringComparison.OrdinalIgnoreCase));
+
+            if (wasActive)
+            {
+                _animPlayer.Stop();
+                if (matchingInfo != null)
+                {
+                    SelectAnimation(matchingInfo, autoPlay: true);
+                }
+                else
+                {
+                    AutoSelectDefaultIdle();
+                }
+            }
+        }
+
+        _currentHeroAnimations.Sort((a, b) =>
+        {
+            int catOrderA = DeadlockAnimLoader.GetCategoryPriority(a.Category);
+            int catOrderB = DeadlockAnimLoader.GetCategoryPriority(b.Category);
+            if (catOrderA != catOrderB) return catOrderA.CompareTo(catOrderB);
+            return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+        });
+
+        PopulateAnimationTree();
+    }
+
+    private void OnWorkspaceCleared()
+    {
+        DeadlockAnimLoader.KnownRemappedAnimations.Clear();
+        if (_animPlayer != null)
+        {
+            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+            if (animLib != null)
+            {
+                foreach (var aKey in animLib.GetAnimationList())
+                {
+                    var anim = animLib.GetAnimation(aKey);
+                    if (anim != null && anim.HasMeta("is_retargeted"))
+                    {
+                        anim.RemoveMeta("is_retargeted");
+                        anim.RemoveMeta("decoded_by_anim_loader");
+                        animLib.RemoveAnimation(aKey);
+                    }
+                }
+            }
+        }
+        foreach (var a in _currentHeroAnimations)
+        {
+            a.Category = DeadlockAnimLoader.ClassifyCategory(a.CleanName);
+        }
+        PopulateAnimationTree();
     }
 
     private void InitParticleControls()
@@ -536,10 +636,14 @@ public partial class PlayerTabUI : VBoxContainer
     public void SetSkeleton(Skeleton3D skeleton)
     {
         _skeleton = (skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion()) ? skeleton : null;
-        if (_animStudioDock != null && _skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+        if (_animStudioDock != null)
         {
-            var curAnim = _animPlayer.GetAnimation(_activeAnimName);
-            _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
+            _animStudioDock.SetSkeleton(_skeleton);
+            if (_skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+            {
+                var curAnim = _animPlayer.GetAnimation(_activeAnimName);
+                _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
+            }
         }
     }
 
@@ -551,6 +655,10 @@ public partial class PlayerTabUI : VBoxContainer
         }
 
         _animPlayer = animPlayer;
+        if (_animStudioDock != null)
+        {
+            _animStudioDock.SetAnimationPlayer(_animPlayer);
+        }
         if (_animPlayer == null)
         {
             ResetTransportUI();
@@ -703,6 +811,13 @@ public partial class PlayerTabUI : VBoxContainer
                 if (isRetargeted)
                 {
                     existing.Category = "Remapped";
+                    if (anim != null)
+                    {
+                        existing.Duration = (float)anim.Length;
+                        existing.Fps = 30f;
+                        existing.FrameCount = Math.Max(1, (int)Math.Round(anim.Length * 30.0) + 1);
+                        existing.IsLooping = anim.LoopMode != Godot.Animation.LoopModeEnum.None;
+                    }
                 }
                 continue;
             }
@@ -737,6 +852,79 @@ public partial class PlayerTabUI : VBoxContainer
                     IsAdditive = isAdditive
                 });
             }
+        }
+
+        // 3. Restore any animations staged in active ModWorkspaceSession for this hero
+        try
+        {
+            string heroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename ?? "";
+            if (!string.IsNullOrEmpty(heroId) &&
+                ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(heroId, out var heroEntry) &&
+                heroEntry.Assets != null)
+            {
+                var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+                foreach (var asset in heroEntry.Assets)
+                {
+                    if (asset.Animations == null || asset.Animations.Count == 0) continue;
+
+                    foreach (var stagedEntry in asset.Animations)
+                    {
+                        if (string.IsNullOrEmpty(stagedEntry.CleanName)) continue;
+
+                        string animKey = stagedEntry.CleanName;
+                        Godot.Animation anim = null;
+
+                        if (animLib != null)
+                        {
+                            anim = ModWorkspaceSession.Instance.LoadStagedAnimationToGodot(stagedEntry, _skeleton);
+                            if (anim != null)
+                            {
+                                if (animLib.HasAnimation(animKey))
+                                {
+                                    animLib.RemoveAnimation(animKey);
+                                }
+                                animLib.AddAnimation(animKey, anim);
+                                GD.Print($"[PlayerTabUI] Restored staged animation '{animKey}' into AnimationPlayer for hero '{heroId}'.");
+                            }
+                        }
+
+                        DeadlockAnimLoader.KnownRemappedAnimations.Add(animKey);
+                        DeadlockAnimLoader.KnownRemappedAnimations.Add(stagedEntry.AnimName);
+
+                        var existing = _currentHeroAnimations.FirstOrDefault(a =>
+                            a.RawName.Equals(animKey, StringComparison.OrdinalIgnoreCase) ||
+                            a.CleanName.Equals(animKey, StringComparison.OrdinalIgnoreCase));
+
+                        if (existing != null)
+                        {
+                            existing.Category = "Remapped";
+                            existing.Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0);
+                            existing.IsLooping = stagedEntry.IsLooping;
+                            existing.IsAdditive = stagedEntry.IsAdditive;
+                            existing.VpkClipPath = stagedEntry.TargetVpkPath;
+                        }
+                        else
+                        {
+                            seenCleanNames.Add(animKey);
+                            _currentHeroAnimations.Add(new DeadlockAnimLoader.AnimSequenceInfo
+                            {
+                                RawName = animKey,
+                                CleanName = animKey,
+                                DisplayName = DeadlockAnimLoader.FormatDisplayName(animKey),
+                                Category = "Remapped",
+                                Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0),
+                                IsLooping = stagedEntry.IsLooping,
+                                IsAdditive = stagedEntry.IsAdditive,
+                                VpkClipPath = stagedEntry.TargetVpkPath
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception wsEx)
+        {
+            GD.PrintErr($"[PlayerTabUI] Failed to restore workspace staged animations for hero: {wsEx.Message}");
         }
 
         // Sort by category priority, then display name
@@ -886,36 +1074,6 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
-    private void OnIdleUnderlayToggled(bool toggled)
-    {
-        _isIdleUnderlayEnabled = toggled;
-
-        if (_activeAnimInfo != null && _animPlayer != null)
-        {
-            string clean = _activeAnimInfo.CleanName;
-            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
-            if (animLib != null)
-            {
-                if (animLib.HasAnimation(clean)) animLib.RemoveAnimation(clean);
-                if (animLib.HasAnimation($"{clean}_underlaid")) animLib.RemoveAnimation($"{clean}_underlaid");
-                if (animLib.HasAnimation(_activeAnimInfo.RawName)) animLib.RemoveAnimation(_activeAnimInfo.RawName);
-                if (animLib.HasAnimation($"{_activeAnimInfo.RawName}_underlaid")) animLib.RemoveAnimation($"{_activeAnimInfo.RawName}_underlaid");
-            }
-
-            double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
-            bool wasPlaying = _animPlayer.IsPlaying();
-            SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
-            if (_animPlayer.HasAnimation(_activeAnimName))
-            {
-                _animPlayer.Seek(currentPos, update: true);
-                if (wasPlaying) _animPlayer.Play(_activeAnimName);
-                else _animPlayer.Pause();
-            }
-            _timelineSlider?.SetValueNoSignal(currentPos);
-            UpdateTimeLabel((float)currentPos, _activeAnimLength);
-        }
-    }
-
     private void OnInPlaceMotionToggled(bool toggled)
     {
         _isInPlaceMotionEnabled = toggled;
@@ -1037,6 +1195,17 @@ public partial class PlayerTabUI : VBoxContainer
             var anim = _animPlayer.GetAnimation(targetName);
             if (anim != null)
             {
+                // CRITICAL: Protect retargeted, imported, or studio-modified animations!
+                bool isRetargeted = (anim.HasMeta("is_retargeted") && (bool)anim.GetMeta("is_retargeted")) ||
+                                    DeadlockAnimLoader.KnownRemappedAnimations.Contains(targetName) ||
+                                    DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.CleanName) ||
+                                    DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.RawName);
+
+                if (isRetargeted)
+                {
+                    return anim;
+                }
+
                 bool isDecodedByLoader = anim.HasMeta("decoded_by_anim_loader");
                 bool isStaleVersion = isDecodedByLoader
                     ? (!anim.HasMeta("anim_loader_version") || anim.GetMeta("anim_loader_version").AsInt32() < 5)
@@ -1131,7 +1300,10 @@ public partial class PlayerTabUI : VBoxContainer
         bool isAdditive = (info.Category == "Additive Layers") ||
                           (info.VrfAnimation != null ? info.VrfAnimation.IsAdditive : info.IsAdditive) ||
                           DeadlockAnimLoader.IsDeltaSequence(info);
-        if (info.Category == "Idles & Stances" || info.Category == "Idle")
+        if (info.Category == "Idles & Stances" || info.Category == "Idle" || info.Category == "Remapped" ||
+            (rawAnim != null && rawAnim.HasMeta("is_retargeted")) ||
+            DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.CleanName) ||
+            DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.RawName))
         {
             isAdditive = false;
         }

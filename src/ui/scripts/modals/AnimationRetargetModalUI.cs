@@ -121,9 +121,11 @@ namespace DeadlockPlayground.UI
             _animPlayer = animPlayer;
             _activeAnimName = currentActiveAnimName ?? "";
 
-            if (_loadResult == null || _loadResult.SourceSkeleton == null || _targetSkeleton == null)
+            if (_loadResult == null || _loadResult.SourceSkeleton == null || !GodotObject.IsInstanceValid(_loadResult.SourceSkeleton)
+                || _targetSkeleton == null || !GodotObject.IsInstanceValid(_targetSkeleton) || _targetSkeleton.IsQueuedForDeletion())
             {
                 GD.PrintErr("[AnimationRetargetModal] Cannot open: invalid load result or skeleton.");
+                StudioUIManager.Instance?.ShowToast("Cannot retarget animation: active character skeleton is missing or invalid.");
                 Close();
                 return;
             }

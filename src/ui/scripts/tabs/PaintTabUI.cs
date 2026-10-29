@@ -325,8 +325,10 @@ public partial class PaintTabUI : VBoxContainer
         if (_btnAlphaLock != null)
         {
             _btnAlphaLock.Icon = _iconAlphaLock;
-            _btnAlphaLock.ExpandIcon = true;
+            _btnAlphaLock.ExpandIcon = false;
+            _btnAlphaLock.Set("theme_override_constants/icon_max_width", 16);
             _btnAlphaLock.IconAlignment = HorizontalAlignment.Center;
+            _btnAlphaLock.CustomMinimumSize = new Vector2(28, 26);
             _btnAlphaLock.Toggled += (locked) =>
             {
                 if (_layerManager?.ActiveLayer != null && !_layerManager.IsBaseTextureActive)

@@ -837,7 +837,7 @@ namespace DeadlockPlayground.Painter
                                                     byte[] clipData = File.ReadAllBytes(fullClipPath);
                                                     string targetVpkPath = !string.IsNullOrEmpty(animEntry.TargetVpkPath)
                                                         ? animEntry.TargetVpkPath
-                                                        : $"models/heroes/{config.HeroCodename}/animations/{animEntry.CleanName}.vnmclip_c";
+                                                        : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(config.HeroCodename, null, animEntry.CleanName);
                                                     targetVpkPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
                                                     package.AddFile(targetVpkPath, clipData);
                                                     progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));

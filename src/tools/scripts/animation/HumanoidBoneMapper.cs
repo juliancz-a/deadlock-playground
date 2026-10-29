@@ -368,7 +368,7 @@ namespace DeadlockPlayground.Animation
         /// </summary>
         public static string ResolveTargetBone(Skeleton3D targetSkeleton, BoneDefinition def)
         {
-            if (targetSkeleton == null) return null;
+            if (targetSkeleton == null || !GodotObject.IsInstanceValid(targetSkeleton) || targetSkeleton.IsQueuedForDeletion()) return null;
 
             // 1. Direct canonical name match
             if (targetSkeleton.FindBone(def.CanonicalName) != -1)
@@ -469,7 +469,8 @@ namespace DeadlockPlayground.Animation
         public static Dictionary<string, string> AutoMap(Skeleton3D sourceSkeleton, Skeleton3D targetSkeleton)
         {
             var mapping = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (targetSkeleton == null || sourceSkeleton == null) return mapping;
+            if (targetSkeleton == null || !GodotObject.IsInstanceValid(targetSkeleton) || targetSkeleton.IsQueuedForDeletion()) return mapping;
+            if (sourceSkeleton == null || !GodotObject.IsInstanceValid(sourceSkeleton) || sourceSkeleton.IsQueuedForDeletion()) return mapping;
 
             var usedSourceBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

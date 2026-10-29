@@ -129,6 +129,15 @@ namespace DeadlockPlayground.UI
             IsOpen = false;
             ClipContents = true;
 
+            if (_lblTitle != null)
+            {
+                _lblTitle.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            }
+            if (_lblSubtitle != null)
+            {
+                _lblSubtitle.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            }
+
             WireSignals();
             SetupScrollableProtection();
             InitDropdowns();
@@ -305,9 +314,14 @@ namespace DeadlockPlayground.UI
             Vector2 vpSize = vp.GetVisibleRect().Size;
             if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
 
+            float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
             float maxAllowedH = vpSize.Y * 0.85f;
-            float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : Size.X;
-            float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : Size.Y;
+
+            float combinedW = GetCombinedMinimumSize().X;
+            float modalW = Mathf.Clamp(Mathf.Max(Size.X, combinedW), 320f, maxAllowedW);
+            float modalH = Mathf.Max(Size.Y, GetCombinedMinimumSize().Y);
+
+            CustomMinimumSize = new Vector2(Mathf.Min(CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380f, maxAllowedW), CustomMinimumSize.Y);
             if (modalH > maxAllowedH)
             {
                 modalH = maxAllowedH;
@@ -316,19 +330,24 @@ namespace DeadlockPlayground.UI
             }
 
             Vector2 target = candidatePos ?? Position;
-            float clampedX = Mathf.Clamp(target.X, 20f, Mathf.Max(20f, vpSize.X - modalW - 20f));
-            float clampedY = Mathf.Clamp(target.Y, 20f, Mathf.Max(20f, vpSize.Y - modalH - 20f));
+            float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+            float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+            float clampedX = Mathf.Clamp(target.X, 20f, maxX);
+            float clampedY = Mathf.Clamp(target.Y, 20f, maxY);
             Position = new Vector2(clampedX, clampedY);
         }
 
         private void CenterOrPositionModal()
         {
             var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-            float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380;
-            float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 300;
+            float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
+            float modalW = Mathf.Clamp(CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380f, 320f, maxAllowedW);
+            float modalH = Mathf.Clamp(CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 320f, 240f, vpSize.Y * 0.85f);
 
-            float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 20f, vpSize.X - modalW - 20f);
-            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, vpSize.Y - modalH - 20f);
+            float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+            float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+            float targetX = Mathf.Clamp(vpSize.X - modalW - 60f, 20f, maxX);
+            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
             ClampPositionToScreen(new Vector2(targetX, targetY));
         }
 

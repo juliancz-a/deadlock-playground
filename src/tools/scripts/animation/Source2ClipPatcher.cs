@@ -6,6 +6,7 @@ using System.Numerics;
 using SteamDatabase.ValvePak;
 using ValveKeyValue;
 using ValveResourceFormat;
+using ValveResourceFormat.IO;
 using ValveResourceFormat.ResourceTypes;
 using ValveResourceFormat.ResourceTypes.ModelAnimation2;
 using ValveResourceFormat.Serialization.KeyValues;
@@ -40,7 +41,10 @@ namespace DeadlockPlayground.Animation
             Godot.Animation godotAnim,
             Godot.Skeleton3D skeleton,
             string animName,
-            float fps = 30f)
+            float fps = 30f,
+            string targetVpkPath = null,
+            string heroId = null,
+            IFileLoader fileLoader = null)
         {
             if (godotAnim == null || skeleton == null) return null;
 
@@ -51,49 +55,113 @@ namespace DeadlockPlayground.Animation
                 IsAdditive = godotAnim.HasMeta("is_additive") && godotAnim.GetMeta("is_additive").AsBool()
             };
 
-            if (existingResourceBytes == null || existingResourceBytes.Length == 0)
+            Package openedPkg = null;
+            try
             {
-                try
+                if (fileLoader == null || existingResourceBytes == null || existingResourceBytes.Length == 0)
                 {
-                    var pm = new GamePathManager();
-                    pm.LoadConfig();
-                    string deadlockPath = pm.CurrentGamePath;
-                    if (!string.IsNullOrEmpty(deadlockPath))
+                    try
                     {
-                        string vpkPath = Path.Combine(deadlockPath, "game", "citadel", "pak01_dir.vpk");
-                        if (File.Exists(vpkPath))
+                        var pm = new GamePathManager();
+                        pm.LoadConfig();
+                        string deadlockPath = pm.CurrentGamePath;
+                        if (!string.IsNullOrEmpty(deadlockPath))
                         {
-                            using var pkg = new Package();
-                            pkg.Read(vpkPath);
-                            string targetFile = $"{animName}.vnmclip_c";
-                            foreach (var extGroup in pkg.Entries.Values)
+                            string vpkPath = Path.Combine(deadlockPath, "game", "citadel", "pak01_dir.vpk");
+                            if (File.Exists(vpkPath))
                             {
-                                foreach (var entry in extGroup)
+                                openedPkg = new Package();
+                                openedPkg.Read(vpkPath);
+                                fileLoader ??= new GameFileLoader(openedPkg, "");
+
+                                if (existingResourceBytes == null || existingResourceBytes.Length == 0)
                                 {
-                                    if (string.Equals(entry.FileName + "." + entry.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
+                                    // 1. Try direct targetVpkPath if specified
+                                    if (!string.IsNullOrEmpty(targetVpkPath))
                                     {
-                                        pkg.ReadEntry(entry, out byte[] data);
-                                        existingResourceBytes = data;
-                                        break;
+                                        string cleanPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
+                                        var entry = openedPkg.FindEntry(cleanPath);
+                                        if (entry != null)
+                                        {
+                                            openedPkg.ReadEntry(entry, out byte[] data);
+                                            existingResourceBytes = data;
+                                        }
+                                    }
+
+                                    // 2. Query pkg.Entries["vnmclip_c"] for matching clip
+                                    if (existingResourceBytes == null && openedPkg.Entries.TryGetValue("vnmclip_c", out var clips))
+                                    {
+                                        string cleanSearch = DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(animName).ToLowerInvariant();
+                                        string heroSearch = !string.IsNullOrEmpty(heroId) ? heroId.ToLowerInvariant() : "";
+
+                                        // A. Exact file name match in hero folder
+                                        var heroClips = !string.IsNullOrEmpty(heroSearch)
+                                            ? clips.Where(c => c.DirectoryName.ToLowerInvariant().Contains(heroSearch)).ToList()
+                                            : clips;
+
+                                        var exact = heroClips.FirstOrDefault(c => string.Equals(c.FileName, cleanSearch, StringComparison.OrdinalIgnoreCase))
+                                                 ?? clips.FirstOrDefault(c => string.Equals(c.FileName, cleanSearch, StringComparison.OrdinalIgnoreCase));
+
+                                        if (exact != null)
+                                        {
+                                            openedPkg.ReadEntry(exact, out byte[] data);
+                                            existingResourceBytes = data;
+                                        }
+                                        else
+                                        {
+                                            // B. Fuzzy prefix/suffix match (e.g. weapon_{animName}, out_of_combat_{animName})
+                                            var fuzzy = heroClips.FirstOrDefault(c =>
+                                                c.FileName.EndsWith($"_{cleanSearch}", StringComparison.OrdinalIgnoreCase) ||
+                                                c.FileName.StartsWith($"{cleanSearch}_", StringComparison.OrdinalIgnoreCase) ||
+                                                c.FileName.Contains(cleanSearch, StringComparison.OrdinalIgnoreCase));
+
+                                            if (fuzzy != null)
+                                            {
+                                                openedPkg.ReadEntry(fuzzy, out byte[] data);
+                                                existingResourceBytes = data;
+                                            }
+                                        }
+
+                                        // C. Fallback: If still not found (e.g. sequence was embedded in .vmdl_c),
+                                        // use any existing hero clip as a valid Source 2 AnimGraph 2 binary template!
+                                        if (existingResourceBytes == null && heroClips.Count > 0)
+                                        {
+                                            var templateClip = heroClips.FirstOrDefault(c => !c.FileName.Contains("lean") && !c.FileName.Contains("aim"))
+                                                            ?? heroClips.First();
+                                            openedPkg.ReadEntry(templateClip, out byte[] data);
+                                            existingResourceBytes = data;
+                                            Godot.GD.Print($"[Source2ClipPatcher] Used '{templateClip.FileName}' as structural template for '{animName}'.");
+                                        }
+                                        else if (existingResourceBytes == null && clips.Count > 0)
+                                        {
+                                            var fallback = clips.First();
+                                            openedPkg.ReadEntry(fallback, out byte[] data);
+                                            existingResourceBytes = data;
+                                            Godot.GD.Print($"[Source2ClipPatcher] Used generic clip '{fallback.FileName}' as structural template for '{animName}'.");
+                                        }
                                     }
                                 }
-                                if (existingResourceBytes != null) break;
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Godot.GD.Print($"[Source2ClipPatcher] Notice: Base VPK lookup for '{animName}': {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+
+                if (existingResourceBytes == null || existingResourceBytes.Length == 0)
                 {
-                    Godot.GD.Print($"[Source2ClipPatcher] Notice: Base VPK lookup for '{animName}': {ex.Message}");
+                    Godot.GD.PrintErr($"[Source2ClipPatcher] Failed to resolve base .vnmclip_c template for '{animName}'.");
+                    return null;
                 }
-            }
 
-            if (existingResourceBytes == null || existingResourceBytes.Length == 0)
+                return PatchClipResource(existingResourceBytes, godotAnim, skeleton, options, animName, fileLoader);
+            }
+            finally
             {
-                return null;
+                openedPkg?.Dispose();
             }
-
-            return PatchClipResource(existingResourceBytes, godotAnim, skeleton, options);
         }
 
         /// <summary>
@@ -105,7 +173,9 @@ namespace DeadlockPlayground.Animation
             byte[] originalVnmclipBytes,
             Godot.Animation godotAnim,
             Godot.Skeleton3D skeleton,
-            PatchOptions options = null)
+            PatchOptions options = null,
+            string animName = null,
+            IFileLoader fileLoader = null)
         {
             if (godotAnim == null || skeleton == null) return null;
             options ??= new PatchOptions();
@@ -126,14 +196,40 @@ namespace DeadlockPlayground.Animation
             int numFrames = Math.Max(1, (int)Math.Round(godotAnim.Length * fps) + 1);
             float duration = (float)godotAnim.Length;
 
-            // 2. Sample skeleton bones across all frames
-            int boneCount = skeleton.GetBoneCount();
+            if (!string.IsNullOrEmpty(animName))
+            {
+                SetOrReplace(rootObj, "m_clipName", animName);
+            }
+
+            // 2. Resolve target skeleton (from m_skeleton if specified in .vnmclip_c)
+            ValveResourceFormat.ResourceTypes.ModelAnimation.Skeleton targetSkel = null;
+            if (fileLoader != null && rootObj.ContainsKey("m_skeleton"))
+            {
+                string secSkelPath = rootObj["m_skeleton"].ToString();
+                try
+                {
+                    targetSkel = ValveResourceFormat.ResourceTypes.ModelAnimation.Skeleton.FromSkeletonResource(fileLoader, secSkelPath);
+                    if (targetSkel != null)
+                    {
+                        Godot.GD.Print($"[Source2ClipPatcher] Resolved target skeleton '{secSkelPath}' with {targetSkel.Bones.Length} bones.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Godot.GD.PrintErr($"[Source2ClipPatcher] Failed to load target skeleton '{secSkelPath}': {ex.Message}");
+                }
+            }
+
+            // Sample skeleton bones across all frames matching target skeleton ordering if available
+            int boneCount = targetSkel != null && targetSkel.Bones.Length > 0
+                ? targetSkel.Bones.Length
+                : skeleton.GetBoneCount();
+            var targetBones = targetSkel != null && targetSkel.Bones.Length > 0 ? targetSkel.Bones : null;
             var boneTracks = new (int PosTrack, int RotTrack)[boneCount];
-            string skelPath = skeleton.Name;
 
             for (int b = 0; b < boneCount; b++)
             {
-                string bName = skeleton.GetBoneName(b);
+                string bName = targetBones != null ? targetBones[b].Name : skeleton.GetBoneName(b);
                 int pTrack = -1;
                 int rTrack = -1;
 
@@ -144,7 +240,7 @@ namespace DeadlockPlayground.Animation
 
                     var type = godotAnim.TrackGetType(t);
                     if (type == Godot.Animation.TrackType.Position3D) pTrack = t;
-                    else if (type == godotAnim.TrackGetType(t) && type == Godot.Animation.TrackType.Rotation3D) rTrack = t;
+                    else if (type == Godot.Animation.TrackType.Rotation3D) rTrack = t;
                 }
                 boneTracks[b] = (pTrack, rTrack);
             }
@@ -160,35 +256,98 @@ namespace DeadlockPlayground.Animation
 
                 for (int b = 0; b < boneCount; b++)
                 {
-                    bool isRoot = (skeleton.GetBoneParent(b) == -1);
+                    string bName = targetBones != null ? targetBones[b].Name : skeleton.GetBoneName(b);
+                    int gBoneIdx = skeleton.FindBone(bName);
                     var (pTrack, rTrack) = boneTracks[b];
 
-                    Godot.Vector3 gPos = skeleton.GetBoneRest(b).Origin;
-                    Godot.Quaternion gRot = skeleton.GetBoneRest(b).Basis.GetRotationQuaternion();
+                    bool isPelvis = bName.Equals("pelvis", StringComparison.OrdinalIgnoreCase);
+                    bool isRootMotion = bName.Equals("root_motion", StringComparison.OrdinalIgnoreCase) ||
+                                        bName.Equals("root", StringComparison.OrdinalIgnoreCase);
 
-                    if (pTrack != -1 && godotAnim.TrackGetKeyCount(pTrack) > 0)
+                    System.Numerics.Vector3 sPos;
+                    System.Numerics.Quaternion sRot;
+
+                    if (gBoneIdx != -1)
                     {
-                        gPos = godotAnim.PositionTrackInterpolate(pTrack, time);
+                        Godot.Vector3 gPos = skeleton.GetBoneRest(gBoneIdx).Origin;
+                        Godot.Quaternion gRot = skeleton.GetBoneRest(gBoneIdx).Basis.GetRotationQuaternion();
+
+                        if (pTrack != -1 && godotAnim.TrackGetKeyCount(pTrack) > 0)
+                        {
+                            gPos = godotAnim.PositionTrackInterpolate(pTrack, time);
+                        }
+                        if (rTrack != -1 && godotAnim.TrackGetKeyCount(rTrack) > 0)
+                        {
+                            gRot = godotAnim.RotationTrackInterpolate(rTrack, time).Normalized();
+                        }
+
+                        if (isPelvis)
+                        {
+                            // Pelvis in Godot (Y-up, meters) -> Source 2 (Z-up, inches).
+                            // In Godot, pelvis has SourceToGltfRotation applied during import to stand upright.
+                            // During export, GltfToSourceRotation converts Y-up waist height and orientation back to Source 2 Z-up!
+                            sPos = new System.Numerics.Vector3(gPos.X, gPos.Y, gPos.Z) * MetersToInches;
+                            sPos = System.Numerics.Vector3.Transform(sPos, GltfToSourceRotation);
+                            sRot = new System.Numerics.Quaternion(gRot.X, gRot.Y, gRot.Z, gRot.W);
+                            sRot = System.Numerics.Quaternion.Normalize(GltfToSourceRotation * sRot);
+                        }
+                        else if (isRootMotion)
+                        {
+                            // In Source 2 AnimGraph 2 (.vnmskel), root_motion is the top-level ground reference frame (Z-up, X-forward).
+                            // Its native rest orientation in Source 2 is Identity (0, 0, 0, 1).
+                            // All character bones (including pelvis and IK targets) are parented to root_motion.
+                            // Applying GltfToSourceRotation to root_motion would pitch the ENTIRE secondary skeleton 90 degrees horizontal!
+                            if (pTrack == -1 || (MathF.Abs(gPos.X) < 0.001f && MathF.Abs(gPos.Z) < 0.001f))
+                            {
+                                sPos = System.Numerics.Vector3.Zero;
+                            }
+                            else
+                            {
+                                // Godot (-Z forward, +X right, +Y up) -> Source 2 (+X forward, -Y right, +Z up)
+                                sPos = new System.Numerics.Vector3(-gPos.Z, -gPos.X, gPos.Y) * MetersToInches;
+                            }
+
+                            if (rTrack == -1 || (MathF.Abs(gRot.X) < 0.001f && MathF.Abs(gRot.Z) < 0.001f && MathF.Abs(gRot.Y) < 0.001f))
+                            {
+                                sRot = System.Numerics.Quaternion.Identity;
+                            }
+                            else
+                            {
+                                // Godot yaw around Y to Source 2 yaw around Z
+                                sRot = new System.Numerics.Quaternion(0f, 0f, -gRot.Y, gRot.W);
+                            }
+                        }
+                        else
+                        {
+                            // Standard child bone: local rotation & position relative to parent
+                            sPos = new System.Numerics.Vector3(gPos.X, gPos.Y, gPos.Z) * MetersToInches;
+                            sRot = new System.Numerics.Quaternion(gRot.X, gRot.Y, gRot.Z, gRot.W);
+                        }
                     }
-                    if (rTrack != -1 && godotAnim.TrackGetKeyCount(rTrack) > 0)
+                    else if (targetBones != null)
                     {
-                        gRot = godotAnim.RotationTrackInterpolate(rTrack, time).Normalized();
+                        // Bone exists in target skeleton (e.g. vnmskel) but is not keyed in Godot model
+                        sPos = targetBones[b].Position;
+                        sRot = targetBones[b].Angle;
                     }
-
-                    // Convert Godot (Y-up, meters) -> Source 2 (Z-up, inches)
-                    var sPos = new System.Numerics.Vector3(gPos.X, gPos.Y, gPos.Z) * MetersToInches;
-                    var sRot = new System.Numerics.Quaternion(gRot.X, gRot.Y, gRot.Z, gRot.W);
-
-                    if (isRoot)
+                    else
                     {
-                        sPos = System.Numerics.Vector3.Transform(sPos, GltfToSourceRotation);
-                        sRot = System.Numerics.Quaternion.Normalize(GltfToSourceRotation * sRot);
+                        sPos = System.Numerics.Vector3.Zero;
+                        sRot = System.Numerics.Quaternion.Identity;
                     }
 
                     samplePos[f, b] = sPos;
                     sampleRot[f, b] = sRot;
                 }
             }
+
+            // 2b. Automated IK Target Constraint Solver
+            // Source 2 AnimGraph 2 uses Two-Bone IK nodes for feet and hands driven by IK target bones
+            // (e.g. leg_L_IKTARGET -> ankle_L, arm_L_IKTARGET -> hand_L).
+            // When mod animations only author FK body bones, unkeyed IK targets remain frozen at rest floor height,
+            // causing in-game IK to drag and twist feet/hands during jumps and air animations.
+            // We solve and bake world-space tracking constraints into any unkeyed IK targets.
+            ApplyAutomatedIkConstraints(samplePos, sampleRot, numFrames, boneCount, targetBones, skeleton, boneTracks);
 
             // 3. Compute compression settings per bone
             var trackCompressionSettings = new KVObject[boneCount];
@@ -328,9 +487,9 @@ namespace DeadlockPlayground.Animation
             uint blockCount = origReader.ReadUInt32();
 
             // Calculate new file size and offsets
-            // Typically: Header (16 bytes) + BlockTable (blockCount * 12 bytes) + Blocks
-            uint headerSize = 16;
-            uint blockTableSize = blockCount * 12;
+            // Header (16 bytes) + BlockTable (1 * 12 bytes = 12 bytes) + DATA block
+            uint headerSize = 16u;
+            uint blockTableSize = 12u; // 1 block entry: DATA
             uint dataStartOffset = headerSize + blockTableSize;
 
             uint totalFileSize = dataStartOffset + (uint)serializedDataBytes.Length;
@@ -340,17 +499,35 @@ namespace DeadlockPlayground.Animation
             writer.Write(headerVersion);
             writer.Write(version);
             writer.Write(8u); // blockOffset to table (8 bytes after this field)
-            writer.Write(1u); // We emit 1 block (DATA) or retain REDI if needed
+            writer.Write(1u); // We emit 1 block (DATA)
 
             // Block Table Entry for DATA
             writer.Write((uint)BlockType.DATA);
-            writer.Write(0u); // Offset relative to entry end
+            writer.Write(8u); // Offset relative to the start of this field to the data (after 4-byte Size field)
             writer.Write((uint)serializedDataBytes.Length);
 
             // Write serialized DATA block
             writer.Write(serializedDataBytes);
 
-            return outMs.ToArray();
+            byte[] result = outMs.ToArray();
+
+            // Self-verify that VRF can parse the generated Resource cleanly
+            try
+            {
+                using var verifyMs = new MemoryStream(result);
+                using var verifyRes = new Resource();
+                verifyRes.Read(verifyMs);
+                if (verifyRes.DataBlock is not BinaryKV3)
+                {
+                    Godot.GD.PrintErr("[Source2ClipPatcher] Warning: Synthesized resource DataBlock is not BinaryKV3.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Godot.GD.PrintErr($"[Source2ClipPatcher] Verification failed for patched clip: {ex.Message}");
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -433,6 +610,156 @@ namespace DeadlockPlayground.Animation
             else if (val is double d) obj.Add(key, d);
             else if (val is bool b) obj.Add(key, b);
             else if (val is string s) obj.Add(key, s);
+        }
+
+        private static readonly (string IkBone, string TargetBone)[] IkConstraintPairs = new[]
+        {
+            ("leg_L_IKTARGET", "ankle_L"),
+            ("leg_R_IKTARGET", "ankle_R"),
+            ("arm_L_IKTARGET", "hand_L"),
+            ("arm_R_IKTARGET", "hand_R"),
+            ("weaponHand_L", "hand_L"),
+            ("weaponHand_R", "hand_R"),
+        };
+
+        /// <summary>
+        /// Solves and bakes world-space forward kinematics from FK limb bones into corresponding IK target bones
+        /// (e.g. leg_L_IKTARGET -> ankle_L, arm_L_IKTARGET -> hand_L, weaponHand_L -> hand_L).
+        /// This ensures Deadlock's in-game Two-Bone Foot and Hand IK solvers follow the animated limbs cleanly
+        /// without snapping, twisting, or dragging feet to the floor when airborne.
+        /// </summary>
+        public static void ApplyAutomatedIkConstraints(
+            System.Numerics.Vector3[,] samplePos,
+            System.Numerics.Quaternion[,] sampleRot,
+            int numFrames,
+            int boneCount,
+            ValveResourceFormat.ResourceTypes.ModelAnimation.Bone[] targetBones,
+            Godot.Skeleton3D skeleton,
+            (int PosTrack, int RotTrack)[] boneTracks)
+        {
+            // Resolve bone indices for constraint pairs
+            var activePairs = new List<(int IkIdx, int TargetIdx)>();
+            foreach (var (ikName, targetName) in IkConstraintPairs)
+            {
+                int ikIdx = FindBoneIndex(ikName, targetBones, skeleton, boneCount);
+                int targetIdx = FindBoneIndex(targetName, targetBones, skeleton, boneCount);
+
+                if (ikIdx < 0 || targetIdx < 0) continue;
+
+                // If user authored explicit animation tracks on this IK bone in Godot, respect their authored keys
+                if (boneTracks != null && ikIdx < boneTracks.Length)
+                {
+                    var (pTrack, rTrack) = boneTracks[ikIdx];
+                    if (pTrack != -1 || rTrack != -1) continue;
+                }
+
+                activePairs.Add((ikIdx, targetIdx));
+            }
+
+            if (activePairs.Count == 0) return;
+
+            // Pre-resolve parent indices for all bones
+            var parentIndices = new int[boneCount];
+            for (int b = 0; b < boneCount; b++)
+            {
+                if (targetBones != null)
+                {
+                    var p = targetBones[b].Parent;
+                    parentIndices[b] = p != null ? Array.IndexOf(targetBones, p) : -1;
+                }
+                else
+                {
+                    parentIndices[b] = skeleton != null ? skeleton.GetBoneParent(b) : -1;
+                }
+            }
+
+            var worldMats = new System.Numerics.Matrix4x4[boneCount];
+            var computed = new bool[boneCount];
+
+            System.Numerics.Matrix4x4 GetWorldMat(int idx, int f)
+            {
+                if (idx < 0 || idx >= boneCount) return System.Numerics.Matrix4x4.Identity;
+                if (computed[idx]) return worldMats[idx];
+
+                int p = parentIndices[idx];
+                var localMat = System.Numerics.Matrix4x4.CreateFromQuaternion(sampleRot[f, idx]) *
+                               System.Numerics.Matrix4x4.CreateTranslation(samplePos[f, idx]);
+
+                worldMats[idx] = (p >= 0 && p < boneCount && p != idx)
+                    ? localMat * GetWorldMat(p, f)
+                    : localMat;
+
+                computed[idx] = true;
+                return worldMats[idx];
+            }
+
+            for (int f = 0; f < numFrames; f++)
+            {
+                Array.Clear(computed, 0, boneCount);
+
+                foreach (var (ikIdx, targetIdx) in activePairs)
+                {
+                    var targetWorld = GetWorldMat(targetIdx, f);
+                    int pIdx = parentIndices[ikIdx];
+
+                    if (pIdx >= 0 && pIdx < boneCount)
+                    {
+                        var parentWorld = GetWorldMat(pIdx, f);
+                        if (System.Numerics.Matrix4x4.Invert(parentWorld, out var invParent))
+                        {
+                            var mLocal = targetWorld * invParent;
+                            samplePos[f, ikIdx] = mLocal.Translation;
+                            sampleRot[f, ikIdx] = System.Numerics.Quaternion.Normalize(
+                                System.Numerics.Quaternion.CreateFromRotationMatrix(mLocal)
+                            );
+                        }
+                    }
+                    else
+                    {
+                        samplePos[f, ikIdx] = targetWorld.Translation;
+                        sampleRot[f, ikIdx] = System.Numerics.Quaternion.Normalize(
+                            System.Numerics.Quaternion.CreateFromRotationMatrix(targetWorld)
+                        );
+                    }
+
+                    // Invalidate computed cache for this IK bone so downstream bones (e.g. weaponHand parented to arm_IK) evaluate updated world transform
+                    computed[ikIdx] = false;
+                }
+            }
+
+            try
+            {
+                Godot.GD.Print($"[Source2ClipPatcher] Applied automated IK target constraints to {activePairs.Count} bones across {numFrames} frames.");
+            }
+            catch
+            {
+                Console.WriteLine($"[Source2ClipPatcher] Applied automated IK target constraints to {activePairs.Count} bones across {numFrames} frames.");
+            }
+        }
+
+        private static int FindBoneIndex(
+            string name,
+            ValveResourceFormat.ResourceTypes.ModelAnimation.Bone[] targetBones,
+            Godot.Skeleton3D skeleton,
+            int boneCount)
+        {
+            if (targetBones != null)
+            {
+                for (int i = 0; i < targetBones.Length; i++)
+                {
+                    if (targetBones[i].Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                        return i;
+                }
+            }
+            if (skeleton != null)
+            {
+                for (int i = 0; i < skeleton.GetBoneCount(); i++)
+                {
+                    if (skeleton.GetBoneName(i).Equals(name, StringComparison.OrdinalIgnoreCase))
+                        return i;
+                }
+            }
+            return -1;
         }
     }
 }

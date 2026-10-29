@@ -1932,7 +1932,7 @@ public void UpdateTooltipsAndKeymaps()
             return;
         }
 
-        if (@event.IsActionPressed("paint_clone") || (keyEvent.Keycode == Key.S && !keyEvent.CtrlPressed && !keyEvent.AltPressed && !keyEvent.ShiftPressed))
+        if (@event.IsActionPressed("paint_clone") || (keyEvent.Keycode == Key.C && !keyEvent.CtrlPressed && !keyEvent.AltPressed && !keyEvent.ShiftPressed))
         {
             SelectTool(BrushToolMode.Clone, forceFlyoutOpen: true);
             GetViewport()?.SetInputAsHandled();
