@@ -15,16 +15,23 @@ namespace DeadlockPlayground.Painter
 
         public Vector2I CanvasSize { get; private set; } = new Vector2I(2048, 2048);
 
+        public const int BaseTextureLayerIndex = -1;
         private readonly List<SkinLayer> _layers = new();
         private int _activeLayerIndex = 0;
         private int _activeSurfaceIndex = 0;
+        private SkinLayer _baseLayer;
+
+        public bool IsBaseTextureActive => _activeLayerIndex == BaseTextureLayerIndex;
+        public SkinLayer BaseLayer => _baseLayer;
 
         public int ActiveSurfaceIndex => _activeSurfaceIndex;
         public int TargetSurfaceIndex => _activeSurfaceIndex;
 
         public IReadOnlyList<SkinLayer> Layers => _layers;
         public int ActiveLayerIndex => _activeLayerIndex;
-        public SkinLayer ActiveLayer => (_activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count) ? _layers[_activeLayerIndex] : null;
+        public SkinLayer ActiveLayer => (_activeLayerIndex == BaseTextureLayerIndex)
+            ? _baseLayer
+            : ((_activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count) ? _layers[_activeLayerIndex] : null);
 
         public SubViewport CompositeViewport => ActiveLayer?.CompositeViewport;
         public Control CompositeLayerContainer => ActiveLayer?.DisplayRect;
@@ -50,6 +57,255 @@ namespace DeadlockPlayground.Painter
             _compositeShader ??= GD.Load<Shader>("res://assets/shaders/painter/layer_composite.gdshader");
             _dabShader ??= GD.Load<Shader>("res://assets/shaders/painter/brush_dab.gdshader");
             _heroPainterShader ??= GD.Load<Shader>("res://assets/shaders/painter/hero_painter_pbr.gdshader");
+        }
+
+        public void EnsureBaseLayer()
+        {
+            EnsureShadersLoaded();
+            if (_baseLayer == null)
+            {
+                _baseLayer = new SkinLayer();
+                _baseLayer.Initialize("BASE TEXTURE", CanvasSize, false, _compositeShader, _dabShader, null);
+                _baseLayer.SetOpacity(1.0f);
+                _baseLayer.SetVisibility(true);
+                _baseLayer.SetBlendMode(LayerBlendMode.Normal);
+                _baseLayer.IsLocked = false;
+            }
+            int bufferLen = CanvasSize.X * CanvasSize.Y * 8;
+            if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
+            {
+                _baseLayer.GpuData = _baseAtlasBuffer;
+                _baseLayer.IsCpuSynced = true;
+            }
+            if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            {
+                var baseRidVal = _activeAtlasManager.Get("base_texture_rid");
+                if (baseRidVal.VariantType == Variant.Type.Rid)
+                {
+                    _baseLayer.LayerRid = baseRidVal.AsRid();
+                }
+            }
+        }
+
+        public void SyncBaseTextureToGpu()
+        {
+            if (_baseAtlasBuffer == null) return;
+            var rd = RenderingServer.GetRenderingDevice();
+            if (rd == null) return;
+
+            if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            {
+                var baseRidVal = _activeAtlasManager.Get("base_texture_rid");
+                if (baseRidVal.VariantType == Variant.Type.Rid)
+                {
+                    Rid baseRid = baseRidVal.AsRid();
+                    if (baseRid.IsValid && rd.TextureIsValid(baseRid))
+                    {
+                        rd.TextureUpdate(baseRid, 0, _baseAtlasBuffer);
+                    }
+                }
+            }
+            else if (_standaloneBaseTexture != null && _standaloneCompositeTexture != null)
+            {
+                UpdateStandaloneComposite();
+            }
+        }
+
+        public void SelectBaseTexture()
+        {
+            EnsureCpuSynced();
+
+            _activeLayerIndex = BaseTextureLayerIndex;
+            EnsureBaseLayer();
+            InvalidateOtherLayers();
+            UpdateActiveLayerBinding();
+            RecompositeGpuLayers();
+            ApplyOverlayParametersToMeshes();
+            NotifyLayerSelected(BaseTextureLayerIndex);
+        }
+
+        public Texture2D GetActivePristineVanillaTexture()
+        {
+            if (_standaloneBaseTexture != null)
+            {
+                if (!string.IsNullOrEmpty(_activeMaterialKey) && _activeMaterialKey.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
+                {
+                    string rawPath = _activeMaterialKey.Substring("particle:".Length);
+                    var pStage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+                    var origTex = pStage?.GetVanillaTexture(rawPath);
+                    if (origTex != null) return origTex;
+                }
+                return _standaloneBaseTexture;
+            }
+
+            if (_targetMesh != null && GodotObject.IsInstanceValid(_targetMesh))
+            {
+                int sCount = _targetMesh.Mesh != null ? _targetMesh.Mesh.GetSurfaceCount() : 1;
+                for (int s = 0; s < sCount; s++)
+                {
+                    var origMat = HeroMeshHierarchy.GetAuthenticMaterial(_targetMesh, s)
+                               ?? _targetMesh.GetSurfaceOverrideMaterial(s)
+                               ?? (_targetMesh.Mesh != null ? _targetMesh.Mesh.SurfaceGetMaterial(s) : null)
+                               ?? _targetMesh.MaterialOverride;
+                    if (origMat != null)
+                    {
+                        var tex = ExtractBaseTexture(origMat);
+                        if (tex != null) return tex;
+                    }
+                }
+
+                var smMat = _targetMesh.MaterialOverlay as ShaderMaterial;
+                if (smMat != null)
+                {
+                    var gColor = smMat.GetShaderParameter("g_tColor");
+                    if (gColor.VariantType == Variant.Type.Object && gColor.AsGodotObject() is Texture2D gt)
+                        return gt;
+                }
+            }
+
+            return null;
+        }
+
+        public void ResetBaseTexture()
+        {
+            EnsureCpuSynced();
+            RecordInitialSnapshot();
+            RecordGpuUndoSnapshot(is2DCpuStroke: true);
+
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            int bufferLen = w * h * 8;
+
+            Texture2D vanillaTex = GetActivePristineVanillaTexture();
+            if (vanillaTex != null)
+            {
+                _baseAtlasBuffer = ExtractTextureToLinearHalfBuffer(vanillaTex, w, h);
+            }
+            else
+            {
+                _baseAtlasBuffer = new byte[bufferLen];
+                unsafe
+                {
+                    fixed (byte* p = _baseAtlasBuffer)
+                    {
+                        Half* hBase = (Half*)p;
+                        Half one = (Half)1.0f;
+                        for (int i = 0; i < bufferLen / 2; i++) hBase[i] = one;
+                    }
+                }
+            }
+
+            _hasPopulatedBaseAtlasBuffer = true;
+            if (_currentContext != null)
+            {
+                _currentContext.BaseAtlasBuffer = _baseAtlasBuffer;
+            }
+            EnsureBaseLayer();
+            if (_baseLayer != null)
+            {
+                _baseLayer.GpuData = _baseAtlasBuffer;
+            }
+
+            SyncBaseTextureToGpu();
+            InvalidateOtherLayers();
+            RecompositeGpuLayers();
+            UpdateStandaloneComposite();
+            ApplyOverlayParametersToMeshes();
+
+            if (!string.IsNullOrEmpty(_activeMaterialKey) && MeshHierarchy != null)
+            {
+                MeshHierarchy.MarkMaterialDirty(_activeMaterialKey, this);
+            }
+
+            NotifyStackChanged();
+            NotifyLayerSelected(_activeLayerIndex);
+            GD.Print("[SkinLayerManager] Reset Base Texture to pristine vanilla texture.");
+        }
+
+        public bool IsLayerRegionEmpty(SkinLayer layer, byte[] selectionMask, int maskW, int maskH)
+        {
+            if (layer == null || layer.GpuData == null || layer.GpuData.Length == 0) return true;
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            bool hasSelection = selectionMask != null && maskW > 0 && maskH > 0;
+
+            unsafe
+            {
+                fixed (byte* pLayer = layer.GpuData)
+                {
+                    Half* hLayer = (Half*)pLayer;
+                    for (int y = 0; y < h; y++)
+                    {
+                        for (int x = 0; x < w; x++)
+                        {
+                            int pixelIdx = y * w + x;
+                            if (hasSelection)
+                            {
+                                int mx = (int)((long)x * maskW / w);
+                                int my = (int)((long)y * maskH / h);
+                                int mIdx = my * maskW + mx;
+                                if (mIdx < 0 || mIdx >= selectionMask.Length || selectionMask[mIdx] < 128)
+                                    continue;
+                            }
+                            float a = (float)hLayer[pixelIdx * 4 + 3];
+                            if (a > 0.005f)
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        public byte[] SampleVisibleCompositeUnderneath(int targetLayerIndex)
+        {
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            int bufferLen = w * h * 8;
+
+            if (_baseAtlasBuffer == null || _baseAtlasBuffer.Length != bufferLen)
+            {
+                RebuildBaseAtlasBuffer();
+            }
+
+            byte[] composite = new byte[bufferLen];
+            if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
+            {
+                Buffer.BlockCopy(_baseAtlasBuffer, 0, composite, 0, bufferLen);
+            }
+            else
+            {
+                unsafe
+                {
+                    fixed (byte* p = composite)
+                    {
+                        Half* hComp = (Half*)p;
+                        Half one = (Half)1.0f;
+                        for (int i = 0; i < bufferLen / 2; i++) hComp[i] = one;
+                    }
+                }
+            }
+
+            int maxIdx = targetLayerIndex >= 0 ? Math.Min(targetLayerIndex, _layers.Count) : 0;
+            for (int i = 0; i < maxIdx; i++)
+            {
+                var l = _layers[i];
+                if (l != null && l.IsVisible && l.GpuData != null && l.GpuData.Length == bufferLen)
+                {
+                    BlendLayerBuffer(composite, l.GpuData, l.Opacity, l.BlendMode, _baseAtlasBuffer);
+                }
+            }
+
+            return composite;
+        }
+
+        public byte[] SampleVisibleComposite(bool includeUpperLayers = true)
+        {
+            EnsureCpuSynced();
+            int maxIdx = includeUpperLayers ? _layers.Count : (_activeLayerIndex >= 0 ? _activeLayerIndex : 0);
+            return SampleVisibleCompositeUnderneath(maxIdx);
         }
 
         // Per-material atlas managers: meshes sharing identical materials share a single full-resolution OverlayAtlasManager.
@@ -263,10 +519,11 @@ namespace DeadlockPlayground.Painter
             if (_fastUndoStack.Count == 0) return false;
             var rd = RenderingServer.GetRenderingDevice();
             var step = _fastUndoStack[^1];
-            if (step.LayerIndex < 0 || step.LayerIndex >= _layers.Count) return false;
+            if (step.LayerIndex != BaseTextureLayerIndex && (step.LayerIndex < 0 || step.LayerIndex >= _layers.Count)) return false;
 
             _fastUndoStack.RemoveAt(_fastUndoStack.Count - 1);
-            var layer = _layers[step.LayerIndex];
+            var layer = (step.LayerIndex == BaseTextureLayerIndex) ? _baseLayer : _layers[step.LayerIndex];
+            if (layer == null) return false;
             int bufLen = step.Width * step.Height * 8;
 
             // Guardar el estado actual en _fastRedoStack antes de restaurar
@@ -287,7 +544,13 @@ namespace DeadlockPlayground.Painter
 
                 layer.GpuData = step.CpuBytes;
                 layer.IsCpuSynced = true;
-                if (rd != null && layer.LayerRid.IsValid && rd.TextureIsValid(layer.LayerRid))
+                if (step.LayerIndex == BaseTextureLayerIndex)
+                {
+                    _baseAtlasBuffer = step.CpuBytes;
+                    _hasPopulatedBaseAtlasBuffer = true;
+                    SyncBaseTextureToGpu();
+                }
+                else if (rd != null && layer.LayerRid.IsValid && rd.TextureIsValid(layer.LayerRid))
                 {
                     rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
                 }
@@ -317,9 +580,11 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
+            _activeLayerIndex = step.LayerIndex;
             InvalidateOtherLayers();
             RecompositeGpuLayers();
             UpdateStandaloneComposite();
+            NotifyLayerSelected(_activeLayerIndex);
             return true;
         }
 
@@ -328,10 +593,11 @@ namespace DeadlockPlayground.Painter
             if (_fastRedoStack.Count == 0) return false;
             var rd = RenderingServer.GetRenderingDevice();
             var step = _fastRedoStack[^1];
-            if (step.LayerIndex < 0 || step.LayerIndex >= _layers.Count) return false;
+            if (step.LayerIndex != BaseTextureLayerIndex && (step.LayerIndex < 0 || step.LayerIndex >= _layers.Count)) return false;
 
             _fastRedoStack.RemoveAt(_fastRedoStack.Count - 1);
-            var layer = _layers[step.LayerIndex];
+            var layer = (step.LayerIndex == BaseTextureLayerIndex) ? _baseLayer : _layers[step.LayerIndex];
+            if (layer == null) return false;
             int bufLen = step.Width * step.Height * 8;
 
             if (step.CpuBytes != null)
@@ -351,7 +617,13 @@ namespace DeadlockPlayground.Painter
 
                 layer.GpuData = step.CpuBytes;
                 layer.IsCpuSynced = true;
-                if (rd != null && layer.LayerRid.IsValid && rd.TextureIsValid(layer.LayerRid))
+                if (step.LayerIndex == BaseTextureLayerIndex)
+                {
+                    _baseAtlasBuffer = step.CpuBytes;
+                    _hasPopulatedBaseAtlasBuffer = true;
+                    SyncBaseTextureToGpu();
+                }
+                else if (rd != null && layer.LayerRid.IsValid && rd.TextureIsValid(layer.LayerRid))
                 {
                     rd.TextureUpdate(layer.LayerRid, 0, layer.GpuData);
                 }
@@ -381,9 +653,11 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
+            _activeLayerIndex = step.LayerIndex;
             InvalidateOtherLayers();
             RecompositeGpuLayers();
             UpdateStandaloneComposite();
+            NotifyLayerSelected(_activeLayerIndex);
             return true;
         }
 
@@ -948,6 +1222,7 @@ namespace DeadlockPlayground.Painter
             {
                 string[] candidateParams = { 
                     "g_tColor", "g_tColor1", "g_tColorA", "g_tColor0", "g_tColor2", "g_tColorB", 
+                    "g_tAltColor_Reveal", "g_tAltColor",
                     "u_texture_color", "texture_albedo", "albedo_texture", "color_map", "g_tNprTransmissiveColor" 
                 };
                 foreach (var param in candidateParams)
@@ -1070,11 +1345,7 @@ namespace DeadlockPlayground.Painter
 
                     if (ctx.Layers.Count == 0)
                     {
-                        var defaultLayer = new SkinLayer();
-                        defaultLayer.Initialize("Paint Layer 1", ctx.CanvasSize, false, _compositeShader, _dabShader, null);
-                        defaultLayer.GpuData = new byte[ctx.CanvasSize.X * ctx.CanvasSize.Y * 8];
-                        ctx.Layers.Add(defaultLayer);
-                        ctx.ActiveLayerIndex = 0;
+                        ctx.ActiveLayerIndex = BaseTextureLayerIndex;
                     }
                     else if (ctx.ActiveLayerIndex >= ctx.Layers.Count)
                     {
@@ -1164,7 +1435,12 @@ namespace DeadlockPlayground.Painter
                     ResetStandaloneToOriginalVpkTexture();
                     return;
                 }
-                AddNewLayer("Paint Layer 1");
+                _activeLayerIndex = BaseTextureLayerIndex;
+                EnsureBaseLayer();
+                UpdateActiveLayerBinding();
+                ApplyOverlayParametersToMeshes();
+                RecompositeGpuLayers();
+                UpdateStandaloneComposite();
             }
             else
             {
@@ -1232,16 +1508,185 @@ namespace DeadlockPlayground.Painter
             NotifyStackChanged();
         }
 
+        public void DuplicateActiveLayer()
+        {
+            if (_activeLayerIndex < 0 || _activeLayerIndex >= _layers.Count) return;
+            EnsureInitialUndoSnapshot();
+            EnsureCpuSynced();
+
+            var src = _layers[_activeLayerIndex];
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            int bufLen = w * h * 8;
+
+            var copy = new SkinLayer();
+            copy.Initialize($"{src.Name} (Copy)", CanvasSize, false, _compositeShader, _dabShader, null);
+            copy.SetOpacity(src.Opacity);
+            copy.SetVisibility(src.IsVisible);
+            copy.SetBlendMode(src.BlendMode);
+            copy.IsLocked = src.IsLocked;
+            copy.IsAlphaLocked = src.IsAlphaLocked;
+            copy.GpuData = new byte[bufLen];
+            if (src.GpuData != null && src.GpuData.Length == bufLen)
+            {
+                Buffer.BlockCopy(src.GpuData, 0, copy.GpuData, 0, bufLen);
+            }
+            copy.IsCpuSynced = true;
+            copy.LayerRid = CreateLayerGpuTexture(w, h, copy.GpuData);
+
+            int newIdx = _activeLayerIndex + 1;
+            _layers.Insert(newIdx, copy);
+            _activeLayerIndex = newIdx;
+
+            InvalidateOtherLayers();
+            UpdateActiveLayerBinding();
+            ApplyOverlayParametersToMeshes();
+            RecompositeGpuLayers();
+            UpdateStandaloneComposite();
+            NotifyLayerAdded(newIdx, copy.Name);
+            NotifyLayerSelected(_activeLayerIndex);
+            NotifyStackChanged();
+
+            RecordUndoSnapshot();
+        }
+
+        public void MergeDownActiveLayer()
+        {
+            if (_activeLayerIndex <= 0 || _activeLayerIndex >= _layers.Count) return;
+            EnsureInitialUndoSnapshot();
+            EnsureCpuSynced();
+
+            int targetIdx = _activeLayerIndex - 1;
+            var srcLayer = _layers[_activeLayerIndex];
+            var dstLayer = _layers[targetIdx];
+
+            int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            int bufLen = w * h * 8;
+
+            if (dstLayer.GpuData == null || dstLayer.GpuData.Length != bufLen)
+            {
+                dstLayer.GpuData = new byte[bufLen];
+            }
+
+            if (srcLayer.GpuData != null && srcLayer.GpuData.Length == bufLen && srcLayer.IsVisible)
+            {
+                BlendLayerBuffer(dstLayer.GpuData, srcLayer.GpuData, srcLayer.Opacity, srcLayer.BlendMode, _baseAtlasBuffer);
+                dstLayer.IsCpuSynced = true;
+                var rd = RenderingServer.GetRenderingDevice();
+                if (rd != null && dstLayer.LayerRid.IsValid && rd.TextureIsValid(dstLayer.LayerRid))
+                {
+                    rd.TextureUpdate(dstLayer.LayerRid, 0, dstLayer.GpuData);
+                }
+            }
+
+            int removeIdx = _activeLayerIndex;
+            _layers.RemoveAt(removeIdx);
+
+            if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            {
+                var curActiveRid = _activeAtlasManager.Get("atlas_texture_rid");
+                if (curActiveRid.VariantType == Variant.Type.Rid && curActiveRid.AsRid() == srcLayer.LayerRid)
+                {
+                    _activeAtlasManager.Set("atlas_texture_rid", new Rid());
+                }
+            }
+            srcLayer.CleanUp();
+            srcLayer.GpuData = null;
+
+            _activeLayerIndex = targetIdx;
+            InvalidateOtherLayers();
+            UpdateActiveLayerBinding();
+            ApplyOverlayParametersToMeshes();
+            RecompositeGpuLayers();
+            UpdateStandaloneComposite();
+            NotifyLayerRemoved(removeIdx);
+            NotifyLayerSelected(_activeLayerIndex);
+            NotifyStackChanged();
+
+            RecordUndoSnapshot();
+        }
+
+        public byte[] ExtractActiveLayerAlphaMask(out int w, out int h)
+        {
+            w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            var layer = ActiveLayer;
+            if (layer == null) return null;
+            EnsureCpuSynced();
+
+            int bufLen = w * h * 8;
+            if (layer.GpuData == null || layer.GpuData.Length != bufLen) return null;
+
+            byte[] maskBuf = new byte[w * h];
+            int pixelCount = w * h;
+            unsafe
+            {
+                fixed (byte* pLayer = layer.GpuData, pMask = maskBuf)
+                {
+                    Half* hLayer = (Half*)pLayer;
+                    byte* bMask = pMask;
+                    for (int i = 0; i < pixelCount; i++)
+                    {
+                        float a = (float)hLayer[i * 4 + 3];
+                        bMask[i] = (a > (10f / 255f)) ? (byte)255 : (byte)0;
+                    }
+                }
+            }
+            return maskBuf;
+        }
+
+        public bool ExtractActiveLayerAlphaMask(MagicWandTool wandTool = null)
+        {
+            var maskBuf = ExtractActiveLayerAlphaMask(out int w, out int h);
+            if (maskBuf == null || wandTool?.SelectionMask == null) return false;
+
+            wandTool.SelectionMask.SetBuffer(maskBuf, w, h);
+            wandTool.UseSelectionMask = true;
+            return true;
+        }
+
         public void UpdateActiveLayerBinding()
         {
-            var layer = ActiveLayer;
-            if (layer == null || _activeAtlasManager == null || !GodotObject.IsInstanceValid(_activeAtlasManager)) return;
+            if (_activeAtlasManager == null || !GodotObject.IsInstanceValid(_activeAtlasManager)) return;
 
             var rd = RenderingServer.GetRenderingDevice();
             if (rd == null) return;
 
             int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
             int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+
+            if (_activeLayerIndex == BaseTextureLayerIndex)
+            {
+                EnsureBaseLayer();
+                var baseRidVal = _activeAtlasManager.Get("base_texture_rid");
+                if (baseRidVal.VariantType == Variant.Type.Rid && baseRidVal.AsRid().IsValid)
+                {
+                    _activeAtlasManager.Set("owns_atlas_texture_rid", false);
+                    _activeAtlasManager.Set("atlas_texture_rid", baseRidVal.AsRid());
+                    _activeAtlasManager.Set("atlas_index", 0);
+                    _activeAtlasManager.Set("is_active_target", true);
+                }
+                foreach (var kvp in _perMaterialAtlasManagers)
+                {
+                    if (kvp.Value != _activeAtlasManager && GodotObject.IsInstanceValid(kvp.Value))
+                    {
+                        kvp.Value.Set("is_active_target", false);
+                    }
+                }
+                if (_activeAtlasManager.HasMethod("_apply_texture_to_texture_resource"))
+                {
+                    _activeAtlasManager.Call("_apply_texture_to_texture_resource");
+                }
+                if (_activeAtlasManager.HasMethod("_notify_brushes"))
+                {
+                    _activeAtlasManager.Call("_notify_brushes");
+                }
+                return;
+            }
+
+            var layer = ActiveLayer;
+            if (layer == null) return;
 
             if (!layer.LayerRid.IsValid || !rd.TextureIsValid(layer.LayerRid))
             {
@@ -1278,6 +1723,11 @@ namespace DeadlockPlayground.Painter
 
         public void SyncActiveLayerGpuTexture()
         {
+            if (_activeLayerIndex == BaseTextureLayerIndex)
+            {
+                SyncBaseTextureToGpu();
+                return;
+            }
             var layer = ActiveLayer;
             if (layer == null) return;
             var rd = RenderingServer.GetRenderingDevice();
@@ -1353,7 +1803,7 @@ namespace DeadlockPlayground.Painter
                 var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
                 if (fullRidVal.VariantType == Variant.Type.Rid && fullRidVal.AsRid().IsValid && rd.TextureIsValid(fullRidVal.AsRid()))
                 {
-                    if (_layers.Count <= 1 && layer.BlendMode == LayerBlendMode.Normal && layer.Opacity >= 0.999f)
+                    if (_activeLayerIndex != BaseTextureLayerIndex && _layers.Count <= 1 && layer.BlendMode == LayerBlendMode.Normal && layer.Opacity >= 0.999f)
                     {
                         // Copy only the dirty rectangle on GPU
                         rd.TextureCopy(
@@ -1507,7 +1957,7 @@ namespace DeadlockPlayground.Painter
             var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
             var compRidVal = _activeAtlasManager.Get("composite_texture_rid");
 
-            if (_layers.Count <= 1)
+            if (_activeLayerIndex != BaseTextureLayerIndex && _layers.Count <= 1)
             {
                 // Single layer fast path: direct GPU-to-GPU TextureCopy in 0.01ms with zero CPU readback fence
                 if (layer.LayerRid.IsValid && rd.TextureIsValid(layer.LayerRid))
@@ -1545,9 +1995,14 @@ namespace DeadlockPlayground.Painter
 
         public void SelectLayer(int index)
         {
+            if (index == BaseTextureLayerIndex)
+            {
+                SelectBaseTexture();
+                return;
+            }
             if (index < 0 || index >= _layers.Count) return;
 
-            if (ActiveLayer != null && !ActiveLayer.IsCpuSynced)
+            if (ActiveLayer != null && !ActiveLayer.IsCpuSynced && _activeLayerIndex != BaseTextureLayerIndex)
             {
                 var rd = RenderingServer.GetRenderingDevice();
                 if (rd != null && ActiveLayer.LayerRid.IsValid && rd.TextureIsValid(ActiveLayer.LayerRid))
@@ -1605,6 +2060,7 @@ namespace DeadlockPlayground.Painter
             public bool IsVisible = true;
             public LayerBlendMode BlendMode = LayerBlendMode.Normal;
             public bool IsLocked = false;
+            public bool IsAlphaLocked = false;
             public byte[] CompressedData;
             public byte[] PendingRawData;
         }
@@ -1616,6 +2072,8 @@ namespace DeadlockPlayground.Painter
             public List<LayerSnapshotInfo> LayerInfos = new();
             public Dictionary<int, byte[]> CompressedLayerData = new();
             public Dictionary<int, byte[]> PendingRawLayerData = new();
+            public byte[] CompressedBaseAtlasData;
+            public byte[] PendingRawBaseAtlasData;
         }
 
         private static byte[] CompressBuffer(byte[] raw, int length)
@@ -1687,7 +2145,7 @@ namespace DeadlockPlayground.Painter
 
         public void RecordUndoSnapshot(int? targetLayerOnly = null)
         {
-            if (_layers.Count == 0) return;
+            if (_layers.Count == 0 && _baseAtlasBuffer == null) return;
 
             EnsureCpuSynced();
 
@@ -1715,7 +2173,8 @@ namespace DeadlockPlayground.Painter
                     Opacity = layer.Opacity,
                     IsVisible = layer.IsVisible,
                     BlendMode = layer.BlendMode,
-                    IsLocked = layer.IsLocked
+                    IsLocked = layer.IsLocked,
+                    IsAlphaLocked = layer.IsAlphaLocked
                 };
 
                 if (layer.GpuData == null || layer.GpuData.Length == 0 || layer.IsBlank())
@@ -1775,6 +2234,25 @@ namespace DeadlockPlayground.Painter
                 }
 
                 snap.LayerInfos.Add(info);
+            }
+
+            if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
+            {
+                byte[] baseCopy = new byte[bufferLen];
+                Buffer.BlockCopy(_baseAtlasBuffer, 0, baseCopy, 0, bufferLen);
+                snap.PendingRawBaseAtlasData = baseCopy;
+
+                System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    lock (snap)
+                    {
+                        if (snap.PendingRawBaseAtlasData != null)
+                        {
+                            snap.CompressedBaseAtlasData = CompressBuffer(snap.PendingRawBaseAtlasData, snap.UncompressedLength);
+                            snap.PendingRawBaseAtlasData = null;
+                        }
+                    }
+                });
             }
 
             _undoStack.Add(snap);
@@ -1905,7 +2383,7 @@ namespace DeadlockPlayground.Painter
                 ? snapshot.UncompressedLength 
                 : (CanvasSize.X * CanvasSize.Y * 8);
 
-            if (snapshot.LayerInfos != null && snapshot.LayerInfos.Count > 0)
+            if (snapshot.LayerInfos != null)
             {
                 // Synchronize layer list count to match the snapshot
                 while (_layers.Count < snapshot.LayerInfos.Count)
@@ -1934,6 +2412,7 @@ namespace DeadlockPlayground.Painter
                     l.SetVisibility(info.IsVisible);
                     l.SetBlendMode(info.BlendMode);
                     l.IsLocked = info.IsLocked;
+                    l.IsAlphaLocked = info.IsAlphaLocked;
 
                     byte[] rawData = null;
                     lock (snapshot)
@@ -2010,7 +2489,30 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            if (_layers.Count > 0)
+            lock (snapshot)
+            {
+                if (snapshot.PendingRawBaseAtlasData != null)
+                {
+                    _baseAtlasBuffer = new byte[uncompressedLen];
+                    Buffer.BlockCopy(snapshot.PendingRawBaseAtlasData, 0, _baseAtlasBuffer, 0, Math.Min(uncompressedLen, snapshot.PendingRawBaseAtlasData.Length));
+                    _hasPopulatedBaseAtlasBuffer = true;
+                    if (_baseLayer != null) _baseLayer.GpuData = _baseAtlasBuffer;
+                    SyncBaseTextureToGpu();
+                }
+                else if (snapshot.CompressedBaseAtlasData != null && snapshot.CompressedBaseAtlasData.Length > 0)
+                {
+                    _baseAtlasBuffer = DecompressBuffer(snapshot.CompressedBaseAtlasData, uncompressedLen);
+                    _hasPopulatedBaseAtlasBuffer = true;
+                    if (_baseLayer != null) _baseLayer.GpuData = _baseAtlasBuffer;
+                    SyncBaseTextureToGpu();
+                }
+            }
+
+            if (snapshot.ActiveLayerIndex == BaseTextureLayerIndex || _layers.Count == 0)
+            {
+                _activeLayerIndex = BaseTextureLayerIndex;
+            }
+            else if (_layers.Count > 0)
             {
                 _activeLayerIndex = Math.Clamp(snapshot.ActiveLayerIndex, 0, _layers.Count - 1);
             }
@@ -2020,6 +2522,7 @@ namespace DeadlockPlayground.Painter
             ApplyOverlayParametersToMeshes();
             NotifyLayersReordered();
             NotifyStackChanged();
+            NotifyLayerSelected(_activeLayerIndex);
         }
 
         // --- Overlay Shading & Blend Modes ---
@@ -3950,6 +4453,11 @@ namespace DeadlockPlayground.Painter
              Array.Clear(_compositeBuffer, 0, _compositeBuffer.Length);
          }
 
+         if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen && !IsStandaloneTextureMode)
+         {
+             Buffer.BlockCopy(_baseAtlasBuffer, 0, _compositeBuffer, 0, bufferLen);
+         }
+
          for (int i = 0; i < _layers.Count; i++)
          {
              var layer = _layers[i];
@@ -4158,6 +4666,7 @@ namespace DeadlockPlayground.Painter
 
                         if (isErase)
                         {
+                            if (layer.IsAlphaLocked) continue;
                             float curA = (float)hLayer[idx + 3];
                             hLayer[idx + 3] = (Half)Mathf.Clamp(curA * (1.0f - dabAlpha), 0.0f, 1.0f);
                         }
@@ -4168,15 +4677,31 @@ namespace DeadlockPlayground.Painter
                             float curB = (float)hLayer[idx + 2];
                             float curA = (float)hLayer[idx + 3];
 
-                            float outA = Mathf.Clamp(dabAlpha + curA * (1.0f - dabAlpha), 0.0f, 1.0f);
-                            float outR = (outA > 0.0001f) ? (linCol.R * dabAlpha + curR * curA * (1.0f - dabAlpha)) / outA : linCol.R;
-                            float outG = (outA > 0.0001f) ? (linCol.G * dabAlpha + curG * curA * (1.0f - dabAlpha)) / outA : linCol.G;
-                            float outB = (outA > 0.0001f) ? (linCol.B * dabAlpha + curB * curA * (1.0f - dabAlpha)) / outA : linCol.B;
+                            if (layer.IsAlphaLocked)
+                            {
+                                if (curA <= 0.001f) continue;
+                                float t = Math.Clamp(dabAlpha, 0.0f, 1.0f);
+                                float outR = curR * (1.0f - t) + linCol.R * t;
+                                float outG = curG * (1.0f - t) + linCol.G * t;
+                                float outB = curB * (1.0f - t) + linCol.B * t;
 
-                            hLayer[idx] = (Half)outR;
-                            hLayer[idx + 1] = (Half)outG;
-                            hLayer[idx + 2] = (Half)outB;
-                            hLayer[idx + 3] = (Half)outA;
+                                hLayer[idx] = (Half)outR;
+                                hLayer[idx + 1] = (Half)outG;
+                                hLayer[idx + 2] = (Half)outB;
+                                hLayer[idx + 3] = (Half)curA;
+                            }
+                            else
+                            {
+                                float outA = Mathf.Clamp(dabAlpha + curA * (1.0f - dabAlpha), 0.0f, 1.0f);
+                                float outR = (outA > 0.0001f) ? (linCol.R * dabAlpha + curR * curA * (1.0f - dabAlpha)) / outA : linCol.R;
+                                float outG = (outA > 0.0001f) ? (linCol.G * dabAlpha + curG * curA * (1.0f - dabAlpha)) / outA : linCol.G;
+                                float outB = (outA > 0.0001f) ? (linCol.B * dabAlpha + curB * curA * (1.0f - dabAlpha)) / outA : linCol.B;
+
+                                hLayer[idx] = (Half)outR;
+                                hLayer[idx + 1] = (Half)outG;
+                                hLayer[idx + 2] = (Half)outB;
+                                hLayer[idx + 3] = (Half)outA;
+                            }
                         }
                     }
                 }
@@ -4218,6 +4743,191 @@ namespace DeadlockPlayground.Painter
             }
 
             return new Rect2I(minX, minY, maxX - minX + 1, maxY - minY + 1);
+        }
+
+        public unsafe Rect2I PaintCloneDab2D(
+            Vector2 targetAtlasPx,
+            Vector2 sourceAtlasPx,
+            byte[] sampleBuffer,
+            float sizePx,
+            float hardness,
+            float flow,
+            MagicWandTool wandTool = null,
+            BrushShapeType shape = BrushShapeType.SoftCircle,
+            Texture2D brushTex = null)
+        {
+            var layer = ActiveLayer;
+            if (layer == null || layer.IsLocked || !layer.IsVisible) return new Rect2I();
+
+            int atlasW = CanvasSize.X > 0 ? CanvasSize.X : 2048;
+            int atlasH = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+            int bufferLen = atlasW * atlasH * 8;
+            if (layer.GpuData == null || layer.GpuData.Length != bufferLen)
+            {
+                layer.GpuData = new byte[bufferLen];
+            }
+            if (sampleBuffer == null || sampleBuffer.Length != bufferLen) return new Rect2I();
+
+            float radius = sizePx * 0.5f;
+            if (radius < 0.5f) radius = 0.5f;
+            int intRadius = Mathf.CeilToInt(radius);
+
+            int minX = Mathf.Clamp((int)(targetAtlasPx.X - intRadius), 0, atlasW - 1);
+            int maxX = Mathf.Clamp((int)(targetAtlasPx.X + intRadius), 0, atlasW - 1);
+            int minY = Mathf.Clamp((int)(targetAtlasPx.Y - intRadius), 0, atlasH - 1);
+            int maxY = Mathf.Clamp((int)(targetAtlasPx.Y + intRadius), 0, atlasH - 1);
+
+            float rSq = radius * radius;
+            float hardFrac = Mathf.Clamp(hardness, 0.0f, 0.99f);
+            float innerRadius = radius * hardFrac;
+            float innerRadiusSq = innerRadius * innerRadius;
+            float invFadeRange = 1.0f / MathF.Max(0.001f, radius - innerRadius);
+
+            int offsetPxX = (int)Math.Round(sourceAtlasPx.X - targetAtlasPx.X);
+            int offsetPxY = (int)Math.Round(sourceAtlasPx.Y - targetAtlasPx.Y);
+
+            fixed (byte* pDst = layer.GpuData, pSample = sampleBuffer)
+            {
+                Half* hLayer = (Half*)pDst;
+                Half* hSample = (Half*)pSample;
+
+                for (int y = minY; y <= maxY; y++)
+                {
+                    int rowOffset = y * atlasW * 4;
+                    float dy = y - targetAtlasPx.Y;
+                    float dySq = dy * dy;
+                    if (shape != BrushShapeType.Square && dySq > rSq) continue;
+
+                    int srcY = y + offsetPxY;
+                    if (srcY < 0 || srcY >= atlasH) continue;
+                    int srcRowOffset = srcY * atlasW * 4;
+
+                    int rowMinX = minX;
+                    int rowMaxX = maxX;
+                    if (shape != BrushShapeType.Square)
+                    {
+                        float spanX = MathF.Sqrt(rSq - dySq);
+                        rowMinX = Math.Max(minX, (int)(targetAtlasPx.X - spanX));
+                        rowMaxX = Math.Min(maxX, (int)(targetAtlasPx.X + spanX));
+                    }
+
+                    for (int x = rowMinX; x <= rowMaxX; x++)
+                    {
+                        int srcX = x + offsetPxX;
+                        if (srcX < 0 || srcX >= atlasW) continue;
+
+                        float dx = x - targetAtlasPx.X;
+                        float falloff = 0.0f;
+
+                        if (shape == BrushShapeType.HardCircle)
+                        {
+                            falloff = 1.0f;
+                        }
+                        else
+                        {
+                            float dSq = dx * dx + dySq;
+                            if (dSq > rSq) continue;
+                            if (dSq <= innerRadiusSq)
+                            {
+                                falloff = 1.0f;
+                            }
+                            else
+                            {
+                                float dist = MathF.Sqrt(dSq);
+                                float t = (dist - innerRadius) * invFadeRange;
+                                falloff = Math.Clamp(1.0f - t, 0.0f, 1.0f);
+                                falloff = falloff * falloff * (3.0f - 2.0f * falloff);
+                            }
+                        }
+
+                        float wandWeight = 1.0f;
+                        if (wandTool != null && wandTool.HasActiveSelection)
+                        {
+                            float maskVal = wandTool.GetPixelMaskValue(x, y);
+                            if (maskVal < 0.5f) continue;
+                            wandWeight = Math.Clamp((maskVal - 0.5f) / 0.5f, 0.0f, 1.0f);
+                        }
+
+                        int srcIdx = srcRowOffset + srcX * 4;
+                        float sampleA = (float)hSample[srcIdx + 3];
+                        if (sampleA <= 0.0001f) continue;
+
+                        float dabAlpha = falloff * flow * wandWeight * sampleA;
+                        if (dabAlpha <= 0.0001f) continue;
+
+                        float sampleR = (float)hSample[srcIdx];
+                        float sampleG = (float)hSample[srcIdx + 1];
+                        float sampleB = (float)hSample[srcIdx + 2];
+
+                        int idx = rowOffset + x * 4;
+                        float curR = (float)hLayer[idx];
+                        float curG = (float)hLayer[idx + 1];
+                        float curB = (float)hLayer[idx + 2];
+                        float curA = (float)hLayer[idx + 3];
+
+                        if (layer.IsAlphaLocked)
+                        {
+                            if (curA <= 0.001f) continue;
+                            float t = Math.Clamp(dabAlpha, 0.0f, 1.0f);
+                            float outR = curR * (1.0f - t) + sampleR * t;
+                            float outG = curG * (1.0f - t) + sampleG * t;
+                            float outB = curB * (1.0f - t) + sampleB * t;
+
+                            hLayer[idx] = (Half)outR;
+                            hLayer[idx + 1] = (Half)outG;
+                            hLayer[idx + 2] = (Half)outB;
+                            hLayer[idx + 3] = (Half)curA;
+                        }
+                        else
+                        {
+                            float outA = Mathf.Clamp(dabAlpha + curA * (1.0f - dabAlpha), 0.0f, 1.0f);
+                            float outR = (outA > 0.0001f) ? (sampleR * dabAlpha + curR * curA * (1.0f - dabAlpha)) / outA : sampleR;
+                            float outG = (outA > 0.0001f) ? (sampleG * dabAlpha + curG * curA * (1.0f - dabAlpha)) / outA : sampleG;
+                            float outB = (outA > 0.0001f) ? (sampleB * dabAlpha + curB * curA * (1.0f - dabAlpha)) / outA : sampleB;
+
+                            hLayer[idx] = (Half)outR;
+                            hLayer[idx + 1] = (Half)outG;
+                            hLayer[idx + 2] = (Half)outB;
+                            hLayer[idx + 3] = (Half)outA;
+                        }
+                    }
+                }
+            }
+
+            layer.IsCpuSynced = true;
+            return new Rect2I(minX, minY, maxX - minX + 1, maxY - minY + 1);
+        }
+
+        public Rect2I PaintCloneStroke2D(
+            Vector2 fromTargetPx,
+            Vector2 toTargetPx,
+            Vector2 fromSourcePx,
+            Vector2 toSourcePx,
+            byte[] sampleBuffer,
+            float sizePx,
+            float hardness,
+            float flow,
+            MagicWandTool wandTool = null,
+            BrushShapeType shape = BrushShapeType.SoftCircle,
+            Texture2D brushTex = null)
+        {
+            float dist = fromTargetPx.DistanceTo(toTargetPx);
+            float step = MathF.Max(1.0f, sizePx * 0.20f);
+            int steps = Math.Max(1, (int)MathF.Ceiling(dist / step));
+
+            Rect2I totalRect = default;
+            for (int i = 0; i <= steps; i++)
+            {
+                float t = (float)i / steps;
+                Vector2 curTarget = fromTargetPx.Lerp(toTargetPx, t);
+                Vector2 curSource = fromSourcePx.Lerp(toSourcePx, t);
+                var dabRect = PaintCloneDab2D(curTarget, curSource, sampleBuffer, sizePx, hardness, flow, wandTool, shape, brushTex);
+                if (dabRect.Size.X > 0 && dabRect.Size.Y > 0)
+                {
+                    totalRect = (totalRect.Size.X == 0) ? dabRect : totalRect.Merge(dabRect);
+                }
+            }
+            return totalRect;
         }
 
         public void Finish2DStroke(Rect2I? strokeDirtyRect = null)
@@ -4568,7 +5278,7 @@ namespace DeadlockPlayground.Painter
             var fullRidVal = _activeAtlasManager.Get("full_composite_rid");
 
             // FAST PATH: Single Normal layer at 100% opacity -> Pure GPU-to-GPU copy (0.01ms, ZERO CPU loops!)
-            if (_layers.Count == 1 && active != null && active.BlendMode == LayerBlendMode.Normal && active.Opacity >= 0.999f && active.LayerRid.IsValid && rd.TextureIsValid(active.LayerRid))
+            if (_activeLayerIndex != BaseTextureLayerIndex && _layers.Count == 1 && active != null && active.BlendMode == LayerBlendMode.Normal && active.Opacity >= 0.999f && active.LayerRid.IsValid && rd.TextureIsValid(active.LayerRid))
             {
                 if (_otherLayersDirty)
                 {

@@ -18,6 +18,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private Button _btnQuit;
     [Export] private Button _btnNews;
     [Export] private MenuButton _btnAdjustments;
+    [Export] private MenuButton _btnFilter;
     [Export] private MenuButton _btnFileMenu;
 
     [ExportCategory("Tab Navigation Buttons")]
@@ -72,6 +73,8 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private FileDialog _gameFolderDialog;
     [Export] private FileDialog _saveFolderDialog;
     [Export] private ColorAdjustmentModalUI _colorAdjustmentModal;
+    [Export] private GradientMapModalUI _gradientMapModal;
+    [Export] private FilterModalUI _filterModal;
     [Export] private ExportBaseTexturesModalUI _exportBaseTexturesModal;
 
     private Control _unreadBadge;
@@ -277,6 +280,14 @@ public partial class StudioUIManager : CanvasLayer
 
             if (_btnQuickFullscreen != null) _btnQuickFullscreen.Text = "Windowed";
         }
+
+        var animDock = FindChild("AnimationStudioDock", true, false) as AnimationStudioDock;
+        animDock?.RefreshLayout();
+        Callable.From(() =>
+        {
+            var dock = FindChild("AnimationStudioDock", true, false) as AnimationStudioDock;
+            dock?.RefreshLayout();
+        }).CallDeferred();
     }
 
     public override void _UnhandledKeyInput(InputEvent @event)
@@ -288,7 +299,7 @@ public partial class StudioUIManager : CanvasLayer
         if (focusOwner is LineEdit or TextEdit) return;
 
         // Block shortcuts when modal dialogs are open
-        if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
+        if (ColorAdjustmentModalUI.IsOpen || GradientMapModalUI.IsOpen || FilterModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
 
         if ((_settingsModal != null && _settingsModal.Visible) ||
             (_feedbackModal != null && _feedbackModal.Visible) ||
@@ -325,6 +336,12 @@ public partial class StudioUIManager : CanvasLayer
                 GetViewport()?.SetInputAsHandled();
                 return;
             }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.L)
+            {
+                HandleAdjustmentTriggered(AdjustmentType.Levels);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
             if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.B)
             {
                 HandleAdjustmentTriggered(AdjustmentType.ColorBalance);
@@ -339,7 +356,19 @@ public partial class StudioUIManager : CanvasLayer
             }
             if (key.CtrlPressed && key.ShiftPressed && !key.AltPressed && key.Keycode == Key.U)
             {
-                HandleAdjustmentTriggered(AdjustmentType.Desaturate);
+                HandleAdjustmentTriggered((int)AdjustmentType.Desaturate);
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && !key.ShiftPressed && !key.AltPressed && key.Keycode == Key.G)
+            {
+                _tabPaint?.OpenGradientMapModal();
+                GetViewport()?.SetInputAsHandled();
+                return;
+            }
+            if (key.CtrlPressed && key.AltPressed && !key.ShiftPressed && key.Keycode == Key.F)
+            {
+                _tabPaint?.RepeatLastFilter();
                 GetViewport()?.SetInputAsHandled();
                 return;
             }
@@ -502,18 +531,99 @@ public partial class StudioUIManager : CanvasLayer
             popup.Clear();
             popup.AddItem("Brightness / Contrast...", (int)AdjustmentType.BrightnessContrast);
             popup.AddItem("Hue / Saturation...", (int)AdjustmentType.HueSaturation);
-            popup.SetItemAccelerator(1, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.U));
+            popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.HueSaturation), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.U));
             popup.AddItem("Color Balance...", (int)AdjustmentType.ColorBalance);
-            popup.SetItemAccelerator(2, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.B));
+            popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.ColorBalance), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.B));
             popup.AddItem("Exposure...", (int)AdjustmentType.Exposure);
+            popup.AddItem("Levels...", (int)AdjustmentType.Levels);
+            popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.Levels), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.L));
+            popup.AddItem("Posterize...", (int)AdjustmentType.Posterize);
+            popup.AddItem("Threshold...", (int)AdjustmentType.Threshold);
+            popup.AddItem("Gradient Map...", 100);
+            popup.SetItemAccelerator(popup.GetItemIndex(100), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.G));
             popup.AddSeparator();
             popup.AddItem("Invert", (int)AdjustmentType.Invert);
-            popup.SetItemAccelerator(5, (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.I));
+            popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.Invert), (Key)((long)KeyModifierMask.MaskCtrl | (long)Key.I));
             popup.AddItem("Desaturate", (int)AdjustmentType.Desaturate);
-            popup.SetItemAccelerator(6, (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskShift | (long)Key.U));
+            popup.SetItemAccelerator(popup.GetItemIndex((int)AdjustmentType.Desaturate), (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskShift | (long)Key.U));
 
             popup.AboutToPopup += OnAdjustmentsMenuAboutToPopup;
-            popup.IdPressed += (id) => HandleAdjustmentTriggered((AdjustmentType)id);
+            popup.IdPressed += (id) => HandleAdjustmentTriggered((int)id);
+        }
+
+        _btnFilter ??= GetNodeOrNull<MenuButton>("MainHUD/VBoxContainer/TopBar/HBoxContainer/FilterMenuButton")
+                    ?? GetNodeOrNull<MenuButton>("MainHUD/TopBar/HBoxContainer/FilterMenuButton")
+                    ?? GetTree().Root.FindChild("FilterMenuButton", true, false) as MenuButton;
+
+        if (_btnFilter != null)
+        {
+            _btnFilter.Visible = (_currentTabIndex == 8);
+            var popup = _btnFilter.GetPopup();
+            popup.Clear();
+
+            foreach (Node child in popup.GetChildren())
+            {
+                child.QueueFree();
+            }
+
+            popup.AddItem("Repeat Last Filter", 999);
+            popup.SetItemAccelerator(popup.GetItemIndex(999), (Key)((long)KeyModifierMask.MaskCtrl | (long)KeyModifierMask.MaskAlt | (long)Key.F));
+            popup.AddSeparator();
+
+            // 1. Blur
+            var blurMenu = new PopupMenu { Name = "BlurMenu" };
+            blurMenu.AddItem("Gaussian Blur...", (int)FilterType.GaussianBlur);
+            blurMenu.AddItem("Box Blur...", (int)FilterType.BoxBlur);
+            blurMenu.AddItem("Motion Blur...", (int)FilterType.MotionBlur);
+            blurMenu.IdPressed += (id) => HandleFilterTriggered((int)id);
+            popup.AddChild(blurMenu);
+            popup.AddSubmenuNodeItem("Blur (Desenfoque)", blurMenu);
+
+            // 2. Sharpen
+            var sharpenMenu = new PopupMenu { Name = "SharpenMenu" };
+            sharpenMenu.AddItem("Sharpen", (int)FilterType.Sharpen);
+            sharpenMenu.AddItem("Unsharp Mask...", (int)FilterType.UnsharpMask);
+            sharpenMenu.IdPressed += (id) => HandleFilterTriggered((int)id);
+            popup.AddChild(sharpenMenu);
+            popup.AddSubmenuNodeItem("Sharpen", sharpenMenu);
+
+            // 3. Noise
+            var noiseMenu = new PopupMenu { Name = "NoiseMenu" };
+            noiseMenu.AddItem("Add Noise...", (int)FilterType.AddNoise);
+            noiseMenu.AddItem("Median ...", (int)FilterType.Median);
+            noiseMenu.IdPressed += (id) => HandleFilterTriggered((int)id);
+            popup.AddChild(noiseMenu);
+            popup.AddSubmenuNodeItem("Noise ", noiseMenu);
+
+            // 4. Pixelate
+            var pixelateMenu = new PopupMenu { Name = "PixelateMenu" };
+            pixelateMenu.AddItem("Mosaic / Pixelate...", (int)FilterType.Mosaic);
+            pixelateMenu.AddItem("Color Halftone / Dither...", (int)FilterType.ColorHalftone);
+            pixelateMenu.IdPressed += (id) => HandleFilterTriggered((int)id);
+            popup.AddChild(pixelateMenu);
+            popup.AddSubmenuNodeItem("Pixelate", pixelateMenu);
+
+            // 5. Stylize
+            var stylizeMenu = new PopupMenu { Name = "StylizeMenu" };
+            stylizeMenu.AddItem("Find Edges ", (int)FilterType.FindEdges);
+            stylizeMenu.AddItem("Emboss ...", (int)FilterType.Emboss);
+            stylizeMenu.AddItem("Oil Paint / Kuwahara Stylized...", (int)FilterType.OilPaint);
+            stylizeMenu.AddItem("Solarize ", (int)FilterType.Solarize);
+            stylizeMenu.AddItem("Chromatic Aberration...", (int)FilterType.ChromaticAberration);
+            stylizeMenu.AddItem("Outline / Stroke Alpha...", (int)FilterType.OutlineStroke);
+            stylizeMenu.IdPressed += (id) => HandleFilterTriggered((int)id);
+            popup.AddChild(stylizeMenu);
+            popup.AddSubmenuNodeItem("Stylize ", stylizeMenu);
+
+            // 6. Other
+            var otherMenu = new PopupMenu { Name = "OtherMenu" };
+            otherMenu.AddItem("High Pass (Paso Alto)...", (int)FilterType.HighPass);
+            otherMenu.IdPressed += (id) => HandleFilterTriggered((int)id);
+            popup.AddChild(otherMenu);
+            popup.AddSubmenuNodeItem("Other", otherMenu);
+
+            popup.AboutToPopup += OnFilterMenuAboutToPopup;
+            popup.IdPressed += (id) => HandleFilterTriggered((int)id);
         }
 
         _btnFileMenu ??= GetNodeOrNull<MenuButton>("MainHUD/VBoxContainer/TopBar/HBoxContainer/FileMenuButton")
@@ -736,6 +846,32 @@ public partial class StudioUIManager : CanvasLayer
             }
         }
 
+        _gradientMapModal ??= GetNodeOrNull<GradientMapModalUI>("MainHUD/ModalsLayer/GradientMapModal")
+                           ?? GetTree().Root.FindChild("GradientMapModal", true, false) as GradientMapModalUI;
+
+        if (_gradientMapModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/GradientMapModal.tscn");
+            if (modalScene != null)
+            {
+                _gradientMapModal = modalScene.Instantiate<GradientMapModalUI>();
+                _modalsLayer.AddChild(_gradientMapModal);
+            }
+        }
+
+        _filterModal ??= GetNodeOrNull<FilterModalUI>("MainHUD/ModalsLayer/FilterModal")
+                      ?? GetTree().Root.FindChild("FilterModal", true, false) as FilterModalUI;
+
+        if (_filterModal == null && _modalsLayer != null)
+        {
+            var modalScene = GD.Load<PackedScene>("res://ui/scenes/modals/FilterModal.tscn");
+            if (modalScene != null)
+            {
+                _filterModal = modalScene.Instantiate<FilterModalUI>();
+                _modalsLayer.AddChild(_filterModal);
+            }
+        }
+
         _modChangesModal ??= _modalsLayer?.FindChild("ModChangesModal", true, false) as ModChangesModalUI;
         if (_modChangesModal == null && _modalsLayer != null)
         {
@@ -864,10 +1000,36 @@ public partial class StudioUIManager : CanvasLayer
             _btnTabPaint
         };
 
+        string[] tabIconPaths = new string[]
+        {
+            "res://assets/at-icons/person_body.svg",
+            "res://assets/at-icons/bone.svg",
+            "res://assets/at-icons/photo_camera.svg",
+            "res://assets/at-icons/clapperboard.svg",
+            "res://assets/at-icons/globe.svg",
+            "res://assets/at-icons/sparkles.svg",
+            "res://assets/at-icons/lightbulb.svg",
+            "res://assets/at-icons/sun.svg",
+            "res://assets/at-icons/brush.svg"
+        };
+
         for (int i = 0; i < _tabButtons.Length; i++)
         {
             if (_tabButtons[i] != null)
             {
+                if (i < tabIconPaths.Length && ResourceLoader.Exists(tabIconPaths[i]))
+                {
+                    var tex = GD.Load<Texture2D>(tabIconPaths[i]);
+                    if (tex != null)
+                    {
+                        _tabButtons[i].Icon = tex;
+                        _tabButtons[i].IconAlignment = HorizontalAlignment.Left;
+                        _tabButtons[i].VerticalIconAlignment = VerticalAlignment.Center;
+                        _tabButtons[i].ExpandIcon = false;
+                        _tabButtons[i].AddThemeConstantOverride("icon_max_width", 16);
+                        _tabButtons[i].AddThemeConstantOverride("h_separation", 6);
+                    }
+                }
                 PlaygroundThemeHelper.MakeTabButton(_tabButtons[i], i == _currentTabIndex);
                 int tabIdx = i;
                 _tabButtons[i].Pressed += () => SwitchTab(tabIdx);
@@ -919,7 +1081,7 @@ public partial class StudioUIManager : CanvasLayer
             }
             if (!hasActiveParticle && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
             {
-                bool showGizmo = (tabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+                bool showGizmo = (tabIndex == 1) || (tabIndex == 3) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
                 _currentSkeletonGizmoManager.SetGizmoEnabled(showGizmo);
             }
             _tabShading?.SetPaintingModeActive(false);
@@ -930,13 +1092,17 @@ public partial class StudioUIManager : CanvasLayer
             if (_quickColorPalette != null) _quickColorPalette.Visible = false;
             if (_navBadge != null) _navBadge.Visible = true;
             if (_btnAdjustments != null) _btnAdjustments.Visible = false;
+            if (_btnFilter != null) _btnFilter.Visible = false;
             if (_btnFileMenu != null) _btnFileMenu.Visible = false;
             _colorAdjustmentModal?.CancelAndClose();
+            _gradientMapModal?.CancelAndClose();
+            _filterModal?.CancelAndClose();
             _exportBaseTexturesModal?.Close();
         }
       else if (tabIndex == 8)
         {
             if (_btnAdjustments != null) _btnAdjustments.Visible = true;
+            if (_btnFilter != null) _btnFilter.Visible = true;
             if (_btnFileMenu != null) _btnFileMenu.Visible = true;
             var hero = GetVpkLoader()?.CurrentHeroNode;
             if (hero != null && _tabPaint?.CurrentHero == null)
@@ -1007,7 +1173,7 @@ public partial class StudioUIManager : CanvasLayer
         }
         if (tabIndex != 8 && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
         {
-            bool showBones = (tabIndex == 1) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
+            bool showBones = (tabIndex == 1) || (tabIndex == 3) || (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed);
             _currentSkeletonGizmoManager.SetGizmoEnabled(showBones);
         }
     }
@@ -1136,18 +1302,29 @@ public partial class StudioUIManager : CanvasLayer
         if (_btnQuickXRay != null)
         {
             _btnQuickXRay.ToggleMode = true;
+            _btnQuickXRay.Text = _btnQuickXRay.ButtonPressed ? "X-Ray: ON" : "X-Ray: OFF";
             _btnQuickXRay.Toggled += (pressed) =>
             {
+                _btnQuickXRay.Text = pressed ? "X-Ray: ON" : "X-Ray: OFF";
                 _tabBones?.SetXRay(pressed);
+                if (_currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
+                {
+                    bool showGizmo = (_currentTabIndex == 1) || pressed;
+                    _currentSkeletonGizmoManager.SetGizmoEnabled(showGizmo);
+                }
             };
 
             if (_tabBones != null)
             {
                 _tabBones.OnXRayToggled += (pressed) =>
                 {
-                    if (_btnQuickXRay != null && _btnQuickXRay.ButtonPressed != pressed)
+                    if (_btnQuickXRay != null)
                     {
-                        _btnQuickXRay.ButtonPressed = pressed;
+                        if (_btnQuickXRay.ButtonPressed != pressed)
+                        {
+                            _btnQuickXRay.ButtonPressed = pressed;
+                        }
+                        _btnQuickXRay.Text = pressed ? "X-Ray: ON" : "X-Ray: OFF";
                     }
                 };
             }
@@ -1294,11 +1471,11 @@ public partial class StudioUIManager : CanvasLayer
         _currentSkeletonGizmoManager = null;
         _currentIKManager = null;
 
+        _tabBones?.SetSkeleton(skeleton);
+        _tabPlayer?.SetSkeleton(skeleton);
+
         if (skeleton != null)
         {
-            _tabBones?.SetSkeleton(skeleton);
-            _tabPlayer?.SetSkeleton(skeleton);
-
             ProceduralClothSolver.Conform(skeleton);
 
             // Configure SkeletonGizmoManager
@@ -1526,6 +1703,8 @@ public partial class StudioUIManager : CanvasLayer
         var heroModal = _modalsLayer?.FindChild("HeroPickerModal", true, false) as Control;
         var extraModelModal = _modalsLayer?.FindChild("ExtraModelPickerModal", true, false) as Control;
         var modModal = _modalsLayer?.FindChild("ModPickerModal", true, false) as Control;
+        var retargetModal = _modalsLayer?.FindChild("AnimationRetargetModal", true, false) as Control;
+        var shortcutsModal = _modalsLayer?.FindChild("AnimationShortcutsModal", true, false) as Control;
 
         return (_settingsModal != null && _settingsModal.Visible)
             || (_feedbackModal != null && _feedbackModal.Visible)
@@ -1538,11 +1717,15 @@ public partial class StudioUIManager : CanvasLayer
             || (_modChangesModal != null && _modChangesModal.Visible)
             || (_unsavedChangesModal != null && _unsavedChangesModal.Visible)
             || (_colorAdjustmentModal != null && _colorAdjustmentModal.Visible)
+            || (_gradientMapModal != null && _gradientMapModal.Visible)
+            || (_filterModal != null && _filterModal.Visible)
             || (_exportBaseTexturesModal != null && _exportBaseTexturesModal.Visible)
             || (particleModal != null && particleModal.Visible)
             || (heroModal != null && heroModal.Visible)
             || (extraModelModal != null && extraModelModal.Visible)
-            || (modModal != null && modModal.Visible);
+            || (modModal != null && modModal.Visible)
+            || (retargetModal != null && retargetModal.Visible)
+            || (shortcutsModal != null && shortcutsModal.Visible);
     }
 
     public void UpdateModalsState()
@@ -1556,8 +1739,10 @@ public partial class StudioUIManager : CanvasLayer
 
         if (_modalBackdrop != null)
         {
-            bool isAdjustmentOpen = _colorAdjustmentModal != null && _colorAdjustmentModal.Visible;
-            _modalBackdrop.Visible = anyModalOpen && !isAdjustmentOpen;
+            bool isFloatModalOpen = (_colorAdjustmentModal != null && _colorAdjustmentModal.Visible)
+                                 || (_gradientMapModal != null && _gradientMapModal.Visible)
+                                 || (_filterModal != null && _filterModal.Visible);
+            _modalBackdrop.Visible = anyModalOpen && !isFloatModalOpen;
         }
 
         if (anyModalOpen)
@@ -1566,10 +1751,39 @@ public partial class StudioUIManager : CanvasLayer
         }
     }
 
+    public void CloseActiveAdjustmentOrFilterModals(Node exceptModal = null)
+    {
+        _colorAdjustmentModal ??= GetNodeOrNull<ColorAdjustmentModalUI>("MainHUD/ModalsLayer/ColorAdjustmentModal")
+                               ?? GetTree()?.Root?.FindChild("ColorAdjustmentModal", true, false) as ColorAdjustmentModalUI;
+        _gradientMapModal ??= GetNodeOrNull<GradientMapModalUI>("MainHUD/ModalsLayer/GradientMapModal")
+                           ?? GetTree()?.Root?.FindChild("GradientMapModal", true, false) as GradientMapModalUI;
+        _filterModal ??= GetNodeOrNull<FilterModalUI>("MainHUD/ModalsLayer/FilterModal")
+                      ?? GetTree()?.Root?.FindChild("FilterModal", true, false) as FilterModalUI;
+
+        if (_colorAdjustmentModal != null && _colorAdjustmentModal != exceptModal && _colorAdjustmentModal.Visible)
+        {
+            _colorAdjustmentModal.CancelAndClose();
+        }
+        if (_gradientMapModal != null && _gradientMapModal != exceptModal && _gradientMapModal.Visible)
+        {
+            _gradientMapModal.CancelAndClose();
+        }
+        if (_filterModal != null && _filterModal != exceptModal && _filterModal.Visible)
+        {
+            _filterModal.CancelAndClose();
+        }
+    }
+
+    public static void CloseAnyActiveAdjustmentOrFilterModal(Node exceptModal = null)
+    {
+        Instance?.CloseActiveAdjustmentOrFilterModals(exceptModal);
+    }
+
     private void OnAdjustmentsMenuAboutToPopup()
     {
         var activeLayer = _tabPaint?.LayerManager?.ActiveLayer;
-        bool canAdjust = activeLayer != null && activeLayer.IsVisible && !activeLayer.IsLocked;
+        bool isBase = _tabPaint?.LayerManager?.IsBaseTextureActive == true;
+        bool canAdjust = activeLayer != null && activeLayer.IsVisible && (!activeLayer.IsLocked || isBase);
         var popup = _btnAdjustments?.GetPopup();
         if (popup != null)
         {
@@ -1583,7 +1797,34 @@ public partial class StudioUIManager : CanvasLayer
         }
     }
 
-    private void HandleAdjustmentTriggered(AdjustmentType type)
+    private void OnFilterMenuAboutToPopup()
+    {
+        var activeLayer = _tabPaint?.LayerManager?.ActiveLayer;
+        bool isBase = _tabPaint?.LayerManager?.IsBaseTextureActive == true;
+        bool canFilter = activeLayer != null && activeLayer.IsVisible && (!activeLayer.IsLocked || isBase);
+        var popup = _btnFilter?.GetPopup();
+        if (popup != null)
+        {
+            for (int i = 0; i < popup.ItemCount; i++)
+            {
+                if (!popup.IsItemSeparator(i))
+                {
+                    if (popup.GetItemId(i) == 999)
+                    {
+                        popup.SetItemDisabled(i, !canFilter || FilterModalUI.LastFilterParameters == null);
+                    }
+                    else
+                    {
+                        popup.SetItemDisabled(i, !canFilter);
+                    }
+                }
+            }
+        }
+    }
+
+    private void HandleAdjustmentTriggered(AdjustmentType type) => HandleAdjustmentTriggered((int)type);
+
+    private void HandleAdjustmentTriggered(int id)
     {
         if (_currentTabIndex != 8 || _tabPaint == null) return;
         var layer = _tabPaint.LayerManager?.ActiveLayer;
@@ -1597,12 +1838,20 @@ public partial class StudioUIManager : CanvasLayer
             ShowToast($"Cannot adjust layer '{layer.Name}' because it is hidden.");
             return;
         }
-        if (layer.IsLocked)
+        bool isBase = _tabPaint.LayerManager?.IsBaseTextureActive == true;
+        if (layer.IsLocked && !isBase)
         {
             ShowToast($"Cannot adjust layer '{layer.Name}' because it is locked.");
             return;
         }
 
+        if (id == 100)
+        {
+            _tabPaint.OpenGradientMapModal();
+            return;
+        }
+
+        var type = (AdjustmentType)id;
         if (type == AdjustmentType.Invert || type == AdjustmentType.Desaturate)
         {
             _tabPaint.ApplyImmediateAdjustment(type);
@@ -1610,6 +1859,44 @@ public partial class StudioUIManager : CanvasLayer
         else
         {
             _tabPaint.OpenAdjustmentModal(type);
+        }
+    }
+
+    private void HandleFilterTriggered(int id)
+    {
+        if (_currentTabIndex != 8 || _tabPaint == null) return;
+        var layer = _tabPaint.LayerManager?.ActiveLayer;
+        if (layer == null)
+        {
+            ShowToast("No active paint layer selected.");
+            return;
+        }
+        if (!layer.IsVisible)
+        {
+            ShowToast($"Cannot apply filter to '{layer.Name}' because it is hidden.");
+            return;
+        }
+        bool isBase = _tabPaint.LayerManager?.IsBaseTextureActive == true;
+        if (layer.IsLocked && !isBase)
+        {
+            ShowToast($"Cannot apply filter to '{layer.Name}' because it is locked.");
+            return;
+        }
+
+        if (id == 999)
+        {
+            _tabPaint.RepeatLastFilter();
+            return;
+        }
+
+        var filterType = (FilterType)id;
+        if (filterType == FilterType.Sharpen || filterType == FilterType.FindEdges || filterType == FilterType.Solarize)
+        {
+            _tabPaint.ApplyImmediateFilter(filterType);
+        }
+        else
+        {
+            _tabPaint.OpenFilterModal(filterType);
         }
     }
 
@@ -1861,6 +2148,7 @@ public partial class StudioUIManager : CanvasLayer
     {
         _toastPanel = new PanelContainer();
         _toastPanel.Visible = false;
+        _toastPanel.ZIndex = 999;
 
         var margin = new MarginContainer();
         margin.AddThemeConstantOverride("margin_left", 16);

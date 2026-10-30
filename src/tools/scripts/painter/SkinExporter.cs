@@ -7,6 +7,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
+using System.Runtime.InteropServices;
+using SkiaSharp;
 using SteamDatabase.ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
@@ -16,6 +18,19 @@ using DeadlockPlayground.Workspace;
 
 namespace DeadlockPlayground.Painter
 {
+    public class OriginalVtexMetadata
+    {
+        public string VtexCPath { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public string Format { get; set; } = "BC7";
+        public VTexFlags Flags { get; set; } = VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT;
+        public int NumMipLevels { get; set; }
+        public byte[] RawAlpha { get; set; }
+        public Image BaseRgbaImage { get; set; }
+        public bool HasNonUniformAlpha { get; set; }
+    }
+
     public enum ExportLogLevel
     {
         Info,
@@ -153,6 +168,22 @@ namespace DeadlockPlayground.Painter
                             {
                                 if (bImg.IsCompressed()) bImg.Decompress();
                                 var dup = (Image)bImg.Duplicate();
+                                if (dup.HasMipmaps()) dup.ClearMipmaps();
+                                if (dup.GetFormat() != Image.Format.Rgba8) dup.Convert(Image.Format.Rgba8);
+                                byte[] bData = dup.GetData();
+                                if (bData != null)
+                                {
+                                    int expectedBytes = dup.GetWidth() * dup.GetHeight() * 4;
+                                    if (bData.Length > expectedBytes)
+                                    {
+                                        Array.Resize(ref bData, expectedBytes);
+                                    }
+                                    for (int pIdx = 3; pIdx < expectedBytes; pIdx += 4)
+                                    {
+                                        bData[pIdx] = 255;
+                                    }
+                                    dup = Image.CreateFromData(dup.GetWidth(), dup.GetHeight(), false, Image.Format.Rgba8, bData);
+                                }
                                 config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
                                 config.PreExtractedBaseImages[sIdx] = dup;
                             }
@@ -296,8 +327,9 @@ namespace DeadlockPlayground.Painter
                 }                
                 int workspaceTexCount = workspaceAssets.Sum(a => a.ModifiedTextures.Count);
                 int workspaceVpcfCount = workspaceAssets.Count(a => a.Category == "ParticleVFX" && !string.IsNullOrEmpty(a.ParticleOverridesFile));
+                int workspaceAnimCount = workspaceAssets.Sum(a => a.Animations?.Count ?? 0);
 
-                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0)
+                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0 && workspaceAnimCount == 0)
                 {
                     string err = "No modified submeshes or workspace assets selected for compilation. Base game submeshes were left untouched.";
                     progress?.Report(new ExportProgressReport(0.15f, $"[WARNING] {err}", ExportLogLevel.Warning));
@@ -341,49 +373,80 @@ namespace DeadlockPlayground.Painter
                         ct.ThrowIfCancellationRequested();
 
                         string matName = ResolveSubmeshMaterialName(submesh, config.HeroCodename);
-                        string originalColorVtexC = ResolveOriginalColorVtexCPath(submesh, config.HeroCodename, baseVpkPackage);
+                        var allColorPaths = ResolveAllColorVtexCPaths(submesh, config.HeroCodename, baseVpkPackage);
 
-                        if (!processedHeroVtexCPaths.Add(originalColorVtexC))
+                        foreach (var colorVtexC in allColorPaths)
                         {
-                            progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping duplicate material export for submesh '{submesh.DisplayName}' (shares {Path.GetFileName(originalColorVtexC)})"));
-                            continue;
+                            if (Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(colorVtexC))
+                            {
+                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping engine placeholder texture: {colorVtexC}"));
+                                continue;
+                            }
+
+                            if (!processedHeroVtexCPaths.Add(colorVtexC))
+                            {
+                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping already staged texture for submesh '{submesh.DisplayName}' ({Path.GetFileName(colorVtexC)})"));
+                                continue;
+                            }
+
+                            string cleanTexBaseName = Path.GetFileNameWithoutExtension(colorVtexC);
+                            if (cleanTexBaseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                cleanTexBaseName = cleanTexBaseName[..^2];
+
+                            // Load original .vtex_c metadata (format, flags, and raw alpha channel byte-for-byte)
+                            var origMeta = LoadOriginalVtexMetadata(colorVtexC, baseVpkPackage, deadlockPath);
+                            if (origMeta != null && (origMeta.Width < 64 || origMeta.Height < 64))
+                            {
+                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping low-res placeholder texture ({origMeta.Width}x{origMeta.Height}): {colorVtexC}"));
+                                continue;
+                            }
+
+                            progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {colorVtexC}"));
+
+                            string pngFileName = $"{cleanTexBaseName}.png";
+                            string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
+
+                            if (origMeta != null)
+                            {
+                                progress?.Report(new ExportProgressReport(0.19f, $"[INFO] Loaded original texture specs for '{cleanTexBaseName}': {origMeta.Width}x{origMeta.Height}, Format={origMeta.Format}, Flags={origMeta.Flags}, NonUniformAlpha={origMeta.HasNonUniformAlpha}"));
+                            }
+
+                            progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {cleanTexBaseName} composite -> {pngFileName}..."));
+
+                            Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution, origMeta);
+                            if (submeshImage == null)
+                            {
+                                string err = $"Failed to extract image for submesh '{submesh.DisplayName}' ({cleanTexBaseName}).";
+                                progress?.Report(new ExportProgressReport(0.20f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                result.Success = false;
+                                result.ErrorMessage = err;
+                                return result;
+                            }
+
+                            Error saveErr = submeshImage.SavePng(fullPngPath);
+                            if (saveErr != Error.Ok)
+                            {
+                                string err = $"Failed to write PNG '{fullPngPath}' (Code: {saveErr}).";
+                                progress?.Report(new ExportProgressReport(0.25f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                result.Success = false;
+                                result.ErrorMessage = err;
+                                return result;
+                            }
+
+                            // Generate companion DMX .vtex descriptor with dynamic format & flags
+                            string vtexFileName = $"{cleanTexBaseName}.vtex";
+                            string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
+                            string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
+
+                            string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                            VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                            string vtexContent = GenerateSource2DmxVtex(relativePngPath, outputFormat, vtexFlags);
+                            File.WriteAllText(fullVtexPath, vtexContent);
+                            progress?.Report(new ExportProgressReport(0.28f, $"[INFO] Generated DMX VTEX descriptor: {vtexFileName} (Format: {outputFormat}, Flags: {vtexFlags})"));
+
+                            stagedTextures.Add((cleanTexBaseName, fullPngPath, fullVtexPath, colorVtexC));
                         }
-                        progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {originalColorVtexC}"));
-
-                        string pngFileName = $"{matName}_color.png";
-                        string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
-
-                        progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {submesh.DisplayName} composite -> {pngFileName}..."));
-
-                        Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution);
-                        if (submeshImage == null)
-                        {
-                            string err = $"Failed to extract image for submesh '{submesh.DisplayName}'.";
-                            progress?.Report(new ExportProgressReport(0.20f, $"[ERROR] {err}", ExportLogLevel.Error));
-                            result.Success = false;
-                            result.ErrorMessage = err;
-                            return result;
-                        }
-
-                        Error saveErr = submeshImage.SavePng(fullPngPath);
-                        if (saveErr != Error.Ok)
-                        {
-                            string err = $"Failed to write PNG '{fullPngPath}' (Code: {saveErr}).";
-                            progress?.Report(new ExportProgressReport(0.25f, $"[ERROR] {err}", ExportLogLevel.Error));
-                            result.Success = false;
-                            result.ErrorMessage = err;
-                            return result;
-                        }
-
-                        // Generate companion DMX .vtex descriptor with addon-relative PNG path
-                        string vtexFileName = $"{matName}_color.vtex";
-                        string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
-                        string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
-                        string vtexContent = GenerateSource2DmxVtex(relativePngPath);
-                        File.WriteAllText(fullVtexPath, vtexContent);
-                        progress?.Report(new ExportProgressReport(0.28f, $"[INFO] Generated DMX VTEX descriptor: {vtexFileName} (m_fileName: {relativePngPath})"));
-
-                        stagedTextures.Add((matName, fullPngPath, fullVtexPath, originalColorVtexC));
                     }
 
                     // =========================================================================
@@ -426,22 +489,49 @@ namespace DeadlockPlayground.Painter
                                     baseName = baseName.Substring(0, baseName.Length - 2);
                                 }
 
+                                var origMeta = LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath)
+                                            ?? LoadOriginalVtexMetadata(vtexKey, baseVpkPackage, deadlockPath);
+
                                 string targetPngFileName = $"{baseName}.png";
                                 string targetPngFull = Path.Combine(assetContentDir, targetPngFileName);
                                 if (File.Exists(stagedPngFull))
                                 {
-                                    File.Copy(stagedPngFull, targetPngFull, true);
+                                    if (origMeta != null && origMeta.RawAlpha != null)
+                                    {
+                                        var loadedImg = Image.LoadFromFile(stagedPngFull);
+                                        if (loadedImg != null)
+                                        {
+                                            loadedImg = ApplyOriginalAlphaChannel(loadedImg, origMeta);
+                                            loadedImg.SavePng(targetPngFull);
+                                        }
+                                        else
+                                        {
+                                            File.Copy(stagedPngFull, targetPngFull, true);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        File.Copy(stagedPngFull, targetPngFull, true);
+                                    }
                                 }
                                 else if (inMemImg != null)
                                 {
                                     if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
+                                    if (origMeta != null)
+                                    {
+                                        inMemImg = ApplyOriginalAlphaChannel(inMemImg, origMeta);
+                                    }
                                     inMemImg.SavePng(targetPngFull);
                                 }
 
                                 string targetVtexFileName = $"{baseName}.vtex";
                                 string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
                                 string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
-                                string vtexDesc = GenerateSource2DmxVtex(relPng);
+
+                                string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                                VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                                string vtexDesc = GenerateSource2DmxVtex(relPng, outputFormat, vtexFlags);
                                 File.WriteAllText(targetVtexFull, vtexDesc);
 
                                 string targetCompiledVtexCPath = normVtex;
@@ -730,6 +820,34 @@ namespace DeadlockPlayground.Painter
                                 }
                             }
 
+                            // Include any staged workspace animations
+                            if (workspaceSession != null)
+                            {
+                                foreach (var asset in workspaceAssets)
+                                {
+                                    if (asset.Animations != null)
+                                    {
+                                        foreach (var animEntry in asset.Animations)
+                                        {
+                                            if (!string.IsNullOrEmpty(animEntry.RelativeVnmclipPath))
+                                            {
+                                                string fullClipPath = Path.Combine(workspaceSession.SessionDir, animEntry.RelativeVnmclipPath);
+                                                if (File.Exists(fullClipPath))
+                                                {
+                                                    byte[] clipData = File.ReadAllBytes(fullClipPath);
+                                                    string targetVpkPath = !string.IsNullOrEmpty(animEntry.TargetVpkPath)
+                                                        ? animEntry.TargetVpkPath
+                                                        : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(config.HeroCodename, null, animEntry.CleanName);
+                                                    targetVpkPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
+                                                    package.AddFile(targetVpkPath, clipData);
+                                                    progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             package.Write(finalVpkPath);
                         }
 
@@ -918,7 +1036,11 @@ namespace DeadlockPlayground.Painter
             return sm.SurfaceIndex.ToString();
         }
 
-        private static Image ExtractAndBlendSubmeshImage(ModExportConfig config, SubmeshNodeInfo submesh, int targetRes)
+        private static Image ExtractAndBlendSubmeshImage(
+            ModExportConfig config,
+            SubmeshNodeInfo submesh,
+            int targetRes,
+            OriginalVtexMetadata origMeta = null)
         {
             if (config == null || submesh == null) return null;
 
@@ -975,9 +1097,13 @@ namespace DeadlockPlayground.Painter
                 isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
             }
 
-            // Retrieve pre-extracted base texture image
+            // Retrieve base texture image: prioritize authentic un-flattened image from origMeta
             Image baseImg = null;
-            if (config.PreExtractedBaseImagesBySubmesh.TryGetValue(subKey, out var subBase) && subBase != null && !subBase.IsEmpty())
+            if (origMeta?.BaseRgbaImage != null && !origMeta.BaseRgbaImage.IsEmpty())
+            {
+                baseImg = origMeta.BaseRgbaImage;
+            }
+            else if (config.PreExtractedBaseImagesBySubmesh.TryGetValue(subKey, out var subBase) && subBase != null && !subBase.IsEmpty())
             {
                 baseImg = subBase;
             }
@@ -989,7 +1115,28 @@ namespace DeadlockPlayground.Painter
             int exportWidth = 2048;
             int exportHeight = 2048;
 
-            if (baseImg != null && !baseImg.IsEmpty())
+            if (origMeta != null && origMeta.Width > 0 && origMeta.Height > 0)
+            {
+                if (targetRes > 0)
+                {
+                    if (origMeta.Width >= origMeta.Height)
+                    {
+                        exportWidth = targetRes;
+                        exportHeight = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * origMeta.Height / origMeta.Width));
+                    }
+                    else
+                    {
+                        exportHeight = targetRes;
+                        exportWidth = Mathf.Max(1, Mathf.RoundToInt((float)targetRes * origMeta.Width / origMeta.Height));
+                    }
+                }
+                else
+                {
+                    exportWidth = origMeta.Width;
+                    exportHeight = origMeta.Height;
+                }
+            }
+            else if (baseImg != null && !baseImg.IsEmpty())
             {
                 int baseW = baseImg.GetWidth();
                 int baseH = baseImg.GetHeight();
@@ -1043,15 +1190,19 @@ namespace DeadlockPlayground.Painter
 
             if (isolatedImage == null || isolatedImage.IsEmpty()) return null;
 
-            // Ensure isolated painted region matches target dimensions without blur
+            // Ensure isolated painted region matches target dimensions with Bilinear interpolation
             var finalImage = (Image)isolatedImage.Duplicate();
             if (finalImage.IsCompressed())
             {
                 finalImage.Decompress();
             }
+            if (finalImage.HasMipmaps())
+            {
+                finalImage.ClearMipmaps();
+            }
             if (finalImage.GetWidth() != exportWidth || finalImage.GetHeight() != exportHeight)
             {
-                finalImage.Resize(exportWidth, exportHeight, Image.Interpolation.Nearest);
+                finalImage.Resize(exportWidth, exportHeight, Image.Interpolation.Bilinear);
             }
             finalImage.Convert(Image.Format.Rgba8);
 
@@ -1059,22 +1210,35 @@ namespace DeadlockPlayground.Painter
             if (baseImg != null && !baseImg.IsEmpty())
             {
                 var baseUnscaled = (Image)baseImg.Duplicate();
+                if (baseUnscaled.IsCompressed())
+                {
+                    baseUnscaled.Decompress();
+                }
+                if (baseUnscaled.HasMipmaps())
+                {
+                    baseUnscaled.ClearMipmaps();
+                }
                 baseUnscaled.Convert(Image.Format.Rgba8);
                 if (baseUnscaled.GetWidth() != exportWidth || baseUnscaled.GetHeight() != exportHeight)
                 {
-                    baseUnscaled.Resize(exportWidth, exportHeight, Image.Interpolation.Nearest);
+                    baseUnscaled.Resize(exportWidth, exportHeight, Image.Interpolation.Bilinear);
                 }
 
                 // Alpha composite: final = paint.rgb * paint.a + base.rgb * (1 - paint.a)
                 byte[] paintData = finalImage.GetData();
                 byte[] baseData = baseUnscaled.GetData();
+                int pixelCount = exportWidth * exportHeight;
+                int expectedBytes = pixelCount * 4;
 
-                if (paintData != null && baseData != null && paintData.Length >= exportWidth * exportHeight * 4 && baseData.Length >= exportWidth * exportHeight * 4)
+                if (paintData != null && baseData != null && paintData.Length >= expectedBytes && baseData.Length >= expectedBytes)
                 {
-                    int pixelCount = exportWidth * exportHeight;
+                    bool sameRes = (origMeta != null && origMeta.Width == exportWidth && origMeta.Height == exportHeight && origMeta.RawAlpha != null && origMeta.RawAlpha.Length == pixelCount);
+
                     for (int i = 0; i < pixelCount; i++)
                     {
                         int idx = i * 4;
+                        if (idx + 3 >= paintData.Length || idx + 3 >= baseData.Length) break;
+
                         float pA = paintData[idx + 3] / 255.0f;
                         if (pA <= 0.001f)
                         {
@@ -1082,8 +1246,6 @@ namespace DeadlockPlayground.Painter
                             paintData[idx] = baseData[idx];
                             paintData[idx + 1] = baseData[idx + 1];
                             paintData[idx + 2] = baseData[idx + 2];
-                            // Preserve Valve's original Alpha channel (cavity AO, tint, fabric spec) byte-for-byte
-                            paintData[idx + 3] = baseData[idx + 3];
                         }
                         else if (pA < 0.999f)
                         {
@@ -1098,16 +1260,75 @@ namespace DeadlockPlayground.Painter
                             paintData[idx] = (byte)Mathf.Clamp(pR * pA + bR * (1.0f - pA), 0, 255);
                             paintData[idx + 1] = (byte)Mathf.Clamp(pG * pA + bG * (1.0f - pA), 0, 255);
                             paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
-                            // Preserve Valve's original Alpha channel byte-for-byte
-                            paintData[idx + 3] = baseData[idx + 3];
+                        }
+
+                        // Preserve Valve's original Alpha channel byte-for-byte
+                        if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
+                        {
+                            if (sameRes && i < origMeta.RawAlpha.Length)
+                            {
+                                paintData[idx + 3] = origMeta.RawAlpha[i];
+                            }
+                            else if (origMeta.Width > 0 && origMeta.Height > 0)
+                            {
+                                int srcX = Mathf.Clamp(Mathf.FloorToInt((i % exportWidth) * (float)origMeta.Width / exportWidth), 0, origMeta.Width - 1);
+                                int srcY = Mathf.Clamp(Mathf.FloorToInt((i / exportWidth) * (float)origMeta.Height / exportHeight), 0, origMeta.Height - 1);
+                                int srcIdx = srcY * origMeta.Width + srcX;
+                                if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
+                                {
+                                    paintData[idx + 3] = origMeta.RawAlpha[srcIdx];
+                                }
+                            }
                         }
                         else
                         {
-                            // Full paint opacity replaces RGB but retains authentic base alpha channel
                             paintData[idx + 3] = baseData[idx + 3];
                         }
                     }
 
+                    if (paintData.Length > expectedBytes)
+                    {
+                        Array.Resize(ref paintData, expectedBytes);
+                    }
+                    finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
+                }
+            }
+            else if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
+            {
+                // No base image, but authentic original alpha is available
+                byte[] paintData = finalImage.GetData();
+                int pixelCount = exportWidth * exportHeight;
+                int expectedBytes = pixelCount * 4;
+
+                if (paintData != null && paintData.Length >= expectedBytes)
+                {
+                    bool sameRes = (origMeta.Width == exportWidth && origMeta.Height == exportHeight && origMeta.RawAlpha.Length == pixelCount);
+
+                    for (int i = 0; i < pixelCount; i++)
+                    {
+                        int idx = i * 4;
+                        if (idx + 3 >= paintData.Length) break;
+
+                        if (sameRes && i < origMeta.RawAlpha.Length)
+                        {
+                            paintData[idx + 3] = origMeta.RawAlpha[i];
+                        }
+                        else if (origMeta.Width > 0 && origMeta.Height > 0)
+                        {
+                            int srcX = Mathf.Clamp(Mathf.FloorToInt((i % exportWidth) * (float)origMeta.Width / exportWidth), 0, origMeta.Width - 1);
+                            int srcY = Mathf.Clamp(Mathf.FloorToInt((i / exportWidth) * (float)origMeta.Height / exportHeight), 0, origMeta.Height - 1);
+                            int srcIdx = srcY * origMeta.Width + srcX;
+                            if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
+                            {
+                                paintData[idx + 3] = origMeta.RawAlpha[srcIdx];
+                            }
+                        }
+                    }
+
+                    if (paintData.Length > expectedBytes)
+                    {
+                        Array.Resize(ref paintData, expectedBytes);
+                    }
                     finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
             }
@@ -1115,9 +1336,123 @@ namespace DeadlockPlayground.Painter
             return finalImage;
         }
 
+        public static Image ApplyOriginalAlphaChannel(Image targetImage, OriginalVtexMetadata origMeta)
+        {
+            if (targetImage == null || targetImage.IsEmpty() || origMeta?.RawAlpha == null || origMeta.RawAlpha.Length == 0)
+                return targetImage;
+
+            if (targetImage.IsCompressed()) targetImage.Decompress();
+            if (targetImage.HasMipmaps()) targetImage.ClearMipmaps();
+
+            // If target image dimensions differ from origMeta, resize a copy to origMeta dimensions first
+            if (origMeta.Width > 0 && origMeta.Height > 0 && 
+                (targetImage.GetWidth() != origMeta.Width || targetImage.GetHeight() != origMeta.Height))
+            {
+                targetImage = (Image)targetImage.Duplicate();
+                targetImage.Resize(origMeta.Width, origMeta.Height, Image.Interpolation.Bilinear);
+            }
+
+            if (targetImage.GetFormat() != Image.Format.Rgba8) targetImage.Convert(Image.Format.Rgba8);
+
+            int w = targetImage.GetWidth();
+            int h = targetImage.GetHeight();
+            byte[] data = targetImage.GetData();
+            int pixelCount = w * h;
+            int expectedBytes = pixelCount * 4;
+            if (data == null || data.Length < expectedBytes) return targetImage;
+            if (data.Length > expectedBytes)
+            {
+                Array.Resize(ref data, expectedBytes);
+            }
+
+            bool sameRes = (origMeta.Width == w && origMeta.Height == h && origMeta.RawAlpha.Length == pixelCount);
+
+            for (int i = 0; i < pixelCount; i++)
+            {
+                int idx = i * 4;
+                if (idx + 3 >= data.Length) break;
+
+                if (sameRes && i < origMeta.RawAlpha.Length)
+                {
+                    data[idx + 3] = origMeta.RawAlpha[i];
+                }
+                else if (origMeta.Width > 0 && origMeta.Height > 0)
+                {
+                    int srcX = Mathf.Clamp(Mathf.FloorToInt((i % w) * (float)origMeta.Width / w), 0, origMeta.Width - 1);
+                    int srcY = Mathf.Clamp(Mathf.FloorToInt((i / w) * (float)origMeta.Height / h), 0, origMeta.Height - 1);
+                    int srcIdx = srcY * origMeta.Width + srcX;
+                    if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
+                    {
+                        data[idx + 3] = origMeta.RawAlpha[srcIdx];
+                    }
+                }
+            }
+
+            return Image.CreateFromData(w, h, false, Image.Format.Rgba8, data);
+        }
+
+        public static List<string> ResolveAllColorVtexCPaths(SubmeshNodeInfo submesh, string heroCodename, Package baseVpkPackage)
+        {
+            var list = new List<string>();
+            if (submesh?.AllColorVtexCPaths != null && submesh.AllColorVtexCPaths.Count > 0)
+            {
+                foreach (var p in submesh.AllColorVtexCPaths)
+                {
+                    if (!string.IsNullOrWhiteSpace(p))
+                    {
+                        string norm = p.Replace('\\', '/').TrimStart('/');
+                        if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(norm) && !list.Contains(norm, StringComparer.OrdinalIgnoreCase))
+                            list.Add(norm);
+                    }
+                }
+            }
+
+            // If we have at most 1 path and baseVpkPackage is available, inspect VPK material to discover any missing secondary/reveal textures
+            if (list.Count <= 1 && baseVpkPackage != null && submesh != null)
+            {
+                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, baseVpkPackage);
+                if (!string.IsNullOrEmpty(primary) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(primary) && !list.Contains(primary, StringComparer.OrdinalIgnoreCase))
+                {
+                    list.Insert(0, primary);
+                }
+                if (!string.IsNullOrEmpty(submesh?.OriginalSecondaryColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalSecondaryColorVtexCPath))
+                {
+                    string sec = submesh.OriginalSecondaryColorVtexCPath.Replace('\\', '/').TrimStart('/');
+                    if (!list.Contains(sec, StringComparer.OrdinalIgnoreCase))
+                        list.Add(sec);
+                }
+                if (submesh?.AllColorVtexCPaths != null)
+                {
+                    foreach (var p in submesh.AllColorVtexCPaths)
+                    {
+                        string norm = p.Replace('\\', '/').TrimStart('/');
+                        if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(norm) && !list.Contains(norm, StringComparer.OrdinalIgnoreCase))
+                            list.Add(norm);
+                    }
+                }
+            }
+
+            if (list.Count == 0)
+            {
+                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, baseVpkPackage);
+                if (!string.IsNullOrEmpty(primary) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(primary) && !list.Contains(primary, StringComparer.OrdinalIgnoreCase))
+                {
+                    list.Add(primary);
+                }
+                if (!string.IsNullOrEmpty(submesh?.OriginalSecondaryColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalSecondaryColorVtexCPath))
+                {
+                    string sec = submesh.OriginalSecondaryColorVtexCPath.Replace('\\', '/').TrimStart('/');
+                    if (!list.Contains(sec, StringComparer.OrdinalIgnoreCase))
+                        list.Add(sec);
+                }
+            }
+
+            return list;
+        }
+
         public static string ResolveOriginalColorVtexCPath(SubmeshNodeInfo submesh, string heroCodename, Package baseVpkPackage)
         {
-            if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath))
+            if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalColorVtexCPath) && submesh?.AllColorVtexCPaths != null && submesh.AllColorVtexCPaths.Count > 1)
             {
                 return submesh.OriginalColorVtexCPath.Replace('\\', '/').TrimStart('/');
             }
@@ -1166,12 +1501,63 @@ namespace DeadlockPlayground.Painter
                                            ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColor")
                                            ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor1");
 
-                            if (!string.IsNullOrEmpty(colorTex))
+                            string secColorTex = DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColor2")
+                                              ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor2")
+                                              ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColorB")
+                                              ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tAltColor_Reveal")
+                                              ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tAltColor")
+                                              ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureAltColor");
+
+                            if (!string.IsNullOrEmpty(secColorTex) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(secColorTex))
+                            {
+                                string normSec = secColorTex.Replace('\\', '/').Trim().TrimStart('/');
+                                if (normSec.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) normSec += "_c";
+                                else if (!normSec.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) normSec += ".vtex_c";
+                                submesh.OriginalSecondaryColorVtexCPath = normSec;
+                                if (!submesh.AllColorVtexCPaths.Contains(normSec, StringComparer.OrdinalIgnoreCase))
+                                    submesh.AllColorVtexCPaths.Add(normSec);
+                            }
+
+                            // Dynamic scan of all texture parameters in vmat for additional Color / Albedo / AltColor textures
+                            if (vmat.TextureParams != null)
+                            {
+                                foreach (var (pKey, pVal) in vmat.TextureParams)
+                                {
+                                    if (string.IsNullOrWhiteSpace(pVal) || Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(pVal)) continue;
+                                    if (pKey.Contains("Normal", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("Roughness", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("AmbientOcclusion", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("AO", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("Mask", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("Transmissive", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("Shadow", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        continue;
+                                    }
+
+                                    if (pKey.Contains("Color", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("Albedo", StringComparison.OrdinalIgnoreCase) ||
+                                        pKey.Contains("Diffuse", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        string normExtra = pVal.Replace('\\', '/').Trim().TrimStart('/');
+                                        if (normExtra.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) normExtra += "_c";
+                                        else if (!normExtra.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) normExtra += ".vtex_c";
+                                        if (!Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(normExtra) && !submesh.AllColorVtexCPaths.Contains(normExtra, StringComparer.OrdinalIgnoreCase))
+                                        {
+                                            submesh.AllColorVtexCPaths.Add(normExtra);
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(colorTex) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(colorTex))
                             {
                                 string norm = colorTex.Replace('\\', '/').Trim().TrimStart('/');
                                 if (norm.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) norm += "_c";
                                 else if (!norm.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) norm += ".vtex_c";
                                 submesh.OriginalColorVtexCPath = norm;
+                                if (!submesh.AllColorVtexCPaths.Contains(norm, StringComparer.OrdinalIgnoreCase))
+                                    submesh.AllColorVtexCPaths.Insert(0, norm);
                                 return norm;
                             }
                         }
@@ -1183,12 +1569,213 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
+            if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalColorVtexCPath))
+            {
+                return submesh.OriginalColorVtexCPath.Replace('\\', '/').TrimStart('/');
+            }
+
             // Default fallback
             string matName = ResolveSubmeshMaterialName(submesh, heroCodename);
             string fallbackFolder = ResolveHeroInternalFolder(heroCodename, null);
             string defaultPath = $"{fallbackFolder}/materials/{matName}_color.vtex_c".Replace('\\', '/').TrimStart('/');
-            if (submesh != null) submesh.OriginalColorVtexCPath = defaultPath;
+            if (submesh != null)
+            {
+                submesh.OriginalColorVtexCPath = defaultPath;
+                if (!submesh.AllColorVtexCPaths.Contains(defaultPath, StringComparer.OrdinalIgnoreCase))
+                    submesh.AllColorVtexCPaths.Add(defaultPath);
+            }
             return defaultPath;
+        }
+
+        public static OriginalVtexMetadata LoadOriginalVtexMetadata(
+            string originalVtexCPath,
+            Package baseVpkPackage,
+            string deadlockGamePath)
+        {
+            if (string.IsNullOrWhiteSpace(originalVtexCPath) || Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(originalVtexCPath)) return null;
+
+            string normPath = originalVtexCPath.Replace('\\', '/').TrimStart('/');
+            if (!normPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+            {
+                if (normPath.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) normPath += "_c";
+                else normPath += ".vtex_c";
+            }
+
+            byte[] rawVtexCBytes = null;
+
+            // 1. Direct disk check if full path or relative to current working directory
+            if (File.Exists(originalVtexCPath))
+            {
+                try { rawVtexCBytes = File.ReadAllBytes(originalVtexCPath); } catch { }
+            }
+            else if (File.Exists(normPath))
+            {
+                try { rawVtexCBytes = File.ReadAllBytes(normPath); } catch { }
+            }
+
+            // 2. Query base pak01_dir.vpk if available (primary source for authentic assets)
+            if (rawVtexCBytes == null && baseVpkPackage != null)
+            {
+                var entry = baseVpkPackage.FindEntry(normPath);
+                if (entry == null)
+                {
+                    string fileNameOnly = Path.GetFileName(normPath);
+                    if (baseVpkPackage.Entries.TryGetValue("vtex_c", out var vtexEntries))
+                    {
+                        entry = vtexEntries.FirstOrDefault(e =>
+                            string.Equals(e.FileName + "." + e.TypeName, fileNameOnly, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(e.FileName, Path.GetFileNameWithoutExtension(fileNameOnly), StringComparison.OrdinalIgnoreCase));
+                    }
+                }
+
+                if (entry != null)
+                {
+                    try
+                    {
+                        baseVpkPackage.ReadEntry(entry, out rawVtexCBytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.Print($"[SkinExporter] Notice: Could not read entry '{normPath}' from base VPK: {ex.Message}");
+                    }
+                }
+            }
+
+            // 3. Check within game citadel folder
+            if (rawVtexCBytes == null && !string.IsNullOrEmpty(deadlockGamePath))
+            {
+                string gameCitadelFile = Path.Combine(deadlockGamePath, "game", "citadel", normPath);
+                if (File.Exists(gameCitadelFile))
+                {
+                    try { rawVtexCBytes = File.ReadAllBytes(gameCitadelFile); } catch { }
+                }
+            }
+
+            // 4. Dynamic fallback search in project scratch / staging roots (without hardcoded drive letters or hero names)
+            if (rawVtexCBytes == null)
+            {
+                string projectDir = ProjectSettings.GlobalizePath("res://");
+                string projectRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
+                string[] searchRoots = new[]
+                {
+                    Path.Combine(projectRoot, "scratch"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "scratch"),
+                    Path.Combine(OS.GetUserDataDir(), "staging")
+                };
+
+                string targetFileName = Path.GetFileName(normPath);
+
+                foreach (var root in searchRoots)
+                {
+                    if (rawVtexCBytes != null) break;
+                    if (!Directory.Exists(root)) continue;
+
+                    string candidate = Path.Combine(root, normPath);
+                    if (File.Exists(candidate))
+                    {
+                        try { rawVtexCBytes = File.ReadAllBytes(candidate); break; } catch { }
+                    }
+
+                    // Recursive fallback search for texture filename inside workspace scratch
+                    try
+                    {
+                        var matchingFiles = Directory.GetFiles(root, targetFileName, SearchOption.AllDirectories);
+                        if (matchingFiles.Length > 0 && File.Exists(matchingFiles[0]))
+                        {
+                            rawVtexCBytes = File.ReadAllBytes(matchingFiles[0]);
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            if (rawVtexCBytes == null || rawVtexCBytes.Length == 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                using var resource = new ValveResourceFormat.Resource();
+                using var ms = new MemoryStream(rawVtexCBytes);
+                resource.Read(ms);
+
+                if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture vrfTex)
+                {
+                    return null;
+                }
+
+                var meta = new OriginalVtexMetadata
+                {
+                    VtexCPath = normPath,
+                    Width = (int)vrfTex.Width,
+                    Height = (int)vrfTex.Height,
+                    Format = vrfTex.Format.ToString(),
+                    Flags = vrfTex.Flags,
+                    NumMipLevels = (int)vrfTex.NumMipLevels
+                };
+
+                using var skBitmap = vrfTex.GenerateBitmap(depth: 0, mipLevel: 0);
+                if (skBitmap != null)
+                {
+                    int w = skBitmap.Width;
+                    int h = skBitmap.Height;
+                    meta.Width = w;
+                    meta.Height = h;
+                    int count = w * h;
+                    byte[] rawAlpha = new byte[count];
+                    byte[] rawRgba = new byte[count * 4];
+
+                    IntPtr ptr = skBitmap.GetPixels();
+                    if (ptr != IntPtr.Zero && skBitmap.ByteCount >= count * 4)
+                    {
+                        byte[] raw = new byte[count * 4];
+                        Marshal.Copy(ptr, raw, 0, raw.Length);
+
+                        bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
+                        bool hasNonOpaqueAlpha = false;
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            int idx = i * 4;
+                            byte a = raw[idx + 3];
+                            rawAlpha[i] = a;
+                            if (a < 250) hasNonOpaqueAlpha = true;
+
+                            byte c0 = raw[idx];
+                            byte c1 = raw[idx + 1];
+                            byte c2 = raw[idx + 2];
+
+                            if (isBgra)
+                            {
+                                rawRgba[idx] = c2;     // R
+                                rawRgba[idx + 1] = c1; // G
+                                rawRgba[idx + 2] = c0; // B
+                                rawRgba[idx + 3] = 255; // Base RGB is 100% opaque for layer compositing and blend modes
+                            }
+                            else
+                            {
+                                rawRgba[idx] = c0;     // R
+                                rawRgba[idx + 1] = c1; // G
+                                rawRgba[idx + 2] = c2; // B
+                                rawRgba[idx + 3] = 255; // Base RGB is 100% opaque for layer compositing and blend modes
+                            }
+                        }
+
+                        meta.RawAlpha = rawAlpha;
+                        meta.HasNonUniformAlpha = hasNonOpaqueAlpha;
+                        meta.BaseRgbaImage = Image.CreateFromData(w, h, false, Image.Format.Rgba8, rawRgba);
+                    }
+                }
+
+                return meta;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[SkinExporter] Failed to decode original .vtex_c metadata for '{normPath}': {ex.Message}");
+                return null;
+            }
         }
 
         public static string GenerateSource2Kv3Material(string relativeColorTexturePath, string materialName)
@@ -1442,56 +2029,109 @@ namespace DeadlockPlayground.Painter
             }
         }
 
-        public static string GenerateSource2DmxVtex(string relativePathToPng)
+        public static string GenerateSource2DmxVtex(
+            string relativePathToPng,
+            string outputFormat = "BC7",
+            VTexFlags flags = VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT,
+            bool isLinear = false)
         {
             string cleanPngPath = (relativePathToPng ?? "").Replace('\\', '/').TrimStart('/');
+            string fmt = string.IsNullOrWhiteSpace(outputFormat) ? "BC7" : outputFormat.Trim();
+
+            bool clampS = flags.HasFlag(VTexFlags.SUGGEST_CLAMPS);
+            bool clampT = flags.HasFlag(VTexFlags.SUGGEST_CLAMPT);
+            bool clampU = flags.HasFlag(VTexFlags.SUGGEST_CLAMPU);
+            string clampStr = $"{(clampS ? "1" : "0")} {(clampT ? "1" : "0")} {(clampU ? "1" : "0")}";
+
+            bool isBc1 = fmt.Equals("BC1", StringComparison.OrdinalIgnoreCase);
+            string colorSpace = isLinear ? "linear" : "srgb";
+            bool noLod = flags.HasFlag(VTexFlags.NO_LOD);
+            string noLodStr = noLod ? "1" : "0";
+
+            string channelOutputBlock;
+            if (isBc1)
+            {
+                channelOutputBlock = 
+$@"		""CDmeTextureOutputChannel""
+		{{
+			""m_inputTextureArray"" ""string_array"" [ ""InputTexture0"" ]
+			""m_srcChannels"" ""string"" ""rgb""
+			""m_dstChannels"" ""string"" ""rgb""
+			""m_mipAlgorithm"" ""CDmeImageProcessor""
+			{{
+				""m_algorithm"" ""string"" ""Box""
+				""m_stringArg"" ""string"" """"
+				""m_vFloat4Arg"" ""vector4"" ""0 0 0 0""
+			}}
+			""m_outputColorSpace"" ""string"" ""{colorSpace}""
+		}}";
+            }
+            else
+            {
+                channelOutputBlock = 
+$@"		""CDmeTextureOutputChannel""
+		{{
+			""m_inputTextureArray"" ""string_array"" [ ""InputTexture0"" ]
+			""m_srcChannels"" ""string"" ""rgb""
+			""m_dstChannels"" ""string"" ""rgb""
+			""m_mipAlgorithm"" ""CDmeImageProcessor""
+			{{
+				""m_algorithm"" ""string"" ""Box""
+				""m_stringArg"" ""string"" """"
+				""m_vFloat4Arg"" ""vector4"" ""0 0 0 0""
+			}}
+			""m_outputColorSpace"" ""string"" ""{colorSpace}""
+		}},
+		""CDmeTextureOutputChannel""
+		{{
+			""m_inputTextureArray"" ""string_array"" [ ""InputTexture0"" ]
+			""m_srcChannels"" ""string"" ""a""
+			""m_dstChannels"" ""string"" ""a""
+			""m_mipAlgorithm"" ""CDmeImageProcessor""
+			{{
+				""m_algorithm"" ""string"" ""Box""
+				""m_stringArg"" ""string"" """"
+				""m_vFloat4Arg"" ""vector4"" ""0 0 0 0""
+			}}
+			""m_outputColorSpace"" ""string"" ""linear""
+		}}";
+            }
+
             return 
-@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
+$@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
 ""CDmeVtex""
-{
+{{
 	""m_inputTextureArray"" ""element_array""
 	[
 		""CDmeInputTexture""
-		{
+		{{
 			""m_name"" ""string"" ""InputTexture0""
-			""m_fileName"" ""string"" """ + cleanPngPath + @"""
-			""m_colorSpace"" ""string"" ""srgb""
+			""m_fileName"" ""string"" ""{cleanPngPath}""
+			""m_colorSpace"" ""string"" ""{colorSpace}""
 			""m_typeString"" ""string"" ""2D""
 			""m_imageProcessorArray"" ""element_array""
 			[
 				""CDmeImageProcessor""
-				{
+				{{
 					""m_algorithm"" ""string"" ""None""
 					""m_stringArg"" ""string"" """"
 					""m_vFloat4Arg"" ""vector4"" ""0 0 0 0""
-				}
+				}}
 			]
-		}
+		}}
 	]
 	""m_outputTypeString"" ""string"" ""2D""
-	""m_outputFormat"" ""string"" ""BC7""
+	""m_outputFormat"" ""string"" ""{fmt}""
 	""m_outputClearColor"" ""vector4"" ""0 0 0 0""
 	""m_nOutputMinDimension"" ""int"" ""4""
 	""m_nOutputMaxDimension"" ""int"" ""0""
 	""m_textureOutputChannelArray"" ""element_array""
 	[
-		""CDmeTextureOutputChannel""
-		{
-			""m_inputTextureArray"" ""string_array"" [ ""InputTexture0"" ]
-			""m_srcChannels"" ""string"" ""rgba""
-			""m_dstChannels"" ""string"" ""rgba""
-			""m_mipAlgorithm"" ""CDmeImageProcessor""
-			{
-				""m_algorithm"" ""string"" ""Box""
-				""m_stringArg"" ""string"" """"
-				""m_vFloat4Arg"" ""vector4"" ""0 0 0 0""
-			}
-			""m_outputColorSpace"" ""string"" ""srgb""
-		}
+{channelOutputBlock}
 	]
-	""m_vClamp"" ""vector3"" ""0 0 0""
-	""m_bNoLod"" ""bool"" ""0""
-}
+	""m_vClamp"" ""vector3"" ""{clampStr}""
+	""m_bNoLod"" ""bool"" ""{noLodStr}""
+}}
 ";
         }
 

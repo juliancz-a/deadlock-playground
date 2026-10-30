@@ -21,6 +21,9 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     [Export] private VBoxContainer _containerHueSaturation;
     [Export] private VBoxContainer _containerColorBalance;
     [Export] private VBoxContainer _containerExposure;
+    [Export] private VBoxContainer _containerLevels;
+    [Export] private VBoxContainer _containerPosterize;
+    [Export] private VBoxContainer _containerThreshold;
 
     [ExportCategory("Brightness / Contrast Controls")]
     [Export] private HSlider _sliderBrightness;
@@ -54,6 +57,26 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     [Export] private HSlider _sliderGamma;
     [Export] private Label _lblGammaVal;
 
+    [ExportCategory("Levels Controls")]
+    [Export] private HSlider _sliderInBlack;
+    [Export] private Label _lblInBlackVal;
+    [Export] private HSlider _sliderLevelsGamma;
+    [Export] private Label _lblLevelsGammaVal;
+    [Export] private HSlider _sliderInWhite;
+    [Export] private Label _lblInWhiteVal;
+    [Export] private HSlider _sliderOutBlack;
+    [Export] private Label _lblOutBlackVal;
+    [Export] private HSlider _sliderOutWhite;
+    [Export] private Label _lblOutWhiteVal;
+
+    [ExportCategory("Posterize Controls")]
+    [Export] private HSlider _sliderPosterizeLevels;
+    [Export] private Label _lblPosterizeLevelsVal;
+
+    [ExportCategory("Threshold Controls")]
+    [Export] private HSlider _sliderThreshold;
+    [Export] private Label _lblThresholdVal;
+
     [ExportCategory("Footer Controls")]
     [Export] private CheckBox _chkPreview;
     [Export] private Button _btnReset;
@@ -67,6 +90,10 @@ public partial class ColorAdjustmentModalUI : PanelContainer
 
     private AdjustmentType _currentType = AdjustmentType.BrightnessContrast;
     private byte[] _backupBuffer = null;
+
+    private string _openedMaterialKey = "";
+    private int _openedW = 0;
+    private int _openedH = 0;
     private bool _hasSelection = false;
     private byte[] _selectionMaskBuffer = null;
     private int _maskW = 0;
@@ -76,14 +103,73 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     private Vector2 _dragMouseStart;
     private Vector2 _dragPositionStart;
     private bool _suppressSliderEvents = false;
+    private bool _isSamplingUnderlyingComposite = false;
 
     public override void _Ready()
     {
         Visible = false;
         IsOpen = false;
 
+        // CRITICAL: Prevent parent anchors (AnchorBottom = 1.0) from stretching the modal to the bottom of the screen!
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+
+        if (_lblTitle != null)
+        {
+            _lblTitle.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        }
+        if (_lblSubtitle != null)
+        {
+            _lblSubtitle.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        }
+
+        ResolveFallbackNodes();
         WireSignals();
         SetupScrollableProtection();
+        SetupModalForType(AdjustmentType.BrightnessContrast);
+    }
+
+    private void ResolveFallbackNodes()
+    {
+        _containerBrightnessContrast ??= (FindChild("BrightnessContrastContainer", true, false) ?? FindChild("ContainerBrightnessContrast", true, false)) as VBoxContainer;
+        _containerHueSaturation ??= (FindChild("HueSaturationContainer", true, false) ?? FindChild("ContainerHueSaturation", true, false)) as VBoxContainer;
+        _containerColorBalance ??= (FindChild("ColorBalanceContainer", true, false) ?? FindChild("ContainerColorBalance", true, false)) as VBoxContainer;
+        _containerExposure ??= (FindChild("ExposureContainer", true, false) ?? FindChild("ContainerExposure", true, false)) as VBoxContainer;
+
+        _lblTitle ??= FindChild("Title", true, false) as Label;
+        _lblSubtitle ??= FindChild("Subtitle", true, false) as Label;
+        _headerContainer ??= FindChild("HeaderBar", true, false) as Control;
+        _btnClose ??= FindChild("BtnClose", true, false) as Button;
+        _containerLevels ??= (FindChild("LevelsContainer", true, false) ?? FindChild("ContainerLevels", true, false)) as VBoxContainer;
+        _sliderInBlack ??= FindChild("InBlackSlider", true, false) as HSlider;
+        _lblInBlackVal ??= FindChild("InBlackVal", true, false) as Label;
+        _sliderLevelsGamma ??= FindChild("LevelsGammaSlider", true, false) as HSlider;
+        _lblLevelsGammaVal ??= FindChild("LevelsGammaVal", true, false) as Label;
+        _sliderInWhite ??= FindChild("InWhiteSlider", true, false) as HSlider;
+        _lblInWhiteVal ??= FindChild("InWhiteVal", true, false) as Label;
+        _sliderOutBlack ??= FindChild("OutBlackSlider", true, false) as HSlider;
+        _lblOutBlackVal ??= FindChild("OutBlackVal", true, false) as Label;
+        _sliderOutWhite ??= FindChild("OutWhiteSlider", true, false) as HSlider;
+        _lblOutWhiteVal ??= FindChild("OutWhiteVal", true, false) as Label;
+
+        _containerPosterize ??= (FindChild("PosterizeContainer", true, false) ?? FindChild("ContainerPosterize", true, false)) as VBoxContainer;
+        _sliderPosterizeLevels ??= FindChild("PosterizeLevelsSlider", true, false) as HSlider;
+        _lblPosterizeLevelsVal ??= FindChild("PosterizeLevelsVal", true, false) as Label;
+
+        _containerThreshold ??= (FindChild("ThresholdContainer", true, false) ?? FindChild("ContainerThreshold", true, false)) as VBoxContainer;
+        _sliderThreshold ??= FindChild("ThresholdSlider", true, false) as HSlider;
+        _lblThresholdVal ??= FindChild("ThresholdVal", true, false) as Label;
+
+        // Also resolve by slider parent if any container export wasn't named as expected
+        if (_containerBrightnessContrast == null && _sliderBrightness != null)
+            _containerBrightnessContrast = _sliderBrightness.GetParent()?.GetParent() as VBoxContainer ?? _sliderBrightness.GetParent() as VBoxContainer;
+        if (_containerHueSaturation == null && _sliderHue != null)
+            _containerHueSaturation = _sliderHue.GetParent()?.GetParent() as VBoxContainer ?? _sliderHue.GetParent() as VBoxContainer;
+        if (_containerColorBalance == null && _sliderCyanRed != null)
+            _containerColorBalance = _sliderCyanRed.GetParent()?.GetParent() as VBoxContainer ?? _sliderCyanRed.GetParent() as VBoxContainer;
+        if (_containerExposure == null && _sliderExposure != null)
+            _containerExposure = _sliderExposure.GetParent()?.GetParent() as VBoxContainer ?? _sliderExposure.GetParent() as VBoxContainer;
     }
 
     private void SetupScrollableProtection()
@@ -93,7 +179,10 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _sliderBrightness, _sliderContrast,
             _sliderHue, _sliderSaturation, _sliderLightness,
             _sliderCyanRed, _sliderMagentaGreen, _sliderYellowBlue,
-            _sliderExposure, _sliderOffset, _sliderGamma
+            _sliderExposure, _sliderOffset, _sliderGamma,
+            _sliderInBlack, _sliderLevelsGamma, _sliderInWhite,
+            _sliderOutBlack, _sliderOutWhite,
+            _sliderPosterizeLevels, _sliderThreshold
         };
 
         foreach (var s in sliders)
@@ -141,6 +230,15 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         if (_sliderExposure != null) _sliderExposure.ValueChanged += (v) => OnSliderOrOptionChanged();
         if (_sliderOffset != null) _sliderOffset.ValueChanged += (v) => OnSliderOrOptionChanged();
         if (_sliderGamma != null) _sliderGamma.ValueChanged += (v) => OnSliderOrOptionChanged();
+
+        if (_sliderInBlack != null) _sliderInBlack.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderLevelsGamma != null) _sliderLevelsGamma.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderInWhite != null) _sliderInWhite.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderOutBlack != null) _sliderOutBlack.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderOutWhite != null) _sliderOutWhite.ValueChanged += (v) => OnSliderOrOptionChanged();
+
+        if (_sliderPosterizeLevels != null) _sliderPosterizeLevels.ValueChanged += (v) => OnSliderOrOptionChanged();
+        if (_sliderThreshold != null) _sliderThreshold.ValueChanged += (v) => OnSliderOrOptionChanged();
     }
 
     private void OnHeaderGuiInput(InputEvent @event)
@@ -163,12 +261,14 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         }
         else if (@event is InputEventMouseMotion mm && _isDraggingModal)
         {
-            Position = _dragPositionStart + (mm.GlobalPosition - _dragMouseStart);
+            ClampPositionToScreen(_dragPositionStart + (mm.GlobalPosition - _dragMouseStart));
         }
     }
 
     public void Open(AdjustmentType type, PaintTabUI paintTab)
     {
+        StudioUIManager.CloseAnyActiveAdjustmentOrFilterModal(this);
+
         _paintTab = paintTab;
         _layerManager = paintTab?.LayerManager;
         _painter = paintTab?.Painter;
@@ -186,7 +286,7 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             return;
         }
 
-        if (_activeLayer.IsLocked)
+        if (_activeLayer.IsLocked && !_layerManager.IsBaseTextureActive)
         {
             StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{_activeLayer.Name}' because it is locked.");
             return;
@@ -195,6 +295,10 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         int w = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
         int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
         int expectedLen = w * h * 8;
+        
+        _openedMaterialKey = _layerManager.ActiveMaterialKey ?? "";
+        _openedW = w;
+        _openedH = h;
 
         _layerManager.EnsureCpuSynced();
         if (_activeLayer.GpuData == null || _activeLayer.GpuData.Length != expectedLen)
@@ -205,10 +309,6 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         {
             _activeLayer.GpuData = new byte[expectedLen];
         }
-
-        // Cache pre-adjustment backup buffer
-        _backupBuffer = new byte[expectedLen];
-        Buffer.BlockCopy(_activeLayer.GpuData, 0, _backupBuffer, 0, expectedLen);
 
         // Check active selection mask
         _hasSelection = false;
@@ -222,6 +322,23 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _maskH = sel.Height;
         }
 
+        // Cache pre-adjustment backup buffer
+        _backupBuffer = new byte[expectedLen];
+
+        // GIMP / Photopea Merge-Into-Layer Behavior:
+        // If target region on active paint layer is completely empty, auto-sample visible pixels underneath!
+        _isSamplingUnderlyingComposite = false;
+        if (!_layerManager.IsBaseTextureActive && _layerManager.IsLayerRegionEmpty(_activeLayer, _selectionMaskBuffer, _maskW, _maskH))
+        {
+            _isSamplingUnderlyingComposite = true;
+            byte[] comp = _layerManager.SampleVisibleCompositeUnderneath(_layerManager.ActiveLayerIndex);
+            Buffer.BlockCopy(comp, 0, _backupBuffer, 0, expectedLen);
+        }
+        else
+        {
+            Buffer.BlockCopy(_activeLayer.GpuData, 0, _backupBuffer, 0, expectedLen);
+        }
+
         _currentType = type;
         SetupModalForType(type);
 
@@ -231,22 +348,146 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         if (_chkPreview != null)
             _chkPreview.ButtonPressed = true;
 
-        // Position modal nicely in the upper-right / center area of the viewport
+        // Position modal nicely in the viewport clamped to screen margins
         CenterOrPositionModal();
         UpdateValueLabels();
         StudioUIManager.Instance?.UpdateModalsState();
     }
 
+    public void ClampPositionToScreen(Vector2? candidatePos = null)
+    {
+        var vp = GetViewport();
+        if (vp == null) return;
+        Vector2 vpSize = vp.GetVisibleRect().Size;
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        float maxAllowedW = Mathf.Min(400f, vpSize.X - 40f);
+        float maxAllowedH = vpSize.Y * 0.85f;
+
+        float modalW = Mathf.Clamp(Size.X > 0 ? Size.X : 380f, 320f, maxAllowedW);
+        float modalH = Mathf.Clamp(Size.Y > 0 ? Size.Y : GetCombinedMinimumSize().Y, 160f, maxAllowedH);
+
+        Vector2 target = candidatePos ?? Position;
+        float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+        float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+        float clampedX = Mathf.Clamp(target.X, 20f, maxX);
+        float clampedY = Mathf.Clamp(target.Y, 20f, maxY);
+        Position = new Vector2(clampedX, clampedY);
+    }
+
+    private bool _isAdjustingRect = false;
+
+    public override void _Notification(int what)
+    {
+        base._Notification(what);
+        if ((what == NotificationResized || what == NotificationSortChildren || what == NotificationVisibilityChanged)
+            && Visible && !_isAdjustingRect)
+        {
+            EnforceCompactHeight();
+        }
+    }
+
+    private void EnforceCompactHeight()
+    {
+        if (!IsInsideTree() || _isAdjustingRect) return;
+        _isAdjustingRect = true;
+
+        // Ensure inner containers never expand vertically
+        if (GetChildCount() > 0 && GetChild(0) is Control rootChild)
+        {
+            rootChild.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            foreach (Node grandChild in rootChild.GetChildren())
+            {
+                if (grandChild is Control gc)
+                    gc.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            }
+        }
+
+        CustomMinimumSize = new Vector2(400f, 0f);
+        float exactMinH = GetCombinedMinimumSize().Y;
+        if (exactMinH > 50f && Mathf.Abs(Size.Y - exactMinH) > 2f)
+        {
+            SetAnchorsPreset(LayoutPreset.TopLeft);
+            Size = new Vector2(400f, exactMinH);
+        }
+
+        _isAdjustingRect = false;
+    }
     private void CenterOrPositionModal()
     {
-        var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-        float modalW = CustomMinimumSize.X > 0 ? CustomMinimumSize.X : 380;
-        float modalH = CustomMinimumSize.Y > 0 ? CustomMinimumSize.Y : 320;
+        if (!IsInsideTree()) return;
+        _isAdjustingRect = true;
 
-        // Place on the right-center side so the 3D model in the center is visible
-        float targetX = Mathf.Clamp(vpSize.X - modalW - 60, 400, vpSize.X - modalW - 20);
-        float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 50, vpSize.Y - modalH - 50);
+        var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        CustomMinimumSize = new Vector2(400f, 0f);
+        ResetSize();
+
+        float modalW = 400f;
+        float modalH = Mathf.Clamp(GetCombinedMinimumSize().Y, 150f, vpSize.Y * 0.85f);
+        Size = new Vector2(modalW, modalH);
+
+        float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+        float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+        float targetX = Mathf.Clamp((vpSize.X - modalW) * 0.5f, 20f, maxX);
+        float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
         Position = new Vector2(targetX, targetY);
+
+        _isAdjustingRect = false;
+    }
+
+    private void ApplyCompactModalSize(bool reposition)
+    {
+        if (!IsInsideTree()) return;
+
+        var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        if (vpSize.X <= 0 || vpSize.Y <= 0) vpSize = new Vector2(1920, 1080);
+
+        float modalW = Mathf.Clamp(380f, 320f, vpSize.X - 40f);
+
+        // Detach bottom anchor stretching completely
+        SetAnchorsPreset(LayoutPreset.TopLeft);
+        AnchorRight = 0f;
+        AnchorBottom = 0f;
+        GrowHorizontal = GrowDirection.End;
+        GrowVertical = GrowDirection.End;
+        SizeFlagsVertical = SizeFlags.ShrinkBegin;
+
+        foreach (Node child in GetChildren())
+        {
+            if (child is Control ctrl)
+            {
+                ctrl.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+                ctrl.CustomMinimumSize = new Vector2(ctrl.CustomMinimumSize.X, 0);
+            }
+        }
+
+        CustomMinimumSize = new Vector2(modalW, 0);
+        ResetSize();
+
+        float minH = GetCombinedMinimumSize().Y;
+        float modalH = Mathf.Clamp(minH, 160f, vpSize.Y * 0.85f);
+
+        Size = new Vector2(modalW, modalH);
+        OffsetRight = OffsetLeft + modalW;
+        OffsetBottom = OffsetTop + modalH;
+
+        if (reposition)
+        {
+            float maxX = Mathf.Max(20f, vpSize.X - modalW - 20f);
+            float maxY = Mathf.Max(20f, vpSize.Y - modalH - 20f);
+            float targetX = Mathf.Clamp((vpSize.X - modalW) * 0.5f, 20f, maxX);
+            float targetY = Mathf.Clamp((vpSize.Y - modalH) * 0.35f, 20f, maxY);
+            Position = new Vector2(targetX, targetY);
+        }
+        else
+        {
+            ClampPositionToScreen(Position);
+        }
     }
 
     private void SetupModalForType(AdjustmentType type)
@@ -258,6 +499,9 @@ public partial class ColorAdjustmentModalUI : PanelContainer
         if (_containerHueSaturation != null) _containerHueSaturation.Visible = (type == AdjustmentType.HueSaturation);
         if (_containerColorBalance != null) _containerColorBalance.Visible = (type == AdjustmentType.ColorBalance);
         if (_containerExposure != null) _containerExposure.Visible = (type == AdjustmentType.Exposure);
+        if (_containerLevels != null) _containerLevels.Visible = (type == AdjustmentType.Levels);
+        if (_containerPosterize != null) _containerPosterize.Visible = (type == AdjustmentType.Posterize);
+        if (_containerThreshold != null) _containerThreshold.Visible = (type == AdjustmentType.Threshold);
 
         string titleText = "Adjustments";
         switch (type)
@@ -290,6 +534,25 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 if (_sliderOffset != null) _sliderOffset.Value = 0;
                 if (_sliderGamma != null) _sliderGamma.Value = 1.0;
                 break;
+
+            case AdjustmentType.Levels:
+                titleText = "Levels";
+                if (_sliderInBlack != null) _sliderInBlack.Value = 0;
+                if (_sliderLevelsGamma != null) _sliderLevelsGamma.Value = 1.0;
+                if (_sliderInWhite != null) _sliderInWhite.Value = 255;
+                if (_sliderOutBlack != null) _sliderOutBlack.Value = 0;
+                if (_sliderOutWhite != null) _sliderOutWhite.Value = 255;
+                break;
+
+            case AdjustmentType.Posterize:
+                titleText = "Posterize";
+                if (_sliderPosterizeLevels != null) _sliderPosterizeLevels.Value = 4;
+                break;
+
+            case AdjustmentType.Threshold:
+                titleText = "Threshold";
+                if (_sliderThreshold != null) _sliderThreshold.Value = 128;
+                break;
         }
 
         if (_lblTitle != null)
@@ -297,10 +560,11 @@ public partial class ColorAdjustmentModalUI : PanelContainer
 
         if (_lblSubtitle != null)
         {
-            string layerName = _activeLayer != null ? _activeLayer.Name : "Active Layer";
+            string layerName = _layerManager != null && _layerManager.IsBaseTextureActive ? "BASE TEXTURE" : (_activeLayer != null ? _activeLayer.Name : "Active Layer");
+            string modeHint = _isSamplingUnderlyingComposite ? " [Auto-Sampling Visible Underneath]" : "";
             _lblSubtitle.Text = _hasSelection
-                ? $"Target: {layerName}  •  [Selection Mask Active]"
-                : $"Target: {layerName}";
+                ? $"Target: {layerName}{modeHint}  •  [Selection Mask Active]"
+                : $"Target: {layerName}{modeHint}";
         }
 
         _suppressSliderEvents = false;
@@ -335,6 +599,22 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 if (_sliderOffset != null) _sliderOffset.Value = 0;
                 if (_sliderGamma != null) _sliderGamma.Value = 1.0;
                 break;
+
+            case AdjustmentType.Levels:
+                if (_sliderInBlack != null) _sliderInBlack.Value = 0;
+                if (_sliderLevelsGamma != null) _sliderLevelsGamma.Value = 1.0;
+                if (_sliderInWhite != null) _sliderInWhite.Value = 255;
+                if (_sliderOutBlack != null) _sliderOutBlack.Value = 0;
+                if (_sliderOutWhite != null) _sliderOutWhite.Value = 255;
+                break;
+
+            case AdjustmentType.Posterize:
+                if (_sliderPosterizeLevels != null) _sliderPosterizeLevels.Value = 4;
+                break;
+
+            case AdjustmentType.Threshold:
+                if (_sliderThreshold != null) _sliderThreshold.Value = 128;
+                break;
         }
         _suppressSliderEvents = false;
         UpdateValueLabels();
@@ -368,6 +648,23 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             _lblOffsetVal.Text = $"{_sliderOffset.Value:+0.000;-0.000;0.000}";
         if (_lblGammaVal != null && _sliderGamma != null)
             _lblGammaVal.Text = $"{_sliderGamma.Value:0.00}";
+
+        if (_lblInBlackVal != null && _sliderInBlack != null)
+            _lblInBlackVal.Text = $"{Mathf.RoundToInt(_sliderInBlack.Value)}";
+        if (_lblLevelsGammaVal != null && _sliderLevelsGamma != null)
+            _lblLevelsGammaVal.Text = $"{_sliderLevelsGamma.Value:0.00}";
+        if (_lblInWhiteVal != null && _sliderInWhite != null)
+            _lblInWhiteVal.Text = $"{Mathf.RoundToInt(_sliderInWhite.Value)}";
+        if (_lblOutBlackVal != null && _sliderOutBlack != null)
+            _lblOutBlackVal.Text = $"{Mathf.RoundToInt(_sliderOutBlack.Value)}";
+        if (_lblOutWhiteVal != null && _sliderOutWhite != null)
+            _lblOutWhiteVal.Text = $"{Mathf.RoundToInt(_sliderOutWhite.Value)}";
+
+        if (_lblPosterizeLevelsVal != null && _sliderPosterizeLevels != null)
+            _lblPosterizeLevelsVal.Text = $"{Mathf.RoundToInt(_sliderPosterizeLevels.Value)}";
+
+        if (_lblThresholdVal != null && _sliderThreshold != null)
+            _lblThresholdVal.Text = $"{Mathf.RoundToInt(_sliderThreshold.Value)}";
     }
 
     private ColorAdjustmentParams GetCurrentParams()
@@ -400,13 +697,40 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 p.Offset = _sliderOffset != null ? (float)_sliderOffset.Value : 0f;
                 p.Gamma = _sliderGamma != null ? (float)_sliderGamma.Value : 1.0f;
                 break;
+
+            case AdjustmentType.Levels:
+                p.InBlack = _sliderInBlack != null ? (float)_sliderInBlack.Value : 0f;
+                p.LevelsGamma = _sliderLevelsGamma != null ? (float)_sliderLevelsGamma.Value : 1.0f;
+                p.InWhite = _sliderInWhite != null ? (float)_sliderInWhite.Value : 255f;
+                p.OutBlack = _sliderOutBlack != null ? (float)_sliderOutBlack.Value : 0f;
+                p.OutWhite = _sliderOutWhite != null ? (float)_sliderOutWhite.Value : 255f;
+                break;
+
+            case AdjustmentType.Posterize:
+                p.PosterizeLevels = _sliderPosterizeLevels != null ? Mathf.RoundToInt(_sliderPosterizeLevels.Value) : 4;
+                break;
+
+            case AdjustmentType.Threshold:
+                p.ThresholdValue = _sliderThreshold != null ? (float)_sliderThreshold.Value : 128f;
+                break;
         }
 
         return p;
     }
 
     private void OnSliderOrOptionChanged()
-    {
+    {   
+
+        // Si el usuario cambió de material o de capa mientras el modal estaba abierto, cancelar inmediatamente antes de corromper la GPU
+        if (_layerManager.ActiveLayer != _activeLayer ||
+            !string.Equals(_layerManager.ActiveMaterialKey ?? "", _openedMaterialKey, StringComparison.Ordinal) ||
+            _layerManager.CanvasSize.X != _openedW ||
+            _layerManager.CanvasSize.Y != _openedH)
+        {
+            CancelAndClose();
+            return;
+        }
+
         if (_suppressSliderEvents || _backupBuffer == null || _activeLayer == null || _layerManager == null) return;
         UpdateValueLabels();
 
@@ -425,13 +749,21 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 p,
                 _hasSelection ? _selectionMaskBuffer : null,
                 _maskW,
-                _maskH
+                _maskH,
+                _isSamplingUnderlyingComposite
             );
         }
         else
         {
-            // Restore pristine backup buffer when Preview is unchecked
-            Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            if (_isSamplingUnderlyingComposite)
+            {
+                Array.Clear(_activeLayer.GpuData, 0, _activeLayer.GpuData.Length);
+            }
+            else
+            {
+                // Restore pristine backup buffer when Preview is unchecked
+                Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            }
         }
 
         _layerManager.SyncActiveLayerGpuTexture();
@@ -446,8 +778,15 @@ public partial class ColorAdjustmentModalUI : PanelContainer
     {
         if (_backupBuffer != null && _activeLayer != null && _activeLayer.GpuData != null && _layerManager != null)
         {
-            // Restore pristine backup buffer back to CPU and GPU
-            Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            if (_isSamplingUnderlyingComposite)
+            {
+                Array.Clear(_activeLayer.GpuData, 0, _activeLayer.GpuData.Length);
+            }
+            else
+            {
+                // Restore pristine backup buffer back to CPU and GPU
+                Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            }
             _layerManager.SyncActiveLayerGpuTexture();
             _layerManager.RecompositeGpuLayers();
             _layerManager.UpdateStandaloneComposite();
@@ -473,7 +812,14 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;
 
             // 1. Temporarily restore pristine backup into active layer so RecordGpuUndoSnapshot captures pristine state!
-            Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            if (_isSamplingUnderlyingComposite)
+            {
+                Array.Clear(_activeLayer.GpuData, 0, _activeLayer.GpuData.Length);
+            }
+            else
+            {
+                Buffer.BlockCopy(_backupBuffer, 0, _activeLayer.GpuData, 0, _backupBuffer.Length);
+            }
             _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
 
             // 2. Compute final adjusted pixels from _backupBuffer into _activeLayer.GpuData
@@ -486,7 +832,8 @@ public partial class ColorAdjustmentModalUI : PanelContainer
                 p,
                 _hasSelection ? _selectionMaskBuffer : null,
                 _maskW,
-                _maskH
+                _maskH,
+                _isSamplingUnderlyingComposite
             );
 
             // 3. Sync modified CPU buffer to GPU layer texture & composite

@@ -28,6 +28,10 @@ public partial class SkeletonGizmoManager : Node3D
     [ExportCategory("Debug Wireframe")]
     [Export] public Material XRayMaterial { get; set; }
 
+    public static event Action<int, Vector3, Quaternion> OnBonePoseChanged;
+    public static event Action<int, Vector3, Quaternion> OnBoneTransformEnded;
+    public static event Action<int> OnBoneSelected;
+
     private BoneLayerManager _boneLayerManager;
     public BoneLayerManager LayerManager => _boneLayerManager;
 
@@ -40,6 +44,8 @@ public partial class SkeletonGizmoManager : Node3D
     private bool _isGizmoDragging = false;
     private bool _areDotsGloballyEnabled = true;
     private bool _isGizmoEnabled = true;
+
+    public int SelectedBoneIdx => _selectedBoneIdx;
 
     public bool IsGizmoEnabled
     {
@@ -182,6 +188,12 @@ public partial class SkeletonGizmoManager : Node3D
         _gizmo.TransformEnd += (mode) => {
             _isGizmoDragging = false;
             IKManager?.ResumeIKForBone(_selectedBoneIdx);
+            if (_selectedBoneIdx != -1 && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
+            {
+                Vector3 finalPos = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+                Quaternion finalRot = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+                OnBoneTransformEnded?.Invoke(_selectedBoneIdx, finalPos, finalRot);
+            }
         };
     }
 
@@ -200,6 +212,22 @@ public partial class SkeletonGizmoManager : Node3D
         if (!_isGizmoEnabled) return;
         if (@event is InputEventMouseButton mouseBtn && mouseBtn.Pressed && mouseBtn.ButtonIndex == MouseButton.Left)
         {
+            // Do not raycast or deselect bones if clicking over UI controls
+            var hovered = GetTree()?.Root?.GuiGetHoveredControl();
+            if (hovered != null)
+            {
+                bool isMainViewport = (hovered.Name == "SubViewportContainer" && hovered.GetParent()?.Name == "ViewportArea");
+                if (!isMainViewport) return;
+            }
+
+            // Also ignore if clicking anywhere within the AnimationStudioDock bounds
+            var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as Control;
+            if (animDock != null && animDock.Visible && animDock.IsVisibleInTree())
+            {
+                Vector2 mousePos = GetViewport()?.GetMousePosition() ?? Vector2.Zero;
+                if (animDock.GetGlobalRect().HasPoint(mousePos)) return;
+            }
+
             // If user clicked in empty space, deselect current bone
             var camera = GetViewport()?.GetCamera3D();
             if (camera != null)
@@ -223,6 +251,50 @@ public partial class SkeletonGizmoManager : Node3D
                 }
             }
         }
+        else if (@event is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            if (_selectedBoneIdx != -1 && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
+            {
+                if (key.Keycode == Key.G && key.AltPressed)
+                {
+                    TargetSkeleton.SetBonePosePosition(_selectedBoneIdx, TargetSkeleton.GetBoneRest(_selectedBoneIdx).Origin);
+                    ProceduralClothSolver.Conform(TargetSkeleton);
+                    SpawnOrMoveGizmo();
+                    UIManager?.UpdateSlidersFromBone();
+                    Vector3 p = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+                    Quaternion r = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+                    OnBonePoseChanged?.Invoke(_selectedBoneIdx, p, r);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (key.Keycode == Key.R && key.AltPressed)
+                {
+                    TargetSkeleton.SetBonePoseRotation(_selectedBoneIdx, TargetSkeleton.GetBoneRest(_selectedBoneIdx).Basis.GetRotationQuaternion());
+                    ProceduralClothSolver.Conform(TargetSkeleton);
+                    SpawnOrMoveGizmo();
+                    UIManager?.UpdateSlidersFromBone();
+                    Vector3 p = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+                    Quaternion r = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+                    OnBonePoseChanged?.Invoke(_selectedBoneIdx, p, r);
+                    GetViewport().SetInputAsHandled();
+                }
+                else if (key.Keycode == Key.G && !key.CtrlPressed && !key.AltPressed)
+                {
+                    if (_gizmo != null)
+                    {
+                        _gizmo.Mode = Gizmo3D.ToolMode.Move;
+                        GetViewport().SetInputAsHandled();
+                    }
+                }
+                else if (key.Keycode == Key.R && !key.CtrlPressed && !key.AltPressed)
+                {
+                    if (_gizmo != null)
+                    {
+                        _gizmo.Mode = Gizmo3D.ToolMode.Rotate;
+                        GetViewport().SetInputAsHandled();
+                    }
+                }
+            }
+        }
     }
 
     public void SelectBone(int boneIdx)
@@ -235,13 +307,14 @@ public partial class SkeletonGizmoManager : Node3D
         }
 
         SpawnOrMoveGizmo();
+        OnBoneSelected?.Invoke(boneIdx);
     }
 
     private void SpawnOrMoveGizmo()
     {
         if (_gizmo == null || _dummyTarget == null) return;
 
-        if (_selectedBoneIdx == -1 || TargetSkeleton == null)
+        if (_selectedBoneIdx == -1 || !GodotObject.IsInstanceValid(TargetSkeleton) || TargetSkeleton.IsQueuedForDeletion())
         {
             _gizmo.ClearSelection();
             _gizmo.Visible = false;
@@ -286,7 +359,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void HandleGizmoTransformChanged(Transform3D globalTransform)
     {
-        if (_selectedBoneIdx == -1 || TargetSkeleton == null) return;
+        if (_selectedBoneIdx == -1 || !GodotObject.IsInstanceValid(TargetSkeleton) || TargetSkeleton.IsQueuedForDeletion()) return;
 
         // Convert Gizmo's GlobalTransform to the Bone's Local Pose (relative to parent)
         Transform3D skelGlobal = TargetSkeleton.GlobalTransform;
@@ -311,6 +384,10 @@ public partial class SkeletonGizmoManager : Node3D
         }
 
         ProceduralClothSolver.Conform(TargetSkeleton);
+
+        Vector3 finalPos = TargetSkeleton.GetBonePosePosition(_selectedBoneIdx);
+        Quaternion finalRot = TargetSkeleton.GetBonePoseRotation(_selectedBoneIdx);
+        OnBonePoseChanged?.Invoke(_selectedBoneIdx, finalPos, finalRot);
 
         if (UIManager != null)
         {
@@ -362,7 +439,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     public override void _Process(double delta)
     {
-        if (GodotObject.IsInstanceValid(_skeletonMeshInstance) && _skeletonMeshInstance.Visible && GodotObject.IsInstanceValid(TargetSkeleton))
+        if (GodotObject.IsInstanceValid(_skeletonMeshInstance) && _skeletonMeshInstance.Visible && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
         {
             DrawSkeleton();
         }
@@ -380,7 +457,7 @@ public partial class SkeletonGizmoManager : Node3D
 
     private void DrawSkeleton()
     {
-        if (!GodotObject.IsInstanceValid(TargetSkeleton) || !GodotObject.IsInstanceValid(_immediateMesh)) return;
+        if (!GodotObject.IsInstanceValid(TargetSkeleton) || TargetSkeleton.IsQueuedForDeletion() || !GodotObject.IsInstanceValid(_immediateMesh)) return;
 
         _immediateMesh.ClearSurfaces();
         _immediateMesh.SurfaceBegin(Mesh.PrimitiveType.Lines);

@@ -33,6 +33,7 @@ public partial class CameraControlPadUI : PanelContainer
     private Button _btnDown;
     private Button _btnDownRight;
     private Button _btnModeToggle;
+    private Button _btnBlockWasd;
 
     public override void _Ready()
     {
@@ -93,7 +94,6 @@ public partial class CameraControlPadUI : PanelContainer
 
         vbox.AddChild(grid);
 
-        // Compact Mode Toggle Button below grid
         _btnModeToggle = new Button
         {
             Text = "Pan",
@@ -104,6 +104,16 @@ public partial class CameraControlPadUI : PanelContainer
         _btnModeToggle.AddThemeFontSizeOverride("font_size", 9);
         _btnModeToggle.Pressed += ToggleMode;
         vbox.AddChild(_btnModeToggle);
+
+        // WASD Keyboard Movement Block Toggle Button
+        _btnBlockWasd = new Button
+        {
+            CustomMinimumSize = new Vector2(76, 18),
+            SizeFlagsHorizontal = Control.SizeFlags.Fill
+        };
+        _btnBlockWasd.AddThemeFontSizeOverride("font_size", 9);
+        _btnBlockWasd.Pressed += ToggleWasdBlock;
+        vbox.AddChild(_btnBlockWasd);
 
         // Wire Click Handlers
         _btnUpLeft.Pressed += () => OnDirectionClicked(-1, 1);
@@ -120,6 +130,7 @@ public partial class CameraControlPadUI : PanelContainer
         _btnCenter.Pressed += RecenterOnModel;
 
         UpdateModeButtonAppearance();
+        UpdateWasdButtonAppearance();
     }
 
     private Button CreatePadButton(string icon, string tooltip)
@@ -263,6 +274,48 @@ public partial class CameraControlPadUI : PanelContainer
         _btnModeToggle.AddThemeStyleboxOverride("hover", hover);
         _btnModeToggle.AddThemeColorOverride("font_color", isPan ? PlaygroundThemeHelper.Parchment : PlaygroundThemeHelper.SageGreen);
         _btnModeToggle.AddThemeFontSizeOverride("font_size", 11);
+    }
+
+    public void ToggleWasdBlock()
+    {
+        OrbitCamera.IsKeyboardMovementBlocked = !OrbitCamera.IsKeyboardMovementBlocked;
+        UpdateWasdButtonAppearance();
+    }
+
+    private void UpdateWasdButtonAppearance()
+    {
+        if (_btnBlockWasd == null) return;
+        bool blocked = OrbitCamera.IsKeyboardMovementBlocked;
+        _btnBlockWasd.Text = blocked ? "WASD: OFF" : "WASD: ON";
+
+        var style = new StyleBoxFlat
+        {
+            BgColor = blocked ? new Color(0.28f, 0.12f, 0.12f, 0.9f) : new Color(0.1843f, 0.2667f, 0.2588f, 0.9f),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderColor = blocked ? new Color(0.85f, 0.35f, 0.35f, 0.8f) : PlaygroundThemeHelper.SageGreen,
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomRight = 4,
+            CornerRadiusBottomLeft = 4,
+            ContentMarginLeft = 6,
+            ContentMarginRight = 6,
+            ContentMarginTop = 4,
+            ContentMarginBottom = 4
+        };
+
+        var hover = (StyleBoxFlat)style.Duplicate();
+        hover.BorderColor = PlaygroundThemeHelper.Parchment;
+
+        _btnBlockWasd.AddThemeStyleboxOverride("normal", style);
+        _btnBlockWasd.AddThemeStyleboxOverride("hover", hover);
+        _btnBlockWasd.AddThemeStyleboxOverride("pressed", style);
+        _btnBlockWasd.AddThemeColorOverride("font_color", blocked ? new Color(1.0f, 0.55f, 0.55f) : new Color(0.65f, 0.95f, 0.70f));
+        _btnBlockWasd.TooltipText = blocked
+            ? "WASD Camera Movement: BLOCKED (Click to unblock). WASD keys will not move the 3D camera."
+            : "WASD Camera Movement: ACTIVE (Click to block). Viewport camera can be panned with WASD.";
     }
 
     private void OnDirectionClicked(int dirX, int dirY)

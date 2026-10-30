@@ -1,0 +1,315 @@
+[gd_scene format=3 uid="uid://bqthcnnf08hel"]
+
+[ext_resource type="Theme" uid="uid://c8modal7theme" path="res://assets/themes/ModalDialogTheme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://ui/scripts/modals/GradientMapModalUI.cs" id="2_script"]
+[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="3_colus"]
+[ext_resource type="Texture2D" uid="uid://cae0vsk8y76jh" path="res://assets/at-icons/folder_open.svg" id="4_icon_folder"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal_root"]
+content_margin_left = 18.0
+content_margin_top = 14.0
+content_margin_right = 18.0
+content_margin_bottom = 16.0
+bg_color = Color(0.09, 0.1, 0.13, 0.98)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.68, 0.32, 0.8)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.65)
+shadow_size = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_normal"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.25, 0.2, 0.11, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.85, 0.68, 0.32, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_hover"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.38, 0.3, 0.15, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 0.85, 0.45, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_apply_pressed"]
+content_margin_left = 16.0
+content_margin_top = 6.0
+content_margin_right = 16.0
+content_margin_bottom = 6.0
+bg_color = Color(0.18, 0.14, 0.08, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.7, 0.55, 0.25, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[node name="GradientMapModal" type="PanelContainer" node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_gradientRampPreview", "_stopMarkersTrack", "_colorPickerStop", "_spinStopPosition", "_btnDeleteStop", "_chkReverse", "_chkDither", "_optBlendMode", "_sliderOpacity", "_lblOpacityVal", "_listBuiltinPresets", "_listImportedPresets", "_btnImportGrd", "_chkPreview", "_btnReset", "_btnCancel", "_btnApply")]
+clip_contents = true
+custom_minimum_size = Vector2(460, 0)
+offset_right = 460.0
+offset_bottom = 420.0
+size_flags_horizontal = 0
+size_flags_vertical = 0
+theme = ExtResource("1_theme")
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
+script = ExtResource("2_script")
+_headerContainer = NodePath("VBoxContainer/HeaderBar")
+_lblTitle = NodePath("VBoxContainer/HeaderBar/VBoxTitle/Title")
+_lblSubtitle = NodePath("VBoxContainer/HeaderBar/VBoxTitle/Subtitle")
+_btnClose = NodePath("VBoxContainer/HeaderBar/BtnClose")
+_gradientRampPreview = NodePath("VBoxContainer/RampSection/RampBorder/RampPreview")
+_stopMarkersTrack = NodePath("VBoxContainer/RampSection/MarkersTrack")
+_colorPickerStop = NodePath("VBoxContainer/StopControls/StopColorPicker")
+_spinStopPosition = NodePath("VBoxContainer/StopControls/StopPositionSpin")
+_btnDeleteStop = NodePath("VBoxContainer/StopControls/BtnDeleteStop")
+_chkReverse = NodePath("VBoxContainer/OptionsRow/ChkReverse")
+_chkDither = NodePath("VBoxContainer/OptionsRow/ChkDither")
+_optBlendMode = NodePath("VBoxContainer/BlendRow/OptBlendMode")
+_sliderOpacity = NodePath("VBoxContainer/BlendRow/OpacitySlider")
+_lblOpacityVal = NodePath("VBoxContainer/BlendRow/OpacityVal")
+_listBuiltinPresets = NodePath("VBoxContainer/PresetsTabs/Built-in Presets/ListBuiltin")
+_listImportedPresets = NodePath("VBoxContainer/PresetsTabs/Imported (.grd)/VBox/ListImported")
+_btnImportGrd = NodePath("VBoxContainer/PresetsTabs/Imported (.grd)/VBox/BtnImportGrd")
+_chkPreview = NodePath("VBoxContainer/FooterBar/ChkPreview")
+_btnReset = NodePath("VBoxContainer/FooterBar/BtnReset")
+_btnCancel = NodePath("VBoxContainer/FooterBar/BtnCancel")
+_btnApply = NodePath("VBoxContainer/FooterBar/BtnApply")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_constants/separation = 8
+
+[node name="HeaderBar" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="VBoxTitle" type="VBoxContainer" parent="VBoxContainer/HeaderBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="Title" type="Label" parent="VBoxContainer/HeaderBar/VBoxTitle"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.85, 0.55, 1)
+theme_override_fonts/font = ExtResource("3_colus")
+theme_override_font_sizes/font_size = 16
+text = "GRADIENT MAP"
+
+[node name="Subtitle" type="Label" parent="VBoxContainer/HeaderBar/VBoxTitle"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.68, 0.75, 1)
+theme_override_font_sizes/font_size = 11
+text = "Remap image luminance to gradient stops"
+
+[node name="BtnClose" type="Button" parent="VBoxContainer/HeaderBar"]
+custom_minimum_size = Vector2(26, 26)
+layout_mode = 2
+size_flags_vertical = 4
+text = "✕"
+
+[node name="HSeparator1" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="RampSection" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="RampBorder" type="PanelContainer" parent="VBoxContainer/RampSection"]
+layout_mode = 2
+
+[node name="RampPreview" type="TextureRect" parent="VBoxContainer/RampSection/RampBorder"]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 6
+
+[node name="MarkersTrack" type="Control" parent="VBoxContainer/RampSection"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+
+[node name="StopControls" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblStopColor" type="Label" parent="VBoxContainer/StopControls"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Stop Color:"
+
+[node name="StopColorPicker" type="ColorPickerButton" parent="VBoxContainer/StopControls"]
+custom_minimum_size = Vector2(36, 24)
+layout_mode = 2
+color = Color(1, 1, 1, 1)
+
+[node name="LblStopPos" type="Label" parent="VBoxContainer/StopControls"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Pos (%):"
+
+[node name="StopPositionSpin" type="SpinBox" parent="VBoxContainer/StopControls"]
+custom_minimum_size = Vector2(65, 0)
+layout_mode = 2
+rounded = true
+
+[node name="BtnDeleteStop" type="Button" parent="VBoxContainer/StopControls"]
+layout_mode = 2
+size_flags_horizontal = 10
+theme_override_font_sizes/font_size = 11
+text = "Delete Stop"
+
+[node name="HSeparator2" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="OptionsRow" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="ChkReverse" type="CheckBox" parent="VBoxContainer/OptionsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Reverse"
+
+[node name="ChkDither" type="CheckBox" parent="VBoxContainer/OptionsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+button_pressed = true
+text = "Dither"
+
+[node name="BlendRow" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LblBlend" type="Label" parent="VBoxContainer/BlendRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Blend:"
+
+[node name="OptBlendMode" type="OptionButton" parent="VBoxContainer/BlendRow"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+
+[node name="LblOpacity" type="Label" parent="VBoxContainer/BlendRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Opacity:"
+
+[node name="OpacitySlider" type="HSlider" parent="VBoxContainer/BlendRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+value = 100.0
+
+[node name="OpacityVal" type="Label" parent="VBoxContainer/BlendRow"]
+custom_minimum_size = Vector2(36, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "100%"
+horizontal_alignment = 2
+
+[node name="PresetsTabs" type="TabContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 11
+current_tab = 0
+
+[node name="Built-in Presets" type="VBoxContainer" parent="VBoxContainer/PresetsTabs"]
+layout_mode = 2
+size_flags_vertical = 0
+metadata/_tab_index = 0
+
+[node name="ListBuiltin" type="ItemList" parent="VBoxContainer/PresetsTabs/Built-in Presets"]
+custom_minimum_size = Vector2(0, 135)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 13
+max_columns = 2
+same_column_width = true
+fixed_icon_size = Vector2i(72, 20)
+
+[node name="Imported (.grd)" type="VBoxContainer" parent="VBoxContainer/PresetsTabs"]
+visible = false
+layout_mode = 2
+size_flags_vertical = 0
+metadata/_tab_index = 1
+
+[node name="VBox" type="VBoxContainer" parent="VBoxContainer/PresetsTabs/Imported (.grd)"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_constants/separation = 6
+
+[node name="ListImported" type="ItemList" parent="VBoxContainer/PresetsTabs/Imported (.grd)/VBox"]
+custom_minimum_size = Vector2(0, 110)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 13
+max_columns = 2
+same_column_width = true
+fixed_icon_size = Vector2i(72, 20)
+
+[node name="BtnImportGrd" type="Button" parent="VBoxContainer/PresetsTabs/Imported (.grd)/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = " Import Photoshop .GRD..."
+icon = ExtResource("4_icon_folder")
+
+[node name="HSeparator3" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="FooterBar" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ChkPreview" type="CheckBox" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+button_pressed = true
+text = "Preview"
+
+[node name="BtnReset" type="Button" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+size_flags_horizontal = 10
+theme_override_font_sizes/font_size = 11
+text = "Reset"
+
+[node name="BtnCancel" type="Button" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Cancel"
+
+[node name="BtnApply" type="Button" parent="VBoxContainer/FooterBar"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_colus")
+theme_override_font_sizes/font_size = 12
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_apply_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_apply_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_apply_pressed")
+text = "Apply"

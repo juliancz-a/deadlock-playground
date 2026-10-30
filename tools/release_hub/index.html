@@ -301,6 +301,172 @@
       margin-top: 2px;
     }
 
+    /* Release Type Segmented Toggle */
+    .release-type-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .radio-chip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+
+    .radio-chip:hover {
+      background: var(--bg-surface-elevated);
+      border-color: var(--border-highlight);
+    }
+
+    .radio-chip.selected {
+      border-color: var(--accent-gold);
+      background: rgba(245, 158, 11, 0.08);
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+    }
+
+    .radio-chip input[type="radio"] {
+      accent-color: var(--accent-gold);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    .chip-icon {
+      font-size: 1.25rem;
+    }
+
+    .chip-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .chip-sub {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    /* Tree Directory View */
+    .tree-container {
+      background: #080c0a;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 8px;
+      max-height: 250px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+
+    .tree-root {
+      margin-bottom: 8px;
+    }
+
+    .tree-root:last-child {
+      margin-bottom: 0;
+    }
+
+    .tree-root-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent-mint);
+      font-weight: 700;
+      font-size: 0.78rem;
+      padding: 5px 8px;
+      background: rgba(114, 148, 127, 0.12);
+      border-radius: var(--radius-sm);
+      user-select: none;
+    }
+
+    .tree-node {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      margin-left: 14px;
+      margin-top: 3px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: all 0.12s ease;
+    }
+
+    .tree-node:hover {
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      border-color: var(--border-subtle);
+    }
+
+    .tree-node.selected {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: var(--accent-gold);
+      color: var(--accent-brass);
+    }
+
+    .tree-node-subgroup {
+      margin-left: 14px;
+      margin-top: 3px;
+    }
+
+    .tree-subgroup-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      color: var(--text-muted);
+      font-size: 0.76rem;
+      font-weight: 600;
+    }
+
+    .tree-node-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tree-node-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .tree-badge {
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-dim);
+    }
+
+    .tree-badge.size {
+      color: var(--accent-gold);
+    }
+
+    .tree-badge.build-folder {
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.4);
+      color: #60a5fa;
+    }
+
     /* Dry Run Banner */
     .dryrun-switch {
       background: rgba(245, 158, 11, 0.08);
@@ -329,7 +495,7 @@
       width: 100%;
       background: linear-gradient(135deg, var(--accent-gold), #b45309);
       color: #0c100e;
-      font-size: 1rem;
+      font-size: 1.05rem;
       font-weight: 800;
       letter-spacing: 0.03em;
       border: none;
@@ -340,13 +506,13 @@
       align-items: center;
       justify-content: center;
       gap: 10px;
-      box-shadow: 0 4px 18px rgba(245, 158, 11, 0.3);
+      box-shadow: 0 4px 18px rgba(245, 158, 11, 0.35);
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .btn-launch:hover:not(:disabled) {
       transform: translateY(-2px);
-      box-shadow: 0 6px 24px rgba(245, 158, 11, 0.45);
+      box-shadow: 0 6px 24px rgba(245, 158, 11, 0.5);
     }
 
     .btn-launch:active:not(:disabled) {
@@ -634,12 +800,34 @@
         <div class="form-row">
           <div class="form-group">
             <label>Release Version</label>
-            <input type="text" id="input-version" placeholder="e.g. 1.1.1 or 1.2.0">
+            <input type="text" id="input-version" placeholder="e.g. 1.1.1 or 1.2.0" oninput="onVersionInput(this.value)">
             <div class="input-hint">Tags will be prefixed automatically with 'v'</div>
           </div>
           <div class="form-group">
             <label>Release Date</label>
             <input type="text" id="input-date" placeholder="e.g. October 20, 2026">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Release Publication Type</label>
+          <div class="release-type-toggle">
+            <label class="radio-chip selected" id="chip-latest" onclick="selectReleaseType('latest')">
+              <input type="radio" name="rel-type" id="radio-type-latest" value="latest" checked>
+              <span class="chip-icon">🌟</span>
+              <div>
+                <div class="chip-title">Official Latest Release</div>
+                <div class="chip-sub">Marked as Latest on GitHub & website</div>
+              </div>
+            </label>
+            <label class="radio-chip" id="chip-prerelease" onclick="selectReleaseType('prerelease')">
+              <input type="radio" name="rel-type" id="radio-type-prerelease" value="prerelease">
+              <span class="chip-icon">🧪</span>
+              <div>
+                <div class="chip-title">Pre-Release (Beta / Alpha)</div>
+                <div class="chip-sub">Tagged as pre-release on GitHub</div>
+              </div>
+            </label>
           </div>
         </div>
 
@@ -666,20 +854,22 @@
       <!-- Binary Archive / Build Artifact -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">📁 Release Binary Archive</div>
-          <div class="card-subtitle">ZIP, 7z or Build Folder</div>
+          <div class="card-title">📁 Release Binary Archive & Build Directory</div>
+          <button type="button" class="pill-btn" onclick="refreshDetectedReleases()" id="btn-refresh-releases" title="Re-scan releases directories">
+            <span id="refresh-icon">🔄</span> Refresh Tree
+          </button>
         </div>
 
         <div class="form-group">
-          <label>Archive / Build Path</label>
+          <label>Selected Archive / Build Path</label>
           <input type="text" id="input-archive-path" placeholder="Path to .7z, .zip or folder">
-          <div class="input-hint">If you select a folder, it will be automatically zipped into a release archive.</div>
+          <div class="input-hint">Click any file or folder in the tree directory below to select it automatically.</div>
         </div>
 
         <div id="detected-releases-section">
-          <label style="font-size: 0.72rem; margin-top: 8px;">Auto-Detected Builds on Drive:</label>
-          <div class="pills-container" id="detected-pills">
-            <span style="font-size: 0.75rem; color: var(--text-dim);">Scanning for builds...</span>
+          <label style="font-size: 0.72rem; margin-top: 8px;">Build Directory Tree:</label>
+          <div class="tree-container" id="tree-container">
+            <span style="font-size: 0.75rem; color: var(--text-dim); padding: 8px; display: block;">Scanning directories for builds...</span>
           </div>
         </div>
       </div>
@@ -761,11 +951,6 @@
         </div>
       </div>
 
-      <!-- Big Action CTA -->
-      <button id="btn-launch" class="btn-launch" onclick="launchPipeline()">
-        <span>🚀 Launch Release Pipeline</span>
-      </button>
-
     </div>
 
     <!-- Right Column: Live Stepper, Terminal & Assistant -->
@@ -837,6 +1022,11 @@
             <span class="step-status-badge badge-pending">Pending</span>
           </div>
         </div>
+
+        <!-- Launch Button moved right below the progress bullet points -->
+        <button id="btn-launch" class="btn-launch" onclick="launchPipeline()" style="margin-top: 18px;">
+          <span>🚀 Launch Release Pipeline</span>
+        </button>
       </div>
 
       <!-- Live Terminal Log -->
@@ -891,6 +1081,31 @@
   <script>
     let infoData = null;
     let sseSource = null;
+    let pollInterval = null;
+    let userExplicitlyChoseReleaseType = false;
+
+    // Release publication type toggle (Latest vs Pre-release)
+    function selectReleaseType(type) {
+      userExplicitlyChoseReleaseType = true;
+      const isLatest = (type === 'latest');
+      document.getElementById('radio-type-latest').checked = isLatest;
+      document.getElementById('radio-type-prerelease').checked = !isLatest;
+      
+      document.getElementById('chip-latest').classList.toggle('selected', isLatest);
+      document.getElementById('chip-prerelease').classList.toggle('selected', !isLatest);
+    }
+
+    function onVersionInput(val) {
+      if (!userExplicitlyChoseReleaseType && val) {
+        const lower = val.toLowerCase();
+        if (lower.includes('beta') || lower.includes('alpha') || lower.includes('rc')) {
+          selectReleaseType('prerelease');
+        } else {
+          selectReleaseType('latest');
+        }
+        userExplicitlyChoseReleaseType = false;
+      }
+    }
 
     // Load initial info
     async function loadInfo() {
@@ -912,28 +1127,8 @@
           tokenBadge.style.color = 'var(--accent-danger)';
         }
 
-        // Render detected releases
-        const pillsContainer = document.getElementById('detected-pills');
-        pillsContainer.innerHTML = '';
-        if (infoData.detected_releases && infoData.detected_releases.length > 0) {
-          infoData.detected_releases.forEach(rel => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'pill-btn';
-            btn.innerText = `${rel.is_folder ? '📁' : '📦'} ${rel.name} (${rel.size_mb > 0 ? rel.size_mb + 'MB' : 'folder'})`;
-            btn.onclick = () => {
-              document.getElementById('input-archive-path').value = rel.path;
-              // Suggest version from name
-              const match = rel.name.match(/\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+)?/);
-              if (match && !document.getElementById('input-version').value) {
-                document.getElementById('input-version').value = match[0];
-              }
-            };
-            pillsContainer.appendChild(btn);
-          });
-        } else {
-          pillsContainer.innerHTML = '<span style="font-size: 0.75rem; color: var(--text-dim);">No builds found in releases folder. Specify path manually.</span>';
-        }
+        // Render detected releases in Tree Directory view
+        renderReleaseTree(infoData.detected_tree, infoData.detected_releases);
 
         // Auto-fill today's date
         if (!document.getElementById('input-date').value) {
@@ -957,9 +1152,125 @@
       }
     }
 
-    // Connect SSE for live logs & progress
+    // Render tree directory
+    function renderReleaseTree(roots, flatItems) {
+      const container = document.getElementById('tree-container');
+      container.innerHTML = '';
+
+      if (!roots || roots.length === 0) {
+        if (flatItems && flatItems.length > 0) {
+          // Render flat items if tree roots not grouped
+          flatItems.forEach(item => {
+            const node = createTreeNode(item);
+            container.appendChild(node);
+          });
+          return;
+        }
+        container.innerHTML = '<span style="font-size: 0.75rem; color: var(--text-dim); padding: 8px; display: block;">No build folders or archives found in configured search paths. Specify path manually or click Refresh.</span>';
+        return;
+      }
+
+      roots.forEach(root => {
+        const rootDiv = document.createElement('div');
+        rootDiv.className = 'tree-root';
+
+        const rootHeader = document.createElement('div');
+        rootHeader.className = 'tree-root-header';
+        rootHeader.innerHTML = `<span>📂</span> <span>${root.root_name}</span> <span style="font-size: 0.68rem; color: var(--text-dim); margin-left: auto;">(${root.root_path})</span>`;
+        rootDiv.appendChild(rootHeader);
+
+        if (root.children && root.children.length > 0) {
+          root.children.forEach(child => {
+            if (child.is_group) {
+              const subGroup = document.createElement('div');
+              subGroup.className = 'tree-node-subgroup';
+              const subHeader = document.createElement('div');
+              subHeader.className = 'tree-subgroup-header';
+              subHeader.innerHTML = `<span>📁</span> <span>${child.name}</span>`;
+              subGroup.appendChild(subHeader);
+
+              child.children.forEach(subChild => {
+                subGroup.appendChild(createTreeNode(subChild));
+              });
+              rootDiv.appendChild(subGroup);
+            } else {
+              rootDiv.appendChild(createTreeNode(child));
+            }
+          });
+        }
+
+        container.appendChild(rootDiv);
+      });
+    }
+
+    function createTreeNode(item) {
+      const node = document.createElement('div');
+      node.className = 'tree-node';
+      node.dataset.path = item.path;
+
+      const isCurrentSelected = document.getElementById('input-archive-path').value === item.path;
+      if (isCurrentSelected) {
+        node.classList.add('selected');
+      }
+
+      const icon = item.is_folder ? '📁' : '📦';
+      const sizeStr = item.size_mb > 0 ? `${item.size_mb} MB` : (item.is_build_folder ? 'Build Folder' : '');
+      const badgeClass = item.is_build_folder ? 'tree-badge build-folder' : 'tree-badge size';
+
+      node.innerHTML = `
+        <div class="tree-node-info">
+          <span>${icon}</span>
+          <span style="font-weight: 550;">${item.name}</span>
+        </div>
+        <div class="tree-node-meta">
+          ${sizeStr ? `<span class="${badgeClass}">${sizeStr}</span>` : ''}
+          <span class="tree-badge">${item.modified || ''}</span>
+        </div>
+      `;
+
+      node.onclick = () => {
+        document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('selected'));
+        node.classList.add('selected');
+        document.getElementById('input-archive-path').value = item.path;
+
+        // Auto-detect version if input empty
+        const match = item.name.match(/\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+)?/);
+        if (match && !document.getElementById('input-version').value) {
+          document.getElementById('input-version').value = match[0];
+          onVersionInput(match[0]);
+        }
+      };
+
+      return node;
+    }
+
+    // Refresh detected releases on demand
+    async function refreshDetectedReleases() {
+      const icon = document.getElementById('refresh-icon');
+      if (icon) {
+        icon.style.display = 'inline-block';
+        icon.style.transform = 'rotate(360deg)';
+        icon.style.transition = 'transform 0.5s ease';
+      }
+
+      try {
+        const res = await fetch('/api/refresh-releases');
+        const data = await res.json();
+        renderReleaseTree(data.roots, data.items);
+      } catch (e) {
+        console.error('Failed to refresh releases:', e);
+      } finally {
+        setTimeout(() => {
+          if (icon) icon.style.transform = 'none';
+        }, 500);
+      }
+    }
+
+    // Connect SSE for live logs & progress with auto-reconnect and polling fallback
     function setupEventSource() {
-      if (sseSource) sseSource.close();
+      if (sseSource) {
+        try { sseSource.close(); } catch (e) {}
+      }
       sseSource = new EventSource('/api/logs');
 
       sseSource.onmessage = (event) => {
@@ -972,8 +1283,31 @@
       };
 
       sseSource.onerror = () => {
-        console.log('SSE connection error, retrying...');
+        console.warn('SSE connection disconnected, scheduling reconnect...');
+        setTimeout(setupEventSource, 2500);
       };
+
+      // Also poll initially to immediately populate logs if reconnecting
+      pollLogs();
+      if (!pollInterval) {
+        pollInterval = setInterval(pollLogs, 3000);
+      }
+    }
+
+    async function pollLogs() {
+      try {
+        const res = await fetch('/api/poll-logs');
+        const data = await res.json();
+        if (data.status === 'ok' && Array.isArray(data.logs)) {
+          const term = document.getElementById('terminal-body');
+          const currentCount = term.querySelectorAll('.log-line').length;
+          // If terminal is empty or only has the initial ready placeholder
+          if (currentCount <= 1 && data.logs.length > 0) {
+            term.innerHTML = '';
+            data.logs.forEach(evt => handleServerEvent(evt));
+          }
+        }
+      } catch (e) {}
     }
 
     function handleServerEvent(evt) {
@@ -998,7 +1332,18 @@
           document.getElementById('overall-status').innerText = 'Complete 🎉';
           document.getElementById('overall-status').style.color = 'var(--accent-emerald)';
           document.getElementById('progress-bar-fill').style.width = '100%';
-          loadInfo(); // Refresh latest version
+          for (let i = 1; i <= 6; i++) {
+            const step = document.getElementById(`step-${i}`);
+            if (step && !step.classList.contains('failed')) {
+              step.className = 'step-item completed';
+              const b = step.querySelector('.step-status-badge');
+              if (b) {
+                b.className = 'step-status-badge badge-success';
+                b.innerText = 'Done';
+              }
+            }
+          }
+          loadInfo(); // Refresh latest version & detected releases
         } else {
           document.getElementById('overall-status').innerText = 'Failed ❌';
           document.getElementById('overall-status').style.color = 'var(--accent-danger)';
@@ -1013,13 +1358,16 @@
 
       const badge = stepElem.querySelector('.step-status-badge');
       
-      // Mark previous steps completed if moving forward
+      // Mark all previous steps completed if moving forward
       for (let i = 1; i < stepNum; i++) {
         const prev = document.getElementById(`step-${i}`);
         if (prev && !prev.classList.contains('failed')) {
           prev.className = 'step-item completed';
-          prev.querySelector('.step-status-badge').className = 'step-status-badge badge-success';
-          prev.querySelector('.step-status-badge').innerText = 'Done';
+          const prevBadge = prev.querySelector('.step-status-badge');
+          if (prevBadge) {
+            prevBadge.className = 'step-status-badge badge-success';
+            prevBadge.innerText = 'Done';
+          }
         }
       }
 
@@ -1129,6 +1477,7 @@
       const archivePath = document.getElementById('input-archive-path').value.trim();
       const targetBranch = document.getElementById('input-target-branch').value.trim() || 'main';
       const dryRun = document.getElementById('chk-dry-run').checked;
+      const isPrerelease = document.getElementById('radio-type-prerelease').checked;
 
       if (!version) {
         alert('Please specify a Release Version (e.g. 1.1.1)');
@@ -1157,6 +1506,8 @@
         archive_path: archivePath,
         target_branch: targetBranch,
         dry_run: dryRun,
+        is_prerelease: isPrerelease,
+        release_type: isPrerelease ? 'prerelease' : 'latest',
         steps
       };
 
@@ -1176,7 +1527,7 @@
     }
 
     function openGameBananaPage() {
-      const url = (infoData && infoData.gamebanana_url) || 'https://gamebanana.com/tools/updates/add/24316';
+      const url = (infoData && infoData.gamebanana_url) || 'https://gamebanana.com/tools/edit/24316';
       window.open(url, '_blank');
     }
 

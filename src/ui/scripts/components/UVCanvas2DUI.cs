@@ -44,6 +44,8 @@ namespace DeadlockPlayground.UI
         private Vector2 _lastAtlasPx = Vector2.Zero;
         private Vector2 _hoverMousePos = new Vector2(-9999, -9999);
         private Rect2I _totalStrokeDirtyRect = default;
+        private Vector2 _cloneDragStartTargetPx = Vector2.Zero;
+        private Vector2 _cloneDragStartSourcePx = Vector2.Zero;
 
         // Advanced Selection State (Rectangular, Lasso, Polygonal)
         private bool _isSelecting = false;
@@ -1301,6 +1303,68 @@ namespace DeadlockPlayground.UI
                         overlay.DrawCircle(_hoverMousePos, 1.5f, cursorCol, filled: true);
                     }
                 }
+                else if (_painter.ToolMode == BrushToolMode.Clone)
+                {
+                    float brushRadius = _painter.BrushSize * 0.5f * _zoom;
+                    float brushDiameter = _painter.BrushSize * _zoom;
+                    Color targetCol = new Color(0.35f, 0.85f, 1.0f, 0.90f); // Cyan
+                    Color faintTargetCol = new Color(targetCol.R, targetCol.G, targetCol.B, 0.40f);
+                    Color sourceCol = new Color(1.0f, 0.75f, 0.25f, 0.90f); // Amber / Gold
+
+                    bool isAltDown = Input.IsKeyPressed(Key.Alt);
+
+                    if (isAltDown)
+                    {
+                        // Setting source crosshair preview under cursor
+                        overlay.DrawCircle(_hoverMousePos, 6.0f, sourceCol, filled: false, width: 2.0f, antialiased: true);
+                        overlay.DrawLine(_hoverMousePos - new Vector2(10, 0), _hoverMousePos + new Vector2(10, 0), sourceCol, 1.5f);
+                        overlay.DrawLine(_hoverMousePos - new Vector2(0, 10), _hoverMousePos + new Vector2(0, 10), sourceCol, 1.5f);
+                        overlay.DrawCircle(_hoverMousePos, 1.5f, sourceCol, filled: true);
+                    }
+                    else
+                    {
+                        // Target brush ring
+                        overlay.DrawCircle(_hoverMousePos, brushRadius, targetCol, filled: false, width: 1.5f, antialiased: true);
+                        if (_painter.BrushHardness > 0.05f && _painter.BrushHardness < 0.98f)
+                        {
+                            float innerRadius = brushRadius * _painter.BrushHardness;
+                            overlay.DrawCircle(_hoverMousePos, innerRadius, faintTargetCol, filled: false, width: 1.0f, antialiased: true);
+                        }
+                        overlay.DrawLine(_hoverMousePos - new Vector2(4, 0), _hoverMousePos + new Vector2(4, 0), faintTargetCol, 1.0f);
+                        overlay.DrawLine(_hoverMousePos - new Vector2(0, 4), _hoverMousePos + new Vector2(0, 4), faintTargetCol, 1.0f);
+                        overlay.DrawCircle(_hoverMousePos, 1.5f, targetCol, filled: true);
+                    }
+
+                    // Source crosshair & connection line if source exists
+                    if (_painter.HasCloneSource)
+                    {
+                        Vector2 curSourceAtlas;
+                        if (_isPainting)
+                        {
+                            Vector2 curTargetAtlas = ScreenToAtlasPx(_hoverMousePos);
+                            curSourceAtlas = _cloneDragStartSourcePx + (curTargetAtlas - _cloneDragStartTargetPx);
+                        }
+                        else
+                        {
+                            curSourceAtlas = (Vector2)_painter.CloneSourceAtlasPx;
+                        }
+
+                        Vector2 sourceScreenPos = AtlasPxToScreen(curSourceAtlas);
+
+                        // Connecting guide line while stamping
+                        if (_isPainting)
+                        {
+                            overlay.DrawLine(sourceScreenPos, _hoverMousePos, new Color(1.0f, 0.8f, 0.3f, 0.35f), 1.0f);
+                            overlay.DrawCircle(sourceScreenPos, brushRadius, new Color(sourceCol.R, sourceCol.G, sourceCol.B, 0.45f), filled: false, width: 1.0f, antialiased: true);
+                        }
+
+                        // Source crosshair
+                        overlay.DrawCircle(sourceScreenPos, 5.0f, sourceCol, filled: false, width: 1.5f, antialiased: true);
+                        overlay.DrawLine(sourceScreenPos - new Vector2(8, 0), sourceScreenPos + new Vector2(8, 0), sourceCol, 1.5f);
+                        overlay.DrawLine(sourceScreenPos - new Vector2(0, 8), sourceScreenPos + new Vector2(0, 8), sourceCol, 1.5f);
+                        overlay.DrawCircle(sourceScreenPos, 1.5f, sourceCol, filled: true);
+                    }
+                }
                 else if (_painter.ToolMode == BrushToolMode.Decal)
                 {
                     if (_painter.ProjectionGizmo != null && _painter.ProjectionGizmo.IsActive) return;
@@ -1430,6 +1494,31 @@ namespace DeadlockPlayground.UI
                             return;
                         }
 
+                        if (_painter != null && _painter.ToolMode == BrushToolMode.Clone)
+                        {
+                            if (mb.AltPressed || Input.IsKeyPressed(Key.Alt))
+                            {
+                                int canvasW = _layerManager?.CanvasSize.X ?? 2048;
+                                int canvasH = _layerManager?.CanvasSize.Y ?? 2048;
+                                int clX = Mathf.Clamp((int)Mathf.Round(atlasPx.X), 0, canvasW - 1);
+                                int clY = Mathf.Clamp((int)Mathf.Round(atlasPx.Y), 0, canvasH - 1);
+                                _painter.CloneSourceAtlasPx = new Vector2I(clX, clY);
+                                _painter.CloneSourceUV = new Vector2(clX / (float)canvasW, clY / (float)canvasH);
+                                _painter.HasCloneSource = true;
+                                StudioUIManager.Instance?.ShowToast($"Clone Source Set: ({clX}, {clY})");
+                                _brushPalette?.UpdateCloneUI();
+                                _cursorOverlay?.QueueRedraw();
+                                canvas.AcceptEvent();
+                                return;
+                            }
+                            else if (!_painter.HasCloneSource)
+                            {
+                                StudioUIManager.Instance?.ShowToast("Alt+Click in canvas to set clone source point first");
+                                canvas.AcceptEvent();
+                                return;
+                            }
+                        }
+
                         if (_painter != null && _painter.ToolMode == BrushToolMode.Shape && _painter.ShapeTool != null)
                         {
                             if (_painter.ShapeTool.HasActiveShape)
@@ -1552,6 +1641,18 @@ namespace DeadlockPlayground.UI
                                 canvas.AcceptEvent();
                                 return;
                             }
+                        }
+
+                        if (_painter != null && _painter.ToolMode == BrushToolMode.Clone && _isPainting)
+                        {
+                            Vector2 finalSource = _cloneDragStartSourcePx + (_lastAtlasPx - _cloneDragStartTargetPx);
+                            int atlasW = _layerManager?.CanvasSize.X ?? 2048;
+                            int atlasH = _layerManager?.CanvasSize.Y ?? 2048;
+                            int clX = Mathf.Clamp((int)Mathf.Round(finalSource.X), 0, atlasW - 1);
+                            int clY = Mathf.Clamp((int)Mathf.Round(finalSource.Y), 0, atlasH - 1);
+                            _painter.CloneSourceAtlasPx = new Vector2I(clX, clY);
+                            _painter.CloneSourceUV = new Vector2(clX / (float)atlasW, clY / (float)atlasH);
+                            _brushPalette?.UpdateCloneUI();
                         }
 
                         if (_isPainting)
@@ -1895,6 +1996,61 @@ namespace DeadlockPlayground.UI
                 _canvasDrawArea?.QueueRedraw();
                 _cursorOverlay?.QueueRedraw();
             }
+            else if (mode == BrushToolMode.Clone)
+            {
+                if (!_painter.HasCloneSource)
+                {
+                    StudioUIManager.Instance?.ShowToast("Alt+Click in canvas to set clone source point first");
+                    return;
+                }
+
+                _isPainting = true;
+                _lastAtlasPx = atlasPx;
+                _cloneDragStartTargetPx = atlasPx;
+                _cloneDragStartSourcePx = (Vector2)_painter.CloneSourceAtlasPx;
+                _accumulated2DDirtyRect = default;
+                _layerManager.EnsureCpuSynced();
+                _layerManager.RecordGpuUndoSnapshot(is2DCpuStroke: true);
+
+                byte[] sampleBuffer;
+                if (_painter.CloneSampleAllLayers)
+                {
+                    _layerManager.EnsureCpuCompositeBufferSynced();
+                    sampleBuffer = _layerManager.CompositeBuffer;
+                }
+                else
+                {
+                    sampleBuffer = _layerManager.ActiveLayer?.GpuData ?? _layerManager.BaseAtlasBuffer;
+                }
+
+                if (sampleBuffer != null)
+                {
+                    var shape = _painter.BrushShape;
+                    var brushTex = _painter.GetBrushTexture(shape);
+                    var dirtyRect = _layerManager.PaintCloneDab2D(
+                        atlasPx,
+                        _cloneDragStartSourcePx,
+                        sampleBuffer,
+                        _painter.BrushSize,
+                        _painter.BrushHardness,
+                        _painter.BrushFlow,
+                        _painter.MagicWandTool,
+                        shape,
+                        brushTex
+                    );
+                    _totalStrokeDirtyRect = dirtyRect;
+                    if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                    {
+                        _layerManager?.UpdateStandaloneComposite(dirtyRect);
+                    }
+                    else
+                    {
+                        _layerManager?.UpdateActiveLayerGpuTextureThrottled(dirtyRect);
+                    }
+                    _canvasDrawArea?.QueueRedraw();
+                    _cursorOverlay?.QueueRedraw();
+                }
+            }
             else if (mode == BrushToolMode.BucketFill)
             {
                 if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
@@ -2044,6 +2200,88 @@ namespace DeadlockPlayground.UI
                     _accumulated2DDirtyRect = default;
                 }
             }
+            else if (mode == BrushToolMode.Clone)
+            {
+                if (fromAtlasPx.DistanceSquaredTo(toAtlasPx) < 0.01f) return;
+                if (!_painter.HasCloneSource) return;
+
+                byte[] sampleBuffer;
+                if (_painter.CloneSampleAllLayers)
+                {
+                    _layerManager.EnsureCpuCompositeBufferSynced();
+                    sampleBuffer = _layerManager.CompositeBuffer;
+                }
+                else
+                {
+                    sampleBuffer = _layerManager.ActiveLayer?.GpuData ?? _layerManager.BaseAtlasBuffer;
+                }
+                if (sampleBuffer == null) return;
+
+                Vector2 fromSourcePx = _cloneDragStartSourcePx + (fromAtlasPx - _cloneDragStartTargetPx);
+                Vector2 toSourcePx = _cloneDragStartSourcePx + (toAtlasPx - _cloneDragStartTargetPx);
+
+                var shape = _painter.BrushShape;
+                var brushTex = _painter.GetBrushTexture(shape);
+                var dirtyRect = _layerManager.PaintCloneStroke2D(
+                    fromAtlasPx,
+                    toAtlasPx,
+                    fromSourcePx,
+                    toSourcePx,
+                    sampleBuffer,
+                    _painter.BrushSize,
+                    _painter.BrushHardness,
+                    _painter.BrushFlow,
+                    _painter.MagicWandTool,
+                    shape,
+                    brushTex
+                );
+                _totalStrokeDirtyRect = (_totalStrokeDirtyRect.Size.X == 0) ? dirtyRect : _totalStrokeDirtyRect.Merge(dirtyRect);
+
+                if (_accumulated2DDirtyRect.Size.X > 0)
+                {
+                    var merged = _accumulated2DDirtyRect.Merge(dirtyRect);
+                    if (merged.Size.X > 512 || merged.Size.Y > 512)
+                    {
+                        if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                        {
+                            _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                        }
+                        else
+                        {
+                            _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                        }
+                        _accumulated2DDirtyRect = dirtyRect;
+                        _lastStrokeRecompositeMs = Time.GetTicksMsec();
+                    }
+                    else
+                    {
+                        _accumulated2DDirtyRect = merged;
+                    }
+                }
+                else
+                {
+                    _accumulated2DDirtyRect = dirtyRect;
+                }
+
+                ulong nowMs = Time.GetTicksMsec();
+                if (nowMs - _lastStrokeRecompositeMs >= 25)
+                {
+                    _lastStrokeRecompositeMs = nowMs;
+                    if (!string.IsNullOrEmpty(_activeParticleTexturePath) || _layerManager?.ActiveAtlasManager == null)
+                    {
+                        _layerManager?.UpdateStandaloneComposite(_accumulated2DDirtyRect);
+                    }
+                    else
+                    {
+                        _layerManager.UpdateActiveLayerGpuTextureThrottled(_accumulated2DDirtyRect);
+                    }
+                }
+            }
+        }
+
+        public Vector2 AtlasPxToScreen(Vector2 atlasPx)
+        {
+            return atlasPx * _zoom + _pan;
         }
 
         private Vector2 ScreenToAtlasPx(Vector2 screenPos)

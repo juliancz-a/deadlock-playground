@@ -16,7 +16,8 @@ namespace DeadlockPlayground.Painter
         SelectSubmesh = 6,
         MagicWand = 7,
         Selection = 8,
-        Shape = 9
+        Shape = 9,
+        Clone = 10
     }
 
     public enum BrushShapeType
@@ -70,6 +71,12 @@ namespace DeadlockPlayground.Painter
         private Vector2 _shapeStartAtlasUV = Vector2.Zero;
 
         private bool _isShapeOriginatedIn3D = false;
+
+        // Clone Stamp Subsystem
+        public Vector2 CloneSourceUV { get; set; } = Vector2.Zero;
+        public Vector2I CloneSourceAtlasPx { get; set; } = Vector2I.Zero;
+        public bool HasCloneSource { get; set; } = false;
+        public bool CloneSampleAllLayers { get; set; } = true;
 
         public bool IsShapeOriginatedIn3D
         {
@@ -1013,7 +1020,7 @@ namespace DeadlockPlayground.Painter
 
         public bool IsMouseOverUI()
         {
-            if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen)
+            if (ColorAdjustmentModalUI.IsOpen || GradientMapModalUI.IsOpen || FilterModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen)
             {
                 return true;
             }

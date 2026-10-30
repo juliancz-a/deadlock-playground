@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using DeadlockPlayground.UI;
 
 public partial class OrbitCamera : Node3D
 {
@@ -226,7 +227,7 @@ public partial class OrbitCamera : Node3D
         }
 
         // 3. Block initiating camera zoom/orbit/pan if modal is open or mouse is hovering over any UI element
-        if (ColorAdjustmentModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
+        if (ColorAdjustmentModalUI.IsOpen || GradientMapModalUI.IsOpen || FilterModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return;
 
         if (StudioUIManager.Instance != null && StudioUIManager.Instance.IsAnyModalOpen())
         {
@@ -400,6 +401,46 @@ public partial class OrbitCamera : Node3D
         return focusOwner is LineEdit or TextEdit;
     }
 
+    /// <summary>
+    /// Master toggle for blocking keyboard camera movement (WASD / QE / Numpad).
+    /// Prevents conflicts when interacting with the Animation Studio Dock or posing tools.
+    /// </summary>
+    public static bool IsKeyboardMovementBlocked { get; set; } = false;
+
+    public bool CanProcessCameraKeyboardNavigation()
+    {
+        if (IsKeyboardMovementBlocked) return false;
+
+        // 1. If any modal dialog is open, block camera navigation
+        if (StudioUIManager.Instance != null && StudioUIManager.Instance.IsAnyModalOpen()) return false;
+        if (ColorAdjustmentModalUI.IsOpen || GradientMapModalUI.IsOpen || FilterModalUI.IsOpen || ExportBaseTexturesModalUI.IsOpen) return false;
+        if (PaintTabUI.IsRenameDialogOpen) return false;
+
+        // 2. Check if mouse is hovering over any UI Control other than SubViewportContainer
+        var hovered = GetTree()?.Root?.GuiGetHoveredControl();
+        if (hovered != null)
+        {
+            bool isMainViewport = (hovered.Name == "SubViewportContainer" && hovered.GetParent()?.Name == "ViewportArea");
+            if (!isMainViewport)
+            {
+                return false;
+            }
+        }
+
+        // 3. If AnimationStudioDock is open and visible, check if mouse is inside its bounds
+        var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as Control;
+        if (animDock != null && animDock.Visible && animDock.IsVisibleInTree())
+        {
+            Vector2 mousePos = GetViewport()?.GetMousePosition() ?? Vector2.Zero;
+            if (animDock.GetGlobalRect().HasPoint(mousePos))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public override void _Process(double delta)
     {
         // Fail-safe: If physically neither RMB nor MMB nor LMB is held, restore Visible cursor
@@ -423,9 +464,10 @@ public partial class OrbitCamera : Node3D
 
         // Check if user is typing in any text box to block camera movement
         bool isTyping = IsUserTyping();
+        bool canNavigate = !isTyping && CanProcessCameraKeyboardNavigation();
 
         // Keyboard Zoom (+ / - or Numpad +/-)
-        if (!isTyping)
+        if (canNavigate)
         {
             if (Input.IsPhysicalKeyPressed(Key.Equal) || Input.IsPhysicalKeyPressed(Key.KpAdd))
             {
@@ -455,7 +497,7 @@ public partial class OrbitCamera : Node3D
         }
 
         // Handle Panning (WASD / QE or configured keybinds)
-        if (!isTyping)
+        if (canNavigate)
         {
             Vector3 inputDir = Vector3.Zero;
             float speedMult = Input.IsPhysicalKeyPressed(Key.Shift) ? 2.5f : 1.0f;

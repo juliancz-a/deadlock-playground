@@ -460,8 +460,11 @@ namespace DeadlockPlayground.UI
             }
         }
 
-        private HBoxContainer CreateAssetRow(string heroId, WorkspaceAssetEntry asset, bool isActive, bool isModel)
+        private Control CreateAssetRow(string heroId, WorkspaceAssetEntry asset, bool isActive, bool isModel)
         {
+            var assetBox = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            assetBox.AddThemeConstantOverride("separation", 4);
+
             var row = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             row.AddThemeConstantOverride("separation", 10);
 
@@ -470,7 +473,10 @@ namespace DeadlockPlayground.UI
 
             string title = !string.IsNullOrEmpty(asset.DisplayName) ? asset.DisplayName : Path.GetFileName(asset.VpkPath);
             int modCount = asset.ModifiedTextures.Count;
-            string details = isModel ? $"{title} ({modCount} textures)" : $"{title} (VFX parameters)";
+            int animCount = asset.Animations?.Count ?? 0;
+            string details = isModel 
+                ? (animCount > 0 ? $"{title} ({modCount} textures, {animCount} animations)" : $"{title} ({modCount} textures)")
+                : $"{title} (VFX parameters)";
 
             var nameLbl = new Label
             {
@@ -548,7 +554,63 @@ namespace DeadlockPlayground.UI
             };
             row.AddChild(trashBtn);
 
-            return row;
+            assetBox.AddChild(row);
+
+            // Sub-rows for animations
+            if (asset.Animations != null && asset.Animations.Count > 0)
+            {
+                foreach (var anim in asset.Animations)
+                {
+                    var animRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+                    animRow.AddThemeConstantOverride("separation", 8);
+
+                    var animIndent = new Control { CustomMinimumSize = new Vector2(36, 0) };
+                    animRow.AddChild(animIndent);
+
+                    var animBadge = new Label
+                    {
+                        Text = "[ANIM]",
+                        Modulate = new Color(0.35f, 0.75f, 1.0f),
+                        SizeFlagsVertical = SizeFlags.ShrinkCenter
+                    };
+                    if (colus != null) animBadge.AddThemeFontOverride("font", colus);
+                    animBadge.AddThemeFontSizeOverride("font_size", 11);
+                    animRow.AddChild(animBadge);
+
+                    var animNameLbl = new Label
+                    {
+                        Text = $"{anim.CleanName} ({anim.Fps} FPS, {anim.Duration:F2}s{(anim.IsAdditive ? ", Additive" : "")})",
+                        SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                        ClipText = true,
+                        TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                        Modulate = new Color(0.85f, 0.88f, 0.94f)
+                    };
+                    animNameLbl.AddThemeFontSizeOverride("font_size", 12);
+                    animRow.AddChild(animNameLbl);
+
+                    var animDiscardBtn = new Button
+                    {
+                        Text = "✕",
+                        CustomMinimumSize = new Vector2(24, 22),
+                        SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                        TooltipText = "Discard modified animation",
+                        Flat = true,
+                        Modulate = new Color(0.95f, 0.45f, 0.45f)
+                    };
+                    string aHeroId = heroId;
+                    string aCleanName = anim.CleanName;
+                    animDiscardBtn.Pressed += () =>
+                    {
+                        ModWorkspaceSession.Instance.DiscardAnimation(aHeroId, aCleanName);
+                        RefreshList();
+                    };
+                    animRow.AddChild(animDiscardBtn);
+
+                    assetBox.AddChild(animRow);
+                }
+            }
+
+            return assetBox;
         }
 
         private void OnSaveProjectClicked()

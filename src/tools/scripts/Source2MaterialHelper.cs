@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 using Godot;
 using SteamDatabase.ValvePak;
@@ -218,25 +219,140 @@ public static class Source2MaterialHelper
                 }
             }
 
-            string colorTex = Source2TextureLoader.GetTextureParam(matResource, "g_tColor")
-                           ?? Source2TextureLoader.GetTextureParam(matResource, "TextureColor")
-                           ?? Source2TextureLoader.GetTextureParam(matResource, "g_tColor1");
-            if (!string.IsNullOrEmpty(colorTex))
+            var colorKeys = new[] { "g_tColor", "TextureColor", "g_tColor1", "TextureColor1", "g_tColorA", "TextureColorA", "g_tColor0", "TextureColor0" };
+            var secondaryColorKeys = new[] 
+            { 
+                "TextureColor2", "g_tColor2", "TextureColorB", "g_tColorB", "TextureColorC", "g_tColorC",
+                "g_tAltColor_Reveal", "g_tAltColor", "TextureAltColor", "g_tColor_Alt", "g_tColorAlt", "g_tColorReveal" 
+            };
+
+            string colorTex = null;
+            foreach (var k in colorKeys)
             {
-                string norm = colorTex.Replace('\\', '/').Trim().TrimStart('/');
-                if (norm.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase))
+                var val = Source2TextureLoader.GetTextureParam(matResource, k);
+                if (!string.IsNullOrEmpty(val) && !IsEngineDummyOrPlaceholderTexture(val))
                 {
-                    norm += "_c";
+                    colorTex = val;
+                    break;
                 }
-                else if (!norm.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase))
+            }
+
+            string secondaryColorTex = null;
+            foreach (var k in secondaryColorKeys)
+            {
+                var val = Source2TextureLoader.GetTextureParam(matResource, k);
+                if (!string.IsNullOrEmpty(val) && !IsEngineDummyOrPlaceholderTexture(val))
                 {
-                    norm += ".vtex_c";
+                    secondaryColorTex = val;
+                    break;
                 }
+            }
+
+            var allColorList = new List<string>();
+
+            if (!string.IsNullOrEmpty(colorTex) && !IsEngineDummyOrPlaceholderTexture(colorTex))
+            {
+                string norm = NormalizeVtexCPath(colorTex);
                 createdMat.SetMeta("OriginalColorVtexCPath", norm);
+                allColorList.Add(norm);
+            }
+
+            if (!string.IsNullOrEmpty(secondaryColorTex) && !IsEngineDummyOrPlaceholderTexture(secondaryColorTex))
+            {
+                string normSec = NormalizeVtexCPath(secondaryColorTex);
+                createdMat.SetMeta("OriginalSecondaryColorVtexCPath", normSec);
+                if (!allColorList.Contains(normSec, StringComparer.OrdinalIgnoreCase))
+                {
+                    allColorList.Add(normSec);
+                }
+            }
+
+            // Dynamically inspect ALL texture parameters for any additional Color / Albedo / AltColor maps
+            if (matResource.TextureParams != null)
+            {
+                foreach (var (pKey, pVal) in matResource.TextureParams)
+                {
+                    if (string.IsNullOrWhiteSpace(pVal) || IsEngineDummyOrPlaceholderTexture(pVal)) continue;
+                    if (pKey.Contains("Normal", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("Roughness", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("AmbientOcclusion", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("AO", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("Mask", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("Transmissive", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("Shadow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (pKey.Contains("Color", StringComparison.OrdinalIgnoreCase) || 
+                        pKey.Contains("Albedo", StringComparison.OrdinalIgnoreCase) ||
+                        pKey.Contains("Diffuse", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string normExtra = NormalizeVtexCPath(pVal);
+                        if (!string.IsNullOrEmpty(normExtra) && !IsEngineDummyOrPlaceholderTexture(normExtra) && !allColorList.Contains(normExtra, StringComparer.OrdinalIgnoreCase))
+                        {
+                            allColorList.Add(normExtra);
+                        }
+                    }
+                }
+            }
+
+            if (allColorList.Count > 0)
+            {
+                createdMat.SetMeta("OriginalAllColorVtexCPaths", string.Join(",", allColorList));
             }
         }
 
         return createdMat;
+    }
+
+    public static bool IsEngineDummyOrPlaceholderTexture(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return true;
+        string norm = path.Replace('\\', '/').Trim().TrimStart('/');
+        
+        // 1. Engine default / dev directories
+        if (norm.StartsWith("materials/default/", StringComparison.OrdinalIgnoreCase) ||
+            norm.StartsWith("default/", StringComparison.OrdinalIgnoreCase) ||
+            norm.StartsWith("dev/", StringComparison.OrdinalIgnoreCase) ||
+            norm.StartsWith("materials/dev/", StringComparison.OrdinalIgnoreCase) ||
+            norm.Contains("/default/", StringComparison.OrdinalIgnoreCase) ||
+            norm.Contains("/dev/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 2. Transmissive / shadow / mask / dummy swatch files
+        if (norm.Contains("transmissivecolor", StringComparison.OrdinalIgnoreCase) ||
+            norm.Contains("transmissive_color", StringComparison.OrdinalIgnoreCase) ||
+            norm.Contains("g_tnprtransmissivecolor", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 3. Fallback / dummy texture filenames
+        string fileName = Path.GetFileNameWithoutExtension(norm).ToLowerInvariant();
+        if (fileName.Contains("default_") || 
+            fileName.Contains("white_color") ||
+            fileName.Contains("black_color") ||
+            fileName.Contains("flat_normal") ||
+            fileName.Contains("transmissivecolor") ||
+            fileName.Contains("transmissive_color") ||
+            fileName.Contains("dummy"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeVtexCPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        string norm = path.Replace('\\', '/').Trim().TrimStart('/');
+        if (norm.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase)) norm += "_c";
+        else if (!norm.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase)) norm += ".vtex_c";
+        return norm;
     }
 
     /// <summary>

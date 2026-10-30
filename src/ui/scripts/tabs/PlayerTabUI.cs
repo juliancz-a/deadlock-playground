@@ -6,6 +6,9 @@ using System.Linq;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.Particles;
+using DeadlockPlayground.UI;
+using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Animation;
 
 public partial class PlayerTabUI : VBoxContainer
 {
@@ -20,6 +23,8 @@ public partial class PlayerTabUI : VBoxContainer
     [Export] private Button _btnApplyPose;
     [Export] private Button _btnResetAllPoses;
 
+    private AnimationStudioDock _animStudioDock;
+
     private Skeleton3D _skeleton;
     private AnimationPlayer _animPlayer;
     private VpkLoaderTest _vpkLoader;
@@ -29,8 +34,9 @@ public partial class PlayerTabUI : VBoxContainer
     private Label _labelCharge;
     private Button _btnRelease;
     private CheckBox _chkAutoLoop;
-    private CheckBox _chkIdleUnderlay;
-    private bool _isIdleUnderlayEnabled = true;
+    private const bool _isIdleUnderlayEnabled = false;
+    private CheckBox _chkInPlaceMotion;
+    private bool _isInPlaceMotionEnabled = true;
     private DeadlockAnimLoader.AnimSequenceInfo _activeAnimInfo;
 
     private List<DeadlockAnimLoader.AnimSequenceInfo> _currentHeroAnimations = new();
@@ -38,6 +44,8 @@ public partial class PlayerTabUI : VBoxContainer
     private float _activeAnimLength = 0.0f;
     private bool _isLooping = true;
     private bool _isUserDraggingSlider = false;
+    private readonly List<string> _decodedAnimLru = new();
+    private const int MaxCachedDecodedAnims = 5;
 
     private Texture2D _iconPlay;
     private Texture2D _iconPause;
@@ -57,6 +65,12 @@ public partial class PlayerTabUI : VBoxContainer
         {
             _btnLoop.Icon = _iconLoop;
         }
+
+        AnimationTransportService.Instance.PlaybackStateChanged += OnTransportPlaybackStateChanged;
+        AnimationTransportService.Instance.TimeChanged += OnTransportTimeChanged;
+        AnimationTransportService.Instance.LoopChanged += OnTransportLoopChanged;
+        ModWorkspaceSession.Instance.OnAnimationDiscarded += OnWorkspaceAnimationDiscarded;
+        ModWorkspaceSession.Instance.OnWorkspaceCleared += OnWorkspaceCleared;
 
         if (_animSearch != null)
         {
@@ -111,16 +125,32 @@ public partial class PlayerTabUI : VBoxContainer
         var animGroup = GetNodeOrNull<VBoxContainer>("AnimGroup");
         if (animGroup != null)
         {
-            _chkIdleUnderlay = new CheckBox
+            _chkInPlaceMotion = new CheckBox
             {
-                Name = "ChkIdleUnderlay",
-                Text = "Underlay Idle Stance",
-                ButtonPressed = _isIdleUnderlayEnabled,
-                TooltipText = "Underlays the hero's base combat idle stance for additive and reaction sequences so limbs and weapons remain naturally posed."
+                Name = "ChkInPlaceMotion",
+                Text = "In-Place Motion",
+                ButtonPressed = _isInPlaceMotionEnabled,
+                TooltipText = "Locks horizontal root motion translation so the character stays centered in the viewport during runs/dashes/rolls."
             };
-            _chkIdleUnderlay.Toggled += OnIdleUnderlayToggled;
-            animGroup.AddChild(_chkIdleUnderlay);
-            animGroup.MoveChild(_chkIdleUnderlay, 1);
+            _chkInPlaceMotion.Toggled += OnInPlaceMotionToggled;
+            animGroup.AddChild(_chkInPlaceMotion);
+            animGroup.MoveChild(_chkInPlaceMotion, 2);
+
+            var btnImportAnim = new Button
+            {
+                Name = "BtnImportExternalAnimSide",
+                Text = "Import Animation (.glb/.fbx)...",
+                TooltipText = "Import external animation (.glb, .gltf, .fbx from Mixamo, Mesh2Motion, etc.) and retarget to Deadlock skeleton"
+            };
+            var impIcon = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg");
+            if (impIcon != null) btnImportAnim.Icon = impIcon;
+            btnImportAnim.Pressed += () =>
+            {
+                EnsureAnimationStudioDockMounted();
+                _animStudioDock?.OpenImportFileDialog();
+            };
+            animGroup.AddChild(btnImportAnim);
+            animGroup.MoveChild(btnImportAnim, 3);
         }
 
         var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
@@ -128,10 +158,47 @@ public partial class PlayerTabUI : VBoxContainer
         {
             SetParticleStage(stage);
         }
+
+        InitAnimationStudioDock();
+    }
+
+    public override void _ExitTree()
+    {
+        SkeletonGizmoManager.OnBonePoseChanged -= OnGizmoBonePoseChanged;
+        AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
+        AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
+        AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
+        if (ModWorkspaceSession.Instance != null)
+        {
+            ModWorkspaceSession.Instance.OnAnimationDiscarded -= OnWorkspaceAnimationDiscarded;
+            ModWorkspaceSession.Instance.OnWorkspaceCleared -= OnWorkspaceCleared;
+        }
+        if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock))
+        {
+            _animStudioDock.AnimationModified -= OnAnimStudioAnimationModified;
+            _animStudioDock.VisibilityToggled -= OnAnimStudioVisibilityToggled;
+        }
     }
 
     public override void _Notification(int what)
     {
+        if (what == NotificationVisibilityChanged)
+        {
+            bool isVis = IsVisibleInTree();
+            if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock))
+            {
+                _animStudioDock.Visible = isVis;
+                if (isVis)
+                {
+                    _animStudioDock.UpdateFloatingViewportControls();
+                }
+                else
+                {
+                    _animStudioDock.ResetFloatingViewportControls();
+                }
+            }
+        }
+
         if (what == NotificationVisibilityChanged && IsVisibleInTree())
         {
             if (_particleStage == null)
@@ -152,6 +219,207 @@ public partial class PlayerTabUI : VBoxContainer
                 OnParticleStageUnloaded();
             }
         }
+    }
+
+    private void InitAnimationStudioDock()
+    {
+        Callable.From(EnsureAnimationStudioDockMounted).CallDeferred();
+        SkeletonGizmoManager.OnBonePoseChanged += OnGizmoBonePoseChanged;
+    }
+
+    private void EnsureAnimationStudioDockMounted()
+    {
+        if (_animStudioDock != null && GodotObject.IsInstanceValid(_animStudioDock)) return;
+
+        var viewportArea = GetTree()?.Root?.FindChild("ViewportArea", true, false) as Control;
+        if (viewportArea != null)
+        {
+            _animStudioDock = viewportArea.FindChild("AnimationStudioDock", true, false) as AnimationStudioDock;
+            if (_animStudioDock == null)
+            {
+                var dockScene = GD.Load<PackedScene>("res://scenes/ui/animation/AnimationStudioDock.tscn")
+                             ?? GD.Load<PackedScene>("res://ui/scenes/components/AnimationStudioDock.tscn");
+                if (dockScene != null)
+                {
+                    _animStudioDock = dockScene.Instantiate<AnimationStudioDock>();
+                    viewportArea.AddChild(_animStudioDock);
+                }
+            }
+
+            if (_animStudioDock != null)
+            {
+                _animStudioDock.Visible = IsVisibleInTree();
+                _animStudioDock.AnimationModified += OnAnimStudioAnimationModified;
+                _animStudioDock.VisibilityToggled += OnAnimStudioVisibilityToggled;
+
+                if (_skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+                {
+                    var anim = _animPlayer.GetAnimation(_activeAnimName);
+                    if (anim != null)
+                    {
+                        _animStudioDock.BindTarget(_skeleton, _animPlayer, anim, _activeAnimName, fps: 30f);
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnAnimStudioVisibilityToggled(bool isOpen)
+    {
+    }
+
+    public void ToggleAnimationStudio()
+    {
+        EnsureAnimationStudioDockMounted();
+        if (_animStudioDock != null)
+        {
+            _animStudioDock.ToggleOpen();
+        }
+    }
+
+    private void OnGizmoBonePoseChanged(int boneIdx, Vector3 pos, Quaternion rot)
+    {
+        _animStudioDock?.OnBoneTransformedByGizmo(boneIdx, pos, rot);
+    }
+
+    private void OnAnimStudioAnimationModified(string animName)
+    {
+        NotifyPoseChanged(animName);
+
+        try
+        {
+            if (_animPlayer != null && _animPlayer.HasAnimation(animName) && _skeleton != null)
+            {
+                var anim = _animPlayer.GetAnimation(animName);
+                FindVpkLoader();
+                string heroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename ?? "";
+                string heroDisplayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
+                string modelVpkPath = _vpkLoader?.LastLoadedHeroEntry?.VmdlRelativePath ?? "";
+
+                var info = _currentHeroAnimations.FirstOrDefault(a => 
+                    a.CleanName.Equals(animName, StringComparison.OrdinalIgnoreCase) ||
+                    a.RawName.Equals(animName, StringComparison.OrdinalIgnoreCase));
+
+                string targetVpkPath = info != null && !string.IsNullOrEmpty(info.VpkClipPath)
+                    ? info.VpkClipPath
+                    : DeadlockAnimLoader.ResolveHeroClipVpkPath(heroId, modelVpkPath, animName, _vpkLoader?.GetOrCreateBasePackage());
+
+                if (!string.IsNullOrEmpty(heroId) && anim != null)
+                {
+                    ModWorkspaceSession.Instance.StageAnimation(
+                        heroId: heroId,
+                        heroDisplayName: heroDisplayName,
+                        modelVpkPath: modelVpkPath,
+                        animName: animName,
+                        cleanName: animName,
+                        godotAnim: anim,
+                        fps: 30f,
+                        skeleton: _skeleton,
+                        targetVpkPath: targetVpkPath
+                    );
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PlayerTabUI] Failed to stage modified animation to workspace: {ex.Message}");
+        }
+    }
+
+    private void OnWorkspaceAnimationDiscarded(string heroId, string cleanName)
+    {
+        FindVpkLoader();
+        string curHeroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename ?? "";
+        if (!string.IsNullOrEmpty(curHeroId) && !string.Equals(curHeroId, heroId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        DeadlockAnimLoader.KnownRemappedAnimations.Remove(cleanName);
+        var matchingInfo = _currentHeroAnimations.FirstOrDefault(a =>
+            a.CleanName.Equals(cleanName, StringComparison.OrdinalIgnoreCase) ||
+            a.RawName.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
+        if (matchingInfo != null)
+        {
+            DeadlockAnimLoader.KnownRemappedAnimations.Remove(matchingInfo.CleanName);
+            DeadlockAnimLoader.KnownRemappedAnimations.Remove(matchingInfo.RawName);
+            matchingInfo.Category = DeadlockAnimLoader.ClassifyCategory(matchingInfo.CleanName);
+        }
+
+        if (_animPlayer != null)
+        {
+            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+            if (animLib != null)
+            {
+                if (animLib.HasAnimation(cleanName))
+                {
+                    var a = animLib.GetAnimation(cleanName);
+                    a?.RemoveMeta("is_retargeted");
+                    a?.RemoveMeta("decoded_by_anim_loader");
+                    animLib.RemoveAnimation(cleanName);
+                }
+                if (matchingInfo != null && animLib.HasAnimation(matchingInfo.RawName))
+                {
+                    var a = animLib.GetAnimation(matchingInfo.RawName);
+                    a?.RemoveMeta("is_retargeted");
+                    a?.RemoveMeta("decoded_by_anim_loader");
+                    animLib.RemoveAnimation(matchingInfo.RawName);
+                }
+            }
+
+            bool wasActive = string.Equals(_activeAnimName, cleanName, StringComparison.OrdinalIgnoreCase) ||
+                             (matchingInfo != null && string.Equals(_activeAnimName, matchingInfo.RawName, StringComparison.OrdinalIgnoreCase));
+
+            if (wasActive)
+            {
+                _animPlayer.Stop();
+                if (matchingInfo != null)
+                {
+                    SelectAnimation(matchingInfo, autoPlay: true);
+                }
+                else
+                {
+                    AutoSelectDefaultIdle();
+                }
+            }
+        }
+
+        _currentHeroAnimations.Sort((a, b) =>
+        {
+            int catOrderA = DeadlockAnimLoader.GetCategoryPriority(a.Category);
+            int catOrderB = DeadlockAnimLoader.GetCategoryPriority(b.Category);
+            if (catOrderA != catOrderB) return catOrderA.CompareTo(catOrderB);
+            return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+        });
+
+        PopulateAnimationTree();
+    }
+
+    private void OnWorkspaceCleared()
+    {
+        DeadlockAnimLoader.KnownRemappedAnimations.Clear();
+        if (_animPlayer != null)
+        {
+            var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+            if (animLib != null)
+            {
+                foreach (var aKey in animLib.GetAnimationList())
+                {
+                    var anim = animLib.GetAnimation(aKey);
+                    if (anim != null && anim.HasMeta("is_retargeted"))
+                    {
+                        anim.RemoveMeta("is_retargeted");
+                        anim.RemoveMeta("decoded_by_anim_loader");
+                        animLib.RemoveAnimation(aKey);
+                    }
+                }
+            }
+        }
+        foreach (var a in _currentHeroAnimations)
+        {
+            a.Category = DeadlockAnimLoader.ClassifyCategory(a.CleanName);
+        }
+        PopulateAnimationTree();
     }
 
     private void InitParticleControls()
@@ -311,6 +579,8 @@ public partial class PlayerTabUI : VBoxContainer
                 _chkAutoLoop.SetPressedNoSignal(_particleStage.AutoChargeLoop);
             }
         }
+        AnimationTransportService.Instance.SetParticleMode(true);
+        _animStudioDock?.SetTransportEnabled(false);
     }
 
     private void OnParticleStageUnloaded()
@@ -329,6 +599,8 @@ public partial class PlayerTabUI : VBoxContainer
             _timelineSlider.Step = 0.01;
             _timelineSlider.SetValueNoSignal(0.0);
         }
+        AnimationTransportService.Instance.SetParticleMode(false);
+        _animStudioDock?.SetTransportEnabled(true);
         UpdateTimeLabel(0.0f, _activeAnimLength);
 
         if (_particleControlsGroup != null)
@@ -358,34 +630,21 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer != null && _animPlayer.IsPlaying() && !_isUserDraggingSlider)
-        {
-            float currentPos = (float)_animPlayer.CurrentAnimationPosition;
-            _timelineSlider?.SetValueNoSignal(currentPos);
-            UpdateTimeLabel(currentPos, _activeAnimLength);
-
-            // Handle non-looping animation ending
-            if (!_isLooping && currentPos >= _activeAnimLength - 0.03f)
-            {
-                _animPlayer.Pause();
-                if (_btnPlayPause != null)
-                {
-                    _btnPlayPause.ButtonPressed = false;
-                    _btnPlayPause.Icon = _iconPlay;
-                }
-            }
-
-            if (_skeleton != null)
-            {
-                ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-            }
-        }
+        AnimationTransportService.Instance.Tick(delta);
     }
 
     public void SetSkeleton(Skeleton3D skeleton)
     {
-        _skeleton = skeleton;
+        _skeleton = (skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion()) ? skeleton : null;
+        if (_animStudioDock != null)
+        {
+            _animStudioDock.SetSkeleton(_skeleton);
+            if (_skeleton != null && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+            {
+                var curAnim = _animPlayer.GetAnimation(_activeAnimName);
+                _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
+            }
+        }
     }
 
     public void SetAnimationPlayer(AnimationPlayer animPlayer)
@@ -396,6 +655,10 @@ public partial class PlayerTabUI : VBoxContainer
         }
 
         _animPlayer = animPlayer;
+        if (_animStudioDock != null)
+        {
+            _animStudioDock.SetAnimationPlayer(_animPlayer);
+        }
         if (_animPlayer == null)
         {
             ResetTransportUI();
@@ -406,10 +669,24 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
+        // Ensure _skeleton is valid and not pointing to a disposed old skeleton
+        if (_skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion())
+        {
+            _skeleton = _animPlayer.GetNodeOrNull<Skeleton3D>(_animPlayer.RootNode)
+                     ?? _animPlayer.GetParent()?.FindChild("GeneralSkeleton", true, false) as Skeleton3D
+                     ?? _animPlayer.GetParent()?.FindChild("Skeleton3D", true, false) as Skeleton3D;
+        }
+
         _animPlayer.AnimationFinished += OnAnimationFinished;
 
         PopulateAnimationTreeFromPlayer();
         AutoSelectDefaultIdle();
+
+        if (_animStudioDock != null && _skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion() && _animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
+        {
+            var curAnim = _animPlayer.GetAnimation(_activeAnimName);
+            _animStudioDock.BindTarget(_skeleton, _animPlayer, curAnim, _activeAnimName, fps: 30f);
+        }
     }
 
     private void OnAnimationFinished(StringName animName)
@@ -432,16 +709,119 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
-    private void PopulateAnimationTreeFromPlayer()
+    private void TrackDecodedAnimationLru(string animName)
+    {
+        if (string.IsNullOrEmpty(animName)) return;
+
+        _decodedAnimLru.Remove(animName);
+        _decodedAnimLru.Add(animName);
+
+        EvictOldDecodedAnimations();
+    }
+
+    private void EvictOldDecodedAnimations()
+    {
+        if (_animPlayer == null || !_animPlayer.HasAnimationLibrary("")) return;
+        if (_decodedAnimLru.Count <= MaxCachedDecodedAnims) return;
+
+        var animLib = _animPlayer.GetAnimationLibrary("");
+        var defaultIdle = FindDefaultIdleAnim();
+        string defaultIdleClean = defaultIdle?.CleanName ?? "";
+        string defaultIdleRaw = defaultIdle?.RawName ?? "";
+
+        for (int i = 0; i < _decodedAnimLru.Count && _decodedAnimLru.Count > MaxCachedDecodedAnims;)
+        {
+            string candidate = _decodedAnimLru[i];
+
+            // Never evict active animation or its underlaid variant
+            if (candidate.Equals(_activeAnimName, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals($"{_activeAnimName}_underlaid", StringComparison.OrdinalIgnoreCase))
+            {
+                i++;
+                continue;
+            }
+
+            // Never evict default idle (needed for underlaying additive clips)
+            if (candidate.Equals(defaultIdleClean, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals(defaultIdleRaw, StringComparison.OrdinalIgnoreCase) ||
+                candidate.Equals($"{defaultIdleClean}_underlaid", StringComparison.OrdinalIgnoreCase))
+            {
+                i++;
+                continue;
+            }
+
+            if (animLib.HasAnimation(candidate))
+            {
+                var godotAnim = animLib.GetAnimation(candidate);
+                // Only evict dynamically decoded animations
+                if (godotAnim != null && godotAnim.HasMeta("decoded_by_anim_loader"))
+                {
+                    animLib.RemoveAnimation(candidate);
+                    GD.Print($"[AnimLoader] LRU Cache: Evicted dynamic animation '{candidate}' from memory.");
+                }
+            }
+
+            _decodedAnimLru.RemoveAt(i);
+        }
+    }
+
+    public void PopulateAnimationTreeFromPlayer()
     {
         if (_animPlayer == null) return;
 
         _currentHeroAnimations.Clear();
-        var animList = _animPlayer.GetAnimationList();
+        FindVpkLoader();
 
+        var seenCleanNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Ingest metadata from VpkLoader if available (lazy loading with zero RAM bloat)
+        if (_vpkLoader?.CurrentHeroAnimations != null && _vpkLoader.CurrentHeroAnimations.Count > 0)
+        {
+            foreach (var vrfAnim in _vpkLoader.CurrentHeroAnimations)
+            {
+                if (seenCleanNames.Add(vrfAnim.CleanName))
+                {
+                    _currentHeroAnimations.Add(vrfAnim);
+                }
+            }
+        }
+
+        // 2. Also merge any local / pre-baked / imported / remapped animations already in AnimationPlayer
+        var animList = _animPlayer.GetAnimationList();
         foreach (var animName in animList)
         {
             var anim = _animPlayer.GetAnimation(animName);
+            string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
+
+            var existing = _currentHeroAnimations.FirstOrDefault(a =>
+                a.RawName.Equals(animName, StringComparison.OrdinalIgnoreCase) ||
+                a.CleanName.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
+
+            bool isRetargeted = (anim != null && anim.HasMeta("is_retargeted") && (bool)anim.GetMeta("is_retargeted")) ||
+                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(animName) ||
+                                DeadlockAnimLoader.KnownRemappedAnimations.Contains(cleanName);
+
+            if (!isRetargeted && DeadlockAnimLoader.IsBlacklisted(animName, false, null))
+            {
+                continue;
+            }
+
+            if (existing != null)
+            {
+                if (isRetargeted)
+                {
+                    existing.Category = "Remapped";
+                    if (anim != null)
+                    {
+                        existing.Duration = (float)anim.Length;
+                        existing.Fps = 30f;
+                        existing.FrameCount = Math.Max(1, (int)Math.Round(anim.Length * 30.0) + 1);
+                        existing.IsLooping = anim.LoopMode != Godot.Animation.LoopModeEnum.None;
+                    }
+                }
+                continue;
+            }
+
             bool isAdditive = false;
             if (anim != null)
             {
@@ -454,22 +834,97 @@ public partial class PlayerTabUI : VBoxContainer
                     DeadlockAnimLoader.StripAdditivePositionTracks(anim, _skeleton);
                 }
             }
-            string cleanName = DeadlockAnimLoader.SanitizePoseName(animName);
             string displayName = DeadlockAnimLoader.FormatDisplayName(cleanName);
-            string category = DeadlockAnimLoader.ClassifyCategory(cleanName);
+            string category = isRetargeted ? "Remapped" : DeadlockAnimLoader.ClassifyCategory(cleanName);
             float duration = (float)(anim?.Length ?? 0.1f);
             bool isLooping = DeadlockAnimLoader.DetermineLooping(cleanName, category);
 
-            _currentHeroAnimations.Add(new DeadlockAnimLoader.AnimSequenceInfo
+            if (seenCleanNames.Add(cleanName))
             {
-                RawName = animName,
-                CleanName = cleanName,
-                DisplayName = displayName,
-                Category = category,
-                Duration = duration,
-                IsLooping = isLooping,
-                IsAdditive = isAdditive
-            });
+                _currentHeroAnimations.Add(new DeadlockAnimLoader.AnimSequenceInfo
+                {
+                    RawName = animName,
+                    CleanName = cleanName,
+                    DisplayName = displayName,
+                    Category = category,
+                    Duration = duration,
+                    IsLooping = isLooping,
+                    IsAdditive = isAdditive
+                });
+            }
+        }
+
+        // 3. Restore any animations staged in active ModWorkspaceSession for this hero
+        try
+        {
+            string heroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename ?? "";
+            if (!string.IsNullOrEmpty(heroId) &&
+                ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(heroId, out var heroEntry) &&
+                heroEntry.Assets != null)
+            {
+                var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+                foreach (var asset in heroEntry.Assets)
+                {
+                    if (asset.Animations == null || asset.Animations.Count == 0) continue;
+
+                    foreach (var stagedEntry in asset.Animations)
+                    {
+                        if (string.IsNullOrEmpty(stagedEntry.CleanName)) continue;
+
+                        string animKey = stagedEntry.CleanName;
+                        Godot.Animation anim = null;
+
+                        if (animLib != null)
+                        {
+                            anim = ModWorkspaceSession.Instance.LoadStagedAnimationToGodot(stagedEntry, _skeleton);
+                            if (anim != null)
+                            {
+                                if (animLib.HasAnimation(animKey))
+                                {
+                                    animLib.RemoveAnimation(animKey);
+                                }
+                                animLib.AddAnimation(animKey, anim);
+                                GD.Print($"[PlayerTabUI] Restored staged animation '{animKey}' into AnimationPlayer for hero '{heroId}'.");
+                            }
+                        }
+
+                        DeadlockAnimLoader.KnownRemappedAnimations.Add(animKey);
+                        DeadlockAnimLoader.KnownRemappedAnimations.Add(stagedEntry.AnimName);
+
+                        var existing = _currentHeroAnimations.FirstOrDefault(a =>
+                            a.RawName.Equals(animKey, StringComparison.OrdinalIgnoreCase) ||
+                            a.CleanName.Equals(animKey, StringComparison.OrdinalIgnoreCase));
+
+                        if (existing != null)
+                        {
+                            existing.Category = "Remapped";
+                            existing.Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0);
+                            existing.IsLooping = stagedEntry.IsLooping;
+                            existing.IsAdditive = stagedEntry.IsAdditive;
+                            existing.VpkClipPath = stagedEntry.TargetVpkPath;
+                        }
+                        else
+                        {
+                            seenCleanNames.Add(animKey);
+                            _currentHeroAnimations.Add(new DeadlockAnimLoader.AnimSequenceInfo
+                            {
+                                RawName = animKey,
+                                CleanName = animKey,
+                                DisplayName = DeadlockAnimLoader.FormatDisplayName(animKey),
+                                Category = "Remapped",
+                                Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0),
+                                IsLooping = stagedEntry.IsLooping,
+                                IsAdditive = stagedEntry.IsAdditive,
+                                VpkClipPath = stagedEntry.TargetVpkPath
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception wsEx)
+        {
+            GD.PrintErr($"[PlayerTabUI] Failed to restore workspace staged animations for hero: {wsEx.Message}");
         }
 
         // Sort by category priority, then display name
@@ -506,12 +961,15 @@ public partial class PlayerTabUI : VBoxContainer
         // Defined category order matching prompt requirements
         string[] categories = new[]
         {
-            "Idle",
+            "Remapped",
+            "Exported",
+            "Idles & Stances",
             "Locomotion",
-            "Combat",
-            "Abilities",
-            "Emotes & Expressions",
-            "Reactions",
+            "Traversal & Zipline",
+            "Combat & Attacks",
+            "Abilities & Magic",
+            "Reactions & Status",
+            "Emotes & Taunts",
             "Additive Layers",
             "Misc / Other"
         };
@@ -519,29 +977,67 @@ public partial class PlayerTabUI : VBoxContainer
         foreach (var category in categories)
         {
             var itemsInCategory = _currentHeroAnimations
-                .Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase))
+                .Where(a => a.Category.Equals(category, StringComparison.OrdinalIgnoreCase) ||
+                            (category == "Idles & Stances" && a.Category.Equals("Idle", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Combat & Attacks" && a.Category.Equals("Combat", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Abilities & Magic" && a.Category.Equals("Abilities", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Reactions & Status" && a.Category.Equals("Reactions", StringComparison.OrdinalIgnoreCase)) ||
+                            (category == "Emotes & Taunts" && a.Category.Equals("Emotes & Expressions", StringComparison.OrdinalIgnoreCase)))
                 .Where(a => string.IsNullOrEmpty(filter) ||
                             a.DisplayName.ToLowerInvariant().Contains(filter) ||
                             a.CleanName.ToLowerInvariant().Contains(filter) ||
                             a.RawName.ToLowerInvariant().Contains(filter))
                 .ToList();
 
-            if (itemsInCategory.Count == 0) continue;
+            if (itemsInCategory.Count == 0)
+            {
+                if (category == "Remapped" && string.IsNullOrEmpty(filter))
+                {
+                    TreeItem emptyCategory = _animTree.CreateItem(root);
+                    var iconEmpty = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg") ?? _iconFolder;
+                    emptyCategory.SetIcon(0, iconEmpty);
+                    emptyCategory.SetIconMaxWidth(0, 16);
+                    emptyCategory.SetCustomColor(0, new Color(0.31f, 0.93f, 0.69f, 0.8f));
+                    emptyCategory.SetCustomMinimumHeight(28);
+                    emptyCategory.SetText(0, "Imported / Remapped (0)");
+                    emptyCategory.SetSelectable(0, false);
+                    emptyCategory.Collapsed = true;
+
+                    TreeItem emptyPlaceholder = _animTree.CreateItem(emptyCategory);
+                    emptyPlaceholder.SetText(0, "(No imported animations yet)");
+                    emptyPlaceholder.SetCustomColor(0, new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                    emptyPlaceholder.SetSelectable(0, false);
+                }
+                continue;
+            }
 
             TreeItem categoryItem = _animTree.CreateItem(root);
-            categoryItem.SetIcon(0, _iconFolder);
+            var iconCat = (category == "Remapped" || category == "Exported")
+                ? (GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg") ?? _iconFolder)
+                : _iconFolder;
+            categoryItem.SetIcon(0, iconCat);
             categoryItem.SetIconMaxWidth(0, 16);
             Color catColor = category switch
             {
+                "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
+                "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
+                "Idles & Stances" or "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
+                "Locomotion" => new Color(0.45f, 0.85f, 0.95f, 1.0f),
+                "Traversal & Zipline" => new Color(0.55f, 0.90f, 0.70f, 1.0f),
+                "Combat & Attacks" or "Combat" => new Color(0.95f, 0.55f, 0.45f, 1.0f),
+                "Abilities & Magic" or "Abilities" => new Color(0.85f, 0.60f, 0.95f, 1.0f),
+                "Reactions & Status" or "Reactions" => new Color(0.95f, 0.75f, 0.45f, 1.0f),
+                "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.95f, 0.65f, 0.85f, 1.0f),
                 "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
-                "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
                 _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
             };
             categoryItem.SetCustomColor(0, catColor);
             categoryItem.SetCustomMinimumHeight(28);
-            categoryItem.SetText(0, $"{category} ({itemsInCategory.Count})");
+            categoryItem.SetText(0, category == "Remapped" ? $"Imported / Remapped ({itemsInCategory.Count})" : $"{category} ({itemsInCategory.Count})");
             categoryItem.SetSelectable(0, false);
-            categoryItem.Collapsed = (category == "Additive Layers");
+
+            // Collapsed by default when not searching!
+            categoryItem.Collapsed = string.IsNullOrEmpty(filter);
 
             foreach (var anim in itemsInCategory)
             {
@@ -554,6 +1050,15 @@ public partial class PlayerTabUI : VBoxContainer
                 int minHeight = charLen > 40 ? 46 : (charLen > 22 ? 36 : 26);
                 item.SetCustomMinimumHeight(minHeight);
 
+                if (!anim.IsCompatible)
+                {
+                    item.SetText(0, $"⚠ {itemText} [Incompatible]");
+                    item.SetTooltipText(0, $"Incompatible prop/skeleton animation: {anim.IncompatibilityReason}\nRaw: {anim.RawName}");
+                    item.SetCustomColor(0, new Color(0.55f, 0.55f, 0.55f, 0.6f));
+                    item.SetSelectable(0, false);
+                    continue;
+                }
+
                 item.SetText(0, itemText);
                 item.SetTooltipText(0, $"{anim.DisplayName} ({anim.Duration:F2}s)\nRaw: {anim.RawName}");
                 item.SetMetadata(0, anim.RawName);
@@ -563,28 +1068,97 @@ public partial class PlayerTabUI : VBoxContainer
                     _activeAnimName == $"{anim.CleanName}_underlaid" || _activeAnimName == $"{anim.RawName}_underlaid")
                 {
                     item.Select(0);
+                    categoryItem.Collapsed = false; // Auto-expand active category
                 }
             }
         }
     }
 
-    private void OnIdleUnderlayToggled(bool toggled)
+   private void OnInPlaceMotionToggled(bool toggled)
     {
-        _isIdleUnderlayEnabled = toggled;
+        _isInPlaceMotionEnabled = toggled;
+        if (_activeAnimInfo == null || _animPlayer == null || !GodotObject.IsInstanceValid(_animPlayer)) return;
 
-        if (_activeAnimInfo != null && _animPlayer != null)
+        string clean = _activeAnimInfo.CleanName;
+        var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+
+        // Check if current animation is a retargeted / imported animation (which does NOT exist in the VPK!)
+        Godot.Animation existingAnim = _animPlayer.HasAnimation(clean) ? _animPlayer.GetAnimation(clean)
+                                     : (_animPlayer.HasAnimation(_activeAnimInfo.RawName) ? _animPlayer.GetAnimation(_activeAnimInfo.RawName) : null);
+
+        bool isRetargeted = _activeAnimInfo.Category == "Remapped" ||
+                            (existingAnim != null && existingAnim.HasMeta("is_retargeted") && existingAnim.GetMeta("is_retargeted").AsBool()) ||
+                            DeadlockAnimLoader.KnownRemappedAnimations.Contains(clean) ||
+                            DeadlockAnimLoader.KnownRemappedAnimations.Contains(_activeAnimInfo.RawName);
+
+        if (isRetargeted && existingAnim != null)
         {
-            double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
-            bool wasPlaying = _animPlayer.IsPlaying();
-            SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
-            if (_animPlayer.HasAnimation(_activeAnimName))
+            // Toggle horizontal in-place lock non-destructively on the retargeted pelvis position track!
+            ToggleRetargetedAnimInPlace(existingAnim, toggled);
+            double pos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
+            _animPlayer.Seek(pos, update: true);
+            _skeleton?.ForceUpdateAllBoneTransforms();
+            return;
+        }
+
+        if (animLib != null)
+        {
+            if (animLib.HasAnimation(clean)) animLib.RemoveAnimation(clean);
+            if (animLib.HasAnimation($"{clean}_underlaid")) animLib.RemoveAnimation($"{clean}_underlaid");
+            if (animLib.HasAnimation(_activeAnimInfo.RawName)) animLib.RemoveAnimation(_activeAnimInfo.RawName);
+            if (animLib.HasAnimation($"{_activeAnimInfo.RawName}_underlaid")) animLib.RemoveAnimation($"{_activeAnimInfo.RawName}_underlaid");
+        }
+
+        double currentPos = _timelineSlider != null ? _timelineSlider.Value : _animPlayer.CurrentAnimationPosition;
+        bool wasPlaying = _animPlayer.IsPlaying();
+        SelectAnimation(_activeAnimInfo, autoPlay: wasPlaying);
+        if (_animPlayer.HasAnimation(_activeAnimName))
+        {
+            _animPlayer.Seek(currentPos, update: true);
+            if (wasPlaying) _animPlayer.Play(_activeAnimName);
+            else _animPlayer.Pause();
+        }
+        _timelineSlider?.SetValueNoSignal(currentPos);
+        UpdateTimeLabel((float)currentPos, _activeAnimLength);
+    }
+
+    private void ToggleRetargetedAnimInPlace(Godot.Animation anim, bool lockInPlace)
+    {
+        if (anim == null) return;
+        for (int t = 0; t < anim.GetTrackCount(); t++)
+        {
+            if (anim.TrackGetType(t) != Godot.Animation.TrackType.Position3D) continue;
+            string path = anim.TrackGetPath(t).ToString();
+            if (!path.EndsWith(":pelvis", StringComparison.OrdinalIgnoreCase) &&
+                !path.EndsWith(":root", StringComparison.OrdinalIgnoreCase))
             {
-                _animPlayer.Seek(currentPos, update: true);
-                if (wasPlaying) _animPlayer.Play(_activeAnimName);
-                else _animPlayer.Pause();
+                continue;
             }
-            _timelineSlider?.SetValueNoSignal(currentPos);
-            UpdateTimeLabel((float)currentPos, _activeAnimLength);
+
+            int keyCount = anim.TrackGetKeyCount(t);
+            if (keyCount == 0) continue;
+
+            string metaKey = $"orig_pos_track_{t}";
+            if (!anim.HasMeta(metaKey))
+            {
+                var backup = new Godot.Collections.Array<Vector3>();
+                for (int k = 0; k < keyCount; k++)
+                {
+                    backup.Add(anim.TrackGetKeyValue(t, k).AsVector3());
+                }
+                anim.SetMeta(metaKey, backup);
+            }
+
+            var origKeys = anim.GetMeta(metaKey).AsGodotArray<Vector3>();
+            if (origKeys == null || origKeys.Count != keyCount) continue;
+
+            Vector3 anchor = origKeys[0];
+            for (int k = 0; k < keyCount; k++)
+            {
+                Vector3 orig = origKeys[k];
+                Vector3 val = lockInPlace ? new Vector3(anchor.X, orig.Y, anchor.Z) : orig;
+                anim.TrackSetKeyValue(t, k, val);
+            }
         }
     }
 
@@ -651,7 +1225,7 @@ public partial class PlayerTabUI : VBoxContainer
 
         // Tier 3: Any Idle-category animation containing "stand_idle" or "idle" without exclusion
         var idleMatch = _currentHeroAnimations.FirstOrDefault(a =>
-            a.Category == "Idle" &&
+            (a.Category == "Idles & Stances" || a.Category == "Idle") &&
             !IsExcluded(a.CleanName) &&
             (a.CleanName.Contains("stand_idle", StringComparison.OrdinalIgnoreCase) ||
              a.CleanName.Contains("idle", StringComparison.OrdinalIgnoreCase)));
@@ -659,7 +1233,7 @@ public partial class PlayerTabUI : VBoxContainer
 
         // Tier 4: Any non-additive, non-excluded Idle
         var anyIdle = _currentHeroAnimations.FirstOrDefault(a =>
-            a.Category == "Idle" && !IsExcluded(a.CleanName));
+            (a.Category == "Idles & Stances" || a.Category == "Idle") && !IsExcluded(a.CleanName));
         if (anyIdle != null) return anyIdle;
 
         // Tier 5: Fallback to any non-additive animation
@@ -672,19 +1246,65 @@ public partial class PlayerTabUI : VBoxContainer
     {
         if (info == null || _animPlayer == null) return null;
 
-        if (_animPlayer.HasAnimation(info.RawName))
+        string targetName = _animPlayer.HasAnimation(info.CleanName) ? info.CleanName :
+                           (_animPlayer.HasAnimation(info.RawName) ? info.RawName : null);
+
+        if (targetName != null)
         {
-            return _animPlayer.GetAnimation(info.RawName);
-        }
-        if (_animPlayer.HasAnimation(info.CleanName))
-        {
-            return _animPlayer.GetAnimation(info.CleanName);
+            var anim = _animPlayer.GetAnimation(targetName);
+            if (anim != null)
+            {
+                // CRITICAL: Protect retargeted, imported, or studio-modified animations!
+                bool isRetargeted = (anim.HasMeta("is_retargeted") && (bool)anim.GetMeta("is_retargeted")) ||
+                                    DeadlockAnimLoader.KnownRemappedAnimations.Contains(targetName) ||
+                                    DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.CleanName) ||
+                                    DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.RawName);
+
+                if (isRetargeted)
+                {
+                    return anim;
+                }
+
+                bool isDecodedByLoader = anim.HasMeta("decoded_by_anim_loader");
+                bool isStaleVersion = isDecodedByLoader
+                    ? (!anim.HasMeta("anim_loader_version") || anim.GetMeta("anim_loader_version").AsInt32() < 5)
+                    : false;
+
+                // Pre-baked GLTF clips always have root motion; if in-place mode is enabled, evict and decode via loader!
+                // For already decoded clips, verify that in_place matches the current user toggle.
+                bool isMismatchedInPlace = isDecodedByLoader
+                    ? (!anim.HasMeta("in_place") || anim.GetMeta("in_place").AsBool() != _isInPlaceMotionEnabled)
+                    : _isInPlaceMotionEnabled;
+
+                bool hasBrokenPrefix = false;
+                for (int t = 0; t < anim.GetTrackCount(); t++)
+                {
+                    if (anim.TrackGetPath(t).ToString().StartsWith("../"))
+                    {
+                        hasBrokenPrefix = true;
+                        break;
+                    }
+                }
+
+                if (!isStaleVersion && !hasBrokenPrefix && !isMismatchedInPlace)
+                {
+                    return anim;
+                }
+
+                // Stale broken or mismatched animation: remove it so it can be cleanly re-decoded
+                var animLib = _animPlayer.HasAnimationLibrary("") ? _animPlayer.GetAnimationLibrary("") : null;
+                if (animLib != null && animLib.HasAnimation(targetName))
+                {
+                    animLib.RemoveAnimation(targetName);
+                }
+            }
         }
 
         FindVpkLoader();
         if (_vpkLoader != null && _skeleton != null)
         {
-            var decoded = _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer);
+            var defaultIdle = _isIdleUnderlayEnabled ? FindDefaultIdleAnim() : null;
+            var decoded = _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo: defaultIdle, inPlace: _isInPlaceMotionEnabled);
             if (decoded != null) return decoded;
         }
 
@@ -708,7 +1328,7 @@ public partial class PlayerTabUI : VBoxContainer
 
     private void HighlightTreeItem(string animKey)
     {
-        if (_animTree == null) return;
+        if (_animTree == null || string.IsNullOrEmpty(animKey)) return;
         TreeItem root = _animTree.GetRoot();
         if (root == null) return;
 
@@ -717,9 +1337,12 @@ public partial class PlayerTabUI : VBoxContainer
             foreach (TreeItem child in cat.GetChildren())
             {
                 string itemKey = child.GetMetadata(0).AsString();
-                if (itemKey == animKey || itemKey.EndsWith(animKey))
+                if (itemKey == animKey || itemKey.EndsWith(animKey) ||
+                    animKey.StartsWith(itemKey) || animKey.Contains(itemKey))
                 {
+                    cat.Collapsed = false; // Auto-expand category containing active clip
                     child.Select(0);
+                    _animTree.ScrollToItem(child);
                     return;
                 }
             }
@@ -728,13 +1351,18 @@ public partial class PlayerTabUI : VBoxContainer
 
     public void SelectAnimation(DeadlockAnimLoader.AnimSequenceInfo info, bool autoPlay = false)
     {
-        if (info == null || _animPlayer == null || _skeleton == null) return;
+        if (info == null || _animPlayer == null || _skeleton == null || !info.IsCompatible) return;
 
         _activeAnimInfo = info;
 
         var rawAnim = GetOrDecodeAnimation(info);
-        bool isAdditive = DeadlockAnimLoader.IsAdditiveAnimation(rawAnim, info, _skeleton);
-        if (info != null && info.Category == "Idle")
+        bool isAdditive = (info.Category == "Additive Layers") ||
+                          (info.VrfAnimation != null ? info.VrfAnimation.IsAdditive : info.IsAdditive) ||
+                          DeadlockAnimLoader.IsDeltaSequence(info);
+        if (info.Category == "Idles & Stances" || info.Category == "Idle" || info.Category == "Remapped" ||
+            (rawAnim != null && rawAnim.HasMeta("is_retargeted")) ||
+            DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.CleanName) ||
+            DeadlockAnimLoader.KnownRemappedAnimations.Contains(info.RawName))
         {
             isAdditive = false;
         }
@@ -782,7 +1410,7 @@ public partial class PlayerTabUI : VBoxContainer
             FindVpkLoader();
             if (_vpkLoader != null)
             {
-                _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo, targetAnim);
+                _vpkLoader.DecodeAnimation(info, _skeleton, _animPlayer, idleInfo, targetAnim, inPlace: _isInPlaceMotionEnabled);
             }
         }
 
@@ -793,10 +1421,12 @@ public partial class PlayerTabUI : VBoxContainer
             else return;
         }
 
+        TrackDecodedAnimationLru(targetAnim);
+
         var godotAnim = _animPlayer.GetAnimation(targetAnim);
         if (godotAnim == null) return;
 
-        // Configure animation playback parameters
+        // Configure animation playback parameters (preserve authored bone tracks; do not mutate or strip)
         DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
 
         string playAnimName = targetAnim;
@@ -832,33 +1462,28 @@ public partial class PlayerTabUI : VBoxContainer
             _skeleton.ResetBonePose(i);
         }
 
+        AnimationTransportService.Instance.Bind(_animPlayer, _skeleton, playAnimName, (float)(info?.Fps ?? 30f));
+
         if (autoPlay)
         {
-            _animPlayer.Play(_activeAnimName);
-            if (_btnPlayPause != null)
-            {
-                _btnPlayPause.ButtonPressed = true;
-                _btnPlayPause.Icon = _iconPause;
-            }
+            AnimationTransportService.Instance.Play();
         }
         else
         {
-            // Evaluate at frame 0
-            _animPlayer.Play(_activeAnimName);
-            _animPlayer.Seek(0.0, update: true);
+            _animPlayer.Play(playAnimName);
             _animPlayer.Pause();
-
-            if (_btnPlayPause != null)
-            {
-                _btnPlayPause.ButtonPressed = false;
-                _btnPlayPause.Icon = _iconPlay;
-            }
+            _animPlayer.Seek(0.0, update: true);
+            _animPlayer.Advance(0.0001);
+            _skeleton.ForceUpdateAllBoneTransforms();
+            AnimationTransportService.Instance.Pause();
+            AnimationTransportService.Instance.Seek(0.0, update: true, conformCloth: true);
         }
 
-        _skeleton.ForceUpdateAllBoneTransforms();
-        ProceduralClothSolver.MarkDirty();
-        ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
         NotifyPoseChanged(_activeAnimName);
+        if (_animStudioDock != null && _skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion())
+        {
+            _animStudioDock.BindTarget(_skeleton, _animPlayer, playAnim, playAnimName, fps: (float)(info?.Fps ?? 30f));
+        }
     }
 
     public void ApplyPoseFromAnimation(string animName)
@@ -874,7 +1499,7 @@ public partial class PlayerTabUI : VBoxContainer
         {
             _activeAnimName = animName;
             var godotAnim = _animPlayer.GetAnimation(animName);
-            if (godotAnim != null)
+            if (godotAnim != null && _skeleton != null && GodotObject.IsInstanceValid(_skeleton) && !_skeleton.IsQueuedForDeletion())
             {
                 DeadlockAnimLoader.StripClothTracks(godotAnim, _skeleton);
                 if (DeadlockAnimLoader.ShouldStripPositionTracks(godotAnim, _skeleton, animName))
@@ -906,6 +1531,7 @@ public partial class PlayerTabUI : VBoxContainer
             ProceduralClothSolver.MarkDirty();
             ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
             NotifyPoseChanged(animName);
+            _animStudioDock?.BindTarget(_skeleton, _animPlayer, godotAnim, animName, fps: 30f);
         }
     }
 
@@ -923,6 +1549,10 @@ public partial class PlayerTabUI : VBoxContainer
     private void OnSearchTextChanged(string newText)
     {
         PopulateAnimationTree();
+        if (string.IsNullOrEmpty(newText) && !string.IsNullOrEmpty(_activeAnimName))
+        {
+            HighlightTreeItem(_activeAnimName);
+        }
     }
 
     private void OnTreeItemSelected()
@@ -937,7 +1567,7 @@ public partial class PlayerTabUI : VBoxContainer
         if (string.IsNullOrEmpty(animKey)) return;
 
         var info = _currentHeroAnimations.FirstOrDefault(a => a.RawName == animKey || a.CleanName == animKey);
-        if (info == null) return;
+        if (info == null || !info.IsCompatible) return;
 
         bool wasPlaying = _animPlayer != null && _animPlayer.IsPlaying();
         SelectAnimation(info, autoPlay: wasPlaying);
@@ -952,28 +1582,13 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
-
         if (isPlaying)
         {
-            if (_animPlayer.CurrentAnimationPosition >= _activeAnimLength - 0.05f)
-            {
-                _animPlayer.Seek(0.0, update: true);
-            }
-            _animPlayer.Play(_activeAnimName);
-            if (_btnPlayPause != null) _btnPlayPause.Icon = _iconPause;
+            AnimationTransportService.Instance.Play();
         }
         else
         {
-            _animPlayer.Pause();
-            if (_btnPlayPause != null) _btnPlayPause.Icon = _iconPlay;
-
-            if (_skeleton != null)
-            {
-                _skeleton.ForceUpdateAllBoneTransforms();
-                ProceduralClothSolver.MarkDirty();
-                ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-            }
+            AnimationTransportService.Instance.Pause();
         }
     }
 
@@ -986,32 +1601,13 @@ public partial class PlayerTabUI : VBoxContainer
             UpdateTimeLabel(0.0f, _particleStage.Duration);
             if (_btnPlayPause != null)
             {
-                _btnPlayPause.ButtonPressed = false;
+                _btnPlayPause.SetPressedNoSignal(false);
                 _btnPlayPause.Icon = _iconPlay;
             }
             return;
         }
 
-        if (_animPlayer == null) return;
-
-        _animPlayer.Stop();
-        _animPlayer.Seek(0.0, update: true);
-
-        if (_btnPlayPause != null)
-        {
-            _btnPlayPause.ButtonPressed = false;
-            _btnPlayPause.Icon = _iconPlay;
-        }
-
-        _timelineSlider?.SetValueNoSignal(0.0);
-        UpdateTimeLabel(0.0f, _activeAnimLength);
-
-        if (_skeleton != null)
-        {
-            _skeleton.ForceUpdateAllBoneTransforms();
-            ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-        }
+        AnimationTransportService.Instance.Stop();
     }
 
     private void OnLoopToggled(bool looping)
@@ -1023,14 +1619,7 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer != null && !string.IsNullOrEmpty(_activeAnimName) && _animPlayer.HasAnimation(_activeAnimName))
-        {
-            var anim = _animPlayer.GetAnimation(_activeAnimName);
-            if (anim != null)
-            {
-                anim.LoopMode = looping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None;
-            }
-        }
+        AnimationTransportService.Instance.SetLoop(looping);
     }
 
     private void OnSpeedSelected(long index)
@@ -1065,18 +1654,7 @@ public partial class PlayerTabUI : VBoxContainer
             return;
         }
 
-        if (_animPlayer == null || string.IsNullOrEmpty(_activeAnimName)) return;
-
-        // Immediate seek to evaluate bone matrices in real time
-        _animPlayer.Seek(val, update: true);
-        UpdateTimeLabel((float)val, _activeAnimLength);
-
-        if (_skeleton != null)
-        {
-            _skeleton.ForceUpdateAllBoneTransforms();
-            ProceduralClothSolver.MarkDirty();
-            ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
-        }
+        AnimationTransportService.Instance.Seek(val, update: true, conformCloth: true);
     }
 
     private void OnApplyPosePressed()
@@ -1102,16 +1680,7 @@ public partial class PlayerTabUI : VBoxContainer
 
     public void ResetAllPoses()
     {
-        _animPlayer?.Stop();
-
-        if (_btnPlayPause != null)
-        {
-            _btnPlayPause.ButtonPressed = false;
-            _btnPlayPause.Icon = _iconPlay;
-        }
-
-        _timelineSlider?.SetValueNoSignal(0.0);
-        UpdateTimeLabel(0.0f, _activeAnimLength);
+        AnimationTransportService.Instance.Stop();
 
         if (_skeleton != null)
         {
@@ -1141,6 +1710,30 @@ public partial class PlayerTabUI : VBoxContainer
     {
         if (_timeLabel == null) return;
         _timeLabel.Text = $"{current:00.00}s / {total:00.00}s";
+    }
+
+    private void OnTransportPlaybackStateChanged(bool isPlaying)
+    {
+        if (_btnPlayPause != null)
+        {
+            _btnPlayPause.SetPressedNoSignal(isPlaying);
+            _btnPlayPause.Icon = isPlaying ? _iconPause : _iconPlay;
+        }
+    }
+
+    private void OnTransportTimeChanged(double time)
+    {
+        if (!_isUserDraggingSlider)
+        {
+            _timelineSlider?.SetValueNoSignal(time);
+            UpdateTimeLabel((float)time, _activeAnimLength);
+        }
+    }
+
+    private void OnTransportLoopChanged(bool looping)
+    {
+        _isLooping = looping;
+        _btnLoop?.SetPressedNoSignal(looping);
     }
 }
 

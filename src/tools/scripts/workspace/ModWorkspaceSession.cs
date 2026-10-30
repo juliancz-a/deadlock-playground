@@ -62,6 +62,75 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("modified_textures")]
         public Dictionary<string, string> ModifiedTextures { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        [JsonPropertyName("animations")]
+        public List<WorkspaceAnimationEntry> Animations { get; set; } = new();
+    }
+
+    public class WorkspaceAnimationEntry
+    {
+        [JsonPropertyName("anim_name")]
+        public string AnimName { get; set; } = "";
+
+        [JsonPropertyName("clean_name")]
+        public string CleanName { get; set; } = "";
+
+        [JsonPropertyName("relative_json_path")]
+        public string RelativeJsonPath { get; set; } = "";
+
+        [JsonPropertyName("relative_vnmclip_path")]
+        public string RelativeVnmclipPath { get; set; } = "";
+
+        [JsonPropertyName("target_vpk_path")]
+        public string TargetVpkPath { get; set; } = "";
+
+        [JsonPropertyName("fps")]
+        public float Fps { get; set; } = 30f;
+
+        [JsonPropertyName("duration")]
+        public float Duration { get; set; } = 1f;
+
+        [JsonPropertyName("is_looping")]
+        public bool IsLooping { get; set; } = true;
+
+        [JsonPropertyName("is_additive")]
+        public bool IsAdditive { get; set; } = false;
+    }
+
+    public class WorkspaceAnimationTrackData
+    {
+        [JsonPropertyName("path")]
+        public string Path { get; set; } = "";
+
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = "";
+
+        [JsonPropertyName("times")]
+        public List<double> Times { get; set; } = new();
+
+        [JsonPropertyName("values")]
+        public List<float[]> Values { get; set; } = new();
+    }
+
+    public class WorkspaceAnimationFileModel
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = "";
+
+        [JsonPropertyName("fps")]
+        public float Fps { get; set; } = 30f;
+
+        [JsonPropertyName("length")]
+        public double Length { get; set; } = 1.0;
+
+        [JsonPropertyName("loop_mode")]
+        public string LoopMode { get; set; } = "Linear";
+
+        [JsonPropertyName("is_additive")]
+        public bool IsAdditive { get; set; } = false;
+
+        [JsonPropertyName("tracks")]
+        public List<WorkspaceAnimationTrackData> Tracks { get; set; } = new();
     }
 
    public class WorkspaceMaterialEntry
@@ -173,6 +242,7 @@ namespace DeadlockPlayground.Workspace
         public string SessionDir { get; private set; }
         public string TexturesDir { get; private set; }
         public string ParticlesDir { get; private set; }
+        public string AnimationsDir { get; private set; }
         public string ManifestPath { get; private set; }
 
         public WorkspaceManifest Manifest { get; private set; } = new();
@@ -182,6 +252,7 @@ namespace DeadlockPlayground.Workspace
 
         public event Action OnWorkspaceChanged;
         public event Action<string, string> OnAssetDiscarded; // (heroId, vpkPath)
+        public event Action<string, string> OnAnimationDiscarded; // (heroId, cleanName)
         public event Action OnWorkspaceCleared;
 
         private static readonly JsonSerializerOptions JsonOpts = new()
@@ -202,16 +273,19 @@ namespace DeadlockPlayground.Workspace
                 SessionDir = ProjectSettings.GlobalizePath("user://workspace_session");
                 TexturesDir = Path.Combine(SessionDir, "textures");
                 ParticlesDir = Path.Combine(SessionDir, "particles");
+                AnimationsDir = Path.Combine(SessionDir, "animations");
                 ManifestPath = Path.Combine(SessionDir, "session_manifest.json");
 
                 Directory.CreateDirectory(SessionDir);
                 Directory.CreateDirectory(TexturesDir);
                 Directory.CreateDirectory(ParticlesDir);
+                Directory.CreateDirectory(AnimationsDir);
 
                 if (File.Exists(ManifestPath))
                 {
                     string json = File.ReadAllText(ManifestPath);
                     Manifest = JsonSerializer.Deserialize<WorkspaceManifest>(json, JsonOpts) ?? new WorkspaceManifest();
+                    PruneGhostEntries();
                 }
                 else
                 {
@@ -223,6 +297,67 @@ namespace DeadlockPlayground.Workspace
             {
                 GD.PrintErr($"[ModWorkspaceSession] Initialization error: {ex.Message}");
                 Manifest = new WorkspaceManifest();
+            }
+        }
+
+        public void PruneGhostEntries()
+        {
+            if (Manifest?.Heroes == null) return;
+
+            bool changed = false;
+            var emptyHeroes = new List<string>();
+
+            foreach (var (heroId, heroEntry) in Manifest.Heroes)
+            {
+                var emptyAssets = new List<WorkspaceAssetEntry>();
+                foreach (var asset in heroEntry.Assets)
+                {
+                    if (asset.Animations != null && asset.Animations.Count > 0)
+                    {
+                        var ghostAnims = asset.Animations.Where(a =>
+                        {
+                            bool hasJson = !string.IsNullOrEmpty(a.RelativeJsonPath) && File.Exists(Path.Combine(SessionDir, a.RelativeJsonPath));
+                            bool hasClip = !string.IsNullOrEmpty(a.RelativeVnmclipPath) && File.Exists(Path.Combine(SessionDir, a.RelativeVnmclipPath));
+                            return !hasJson && !hasClip;
+                        }).ToList();
+
+                        foreach (var ga in ghostAnims)
+                        {
+                            asset.Animations.Remove(ga);
+                            changed = true;
+                        }
+                    }
+
+                    if (asset.Materials.Count == 0 &&
+                        asset.ModifiedTextures.Count == 0 &&
+                        (asset.Animations == null || asset.Animations.Count == 0) &&
+                        string.IsNullOrEmpty(asset.ParticleOverridesFile))
+                    {
+                        emptyAssets.Add(asset);
+                        changed = true;
+                    }
+                }
+
+                foreach (var ea in emptyAssets)
+                {
+                    heroEntry.Assets.Remove(ea);
+                }
+
+                if (heroEntry.Assets.Count == 0)
+                {
+                    emptyHeroes.Add(heroId);
+                    changed = true;
+                }
+            }
+
+            foreach (var eh in emptyHeroes)
+            {
+                Manifest.Heroes.Remove(eh);
+            }
+
+            if (changed)
+            {
+                SaveManifest();
             }
         }
 
@@ -576,6 +711,403 @@ namespace DeadlockPlayground.Workspace
             }
         }
 
+        public void StageAnimation(
+            string heroId,
+            string heroDisplayName,
+            string modelVpkPath,
+            string animName,
+            string cleanName,
+            Godot.Animation godotAnim,
+            float fps,
+            Skeleton3D skeleton,
+            string targetVpkPath = null)
+        {
+            if (string.IsNullOrEmpty(heroId) || godotAnim == null || string.IsNullOrEmpty(cleanName)) return;
+
+            try
+            {
+                if (string.IsNullOrEmpty(AnimationsDir) || !Directory.Exists(AnimationsDir))
+                {
+                    Directory.CreateDirectory(AnimationsDir);
+                }
+
+                // Isolate animation files per hero to prevent cross-hero retarget bone deformation collisions!
+                string heroAnimDir = Path.Combine(AnimationsDir, heroId);
+                if (!Directory.Exists(heroAnimDir))
+                {
+                    Directory.CreateDirectory(heroAnimDir);
+                }
+
+                string safeName = SanitizePathToFileName(cleanName, "");
+                string jsonFileName = $"{safeName}.json";
+                string fullJsonPath = Path.Combine(heroAnimDir, jsonFileName);
+                string relJsonPath = Path.Combine("animations", heroId, jsonFileName).Replace('\\', '/');
+
+                string clipFileName = $"{safeName}.vnmclip_c";
+                string fullClipPath = Path.Combine(heroAnimDir, clipFileName);
+                string relClipPath = Path.Combine("animations", heroId, clipFileName).Replace('\\', '/');
+
+                if (string.IsNullOrEmpty(targetVpkPath))
+                {
+                    targetVpkPath = DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(heroId, modelVpkPath, cleanName);
+                }
+
+                // 1. Build and save JSON representation
+                var fileModel = new WorkspaceAnimationFileModel
+                {
+                    Name = cleanName,
+                    Fps = fps > 0 ? fps : 30f,
+                    Length = godotAnim.Length,
+                    LoopMode = godotAnim.LoopMode.ToString(),
+                    IsAdditive = godotAnim.HasMeta("is_additive") && godotAnim.GetMeta("is_additive").AsBool()
+                };
+
+                for (int t = 0; t < godotAnim.GetTrackCount(); t++)
+                {
+                    var trackType = godotAnim.TrackGetType(t);
+                    var tData = new WorkspaceAnimationTrackData
+                    {
+                        Path = godotAnim.TrackGetPath(t).ToString(),
+                        Type = trackType.ToString()
+                    };
+
+                    int keyCount = godotAnim.TrackGetKeyCount(t);
+                    for (int k = 0; k < keyCount; k++)
+                    {
+                        double tTime = godotAnim.TrackGetKeyTime(t, k);
+                        tData.Times.Add(tTime);
+                        var val = godotAnim.TrackGetKeyValue(t, k);
+
+                        if (trackType == Godot.Animation.TrackType.Position3D || trackType == Godot.Animation.TrackType.Scale3D)
+                        {
+                            Vector3 v = val.AsVector3();
+                            tData.Values.Add(new float[] { v.X, v.Y, v.Z });
+                        }
+                        else if (trackType == Godot.Animation.TrackType.Rotation3D)
+                        {
+                            Quaternion q = val.AsQuaternion();
+                            tData.Values.Add(new float[] { q.X, q.Y, q.Z, q.W });
+                        }
+                    }
+
+                    fileModel.Tracks.Add(tData);
+                }
+
+                string json = JsonSerializer.Serialize(fileModel, JsonOpts);
+                File.WriteAllText(fullJsonPath, json);
+
+                // 2. Build and save binary Source 2 .vnmclip_c using Source2ClipPatcher
+                try
+                {
+                    byte[] clipBytes = DeadlockPlayground.Animation.Source2ClipPatcher.CreateOrPatchClip(
+                        existingResourceBytes: null,
+                        godotAnim: godotAnim,
+                        skeleton: skeleton,
+                        animName: cleanName,
+                        fps: fps > 0 ? fps : 30f,
+                        targetVpkPath: targetVpkPath,
+                        heroId: heroId
+                    );
+
+                    if (clipBytes != null && clipBytes.Length > 0)
+                    {
+                        File.WriteAllBytes(fullClipPath, clipBytes);
+                        GD.Print($"[ModWorkspaceSession] Successfully compiled binary clip '{clipFileName}' ({clipBytes.Length} bytes) -> Target VPK Path: {targetVpkPath}");
+                    }
+                    else
+                    {
+                        GD.PrintErr($"[ModWorkspaceSession] Failed to compile binary clip '{clipFileName}' - CreateOrPatchClip returned null.");
+                    }
+                }
+                catch (Exception clipEx)
+                {
+                    GD.PrintErr($"[ModWorkspaceSession] Failed to compile binary clip '{clipFileName}': {clipEx.Message}");
+                }
+
+                // 3. Ensure hero entry
+                if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry))
+                {
+                    heroEntry = new WorkspaceHeroEntry
+                    {
+                        HeroId = heroId,
+                        DisplayName = !string.IsNullOrEmpty(heroDisplayName) ? heroDisplayName : heroId
+                    };
+                    Manifest.Heroes[heroId] = heroEntry;
+                }
+
+                // 4. Ensure asset entry
+                string assetVpkPath = !string.IsNullOrEmpty(modelVpkPath) ? modelVpkPath : $"models/heroes/{heroId}/{heroId}.vmdl_c";
+                var assetEntry = heroEntry.Assets.FirstOrDefault(a => string.Equals(a.VpkPath, assetVpkPath, StringComparison.OrdinalIgnoreCase));
+                if (assetEntry == null)
+                {
+                    assetEntry = new WorkspaceAssetEntry
+                    {
+                        VpkPath = assetVpkPath,
+                        Category = "CharacterModel",
+                        DisplayName = !string.IsNullOrEmpty(modelVpkPath) ? Path.GetFileNameWithoutExtension(modelVpkPath) : heroDisplayName,
+                        OwnerAssetPath = assetVpkPath
+                    };
+                    heroEntry.Assets.Add(assetEntry);
+                }
+
+                // 5. Update or add WorkspaceAnimationEntry
+                var animEntry = assetEntry.Animations.FirstOrDefault(a => string.Equals(a.CleanName, cleanName, StringComparison.OrdinalIgnoreCase));
+                if (animEntry == null)
+                {
+                    animEntry = new WorkspaceAnimationEntry
+                    {
+                        AnimName = animName,
+                        CleanName = cleanName
+                    };
+                    assetEntry.Animations.Add(animEntry);
+                }
+
+                animEntry.RelativeJsonPath = relJsonPath;
+                animEntry.RelativeVnmclipPath = File.Exists(fullClipPath) ? relClipPath : "";
+                animEntry.TargetVpkPath = !string.IsNullOrEmpty(targetVpkPath)
+                    ? targetVpkPath
+                    : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(heroId, modelVpkPath, cleanName);
+                animEntry.Fps = fps > 0 ? fps : 30f;
+                animEntry.Duration = (float)godotAnim.Length;
+                animEntry.IsLooping = godotAnim.LoopMode != Godot.Animation.LoopModeEnum.None;
+                animEntry.IsAdditive = fileModel.IsAdditive;
+
+                Manifest.LastActiveHeroId = heroId;
+                Manifest.LastActiveAssetType = "CharacterModel";
+                Manifest.LastActiveAssetPath = assetVpkPath;
+
+                SaveManifest();
+                HasUnsavedChanges = true;
+                OnWorkspaceChanged?.Invoke();
+
+                GD.Print($"[ModWorkspaceSession] Staged animation '{cleanName}' for hero '{heroId}' ({relJsonPath})");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ModWorkspaceSession] Error staging animation: {ex.Message}");
+            }
+        }
+
+        public void DiscardAnimation(string heroId, string cleanName)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(cleanName)) return;
+
+            if (Manifest.Heroes.TryGetValue(heroId, out var heroEntry))
+            {
+                var assetsToRemove = new List<WorkspaceAssetEntry>();
+                foreach (var asset in heroEntry.Assets)
+                {
+                    var anim = asset.Animations?.FirstOrDefault(a => 
+                        string.Equals(a.CleanName, cleanName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(a.AnimName, cleanName, StringComparison.OrdinalIgnoreCase));
+
+                    if (anim != null)
+                    {
+                        asset.Animations.Remove(anim);
+                        if (!string.IsNullOrEmpty(anim.RelativeJsonPath))
+                        {
+                            string full = Path.Combine(SessionDir, anim.RelativeJsonPath);
+                            if (File.Exists(full)) { try { File.Delete(full); } catch { } }
+                        }
+                        if (!string.IsNullOrEmpty(anim.RelativeVnmclipPath))
+                        {
+                            string full = Path.Combine(SessionDir, anim.RelativeVnmclipPath);
+                            if (File.Exists(full)) { try { File.Delete(full); } catch { } }
+                        }
+
+                        // Check if asset is now completely empty
+                        if (asset.Materials.Count == 0 &&
+                            asset.ModifiedTextures.Count == 0 &&
+                            (asset.Animations == null || asset.Animations.Count == 0) &&
+                            string.IsNullOrEmpty(asset.ParticleOverridesFile))
+                        {
+                            assetsToRemove.Add(asset);
+                        }
+                    }
+                }
+
+                foreach (var a in assetsToRemove)
+                {
+                    heroEntry.Assets.Remove(a);
+                }
+
+                if (heroEntry.Assets.Count == 0)
+                {
+                    Manifest.Heroes.Remove(heroId);
+                }
+
+                SaveManifest();
+                HasUnsavedChanges = true;
+                OnWorkspaceChanged?.Invoke();
+                OnAnimationDiscarded?.Invoke(heroId, cleanName);
+            }
+        }
+
+public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry, Skeleton3D skeleton = null)
+        {
+            if (entry == null || string.IsNullOrEmpty(entry.RelativeJsonPath)) return null;
+
+            try
+            {
+                string fullJsonPath = Path.Combine(SessionDir, entry.RelativeJsonPath);
+                if (!File.Exists(fullJsonPath))
+                {
+                    string legacyPath = Path.Combine(SessionDir, "animations", Path.GetFileName(entry.RelativeJsonPath));
+                    if (File.Exists(legacyPath))
+                    {
+                        fullJsonPath = legacyPath;
+                    }
+                    else
+                    {
+                        GD.PrintErr($"[ModWorkspaceSession] Cannot load staged animation: file not found '{fullJsonPath}'");
+                        return null;
+                    }
+                }
+
+                string json = File.ReadAllText(fullJsonPath);
+                var fileModel = JsonSerializer.Deserialize<WorkspaceAnimationFileModel>(json, JsonOpts);
+                if (fileModel == null) return null;
+
+                var anim = new Godot.Animation();
+                anim.Length = fileModel.Length > 0 ? fileModel.Length : (entry.Duration > 0 ? entry.Duration : 1.0);
+                anim.LoopMode = Enum.TryParse<Godot.Animation.LoopModeEnum>(fileModel.LoopMode, true, out var loopMode)
+                    ? loopMode
+                    : (entry.IsLooping ? Godot.Animation.LoopModeEnum.Linear : Godot.Animation.LoopModeEnum.None);
+
+                anim.SetMeta("is_additive", fileModel.IsAdditive || entry.IsAdditive);
+                anim.SetMeta("is_retargeted", true);
+                anim.SetMeta("decoded_by_anim_loader", true);
+                anim.SetMeta("anim_loader_version", 5);
+
+                // Resolve the EXACT relative node path from the AnimationPlayer's RootNode to the Skeleton3D (NEVER use '%' unless UniqueNameInOwner is true!)
+                string skelPathPrefix = "";
+                bool hasValidSkeleton = skeleton != null && GodotObject.IsInstanceValid(skeleton) && !skeleton.IsQueuedForDeletion();
+                if (hasValidSkeleton)
+                {
+                    Node animRoot = null;
+                    var parent = skeleton.GetParent();
+                    while (parent != null)
+                    {
+                        var ap = parent.FindChild("AnimationPlayer", true, false) as AnimationPlayer;
+                        if (ap != null)
+                        {
+                            animRoot = ap.GetNodeOrNull(ap.RootNode) ?? ap.GetParent();
+                            break;
+                        }
+                        if (parent.Name.ToString().StartsWith("Hero_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                        parent = parent.GetParent();
+                    }
+
+                    if (animRoot != null && animRoot.IsInsideTree() && skeleton.IsInsideTree())
+                    {
+                        skelPathPrefix = animRoot.GetPathTo(skeleton).ToString();
+                    }
+                    else if (skeleton.UniqueNameInOwner)
+                    {
+                        skelPathPrefix = "%" + skeleton.Name;
+                    }
+                    else
+                    {
+                        skelPathPrefix = skeleton.Name.ToString();
+                    }
+                }
+
+                foreach (var trackData in fileModel.Tracks)
+                {
+                    if (string.IsNullOrEmpty(trackData.Path)) continue;
+
+                    string trackPath = trackData.Path;
+                    int colonIdx = trackPath.IndexOf(':');
+                    if (colonIdx >= 0)
+                    {
+                        string boneName = trackPath.Substring(colonIdx + 1);
+
+                        // Skip bones that do not exist on this hero's Skeleton3D (e.g. spine_3 on a 3-spine hero) so Godot never logs track resolution warnings!
+                        if (hasValidSkeleton && skeleton.FindBone(boneName) < 0)
+                        {
+                            int matchedBoneIdx = -1;
+                            for (int b = 0; b < skeleton.GetBoneCount(); b++)
+                            {
+                                if (string.Equals(skeleton.GetBoneName(b), boneName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    matchedBoneIdx = b;
+                                    boneName = skeleton.GetBoneName(b);
+                                    break;
+                                }
+                            }
+                            if (matchedBoneIdx < 0)
+                            {
+                                continue;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(skelPathPrefix))
+                        {
+                            trackPath = $"{skelPathPrefix}:{boneName}";
+                        }
+                        else if (trackPath.StartsWith("%"))
+                        {
+                            trackPath = trackPath.Substring(1);
+                        }
+                    }
+
+                    Godot.Animation.TrackType tType;
+                    if (Enum.TryParse<Godot.Animation.TrackType>(trackData.Type, true, out var parsedType))
+                    {
+                        tType = parsedType;
+                    }
+                    else if (trackData.Type.Contains("Rotation", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tType = Godot.Animation.TrackType.Rotation3D;
+                    }
+                    else if (trackData.Type.Contains("Position", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tType = Godot.Animation.TrackType.Position3D;
+                    }
+                    else if (trackData.Type.Contains("Scale", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tType = Godot.Animation.TrackType.Scale3D;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    int trackIdx = anim.AddTrack(tType);
+                    anim.TrackSetPath(trackIdx, trackPath);
+
+                    int count = Math.Min(trackData.Times.Count, trackData.Values.Count);
+                    for (int k = 0; k < count; k++)
+                    {
+                        double time = trackData.Times[k];
+                        var rawVal = trackData.Values[k];
+                        if (rawVal == null) continue;
+
+                        if (tType == Godot.Animation.TrackType.Rotation3D && rawVal.Length >= 4)
+                        {
+                            var q = new Quaternion(rawVal[0], rawVal[1], rawVal[2], rawVal[3]);
+                            anim.TrackInsertKey(trackIdx, time, q);
+                        }
+                        else if ((tType == Godot.Animation.TrackType.Position3D || tType == Godot.Animation.TrackType.Scale3D) && rawVal.Length >= 3)
+                        {
+                            var v = new Vector3(rawVal[0], rawVal[1], rawVal[2]);
+                            anim.TrackInsertKey(trackIdx, time, v);
+                        }
+                    }
+                }
+
+                return anim;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ModWorkspaceSession] Failed to reconstruct animation from JSON for '{entry.CleanName}': {ex.Message}");
+                return null;
+            }
+        }
+
         public string GetParticleOwnerHeroId(string vpcfPath)
         {
             if (string.IsNullOrEmpty(vpcfPath)) return null;
@@ -793,6 +1325,24 @@ namespace DeadlockPlayground.Workspace
                         try { File.Delete(fullPath); } catch { }
                     }
                 }
+                if (asset.Animations != null)
+                {
+                    foreach (var anim in asset.Animations)
+                    {
+                        if (!string.IsNullOrEmpty(anim.RelativeJsonPath))
+                        {
+                            string full = Path.Combine(SessionDir, anim.RelativeJsonPath);
+                            if (File.Exists(full)) { try { File.Delete(full); } catch { } }
+                        }
+                        if (!string.IsNullOrEmpty(anim.RelativeVnmclipPath))
+                        {
+                            string full = Path.Combine(SessionDir, anim.RelativeVnmclipPath);
+                            if (File.Exists(full)) { try { File.Delete(full); } catch { } }
+                        }
+                        OnAnimationDiscarded?.Invoke(heroId, anim.CleanName);
+                    }
+                    asset.Animations.Clear();
+                }
                 hero.Assets.Remove(asset);
             }
 
@@ -821,6 +1371,11 @@ namespace DeadlockPlayground.Workspace
                     else
                     {
                         count += Math.Max(1, asset.Materials.Count);
+                    }
+
+                    if (asset.Animations != null)
+                    {
+                        count += asset.Animations.Count;
                     }
                 }
             }

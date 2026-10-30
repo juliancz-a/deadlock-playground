@@ -20,6 +20,7 @@ namespace DeadlockPlayground.Painter
         public string Name { get; set; } = "New Layer";
         public bool IsVisible { get; set; } = true;
         public bool IsLocked { get; set; } = false;
+        public bool IsAlphaLocked { get; set; } = false;
         public float Opacity { get; set; } = 1.0f;
         public LayerBlendMode BlendMode { get; set; } = LayerBlendMode.Normal;
         public byte[] GpuData { get; set; }

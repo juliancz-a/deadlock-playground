@@ -46,6 +46,7 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
 | **Mod Export Pipeline** | [docs/mod_export_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/mod_export_pipeline.md) | In-place VTEX interception architecture, headless `resourcecompiler.exe` invocation, automated VPK packaging, and collision-free slot allocation (`VpkIndexResolver`). |
 | **Valve / VRF Renderer Reference** | [docs/vrf_deadlock_renderer_reference.md](file:///d:/GameDev/deadlock-playground/docs/vrf_deadlock_renderer_reference.md) | Valve's Deadlock NPR toon lighting math (`citadel.slang`), `NprGain`, `NprToonDiffuse`, `NprSteppedSpecular`, and VRF shader decoding rules. |
 | **Hero Particle Editor System** | [docs/hero_particle_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_particle_editor_system.md) | VData indexing, particle picker modal, 3D stage lifecycle, Pose Tab simulation scrubbing, and 2D particle texture repainting. |
+| **Hero Animation Editor System** | [docs/hero_animation_editor_system.md](file:///d:/GameDev/deadlock-playground/docs/hero_animation_editor_system.md) | Blender-style bottom dock (Dope Sheet, Graph Editor F-Curves), bone gizmo Auto-Keying, pose mirroring, AnimGraph 2 binary .vnmclip_c patcher, .dpp session schema, and VPK mod export. |
 | **Dynamic Changelog & Web Showcase** | [docs/dynamic_changelog_and_website_system.md](file:///d:/GameDev/deadlock-playground/docs/dynamic_changelog_and_website_system.md) | Astro web showcase (`web/`), `@tabler/icons`, custom theme cursor, static `/api/changelog.json` endpoint, Cloudflare Pages hosting, and Godot `ChangelogFeedService.cs` integration. |
 | **Release Automation Pipeline** | [docs/release_automation_pipeline.md](file:///d:/GameDev/deadlock-playground/docs/release_automation_pipeline.md) | Release Hub web UI (`tools/release_hub/`), web `changelog.json` sync, GitHub tag/release asset upload, and GameBanana assisted workflow. |
 
@@ -112,40 +113,33 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Shaders: `res://assets/shaders/painter/*.gdshader`, `res://assets/shaders/valve/*.gdshader`, and `res://assets/shaders/*.gdshader`
    - Components: `res://ui/scenes/components/*.tscn` and `res://ui/scripts/components/*.cs`
 
-### D. Skeletal Animation & Additive Ingestion Rules
-1. **VRF Additive Delta Extraction & Hemisphere Normalization**:
-   - In Source 2, modern clips (`ClipAnimation` / `.vnmclip`) author additive bones directly as deltas around Identity `(0, 0, 0, 1)`, while legacy sequences (`SequenceAnimation` / `.vanim`) neutralize unkeyed channels.
-   - Always extract additive deltas using VRF's built-in `info.VrfAnimation.GetAdditiveDelta(b, frame.Bones[b])` with `frame.ClearToIdentity()`. Do NOT use arbitrary $W$ thresholds or subtract BindPose on clips that are already authored deltas.
-   - Enforce positive quaternion hemisphere normalization ($W \ge 0$, negating $q$ if $W < 0$) to eliminate antipodal $180^\circ$ rotation flips and long-arc interpolations.
-   - Prune identity and static tracks (`IsIdentityOrStaticTrack`) so un-animated joints (lower limbs, weapon mount) receive no tracks in additive clips, allowing them to cleanly inherit the base combat stance in `ComposeOverIdle`.
-   - In `ComposeOverIdle`, root and pelvis bones strictly preserve `baseIdleRot` so character stance and hips remain vertical.
-2. **Preserve Pelvis Elevation Track & Overwrite Collapsed Keys**:
-   - Stripping all `Position3D` tracks from additive sequences leaves the `pelvis` bone at local $(0, 0, 0)$ relative to `root`, dropping the character's hips to the floor.
-   - While limb translation tracks (arms, legs, head) must be omitted so joints evaluate against rest, the `pelvis` bone MUST retain its default rest height:
-     ```csharp
-     if (boneName.Equals("pelvis", StringComparison.OrdinalIgnoreCase))
-     {
-         int pTrack = godotAnim.AddTrack(Godot.Animation.TrackType.Position3D);
-         godotAnim.TrackSetPath(pTrack, $"{skeletonPath}:pelvis");
-         godotAnim.PositionTrackInsertKey(pTrack, 0.0, skeleton.GetBoneRest(pelvisIdx).Origin);
-     }
-     ```
-   - In `StripAdditivePositionTracks`, inspect any existing `:pelvis` track. If it holds collapsed delta keys (`Length() < 0.25m`), remove the collapsed track and re-insert the skeleton's true rest elevation (`skeleton.GetBoneRest(pelvisIdx).Origin`).
-3. **Additive Layer Classification & Default Stance Protection**:
-   - Firing deltas (`recoil`, `primary_fire_aimed`, `shoot`, `burst`, `_add`, `_delta`) are authored as runtime additive modifiers, not standalone base poses.
-   - Categorize these sequences into `"Additive Layers"` in `DeadlockAnimLoader.ClassifyCategory`.
-   - In `PoseTabUI.cs`, present `"Additive Layers"` as a distinct subcategory collapsed by default, and exclude it from `AutoSelectDefaultIdle()` so partial overlays are never accidentally loaded as default stances.
-4. **Generic Structural Detection of Collapsed Limb Positions (`ShouldStripPositionTracks`)**:
-   - Additive reactions (e.g. `flinch_back`, `landing_impact`, `melee_hit`, `lean`) or delta clips often lack recoil/fire keywords.
-   - Do NOT hardcode animation names. Use `DeadlockAnimLoader.HasCollapsedOrDeltaPositionTracks`: inspect Godot `Position3D` tracks for child bones with physical rest lengths $> 0.04m$.
-   - If child bone keys sit at $(0, 0, 0)$ (`Length() < 0.02m`), the clip contains raw delta positions that crush the skeleton into a flat origin box.
-   - In `PlayerTabUI.cs`, guard playback using `DeadlockAnimLoader.ShouldStripPositionTracks(anim, skeleton, name)` so any collapsed sequence has limb tracks stripped and hips restored automatically.
-   - In `VpkLoaderTest.cs`, initialize `GltfModelExporter` with `ComposeAdditiveAnimations = true` so pre-exported glTF sequences compose additive deltas directly onto bind pose.
-5. **Base Idle Underlay for Additive Sequences (`ComposeOverIdle` & Position Locking)**:
-   - Additive sequences (reactions, flinches, recoil deltas) only key reacting joints (spine/head), leaving arms, legs, and weapon attachment unkeyed.
-   - In `ComposeOverIdle`, non-pelvis limb bones (arms, legs, spine, neck) **strictly preserve their `baseIdlePos`** (`idleBonePos[boneName]`), preventing additive position tracks or origin snaps from stretching joints or launching the character into the air.
-   - Pelvis preserves base idle stance elevation `basePelvisPos` and only receives small, clamped relative elevation deltas (`delta.Length() <= 0.25m`).
-   - Unkeyed joints inherit the hero's default standing idle pose (`primary_stand_idle` / `stand_idle`), keeping arms holding weapons and feet planted, while delta rotation keys are composed on top of base idle orientations (`(baseIdleRot * deltaRot).Normalized()`).
+### D. Skeletal Animation, Additive Ingestion & Root Motion Rules
+1. **VRF Additive Metadata Single Source of Truth**:
+   - In Source 2, `VrfAnimation.IsAdditive` parsed directly from compiled `.vnmclip_c` / `.vanim_c` binary headers (`m_bIsAdditive`) is the authoritative source of truth.
+   - **Never** use sequence name substrings (`fire`, `shoot`, `shot`, `burst`, `aimed`, `flinch`) to force additive decoding. Heuristic name-based guessing causes full-body absolute animations to compose over rest rotations twice, splaying limbs and rotating the hero horizontal.
+   - In `DecodeAnimationToGodot`, strictly trust `info.VrfAnimation.IsAdditive`. Name matching is reserved solely for UI folder categorization in `ClassifyCategory`.
+2. **Non-Destructive Caching (Zero Runtime Track Stripping on Decoded Clips)**:
+   - `DecodeAnimationToGodot` constructs authoritative tracks cleanly in a single pass with proper rest elevation.
+   - Never call `StripAdditivePositionTracks` or mutate tracks on dynamically decoded animations (`godotAnim.HasMeta("decoded_by_anim_loader")`) during playback or selection in `PlayerTabUI.cs`.
+   - Mutating cached tracks permanently strips authored shoulder, IK, and spine translations, turning bones static and tricking subsequent selections into classifying the clip as additive.
+   - Tag all decoded clips with `anim_loader_version = 2` and evict older cache entries automatically.
+3. **In-Place Root Motion Policy & Center Lock**:
+   - For all root-level bones (`root`, `root_motion`, `Scene Root`, `SceneRoot`, `world`, or parentless joints), apply `SourceToGltfRotation` only to the top-level parentless root to align the skeleton upright.
+   - When "In-Place Motion" is enabled (`_isInPlaceMotionEnabled = true`), zero out horizontal root translation (`convPos.X = 0`, `convPos.Z = 0`) so running, dashing, and rolling sequences remain centered in the viewport while preserving vertical $Y$ jumping/crouching motion.
+4. **Incompatible Skeleton & Sub-Prop Isolation**:
+   - Clips authored on external weapon or prop skeletons (e.g. `TargetSkeletonName` containing `weapon`, `props/`, `v_`, or clips with $< 8$ tracks on 180+ bone hero models) are flagged with `IsCompatible = false`.
+   - In `PlayerTabUI`, incompatible clips are greyed out (`⚠ {name} [Incompatible]`) with disabled selection and informative tooltips, preventing prop tracks from scrambling character body bones.
+5. **Tokenized Category Classification**:
+   - `ClassifyCategory` uses tokenized word matching (splitting by `_`, `-`, ` `, `/`) rather than raw substrings (`.Contains("air")`), eliminating false positives (e.g. `hair` -> `air`, `white` -> `hit`, `result` -> `ult`, `window` -> `win`).
+6. **Additive Composition Contract (`ComposeOverIdle`)**:
+   - When an additive sequence is composed over idle, tag the resulting Godot `Animation` with `composed = true`, `is_additive = false`, and `anim_loader_version = 4`.
+   - `IsAdditiveAnimation` must immediately return `false` if `composed == true` or `decoded_by_anim_loader == true`, guaranteeing that additive composition is never applied more than once.
+7. **Two-Root Skeleton Architecture (`pelvis` & `root_motion`)**:
+   - In Deadlock skeletons, `pelvis` is parentless (`Parent == null`, Godot parent -1) alongside `root_motion`.
+   - Never assume a single top root via `.FirstOrDefault(b => b.Parent == null)`. Apply `SourceToGltfRotation` (-90° X) to **all parentless joints** (`isParentless = (vrfBone.Parent == null)`).
+8. **AnimGraph Secondary Skeleton Retargeting (`.vnmskel`)**:
+   - Locomotion, traversal, and action sequences targeting secondary `.vnmskel` skeletons must be retargeted via `SkeletonRetargeter` against the model skeleton.
+   - Decomposing retargeted world matrices $M_{\text{local}} = M_{\text{world}}[b] \times (M_{\text{world}}[p])^{-1}$ delivers an exact match (0.0° error) against VRF's glTF-baked oracle.
 
 ### E. Mandatory Documentation Synchronization & Maintenance
 > [!IMPORTANT]

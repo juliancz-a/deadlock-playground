@@ -476,7 +476,7 @@ public partial class SettingsDialog : PanelContainer
         if (_painterOutlineWidthLabel != null) _painterOutlineWidthLabel.Text = $"{GizmoDisplaySettings.PainterOutlineWidth:F1}px";
     }
 
-    public void Open()
+    public void Open(int tabIndex = -1, string keybindCategory = null)
     {
         Visible = true;
         MoveToFront();
@@ -487,7 +487,18 @@ public partial class SettingsDialog : PanelContainer
         OffsetBottom = 270;
         SyncFromSettings();
         UpdatePathFields();
+        if (tabIndex >= 0 && _tabContainer != null)
+        {
+            _tabContainer.CurrentTab = tabIndex;
+        }
         OnTabChanged(_tabContainer?.CurrentTab ?? 0);
+
+        if (!string.IsNullOrEmpty(keybindCategory))
+        {
+            var kbTab = GetNodeOrNull<KeybindsSettingsTabUI>("VBoxContainer/TabContainer/Keybinds/KeybindsSettingsTab")
+                     ?? FindChild("KeybindsSettingsTab", true, false) as KeybindsSettingsTabUI;
+            kbTab?.SelectCategory(keybindCategory);
+        }
     }
 
     public void Close()

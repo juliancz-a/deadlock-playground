@@ -5,6 +5,7 @@ using DeadlockPlayground.Tools;
 
 public partial class KeybindsSettingsTabUI : VBoxContainer
 {
+    private TabContainer _categoryTabContainer;
     private readonly Dictionary<string, VBoxContainer> _categoryContainers = new();
     private Label _lblConflictWarning;
     private Button _btnResetDefaults;
@@ -60,14 +61,14 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         AddChild(_lblConflictWarning);
 
         // 3. Category TabContainer
-        var tabContainer = new TabContainer
+        _categoryTabContainer = new TabContainer
         {
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             SizeFlagsVertical = SizeFlags.ExpandFill,
             CustomMinimumSize = new Vector2(0, 270)
         };
 
-        string[] categories = { "Texture Paint", "Camera", "Bones" };
+        string[] categories = { "Texture Paint", "Camera", "Bones", "Animation" };
         foreach (var cat in categories)
         {
             var margin = new MarginContainer
@@ -97,12 +98,12 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
 
             scroll.AddChild(vbox);
             margin.AddChild(scroll);
-            tabContainer.AddChild(margin);
+            _categoryTabContainer.AddChild(margin);
 
             _categoryContainers[cat] = vbox;
         }
 
-        AddChild(tabContainer);
+        AddChild(_categoryTabContainer);
         PopulateActionRows();
 
         // 4. Bottom action bar
@@ -118,6 +119,11 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         bottomBar.AddChild(_btnResetDefaults);
 
         AddChild(bottomBar);
+
+        if (!string.IsNullOrEmpty(_pendingCategory))
+        {
+            SelectCategory(_pendingCategory);
+        }
 
         // Confirmation Dialog
         _confirmResetDialog = new ConfirmationDialog
@@ -319,5 +325,27 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
     private void OnResetDefaultsPressed()
     {
         _confirmResetDialog?.PopupCentered();
+    }
+
+    private string _pendingCategory = null;
+
+    public void SelectCategory(string categoryName)
+    {
+        if (_categoryTabContainer == null)
+        {
+            _pendingCategory = categoryName;
+            return;
+        }
+
+        for (int i = 0; i < _categoryTabContainer.GetTabCount(); i++)
+        {
+            var child = _categoryTabContainer.GetTabControl(i);
+            if (child != null && child.Name == categoryName)
+            {
+                _categoryTabContainer.CurrentTab = i;
+                _pendingCategory = null;
+                break;
+            }
+        }
     }
 }

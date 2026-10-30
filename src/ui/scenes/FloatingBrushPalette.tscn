@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://odvr7w7tk4ug" path="res://assets/at-icons/bucket.svg" id="6_icon_bucket"]
 [ext_resource type="Texture2D" uid="uid://drng8bo6sfceq" path="res://assets/at-icons/magic_wand.svg" id="7_icon_wand"]
 [ext_resource type="Texture2D" uid="uid://df0puf6jw2nk4" path="res://assets/at-icons/stamp.svg" id="8_icon_stamp"]
+[ext_resource type="Texture2D" path="res://assets/at-icons/sticker.svg" id="8_icon_sticker"]
 [ext_resource type="Texture2D" uid="uid://cli801rlo7y66" path="res://assets/at-icons/text.svg" id="9_icon_text"]
 [ext_resource type="Texture2D" uid="uid://c04gv60nyqptd" path="res://assets/at-icons/mirror.svg" id="10_icon_mirror"]
 [ext_resource type="Texture2D" uid="uid://ufndp46u28jp" path="res://assets/at-icons/undo.svg" id="11_icon_undo"]
@@ -173,7 +174,18 @@ expand_icon = true
 unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 32)
 layout_mode = 2
-tooltip_text = "Decal Stamper [L]"
+tooltip_text = "Decal Stamper [K]"
+toggle_mode = true
+icon = ExtResource("8_icon_sticker")
+icon_alignment = 1
+expand_icon = true
+
+[node name="BtnClone" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1298040379]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+tooltip_text = "Clone Stamp [S]
+Alt+Click in 2D canvas to set source"
 toggle_mode = true
 icon = ExtResource("8_icon_stamp")
 icon_alignment = 1
@@ -255,7 +267,8 @@ layout_mode = 2
 tooltip_text = "Pin Options Panel"
 toggle_mode = true
 button_pressed = true
-text = "📌"
+theme_override_font_sizes/font_size = 9
+text = "PIN"
 
 [node name="FlyoutPanel" type="PanelContainer" parent="MainVBox/HBoxContainer" unique_id=1821101042]
 unique_name_in_owner = true
@@ -1315,6 +1328,40 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Cancel (Esc)"
+
+[node name="CloneOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=2079485710]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LblCloneInstructions" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195711]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
+theme_override_font_sizes/font_size = 11
+text = "Alt + Left Click in 2D UV Canvas to set the clone source origin point."
+autowrap_mode = 2
+
+[node name="ChkCloneSampleAllLayers" type="CheckBox" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195712]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "When enabled, samples from the full composite (all visible layers). When disabled, samples only from the active layer."
+button_pressed = true
+text = "Sample All Layers"
+
+[node name="BtnResetCloneSource" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195713]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Reset Clone Source"
+
+[node name="LblCloneStatus" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195714]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
+theme_override_font_sizes/font_size = 10
+text = "Source: None set (Alt+Click to set)"
+autowrap_mode = 2
 
 [node name="DecalFileDialog" type="FileDialog" parent="." unique_id=51934037]
 unique_name_in_owner = true
