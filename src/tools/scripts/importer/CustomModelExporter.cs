@@ -74,6 +74,11 @@ namespace DeadlockPlayground.Importer
                 public Color AlbedoTint { get; set; } = Colors.White;
                 public float RoughnessScalar { get; set; } = 0.6f;
                 public float MetallicScalar { get; set; } = 0.0f;
+                public bool IsOutlineShell { get; set; }
+                public bool IsTranslucent { get; set; }
+                public bool IsAlphaTest { get; set; }
+                public bool IsDoubleSided { get; set; }
+                public bool IsUnlit { get; set; }
             }
 
             public string HeroCodename { get; set; } = "hero";
@@ -192,7 +197,7 @@ namespace DeadlockPlayground.Importer
                 for (int i = 0; i < meshes.Count; i++)
                 {
                     var meshInst = meshes[i];
-                    if (meshInst == null || !GodotObject.IsInstanceValid(meshInst) || meshInst.Mesh == null)
+                    if (meshInst == null || !GodotObject.IsInstanceValid(meshInst) || meshInst.Mesh == null || !meshInst.Visible)
                         continue;
 
                     Mesh mesh = meshInst.Mesh;
@@ -281,13 +286,39 @@ namespace DeadlockPlayground.Importer
                         float roughScalar = 0.6f;
                         float metalScalar = 0.0f;
 
+                        bool isOutlineShell = (meshInst.HasMeta("IsOutlineShell") && meshInst.GetMeta("IsOutlineShell").AsBool())
+                                              || CustomModelAutoRigger.IsLikelyOutlineShell(meshInst, primaryMat);
+                        bool isTranslucent = false;
+                        bool isAlphaTest = false;
+                        bool isDoubleSided = false;
+                        bool isUnlit = isOutlineShell;
+
                         if (stdMat != null)
                         {
+                            Texture2D albedoTex = stdMat.AlbedoTexture ?? stdMat.EmissionTexture;
                             albedoTint = stdMat.AlbedoColor;
+                            bool isBlackAlbedo = albedoTint.R < 0.02f && albedoTint.G < 0.02f && albedoTint.B < 0.02f;
+                            if (isBlackAlbedo)
+                            {
+                                if (albedoTex != null)
+                                {
+                                    albedoTint = new Color(1f, 1f, 1f, albedoTint.A > 0f ? albedoTint.A : 1f);
+                                }
+                                else if (stdMat.EmissionEnabled && (stdMat.Emission.R > 0.02f || stdMat.Emission.G > 0.02f || stdMat.Emission.B > 0.02f))
+                                {
+                                    albedoTint = new Color(stdMat.Emission.R, stdMat.Emission.G, stdMat.Emission.B, albedoTint.A > 0f ? albedoTint.A : 1f);
+                                }
+                            }
+
                             roughScalar = Mathf.Clamp(stdMat.Roughness, 0.05f, 1.0f);
                             metalScalar = Mathf.Clamp(stdMat.Metallic, 0.0f, 1.0f);
+                            isTranslucent = stdMat.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
+                            isAlphaTest = stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
+                                          stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaHash;
+                            isDoubleSided = !isOutlineShell && stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled;
+                            isUnlit = isOutlineShell || stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded;
 
-                            albedoPng = ExtractTexturePngPowerOfTwo(stdMat.AlbedoTexture, albedoTint);
+                            albedoPng = ExtractTexturePngPowerOfTwo(albedoTex, albedoTint);
                             normalPng = ExtractTexturePngPowerOfTwo(stdMat.NormalTexture, Colors.White);
                             roughPng = ExtractTexturePngPowerOfTwo(stdMat.RoughnessTexture, Colors.White);
                             aoPng = ExtractTexturePngPowerOfTwo(stdMat.AOEnabled ? stdMat.AOTexture : null, Colors.White);
@@ -306,40 +337,48 @@ namespace DeadlockPlayground.Importer
                             albedoPng = CreateSolidColorPngBytes(64, 64, albedoTint);
                         }
 
-                        // Deduplicate material name across submeshes sharing the same Material instance or identical texture content
+                        // Resolve candidate material name before deduplication so distinct materials (e.g. eye white vs pistol) never collide
+                        string candidateRaw = primaryMat?.ResourceName;
+                        if (string.IsNullOrWhiteSpace(candidateRaw) && meshInst.HasMeta("SourceMaterialName"))
+                        {
+                            candidateRaw = meshInst.GetMeta("SourceMaterialName").AsString();
+                        }
+                        if (string.IsNullOrWhiteSpace(candidateRaw) && primaryMat != null && primaryMat.HasMeta("MaterialName"))
+                        {
+                            candidateRaw = primaryMat.GetMeta("MaterialName").AsString();
+                        }
+                        if (string.IsNullOrWhiteSpace(candidateRaw))
+                        {
+                            string baseMeshName = meshInst.Name.ToString();
+                            int surfIdx = baseMeshName.IndexOf("_surf", StringComparison.OrdinalIgnoreCase);
+                            if (surfIdx > 0) baseMeshName = baseMeshName.Substring(0, surfIdx);
+                            candidateRaw = $"{cleanHero}_{baseMeshName}";
+                        }
+
+                        string baseSanitized = SanitizeMaterialName(candidateRaw);
+                        if (baseSanitized == "custom_mat")
+                        {
+                            baseSanitized = SanitizeMaterialName($"{cleanHero}_mat_{usedMatNames.Count}");
+                        }
+
+                        // Deduplicate material name across submeshes sharing the same Material instance or identical (name + texture + flags)
                         string matName = null;
                         ulong matId = primaryMat != null ? primaryMat.GetInstanceId() : 0;
                         string texHash = ComputeFastHash(albedoPng, normalPng);
+                        string dedupKey = !string.IsNullOrEmpty(texHash)
+                            ? $"{baseSanitized}_{texHash}_{isOutlineShell}_{isTranslucent}_{isAlphaTest}"
+                            : "";
 
                         if (matId != 0 && materialInstanceToName.TryGetValue(matId, out string existingById))
                         {
                             matName = existingById;
                         }
-                        else if (!string.IsNullOrEmpty(texHash) && textureHashToMatName.TryGetValue(texHash, out string existingByHash))
+                        else if (!string.IsNullOrEmpty(dedupKey) && textureHashToMatName.TryGetValue(dedupKey, out string existingByHash))
                         {
                             matName = existingByHash;
                         }
                         else
                         {
-                            string candidateRaw = primaryMat?.ResourceName;
-                            if (string.IsNullOrWhiteSpace(candidateRaw) && meshInst.HasMeta("SourceMaterialName"))
-                            {
-                                candidateRaw = meshInst.GetMeta("SourceMaterialName").AsString();
-                            }
-                            if (string.IsNullOrWhiteSpace(candidateRaw))
-                            {
-                                string baseMeshName = meshInst.Name.ToString();
-                                int surfIdx = baseMeshName.IndexOf("_surf", StringComparison.OrdinalIgnoreCase);
-                                if (surfIdx > 0) baseMeshName = baseMeshName.Substring(0, surfIdx);
-                                candidateRaw = $"{cleanHero}_{baseMeshName}";
-                            }
-
-                            string baseSanitized = SanitizeMaterialName(candidateRaw);
-                            if (baseSanitized == "custom_mat")
-                            {
-                                baseSanitized = SanitizeMaterialName($"{cleanHero}_mat_{usedMatNames.Count}");
-                            }
-
                             matName = baseSanitized;
                             int suffix = 1;
                             while (!usedMatNames.Add(matName))
@@ -348,7 +387,7 @@ namespace DeadlockPlayground.Importer
                             }
 
                             if (matId != 0) materialInstanceToName[matId] = matName;
-                            if (!string.IsNullOrEmpty(texHash)) textureHashToMatName[texHash] = matName;
+                            if (!string.IsNullOrEmpty(dedupKey)) textureHashToMatName[dedupKey] = matName;
                         }
 
                         string repName = meshInst.HasMeta("ReplacesHeroSubmesh")
@@ -372,7 +411,12 @@ namespace DeadlockPlayground.Importer
                             AmbientOcclusionPngBytes = aoPng,
                             AlbedoTint = albedoTint,
                             RoughnessScalar = roughScalar,
-                            MetallicScalar = metalScalar
+                            MetallicScalar = metalScalar,
+                            IsOutlineShell = isOutlineShell,
+                            IsTranslucent = isTranslucent,
+                            IsAlphaTest = isAlphaTest,
+                            IsDoubleSided = isDoubleSided,
+                            IsUnlit = isUnlit
                         });
 
                         subCounter++;
@@ -699,7 +743,7 @@ namespace DeadlockPlayground.Importer
                     var (decompiledVmdlText, extractedSubfiles, vrfBones) = DecompileVanillaHeroVmdl(bundle, vmdlRel + "_c", modelFolderRel);
 
                     // Write physics hull/mesh .dmx subfiles and any non-replaced weapon .dmx subfiles into contentModelDir
-                    var preservedWeaponMeshes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    var writtenSubfileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     bool customReplacesWeapon = bundle.Submeshes.Any(sm => IsWeaponReplacementSubmesh(sm));
 
                     foreach (var (subFileName, subBytes) in extractedSubfiles)
@@ -717,6 +761,7 @@ namespace DeadlockPlayground.Importer
                         {
                             string outSubPath = Path.Combine(contentModelDir, leafName);
                             File.WriteAllBytes(outSubPath, subBytes);
+                            writtenSubfileNames.Add(leafName);
                         }
                     }
 
@@ -759,7 +804,7 @@ namespace DeadlockPlayground.Importer
                         materialsFolderRel,
                         customRenderMeshes,
                         materialFiles.Keys.ToList(),
-                        extractedSubfiles.Keys.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                        writtenSubfileNames,
                         includeAnimGraph2Nodes: true);
                     File.WriteAllText(vmdlFullPath, vmdlContent, new UTF8Encoding(false));
 
@@ -785,7 +830,7 @@ namespace DeadlockPlayground.Importer
                         string expectedVmdlC = Path.Combine(gameAddonRoot, (vmdlRel + "_c").Replace('/', Path.DirectorySeparatorChar));
 
                         // CSDK12 Fallback: If older compiler fails on NmSkeletonList/AnimGraph2List class allocation,
-                        // strip those two blocks, compile with CSDK12, and binary-patch AnimGraph2 references into .vmdl_c!
+                        // strip those two blocks, compile with CSDK12, and binary-patching AnimGraph2 references into .vmdl_c!
                         if ((!vmdlOk || !File.Exists(expectedVmdlC)) &&
                             vmdlLog != null &&
                             (vmdlLog.Contains("NmSkeletonList", StringComparison.OrdinalIgnoreCase) ||
@@ -800,7 +845,7 @@ namespace DeadlockPlayground.Importer
                                 materialsFolderRel,
                                 customRenderMeshes,
                                 materialFiles.Keys.ToList(),
-                                extractedSubfiles.Keys.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                                writtenSubfileNames,
                                 includeAnimGraph2Nodes: false);
                             File.WriteAllText(vmdlFullPath, fallbackVmdl, new UTF8Encoding(false));
                             vmdlOk = RunResourceCompiler(compilerExe, vmdlFullPath, out vmdlLog);
@@ -813,8 +858,12 @@ namespace DeadlockPlayground.Importer
 
                         if (!File.Exists(expectedVmdlC))
                         {
+                            if (!string.IsNullOrWhiteSpace(vmdlLog))
+                            {
+                                progress?.Report(new ExportProgressReport(0.85f, $"[ERROR] resourcecompiler.exe output:\n{vmdlLog.Trim()}", ExportLogLevel.Error));
+                            }
                             result.Success = false;
-                            result.ErrorMessage = $"resourcecompiler.exe failed to produce '{expectedVmdlC}'. Log:\n{vmdlLog}";
+                            result.ErrorMessage = $"resourcecompiler.exe failed to compile '{Path.GetFileName(vmdlFullPath)}' (see log console for details).";
                             return result;
                         }
 
@@ -847,6 +896,44 @@ namespace DeadlockPlayground.Importer
                                 result.CompiledVtexCFiles.Add(vtexC);
                                 result.AllowlistedVpkFiles[rel] = vtexC;
                             }
+
+                            // Verify every .vtex_c referenced by every compiled .vmat_c is staged in AllowlistedVpkFiles
+                            foreach (var vmatC in result.CompiledVmatCFiles)
+                            {
+                                try
+                                {
+                                    using var vmatRes = new ValveResourceFormat.Resource();
+                                    vmatRes.Read(vmatC);
+                                    if (vmatRes.DataBlock is ValveResourceFormat.ResourceTypes.Material matData)
+                                    {
+                                        foreach (var texParam in matData.TextureParams)
+                                        {
+                                            if (string.IsNullOrWhiteSpace(texParam.Value)) continue;
+                                            string vtexRelC = texParam.Value.Replace('\\', '/').TrimStart('/');
+                                            if (!vtexRelC.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                                vtexRelC += "_c";
+
+                                            if (!result.AllowlistedVpkFiles.ContainsKey(vtexRelC))
+                                            {
+                                                string candidateInAddon = Path.Combine(gameAddonRoot, vtexRelC.Replace('/', Path.DirectorySeparatorChar));
+                                                string candidateInCitadel = Path.Combine(csdkRoot, "game", "citadel", vtexRelC.Replace('/', Path.DirectorySeparatorChar));
+                                                if (File.Exists(candidateInAddon))
+                                                {
+                                                    result.AllowlistedVpkFiles[vtexRelC] = candidateInAddon;
+                                                }
+                                                else if (File.Exists(candidateInCitadel) && vtexRelC.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    result.AllowlistedVpkFiles[vtexRelC] = candidateInCitadel;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    GD.PrintErr($"[CustomModelExporter] Warning inspecting '{Path.GetFileName(vmatC)}': {ex.Message}");
+                                }
+                            }
                         }
                     }
 
@@ -870,10 +957,10 @@ namespace DeadlockPlayground.Importer
                             return result;
                         }
 
-                        if (vpkEntries.Count > 35)
+                        if (vpkEntries.Count > 65)
                         {
                             result.Success = false;
-                            result.ErrorMessage = $"VPK file count ({vpkEntries.Count}) exceeded strict upper bound of 35 files.";
+                            result.ErrorMessage = $"VPK file count ({vpkEntries.Count}) exceeded strict upper bound of 65 files.";
                             return result;
                         }
 
@@ -1235,7 +1322,11 @@ namespace DeadlockPlayground.Importer
             if (sm == null) return false;
             string rep = sm.OriginalHeroReplacementName?.ToLowerInvariant() ?? "";
             string name = sm.SubmeshName?.ToLowerInvariant() ?? "";
-            return rep.Contains("gun") || rep.Contains("weapon") || name.Contains("gun") || name.Contains("weapon");
+            return rep.Contains("gun") || rep.Contains("weapon") ||
+                   name.Contains("gun") || name.Contains("weapon") ||
+                   name.Contains("pistol") || name.Contains("rifle") ||
+                   name.Contains("sword") || name.Contains("blade") ||
+                   name.Contains("bow") || name.Contains("katana");
         }
 
         /// <summary>
@@ -1655,20 +1746,11 @@ namespace DeadlockPlayground.Importer
                     if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
                         continue;
 
-                    Vector3 p0 = GodotToSourcePosition(sub.Vertices[i0]);
-                    Vector3 p1 = GodotToSourcePosition(sub.Vertices[i1]);
-                    Vector3 p2 = GodotToSourcePosition(sub.Vertices[i2]);
-
-                    Vector3 n0 = GodotToSourceNormal(i0 < sub.Normals.Length ? sub.Normals[i0] : Vector3.Up);
-                    Vector3 n1 = GodotToSourceNormal(i1 < sub.Normals.Length ? sub.Normals[i1] : Vector3.Up);
-                    Vector3 n2 = GodotToSourceNormal(i2 < sub.Normals.Length ? sub.Normals[i2] : Vector3.Up);
-
-                    // Guarantee outward CCW winding in Source 2 space matching vertex normals
-                    Vector3 faceCross = (p1 - p0).Cross(p2 - p0);
-                    Vector3 avgNorm = n0 + n1 + n2;
-                    int[] triVerts = faceCross.Dot(avgNorm) < 0f
-                        ? new[] { i0, i2, i1 }
-                        : new[] { i0, i1, i2 };
+                    // In Godot ArrayMesh (imported via GltfDocument), triangle indices (i0, i1, i2) are stored CW,
+                    // whereas Source 2 .smd expects right-handed CCW winding (i0, i2, i1).
+                    // Never flip per-triangle based on faceCross.Dot(avgNorm), which corrupts custom bent anime
+                    // normals on faces/bangs and flips inverted-hull outline shells outward!
+                    int[] triVerts = new[] { i0, i2, i1 };
 
                     sb.AppendLine(matName);
 
@@ -1782,11 +1864,23 @@ namespace DeadlockPlayground.Importer
             writtenVmatPaths = new List<string>();
             var matMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            // Write a single shared flat tangent-space normal map (128, 128, 255) for materials without custom normal maps
-            string sharedNormalFile = "shared_flat_normal.png";
-            string sharedNormalFull = Path.Combine(contentMatDir, sharedNormalFile);
-            string sharedNormalRel = $"{materialsFolderRel}/{sharedNormalFile}";
-            File.WriteAllBytes(sharedNormalFull, CreateSolidColorPngBytes(64, 64, new Color(0.5f, 0.5f, 1.0f, 1.0f)));
+            // Write explicit neutral fallback textures into contentMatDir so resourcecompiler.exe never leaves
+            // g_tAmbientOcclusion, g_tNormalRoughness, g_tSelfIllumMask, or g_tTintMask unbound or pointing to missing engine files.
+            string defaultNormalFile = "default_flat_normal.png";
+            string defaultNormalRel = $"{materialsFolderRel}/{defaultNormalFile}";
+            File.WriteAllBytes(Path.Combine(contentMatDir, defaultNormalFile), CreateSolidColorPngBytes(64, 64, new Color(0.5f, 0.5f, 1.0f, 1.0f)));
+
+            string defaultWhiteAoFile = "default_white_ao.png";
+            string defaultWhiteAoRel = $"{materialsFolderRel}/{defaultWhiteAoFile}";
+            File.WriteAllBytes(Path.Combine(contentMatDir, defaultWhiteAoFile), CreateSolidColorPngBytes(64, 64, new Color(1.0f, 1.0f, 1.0f, 1.0f)));
+
+            string defaultRoughFile = "default_roughness.png";
+            string defaultRoughRel = $"{materialsFolderRel}/{defaultRoughFile}";
+            File.WriteAllBytes(Path.Combine(contentMatDir, defaultRoughFile), CreateSolidColorPngBytes(64, 64, new Color(0.85f, 0.85f, 0.85f, 1.0f)));
+
+            string defaultBlackMaskFile = "default_black_mask.png";
+            string defaultBlackMaskRel = $"{materialsFolderRel}/{defaultBlackMaskFile}";
+            File.WriteAllBytes(Path.Combine(contentMatDir, defaultBlackMaskFile), CreateSolidColorPngBytes(64, 64, new Color(0.0f, 0.0f, 0.0f, 1.0f)));
 
             foreach (var sub in bundle.Submeshes)
             {
@@ -1802,7 +1896,7 @@ namespace DeadlockPlayground.Importer
                     : CreateSolidColorPngBytes(64, 64, sub.AlbedoTint);
                 File.WriteAllBytes(colorPngFull, albedoBytes);
 
-                string normalPngRel = sharedNormalRel;
+                string normalPngRel = defaultNormalRel;
                 if (sub.NormalPngBytes != null && sub.NormalPngBytes.Length > 0)
                 {
                     string normalPngFile = $"{matName}_normal.png";
@@ -1810,8 +1904,7 @@ namespace DeadlockPlayground.Importer
                     normalPngRel = $"{materialsFolderRel}/{normalPngFile}";
                 }
 
-                string roughValueOrPath = string.Format(CultureInfo.InvariantCulture,
-                    "[{0:F6} {0:F6} {0:F6} 0.000000]", sub.RoughnessScalar);
+                string roughValueOrPath = defaultRoughRel;
                 if (sub.RoughnessPngBytes != null && sub.RoughnessPngBytes.Length > 0)
                 {
                     string roughPngFile = $"{matName}_rough.png";
@@ -1819,7 +1912,7 @@ namespace DeadlockPlayground.Importer
                     roughValueOrPath = $"{materialsFolderRel}/{roughPngFile}";
                 }
 
-                string aoValueOrPath = "[1.000000 1.000000 1.000000 0.000000]";
+                string aoValueOrPath = defaultWhiteAoRel;
                 if (sub.AmbientOcclusionPngBytes != null && sub.AmbientOcclusionPngBytes.Length > 0)
                 {
                     string aoPngFile = $"{matName}_ao.png";
@@ -1833,7 +1926,12 @@ namespace DeadlockPlayground.Importer
                     normalPngRel,
                     roughValueOrPath,
                     sub.MetallicScalar,
-                    aoValueOrPath);
+                    aoValueOrPath,
+                    sub.IsTranslucent,
+                    sub.IsAlphaTest,
+                    sub.IsDoubleSided && !sub.IsOutlineShell,
+                    defaultBlackMaskRel,
+                    defaultWhiteAoRel);
                 File.WriteAllText(vmatFull, vmatContent, new UTF8Encoding(false));
                 writtenVmatPaths.Add(vmatFull);
 
@@ -1848,7 +1946,12 @@ namespace DeadlockPlayground.Importer
             string normalTexturePngRel,
             string roughnessValueOrPngRel,
             float metallicScalar,
-            string aoValueOrPngRel)
+            string aoValueOrPngRel,
+            bool isTranslucent = false,
+            bool isAlphaTest = false,
+            bool renderBackfaces = false,
+            string selfIllumMaskRel = null,
+            string tintMaskRel = null)
         {
             var ic = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
@@ -1858,9 +1961,33 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine("{");
             sb.AppendLine("\tshader \"pbr.vfx\"");
             sb.AppendLine();
+            sb.AppendLine("\t//---- Rendering & NPR Lighting ----");
+            sb.AppendLine("\tF_USE_NPR_LIGHTING 1");
+            if (renderBackfaces)
+            {
+                sb.AppendLine("\tF_RENDER_BACKFACES 1");
+            }
+            sb.AppendLine();
+            if (isTranslucent)
+            {
+                sb.AppendLine("\t//---- Translucent ----");
+                sb.AppendLine("\tF_TRANSLUCENT 1");
+                sb.AppendLine($"\tTextureTranslucency1 \"{colorTexturePngRel}\"");
+                sb.AppendLine($"\tTextureTranslucency \"{colorTexturePngRel}\"");
+                sb.AppendLine();
+            }
+            else if (isAlphaTest)
+            {
+                sb.AppendLine("\t//---- Alpha Test ----");
+                sb.AppendLine("\tF_ALPHA_TEST 1");
+                sb.AppendLine($"\tTextureTranslucency1 \"{colorTexturePngRel}\"");
+                sb.AppendLine($"\tTextureTranslucency \"{colorTexturePngRel}\"");
+                sb.AppendLine();
+            }
             sb.AppendLine("\t//---- Color ----");
             sb.AppendLine("\tg_flModelTintAmount \"1.000\"");
             sb.AppendLine("\tg_vColorTint \"[1.000000 1.000000 1.000000 0.000000]\"");
+            sb.AppendLine("\tg_vColorTint1 \"[1.000000 1.000000 1.000000 0.000000]\"");
             sb.AppendLine($"\tTextureColor1 \"{colorTexturePngRel}\"");
             sb.AppendLine($"\tTextureColor \"{colorTexturePngRel}\"");
             sb.AppendLine();
@@ -1875,6 +2002,22 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine(string.Format(ic, "\tTextureMetalness \"[{0:F6} {0:F6} {0:F6} 0.000000]\"", metallicScalar));
             sb.AppendLine($"\tTextureAmbientOcclusion1 \"{aoValueOrPngRel}\"");
             sb.AppendLine($"\tTextureAmbientOcclusion \"{aoValueOrPngRel}\"");
+            if (!string.IsNullOrEmpty(selfIllumMaskRel))
+            {
+                sb.AppendLine($"\tTextureSelfIllumMask1 \"{selfIllumMaskRel}\"");
+                sb.AppendLine($"\tTextureSelfIllumMask \"{selfIllumMaskRel}\"");
+                sb.AppendLine($"\tTextureNprTramsissiveColor1 \"{selfIllumMaskRel}\"");
+                sb.AppendLine($"\tTextureNprTransmissiveColor \"{selfIllumMaskRel}\"");
+            }
+            if (!string.IsNullOrEmpty(tintMaskRel))
+            {
+                sb.AppendLine($"\tTextureTintMask1 \"{tintMaskRel}\"");
+                sb.AppendLine($"\tTextureTintMask \"{tintMaskRel}\"");
+                sb.AppendLine($"\tTextureRimLightMask1 \"{tintMaskRel}\"");
+                sb.AppendLine($"\tTextureTintMaskRimLightMask \"{tintMaskRel}\"");
+                sb.AppendLine($"\tTextureNprOutlineMask1 \"{tintMaskRel}\"");
+                sb.AppendLine($"\tTextureNprOutlineMask \"{tintMaskRel}\"");
+            }
             sb.AppendLine("}");
             return sb.ToString();
         }

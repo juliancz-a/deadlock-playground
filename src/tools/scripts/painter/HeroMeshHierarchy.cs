@@ -107,6 +107,9 @@ namespace DeadlockPlayground.Painter
             // 1. Gather all candidate MeshInstance3D nodes first so modifying the tree doesn't affect recursion
             var candidateMeshes = new List<MeshInstance3D>();
             CollectCandidateMeshesRecursive(heroNode, candidateMeshes);
+            bool hasVisibleBakedOutlineShells = candidateMeshes.Any(m =>
+                m != null && GodotObject.IsInstanceValid(m) && m.Visible &&
+                m.HasMeta("IsOutlineShell") && m.GetMeta("IsOutlineShell").AsBool());
 
             // 2. Process each mesh: register candidate meshes directly preserving original skinning and materials
             foreach (var mi in candidateMeshes)
@@ -116,6 +119,7 @@ namespace DeadlockPlayground.Painter
                 if (surfaceCount == 0) continue;
 
                 bool isAcc = IsAccessoryKeyword(rawName);
+                bool isCustomMesh = mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool();
 
                 if (surfaceCount == 1)
                 {
@@ -128,7 +132,11 @@ namespace DeadlockPlayground.Painter
                     {
                         mi.SetMeta("OriginalMaterial_0", origMat);
                     }
-                    var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, rawName, matPath);
+                    bool isOutlineShell = (mi.HasMeta("IsOutlineShell") && mi.GetMeta("IsOutlineShell").AsBool()) ||
+                                          (origMat != null && origMat.HasMeta("IsOutlineShell") && origMat.GetMeta("IsOutlineShell").AsBool());
+                    var (toonMat, outlineMat, preserve) = isOutlineShell
+                        ? (null, null, true)
+                        : CreateToonMaterials(origMat, rawName, matPath, suppressOutlinePass: isCustomMesh && hasVisibleBakedOutlineShells);
 
                     string singleDisplay = CleanName(rawName);
                     if (!string.IsNullOrEmpty(matPath))
@@ -247,7 +255,11 @@ namespace DeadlockPlayground.Painter
                         _generatedSubmeshNodes.Add(newMi);
                         genArray.Add(newMi);
 
-                        var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, surfaceRawName, matName);
+                        bool isOutlineShell = (mi.HasMeta("IsOutlineShell") && mi.GetMeta("IsOutlineShell").AsBool()) ||
+                                              (origMat != null && origMat.HasMeta("IsOutlineShell") && origMat.GetMeta("IsOutlineShell").AsBool());
+                        var (toonMat, outlineMat, preserve) = isOutlineShell
+                            ? (null, null, true)
+                            : CreateToonMaterials(origMat, surfaceRawName, matName, suppressOutlinePass: isCustomMesh && hasVisibleBakedOutlineShells);
 
                         var info = new SubmeshNodeInfo
                         {
@@ -348,7 +360,7 @@ namespace DeadlockPlayground.Painter
             if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) return false;
             if (mi.Mesh is ImmediateMesh) return false;
 
-            // 1. Accept active custom imported character submeshes
+            // 1. Accept active custom imported character submeshes (including baked outline shells unless hidden)
             if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool())
             {
                 string name = mi.Name.ToString();
@@ -356,7 +368,11 @@ namespace DeadlockPlayground.Painter
                 string lower = name.ToLowerInvariant();
                 if (lower.Contains("picker") || lower.Contains("handle") || lower.Contains("visual") ||
                     lower.Contains("gizmo") || lower.Contains("marker") || lower.Contains("preview") ||
-                    lower.Contains("tip") || lower.Contains("pole") || lower.Contains("outline"))
+                    lower.Contains("tip") || lower.Contains("pole"))
+                {
+                    return false;
+                }
+                if (mi.HasMeta("UserHiddenOutlineShell") && mi.GetMeta("UserHiddenOutlineShell").AsBool())
                 {
                     return false;
                 }
@@ -423,16 +439,24 @@ namespace DeadlockPlayground.Painter
             return _toonOutlineShader;
         }
 
-        private static (ShaderMaterial ToonMat, ShaderMaterial OutlineMat, bool Preserve) CreateToonMaterials(Material origMat, string meshName, string vmatPath)
+        private static (ShaderMaterial ToonMat, ShaderMaterial OutlineMat, bool Preserve) CreateToonMaterials(Material origMat, string meshName, string vmatPath, bool suppressOutlinePass = false)
         {
+            if (origMat is StandardMaterial3D stdCheck &&
+                stdCheck.HasMeta("IsOutlineShell") && stdCheck.GetMeta("IsOutlineShell").AsBool())
+            {
+                return (null, null, true);
+            }
+
             var toonShader = GetToonShader();
             var outlineShader = GetToonOutlineShader();
 
             bool isWeapon = meshName.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
                             meshName.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                            meshName.Contains("pistol", StringComparison.OrdinalIgnoreCase) ||
                             meshName.Contains("blaster", StringComparison.OrdinalIgnoreCase) ||
                             (!string.IsNullOrEmpty(vmatPath) && (vmatPath.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
                                                                   vmatPath.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                                                                  vmatPath.Contains("pistol", StringComparison.OrdinalIgnoreCase) ||
                                                                   vmatPath.Contains("blaster", StringComparison.OrdinalIgnoreCase)));
 
             bool isGlass = meshName.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
@@ -448,7 +472,7 @@ namespace DeadlockPlayground.Painter
             bool shouldPreserve = isGlass || DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(meshName, vmatPath, origMat);
             if (shouldPreserve)
             {
-                if (!isGlass && isWeapon && outlineShader != null)
+                if (!suppressOutlinePass && !isGlass && isWeapon && outlineShader != null)
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var weaponOutline = new ShaderMaterial { Shader = outlineShader };
@@ -471,7 +495,7 @@ namespace DeadlockPlayground.Painter
                       smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true ||
                       smPbr.Shader?.ResourcePath?.Contains("unicorn_hair") == true))
             {
-                if (outlineShader != null)
+                if (!suppressOutlinePass && outlineShader != null)
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var outline = new ShaderMaterial { Shader = outlineShader };
@@ -489,7 +513,7 @@ namespace DeadlockPlayground.Painter
             if (isGlass || isAdditive || isTranslucent)
             {
                 // NEVER create outline for glass or translucent surfaces (even on weapons)
-                if (!isGlass && !isTranslucent && isWeapon && outlineShader != null)
+                if (!suppressOutlinePass && !isGlass && !isTranslucent && isWeapon && outlineShader != null)
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var weaponOutline = new ShaderMaterial { Shader = outlineShader };
@@ -507,10 +531,13 @@ namespace DeadlockPlayground.Painter
 
             Color outlineCol = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
             var toonMat = new ShaderMaterial { Shader = toonShader };
-            var outlineMat = new ShaderMaterial { Shader = outlineShader };
-
-            outlineMat.SetShaderParameter("outline_width", 0.5f);
-            outlineMat.SetShaderParameter("outline_color", outlineCol);
+            ShaderMaterial outlineMat = null;
+            if (!suppressOutlinePass)
+            {
+                outlineMat = new ShaderMaterial { Shader = outlineShader };
+                outlineMat.SetShaderParameter("outline_width", 0.5f);
+                outlineMat.SetShaderParameter("outline_color", outlineCol);
+            }
 
             if (origMat is StandardMaterial3D stdMat)
             {

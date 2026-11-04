@@ -67,6 +67,8 @@ namespace DeadlockPlayground.Importer
             public bool ExcludeClothHairBones { get; set; } = true;
             public bool KeepFingersRigidOnHand { get; set; } = false;
             public bool ClampLimbStretching { get; set; } = true;
+            public bool IncludeBakedOutlineShells { get; set; } = true;
+            public Dictionary<string, bool> SubmeshIsOutlineShell { get; set; } = new(StringComparer.OrdinalIgnoreCase);
             public Vector3 RootPosition { get; set; } = Vector3.Zero;
             public Vector3 RootRotationDeg { get; set; } = Vector3.Zero;
             public float RootScale { get; set; } = 1.0f;
@@ -396,6 +398,10 @@ namespace DeadlockPlayground.Importer
             {
                 heroSkin = CreateFullSkeletonSkin(heroSkeleton);
             }
+
+            // Ensure unlit/emissive materials and outline shell metadata are sanitized on the imported scene
+            SanitizeImportedModelMaterials(importedScene, options.SubmeshIsOutlineShell);
+
             var allImportedMeshes = CollectMeshes(importedScene);
             var importedMeshes = options.IncludedImportedSubmeshNames != null && options.IncludedImportedSubmeshNames.Count > 0
                 ? allImportedMeshes.Where(m => options.IncludedImportedSubmeshNames.Contains(m.Name.ToString())).ToList()
@@ -754,6 +760,7 @@ namespace DeadlockPlayground.Importer
                     newMi.Layers &= ~(uint)(1 << 20); // Clear bit 20 (CameraBrush isolation)
                     newMi.SetMeta("IsCustomImportedMesh", true);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
+                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
 
                     containerNode.AddChild(newMi);
                     newMi.Skeleton = newMi.GetPathTo(heroSkeleton);
@@ -1164,6 +1171,7 @@ namespace DeadlockPlayground.Importer
                     newMi.Layers &= ~(uint)(1 << 20);
                     newMi.SetMeta("IsCustomImportedMesh", true);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
+                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
 
                     containerNode.AddChild(newMi);
                     newMi.Skeleton = newMi.GetPathTo(targetSkeleton);
@@ -1305,6 +1313,7 @@ namespace DeadlockPlayground.Importer
                     newMi.Layers &= ~(uint)(1 << 20);
                     newMi.SetMeta("IsCustomImportedMesh", true);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
+                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
 
                     containerNode.AddChild(newMi);
                     newMi.Skeleton = newMi.GetPathTo(skeleton);
@@ -3869,6 +3878,428 @@ namespace DeadlockPlayground.Importer
 
             // 3. Re-scan hero hierarchy
             new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
+        }
+
+        /// <summary>
+        /// Loads a 3D model file (.glb, .gltf, .fbx), automatically repairing Blender KHR_materials_unlit / Emission
+        /// materials (where baseColorFactor is [0,0,0,1] and textures/colors live in emissiveTexture/emissiveFactor),
+        /// disambiguating generic material names, and tagging inverted-hull outline shells.
+        /// </summary>
+        public static Node3D LoadAndSanitize3DModelScene(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return null;
+
+            Node importedScene = null;
+            string ext = Path.GetExtension(filePath).ToLowerInvariant();
+            string baseDir = Path.GetDirectoryName(filePath) ?? "";
+
+            try
+            {
+                if (ext == ".fbx")
+                {
+                    try
+                    {
+                        var fbxDoc = new FbxDocument();
+                        var fbxState = new FbxState();
+                        if (fbxDoc.AppendFromFile(filePath, fbxState) == Error.Ok)
+                        {
+                            importedScene = fbxDoc.GenerateScene(fbxState);
+                        }
+                    }
+                    catch (Exception fbxEx)
+                    {
+                        GD.Print($"[CustomModelAutoRigger] Direct FBX load warning: {fbxEx.Message}. Trying GltfDocument fallback...");
+                    }
+                }
+
+                if (importedScene == null && ext == ".glb")
+                {
+                    try
+                    {
+                        byte[] rawGlb = File.ReadAllBytes(filePath);
+                        byte[] patchedGlb = PreprocessGlbBytesForUnlitAndEmissiveMaterials(rawGlb);
+                        var gltfDoc = new GltfDocument();
+                        var gltfState = new GltfState();
+                        if (gltfDoc.AppendFromBuffer(patchedGlb, baseDir, gltfState) == Error.Ok)
+                        {
+                            importedScene = gltfDoc.GenerateScene(gltfState);
+                        }
+                    }
+                    catch (Exception glbEx)
+                    {
+                        GD.Print($"[CustomModelAutoRigger] GLB buffer preprocess warning: {glbEx.Message}. Falling back to AppendFromFile.");
+                    }
+                }
+
+                if (importedScene == null)
+                {
+                    var gltfDoc = new GltfDocument();
+                    var gltfState = new GltfState();
+                    if (gltfDoc.AppendFromFile(filePath, gltfState) == Error.Ok)
+                    {
+                        importedScene = gltfDoc.GenerateScene(gltfState);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[CustomModelAutoRigger] Failed to load 3D file '{filePath}': {ex.Message}");
+                return null;
+            }
+
+            if (importedScene == null) return null;
+
+            var sceneRoot = importedScene as Node3D ?? new Node3D();
+            if (sceneRoot != importedScene)
+            {
+                sceneRoot.AddChild(importedScene);
+            }
+
+            SanitizeImportedModelMaterials(sceneRoot);
+            return sceneRoot;
+        }
+
+        /// <summary>
+        /// Repairs binary glTF 2.0 (.glb) JSON chunk in-memory before Godot's GltfDocument parses it:
+        /// 1. When a material uses KHR_materials_unlit or Emission nodes with pbrMetallicRoughness.baseColorFactor = [0,0,0,1]:
+        ///    - Copies emissiveTexture to pbrMetallicRoughness.baseColorTexture if baseColorTexture is missing (e.g. Sasha's 'Iris' pupils!).
+        ///    - Sets baseColorFactor RGB to [1,1,1] (if textured) or emissiveFactor (if untextured, e.g. Sasha's white eye sclera 'material'!).
+        /// 2. Disambiguates generic Blender material names ("material", "Material.001", etc.) with the mesh name so distinct materials never collide.
+        /// </summary>
+        public static byte[] PreprocessGlbBytesForUnlitAndEmissiveMaterials(byte[] glbBytes)
+        {
+            if (glbBytes == null || glbBytes.Length < 20) return glbBytes;
+
+            uint magic = BitConverter.ToUInt32(glbBytes, 0);
+            uint version = BitConverter.ToUInt32(glbBytes, 4);
+            if (magic != 0x46546C67u || version != 2u) return glbBytes;
+
+            uint jsonLen = BitConverter.ToUInt32(glbBytes, 12);
+            uint jsonType = BitConverter.ToUInt32(glbBytes, 16);
+            if (jsonType != 0x4E4F534Au || 20 + jsonLen > glbBytes.Length) return glbBytes;
+
+            string jsonStr = System.Text.Encoding.UTF8.GetString(glbBytes, 20, (int)jsonLen).TrimEnd('\0', ' ', '\t', '\r', '\n');
+            var rootNode = System.Text.Json.Nodes.JsonNode.Parse(jsonStr) as System.Text.Json.Nodes.JsonObject;
+            if (rootNode == null) return glbBytes;
+
+            var materialsArr = rootNode["materials"] as System.Text.Json.Nodes.JsonArray;
+            if (materialsArr == null || materialsArr.Count == 0) return glbBytes;
+
+            // Map material index -> owning mesh name for disambiguating generic "material" / "Material.001" names
+            var matIdxToOwnerMeshName = new Dictionary<int, string>();
+            if (rootNode["meshes"] is System.Text.Json.Nodes.JsonArray meshesArr)
+            {
+                for (int m = 0; m < meshesArr.Count; m++)
+                {
+                    if (meshesArr[m] is not System.Text.Json.Nodes.JsonObject meshObj) continue;
+                    string mName = meshObj["name"]?.GetValue<string>() ?? $"mesh_{m}";
+                    if (meshObj["primitives"] is System.Text.Json.Nodes.JsonArray prims)
+                    {
+                        foreach (var prim in prims)
+                        {
+                            if (prim is System.Text.Json.Nodes.JsonObject pObj && pObj["material"] != null)
+                            {
+                                int matIdx = pObj["material"].GetValue<int>();
+                                if (!matIdxToOwnerMeshName.ContainsKey(matIdx))
+                                {
+                                    matIdxToOwnerMeshName[matIdx] = mName;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            bool modified = false;
+            for (int i = 0; i < materialsArr.Count; i++)
+            {
+                if (materialsArr[i] is not System.Text.Json.Nodes.JsonObject matObj) continue;
+
+                string matName = matObj["name"]?.GetValue<string>() ?? $"mat_{i}";
+                string lowerMat = matName.ToLowerInvariant();
+
+                // Disambiguate generic Blender default material names ("material", "material.001", etc.)
+                if (lowerMat == "material" || lowerMat.StartsWith("material.") || lowerMat.StartsWith("material_"))
+                {
+                    if (matIdxToOwnerMeshName.TryGetValue(i, out string ownerMesh) && !string.IsNullOrWhiteSpace(ownerMesh))
+                    {
+                        string suffix = lowerMat == "material" ? "mat" : matName.Replace('.', '_');
+                        string cleanOwner = ownerMesh.Replace('.', '_').Replace(' ', '_');
+                        matObj["name"] = $"{cleanOwner}_{suffix}";
+                        modified = true;
+                    }
+                }
+
+                var pbr = matObj["pbrMetallicRoughness"] as System.Text.Json.Nodes.JsonObject;
+                if (pbr == null)
+                {
+                    pbr = new System.Text.Json.Nodes.JsonObject();
+                    matObj["pbrMetallicRoughness"] = pbr;
+                    modified = true;
+                }
+
+                // 1. If baseColorTexture is missing but emissiveTexture is present, promote emissiveTexture to baseColorTexture!
+                if (pbr["baseColorTexture"] == null && matObj["emissiveTexture"] is System.Text.Json.Nodes.JsonObject emTex)
+                {
+                    var clonedTex = System.Text.Json.Nodes.JsonNode.Parse(emTex.ToJsonString()) as System.Text.Json.Nodes.JsonObject;
+                    if (clonedTex != null)
+                    {
+                        pbr["baseColorTexture"] = clonedTex;
+                        modified = true;
+                    }
+                }
+
+                // 2. Check if baseColorFactor is near-black [0, 0, 0, a] while texture or emissiveFactor is present
+                float r = 1f, g = 1f, b = 1f, a = 1f;
+                if (pbr["baseColorFactor"] is System.Text.Json.Nodes.JsonArray bcf && bcf.Count >= 3)
+                {
+                    r = bcf[0]?.GetValue<float>() ?? 1f;
+                    g = bcf[1]?.GetValue<float>() ?? 1f;
+                    b = bcf[2]?.GetValue<float>() ?? 1f;
+                    if (bcf.Count >= 4) a = bcf[3]?.GetValue<float>() ?? 1f;
+                }
+
+                float er = 0f, eg = 0f, eb = 0f;
+                if (matObj["emissiveFactor"] is System.Text.Json.Nodes.JsonArray ef && ef.Count >= 3)
+                {
+                    er = ef[0]?.GetValue<float>() ?? 0f;
+                    eg = ef[1]?.GetValue<float>() ?? 0f;
+                    eb = ef[2]?.GetValue<float>() ?? 0f;
+                }
+
+                bool hasBaseTex = pbr["baseColorTexture"] != null;
+                bool isBlackFactor = r < 0.02f && g < 0.02f && b < 0.02f;
+
+                if (isBlackFactor)
+                {
+                    if (hasBaseTex)
+                    {
+                        // Do not multiply textured unlit/emissive materials (like Bodysuit or Iris) by black [0,0,0]!
+                        pbr["baseColorFactor"] = new System.Text.Json.Nodes.JsonArray(1.0f, 1.0f, 1.0f, a);
+                        modified = true;
+                    }
+                    else if (er > 0.02f || eg > 0.02f || eb > 0.02f)
+                    {
+                        // Promote non-zero emissiveFactor (e.g. eye sclera [1,1,1] or colored outline shell) to baseColorFactor!
+                        pbr["baseColorFactor"] = new System.Text.Json.Nodes.JsonArray(
+                            Math.Clamp(er, 0f, 1f),
+                            Math.Clamp(eg, 0f, 1f),
+                            Math.Clamp(eb, 0f, 1f),
+                            a);
+                        modified = true;
+                    }
+                }
+            }
+
+            if (!modified) return glbBytes;
+
+            byte[] newJsonBytes = System.Text.Encoding.UTF8.GetBytes(rootNode.ToJsonString());
+            int pad = (4 - (newJsonBytes.Length % 4)) % 4;
+            int paddedJsonLen = newJsonBytes.Length + pad;
+
+            int restOffset = 20 + (int)jsonLen;
+            int restLen = glbBytes.Length - restOffset;
+            uint totalLen = (uint)(20 + paddedJsonLen + restLen);
+
+            byte[] outBytes = new byte[totalLen];
+            using var ms = new MemoryStream(outBytes);
+            using var bw = new BinaryWriter(ms);
+            bw.Write(0x46546C67u);
+            bw.Write(2u);
+            bw.Write(totalLen);
+            bw.Write((uint)paddedJsonLen);
+            bw.Write(0x4E4F534Au);
+            bw.Write(newJsonBytes);
+            for (int p = 0; p < pad; p++) bw.Write((byte)0x20);
+            if (restLen > 0)
+            {
+                bw.Write(glbBytes, restOffset, restLen);
+            }
+            return outBytes;
+        }
+
+        /// <summary>
+        /// Inspects all MeshInstance3D nodes and their surfaces in an imported 3D scene:
+        /// - Repairs any StandardMaterial3D where AlbedoTexture is null but EmissionTexture is present,
+        ///   or where AlbedoColor is black (0,0,0) while a texture or Emission color is present.
+        /// - Disables VertexColorUseAsAlbedo if the mesh has an all-black vertex color array.
+        /// - Detects Inverted-Hull Outline Shells ("outline_*") and configures single-sided culling + unshaded mode.
+        /// </summary>
+        public static void SanitizeImportedModelMaterials(Node3D sceneRoot, Dictionary<string, bool> outlineOverrides = null)
+        {
+            if (sceneRoot == null || !GodotObject.IsInstanceValid(sceneRoot)) return;
+
+            var meshes = CollectMeshes(sceneRoot);
+            foreach (var mi in meshes)
+            {
+                if (mi?.Mesh == null) continue;
+                string rawMeshName = mi.Name.ToString();
+                int surfCount = mi.Mesh.GetSurfaceCount();
+
+                for (int s = 0; s < surfCount; s++)
+                {
+                    Material mat = mi.Mesh.SurfaceGetMaterial(s) ?? mi.GetSurfaceOverrideMaterial(s) ?? mi.MaterialOverride;
+
+                    // Check if vertex color array is all black/zero
+                    bool hasAllBlackVertexColors = false;
+                    var arrays = mi.Mesh.SurfaceGetArrays(s);
+                    if (arrays != null && arrays.Count > (int)Mesh.ArrayType.Color && arrays[(int)Mesh.ArrayType.Color].VariantType != Variant.Type.Nil)
+                    {
+                        var colors = arrays[(int)Mesh.ArrayType.Color].AsColorArray();
+                        if (colors != null && colors.Length > 0)
+                        {
+                            bool anyNonBlack = false;
+                            int step = Math.Max(1, colors.Length / 128);
+                            for (int c = 0; c < colors.Length; c += step)
+                            {
+                                if (colors[c].R > 0.02f || colors[c].G > 0.02f || colors[c].B > 0.02f)
+                                {
+                                    anyNonBlack = true;
+                                    break;
+                                }
+                            }
+                            hasAllBlackVertexColors = !anyNonBlack;
+                        }
+                    }
+
+                    bool isOutline = IsLikelyOutlineShell(mi, mat);
+                    if (outlineOverrides != null && outlineOverrides.TryGetValue(rawMeshName, out bool userOutline))
+                    {
+                        isOutline = userOutline;
+                    }
+
+                    mi.SetMeta("IsOutlineShell", isOutline);
+
+                    if (mat is StandardMaterial3D stdMat)
+                    {
+                        if (hasAllBlackVertexColors && stdMat.VertexColorUseAsAlbedo)
+                        {
+                            stdMat.VertexColorUseAsAlbedo = false;
+                        }
+
+                        // Repair unlit/emissive texture & color if not already patched at GLB level
+                        if (stdMat.AlbedoTexture == null && stdMat.EmissionTexture != null)
+                        {
+                            stdMat.AlbedoTexture = stdMat.EmissionTexture;
+                        }
+
+                        bool isBlackAlbedo = stdMat.AlbedoColor.R < 0.02f && stdMat.AlbedoColor.G < 0.02f && stdMat.AlbedoColor.B < 0.02f;
+                        if (isBlackAlbedo)
+                        {
+                            if (stdMat.AlbedoTexture != null)
+                            {
+                                stdMat.AlbedoColor = new Color(1f, 1f, 1f, stdMat.AlbedoColor.A > 0f ? stdMat.AlbedoColor.A : 1f);
+                            }
+                            else if (stdMat.EmissionEnabled && (stdMat.Emission.R > 0.02f || stdMat.Emission.G > 0.02f || stdMat.Emission.B > 0.02f))
+                            {
+                                stdMat.AlbedoColor = new Color(stdMat.Emission.R, stdMat.Emission.G, stdMat.Emission.B, stdMat.AlbedoColor.A > 0f ? stdMat.AlbedoColor.A : 1f);
+                            }
+                        }
+
+                        // Clear redundant unlit Emission so Toon Shader doesn't add (1,1,1) white emission on top of Albedo
+                        if (stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded && stdMat.EmissionEnabled)
+                        {
+                            stdMat.EmissionEnabled = false;
+                            stdMat.Emission = Colors.Black;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(stdMat.ResourceName))
+                        {
+                            mi.SetMeta("SourceMaterialName", stdMat.ResourceName);
+                            stdMat.SetMeta("MaterialName", stdMat.ResourceName);
+                        }
+
+                        stdMat.SetMeta("IsOutlineShell", isOutline);
+
+                        if (isOutline)
+                        {
+                            // Inverted-hull outline shells must NEVER be two-sided (CullModeEnum.Disabled),
+                            // otherwise the front of the outer shell covers the character body underneath!
+                            if (stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled)
+                            {
+                                stdMat.CullMode = BaseMaterial3D.CullModeEnum.Back;
+                            }
+                            stdMat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Auto-detects whether a MeshInstance3D or its Material is an Inverted-Hull Outline Shell
+        /// (e.g. "Outline_Black", "Outline for Cube_005", "Outline for pistol", "Sasha.Body.Outline").
+        /// </summary>
+        public static bool IsLikelyOutlineShell(MeshInstance3D mi, Material mat = null)
+        {
+            if (mi == null) return false;
+            mat ??= mi.Mesh != null && mi.Mesh.GetSurfaceCount() > 0
+                ? (mi.Mesh.SurfaceGetMaterial(0) ?? mi.GetSurfaceOverrideMaterial(0) ?? mi.MaterialOverride)
+                : null;
+
+            string meshName = mi.Name.ToString();
+            string matName = mat?.ResourceName ?? "";
+            if (string.IsNullOrEmpty(matName) && mi.HasMeta("SourceMaterialName"))
+            {
+                matName = mi.GetMeta("SourceMaterialName").AsString();
+            }
+
+            if (meshName.Contains("outline", StringComparison.OrdinalIgnoreCase) ||
+                matName.Contains("outline", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void ConfigureRiggedSubmeshMetadata(MeshInstance3D newMi, MeshInstance3D srcMi, Material surfMat, RiggingOptions options)
+        {
+            if (newMi == null || srcMi == null) return;
+
+            string srcName = srcMi.Name.ToString();
+            bool isOutline = srcMi.HasMeta("IsOutlineShell") && srcMi.GetMeta("IsOutlineShell").AsBool();
+            if (!isOutline)
+            {
+                isOutline = IsLikelyOutlineShell(srcMi, surfMat);
+            }
+            if (options?.SubmeshIsOutlineShell != null && options.SubmeshIsOutlineShell.TryGetValue(srcName, out bool overrideOutline))
+            {
+                isOutline = overrideOutline;
+            }
+
+            newMi.SetMeta("IsOutlineShell", isOutline);
+            newMi.SetMeta("SourceSubmeshName", srcName);
+
+            string matName = surfMat?.ResourceName;
+            if (string.IsNullOrWhiteSpace(matName) && srcMi.HasMeta("SourceMaterialName"))
+            {
+                matName = srcMi.GetMeta("SourceMaterialName").AsString();
+            }
+            if (!string.IsNullOrWhiteSpace(matName))
+            {
+                newMi.SetMeta("SourceMaterialName", matName);
+            }
+
+            if (options?.SubmeshReplacementMap != null &&
+                options.SubmeshReplacementMap.TryGetValue(srcName, out string repTarget) &&
+                !string.IsNullOrWhiteSpace(repTarget))
+            {
+                newMi.SetMeta("ReplacesHeroSubmesh", repTarget);
+            }
+
+            if (surfMat is StandardMaterial3D stdMat)
+            {
+                stdMat.SetMeta("IsOutlineShell", isOutline);
+                if (isOutline)
+                {
+                    if (stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled)
+                    {
+                        stdMat.CullMode = BaseMaterial3D.CullModeEnum.Back;
+                    }
+                    stdMat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
+                }
+            }
         }
 
         #endregion

@@ -126,8 +126,12 @@ namespace DeadlockPlayground.UI
         public CustomModelAutoRigger.RiggingOptions LastRiggingOptions { get; private set; }
         public Transform3D GetAlignedTransform() => _previewModelRoot?.Transform ?? Transform3D.Identity;
 
-        // Weapon Submesh Group Linking
+        // Weapon Submesh Group Linking & Baked Outline Shell Controls
         private CheckBox _chkLinkWeaponSubmeshes;
+        private CheckBox _chkIncludeBakedOutlines;
+        private readonly Dictionary<string, bool> _submeshIsOutlineShell = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, CheckBox> _submeshOutlineCheckboxes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Label> _submeshOutlineBadges = new(StringComparer.OrdinalIgnoreCase);
 
         // 3D Viewport Interactive Gizmo & Dual Weapon Controls
         private Gizmo3D _previewGizmo;
@@ -1504,6 +1508,30 @@ namespace DeadlockPlayground.UI
             lblImported.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblImported);
 
+            _chkIncludeBakedOutlines = new CheckBox
+            {
+                Text = "Include Baked Outline Shells (Toggle all [OUTLINE SHELL] submeshes)",
+                ButtonPressed = true,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Toggles inclusion of all submeshes flagged as Inverted-Hull Outline Shells with one click."
+            };
+            _chkIncludeBakedOutlines.AddThemeFontSizeOverride("font_size", 11);
+            _chkIncludeBakedOutlines.Toggled += (includeOutlines) =>
+            {
+                if (_isGizmoUpdatingFromUI) return;
+                foreach (var chk in _importedSubmeshCheckboxes)
+                {
+                    if (!chk.HasMeta("SubmeshName")) continue;
+                    string sName = chk.GetMeta("SubmeshName").AsString();
+                    if (_submeshIsOutlineShell.TryGetValue(sName, out bool isOutline) && isOutline)
+                    {
+                        chk.SetPressedNoSignal(includeOutlines);
+                    }
+                }
+                TriggerRealtimeRigUpdate();
+            };
+            vBox.AddChild(_chkIncludeBakedOutlines);
+
             _chkLinkWeaponSubmeshes = new CheckBox
             {
                 Text = "Link All Weapon / Socket Submeshes Together (Sync Bone, Transform & Scale)",
@@ -1712,7 +1740,26 @@ namespace DeadlockPlayground.UI
                 }
             }
 
-            // 5. Restore Submesh Checklist state
+            // 5. Restore Submesh Checklist & Outline Shell state
+            if (_chkIncludeBakedOutlines != null)
+            {
+                _chkIncludeBakedOutlines.SetPressedNoSignal(options.IncludeBakedOutlineShells);
+            }
+            if (options.SubmeshIsOutlineShell != null)
+            {
+                foreach (var (k, v) in options.SubmeshIsOutlineShell)
+                {
+                    _submeshIsOutlineShell[k] = v;
+                    if (_submeshOutlineCheckboxes.TryGetValue(k, out var outChk))
+                    {
+                        outChk.SetPressedNoSignal(v);
+                    }
+                    if (_submeshOutlineBadges.TryGetValue(k, out var outBadge))
+                    {
+                        outBadge.Visible = v;
+                    }
+                }
+            }
             if (options.IncludedImportedSubmeshNames != null && options.IncludedImportedSubmeshNames.Count > 0)
             {
                 foreach (var chk in _importedSubmeshCheckboxes)
@@ -2162,6 +2209,9 @@ namespace DeadlockPlayground.UI
             _submeshSocketAssignments.Clear();
             _submeshHeroReplacements.Clear();
             _submeshCardControls.Clear();
+            _submeshIsOutlineShell.Clear();
+            _submeshOutlineCheckboxes.Clear();
+            _submeshOutlineBadges.Clear();
 
             // Original Deadlock Hero submeshes (strictly authentic, zero gizmo meshes!)
             var heroMeshes = CustomModelAutoRigger.CollectOriginalHeroMeshes(_liveHeroNode);
@@ -2263,17 +2313,52 @@ namespace DeadlockPlayground.UI
                 cardVBox.AddThemeConstantOverride("separation", 4);
                 card.AddChild(cardVBox);
 
-                // Row 1: Include Checkbox
+                // Row 1: Include Checkbox + [OUTLINE SHELL] Badge + Manual Outline Shell Toggle
+                bool isOutlineShell = CustomModelAutoRigger.IsLikelyOutlineShell(mi);
+                _submeshIsOutlineShell[rawMeshName] = isOutlineShell;
+
+                var headerRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                headerRow.AddThemeConstantOverride("separation", 6);
+                cardVBox.AddChild(headerRow);
+
                 var chk = new CheckBox
                 {
                     Text = $"{rawMeshName} ({vCount:N0} verts | {tCount:N0} tris)",
-                    ButtonPressed = true
+                    ButtonPressed = isOutlineShell ? (_chkIncludeBakedOutlines?.ButtonPressed ?? true) : true,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
                 chk.SetMeta("SubmeshName", rawMeshName);
                 chk.AddThemeFontSizeOverride("font_size", 10);
                 chk.Toggled += (v) => { mi.Visible = v; TriggerRealtimeRigUpdate(); };
                 _importedSubmeshCheckboxes.Add(chk);
-                cardVBox.AddChild(chk);
+                headerRow.AddChild(chk);
+
+                var lblOutlineBadge = new Label
+                {
+                    Text = "[OUTLINE SHELL]",
+                    Visible = isOutlineShell
+                };
+                lblOutlineBadge.AddThemeFontSizeOverride("font_size", 9);
+                lblOutlineBadge.AddThemeColorOverride("font_color", new Color(0.35f, 0.88f, 0.98f));
+                _submeshOutlineBadges[rawMeshName] = lblOutlineBadge;
+                headerRow.AddChild(lblOutlineBadge);
+
+                var chkOutlineShell = new CheckBox
+                {
+                    Text = "Outline Hull",
+                    ButtonPressed = isOutlineShell,
+                    TooltipText = "Mark or unmark this submesh as an Inverted-Hull Outline Shell (single-sided backface culling, unlit, no extra toon outline)."
+                };
+                chkOutlineShell.AddThemeFontSizeOverride("font_size", 9);
+                chkOutlineShell.Toggled += (isOut) =>
+                {
+                    _submeshIsOutlineShell[rawMeshName] = isOut;
+                    lblOutlineBadge.Visible = isOut;
+                    mi.SetMeta("IsOutlineShell", isOut);
+                    TriggerRealtimeRigUpdate();
+                };
+                _submeshOutlineCheckboxes[rawMeshName] = chkOutlineShell;
+                headerRow.AddChild(chkOutlineShell);
 
                 // Row 2: Role selection (Skinned Body vs Socket / Weapon)
                 var roleRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -3103,6 +3188,8 @@ namespace DeadlockPlayground.UI
                 SubmeshSocketOffsetPos = new Dictionary<string, Vector3>(_submeshSocketOffsetPos),
                 SubmeshSocketOffsetRot = new Dictionary<string, Vector3>(_submeshSocketOffsetRot),
                 SubmeshSocketScale = new Dictionary<string, float>(_submeshSocketScale),
+                IncludeBakedOutlineShells = _chkIncludeBakedOutlines?.ButtonPressed ?? true,
+                SubmeshIsOutlineShell = new Dictionary<string, bool>(_submeshIsOutlineShell, StringComparer.OrdinalIgnoreCase),
                 KeepFingersRigidOnHand = _chkKeepFingersRigid?.ButtonPressed ?? false,
                 AutoSnapArmsToHero = _chkAutoAlignArms?.ButtonPressed ?? true,
                 AutoSnapLegsToHero = _chkAutoAlignLegs?.ButtonPressed ?? true,

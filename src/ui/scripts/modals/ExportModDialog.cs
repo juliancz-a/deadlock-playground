@@ -438,10 +438,18 @@ public partial class ExportModDialog : CanvasLayer
             hbox.AddThemeConstantOverride("separation", 8);
 
             submesh.IsSelected = isPreChecked;
+            if (isPreChecked)
+            {
+                submesh.IsDirty = true;
+            }
+
+            bool isOutline = submesh.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh) &&
+                             submesh.Mesh.HasMeta("IsOutlineShell") && submesh.Mesh.GetMeta("IsOutlineShell").AsBool();
+            string outlineTag = isOutline ? " [OUTLINE SHELL]" : "";
 
             var chk = new CheckBox
             {
-                Text = $"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]",
+                Text = $"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]{outlineTag}",
                 ButtonPressed = isPreChecked,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
@@ -450,11 +458,11 @@ public partial class ExportModDialog : CanvasLayer
 
             var lblStatusBadge = new Label
             {
-                Text = submesh.IsDirty ? "[MODIFIED]" : "[UNMODIFIED]"
+                Text = isPreChecked ? (submesh.IsDirty ? "[SELECTED]" : "[MODIFIED]") : "[UNMODIFIED]"
             };
             if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
             lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-            lblStatusBadge.AddThemeColorOverride("font_color", submesh.IsDirty ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+            lblStatusBadge.AddThemeColorOverride("font_color", isPreChecked ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
 
             chk.Toggled += (pressed) =>
             {
@@ -491,10 +499,42 @@ public partial class ExportModDialog : CanvasLayer
         }
 
         AddSectionHeader("👤 Hero Model Submeshes", new Color(0.95f, 0.85f, 0.45f));
+        bool hasCustomImportedModel = _allSubmeshes.Any(s =>
+            s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
+            s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool());
         var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
         bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0;
 
-        if (dirtySubmeshes.Count > 0)
+        if (_allSubmeshes.Count > 1)
+        {
+            var chkSelectAll = new CheckBox
+            {
+                Text = "Select All / Deselect All Materials",
+                ButtonPressed = hasCustomImportedModel || dirtySubmeshes.Count > 0,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            if (colus != null) chkSelectAll.AddThemeFontOverride("font", colus);
+            chkSelectAll.AddThemeFontSizeOverride("font_size", 13);
+            chkSelectAll.AddThemeColorOverride("font_color", new Color(0.55f, 0.88f, 1.0f));
+            chkSelectAll.Toggled += (selectAll) =>
+            {
+                foreach (var kv in _submeshCheckboxes)
+                {
+                    kv.Key.ButtonPressed = selectAll;
+                }
+            };
+            _submeshChecklistContainer.AddChild(chkSelectAll);
+        }
+
+        if (hasCustomImportedModel)
+        {
+            foreach (var sm in _allSubmeshes)
+            {
+                bool isVisible = sm.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh) || sm.Mesh.Visible;
+                AddSubmeshRow(sm, isVisible);
+            }
+        }
+        else if (dirtySubmeshes.Count > 0)
         {
             foreach (var sm in dirtySubmeshes)
             {
@@ -776,8 +816,9 @@ public partial class ExportModDialog : CanvasLayer
         {
             var sm = kvp.Value;
             sm.IsSelected = kvp.Key.ButtonPressed;
-            if (sm.IsSelected && sm.IsDirty)
+            if (sm.IsSelected)
             {
+                sm.IsDirty = true;
                 selectedSubmeshes.Add(sm);
             }
         }

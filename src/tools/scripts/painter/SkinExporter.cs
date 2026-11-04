@@ -255,7 +255,7 @@ namespace DeadlockPlayground.Painter
 
             // Pre-extract custom imported meshes on the main thread to prevent cross-thread Godot crashes
             var preExtractedCustomMeshes = config.TargetSubmeshes?
-                .Where(sm => sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("IsCustomImportedMesh"))
+                .Where(sm => sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("IsCustomImportedMesh") && sm.Mesh.Visible)
                 .Select(sm => sm.Mesh)
                 .Distinct()
                 .ToList() ?? new List<MeshInstance3D>();
@@ -297,6 +297,40 @@ namespace DeadlockPlayground.Painter
                     compilerExe: config.ResourceCompilerPath,
                     deadlockGamePath: config.DeadlockGamePath
                 );
+
+                // If the user painted on any custom submesh in the 3D painter, merge the baked paint strokes
+                // directly into preExtractedCustomBundle.Submeshes so CustomModelExporter compiles the painted texture.
+                if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
+                {
+                    foreach (var sm in config.TargetSubmeshes)
+                    {
+                        if (sm?.Mesh == null || !sm.Mesh.HasMeta("IsCustomImportedMesh")) continue;
+                        string smKey = !string.IsNullOrEmpty(sm.DisplayName) ? sm.DisplayName : sm.Mesh.Name.ToString();
+                        bool hasPaintedOverlay = (config.PreBakedAtlasesBySubmesh != null && !string.IsNullOrEmpty(smKey) && config.PreBakedAtlasesBySubmesh.ContainsKey(smKey))
+                                                 || config.PreBakedAtlas != null;
+                        if (!hasPaintedOverlay) continue;
+
+                        int targetRes = config.Resolution > 0 ? config.Resolution : 2048;
+                        Image blendedImg = ExtractAndBlendSubmeshImage(config, sm, targetRes);
+                        if (blendedImg != null && !blendedImg.IsEmpty())
+                        {
+                            byte[] paintedPng = blendedImg.SavePngToBuffer();
+                            if (paintedPng != null && paintedPng.Length > 0)
+                            {
+                                string meshName = sm.Mesh.Name.ToString();
+                                foreach (var bundleSub in preExtractedCustomBundle.Submeshes)
+                                {
+                                    if (string.Equals(bundleSub.SubmeshName, smKey, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(bundleSub.SubmeshName, meshName, StringComparison.OrdinalIgnoreCase) ||
+                                        bundleSub.SubmeshName.StartsWith(meshName + "_s", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        bundleSub.AlbedoPngBytes = paintedPng;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             return await Task.Run(async () =>
@@ -445,8 +479,11 @@ bool isSourceModInTargetAddons = false;
                 }
                 else if (hasCustomModel)
                 {
-                    // If custom model exists, only export submeshes that are explicitly dirty
-                    submeshesToExport = submeshesToExport.Where(s => s.IsDirty).ToList();
+                    // Custom imported meshes are compiled with their own .vmat_c and .vtex_c in Step 2.5 (CustomModelExporter).
+                    // Exclude IsCustomImportedMesh from Step A so we never emit duplicate unreferenced <mat>_color.vtex_c files!
+                    submeshesToExport = submeshesToExport
+                        .Where(s => s.IsDirty && !(s.Mesh != null && s.Mesh.HasMeta("IsCustomImportedMesh")))
+                        .ToList();
                 }
 
                 var workspaceSession = ModWorkspaceSession.Instance;
@@ -1073,10 +1110,10 @@ bool isSourceModInTargetAddons = false;
                                     return result;
                                 }
 
-                                if (modelRes.AllowlistedVpkFiles.Count > 35)
+                                if (modelRes.AllowlistedVpkFiles.Count > 65)
                                 {
                                     result.Success = false;
-                                    result.ErrorMessage = $"Custom model export exceeded strict file count limit ({modelRes.AllowlistedVpkFiles.Count} > 35).";
+                                    result.ErrorMessage = $"Custom model export exceeded strict file count limit ({modelRes.AllowlistedVpkFiles.Count} > 65).";
                                     progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
                                     return result;
                                 }

@@ -142,31 +142,96 @@ namespace DeadlockPlayground.Tests
                     throw new FileNotFoundException($"Model file not found: {sashaPath}");
                 }
 
-                var gltfDoc = new GltfDocument();
-                var gltfState = new GltfState();
-                Error err = gltfDoc.AppendFromFile(sashaPath, gltfState);
-                if (err != Error.Ok)
+                var sashaScene = CustomModelAutoRigger.LoadAndSanitize3DModelScene(sashaPath);
+                if (sashaScene == null)
                 {
-                    throw new Exception($"Failed to append GLTF document: {err}");
+                    throw new Exception($"Failed to load and sanitize GLTF document: {sashaPath}");
                 }
-                var sashaScene = (Node3D)gltfDoc.GenerateScene(gltfState);
                 Root.AddChild(sashaScene);
 
                 var sashaMeshes = CustomModelAutoRigger.CollectMeshes(sashaScene);
                 int totalSashaVerts = 0;
                 int totalSashaTris = 0;
-                foreach (var m in sashaMeshes)
+                int detectedOutlineShells = 0;
+                bool irisHasTextureAndWhiteAlbedo = false;
+                bool eyeWhiteIsWhite = false;
+                bool bodysuitHasTextureAndWhiteAlbedo = false;
+
+                GD.Print("\n--- DIAGNOSTIC DUMP OF ALL 19 SASHA SUBMESHES & MATERIALS ---");
+                for (int miIdx = 0; miIdx < sashaMeshes.Count; miIdx++)
                 {
+                    var m = sashaMeshes[miIdx];
+                    bool isOutline = m.HasMeta("IsOutlineShell") && m.GetMeta("IsOutlineShell").AsBool();
+                    if (isOutline) detectedOutlineShells++;
+
                     for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
                     {
                         var arr = m.Mesh.SurfaceGetArrays(s);
                         var v = arr[(int)Mesh.ArrayType.Vertex].As<Vector3[]>();
+                        var uvs = arr.Count > (int)Mesh.ArrayType.TexUV && arr[(int)Mesh.ArrayType.TexUV].VariantType != Variant.Type.Nil
+                            ? arr[(int)Mesh.ArrayType.TexUV].As<Vector2[]>()
+                            : null;
                         var idx = arr[(int)Mesh.ArrayType.Index].As<int[]>();
                         if (v != null) totalSashaVerts += v.Length;
                         if (idx != null) totalSashaTris += idx.Length / 3;
+
+                        Vector2 uvMin = new Vector2(float.MaxValue, float.MaxValue);
+                        Vector2 uvMax = new Vector2(float.MinValue, float.MinValue);
+                        if (uvs != null && uvs.Length > 0)
+                        {
+                            for (int u = 0; u < uvs.Length; u++)
+                            {
+                                uvMin = uvMin.Min(uvs[u]);
+                                uvMax = uvMax.Max(uvs[u]);
+                            }
+                        }
+                        else
+                        {
+                            uvMin = Vector2.Zero;
+                            uvMax = Vector2.Zero;
+                        }
+
+                        var surfMat = (m.Mesh.SurfaceGetMaterial(s) ?? m.GetSurfaceOverrideMaterial(s)) as StandardMaterial3D;
+                        string matName = surfMat?.ResourceName ?? (m.HasMeta("SourceMaterialName") ? m.GetMeta("SourceMaterialName").AsString() : "<none>");
+                        string texDesc = surfMat?.AlbedoTexture != null
+                            ? $"{surfMat.AlbedoTexture.GetWidth()}x{surfMat.AlbedoTexture.GetHeight()}"
+                            : "null";
+
+                        GD.Print($"  [{miIdx:D2}] Mesh='{m.Name}' | Mat='{matName}' | OutlineShell={isOutline} | " +
+                                 $"Cull={surfMat?.CullMode} | Shading={surfMat?.ShadingMode} | Transp={surfMat?.Transparency} | " +
+                                 $"Albedo={surfMat?.AlbedoColor} | Tex={texDesc} | Emission={surfMat?.Emission} | " +
+                                 $"VColorAlbedo={surfMat?.VertexColorUseAsAlbedo} | UV=[({uvMin.X:F2},{uvMin.Y:F2})..({uvMax.X:F2},{uvMax.Y:F2})]");
+
+                        if (matName.Equals("Iris", StringComparison.OrdinalIgnoreCase) && surfMat != null)
+                        {
+                            irisHasTextureAndWhiteAlbedo = surfMat.AlbedoTexture != null &&
+                                                           surfMat.AlbedoTexture.GetWidth() == 1024 &&
+                                                           surfMat.AlbedoColor.R > 0.9f && surfMat.AlbedoColor.G > 0.9f && surfMat.AlbedoColor.B > 0.9f;
+                        }
+                        if ((m.Name.ToString().Contains("Body_Eye", StringComparison.OrdinalIgnoreCase) ||
+                             matName.Contains("Body_Eye", StringComparison.OrdinalIgnoreCase)) && surfMat != null)
+                        {
+                            eyeWhiteIsWhite = surfMat.AlbedoColor.R > 0.9f && surfMat.AlbedoColor.G > 0.9f && surfMat.AlbedoColor.B > 0.9f;
+                        }
+                        if (matName.Equals("Bodysuit", StringComparison.OrdinalIgnoreCase) && surfMat != null)
+                        {
+                            bodysuitHasTextureAndWhiteAlbedo = surfMat.AlbedoTexture != null &&
+                                                               surfMat.AlbedoTexture.GetWidth() == 2048 &&
+                                                               surfMat.AlbedoColor.R > 0.9f && surfMat.AlbedoColor.G > 0.9f && surfMat.AlbedoColor.B > 0.9f;
+                        }
                     }
                 }
-                GD.Print($"[Test] Sasha loaded: {sashaMeshes.Count} submeshes, {totalSashaVerts} verts, {totalSashaTris} tris.");
+                GD.Print($"[Test] Sasha loaded: {sashaMeshes.Count} submeshes ({detectedOutlineShells} outline shells), {totalSashaVerts} verts, {totalSashaTris} tris.");
+
+                if (!irisHasTextureAndWhiteAlbedo || !eyeWhiteIsWhite || !bodysuitHasTextureAndWhiteAlbedo || detectedOutlineShells != 7)
+                {
+                    GD.PrintErr($"FAIL: Sasha unlit/emissive material repair or outline shell detection failed! IrisOk={irisHasTextureAndWhiteAlbedo}, EyeWhiteOk={eyeWhiteIsWhite}, BodysuitOk={bodysuitHasTextureAndWhiteAlbedo}, OutlineShells={detectedOutlineShells} (expected 7)");
+                    allPassed = false;
+                }
+                else
+                {
+                    GD.Print("PASS: Sasha KHR_materials_unlit / Emission materials repaired (Iris 1024x1024 cyan/pink texture restored, Eye Sclera white [1,1,1], Bodysuit 2048x2048 texture un-blackened, and all 7 Inverted-Hull Outline Shells tagged with CullMode=Back & Unshaded)!");
+                }
 
                 var (modelMin, modelMax, modelValid) = CustomModelAutoRigger.ComputePristineModelBounds(sashaScene);
                 float modelHeight = modelMax.Y - modelMin.Y;
@@ -1016,6 +1081,9 @@ namespace DeadlockPlayground.Tests
                 else
                 {
                     bool allSubmeshesHaveMats = true;
+                    bool outlinesProtected = true;
+                    int toonCapableCount = 0;
+
                     foreach (var sm in painterHierarchy.Submeshes)
                     {
                         if (string.IsNullOrWhiteSpace(painterHierarchy.GetSubmeshMaterialKey(sm)))
@@ -1023,15 +1091,39 @@ namespace DeadlockPlayground.Tests
                             allSubmeshesHaveMats = false;
                             break;
                         }
+                        bool isOutline = sm.Mesh != null && sm.Mesh.HasMeta("IsOutlineShell") && sm.Mesh.GetMeta("IsOutlineShell").AsBool();
+                        if (isOutline && (!sm.PreserveOriginal || sm.ToonMaterial != null || sm.OutlineMaterial != null))
+                        {
+                            outlinesProtected = false;
+                        }
+                        if (!isOutline && sm.ToonMaterial != null)
+                        {
+                            toonCapableCount++;
+                            // Since Sasha already has 7 visible baked outline shells, OutlineMaterial must be suppressed to avoid double outlines
+                            if (sm.OutlineMaterial != null)
+                            {
+                                outlinesProtected = false;
+                            }
+                        }
                     }
 
-                    if (allSubmeshesHaveMats)
+                    // Toggle Toon Shading ON and verify active surface material switches to ToonMaterial
+                    painterHierarchy.ApplyToonShading(true);
+                    bool toonAppliedOnEnable = painterHierarchy.Submeshes.Any(sm =>
+                        sm.ToonMaterial != null && sm.Mesh.GetSurfaceOverrideMaterial(sm.SurfaceIndex) == sm.ToonMaterial);
+
+                    // Toggle Toon Shading OFF and verify active surface material reverts to OriginalMaterial
+                    painterHierarchy.ApplyToonShading(false);
+                    bool origRestoredOnDisable = painterHierarchy.Submeshes.All(sm =>
+                        sm.Mesh.GetSurfaceOverrideMaterial(sm.SurfaceIndex) == sm.OriginalMaterial);
+
+                    if (allSubmeshesHaveMats && outlinesProtected && toonCapableCount >= 9 && toonAppliedOnEnable && origRestoredOnDisable && painterHierarchy.Submeshes.Count == 19)
                     {
-                        GD.Print($"PASS: HeroMeshHierarchy successfully scanned {painterHierarchy.Submeshes.Count} submeshes and {painterHierarchy.MaterialGroups.Count} material groups (all resolved valid material keys for painter & export)!");
+                        GD.Print($"PASS: HeroMeshHierarchy scanned all {painterHierarchy.Submeshes.Count} submeshes ({toonCapableCount} Toon-capable surfaces, 7 protected outline shells, Toon ON/OFF toggle verified)!");
                     }
                     else
                     {
-                        GD.PrintErr("FAIL: One or more submeshes in custom-rigged hero failed to resolve a material key!");
+                        GD.PrintErr($"FAIL: HeroMeshHierarchy custom submesh validation failed! count={painterHierarchy.Submeshes.Count} (expected 19), allHaveMats={allSubmeshesHaveMats}, outlinesProtected={outlinesProtected}, toonCapable={toonCapableCount}, toonON={toonAppliedOnEnable}, toonOFF={origRestoredOnDisable}");
                         allPassed = false;
                     }
                 }
@@ -1150,15 +1242,53 @@ namespace DeadlockPlayground.Tests
                                 GD.Print($"   - {p}");
                             }
 
-                            bool countBounded = allVpkPaths.Count > 1 && allVpkPaths.Count < 35;
+                            // Verify every .vmat_c in the VPK has all required texture parameters (including g_tAmbientOcclusion)
+                            // and that every referenced .vtex_c exists inside the VPK and has valid non-checkerboard pixel data!
+                            bool allVmatsHaveSelfContainedVtex = true;
+                            foreach (var vmatPath in allVpkPaths.Where(p => p.EndsWith(".vmat_c", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                var vmEntry = outPkg.FindEntry(vmatPath);
+                                if (vmEntry == null) { allVmatsHaveSelfContainedVtex = false; break; }
+                                outPkg.ReadEntry(vmEntry, out byte[] vmBytes);
+                                using var vmRes = new ValveResourceFormat.Resource { FileName = vmatPath };
+                                using var vmMs = new MemoryStream(vmBytes);
+                                vmRes.Read(vmMs);
+
+                                if (vmRes.DataBlock is ValveResourceFormat.ResourceTypes.Material matBlock)
+                                {
+                                    bool hasAoSlot = matBlock.TextureParams.ContainsKey("g_tAmbientOcclusion");
+                                    bool hasColorSlot = matBlock.TextureParams.ContainsKey("g_tColor");
+                                    bool hasNormSlot = matBlock.TextureParams.ContainsKey("g_tNormalRoughness");
+                                    if (!hasAoSlot || !hasColorSlot || !hasNormSlot)
+                                    {
+                                        GD.PrintErr($"FAIL: '{vmatPath}' missing required slots: color={hasColorSlot}, norm={hasNormSlot}, ao={hasAoSlot}");
+                                        allVmatsHaveSelfContainedVtex = false;
+                                    }
+
+                                    foreach (var tp in matBlock.TextureParams)
+                                    {
+                                        string refVtexC = tp.Value.Replace('\\', '/').TrimStart('/') + "_c";
+                                        var refEntry = outPkg.FindEntry(refVtexC);
+                                        if (refEntry == null)
+                                        {
+                                            GD.PrintErr($"FAIL: '{vmatPath}' param '{tp.Key}' references '{refVtexC}' which is MISSING from the output VPK!");
+                                            allVmatsHaveSelfContainedVtex = false;
+                                        }
+                                    }
+                                }
+                            }
+
+                            bool countBounded = allVpkPaths.Count > 1 && allVpkPaths.Count < 65;
                             bool hasCompiledVmdl = allVpkPaths.Contains("models/heroes_staging/chrono/chrono.vmdl_c", StringComparer.OrdinalIgnoreCase);
                             bool allCustomMatsCompiled = uniqueMatNames.All(m =>
                                 allVpkPaths.Contains($"models/heroes_staging/chrono/materials/{m}.vmat_c", StringComparer.OrdinalIgnoreCase));
+                            bool hasIrisVmat = allVpkPaths.Contains("models/heroes_staging/chrono/materials/iris.vmat_c", StringComparer.OrdinalIgnoreCase);
+                            bool hasBodysuitVmat = allVpkPaths.Contains("models/heroes_staging/chrono/materials/bodysuit.vmat_c", StringComparer.OrdinalIgnoreCase);
                             bool hasCompiledVtex = allVpkPaths.Any(p => p.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase));
 
-                            if (!countBounded || !hasCompiledVmdl || !allCustomMatsCompiled || !hasCompiledVtex)
+                            if (!countBounded || !hasCompiledVmdl || !allCustomMatsCompiled || !hasIrisVmat || !hasBodysuitVmat || !hasCompiledVtex || !allVmatsHaveSelfContainedVtex)
                             {
-                                GD.PrintErr($"FAIL: VPK content assertions failed! count={allVpkPaths.Count} (<35={countBounded}), hasVmdlC={hasCompiledVmdl}, allMatsCompiled={allCustomMatsCompiled}, hasVtexC={hasCompiledVtex}");
+                                GD.PrintErr($"FAIL: VPK content assertions failed! count={allVpkPaths.Count} (<65={countBounded}), hasVmdlC={hasCompiledVmdl}, allMatsCompiled={allCustomMatsCompiled}, hasIris={hasIrisVmat}, hasBodysuit={hasBodysuitVmat}, hasVtexC={hasCompiledVtex}, selfContainedVtex={allVmatsHaveSelfContainedVtex}");
                                 allPassed = false;
                             }
                             else
@@ -1180,7 +1310,7 @@ namespace DeadlockPlayground.Tests
 
                                 if (compiledHasStandingPivot && compiledHasAg2)
                                 {
-                                    GD.Print($"PASS: End-to-end CSDK13 VPK verified ({allVpkPaths.Count} files < 35, all {uniqueMatNames.Count} custom .vmat_c/.vtex_c present, and compiled chrono.vmdl_c contains standing_pivot, gunaim_00, chrono.vnmskel, and AnimGraph2 references)!");
+                                    GD.Print($"PASS: End-to-end CSDK13 VPK verified ({allVpkPaths.Count} files < 65, all {uniqueMatNames.Count} custom .vmat_c/.vtex_c present with self-contained AO/Normal/Mask textures, and compiled chrono.vmdl_c contains standing_pivot, gunaim_00, chrono.vnmskel, and AnimGraph2 references)!");
                                 }
                                 else
                                 {

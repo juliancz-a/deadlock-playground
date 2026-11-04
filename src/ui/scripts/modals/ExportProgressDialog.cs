@@ -35,6 +35,51 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
         _btnCancel ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnCancel");
         _btnOpenFolder ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnOpenFolder");
         _btnCopyLog ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnCopyLog");
+
+        if (_lblStepStatus != null)
+        {
+            _lblStepStatus.ClipText = true;
+            _lblStepStatus.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        }
+
+        if (_logConsole != null)
+        {
+            _logConsole.SelectionEnabled = true;
+            _logConsole.ContextMenuEnabled = true;
+        }
+    }
+
+    public override void _Input(InputEvent @event)
+    {
+        if (!Visible || !_isCompleted) return;
+        if (@event is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.Escape)
+        {
+            OnCancelOrClosePressed();
+            GetViewport()?.SetInputAsHandled();
+        }
+    }
+
+    private static string FormatSingleLineStatus(string raw, int maxLen = 85)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        string clean = raw
+            .Replace("[INFO]", "")
+            .Replace("[SUCCESS]", "")
+            .Replace("[WARNING]", "")
+            .Replace("[ERROR]", "")
+            .Trim();
+
+        int newlineIdx = clean.IndexOfAny(new[] { '\r', '\n' });
+        if (newlineIdx >= 0)
+        {
+            clean = clean.Substring(0, newlineIdx).Trim();
+        }
+
+        if (clean.Length > maxLen)
+        {
+            clean = clean.Substring(0, maxLen - 3) + "...";
+        }
+        return clean;
     }
 
     private void ConnectEvents()
@@ -105,10 +150,7 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
 
                 if (_lblStepStatus != null)
                 {
-                    string clean = report.Message;
-                    clean = clean.Replace("[INFO]", "").Replace("[SUCCESS]", "").Replace("[WARNING]", "").Replace("[ERROR]", "").Trim();
-                    if (clean.Length > 80) clean = clean.Substring(0, 77) + "...";
-                    _lblStepStatus.Text = clean;
+                    _lblStepStatus.Text = FormatSingleLineStatus(report.Message, 85);
                 }
             }
         }).CallDeferred();
@@ -145,9 +187,20 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
             }
             else
             {
+                string fullErr = result?.ErrorMessage ?? "Unknown error";
+                if (_logConsole != null)
+                {
+                    string existingLog = _logConsole.GetParsedText() ?? "";
+                    if (!existingLog.Contains(fullErr, StringComparison.Ordinal))
+                    {
+                        AppendLog($"[ERROR] {fullErr}", ExportLogLevel.Error);
+                    }
+                }
+
                 if (_lblStepStatus != null)
                 {
-                    _lblStepStatus.Text = $"Export failed: {result?.ErrorMessage ?? "Unknown error"}";
+                    string singleLineErr = FormatSingleLineStatus(fullErr, 75);
+                    _lblStepStatus.Text = $"Export failed: {singleLineErr}";
                     _lblStepStatus.Modulate = Colors.Salmon;
                 }
             }

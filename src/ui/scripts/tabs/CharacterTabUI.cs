@@ -476,54 +476,11 @@ public partial class CharacterTabUI : VBoxContainer
             return;
         }
 
-        Node importedScene = null;
-        string ext = Path.GetExtension(filePath).ToLowerInvariant();
-
-        try
-        {
-            if (ext == ".fbx")
-            {
-                try
-                {
-                    var fbxDoc = new FbxDocument();
-                    var fbxState = new FbxState();
-                    if (fbxDoc.AppendFromFile(filePath, fbxState) == Error.Ok)
-                    {
-                        importedScene = fbxDoc.GenerateScene(fbxState);
-                    }
-                }
-                catch (Exception fbxEx)
-                {
-                    GD.Print($"[CharacterTabUI] Direct FBX load warning: {fbxEx.Message}. Trying GltfDocument fallback...");
-                }
-            }
-
-            if (importedScene == null)
-            {
-                var gltfDoc = new GltfDocument();
-                var gltfState = new GltfState();
-                if (gltfDoc.AppendFromFile(filePath, gltfState) == Error.Ok)
-                {
-                    importedScene = gltfDoc.GenerateScene(gltfState);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharacterTabUI] Failed to load 3D file '{filePath}': {ex.Message}");
-            return;
-        }
-
-        if (importedScene == null)
+        var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(filePath);
+        if (sceneRoot == null)
         {
             GD.PrintErr($"[CharacterTabUI] Could not parse 3D scene from '{filePath}'.");
             return;
-        }
-
-        var sceneRoot = importedScene as Node3D ?? new Node3D();
-        if (sceneRoot != importedScene)
-        {
-            sceneRoot.AddChild(importedScene);
         }
 
         // Open Self-Contained Custom Model Importer Modal (CanvasLayer 110 with isolated SubViewport)
@@ -552,6 +509,13 @@ public partial class CharacterTabUI : VBoxContainer
                 var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
                 // Invalidate cached hero so switching to Paint tab reloads it smoothly without freezing CharacterTabUI
                 paintTab?.ClearHero();
+
+                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+                hierarchy?.ScanHero(activeHero);
+
+                var shadingTab = GetTree()?.Root?.FindChild("ShadingTab", true, false) as ShadingTabUI
+                              ?? GetTree()?.Root?.FindChild("ShadingTabUI", true, false) as ShadingTabUI;
+                shadingTab?.SetHero(activeHero);
 
                 var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
                 if (skeleton != null)
@@ -585,54 +549,11 @@ public partial class CharacterTabUI : VBoxContainer
         }
 
         // Re-generate pristine scene root from file to avoid any mutations from previous riggings
-        Node importedScene = null;
-        string ext = Path.GetExtension(_lastImportedFilePath).ToLowerInvariant();
-
-        try
-        {
-            if (ext == ".fbx")
-            {
-                try
-                {
-                    var fbxDoc = new FbxDocument();
-                    var fbxState = new FbxState();
-                    if (fbxDoc.AppendFromFile(_lastImportedFilePath, fbxState) == Error.Ok)
-                    {
-                        importedScene = fbxDoc.GenerateScene(fbxState);
-                    }
-                }
-                catch (Exception fbxEx)
-                {
-                    GD.Print($"[CharacterTabUI] Direct FBX load warning: {fbxEx.Message}. Trying GltfDocument fallback...");
-                }
-            }
-
-            if (importedScene == null)
-            {
-                var gltfDoc = new GltfDocument();
-                var gltfState = new GltfState();
-                if (gltfDoc.AppendFromFile(_lastImportedFilePath, gltfState) == Error.Ok)
-                {
-                    importedScene = gltfDoc.GenerateScene(gltfState);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharacterTabUI] Failed to reload 3D file '{_lastImportedFilePath}': {ex.Message}");
-            return;
-        }
-
-        if (importedScene == null)
+        var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(_lastImportedFilePath);
+        if (sceneRoot == null)
         {
             GD.PrintErr($"[CharacterTabUI] Could not reload 3D scene from '{_lastImportedFilePath}'.");
             return;
-        }
-
-        var sceneRoot = importedScene as Node3D ?? new Node3D();
-        if (sceneRoot != importedScene)
-        {
-            sceneRoot.AddChild(importedScene);
         }
 
         // Temporarily hide current custom model container so preview in modal is isolated
@@ -676,6 +597,13 @@ public partial class CharacterTabUI : VBoxContainer
 
                 var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
                 paintTab?.ClearHero();
+
+                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+                hierarchy?.ScanHero(activeHero);
+
+                var shadingTab = GetTree()?.Root?.FindChild("ShadingTab", true, false) as ShadingTabUI
+                              ?? GetTree()?.Root?.FindChild("ShadingTabUI", true, false) as ShadingTabUI;
+                shadingTab?.SetHero(activeHero);
 
                 var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
                 if (skeleton != null)
