@@ -10,6 +10,7 @@ using DeadlockPlayground.UI;
 using DeadlockPlayground.Particles;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Materials;
+using DeadlockPlayground.Importer;
 
 public partial class CharacterTabUI : VBoxContainer
 {
@@ -25,6 +26,10 @@ public partial class CharacterTabUI : VBoxContainer
     [Export] private Button _btnBrowseModGallery;
     [Export] private Button _btnCloseParticle;
     [Export] private Button _btnRestoreCharacter;
+    [Export] private Button _btnImportCustomModel;
+    [Export] private Control _customModelActionsRow;
+    [Export] private Button _btnEditCustomModel;
+    [Export] private Button _btnResetCustomModel;
     [Export] private Control _secondaryActionButtons;
     [Export] private TextureRect _texHeroGallery;
     [Export] private TextureRect _texModGallery;
@@ -55,6 +60,10 @@ public partial class CharacterTabUI : VBoxContainer
     private bool _isParticleHierarchyMode = false;
     private bool _hasConnectedParticleStage = false;
     private bool _artworkLoaded = false;
+    private string _lastImportedFilePath;
+    private Node3D _lastImportedScene;
+    private CustomModelAutoRigger.RiggingOptions _lastImportedOptions;
+    private bool _hasCustomModelApplied = false;
 
     public override void _Ready()
     {
@@ -82,6 +91,58 @@ public partial class CharacterTabUI : VBoxContainer
         _btnBrowseParticles ??= GetNodeOrNull<Button>("HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles")
                              ?? GetNodeOrNull<Button>("SubmeshHeader/HBoxButtons/BtnBrowseParticles")
                              ?? FindChild("BtnBrowseParticles", true, false) as Button;
+
+        _btnImportCustomModel ??= GetNodeOrNull<Button>("HeroSelectGroup/BtnImportCustomModel")
+                               ?? FindChild("BtnImportCustomModel", true, false) as Button;
+
+        if (_btnImportCustomModel != null)
+        {
+            var iconTex = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg");
+            if (iconTex != null)
+            {
+                _btnImportCustomModel.Icon = iconTex;
+                _btnImportCustomModel.ExpandIcon = true;
+                _btnImportCustomModel.AddThemeConstantOverride("icon_max_width", 20);
+                _btnImportCustomModel.AddThemeConstantOverride("h_separation", 8);
+                _btnImportCustomModel.AddThemeColorOverride("icon_normal_color", new Color(0.937255f, 0.870588f, 0.74902f, 1f));
+                _btnImportCustomModel.AddThemeColorOverride("icon_hover_color", new Color(1f, 0.95f, 0.85f, 1f));
+            }
+        }
+
+        _customModelActionsRow ??= GetNodeOrNull<Control>("HeroSelectGroup/CustomModelActionsRow")
+                                ?? FindChild("CustomModelActionsRow", true, false) as Control;
+        _btnEditCustomModel ??= GetNodeOrNull<Button>("HeroSelectGroup/CustomModelActionsRow/BtnEditCustomModel")
+                             ?? FindChild("BtnEditCustomModel", true, false) as Button;
+        _btnResetCustomModel ??= GetNodeOrNull<Button>("HeroSelectGroup/CustomModelActionsRow/BtnResetCustomModel")
+                              ?? FindChild("BtnResetCustomModel", true, false) as Button;
+
+        if (_btnEditCustomModel != null)
+        {
+            var iconEdit = GD.Load<Texture2D>("res://assets/at-icons/sliders.svg");
+            if (iconEdit != null)
+            {
+                _btnEditCustomModel.Icon = iconEdit;
+                _btnEditCustomModel.ExpandIcon = true;
+                _btnEditCustomModel.AddThemeConstantOverride("icon_max_width", 20);
+                _btnEditCustomModel.AddThemeConstantOverride("h_separation", 8);
+                _btnEditCustomModel.AddThemeColorOverride("icon_normal_color", new Color(0.937255f, 0.870588f, 0.74902f, 1f));
+                _btnEditCustomModel.AddThemeColorOverride("icon_hover_color", new Color(1f, 0.95f, 0.85f, 1f));
+            }
+        }
+
+        if (_btnResetCustomModel != null)
+        {
+            var iconReset = GD.Load<Texture2D>("res://assets/at-icons/rotate.svg");
+            if (iconReset != null)
+            {
+                _btnResetCustomModel.Icon = iconReset;
+                _btnResetCustomModel.ExpandIcon = true;
+                _btnResetCustomModel.AddThemeConstantOverride("icon_max_width", 20);
+                _btnResetCustomModel.AddThemeConstantOverride("h_separation", 8);
+                _btnResetCustomModel.AddThemeColorOverride("icon_normal_color", new Color(0.95f, 0.65f, 0.65f, 1f));
+                _btnResetCustomModel.AddThemeColorOverride("icon_hover_color", new Color(1f, 0.75f, 0.75f, 1f));
+            }
+        }
 
         _texHeroGallery ??= FindChild("TexHeroGallery", true, false) as TextureRect;
         _texModGallery ??= FindChild("TexModGallery", true, false) as TextureRect;
@@ -133,6 +194,7 @@ public partial class CharacterTabUI : VBoxContainer
         bool hasHeroOrModel = enabled || _currentHeroNode != null || _vpkLoader?.CurrentHeroNode != null;
         if (_btnBrowseParticles != null) _btnBrowseParticles.Disabled = !hasHeroOrModel;
         if (_btnExtraModels != null) _btnExtraModels.Disabled = !hasHeroOrModel;
+        if (_btnImportCustomModel != null) _btnImportCustomModel.Disabled = !hasHeroOrModel;
         if (_submeshContainer != null)
         {
             _submeshContainer.Modulate = enabled ? Colors.White : new Color(1, 1, 1, 0.4f);
@@ -191,6 +253,21 @@ public partial class CharacterTabUI : VBoxContainer
         if (_btnBrowseParticles != null)
         {
             _btnBrowseParticles.Pressed += OnBrowseParticlesPressed;
+        }
+
+        if (_btnImportCustomModel != null)
+        {
+            _btnImportCustomModel.Pressed += OnImportCustomModelPressed;
+        }
+
+        if (_btnEditCustomModel != null)
+        {
+            _btnEditCustomModel.Pressed += OnEditCustomModelPressed;
+        }
+
+        if (_btnResetCustomModel != null)
+        {
+            _btnResetCustomModel.Pressed += OnResetCustomModelPressed;
         }
     }
 
@@ -346,6 +423,309 @@ public partial class CharacterTabUI : VBoxContainer
         _vpkLoader.SetActiveAddon(mod.FilePath, mod);
         await _vpkLoader.LoadAddonModelAsync(mod);
         UpdateContextualButtonsVisibility();
+    }
+
+    private FileDialog _customModelFileDialog;
+
+    public void OnImportCustomModelPressed()
+    {
+        var hero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (hero == null)
+        {
+            GD.PrintErr("[CharacterTabUI] Cannot import custom model: no base hero is loaded.");
+            return;
+        }
+
+        if (_customModelFileDialog == null || !GodotObject.IsInstanceValid(_customModelFileDialog))
+        {
+            _customModelFileDialog = new FileDialog
+            {
+                Name = "CustomModelFileDialog",
+                Title = "Select Custom 3D Character or Accessory (.glb / .gltf / .fbx)",
+                FileMode = FileDialog.FileModeEnum.OpenFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new[]
+                {
+                    "*.glb, *.gltf, *.fbx ; 3D Model Files (*.glb, *.gltf, *.fbx)",
+                    "*.glb ; GL Transmission Format Binary (*.glb)",
+                    "*.gltf ; GL Transmission Format (*.gltf)",
+                    "*.fbx ; Filmbox 3D Model (*.fbx)",
+                    "*.* ; All Files"
+                },
+                UseNativeDialog = true
+            };
+            AddChild(_customModelFileDialog);
+            _customModelFileDialog.FileSelected += OnCustomModelFileSelected;
+        }
+
+        _customModelFileDialog.PopupCentered(new Vector2I(850, 550));
+    }
+
+    private void OnCustomModelFileSelected(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+        {
+            GD.PrintErr($"[CharacterTabUI] Invalid custom model path: '{filePath}'");
+            return;
+        }
+
+        var hero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (hero == null)
+        {
+            GD.PrintErr("[CharacterTabUI] No hero loaded to attach custom model to.");
+            return;
+        }
+
+        Node importedScene = null;
+        string ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+        try
+        {
+            if (ext == ".fbx")
+            {
+                try
+                {
+                    var fbxDoc = new FbxDocument();
+                    var fbxState = new FbxState();
+                    if (fbxDoc.AppendFromFile(filePath, fbxState) == Error.Ok)
+                    {
+                        importedScene = fbxDoc.GenerateScene(fbxState);
+                    }
+                }
+                catch (Exception fbxEx)
+                {
+                    GD.Print($"[CharacterTabUI] Direct FBX load warning: {fbxEx.Message}. Trying GltfDocument fallback...");
+                }
+            }
+
+            if (importedScene == null)
+            {
+                var gltfDoc = new GltfDocument();
+                var gltfState = new GltfState();
+                if (gltfDoc.AppendFromFile(filePath, gltfState) == Error.Ok)
+                {
+                    importedScene = gltfDoc.GenerateScene(gltfState);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharacterTabUI] Failed to load 3D file '{filePath}': {ex.Message}");
+            return;
+        }
+
+        if (importedScene == null)
+        {
+            GD.PrintErr($"[CharacterTabUI] Could not parse 3D scene from '{filePath}'.");
+            return;
+        }
+
+        var sceneRoot = importedScene as Node3D ?? new Node3D();
+        if (sceneRoot != importedScene)
+        {
+            sceneRoot.AddChild(importedScene);
+        }
+
+        // Open Self-Contained Custom Model Importer Modal (CanvasLayer 110 with isolated SubViewport)
+        var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
+        oldModal?.QueueFree();
+
+        var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
+        GetTree()?.Root?.AddChild(modal);
+
+        modal.Open(hero, sceneRoot, filePath);
+        modal.RiggingConfirmed += () =>
+        {
+            _lastImportedOptions = modal.LastRiggingOptions;
+            _lastImportedFilePath = filePath;
+            _lastImportedScene = sceneRoot;
+            _hasCustomModelApplied = true;
+            UpdateContextualButtonsVisibility();
+
+            var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+            if (activeHero != null)
+            {
+                ClearSubmeshes(clearHeroNode: false);
+                CollectSubmeshesRecursive(activeHero);
+                PopulateSubmeshList();
+
+                var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
+                // Invalidate cached hero so switching to Paint tab reloads it smoothly without freezing CharacterTabUI
+                paintTab?.ClearHero();
+
+                var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
+                if (skeleton != null)
+                {
+                    var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                                 ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+                    playerTab?.SetSkeleton(skeleton);
+
+                    var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as DeadlockPlayground.UI.AnimationStudioDock;
+                    animDock?.SetSkeleton(skeleton);
+                }
+
+                GD.Print("[CharacterTabUI] Custom model rigging confirmed and bound successfully!");
+            }
+        };
+    }
+
+    private void OnEditCustomModelPressed()
+    {
+        var hero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (hero == null)
+        {
+            GD.PrintErr("[CharacterTabUI] No hero loaded to edit custom model.");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_lastImportedFilePath) || !File.Exists(_lastImportedFilePath))
+        {
+            GD.PrintErr("[CharacterTabUI] Source file path for imported model is missing or deleted.");
+            return;
+        }
+
+        // Re-generate pristine scene root from file to avoid any mutations from previous riggings
+        Node importedScene = null;
+        string ext = Path.GetExtension(_lastImportedFilePath).ToLowerInvariant();
+
+        try
+        {
+            if (ext == ".fbx")
+            {
+                try
+                {
+                    var fbxDoc = new FbxDocument();
+                    var fbxState = new FbxState();
+                    if (fbxDoc.AppendFromFile(_lastImportedFilePath, fbxState) == Error.Ok)
+                    {
+                        importedScene = fbxDoc.GenerateScene(fbxState);
+                    }
+                }
+                catch (Exception fbxEx)
+                {
+                    GD.Print($"[CharacterTabUI] Direct FBX load warning: {fbxEx.Message}. Trying GltfDocument fallback...");
+                }
+            }
+
+            if (importedScene == null)
+            {
+                var gltfDoc = new GltfDocument();
+                var gltfState = new GltfState();
+                if (gltfDoc.AppendFromFile(_lastImportedFilePath, gltfState) == Error.Ok)
+                {
+                    importedScene = gltfDoc.GenerateScene(gltfState);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[CharacterTabUI] Failed to reload 3D file '{_lastImportedFilePath}': {ex.Message}");
+            return;
+        }
+
+        if (importedScene == null)
+        {
+            GD.PrintErr($"[CharacterTabUI] Could not reload 3D scene from '{_lastImportedFilePath}'.");
+            return;
+        }
+
+        var sceneRoot = importedScene as Node3D ?? new Node3D();
+        if (sceneRoot != importedScene)
+        {
+            sceneRoot.AddChild(importedScene);
+        }
+
+        // Temporarily hide current custom model container so preview in modal is isolated
+        var existingContainer = hero.FindChild("Custom_Rigged_Character", true, false) as Node3D;
+        if (existingContainer != null)
+        {
+            existingContainer.Visible = false;
+        }
+
+        // Open modal with cached options
+        var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
+        oldModal?.QueueFree();
+
+        var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
+        GetTree()?.Root?.AddChild(modal);
+
+        modal.Open(hero, sceneRoot, _lastImportedFilePath, _lastImportedOptions);
+
+        modal.ModalCancelled += () =>
+        {
+            // Restore visibility if cancelled
+            if (existingContainer != null && GodotObject.IsInstanceValid(existingContainer))
+            {
+                existingContainer.Visible = true;
+            }
+        };
+
+        modal.RiggingConfirmed += () =>
+        {
+            _lastImportedOptions = modal.LastRiggingOptions;
+            _lastImportedScene = sceneRoot;
+            _hasCustomModelApplied = true;
+            UpdateContextualButtonsVisibility();
+
+            var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+            if (activeHero != null)
+            {
+                ClearSubmeshes(clearHeroNode: false);
+                CollectSubmeshesRecursive(activeHero);
+                PopulateSubmeshList();
+
+                var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
+                paintTab?.ClearHero();
+
+                var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
+                if (skeleton != null)
+                {
+                    var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                                 ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+                    playerTab?.SetSkeleton(skeleton);
+
+                    var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as DeadlockPlayground.UI.AnimationStudioDock;
+                    animDock?.SetSkeleton(skeleton);
+                }
+
+                GD.Print("[CharacterTabUI] Custom model re-rigged and updated successfully!");
+            }
+        };
+    }
+
+    private void OnResetCustomModelPressed()
+    {
+        var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (activeHero != null)
+        {
+            CustomModelAutoRigger.RemoveCustomModelAndRestoreHero(activeHero);
+            _hasCustomModelApplied = false;
+            _lastImportedOptions = null;
+            _lastImportedScene = null;
+            _lastImportedFilePath = null;
+
+            ClearSubmeshes(clearHeroNode: false);
+            CollectSubmeshesRecursive(activeHero);
+            PopulateSubmeshList();
+
+            var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
+            paintTab?.ClearHero();
+
+            var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
+            if (skeleton != null)
+            {
+                skeleton.ResetBonePoses();
+                var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                             ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+                playerTab?.SetSkeleton(skeleton);
+
+                var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as DeadlockPlayground.UI.AnimationStudioDock;
+                animDock?.SetSkeleton(skeleton);
+            }
+
+            UpdateContextualButtonsVisibility();
+            GD.Print("[CharacterTabUI] Reset hero to original Deadlock state and removed custom model.");
+        }
     }
 
     private ParticleStage3D GetOrCreateParticleStage()
@@ -730,11 +1110,31 @@ public partial class CharacterTabUI : VBoxContainer
                 _btnBrowseParticles.Visible = hasHero;
             }
         }
+
+        var heroNode = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        bool hasCustom = _hasCustomModelApplied || (heroNode != null && heroNode.FindChild("Custom_Rigged_Character", true, false) != null);
+        if (_customModelActionsRow != null && GodotObject.IsInstanceValid(_customModelActionsRow))
+        {
+            _customModelActionsRow.Visible = hasCustom;
+        }
+        if (_btnEditCustomModel != null && GodotObject.IsInstanceValid(_btnEditCustomModel))
+        {
+            _btnEditCustomModel.Disabled = !hasCustom;
+        }
+        if (_btnResetCustomModel != null && GodotObject.IsInstanceValid(_btnResetCustomModel))
+        {
+            _btnResetCustomModel.Disabled = !hasCustom;
+        }
     }
 
     public void SetHero(Node3D heroNode)
     {
         _currentHeroNode = heroNode;
+        bool hasCustom = heroNode != null && heroNode.FindChild("Custom_Rigged_Character", true, false) != null;
+        if (!hasCustom)
+        {
+            _hasCustomModelApplied = false;
+        }
         UpdateContextualButtonsVisibility();
         LoadActionButtonsArtwork();
 
@@ -790,6 +1190,12 @@ public partial class CharacterTabUI : VBoxContainer
         {
             string rawName = mi.Name.ToString();
             if (rawName.StartsWith("@") || rawName.StartsWith(".")) return;
+
+            // Filter out original hero meshes replaced by custom model
+            if (mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool())
+            {
+                return;
+            }
 
             if (!HeroMeshHierarchy.IsAuthenticHeroMesh(mi))
             {

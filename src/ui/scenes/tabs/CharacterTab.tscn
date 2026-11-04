@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://cyy83uh7loppl" path="res://ui/scripts/tabs/CharacterTabUI.cs" id="1_char"]
 [ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_cxjk5"]
 
-[node name="CharacterTab" type="VBoxContainer" unique_id=848590226 node_paths=PackedStringArray("_submeshContainer", "_partsLabel", "_btnShowAll", "_btnHideAccessories", "_btnBrowseHeroGallery", "_btnExtraModels", "_btnBrowseModGallery", "_btnBrowseParticles", "_btnCloseParticle", "_btnRestoreCharacter", "_secondaryActionButtons", "_texHeroGallery", "_texModGallery", "_texExtraModels", "_texParticles")]
+[node name="CharacterTab" type="VBoxContainer" unique_id=848590226 node_paths=PackedStringArray("_submeshContainer", "_partsLabel", "_btnShowAll", "_btnHideAccessories", "_btnBrowseHeroGallery", "_btnExtraModels", "_btnBrowseModGallery", "_btnBrowseParticles", "_btnCloseParticle", "_btnRestoreCharacter", "_btnImportCustomModel", "_customModelActionsRow", "_btnEditCustomModel", "_btnResetCustomModel", "_secondaryActionButtons", "_texHeroGallery", "_texModGallery", "_texExtraModels", "_texParticles")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -24,6 +24,10 @@ _btnExtraModels = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnExtraModel
 _btnBrowseParticles = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnBrowseParticles")
 _btnCloseParticle = NodePath("HeroSelectGroup/ContextualActionButtons/BtnCloseParticle")
 _btnRestoreCharacter = NodePath("HeroSelectGroup/ContextualActionButtons/BtnRestoreCharacter")
+_btnImportCustomModel = NodePath("HeroSelectGroup/BtnImportCustomModel")
+_customModelActionsRow = NodePath("HeroSelectGroup/CustomModelActionsRow")
+_btnEditCustomModel = NodePath("HeroSelectGroup/CustomModelActionsRow/BtnEditCustomModel")
+_btnResetCustomModel = NodePath("HeroSelectGroup/CustomModelActionsRow/BtnResetCustomModel")
 _texHeroGallery = NodePath("HeroSelectGroup/PrimaryActionButtons/BtnBrowseHeroGallery/Margin/VBox/TexHeroGallery")
 _texModGallery = NodePath("HeroSelectGroup/PrimaryActionButtons/BtnBrowseModGallery/Margin/VBox/TexModGallery")
 _texExtraModels = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnExtraModels/Margin/VBox/TexExtraModels")
@@ -32,6 +36,35 @@ _texParticles = NodePath("HeroSelectGroup/SecondaryActionButtons/BtnBrowsePartic
 [node name="HeroSelectGroup" type="VBoxContainer" parent="." unique_id=183166962]
 layout_mode = 2
 theme_override_constants/separation = 6
+
+[node name="BtnImportCustomModel" type="Button" parent="HeroSelectGroup" unique_id=739281050]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+text = " Import Custom 3D Model (.glb / .fbx) "
+tooltip_text = "Import external 3D character or accessory (.glb / .fbx), align in 3D Fitting Room, auto-rig to Deadlock hero skeleton, and export as mod"
+
+[node name="CustomModelActionsRow" type="HFlowContainer" parent="HeroSelectGroup" unique_id=739281099]
+visible = false
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+
+[node name="BtnEditCustomModel" type="Button" parent="HeroSelectGroup/CustomModelActionsRow" unique_id=739281100]
+custom_minimum_size = Vector2(140, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = " Edit Imported Model "
+clip_text = true
+tooltip_text = "Re-open 3D Fitting Room to adjust weapon rotation, scale, bone mappings, or submeshes"
+
+[node name="BtnResetCustomModel" type="Button" parent="HeroSelectGroup/CustomModelActionsRow" unique_id=739281101]
+custom_minimum_size = Vector2(140, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+text = " Reset to Original Hero "
+clip_text = true
+tooltip_text = "Remove custom imported model and restore all authentic Deadlock hero meshes and visibility"
 
 [node name="PrimaryActionButtons" type="HBoxContainer" parent="HeroSelectGroup" unique_id=739281041]
 layout_mode = 2

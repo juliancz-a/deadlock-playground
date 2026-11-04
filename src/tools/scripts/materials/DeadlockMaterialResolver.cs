@@ -111,6 +111,12 @@ public static class DeadlockMaterialResolver
     {
         if (node is MeshInstance3D mi)
         {
+            if (mi.HasMeta("UserVisibility"))
+            {
+                mi.Visible = mi.GetMeta("UserVisibility").AsBool();
+                return;
+            }
+
             string mName = mi.Name.ToString().TrimStart('.', '_').ToLowerInvariant();
 
             // Built-in inverted hulls (Viscous bodyoutline must remain hidden by default so translucent gel body and internal skeleton are visible)

@@ -34,6 +34,7 @@ public partial class ExportModDialog : CanvasLayer
 
     private string _heroCodename = "hero";
     private string _heroDisplayName = "Hero";
+    private string _detectedSourceModVpkPath = "";
     private List<SubmeshNodeInfo> _allSubmeshes = new();
     private readonly Dictionary<CheckBox, SubmeshNodeInfo> _submeshCheckboxes = new();
     private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _extraModelCheckboxes = new();
@@ -41,6 +42,11 @@ public partial class ExportModDialog : CanvasLayer
     private Image _preBakedAtlas;
     private GamePathManager _pathManager;
     private bool _isBrowsingCsdk = false;
+
+    private CheckBox _chkMergeBaseMod;
+    private CheckBox _chkPrioritizeNewMod;
+    private CheckBox _chkOverwriteOriginalMod;
+    private VBoxContainer _modMergeOptionsBox;
 
     public override void _Ready()
     {
@@ -135,7 +141,6 @@ public partial class ExportModDialog : CanvasLayer
                 UpdateCompilerValidationStatus(file);
                 _pathManager?.SaveResourceCompilerPath(file);
 
-                // Try to auto-populate CSDK Root if currently blank
                 if (string.IsNullOrEmpty(_txtCsdkPath?.Text))
                 {
                     string autoRoot = AutoDeriveCsdkRoot(file);
@@ -228,12 +233,46 @@ public partial class ExportModDialog : CanvasLayer
             };
         }
 
-        // Open the CSDK12 download page in the system default browser.
         if (_btnDownloadCsdk != null)
         {
             _btnDownloadCsdk.Pressed += () =>
                 OS.ShellOpen("https://deadlockmodding.pages.dev/modding-tools/csdk-12");
         }
+    }
+
+    private string ResolveActiveSourceModVpk()
+    {
+        if (_allSubmeshes != null)
+        {
+            foreach (var sm in _allSubmeshes)
+            {
+                if (!string.IsNullOrWhiteSpace(sm?.SourceAddonVpkPath) && File.Exists(sm.SourceAddonVpkPath))
+                    return sm.SourceAddonVpkPath;
+                if (sm?.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("SourceAddonVpkPath"))
+                {
+                    string meta = sm.Mesh.GetMeta("SourceAddonVpkPath").AsString();
+                    if (!string.IsNullOrWhiteSpace(meta) && File.Exists(meta))
+                        return meta;
+                }
+            }
+        }
+
+        if (ModWorkspaceSession.Instance != null &&
+            !string.IsNullOrWhiteSpace(_heroCodename) &&
+            ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(_heroCodename, out var wsHero) &&
+            !string.IsNullOrWhiteSpace(wsHero?.SourceAddonVpkPath) &&
+            File.Exists(wsHero.SourceAddonVpkPath))
+        {
+            return wsHero.SourceAddonVpkPath;
+        }
+
+        var vpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as global::VpkLoaderTest;
+        if (vpkLoader != null && !string.IsNullOrWhiteSpace(vpkLoader.ActiveAddonVpkPath) && File.Exists(vpkLoader.ActiveAddonVpkPath))
+        {
+            return vpkLoader.ActiveAddonVpkPath;
+        }
+
+        return "";
     }
 
     public void Setup(
@@ -252,9 +291,29 @@ public partial class ExportModDialog : CanvasLayer
         _preBakedAtlas = preBakedAtlas;
         _pathManager = pathManager;
 
+        _detectedSourceModVpkPath = ResolveActiveSourceModVpk();
+        bool hasSourceMod = !string.IsNullOrWhiteSpace(_detectedSourceModVpkPath) && File.Exists(_detectedSourceModVpkPath);
+
         if (_lblCommunityModWarning != null)
         {
-            _lblCommunityModWarning.Visible = isCommunityMod;
+            _lblCommunityModWarning.Visible = isCommunityMod || hasSourceMod;
+            if (hasSourceMod)
+            {
+                _lblCommunityModWarning.Text = $"📦 Base Mod Detected: {Path.GetFileName(_detectedSourceModVpkPath)}";
+            }
+        }
+
+        // Mount the Mod Merge checkboxes inside VBoxInstall (right below the install destination checkboxes)
+        var installBox = _chkInstallCitadel?.GetParent() as Container
+                      ?? GetNodeOrNull<Container>("DialogPanel/Margin/VBox/VBoxInstall")
+                      ?? GetNodeOrNull<Container>("DialogPanel/Margin/VBox");
+        if (installBox != null)
+        {
+            EnsureModMergeUICreated(installBox);
+            if (_modMergeOptionsBox != null)
+            {
+                _modMergeOptionsBox.Visible = hasSourceMod;
+            }
         }
 
         if (_txtModName != null)
@@ -267,7 +326,6 @@ public partial class ExportModDialog : CanvasLayer
             _lblHero.Text = $"{_heroDisplayName} ({_heroCodename})";
         }
 
-        // Resolve Resource Compiler Path
         string compilerPath = _pathManager?.ResolveResourceCompilerExe();
         if (_txtCompilerPath != null)
         {
@@ -275,7 +333,6 @@ public partial class ExportModDialog : CanvasLayer
         }
         UpdateCompilerValidationStatus(compilerPath);
 
-        // Populate CSDK path if available
         string csdk = _pathManager?.CurrentCsdkPath;
         if (string.IsNullOrEmpty(csdk) && !string.IsNullOrEmpty(compilerPath))
         {
@@ -286,10 +343,8 @@ public partial class ExportModDialog : CanvasLayer
             _txtCsdkPath.Text = csdk ?? "";
         }
 
-        // Setup submeshes checklist
         PopulateSubmeshChecklist();
 
-        // Default install mode
         if (_chkInstallCitadel != null) _chkInstallCitadel.ButtonPressed = true;
         if (_chkCustomFolder != null) _chkCustomFolder.ButtonPressed = false;
         UpdateInstallModeUI();
@@ -435,7 +490,6 @@ public partial class ExportModDialog : CanvasLayer
             _submeshChecklistContainer.AddChild(hbox);
         }
 
-        // Section 1: Hero Model Submeshes
         AddSectionHeader("👤 Hero Model Submeshes", new Color(0.95f, 0.85f, 0.45f));
         var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
         bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0;
@@ -501,7 +555,6 @@ public partial class ExportModDialog : CanvasLayer
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
 
-        // Section 2: Extra Models
         if (extraModelAssets.Count > 0)
         {
             var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
@@ -552,7 +605,6 @@ public partial class ExportModDialog : CanvasLayer
             }
         }
 
-        // Section 3: Particle VFX
         if (particleAssets.Count > 0)
         {
             var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
@@ -604,6 +656,58 @@ public partial class ExportModDialog : CanvasLayer
         }
     }
 
+    private void EnsureModMergeUICreated(Container parentContainer)
+    {
+        if (_modMergeOptionsBox != null && GodotObject.IsInstanceValid(_modMergeOptionsBox))
+            return;
+
+        _modMergeOptionsBox = new VBoxContainer
+        {
+            Name = "ModMergeOptionsBox",
+            Visible = false
+        };
+        _modMergeOptionsBox.AddThemeConstantOverride("separation", 4);
+
+        _chkMergeBaseMod = new CheckBox
+        {
+            Text = "Bundle Base Mod Files (Standalone Merged VPK)",
+            ButtonPressed = true,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = "Includes the original mod's 3D model (.vmdl_c) and materials (.vmat_c) alongside your recolored textures in the new VPK."
+        };
+        _chkMergeBaseMod.Toggled += (_) => UpdateTargetVpkInfo();
+
+        _chkPrioritizeNewMod = new CheckBox
+        {
+            Text = "Give New Recolor Highest Load Priority (Takes lower pakXX number & shifts original mod up)",
+            ButtonPressed = true, // TRUE by default so the new recolor wins in Deadlock without deleting the original!
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = "In Source 2, lower pakXX numbers have higher priority. This places your new recolor in the original mod's slot and moves the original mod to the next pakXX slot so nothing is lost."
+        };
+        _chkPrioritizeNewMod.Toggled += (_) => UpdateTargetVpkInfo();
+
+        _chkOverwriteOriginalMod = new CheckBox
+        {
+            Text = "Overwrite Original Mod VPK in addons/ (Replace instead of keeping both)",
+            ButtonPressed = false, // FALSE by default: keeps both mods!
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = "If checked, overwrites the original mod file directly instead of keeping both VPK files."
+        };
+        _chkOverwriteOriginalMod.Toggled += (on) =>
+        {
+            if (_chkPrioritizeNewMod != null)
+            {
+                _chkPrioritizeNewMod.Disabled = on;
+            }
+            UpdateTargetVpkInfo();
+        };
+
+        _modMergeOptionsBox.AddChild(_chkMergeBaseMod);
+        _modMergeOptionsBox.AddChild(_chkPrioritizeNewMod);
+        _modMergeOptionsBox.AddChild(_chkOverwriteOriginalMod);
+        parentContainer.AddChild(_modMergeOptionsBox);
+    }
+
     private void UpdateInstallModeUI()
     {
         bool isCustom = _chkCustomFolder?.ButtonPressed == true;
@@ -623,8 +727,32 @@ public partial class ExportModDialog : CanvasLayer
             string deadlockPath = _pathManager?.CurrentGamePath ?? "";
             string addonsDir = Path.Combine(deadlockPath, "game", "citadel", "addons");
             string nextVpk = VpkIndexResolver.ResolveNextFileName(addonsDir);
-            _lblTargetVpkInfo.Text = $"Will be installed as: {nextVpk} (in game/citadel/addons)";
-            _lblTargetVpkInfo.Modulate = new Color(0.4f, 0.9f, 0.5f);
+
+            bool hasSourceModInAddons = false;
+            string srcFileName = "";
+            if (!string.IsNullOrWhiteSpace(_detectedSourceModVpkPath) && File.Exists(_detectedSourceModVpkPath) && Directory.Exists(addonsDir))
+            {
+                string srcDir = Path.GetDirectoryName(Path.GetFullPath(_detectedSourceModVpkPath))?.TrimEnd('\\', '/') ?? "";
+                string tgtDir = Path.GetFullPath(addonsDir).TrimEnd('\\', '/');
+                hasSourceModInAddons = string.Equals(srcDir, tgtDir, StringComparison.OrdinalIgnoreCase);
+                srcFileName = Path.GetFileName(_detectedSourceModVpkPath);
+            }
+
+            if (hasSourceModInAddons && _chkOverwriteOriginalMod?.ButtonPressed == true)
+            {
+                _lblTargetVpkInfo.Text = $"Will overwrite original mod in-place: {srcFileName} (in game/citadel/addons)";
+                _lblTargetVpkInfo.Modulate = new Color(1.0f, 0.78f, 0.35f);
+            }
+            else if (hasSourceModInAddons && _chkPrioritizeNewMod?.ButtonPressed != false)
+            {
+                _lblTargetVpkInfo.Text = $"Will take priority slot '{srcFileName}' & shift original mod to '{nextVpk}' (both kept!)";
+                _lblTargetVpkInfo.Modulate = new Color(0.4f, 0.95f, 0.6f);
+            }
+            else
+            {
+                _lblTargetVpkInfo.Text = $"Will be installed as: {nextVpk} (in game/citadel/addons)";
+                _lblTargetVpkInfo.Modulate = new Color(0.4f, 0.9f, 0.5f);
+            }
         }
         else
         {
@@ -723,11 +851,14 @@ public partial class ExportModDialog : CanvasLayer
             DeadlockGamePath = _pathManager?.CurrentGamePath ?? "",
             ResourceCompilerPath = compilerPath,
             CsdkPath = csdkPath,
+            SourceModVpkPath = _detectedSourceModVpkPath,
+            MergeWithSourceModVpk = _chkMergeBaseMod == null || _chkMergeBaseMod.ButtonPressed,
+            PrioritizeNewModOverSource = _chkPrioritizeNewMod == null || _chkPrioritizeNewMod.ButtonPressed,
+            OverwriteSourceModInAddons = _chkOverwriteOriginalMod != null && _chkOverwriteOriginalMod.ButtonPressed,
             PreBakedAtlas = _preBakedAtlas,
             ExcludedAssetVpkPaths = excludedPaths
         };
 
-        // Persist paths to user config
         if (!string.IsNullOrEmpty(compilerPath))
         {
             _pathManager?.SaveResourceCompilerPath(compilerPath);

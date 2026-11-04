@@ -784,6 +784,16 @@ public partial class VpkLoaderTest : Node3D
 			Node3D modelScene = (Node3D)gltfDoc.GenerateScene(gltfState);
 			modelScene.Name = $"Hero_{hero}";
 
+			// [MOD MERGE SUPPORT] Stamp the source addon VPK path on the hero root node
+			if (!string.IsNullOrWhiteSpace(AddonVpkPath) && File.Exists(AddonVpkPath))
+			{
+				modelScene.SetMeta("SourceAddonVpkPath", AddonVpkPath);
+				if (DeadlockPlayground.Workspace.ModWorkspaceSession.Instance != null)
+				{
+					DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.RegisterHeroSourceAddonVpk(hero, LastLoadedDisplayName ?? hero, AddonVpkPath);
+				}
+			}
+
 			_currentHeroNode = modelScene;
 
 			// Register authoritative Model Attachments for data-driven particle sockets
@@ -1127,6 +1137,13 @@ public partial class VpkLoaderTest : Node3D
 					if (mat != null)
 					{
 						mat.ResourceName = vmatPath;
+						// [MOD MERGE SUPPORT] Stamp source addon VPK path on material & meshInstance
+						if (!string.IsNullOrWhiteSpace(AddonVpkPath) && File.Exists(AddonVpkPath))
+						{
+							mat.SetMeta("SourceAddonVpkPath", AddonVpkPath);
+							meshInstance.SetMeta("SourceAddonVpkPath", AddonVpkPath);
+						}
+
 						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat, package, addonPackage);
 						meshInstance.SetSurfaceOverrideMaterial(i, mat);
 						if (meshInstance.Mesh is ArrayMesh arrMesh)

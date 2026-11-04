@@ -36,6 +36,9 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("display_name")]
         public string DisplayName { get; set; } = "";
 
+        [JsonPropertyName("source_addon_vpk_path")]
+        public string SourceAddonVpkPath { get; set; } = "";
+
         [JsonPropertyName("assets")]
         public List<WorkspaceAssetEntry> Assets { get; set; } = new();
     }
@@ -397,6 +400,26 @@ namespace DeadlockPlayground.Workspace
         }
 
         public void ClearSession() => CleanupTempSession();
+
+        public void RegisterHeroSourceAddonVpk(string heroId, string heroDisplayName, string addonVpkPath)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(addonVpkPath)) return;
+            if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry))
+            {
+                heroEntry = new WorkspaceHeroEntry
+                {
+                    HeroId = heroId,
+                    DisplayName = !string.IsNullOrEmpty(heroDisplayName) ? heroDisplayName : heroId,
+                    SourceAddonVpkPath = addonVpkPath
+                };
+                Manifest.Heroes[heroId] = heroEntry;
+            }
+            else
+            {
+                heroEntry.SourceAddonVpkPath = addonVpkPath;
+            }
+            SaveManifest();
+        }
 
         public WorkspaceParticleOverrides GetParticleOverrides(string vpcfPath) => GetStagedParticleOverrides(vpcfPath);
 

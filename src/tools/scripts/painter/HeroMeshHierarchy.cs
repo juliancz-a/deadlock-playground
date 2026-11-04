@@ -18,6 +18,7 @@ namespace DeadlockPlayground.Painter
         public MeshRaycaster Raycaster { get; set; }
         public string OriginalVmatPath { get; set; }
         public string MaterialName { get; set; }
+        public string SourceAddonVpkPath { get; set; } = "";
 
         // Dirty tracking & export selection
         public bool IsDirty { get; set; } = false;
@@ -93,6 +94,15 @@ namespace DeadlockPlayground.Painter
                 NotifyHierarchyChanged();
                 return;
             }
+            string heroAddonVpkPath = "";
+            if (heroNode.HasMeta("SourceAddonVpkPath"))
+            {
+                heroAddonVpkPath = heroNode.GetMeta("SourceAddonVpkPath").AsString();
+            }
+            else if (heroNode.GetParent() is VpkLoaderTest loader && !string.IsNullOrWhiteSpace(loader.ActiveAddonVpkPath))
+            {
+                heroAddonVpkPath = loader.ActiveAddonVpkPath;
+            }
 
             // 1. Gather all candidate MeshInstance3D nodes first so modifying the tree doesn't affect recursion
             var candidateMeshes = new List<MeshInstance3D>();
@@ -139,6 +149,7 @@ namespace DeadlockPlayground.Painter
                         IsSoloed = false,
                         OriginalVmatPath = matPath,
                         MaterialName = cleanMat,
+                        SourceAddonVpkPath = mi.HasMeta("SourceAddonVpkPath") ? mi.GetMeta("SourceAddonVpkPath").AsString() : heroAddonVpkPath,
                         IsDirty = false,
                         IsSelected = false,
                         OriginalMaterial = origMat,
@@ -227,6 +238,10 @@ namespace DeadlockPlayground.Painter
                         {
                             newMi.SetMeta("OriginalMaterial_0", origMat);
                         }
+                        if (!string.IsNullOrEmpty(heroAddonVpkPath))
+                        {
+                            newMi.SetMeta("SourceAddonVpkPath", heroAddonVpkPath);
+                        }
 
                         mi.GetParent()?.AddChild(newMi);
                         _generatedSubmeshNodes.Add(newMi);
@@ -249,7 +264,8 @@ namespace DeadlockPlayground.Painter
                             OriginalMaterial = origMat,
                             ToonMaterial = toonMat,
                             OutlineMaterial = outlineMat,
-                            PreserveOriginal = preserve
+                            PreserveOriginal = preserve,
+                            SourceAddonVpkPath = heroAddonVpkPath
                         };
                         ExtractMaterialMetadata(info, mi, s);
                         _submeshes.Add(info);
@@ -292,11 +308,12 @@ namespace DeadlockPlayground.Painter
             return false;
         }
 
-        public static bool IsAuthenticHeroMesh(MeshInstance3D mi)
+        public static bool IsOriginalHeroMesh(MeshInstance3D mi)
         {
             if (mi == null || !GodotObject.IsInstanceValid(mi)) return false;
             if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) return false;
             if (mi.Mesh is ImmediateMesh) return false;
+            if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool()) return false;
 
             string name = mi.Name.ToString();
             if (name.StartsWith("@")) return false;
@@ -308,18 +325,50 @@ namespace DeadlockPlayground.Painter
                 return false;
             }
 
-            // Verify the node is an authentic descendant and not part of an editor/gizmo tree
+            // Verify the node is an authentic descendant and not part of an editor/gizmo/custom tree
             Node parent = mi.GetParent();
             while (parent != null)
             {
                 string pName = parent.Name.ToString();
                 if (pName.StartsWith("@")) return false;
                 string pLower = pName.ToLowerInvariant();
-                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual"))
+                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual") || pName.Contains("Custom_Rigged_Character"))
                 {
                     return false;
                 }
                 parent = parent.GetParent();
+            }
+
+            return true;
+        }
+
+        public static bool IsAuthenticHeroMesh(MeshInstance3D mi)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi)) return false;
+            if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) return false;
+            if (mi.Mesh is ImmediateMesh) return false;
+
+            // 1. Accept active custom imported character submeshes
+            if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool())
+            {
+                string name = mi.Name.ToString();
+                if (name.StartsWith("@")) return false;
+                string lower = name.ToLowerInvariant();
+                if (lower.Contains("picker") || lower.Contains("handle") || lower.Contains("visual") ||
+                    lower.Contains("gizmo") || lower.Contains("marker") || lower.Contains("preview") ||
+                    lower.Contains("tip") || lower.Contains("pole") || lower.Contains("outline"))
+                {
+                    return false;
+                }
+                return true;
+            }
+
+            // 2. Otherwise require authentic original hero mesh that is not hidden by a custom model
+            if (!IsOriginalHeroMesh(mi)) return false;
+
+            if (mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool())
+            {
+                return false;
             }
 
             return true;
@@ -349,6 +398,11 @@ namespace DeadlockPlayground.Painter
             if (overrideMat != null && !IsToonMaterial(overrideMat))
             {
                 return overrideMat;
+            }
+
+            if (mi.MaterialOverride != null && !IsToonMaterial(mi.MaterialOverride))
+            {
+                return mi.MaterialOverride;
             }
 
             return baseMat ?? overrideMat;
@@ -716,12 +770,11 @@ namespace DeadlockPlayground.Painter
         {
             if (mi == null) return null;
             var mat = GetAuthenticMaterial(mi, s);
-            if (mat == null) return null;
 
-            string name = mat.ResourceName;
+            string name = mat?.ResourceName;
             if (string.IsNullOrEmpty(name))
             {
-                name = mat.ResourcePath;
+                name = mat?.ResourcePath;
             }
 
             if (!string.IsNullOrEmpty(name))
@@ -738,6 +791,14 @@ namespace DeadlockPlayground.Painter
                 }
                 return name;
             }
+
+            // Fallback for custom imported meshes or in-memory materials lacking resource paths
+            if (mi.HasMeta("IsCustomImportedMesh") || mat != null)
+            {
+                string meshName = mi.Name.ToString().TrimStart('@');
+                return s > 0 ? $"{meshName}_surf{s}_mat" : $"{meshName}_mat";
+            }
+
             return null;
         }
 

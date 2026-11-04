@@ -49,71 +49,71 @@ namespace DeadlockPlayground.Animation
             // --- Pelvis & Core ---
             new("pelvis", "Pelvis / Hips", BoneGroup.Pelvis,
                 new[] { "pelvis", "hip", "hips" },
-                new[] { "hips", "pelvis", "root_hips", "b_pelvis", "hip", "bip_pelvis", "c_pelvis" }),
+                new[] { "hips", "pelvis", "root_hips", "b_pelvis", "hip", "bip_pelvis", "c_pelvis", "def_spine", "def-spine", "def-pelvis.l", "def-pelvis.r", "def_pelvis_l", "def_pelvis_r", "pelvis.l", "pelvis.r" }),
 
             // --- Spine & Posture ---
             new("spine_0", "Spine 0 (Lower)", BoneGroup.Spine,
                 new[] { "spine_0", "spine_01", "spine", "spine0" },
-                new[] { "spine", "spine_01", "spine1", "spine.001", "b_spine1", "bip_spine0" }),
+                new[] { "spine.001", "spine_01", "spine1", "def-spine.001", "def_spine_001", "b_spine1", "bip_spine0", "spine" }),
             new("spine_1", "Spine 1 (Mid)", BoneGroup.Spine,
                 new[] { "spine_1", "spine_02", "spine2" },
-                new[] { "spine1", "spine_02", "spine2", "spine.002", "b_spine2", "bip_spine1" }),
+                new[] { "spine.002", "spine_02", "spine2", "def-spine.002", "def_spine_002", "b_spine2", "bip_spine1" }),
             new("spine_2", "Spine 2 (Chest)", BoneGroup.Spine,
                 new[] { "spine_2", "spine_03", "spine3", "chest" },
-                new[] { "spine2", "spine_03", "spine3", "chest", "spine.003", "b_spine3", "bip_spine2" }),
+                new[] { "spine.003", "spine_03", "spine3", "chest", "def-spine.003", "def_spine_003", "b_spine3", "bip_spine2" }),
             new("spine_3", "Spine 3 (Upper Chest)", BoneGroup.Spine,
                 new[] { "spine_3", "spine_04", "spine4", "upperchest", "upper_chest" },
-                new[] { "spine3", "spine_04", "spine4", "upperchest", "upper_chest", "spine.004", "b_spine4" }),
+                new[] { "spine.004", "spine_04", "spine4", "upperchest", "upper_chest", "def-spine.004", "def_spine_004", "b_spine4" }),
 
             // --- Neck & Head ---
             new("neck_0", "Neck", BoneGroup.Head,
                 new[] { "neck_0", "neck_01", "neck", "neck0" },
-                new[] { "neck", "neck_01", "neck1", "neck.001", "b_neck", "bip_neck" }),
+                new[] { "neck", "neck_01", "neck1", "neck.001", "spine.005", "def-spine.005", "def_spine_005", "b_neck", "bip_neck" }),
             new("head", "Head", BoneGroup.Head,
                 new[] { "head", "head_01", "head0" },
-                new[] { "head", "head_01", "head.001", "b_head", "bip_head" }),
+                new[] { "head", "head_01", "head.001", "spine.006", "def-spine.006", "def_spine_006", "b_head", "bip_head" }),
 
             // --- Left Arm Chain ---
             new("clavicle_L", "Left Shoulder / Clavicle", BoneGroup.LeftArm,
                 new[] { "clavicle_L", "clavicle_l", "shoulder_L", "shoulder_l" },
-                new[] { "leftshoulder", "clavicle_l", "shoulder.l", "l_clavicle", "b_l_clavicle", "l_shoulder", "bip_clavicle_l" }),
+                new[] { "leftshoulder", "clavicle_l", "shoulder.l", "shoulder_l", "l_clavicle", "b_l_clavicle", "l_shoulder", "bip_clavicle_l", "def-shoulder.l", "def_shoulder_l" }),
             new("arm_upper_L", "Left Upper Arm", BoneGroup.LeftArm,
                 new[] { "arm_upper_L", "arm_upper_l", "upperarm_l", "upper_arm_l", "arm_l" },
-                new[] { "leftarm", "upperarm_l", "upper_arm.l", "l_upperarm", "b_l_arm", "left_arm", "arm_l", "bip_arm_l" }),
+                new[] { "leftarm", "upperarm_l", "upper_arm.l", "upper_arm_l", "l_upperarm", "b_l_arm", "left_arm", "arm_l", "bip_arm_l", "def-upper_arm.l", "def_upper_arm_l", "def-upper_arm.l.001", "def_upper_arm_l_001", "upper_arm.l.001" }),
             new("arm_lower_L", "Left Forearm", BoneGroup.LeftArm,
                 new[] { "arm_lower_L", "arm_lower_l", "lowerarm_l", "lower_arm_l", "forearm_l" },
-                new[] { "leftforearm", "lowerarm_l", "forearm.l", "l_lowerarm", "b_l_forearm", "left_forearm", "forearm_l", "bip_forearm_l" }),
+                new[] { "leftforearm", "lowerarm_l", "forearm.l", "forearm_l", "l_lowerarm", "b_l_forearm", "left_forearm", "bip_forearm_l", "def-forearm.l", "def_forearm_l", "def-forearm.l.001", "def_forearm_l_001", "forearm.l.001" }),
             new("hand_L", "Left Hand / Wrist", BoneGroup.LeftArm,
                 new[] { "hand_L", "hand_l", "wrist_L", "wrist_l" },
-                new[] { "lefthand", "hand_l", "hand.l", "l_hand", "b_l_hand", "left_hand", "wrist_l", "bip_hand_l" }),
+                new[] { "lefthand", "hand_l", "hand.l", "l_hand", "b_l_hand", "left_hand", "wrist_l", "bip_hand_l", "def-hand.l", "def_hand_l" }),
 
             // --- Right Arm Chain ---
             new("clavicle_R", "Right Shoulder / Clavicle", BoneGroup.RightArm,
                 new[] { "clavicle_R", "clavicle_r", "shoulder_R", "shoulder_r" },
-                new[] { "rightshoulder", "clavicle_r", "shoulder.r", "r_clavicle", "b_r_clavicle", "r_shoulder", "bip_clavicle_r" }),
+                new[] { "rightshoulder", "clavicle_r", "shoulder.r", "shoulder_r", "r_clavicle", "b_r_clavicle", "r_shoulder", "bip_clavicle_r", "def-shoulder.r", "def_shoulder_r" }),
             new("arm_upper_R", "Right Upper Arm", BoneGroup.RightArm,
                 new[] { "arm_upper_R", "arm_upper_r", "upperarm_r", "upper_arm_r", "arm_r" },
-                new[] { "rightarm", "upperarm_r", "upper_arm.r", "r_upperarm", "b_r_arm", "right_arm", "arm_r", "bip_arm_r" }),
+                new[] { "rightarm", "upperarm_r", "upper_arm.r", "upper_arm_r", "r_upperarm", "b_r_arm", "right_arm", "arm_r", "bip_arm_r", "def-upper_arm.r", "def_upper_arm_r", "def-upper_arm.r.001", "def_upper_arm_r_001", "upper_arm.r.001" }),
             new("arm_lower_R", "Right Forearm", BoneGroup.RightArm,
                 new[] { "arm_lower_R", "arm_lower_r", "lowerarm_r", "lower_arm_r", "forearm_r" },
-                new[] { "rightforearm", "lowerarm_r", "forearm.r", "r_lowerarm", "b_r_forearm", "right_forearm", "forearm_r", "bip_forearm_r" }),
+                new[] { "rightforearm", "lowerarm_r", "forearm.r", "forearm_r", "r_lowerarm", "b_r_forearm", "right_forearm", "bip_forearm_r", "def-forearm.r", "def_forearm_r", "def-forearm.r.001", "def_forearm_r_001", "forearm.r.001" }),
             new("hand_R", "Right Hand / Wrist", BoneGroup.RightArm,
                 new[] { "hand_R", "hand_r", "wrist_R", "wrist_r" },
-                new[] { "righthand", "hand_r", "hand.r", "r_hand", "b_r_hand", "right_hand", "wrist_r", "bip_hand_r" }),
+                new[] { "righthand", "hand_r", "hand.r", "r_hand", "b_r_hand", "right_hand", "wrist_r", "bip_hand_r", "def-hand.r", "def_hand_r" }),
 
             // --- Left Leg Chain ---
             new("leg_upper_L", "Left Thigh / UpLeg", BoneGroup.LeftLeg,
                 new[] { "leg_upper_L", "leg_upper_l", "thigh_L", "thigh_l", "leg_l" },
-                new[] { "leftupleg", "thigh_l", "thigh.l", "l_thigh", "b_l_thigh", "left_thigh", "leg_l", "bip_leg_l" }),
+                new[] { "leftupleg", "thigh_l", "thigh.l", "l_thigh", "b_l_thigh", "left_thigh", "leg_l", "bip_leg_l", "def-thigh.l", "def_thigh_l", "def-thigh.l.001", "def_thigh_l_001", "thigh.l.001" }),
             new("leg_lower_L", "Left Calf / Shin", BoneGroup.LeftLeg,
                 new[] { "leg_lower_L", "leg_lower_l", "calf_L", "calf_l", "knee_l", "shin_l" },
-                new[] { "leftleg", "calf_l", "shin.l", "l_calf", "b_l_calf", "left_calf", "bip_calf_l" }),
+                new[] { "leftleg", "calf_l", "shin.l", "shin_l", "l_calf", "b_l_calf", "left_calf", "bip_calf_l", "def-shin.l", "def_shin_l", "def-shin.l.001", "def_shin_l_001", "shin.l.001" }),
             new("ankle_L", "Left Foot / Ankle", BoneGroup.LeftLeg,
                 new[] { "ankle_L", "ankle_l", "foot_L", "foot_l" },
-                new[] { "leftfoot", "foot_l", "foot.l", "l_foot", "b_l_foot", "left_foot", "ankle_l", "bip_foot_l" }),
+                new[] { "leftfoot", "foot_l", "foot.l", "l_foot", "b_l_foot", "left_foot", "ankle_l", "bip_foot_l", "def-foot.l", "def_foot_l" }),
             new("ball_L", "Left Toe / Ball", BoneGroup.LeftLeg,
                 new[] { "ball_L", "ball_l", "toe_L", "toe_l", "toes_l" },
-                new[] { "lefttoebase", "ball_l", "toe.l", "l_toe", "b_l_toe", "left_toe", "bip_toe_l" }),
+                new[] { "lefttoebase", "ball_l", "toe.l", "toe_l", "l_toe", "b_l_toe", "left_toe", "bip_toe_l", "def-toe.l", "def_toe_l" }),
             new("ball_end_L", "Left Toe End / Tip", BoneGroup.LeftLeg,
                 new[] { "ball_end_L", "ball_end_l", "toe_end_L", "toe_end_l" },
                 new[] { "lefttoe_end", "lefttoeend", "ball_leaf_l", "ball_left_end", "ball_end_l", "toe_end_l" }),
@@ -121,16 +121,16 @@ namespace DeadlockPlayground.Animation
             // --- Right Leg Chain ---
             new("leg_upper_R", "Right Thigh / UpLeg", BoneGroup.RightLeg,
                 new[] { "leg_upper_R", "leg_upper_r", "thigh_R", "thigh_r", "leg_r" },
-                new[] { "rightupleg", "thigh_r", "thigh.r", "r_thigh", "b_r_thigh", "right_thigh", "leg_r", "bip_leg_r" }),
+                new[] { "rightupleg", "thigh_r", "thigh.r", "r_thigh", "b_r_thigh", "right_thigh", "leg_r", "bip_leg_r", "def-thigh.r", "def_thigh_r", "def-thigh.r.001", "def_thigh_r_001", "thigh.r.001" }),
             new("leg_lower_R", "Right Calf / Shin", BoneGroup.RightLeg,
                 new[] { "leg_lower_R", "leg_lower_r", "calf_R", "calf_r", "knee_r", "shin_r" },
-                new[] { "rightleg", "calf_r", "shin.r", "r_calf", "b_r_calf", "right_calf", "bip_calf_r" }),
+                new[] { "rightleg", "calf_r", "shin.r", "shin_r", "r_calf", "b_r_calf", "right_calf", "bip_calf_r", "def-shin.r", "def_shin_r", "def-shin.r.001", "def_shin_r_001", "shin.r.001" }),
             new("ankle_R", "Right Foot / Ankle", BoneGroup.RightLeg,
                 new[] { "ankle_R", "ankle_r", "foot_R", "foot_r" },
-                new[] { "rightfoot", "foot_r", "foot.r", "r_foot", "b_r_foot", "right_foot", "ankle_r", "bip_foot_r" }),
+                new[] { "rightfoot", "foot_r", "foot.r", "r_foot", "b_r_foot", "right_foot", "ankle_r", "bip_foot_r", "def-foot.r", "def_foot_r" }),
             new("ball_R", "Right Toe / Ball", BoneGroup.RightLeg,
                 new[] { "ball_R", "ball_r", "toe_R", "toe_r", "toes_r" },
-                new[] { "righttoebase", "ball_r", "toe.r", "r_toe", "b_r_toe", "right_toe", "bip_toe_r" }),
+                new[] { "righttoebase", "ball_r", "toe.r", "r_toe", "b_r_toe", "right_toe", "bip_toe_r", "def-toe.r", "def_toe_r" }),
             new("ball_end_R", "Right Toe End / Tip", BoneGroup.RightLeg,
                 new[] { "ball_end_R", "ball_end_r", "toe_end_R", "toe_end_r" },
                 new[] { "righttoe_end", "righttoeend", "ball_leaf_r", "ball_right_end", "ball_end_r", "toe_end_r" }),
@@ -141,13 +141,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_thumb_0_L", "Left Thumb 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_thumb_0_L", "finger_thumb_0_l", "thumb_01_l", "thumb_0_l" },
-                new[] { "lefthandthumb1", "thumb_01_l", "thumb1_l", "thumb.01.l", "f_thumb01_l" }),
+                new[] { "lefthandthumb1", "thumb_01_l", "thumb1_l", "thumb.01.l", "f_thumb01_l", "def-thumb.01.l", "def_thumb_01_l", "f_thumb.01.l" }),
             new("finger_thumb_1_L", "Left Thumb 2", BoneGroup.LeftHandFingers,
                 new[] { "finger_thumb_1_L", "finger_thumb_1_l", "thumb_02_l", "thumb_1_l" },
-                new[] { "lefthandthumb2", "thumb_02_l", "thumb2_l", "thumb.02.l", "f_thumb02_l" }),
+                new[] { "lefthandthumb2", "thumb_02_l", "thumb2_l", "thumb.02.l", "f_thumb02_l", "def-thumb.02.l", "def_thumb_02_l", "f_thumb.02.l" }),
             new("finger_thumb_2_L", "Left Thumb 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_thumb_2_L", "finger_thumb_2_l", "thumb_03_l", "thumb_2_l" },
-                new[] { "lefthandthumb3", "thumb_03_l", "thumb3_l", "thumb.03.l", "f_thumb03_l" }),
+                new[] { "lefthandthumb3", "thumb_03_l", "thumb3_l", "thumb.03.l", "f_thumb03_l", "def-thumb.03.l", "def_thumb_03_l", "f_thumb.03.l" }),
             new("finger_thumb_end_L", "Left Thumb End / Tip", BoneGroup.LeftHandFingers,
                 new[] { "finger_thumb_end_L", "finger_thumb_end_l", "finger_thumb_leaf_l" },
                 new[] { "thumb_04_leaf_l", "lefthandthumb4", "thumb_04_l", "thumb_leaf_l", "thumb_end_l", "thumb.004.l" }),
@@ -157,13 +157,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_index_0_L", "Left Index 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_index_0_L", "finger_index_0_l", "index_01_l", "index_0_l" },
-                new[] { "lefthandindex1", "index_01_l", "index1_l", "index.01.l", "f_index01_l" }),
+                new[] { "lefthandindex1", "index_01_l", "index1_l", "index.01.l", "f_index01_l", "def-f_index.01.l", "def_f_index_01_l", "f_index.01.l" }),
             new("finger_index_1_L", "Left Index 2", BoneGroup.LeftHandFingers,
                 new[] { "finger_index_1_L", "finger_index_1_l", "index_02_l", "index_1_l" },
-                new[] { "lefthandindex2", "index_02_l", "index2_l", "index.02.l", "f_index02_l" }),
+                new[] { "lefthandindex2", "index_02_l", "index2_l", "index.02.l", "f_index02_l", "def-f_index.02.l", "def_f_index_02_l", "f_index.02.l" }),
             new("finger_index_2_L", "Left Index 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_index_2_L", "finger_index_2_l", "index_03_l", "index_2_l" },
-                new[] { "lefthandindex3", "index_03_l", "index3_l", "index.03.l", "f_index03_l" }),
+                new[] { "lefthandindex3", "index_03_l", "index3_l", "index.03.l", "f_index03_l", "def-f_index.03.l", "def_f_index_03_l", "f_index.03.l" }),
             new("finger_index_end_L", "Left Index End / Tip", BoneGroup.LeftHandFingers,
                 new[] { "finger_index_end_L", "finger_index_end_l", "finger_index_leaf_l" },
                 new[] { "index_04_leaf_l", "lefthandindex4", "index_04_l", "index_leaf_l", "index_end_l", "index.004.l" }),
@@ -173,13 +173,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_middle_0_L", "Left Middle 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_middle_0_L", "finger_middle_0_l", "middle_01_l", "middle_0_l" },
-                new[] { "lefthandmiddle1", "middle_01_l", "middle1_l", "middle.01.l", "f_middle01_l" }),
+                new[] { "lefthandmiddle1", "middle_01_l", "middle1_l", "middle.01.l", "f_middle01_l", "def-f_middle.01.l", "def_f_middle_01_l", "f_middle.01.l" }),
             new("finger_middle_1_L", "Left Middle 2", BoneGroup.LeftHandFingers,
                 new[] { "finger_middle_1_L", "finger_middle_1_l", "middle_02_l", "middle_1_l" },
-                new[] { "lefthandmiddle2", "middle_02_l", "middle2_l", "middle.02.l", "f_middle02_l" }),
+                new[] { "lefthandmiddle2", "middle_02_l", "middle2_l", "middle.02.l", "f_middle02_l", "def-f_middle.02.l", "def_f_middle_02_l", "f_middle.02.l" }),
             new("finger_middle_2_L", "Left Middle 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_middle_2_L", "finger_middle_2_l", "middle_03_l", "middle_2_l" },
-                new[] { "lefthandmiddle3", "middle_03_l", "middle3_l", "middle.03.l", "f_middle03_l" }),
+                new[] { "lefthandmiddle3", "middle_03_l", "middle3_l", "middle.03.l", "f_middle03_l", "def-f_middle.03.l", "def_f_middle_03_l", "f_middle.03.l" }),
             new("finger_middle_end_L", "Left Middle End / Tip", BoneGroup.LeftHandFingers,
                 new[] { "finger_middle_end_L", "finger_middle_end_l", "finger_middle_leaf_l" },
                 new[] { "middle_04_leaf_l", "lefthandmiddle4", "middle_04_l", "middle_leaf_l", "middle_end_l", "middle.004.l" }),
@@ -189,13 +189,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_ring_0_L", "Left Ring 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_ring_0_L", "finger_ring_0_l", "ring_01_l", "ring_0_l" },
-                new[] { "lefthandring1", "ring_01_l", "ring1_l", "ring.01.l", "f_ring01_l" }),
+                new[] { "lefthandring1", "ring_01_l", "ring1_l", "ring.01.l", "f_ring01_l", "def-f_ring.01.l", "def_f_ring_01_l", "f_ring.01.l" }),
             new("finger_ring_1_L", "Left Ring 2", BoneGroup.LeftHandFingers,
                 new[] { "finger_ring_1_L", "finger_ring_1_l", "ring_02_l", "ring_1_l" },
-                new[] { "lefthandring2", "ring_02_l", "ring2_l", "ring.02.l", "f_ring02_l" }),
+                new[] { "lefthandring2", "ring_02_l", "ring2_l", "ring.02.l", "f_ring02_l", "def-f_ring.02.l", "def_f_ring_02_l", "f_ring.02.l" }),
             new("finger_ring_2_L", "Left Ring 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_ring_2_L", "finger_ring_2_l", "ring_03_l", "ring_2_l" },
-                new[] { "lefthandring3", "ring_03_l", "ring3_l", "ring.03.l", "f_ring03_l" }),
+                new[] { "lefthandring3", "ring_03_l", "ring3_l", "ring.03.l", "f_ring03_l", "def-f_ring.03.l", "def_f_ring_03_l", "f_ring.03.l" }),
             new("finger_ring_end_L", "Left Ring End / Tip", BoneGroup.LeftHandFingers,
                 new[] { "finger_ring_end_L", "finger_ring_end_l", "finger_ring_leaf_l" },
                 new[] { "ring_04_leaf_l", "lefthandring4", "ring_04_l", "ring_leaf_l", "ring_end_l", "ring.004.l" }),
@@ -205,13 +205,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_pinky_0_L", "Left Pinky 1", BoneGroup.LeftHandFingers,
                 new[] { "finger_pinky_0_L", "finger_pinky_0_l", "pinky_01_l", "pinky_0_l" },
-                new[] { "lefthandpinky1", "pinky_01_l", "pinky1_l", "pinky.01.l", "f_pinky01_l", "little_01_l" }),
+                new[] { "lefthandpinky1", "pinky_01_l", "pinky1_l", "pinky.01.l", "f_pinky01_l", "def-f_pinky.01.l", "def_f_pinky_01_l", "f_pinky.01.l", "little_01_l" }),
             new("finger_pinky_1_L", "Left Pinky 2", BoneGroup.LeftHandFingers,
                 new[] { "finger_pinky_1_L", "finger_pinky_1_l", "pinky_02_l", "pinky_1_l" },
-                new[] { "lefthandpinky2", "pinky_02_l", "pinky2_l", "pinky.02.l", "f_pinky02_l", "little_02_l" }),
+                new[] { "lefthandpinky2", "pinky_02_l", "pinky2_l", "pinky.02.l", "f_pinky02_l", "def-f_pinky.02.l", "def_f_pinky_02_l", "f_pinky.02.l", "little_02_l" }),
             new("finger_pinky_2_L", "Left Pinky 3", BoneGroup.LeftHandFingers,
                 new[] { "finger_pinky_2_L", "finger_pinky_2_l", "pinky_03_l", "pinky_2_l" },
-                new[] { "lefthandpinky3", "pinky_03_l", "pinky3_l", "pinky.03.l", "f_pinky03_l", "little_03_l" }),
+                new[] { "lefthandpinky3", "pinky_03_l", "pinky3_l", "pinky.03.l", "f_pinky03_l", "def-f_pinky.03.l", "def_f_pinky_03_l", "f_pinky.03.l", "little_03_l" }),
             new("finger_pinky_end_L", "Left Pinky End / Tip", BoneGroup.LeftHandFingers,
                 new[] { "finger_pinky_end_L", "finger_pinky_end_l", "finger_pinky_leaf_l" },
                 new[] { "pinky_04_leaf_l", "lefthandpinky4", "pinky_04_l", "pinky_leaf_l", "pinky_end_l", "pinky.004.l", "little_04_leaf_l" }),
@@ -222,13 +222,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_thumb_0_R", "Right Thumb 1", BoneGroup.RightHandFingers,
                 new[] { "finger_thumb_0_R", "finger_thumb_0_r", "thumb_01_r", "thumb_0_r" },
-                new[] { "righthandthumb1", "thumb_01_r", "thumb1_r", "thumb.01.r", "f_thumb01_r" }),
+                new[] { "righthandthumb1", "thumb_01_r", "thumb1_r", "thumb.01.r", "f_thumb01_r", "def-thumb.01.r", "def_thumb_01_r", "f_thumb.01.r" }),
             new("finger_thumb_1_R", "Right Thumb 2", BoneGroup.RightHandFingers,
                 new[] { "finger_thumb_1_R", "finger_thumb_1_r", "thumb_02_r", "thumb_1_r" },
-                new[] { "righthandthumb2", "thumb_02_r", "thumb2_r", "thumb.02.r", "f_thumb02_r" }),
+                new[] { "righthandthumb2", "thumb_02_r", "thumb2_r", "thumb.02.r", "f_thumb02_r", "def-thumb.02.r", "def_thumb_02_r", "f_thumb.02.r" }),
             new("finger_thumb_2_R", "Right Thumb 3", BoneGroup.RightHandFingers,
                 new[] { "finger_thumb_2_R", "finger_thumb_2_r", "thumb_03_r", "thumb_2_r" },
-                new[] { "righthandthumb3", "thumb_03_r", "thumb3_r", "thumb.03.r", "f_thumb03_r" }),
+                new[] { "righthandthumb3", "thumb_03_r", "thumb3_r", "thumb.03.r", "f_thumb03_r", "def-thumb.03.r", "def_thumb_03_r", "f_thumb.03.r" }),
             new("finger_thumb_end_R", "Right Thumb End / Tip", BoneGroup.RightHandFingers,
                 new[] { "finger_thumb_end_R", "finger_thumb_end_r", "finger_thumb_leaf_r" },
                 new[] { "thumb_04_leaf_r", "righthandthumb4", "thumb_04_r", "thumb_leaf_r", "thumb_end_r", "thumb.004.r" }),
@@ -238,13 +238,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_index_0_R", "Right Index 1", BoneGroup.RightHandFingers,
                 new[] { "finger_index_0_R", "finger_index_0_r", "index_01_r", "index_0_r" },
-                new[] { "righthandindex1", "index_01_r", "index1_r", "index.01.r", "f_index01_r" }),
+                new[] { "righthandindex1", "index_01_r", "index1_r", "index.01.r", "f_index01_r", "def-f_index.01.r", "def_f_index_01_r", "f_index.01.r" }),
             new("finger_index_1_R", "Right Index 2", BoneGroup.RightHandFingers,
                 new[] { "finger_index_1_R", "finger_index_1_r", "index_02_r", "index_1_r" },
-                new[] { "righthandindex2", "index_02_r", "index2_r", "index.02.r", "f_index02_r" }),
+                new[] { "righthandindex2", "index_02_r", "index2_r", "index.02.r", "f_index02_r", "def-f_index.02.r", "def_f_index_02_r", "f_index.02.r" }),
             new("finger_index_2_R", "Right Index 3", BoneGroup.RightHandFingers,
                 new[] { "finger_index_2_R", "finger_index_2_r", "index_03_r", "index_2_r" },
-                new[] { "righthandindex3", "index_03_r", "index3_r", "index.03.r", "f_index03_r" }),
+                new[] { "righthandindex3", "index_03_r", "index3_r", "index.03.r", "f_index03_r", "def-f_index.03.r", "def_f_index_03_r", "f_index.03.r" }),
             new("finger_index_end_R", "Right Index End / Tip", BoneGroup.RightHandFingers,
                 new[] { "finger_index_end_R", "finger_index_end_r", "finger_index_leaf_r" },
                 new[] { "index_04_leaf_r", "righthandindex4", "index_04_r", "index_leaf_r", "index_end_r", "index.004.r" }),
@@ -254,13 +254,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_middle_0_R", "Right Middle 1", BoneGroup.RightHandFingers,
                 new[] { "finger_middle_0_R", "finger_middle_0_r", "middle_01_r", "middle_0_r" },
-                new[] { "righthandmiddle1", "middle_01_r", "middle1_r", "middle.01.r", "f_middle01_r" }),
+                new[] { "righthandmiddle1", "middle_01_r", "middle1_r", "middle.01.r", "f_middle01_r", "def-f_middle.01.r", "def_f_middle_01_r", "f_middle.01.r" }),
             new("finger_middle_1_R", "Right Middle 2", BoneGroup.RightHandFingers,
                 new[] { "finger_middle_1_R", "finger_middle_1_r", "middle_02_r", "middle_1_r" },
-                new[] { "righthandmiddle2", "middle_02_r", "middle2_r", "middle.02.r", "f_middle02_r" }),
+                new[] { "righthandmiddle2", "middle_02_r", "middle2_r", "middle.02.r", "f_middle02_r", "def-f_middle.02.r", "def_f_middle_02_r", "f_middle.02.r" }),
             new("finger_middle_2_R", "Right Middle 3", BoneGroup.RightHandFingers,
                 new[] { "finger_middle_2_R", "finger_middle_2_r", "middle_03_r", "middle_2_r" },
-                new[] { "righthandmiddle3", "middle_03_r", "middle3_r", "middle.03.r", "f_middle03_r" }),
+                new[] { "righthandmiddle3", "middle_03_r", "middle3_r", "middle.03.r", "f_middle03_r", "def-f_middle.03.r", "def_f_middle_03_r", "f_middle.03.r" }),
             new("finger_middle_end_R", "Right Middle End / Tip", BoneGroup.RightHandFingers,
                 new[] { "finger_middle_end_R", "finger_middle_end_r", "finger_middle_leaf_r" },
                 new[] { "middle_04_leaf_r", "righthandmiddle4", "middle_04_r", "middle_leaf_r", "middle_end_r", "middle.004.r" }),
@@ -270,13 +270,13 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_ring_0_R", "Right Ring 1", BoneGroup.RightHandFingers,
                 new[] { "finger_ring_0_R", "finger_ring_0_r", "ring_01_r", "ring_0_r" },
-                new[] { "righthandring1", "ring_01_r", "ring1_r", "ring.01.r", "f_ring01_r" }),
+                new[] { "righthandring1", "ring_01_r", "ring1_r", "ring.01.r", "f_ring01_r", "def-f_ring.01.r", "def_f_ring_01_r", "f_ring.01.r" }),
             new("finger_ring_1_R", "Right Ring 2", BoneGroup.RightHandFingers,
                 new[] { "finger_ring_1_R", "finger_ring_1_r", "ring_02_r", "ring_1_r" },
-                new[] { "righthandring2", "ring_02_r", "ring2_r", "ring.02.r", "f_ring02_r" }),
+                new[] { "righthandring2", "ring_02_r", "ring2_r", "ring.02.r", "f_ring02_r", "def-f_ring.02.r", "def_f_ring_02_r", "f_ring.02.r" }),
             new("finger_ring_2_R", "Right Ring 3", BoneGroup.RightHandFingers,
                 new[] { "finger_ring_2_R", "finger_ring_2_r", "ring_03_r", "ring_2_r" },
-                new[] { "righthandring3", "ring_03_r", "ring3_r", "ring.03.r", "f_ring03_r" }),
+                new[] { "righthandring3", "ring_03_r", "ring3_r", "ring.03.r", "f_ring03_r", "def-f_ring.03.r", "def_f_ring_03_r", "f_ring.03.r" }),
             new("finger_ring_end_R", "Right Ring End / Tip", BoneGroup.RightHandFingers,
                 new[] { "finger_ring_end_R", "finger_ring_end_r", "finger_ring_leaf_r" },
                 new[] { "ring_04_leaf_r", "righthandring4", "ring_04_r", "ring_leaf_r", "ring_end_r", "ring.004.r" }),
@@ -286,21 +286,30 @@ namespace DeadlockPlayground.Animation
                 Array.Empty<string>()),
             new("finger_pinky_0_R", "Right Pinky 1", BoneGroup.RightHandFingers,
                 new[] { "finger_pinky_0_R", "finger_pinky_0_r", "pinky_01_r", "pinky_0_r" },
-                new[] { "righthandpinky1", "pinky_01_r", "pinky1_r", "pinky.01.r", "f_pinky01_r", "little_01_r" }),
+                new[] { "righthandpinky1", "pinky_01_r", "pinky1_r", "pinky.01.r", "f_pinky01_r", "def-f_pinky.01.r", "def_f_pinky_01_r", "f_pinky.01.r", "little_01_r" }),
             new("finger_pinky_1_R", "Right Pinky 2", BoneGroup.RightHandFingers,
                 new[] { "finger_pinky_1_R", "finger_pinky_1_r", "pinky_02_r", "pinky_1_r" },
-                new[] { "righthandpinky2", "pinky_02_r", "pinky2_r", "pinky.02.r", "f_pinky02_r", "little_02_r" }),
+                new[] { "righthandpinky2", "pinky_02_r", "pinky2_r", "pinky.02.r", "f_pinky02_r", "def-f_pinky.02.r", "def_f_pinky_02_r", "f_pinky.02.r", "little_02_r" }),
             new("finger_pinky_2_R", "Right Pinky 3", BoneGroup.RightHandFingers,
                 new[] { "finger_pinky_2_R", "finger_pinky_2_r", "pinky_03_r", "pinky_2_r" },
-                new[] { "righthandpinky3", "pinky_03_r", "pinky3_r", "pinky.03.r", "f_pinky03_r", "little_03_r" }),
+                new[] { "righthandpinky3", "pinky_03_r", "pinky3_r", "pinky.03.r", "f_pinky03_r", "def-f_pinky.03.r", "def_f_pinky_03_r", "f_pinky.03.r", "little_03_r" }),
             new("finger_pinky_end_R", "Right Pinky End / Tip", BoneGroup.RightHandFingers,
                 new[] { "finger_pinky_end_R", "finger_pinky_end_r", "finger_pinky_leaf_r" },
-                new[] { "pinky_04_leaf_r", "righthandpinky4", "pinky_04_r", "pinky_leaf_r", "pinky_end_r", "pinky.004.r", "little_04_leaf_r" })
+                new[] { "pinky_04_leaf_r", "righthandpinky4", "pinky_04_r", "pinky_leaf_r", "pinky_end_r", "pinky.004.r", "little_04_leaf_r" }),
+
+            // --- Secondary & Helper Bones (Forearm Twists) ---
+            new("arm_lower_L_TWIST", "Left Forearm Twist", BoneGroup.Secondary,
+                new[] { "arm_lower_L_TWIST", "arm_lower_twist_L", "arm_lower_l_twist", "wrist_helper_L" },
+                new[] { "def-forearm.l.001", "def_forearm_l_001", "forearm.l.001", "forearm_twist_l", "arm_lower_twist_l" }),
+            new("arm_lower_R_TWIST", "Right Forearm Twist", BoneGroup.Secondary,
+                new[] { "arm_lower_R_TWIST", "arm_lower_twist_R", "arm_lower_r_twist", "wrist_helper_R" },
+                new[] { "def-forearm.r.001", "def_forearm_r_001", "forearm.r.001", "forearm_twist_r", "arm_lower_twist_r" })
         };
 
         /// <summary>
         /// Cleans and sanitizes bone name for fuzzy token matching.
-        /// Strips namespace prefixes like "mixamorig:", "b_", "def_", "j_", "root|", etc.
+        /// Strips namespace prefixes like "mixamorig:", "b_", "def_", "def-", "j_", "root|", etc.
+        /// Also strips trailing glTF node export indices like "_0108", "_03", "_019".
         /// </summary>
         public static string CleanBoneName(string rawName)
         {
@@ -319,20 +328,40 @@ namespace DeadlockPlayground.Animation
             if (slashIdx != -1) name = name[(slashIdx + 1)..];
 
             // Strip standard prefixes
-            if (name.StartsWith("mixamorig_", StringComparison.OrdinalIgnoreCase)) name = name[10..];
+            if (name.StartsWith("mixamorig:", StringComparison.OrdinalIgnoreCase)) name = name[10..];
+            else if (name.StartsWith("mixamorig_", StringComparison.OrdinalIgnoreCase)) name = name[10..];
             else if (name.StartsWith("mixamo_", StringComparison.OrdinalIgnoreCase)) name = name[7..];
             else if (name.StartsWith("skel_", StringComparison.OrdinalIgnoreCase)) name = name[5..];
             else if (name.StartsWith("rig_", StringComparison.OrdinalIgnoreCase)) name = name[4..];
             else if (name.StartsWith("b_", StringComparison.OrdinalIgnoreCase)) name = name[2..];
             else if (name.StartsWith("def_", StringComparison.OrdinalIgnoreCase)) name = name[4..];
+            else if (name.StartsWith("def-", StringComparison.OrdinalIgnoreCase)) name = name[4..];
             else if (name.StartsWith("j_", StringComparison.OrdinalIgnoreCase)) name = name[2..];
             else if (name.StartsWith("bip_", StringComparison.OrdinalIgnoreCase)) name = name[4..];
             else if (name.StartsWith("cc_", StringComparison.OrdinalIgnoreCase)) name = name[3..];
             else if (name.StartsWith("m_avg_", StringComparison.OrdinalIgnoreCase)) name = name[6..];
             else if (name.StartsWith("m_", StringComparison.OrdinalIgnoreCase)) name = name[2..];
 
+            // Strip trailing glTF node export indices (e.g. "_0108", "_03", "_019", "_0127")
+            int lastUnderscore = name.LastIndexOf('_');
+            if (lastUnderscore > 0 && lastUnderscore < name.Length - 1)
+            {
+                string suffix = name[(lastUnderscore + 1)..];
+                if (suffix.Length >= 2 && suffix.All(char.IsDigit))
+                {
+                    name = name[..lastUnderscore];
+                }
+            }
+
             // Normalize delimiters: replace dots and hyphens with underscores
             name = name.Replace('.', '_').Replace('-', '_');
+
+            // Strip Blender Rigify finger prefix "f_" (e.g. f_index_01 -> index_01)
+            string lowerName = name.ToLowerInvariant();
+            if (lowerName.StartsWith("f_index_") || lowerName.StartsWith("f_middle_") || lowerName.StartsWith("f_ring_") || lowerName.StartsWith("f_pinky_") || lowerName.StartsWith("f_thumb_"))
+            {
+                name = name[2..];
+            }
 
             return name.ToLowerInvariant();
         }
@@ -341,7 +370,11 @@ namespace DeadlockPlayground.Animation
         /// Identifies non-primary bones (sub-foot bones, procedural helpers, twist bones, cloth/attachments)
         /// that must never be auto-mapped as primary humanoid limb joints.
         /// </summary>
-        public static bool IsSecondaryOrHelperBone(string rawName)
+        /// <summary>
+        /// Identifies non-primary bones (sub-foot bones, procedural helpers, twist bones, cloth/attachments)
+        /// that must never be auto-mapped as primary humanoid limb joints.
+        /// </summary>
+        public static bool IsSecondaryOrHelperBone(string rawName, bool allowTwist = false)
         {
             if (string.IsNullOrWhiteSpace(rawName)) return false;
             string clean = CleanBoneName(rawName);
@@ -352,7 +385,7 @@ namespace DeadlockPlayground.Animation
                 return true;
 
             // Twist & procedural helper bones
-            if (clean.Contains("twist") || clean.Contains("helper") || clean.Contains("proc") || clean.Contains("notwist"))
+            if (!allowTwist && (clean.Contains("twist") || clean.Contains("helper") || clean.Contains("proc") || clean.Contains("notwist")))
                 return true;
 
             // IK targets, offset handles, and cloth/attachment bones
@@ -370,6 +403,8 @@ namespace DeadlockPlayground.Animation
         {
             if (targetSkeleton == null || !GodotObject.IsInstanceValid(targetSkeleton) || targetSkeleton.IsQueuedForDeletion()) return null;
 
+            bool allowTwist = def.Group == BoneGroup.Secondary || def.CanonicalName.Contains("twist", StringComparison.OrdinalIgnoreCase);
+
             // 1. Direct canonical name match
             if (targetSkeleton.FindBone(def.CanonicalName) != -1)
             {
@@ -383,7 +418,7 @@ namespace DeadlockPlayground.Animation
                 if (idx != -1)
                 {
                     string candidate = targetSkeleton.GetBoneName(idx);
-                    if (!IsSecondaryOrHelperBone(candidate)) return candidate;
+                    if (!IsSecondaryOrHelperBone(candidate, allowTwist)) return candidate;
                 }
             }
 
@@ -392,7 +427,7 @@ namespace DeadlockPlayground.Animation
             for (int b = 0; b < totalBones; b++)
             {
                 string tName = targetSkeleton.GetBoneName(b);
-                if (IsSecondaryOrHelperBone(tName)) continue;
+                if (IsSecondaryOrHelperBone(tName, allowTwist)) continue;
 
                 string cleanT = CleanBoneName(tName);
 
@@ -413,14 +448,31 @@ namespace DeadlockPlayground.Animation
         {
             if (sourceSkeleton == null) return null;
 
+            bool allowTwist = def.Group == BoneGroup.Secondary || def.CanonicalName.Contains("twist", StringComparison.OrdinalIgnoreCase);
+
             int totalSource = sourceSkeleton.GetBoneCount();
             var sourceBones = new List<string>(totalSource);
             for (int s = 0; s < totalSource; s++)
             {
                 string sName = sourceSkeleton.GetBoneName(s);
-                if (!IsSecondaryOrHelperBone(sName))
+                if (!IsSecondaryOrHelperBone(sName, allowTwist))
                 {
                     sourceBones.Add(sName);
+                }
+            }
+
+            // Rigify Special Case: In Blender Rigify, DEF-spine is the Pelvis root when spine.001 exists!
+            if (def.CanonicalName == "pelvis")
+            {
+                bool hasRigifySpine1 = sourceBones.Any(b => CleanBoneName(b).Contains("spine_001") || CleanBoneName(b).Contains("spine_01"));
+                if (hasRigifySpine1)
+                {
+                    var rigifyPelvis = sourceBones.FirstOrDefault(b =>
+                    {
+                        string c = CleanBoneName(b);
+                        return c == "spine" || c == "def_spine";
+                    });
+                    if (rigifyPelvis != null) return rigifyPelvis;
                 }
             }
 
@@ -431,7 +483,7 @@ namespace DeadlockPlayground.Animation
                 if (match != null) return match;
             }
 
-            // 2. Normalized match (cleaning prefixes like mixamorig:, bip_, etc.)
+            // 2. Normalized match (cleaning prefixes like mixamorig:, bip_, def-, etc.)
             foreach (var alias in def.SourceAliases)
             {
                 string cleanAlias = CleanBoneName(alias);
@@ -439,23 +491,31 @@ namespace DeadlockPlayground.Animation
                 if (match != null) return match;
             }
 
-            // 3. Substring matching for compound names (e.g. "LeftHandIndex1", "thigh_l", "clavicle_l")
+            // 3. Token-based matching for compound names (e.g. "LeftHandIndex1", "thigh_l", "clavicle_l")
+            bool isCentral = def.Group == BoneGroup.Pelvis || def.Group == BoneGroup.Spine || def.Group == BoneGroup.Head || def.Group == BoneGroup.Root;
+            bool isLeft = def.Group == BoneGroup.LeftArm || def.Group == BoneGroup.LeftLeg || def.Group == BoneGroup.LeftHandFingers;
+            bool isRight = def.Group == BoneGroup.RightArm || def.Group == BoneGroup.RightLeg || def.Group == BoneGroup.RightHandFingers;
+
             foreach (var alias in def.SourceAliases)
             {
                 string cleanAlias = CleanBoneName(alias);
                 var match = sourceBones.FirstOrDefault(b =>
                 {
                     string c = CleanBoneName(b);
-                    if (def.Group == BoneGroup.LeftHandFingers || def.Group == BoneGroup.RightHandFingers)
-                    {
-                        // Strict side checking for finger bones
-                        bool isLeftDef = def.Group == BoneGroup.LeftHandFingers;
-                        bool isLeftSource = c.Contains("left") || c.EndsWith("_l") || c.Contains("_l_");
-                        bool isRightSource = c.Contains("right") || c.EndsWith("_r") || c.Contains("_r_");
-                        if (isLeftDef && isRightSource && !c.Contains("left")) return false;
-                        if (!isLeftDef && isLeftSource && !c.Contains("right")) return false;
-                    }
-                    return c.Contains(cleanAlias) || cleanAlias.Contains(c);
+
+                    // Central bones (pelvis, spine, head) must NEVER match lateral bones (ending in _l/_r or containing left/right)
+                    bool hasLateralTag = c.EndsWith("_l") || c.EndsWith("_r") || c.Contains("_l_") || c.Contains("_r_") || c.Contains("left") || c.Contains("right");
+                    if (isCentral && hasLateralTag) return false;
+
+                    // Lateral sides must strictly match
+                    if (isLeft && (c.EndsWith("_r") || c.Contains("_r_") || c.Contains("right")) && !c.Contains("left")) return false;
+                    if (isRight && (c.EndsWith("_l") || c.Contains("_l_") || c.Contains("left")) && !c.Contains("right")) return false;
+
+                    // "head" must not match "forehead"
+                    if (def.CanonicalName == "head" && c.Contains("forehead")) return false;
+
+                    // Match tokens or exact compound word
+                    return c == cleanAlias || c.StartsWith(cleanAlias + "_") || c.EndsWith("_" + cleanAlias) || c.Contains("_" + cleanAlias + "_");
                 });
                 if (match != null) return match;
             }

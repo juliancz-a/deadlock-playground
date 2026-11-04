@@ -15,6 +15,7 @@ using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Importer;
 
 namespace DeadlockPlayground.Painter
 {
@@ -65,6 +66,10 @@ namespace DeadlockPlayground.Painter
         public string DeadlockGamePath { get; set; } = "";
         public string CsdkPath { get; set; } = "";
         public string ResourceCompilerPath { get; set; } = "";
+        public string SourceModVpkPath { get; set; } = "";
+        public bool MergeWithSourceModVpk { get; set; } = true;
+        public bool PrioritizeNewModOverSource { get; set; } = true;
+        public bool OverwriteSourceModInAddons { get; set; } = false;
         public Image PreBakedAtlas { get; set; } // Pre-extracted on Godot main thread
         public Dictionary<int, Image> PreBakedAtlasesBySurface { get; set; } = new();
         public Dictionary<int, Image> PreExtractedBaseImages { get; set; } = new();
@@ -107,7 +112,7 @@ namespace DeadlockPlayground.Painter
         /// Step A: Bake composite textures to PNG.
         /// Step B: Generate KV3 .vmat files.
         /// Step C: Compile via headless resourcecompiler.exe CLI.
-        /// Step D: Package into VPK archive with ValvePak and clean up staging.
+        /// Step D: Package into VPK archive with ValvePak (merging base mod VPK if editing a modded hero) and clean up staging.
         /// </summary>
         public async Task<SkinExportResult> ExportModAsync(
             ModExportConfig config,
@@ -121,6 +126,50 @@ namespace DeadlockPlayground.Painter
                 result.Success = false;
                 result.ErrorMessage = "Export configuration is null.";
                 return result;
+            }
+
+            // Auto-discover SourceModVpkPath on the main thread if not explicitly populated on config
+            if (string.IsNullOrWhiteSpace(config.SourceModVpkPath))
+            {
+                if (config.TargetSubmeshes != null)
+                {
+                    foreach (var sm in config.TargetSubmeshes)
+                    {
+                        if (!string.IsNullOrWhiteSpace(sm?.SourceAddonVpkPath) && File.Exists(sm.SourceAddonVpkPath))
+                        {
+                            config.SourceModVpkPath = sm.SourceAddonVpkPath;
+                            break;
+                        }
+                        if (sm?.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("SourceAddonVpkPath"))
+                        {
+                            string metaVpk = sm.Mesh.GetMeta("SourceAddonVpkPath").AsString();
+                            if (!string.IsNullOrWhiteSpace(metaVpk) && File.Exists(metaVpk))
+                            {
+                                config.SourceModVpkPath = metaVpk;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(config.SourceModVpkPath) &&
+                    ModWorkspaceSession.Instance != null &&
+                    !string.IsNullOrWhiteSpace(config.HeroCodename) &&
+                    ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(config.HeroCodename, out var wsHero) &&
+                    !string.IsNullOrWhiteSpace(wsHero?.SourceAddonVpkPath) &&
+                    File.Exists(wsHero.SourceAddonVpkPath))
+                {
+                    config.SourceModVpkPath = wsHero.SourceAddonVpkPath;
+                }
+
+                if (string.IsNullOrWhiteSpace(config.SourceModVpkPath) && Engine.GetMainLoop() is SceneTree tree && tree.Root != null)
+                {
+                    var vpkLoader = tree.Root.FindChild("VpkLoaderTest", true, false) as global::VpkLoaderTest;
+                    if (vpkLoader != null && !string.IsNullOrWhiteSpace(vpkLoader.ActiveAddonVpkPath) && File.Exists(vpkLoader.ActiveAddonVpkPath))
+                    {
+                        config.SourceModVpkPath = vpkLoader.ActiveAddonVpkPath;
+                    }
+                }
             }
 
             // Pre-extract all textures, materials, and atlas rects on the Godot MAIN THREAD before entering worker thread
@@ -204,7 +253,53 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            return await Task.Run(() =>
+            // Pre-extract custom imported meshes on the main thread to prevent cross-thread Godot crashes
+            var preExtractedCustomMeshes = config.TargetSubmeshes?
+                .Where(sm => sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("IsCustomImportedMesh"))
+                .Select(sm => sm.Mesh)
+                .Distinct()
+                .ToList() ?? new List<MeshInstance3D>();
+
+            CustomModelExporter.CustomModelExportBundle preExtractedCustomBundle = null;
+            if (preExtractedCustomMeshes.Count > 0)
+            {
+                var firstMesh = preExtractedCustomMeshes.FirstOrDefault() ?? config.TargetSubmeshes?.FirstOrDefault()?.Mesh;
+                Skeleton3D skeleton = null;
+                if (firstMesh != null && !firstMesh.Skeleton.IsEmpty)
+                {
+                    skeleton = firstMesh.GetNodeOrNull<Skeleton3D>(firstMesh.Skeleton);
+                }
+                if (skeleton == null && firstMesh != null)
+                {
+                    Node curr = firstMesh;
+                    while (curr != null)
+                    {
+                        if (curr is Skeleton3D s) { skeleton = s; break; }
+                        curr = curr.GetParent();
+                    }
+                    if (skeleton == null && firstMesh.GetTree()?.Root != null)
+                    {
+                        skeleton = CustomModelAutoRigger.FindSkeleton(firstMesh.GetTree().Root);
+                    }
+                }
+
+                string resolvedHeroVmdlPath = DeadlockHeroCatalog.ResolveHero(config.HeroCodename)?.VmdlRelativePath;
+                if (string.IsNullOrEmpty(resolvedHeroVmdlPath))
+                {
+                    resolvedHeroVmdlPath = $"models/heroes/{config.HeroCodename}/{config.HeroCodename}.vmdl_c";
+                }
+
+                preExtractedCustomBundle = CustomModelExporter.BuildExportBundle(
+                    preExtractedCustomMeshes,
+                    skeleton,
+                    config.HeroCodename,
+                    heroModelVpkPath: resolvedHeroVmdlPath,
+                    compilerExe: config.ResourceCompilerPath,
+                    deadlockGamePath: config.DeadlockGamePath
+                );
+            }
+
+            return await Task.Run(async () =>
             {
                 string csdkPath = ResolveEffectiveCsdkPath(config.CsdkPath, config.DeadlockGamePath);
                 string deadlockPath = config.DeadlockGamePath;
@@ -215,7 +310,6 @@ namespace DeadlockPlayground.Painter
                 string compilerExe = ResolveCompilerExecutable(csdkPath, config.ResourceCompilerPath);
                 if (string.IsNullOrEmpty(compilerExe) || !File.Exists(compilerExe))
                 {
-                    // Check configured path manager
                     var pm = new GamePathManager();
                     pm.LoadConfig();
                     compilerExe = pm.ResolveResourceCompilerExe();
@@ -266,13 +360,41 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
-                // Resolve VPK filename via VpkIndexResolver
+                // Check if we are modifying a base mod that already lives in targetDir (game/citadel/addons)
+bool isSourceModInTargetAddons = false;
+                if (!string.IsNullOrWhiteSpace(config.SourceModVpkPath) && File.Exists(config.SourceModVpkPath))
+                {
+                    string srcDir = Path.GetDirectoryName(Path.GetFullPath(config.SourceModVpkPath))?.TrimEnd('\\', '/') ?? "";
+                    string tgtDirFull = Path.GetFullPath(targetDir).TrimEnd('\\', '/');
+                    isSourceModInTargetAddons = string.Equals(srcDir, tgtDirFull, StringComparison.OrdinalIgnoreCase);
+                }
+
                 string vpkFileName;
+                string shiftedOriginalModDestinationPath = null;
+
                 if (config.InstallDirectlyToGame)
                 {
-                    vpkFileName = VpkIndexResolver.ResolveNextFileName(targetDir);
-                    int highest = VpkIndexResolver.GetExistingIndices(targetDir).LastOrDefault();
-                    progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Detected highest addon: pak{highest:D2}_dir.vpk. Assigned: {vpkFileName}"));
+                    if (isSourceModInTargetAddons && config.MergeWithSourceModVpk && config.OverwriteSourceModInAddons)
+                    {
+                        // Opción 1: Reemplazar el archivo original in-place
+                        vpkFileName = Path.GetFileName(config.SourceModVpkPath);
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Overwriting existing addon in-place: {vpkFileName}"));
+                    }
+                    else if (isSourceModInTargetAddons && config.MergeWithSourceModVpk && config.PrioritizeNewModOverSource)
+                    {
+                        // Opción 2 (DEFAULT): El nuevo mod toma el número menor (ej. pak01_dir.vpk) y el original se mueve al siguiente libre (ej. pak02_dir.vpk)!
+                        string nextFreeSlotName = VpkIndexResolver.ResolveNextFileName(targetDir);
+                        shiftedOriginalModDestinationPath = Path.Combine(targetDir, nextFreeSlotName);
+                        vpkFileName = Path.GetFileName(config.SourceModVpkPath);
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New recolor will take '{vpkFileName}' (higher priority) and original mod will be preserved as '{nextFreeSlotName}'."));
+                    }
+                    else
+                    {
+                        // Opción 3: Guardar en el siguiente pakXX_dir.vpk libre sin mover el original
+                        vpkFileName = VpkIndexResolver.ResolveNextFileName(targetDir);
+                        int highest = VpkIndexResolver.GetExistingIndices(targetDir).LastOrDefault();
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Detected highest addon: pak{highest:D2}_dir.vpk. Assigned: {vpkFileName}"));
+                    }
                 }
                 else
                 {
@@ -286,9 +408,6 @@ namespace DeadlockPlayground.Painter
                 string heroFolder = ResolveHeroInternalFolder(config.HeroCodename, config.TargetSubmeshes);
                 progress?.Report(new ExportProgressReport(0.14f, $"[INFO] Resolved internal hero path: {heroFolder}"));
 
-                // Setup Staging Paths in CSDK:
-                // {csdkPath}/content/citadel_addons/_temp_export/{heroFolder}/materials/
-                // {csdkPath}/game/citadel_addons/_temp_export/{heroFolder}/materials/
                 string contentStagingRoot = Path.Combine(csdkPath, "content", "citadel_addons", "_temp_export");
                 string gameStagingRoot = Path.Combine(csdkPath, "game", "citadel_addons", "_temp_export");
                 string contentMaterialsDir = Path.Combine(contentStagingRoot, heroFolder, "materials");
@@ -313,10 +432,21 @@ namespace DeadlockPlayground.Painter
                     ? config.TargetSubmeshes.Where(s => s.IsSelected && s.IsDirty).ToList()
                     : new List<SubmeshNodeInfo>();
 
-                // Fallback: If no submesh is marked dirty but user explicitly selected submeshes
+                bool hasCustomModel = preExtractedCustomBundle != null && preExtractedCustomBundle.Submeshes.Count > 0;
+
                 if (submeshesToExport.Count == 0 && config.TargetSubmeshes != null && config.TargetSubmeshes.Count > 0)
                 {
-                    submeshesToExport = config.TargetSubmeshes.Where(s => s.IsSelected).ToList();
+                    // Only fallback to all selected submeshes if we don't have a custom model bundle.
+                    // For custom models, unpainted meshes should not generate dummy vtex files.
+                    if (!hasCustomModel)
+                    {
+                        submeshesToExport = config.TargetSubmeshes.Where(s => s.IsSelected).ToList();
+                    }
+                }
+                else if (hasCustomModel)
+                {
+                    // If custom model exists, only export submeshes that are explicitly dirty
+                    submeshesToExport = submeshesToExport.Where(s => s.IsDirty).ToList();
                 }
 
                 var workspaceSession = ModWorkspaceSession.Instance;
@@ -329,19 +459,37 @@ namespace DeadlockPlayground.Painter
                 int workspaceVpcfCount = workspaceAssets.Count(a => a.Category == "ParticleVFX" && !string.IsNullOrEmpty(a.ParticleOverridesFile));
                 int workspaceAnimCount = workspaceAssets.Sum(a => a.Animations?.Count ?? 0);
 
-                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0 && workspaceAnimCount == 0)
+                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0 && workspaceAnimCount == 0 && !hasCustomModel)
                 {
-                    string err = "No modified submeshes or workspace assets selected for compilation. Base game submeshes were left untouched.";
+                    string err = "No modified submeshes, custom models, or workspace assets selected for compilation.";
                     progress?.Report(new ExportProgressReport(0.15f, $"[WARNING] {err}", ExportLogLevel.Warning));
                     result.Success = false;
                     result.ErrorMessage = err;
                     return result;
                 }
 
-                // Open base pak01_dir.vpk if available to extract authentic normal/AO/mask textures
                 Package baseVpkPackage = null;
+                Package sourceModPackage = null;
                 try
                 {
+                    // 1. Open Source Mod VPK if editing a modded hero (Priority 1 for custom .vmat_c / .vtex_c resolution & merging)
+                    if (!string.IsNullOrWhiteSpace(config.SourceModVpkPath) && File.Exists(config.SourceModVpkPath))
+                    {
+                        try
+                        {
+                            sourceModPackage = new Package();
+                            sourceModPackage.Read(config.SourceModVpkPath);
+                            progress?.Report(new ExportProgressReport(0.14f, $"[INFO] Mounted source mod VPK: {Path.GetFileName(config.SourceModVpkPath)}"));
+                        }
+                        catch (Exception ex)
+                        {
+                            GD.PrintErr($"[SkinExporter] Notice: Could not pre-read SourceModVpkPath '{config.SourceModVpkPath}': {ex.Message}");
+                            sourceModPackage?.Dispose();
+                            sourceModPackage = null;
+                        }
+                    }
+
+                    // 2. Open base pak01_dir.vpk if available (Priority 2 fallback for vanilla textures/materials)
                     string baseVpkPath = !string.IsNullOrEmpty(config.DeadlockGamePath)
                         ? Path.Combine(config.DeadlockGamePath, "game", "citadel", "pak01_dir.vpk")
                         : null;
@@ -356,6 +504,7 @@ namespace DeadlockPlayground.Painter
                         catch (Exception ex)
                         {
                             GD.Print($"[SkinExporter] Notice: Could not pre-read base pak01_dir.vpk: {ex.Message}");
+                            baseVpkPackage?.Dispose();
                             baseVpkPackage = null;
                         }
                     }
@@ -373,7 +522,7 @@ namespace DeadlockPlayground.Painter
                         ct.ThrowIfCancellationRequested();
 
                         string matName = ResolveSubmeshMaterialName(submesh, config.HeroCodename);
-                        var allColorPaths = ResolveAllColorVtexCPaths(submesh, config.HeroCodename, baseVpkPackage);
+                        var allColorPaths = ResolveAllColorVtexCPaths(submesh, config.HeroCodename, sourceModPackage ?? baseVpkPackage, baseVpkPackage);
 
                         foreach (var colorVtexC in allColorPaths)
                         {
@@ -393,8 +542,10 @@ namespace DeadlockPlayground.Painter
                             if (cleanTexBaseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                                 cleanTexBaseName = cleanTexBaseName[..^2];
 
-                            // Load original .vtex_c metadata (format, flags, and raw alpha channel byte-for-byte)
-                            var origMeta = LoadOriginalVtexMetadata(colorVtexC, baseVpkPackage, deadlockPath);
+                            // Load original .vtex_c metadata (prioritizing sourceModPackage so modded hero textures/alpha are used!)
+                            var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(colorVtexC, sourceModPackage, deadlockPath) : null)
+                                        ?? LoadOriginalVtexMetadata(colorVtexC, baseVpkPackage, deadlockPath);
+
                             if (origMeta != null && (origMeta.Width < 64 || origMeta.Height < 64))
                             {
                                 progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping low-res placeholder texture ({origMeta.Width}x{origMeta.Height}): {colorVtexC}"));
@@ -433,7 +584,6 @@ namespace DeadlockPlayground.Painter
                                 return result;
                             }
 
-                            // Generate companion DMX .vtex descriptor with dynamic format & flags
                             string vtexFileName = $"{cleanTexBaseName}.vtex";
                             string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
                             string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
@@ -489,7 +639,9 @@ namespace DeadlockPlayground.Painter
                                     baseName = baseName.Substring(0, baseName.Length - 2);
                                 }
 
-                                var origMeta = LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath)
+                                var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtex, sourceModPackage, deadlockPath) : null)
+                                            ?? (sourceModPackage != null ? LoadOriginalVtexMetadata(vtexKey, sourceModPackage, deadlockPath) : null)
+                                            ?? LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath)
                                             ?? LoadOriginalVtexMetadata(vtexKey, baseVpkPackage, deadlockPath);
 
                                 string targetPngFileName = $"{baseName}.png";
@@ -534,7 +686,9 @@ namespace DeadlockPlayground.Painter
                                 string vtexDesc = GenerateSource2DmxVtex(relPng, outputFormat, vtexFlags);
                                 File.WriteAllText(targetVtexFull, vtexDesc);
 
-                                string targetCompiledVtexCPath = normVtex;
+                                string targetCompiledVtexCPath = origMeta != null && !string.IsNullOrEmpty(origMeta.VtexCPath)
+                                    ? origMeta.VtexCPath
+                                    : normVtex;
                                 if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                                 {
                                     targetCompiledVtexCPath += "_c";
@@ -544,7 +698,7 @@ namespace DeadlockPlayground.Painter
                                 existingVtexPaths.Add(vtexKey);
                                 existingVtexPaths.Add(targetCompiledVtexCPath);
 
-                                progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {vtexKey}"));
+                                progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {targetCompiledVtexCPath}"));
                             }
                         }
                     }
@@ -576,7 +730,6 @@ namespace DeadlockPlayground.Painter
                         float vtexProgress = texBase + (texSlice * 0.10f);
                         float vtexDoneProgress = texBase + (texSlice * 0.90f);
 
-                        // Compile Texture (.vtex -> .vtex_c)
                         progress?.Report(new ExportProgressReport(vtexProgress, $"[INFO] Compiling texture ({tIdx + 1}/{totalTextures}): {Path.GetFileName(vtexPath)}..."));
 
                         var vtexArgs = new List<string>
@@ -587,7 +740,6 @@ namespace DeadlockPlayground.Painter
 
                         int vtexExitCode = RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vtexArgs), progress, ct, vtexProgress + 0.05f);
 
-                        // Exact file match without wildcards to avoid prefix collisions
                         string expectedVtexFileName = $"{Path.GetFileNameWithoutExtension(vtexPath)}.vtex_c";
                         string expectedVtexC = LocateEmittedFile(gameMaterialsDir, contentMaterialsDir, expectedVtexFileName, gameStagingRoot, contentStagingRoot);
                         bool vtexEmitted = !string.IsNullOrEmpty(expectedVtexC) && File.Exists(expectedVtexC);
@@ -620,7 +772,7 @@ namespace DeadlockPlayground.Painter
                     // =========================================================================
                     // STEP C.2: Stage & Compile Modified Particle Systems (.vpcf -> .vpcf_c)
                     // =========================================================================
-                    if (baseVpkPackage != null)
+                    if (baseVpkPackage != null || sourceModPackage != null)
                     {
                         foreach (var asset in workspaceAssets)
                         {
@@ -638,7 +790,6 @@ namespace DeadlockPlayground.Painter
                             if (normRootVpcf.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                                 normRootVpcf = normRootVpcf[..^2];
 
-                            // Agrupar overrides por cada archivo .vpcf hijo (ej. chrono_time_wall_warp.vpcf)
                             var childTargets = new Dictionary<string, EmitterOverrideData>(StringComparer.OrdinalIgnoreCase);
                             foreach (var em in pOverrides.Emitters.Values)
                             {
@@ -655,7 +806,6 @@ namespace DeadlockPlayground.Painter
                                 }
                             }
 
-                            // Preparar override para la partícula raíz (orquestador principal)
                             EmitterOverrideData rootOverride = null;
                             foreach (var em in pOverrides.Emitters.Values)
                             {
@@ -684,8 +834,6 @@ namespace DeadlockPlayground.Painter
                                 };
                             }
 
-                            // Orden de compilación: Primero las partículas hijas para que existan en gameStagingRoot,
-                            // seguido por la partícula raíz orquestadora al final.
                             var allCompileTargets = new List<(string TargetPath, EmitterOverrideData OverrideData, bool IsRoot)>();
                             foreach (var (childPath, em) in childTargets)
                             {
@@ -704,14 +852,26 @@ namespace DeadlockPlayground.Painter
                                     normVpcf = normVpcf[..^2];
                                 string compiledVpcfPath = normVpcf + "_c";
 
-                                var vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
-                                if (vpkEntry == null)
+                                Package ownerPkg = null;
+                                PackageEntry vpkEntry = null;
+                                if (sourceModPackage != null)
                                 {
-                                    GD.PrintErr($"[SkinExporter] Could not find base VPK entry for particle: {compiledVpcfPath}");
+                                    vpkEntry = sourceModPackage.FindEntry(compiledVpcfPath);
+                                    if (vpkEntry != null) ownerPkg = sourceModPackage;
+                                }
+                                if (vpkEntry == null && baseVpkPackage != null)
+                                {
+                                    vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
+                                    if (vpkEntry != null) ownerPkg = baseVpkPackage;
+                                }
+
+                                if (vpkEntry == null || ownerPkg == null)
+                                {
+                                    GD.PrintErr($"[SkinExporter] Could not find VPK entry for particle: {compiledVpcfPath}");
                                     continue;
                                 }
 
-                                baseVpkPackage.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
+                                ownerPkg.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
                                 using var vrfRes = new ValveResourceFormat.Resource();
                                 using var ms = new MemoryStream(rawVpcfBytes);
                                 vrfRes.Read(ms);
@@ -719,17 +879,12 @@ namespace DeadlockPlayground.Painter
                                 string kv3Text = vrfRes.DataBlock?.ToString();
                                 if (string.IsNullOrEmpty(kv3Text)) continue;
 
-                                // Check if the emitter override actually introduces meaningful modifications compared to vanilla KV3.
-                                // NOTE: The root orchestrator particle (isRoot == true) is NEVER skipped because it represents the
-                                // primary entry point for the ability particle system in Deadlock, and must be included in the mod VPK
-                                // alongside its compiled child emitters.
                                 if (!isRoot && !HasMeaningfulVpcfOverrides(kv3Text, emOverride))
                                 {
                                     GD.Print($"[SkinExporter] Skipping untouched particle definition: {normVpcf}");
                                     continue;
                                 }
 
-                                // Si es la raíz, propagar estados de visibilidad desactivados a m_Children
                                 if (isRoot)
                                 {
                                     foreach (var (childPath, childOv) in childTargets)
@@ -746,7 +901,6 @@ namespace DeadlockPlayground.Painter
                                     }
                                 }
 
-                                // Aplicar modificaciones al texto KV3 del .vpcf
                                 kv3Text = ApplyOverridesToVpcfKv3Text(kv3Text, emOverride);
 
                                 string vpcfFolder = Path.GetDirectoryName(normVpcf)?.Replace('\\', '/') ?? "particles";
@@ -756,12 +910,11 @@ namespace DeadlockPlayground.Painter
 
                                 string vpcfFileName = Path.GetFileName(normVpcf);
                                 string fullVpcfContentPath = Path.Combine(vpcfContentDir, vpcfFileName);
-                                // Asegurar que todas las texturas referenciadas en el .vpcf existan en gameStagingRoot para que resourcecompiler.exe no falle
                                 foreach (System.Text.RegularExpressions.Match resMatch in System.Text.RegularExpressions.Regex.Matches(kv3Text, @"resource:""([^""]+)"""))
                                 {
                                     string rawDep = resMatch.Groups[1].Value.Replace('\\', '/').Trim().TrimStart('/');
                                     string compiledDep = rawDep.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? rawDep : rawDep + "_c";
-                                    EnsureTextureStagedInGameTree(gameStagingRoot, compiledDep, baseVpkPackage);
+                                    EnsureTextureStagedInGameTree(gameStagingRoot, compiledDep, sourceModPackage ?? baseVpkPackage);
                                 }
                                 File.WriteAllText(fullVpcfContentPath, kv3Text);
 
@@ -799,16 +952,57 @@ namespace DeadlockPlayground.Painter
                             }
                         }
                     }
+
                     // =========================================================================
-                    // STEP D: Package Intercepted VTEX Binaries into VPK Archive (85% -> 100%)
+                    // STEP D: Package Intercepted VTEX Binaries (+ Base Mod Merge) into VPK Archive (85% -> 100%)
                     // =========================================================================
                     ct.ThrowIfCancellationRequested();
-                    progress?.Report(new ExportProgressReport(0.85f, $"[INFO] Packing intercepted textures into VPK archive '{vpkFileName}'..."));
+                    progress?.Report(new ExportProgressReport(0.85f, $"[INFO] Packing assets into VPK archive '{vpkFileName}'..."));
 
                     try
                     {
+                        // Pre-extract base mod entries into memory before writing in case finalVpkPath == config.SourceModVpkPath
+                        var baseModFilesToMerge = new List<(string InternalPath, byte[] Data)>();
+                        if (sourceModPackage != null && config.MergeWithSourceModVpk)
+                        {
+                            foreach (var extGroup in sourceModPackage.Entries)
+                            {
+                                foreach (var entry in extGroup.Value)
+                                {
+                                    string fullEntryPath = entry.GetFullPath().Replace('\\', '/').TrimStart('/');
+                                    sourceModPackage.ReadEntry(entry, out byte[] rawEntryBytes);
+                                    if (rawEntryBytes != null)
+                                    {
+                                        baseModFilesToMerge.Add((fullEntryPath, rawEntryBytes));
+                                    }
+                                }
+                            }
+                        }
+
+                       // Release read lock on sourceModPackage before moving or overwriting it
+                        if (sourceModPackage != null &&
+                            string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath), StringComparison.OrdinalIgnoreCase))
+                        {
+                            sourceModPackage.Dispose();
+                            sourceModPackage = null;
+
+                            // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al siguiente slot pakXX libre!
+                            if (!string.IsNullOrEmpty(shiftedOriginalModDestinationPath) && File.Exists(config.SourceModVpkPath))
+                            {
+                                if (File.Exists(shiftedOriginalModDestinationPath))
+                                {
+                                    File.Delete(shiftedOriginalModDestinationPath);
+                                }
+                                File.Move(config.SourceModVpkPath, shiftedOriginalModDestinationPath);
+                                progress?.Report(new ExportProgressReport(0.88f, $"[INFO] Preserved original mod VPK -> moved to '{Path.GetFileName(shiftedOriginalModDestinationPath)}'."));
+                            }
+                        }
+
                         using (var package = new Package())
                         {
+                            var addedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                            // 1. Add our newly compiled recolored textures (.vtex_c) and particles (.vpcf_c)
                             foreach (var (vtexC, originalVtexCPath) in compiledOutputFiles)
                             {
                                 if (File.Exists(vtexC))
@@ -816,11 +1010,12 @@ namespace DeadlockPlayground.Painter
                                     byte[] vtexData = File.ReadAllBytes(vtexC);
                                     string internalVtexPath = originalVtexCPath.Replace('\\', '/').TrimStart('/');
                                     package.AddFile(internalVtexPath, vtexData);
-                                    progress?.Report(new ExportProgressReport(0.90f, $"[INFO] Added intercepted texture to VPK: {internalVtexPath} ({vtexData.Length / 1024} KB)"));
+                                    addedPaths.Add(internalVtexPath);
+                                    progress?.Report(new ExportProgressReport(0.90f, $"[INFO] Added modified asset to VPK: {internalVtexPath} ({vtexData.Length / 1024} KB)"));
                                 }
                             }
 
-                            // Include any staged workspace animations
+                            // 2. Include any staged workspace animations
                             if (workspaceSession != null)
                             {
                                 foreach (var asset in workspaceAssets)
@@ -839,13 +1034,81 @@ namespace DeadlockPlayground.Painter
                                                         ? animEntry.TargetVpkPath
                                                         : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(config.HeroCodename, null, animEntry.CleanName);
                                                     targetVpkPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
-                                                    package.AddFile(targetVpkPath, clipData);
-                                                    progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));
+                                                    if (addedPaths.Add(targetVpkPath))
+                                                    {
+                                                        package.AddFile(targetVpkPath, clipData);
+                                                        progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            }
+
+                            // 2.5. Include compiled custom 3D model (.vmdl_c, .vmesh_c, .vmat_c, .vtex_c) if custom imported meshes exist
+                            if (preExtractedCustomBundle != null && preExtractedCustomBundle.Submeshes.Count > 0)
+                            {
+                                preExtractedCustomBundle.StagingDir = csdkPath;
+                                preExtractedCustomBundle.ResourceCompilerExe = compilerExe;
+                                if (string.IsNullOrEmpty(preExtractedCustomBundle.DeadlockGamePath))
+                                {
+                                    preExtractedCustomBundle.DeadlockGamePath = deadlockPath;
+                                }
+
+                                var modelRes = await CustomModelExporter.ExportAndCompileCustomModelAsync(preExtractedCustomBundle, progress, ct);
+                                if (!modelRes.Success)
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = modelRes.ErrorMessage ?? "Custom model compilation failed.";
+                                    progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
+                                    return result;
+                                }
+
+                                if (!CustomModelExporter.ValidateAllowlist(modelRes.AllowlistedVpkFiles.Keys, out string rejectedReason))
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = $"VPK allowlist validation failed: {rejectedReason}";
+                                    progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
+                                    return result;
+                                }
+
+                                if (modelRes.AllowlistedVpkFiles.Count > 35)
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = $"Custom model export exceeded strict file count limit ({modelRes.AllowlistedVpkFiles.Count} > 35).";
+                                    progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
+                                    return result;
+                                }
+
+                                foreach (var (relVpkPath, fullDiskPath) in modelRes.AllowlistedVpkFiles)
+                                {
+                                    if (File.Exists(fullDiskPath))
+                                    {
+                                        string normRel = relVpkPath.Replace('\\', '/').TrimStart('/');
+                                        byte[] fileData = File.ReadAllBytes(fullDiskPath);
+                                        if (addedPaths.Add(normRel))
+                                        {
+                                            package.AddFile(normRel, fileData);
+                                            progress?.Report(new ExportProgressReport(0.94f, $"[INFO] Added compiled custom model asset to VPK: {normRel} ({fileData.Length / 1024} KB)"));
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Merge all untouched files (.vmdl_c, .vmesh_c, .vmat_c, .vtex_c) from the Base Mod VPK!
+                            if (baseModFilesToMerge.Count > 0)
+                            {
+                                int mergedCount = 0;
+                                foreach (var (internalPath, rawData) in baseModFilesToMerge)
+                                {
+                                    if (addedPaths.Add(internalPath))
+                                    {
+                                        package.AddFile(internalPath, rawData);
+                                        mergedCount++;
+                                    }
+                                }
+                                progress?.Report(new ExportProgressReport(0.94f, $"[SUCCESS] Merged {mergedCount} base mod file(s) (.vmdl_c, .vmat_c, meshes) into standalone VPK!", ExportLogLevel.Success));
                             }
 
                             package.Write(finalVpkPath);
@@ -868,45 +1131,76 @@ namespace DeadlockPlayground.Painter
                         return result;
                     }
 
-                // Clean up temporary staging folders in CSDK
-                try
-                {
-                    if (Directory.Exists(contentStagingRoot)) Directory.Delete(contentStagingRoot, true);
-                    if (Directory.Exists(gameStagingRoot)) Directory.Delete(gameStagingRoot, true);
-                    progress?.Report(new ExportProgressReport(0.98f, $"[INFO] Cleaned up temporary staging files."));
+                    // Clean up temporary staging folders in CSDK
+                    try
+                    {
+                        if (Directory.Exists(contentStagingRoot)) Directory.Delete(contentStagingRoot, true);
+                        if (Directory.Exists(gameStagingRoot)) Directory.Delete(gameStagingRoot, true);
+                        progress?.Report(new ExportProgressReport(0.98f, $"[INFO] Cleaned up temporary staging files."));
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.Print($"[SkinExporter] Non-fatal staging cleanup notice: {ex.Message}");
+                    }
+
+                    string installNote = config.InstallDirectlyToGame
+                        ? $"Mod successfully installed to citadel/addons/{vpkFileName}"
+                        : $"Mod successfully exported to {finalVpkPath}";
+
+                    progress?.Report(new ExportProgressReport(1.0f, $"[SUCCESS] {installNote}", ExportLogLevel.Success));
+
+                    result.Success = true;
+                    result.VpkPath = finalVpkPath;
+                    result.ModDirectory = targetDir;
+                    return result;
                 }
-                catch (Exception ex)
+                finally
                 {
-                    GD.Print($"[SkinExporter] Non-fatal staging cleanup notice: {ex.Message}");
+                    sourceModPackage?.Dispose();
+                    baseVpkPackage?.Dispose();
                 }
-
-                // Final 100% confirmation
-                string installNote = config.InstallDirectlyToGame
-                    ? $"Mod successfully installed to citadel/addons/{vpkFileName}"
-                    : $"Mod successfully exported to {finalVpkPath}";
-
-                progress?.Report(new ExportProgressReport(1.0f, $"[SUCCESS] {installNote}", ExportLogLevel.Success));
-
-                result.Success = true;
-                result.VpkPath = finalVpkPath;
-                result.ModDirectory = targetDir;
-                return result;
-            }
-            finally
-            {
-                baseVpkPackage?.Dispose();
-            }
-        }, ct);
+            }, ct);
         }
 
         private static string ResolveEffectiveCsdkPath(string userCsdkPath, string deadlockGamePath)
         {
+            // Prioritize CSDK13 / Reduced_CSDK_13 if present on disk (even if userCsdkPath was previously set to CSDK12)
+            if (!string.IsNullOrEmpty(userCsdkPath))
+            {
+                string up13 = userCsdkPath
+                    .Replace("Reduced_CSDK_12", "Reduced_CSDK_13", StringComparison.OrdinalIgnoreCase)
+                    .Replace("CSDK12", "CSDK13", StringComparison.OrdinalIgnoreCase);
+                if (Directory.Exists(up13)) return up13;
+            }
+
+            string[] csdk13Defaults = {
+                @"C:\CSDK13",
+                @"C:\Reduced_CSDK_13",
+                @"D:\CSDK13",
+                @"D:\Reduced_CSDK_13",
+                @"E:\CSDK13",
+                @"E:\Reduced_CSDK_13",
+                @"E:\SteamLibrary\steamapps\common\CSDK13"
+            };
+            foreach (var d13 in csdk13Defaults)
+            {
+                if (Directory.Exists(d13)) return d13;
+            }
+
+            if (!string.IsNullOrEmpty(deadlockGamePath))
+            {
+                string siblingCsdk13 = Path.GetFullPath(Path.Combine(deadlockGamePath, "..", "CSDK13"));
+                if (Directory.Exists(siblingCsdk13)) return siblingCsdk13;
+
+                string siblingReduced13 = Path.GetFullPath(Path.Combine(deadlockGamePath, "..", "Reduced_CSDK_13"));
+                if (Directory.Exists(siblingReduced13)) return siblingReduced13;
+            }
+
             if (!string.IsNullOrEmpty(userCsdkPath) && Directory.Exists(userCsdkPath))
             {
                 return userCsdkPath;
             }
 
-            // Check if deadlock path has compiler
             if (!string.IsNullOrEmpty(deadlockGamePath))
             {
                 string p1 = Path.Combine(deadlockGamePath, "game", "bin", "win64", "resourcecompiler.exe");
@@ -919,6 +1213,7 @@ namespace DeadlockPlayground.Painter
             string[] defaults = {
                 @"C:\CSDK12",
                 @"D:\CSDK12",
+                @"D:\Reduced_CSDK_12",
                 @"E:\CSDK12",
                 @"E:\SteamLibrary\steamapps\common\CSDK12"
             };
@@ -933,11 +1228,17 @@ namespace DeadlockPlayground.Painter
 
         private static string ResolveCompilerExecutable(string csdkPath, string explicitPath = null)
         {
+            string upgraded13 = GamePathManager.TryResolveCsdk13CompilerUpgrade(explicitPath, csdkPath);
+            if (!string.IsNullOrEmpty(upgraded13) && File.Exists(upgraded13))
+            {
+                return upgraded13;
+            }
+
             if (!string.IsNullOrEmpty(explicitPath) && File.Exists(explicitPath))
             {
-                // If user selected bin\win64\resourcecompiler.exe, prioritize bin_cs2 sibling!
                 string norm = explicitPath.Replace('\\', '/');
-                if (norm.Contains("/game/bin/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase))
+                bool isCsdk13 = norm.Contains("CSDK13", StringComparison.OrdinalIgnoreCase) || norm.Contains("CSDK_13", StringComparison.OrdinalIgnoreCase);
+                if (!isCsdk13 && norm.Contains("/game/bin/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase))
                 {
                     string binCs2Sibling = norm.Replace("/game/bin/win64/resourcecompiler.exe", "/game/bin_cs2/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase);
                     if (File.Exists(binCs2Sibling))
@@ -950,15 +1251,22 @@ namespace DeadlockPlayground.Painter
 
             if (!string.IsNullOrEmpty(csdkPath))
             {
-                // 1. Isolated bin_cs2 compiler (prevents particleslib schema mismatch aborts)
+                bool isCsdk13 = csdkPath.Contains("CSDK13", StringComparison.OrdinalIgnoreCase) || csdkPath.Contains("CSDK_13", StringComparison.OrdinalIgnoreCase);
+                if (isCsdk13)
+                {
+                    string p13 = Path.Combine(csdkPath, "game", "bin", "win64", "resourcecompiler.exe");
+                    if (File.Exists(p13)) return p13;
+
+                    string p13Sub = Path.Combine(csdkPath, "Reduced_CSDK_13", "game", "bin", "win64", "resourcecompiler.exe");
+                    if (File.Exists(p13Sub)) return p13Sub;
+                }
+
                 string p1 = Path.Combine(csdkPath, "game", "bin_cs2", "win64", "resourcecompiler.exe");
                 if (File.Exists(p1)) return p1;
 
-                // 2. Reduced_CSDK_12 nested
                 string p2 = Path.Combine(csdkPath, "Reduced_CSDK_12", "game", "bin_cs2", "win64", "resourcecompiler.exe");
                 if (File.Exists(p2)) return p2;
 
-                // 3. Fallbacks
                 string p3 = Path.Combine(csdkPath, "game", "bin", "win64", "resourcecompiler.exe");
                 if (File.Exists(p3)) return p3;
 
@@ -973,7 +1281,6 @@ namespace DeadlockPlayground.Painter
         {
             string cleanHero = string.IsNullOrEmpty(heroCodename) ? "custom_hero" : heroCodename.ToLowerInvariant();
 
-            // 1. Check if any submesh has an authentic OriginalVmatPath with exact folder structure
             if (submeshes != null)
             {
                 foreach (var sm in submeshes)
@@ -990,7 +1297,6 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 2. Query DeadlockHeroCatalog
             var entry = DeadlockHeroCatalog.ResolveHero(cleanHero) ?? DeadlockHeroCatalog.GetByPath(cleanHero);
             if (entry != null && !string.IsNullOrEmpty(entry.VmdlRelativePath))
             {
@@ -1001,13 +1307,11 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 3. If cleanHero is already a full or relative path starting with models/
             if (cleanHero.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
             {
                 return cleanHero.TrimEnd('/');
             }
 
-            // 4. Fallback default
             return $"models/heroes_staging/{cleanHero}";
         }
 
@@ -1063,7 +1367,6 @@ namespace DeadlockPlayground.Painter
 
             Image isolatedImage = atlasImage;
 
-            // Check if submesh is assigned an atlas rectangle
             Vector2 pos = Vector2.Zero;
             Vector2 size = Vector2.One;
             if (config.SubmeshAtlasRectsBySubmesh.TryGetValue(subKey, out var subRect))
@@ -1097,7 +1400,6 @@ namespace DeadlockPlayground.Painter
                 isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
             }
 
-            // Retrieve base texture image: prioritize authentic un-flattened image from origMeta
             Image baseImg = null;
             if (origMeta?.BaseRgbaImage != null && !origMeta.BaseRgbaImage.IsEmpty())
             {
@@ -1190,7 +1492,6 @@ namespace DeadlockPlayground.Painter
 
             if (isolatedImage == null || isolatedImage.IsEmpty()) return null;
 
-            // Ensure isolated painted region matches target dimensions with Bilinear interpolation
             var finalImage = (Image)isolatedImage.Duplicate();
             if (finalImage.IsCompressed())
             {
@@ -1206,7 +1507,6 @@ namespace DeadlockPlayground.Painter
             }
             finalImage.Convert(Image.Format.Rgba8);
 
-            // Composite over base texture if present
             if (baseImg != null && !baseImg.IsEmpty())
             {
                 var baseUnscaled = (Image)baseImg.Duplicate();
@@ -1224,7 +1524,6 @@ namespace DeadlockPlayground.Painter
                     baseUnscaled.Resize(exportWidth, exportHeight, Image.Interpolation.Bilinear);
                 }
 
-                // Alpha composite: final = paint.rgb * paint.a + base.rgb * (1 - paint.a)
                 byte[] paintData = finalImage.GetData();
                 byte[] baseData = baseUnscaled.GetData();
                 int pixelCount = exportWidth * exportHeight;
@@ -1242,7 +1541,6 @@ namespace DeadlockPlayground.Painter
                         float pA = paintData[idx + 3] / 255.0f;
                         if (pA <= 0.001f)
                         {
-                            // 1:1 unpainted: exact raw base texels byte-for-byte!
                             paintData[idx] = baseData[idx];
                             paintData[idx + 1] = baseData[idx + 1];
                             paintData[idx + 2] = baseData[idx + 2];
@@ -1262,7 +1560,6 @@ namespace DeadlockPlayground.Painter
                             paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
                         }
 
-                        // Preserve Valve's original Alpha channel byte-for-byte
                         if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
                         {
                             if (sameRes && i < origMeta.RawAlpha.Length)
@@ -1295,7 +1592,6 @@ namespace DeadlockPlayground.Painter
             }
             else if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
             {
-                // No base image, but authentic original alpha is available
                 byte[] paintData = finalImage.GetData();
                 int pixelCount = exportWidth * exportHeight;
                 int expectedBytes = pixelCount * 4;
@@ -1344,7 +1640,6 @@ namespace DeadlockPlayground.Painter
             if (targetImage.IsCompressed()) targetImage.Decompress();
             if (targetImage.HasMipmaps()) targetImage.ClearMipmaps();
 
-            // If target image dimensions differ from origMeta, resize a copy to origMeta dimensions first
             if (origMeta.Width > 0 && origMeta.Height > 0 && 
                 (targetImage.GetWidth() != origMeta.Width || targetImage.GetHeight() != origMeta.Height))
             {
@@ -1391,7 +1686,7 @@ namespace DeadlockPlayground.Painter
             return Image.CreateFromData(w, h, false, Image.Format.Rgba8, data);
         }
 
-        public static List<string> ResolveAllColorVtexCPaths(SubmeshNodeInfo submesh, string heroCodename, Package baseVpkPackage)
+        public static List<string> ResolveAllColorVtexCPaths(SubmeshNodeInfo submesh, string heroCodename, Package primaryVpkPackage, Package fallbackVpkPackage = null)
         {
             var list = new List<string>();
             if (submesh?.AllColorVtexCPaths != null && submesh.AllColorVtexCPaths.Count > 0)
@@ -1407,10 +1702,9 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // If we have at most 1 path and baseVpkPackage is available, inspect VPK material to discover any missing secondary/reveal textures
-            if (list.Count <= 1 && baseVpkPackage != null && submesh != null)
+            if (list.Count <= 1 && primaryVpkPackage != null && submesh != null)
             {
-                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, baseVpkPackage);
+                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, primaryVpkPackage, fallbackVpkPackage);
                 if (!string.IsNullOrEmpty(primary) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(primary) && !list.Contains(primary, StringComparer.OrdinalIgnoreCase))
                 {
                     list.Insert(0, primary);
@@ -1434,7 +1728,7 @@ namespace DeadlockPlayground.Painter
 
             if (list.Count == 0)
             {
-                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, baseVpkPackage);
+                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, primaryVpkPackage, fallbackVpkPackage);
                 if (!string.IsNullOrEmpty(primary) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(primary) && !list.Contains(primary, StringComparer.OrdinalIgnoreCase))
                 {
                     list.Add(primary);
@@ -1450,47 +1744,69 @@ namespace DeadlockPlayground.Painter
             return list;
         }
 
-        public static string ResolveOriginalColorVtexCPath(SubmeshNodeInfo submesh, string heroCodename, Package baseVpkPackage)
+        private static PackageEntry FindVmatEntryInPackage(Package pkg, SubmeshNodeInfo submesh)
+        {
+            if (pkg == null || submesh == null) return null;
+
+            var candidates = new List<string>();
+            if (!string.IsNullOrEmpty(submesh.OriginalVmatPath)) candidates.Add(submesh.OriginalVmatPath);
+            if (!string.IsNullOrEmpty(submesh.MaterialName))
+            {
+                candidates.Add($"materials/{submesh.MaterialName}.vmat_c");
+                candidates.Add($"models/{submesh.MaterialName}.vmat_c");
+            }
+
+            foreach (var c in candidates)
+            {
+                string norm = c.Replace('\\', '/').TrimStart('/');
+                if (!norm.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) norm += "_c";
+                var found = pkg.FindEntry(norm);
+                if (found != null) return found;
+            }
+
+            string targetMatName = !string.IsNullOrEmpty(submesh.MaterialName)
+                ? submesh.MaterialName
+                : (!string.IsNullOrEmpty(submesh.OriginalVmatPath) ? Path.GetFileNameWithoutExtension(submesh.OriginalVmatPath) : "");
+
+            if (!string.IsNullOrEmpty(targetMatName))
+            {
+                if (targetMatName.EndsWith(".vmat", StringComparison.OrdinalIgnoreCase))
+                    targetMatName = Path.GetFileNameWithoutExtension(targetMatName);
+
+                string targetFile = $"{targetMatName}.vmat_c";
+                if (pkg.Entries.TryGetValue("vmat_c", out var vmatEntries))
+                {
+                    var found = vmatEntries.FirstOrDefault(e => string.Equals(e.FileName + "." + e.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
+                             ?? vmatEntries.FirstOrDefault(e => e.FileName.Equals(targetMatName, StringComparison.OrdinalIgnoreCase));
+                    if (found != null) return found;
+                }
+            }
+
+            return null;
+        }
+
+        public static string ResolveOriginalColorVtexCPath(SubmeshNodeInfo submesh, string heroCodename, Package primaryVpkPackage, Package fallbackVpkPackage = null)
         {
             if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalColorVtexCPath) && submesh?.AllColorVtexCPaths != null && submesh.AllColorVtexCPaths.Count > 1)
             {
                 return submesh.OriginalColorVtexCPath.Replace('\\', '/').TrimStart('/');
             }
 
-            if (baseVpkPackage != null && submesh != null)
+            if (submesh != null)
             {
-                var candidates = new List<string>();
-                if (!string.IsNullOrEmpty(submesh.OriginalVmatPath)) candidates.Add(submesh.OriginalVmatPath);
-                if (!string.IsNullOrEmpty(submesh.MaterialName))
+                Package ownerPkg = primaryVpkPackage;
+                PackageEntry foundEntry = FindVmatEntryInPackage(primaryVpkPackage, submesh);
+                if (foundEntry == null && fallbackVpkPackage != null && fallbackVpkPackage != primaryVpkPackage)
                 {
-                    candidates.Add($"materials/{submesh.MaterialName}.vmat_c");
-                    candidates.Add($"models/{submesh.MaterialName}.vmat_c");
+                    foundEntry = FindVmatEntryInPackage(fallbackVpkPackage, submesh);
+                    if (foundEntry != null) ownerPkg = fallbackVpkPackage;
                 }
 
-                PackageEntry foundEntry = null;
-                foreach (var c in candidates)
-                {
-                    string norm = c.Replace('\\', '/').TrimStart('/');
-                    if (!norm.EndsWith("_c")) norm += "_c";
-                    foundEntry = baseVpkPackage.FindEntry(norm);
-                    if (foundEntry != null) break;
-                }
-
-                if (foundEntry == null && !string.IsNullOrEmpty(submesh.MaterialName))
-                {
-                    string targetFile = $"{submesh.MaterialName}.vmat_c";
-                    if (baseVpkPackage.Entries.TryGetValue("vmat_c", out var vmatEntries))
-                    {
-                        foundEntry = vmatEntries.FirstOrDefault(e => string.Equals(e.FileName + "." + e.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
-                                  ?? vmatEntries.FirstOrDefault(e => e.FileName.Equals(submesh.MaterialName, StringComparison.OrdinalIgnoreCase));
-                    }
-                }
-
-                if (foundEntry != null)
+                if (foundEntry != null && ownerPkg != null)
                 {
                     try
                     {
-                        baseVpkPackage.ReadEntry(foundEntry, out byte[] data);
+                        ownerPkg.ReadEntry(foundEntry, out byte[] data);
                         using var resource = new ValveResourceFormat.Resource();
                         using var ms = new MemoryStream(data);
                         resource.Read(ms);
@@ -1499,7 +1815,8 @@ namespace DeadlockPlayground.Painter
                         {
                             string colorTex = DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor")
                                            ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColor")
-                                           ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor1");
+                                           ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor1")
+                                           ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColorA");
 
                             string secColorTex = DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColor2")
                                               ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor2")
@@ -1518,7 +1835,6 @@ namespace DeadlockPlayground.Painter
                                     submesh.AllColorVtexCPaths.Add(normSec);
                             }
 
-                            // Dynamic scan of all texture parameters in vmat for additional Color / Albedo / AltColor textures
                             if (vmat.TextureParams != null)
                             {
                                 foreach (var (pKey, pVal) in vmat.TextureParams)
@@ -1546,6 +1862,10 @@ namespace DeadlockPlayground.Painter
                                         {
                                             submesh.AllColorVtexCPaths.Add(normExtra);
                                         }
+                                        if (string.IsNullOrEmpty(colorTex))
+                                        {
+                                            colorTex = pVal;
+                                        }
                                     }
                                 }
                             }
@@ -1567,6 +1887,30 @@ namespace DeadlockPlayground.Painter
                         GD.Print($"[SkinExporter] Notice: Could not extract OriginalColorVtexCPath from VPK: {ex.Message}");
                     }
                 }
+
+                // Fallback for texture-only or custom-named mod textures in primaryVpkPackage: match vtex_c by material name prefix
+                if (primaryVpkPackage != null && primaryVpkPackage.Entries.TryGetValue("vtex_c", out var modVtexEntries))
+                {
+                    string matShort = ResolveSubmeshMaterialName(submesh, heroCodename);
+                    if (!string.IsNullOrEmpty(matShort))
+                    {
+                        var matchedVtex = modVtexEntries.FirstOrDefault(e =>
+                            e.FileName.StartsWith(matShort, StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("normal", StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("rough", StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("mask", StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("_ao", StringComparison.OrdinalIgnoreCase));
+
+                        if (matchedVtex != null)
+                        {
+                            string matchedFull = matchedVtex.GetFullPath().Replace('\\', '/').TrimStart('/');
+                            submesh.OriginalColorVtexCPath = matchedFull;
+                            if (!submesh.AllColorVtexCPaths.Contains(matchedFull, StringComparer.OrdinalIgnoreCase))
+                                submesh.AllColorVtexCPaths.Insert(0, matchedFull);
+                            return matchedFull;
+                        }
+                    }
+                }
             }
 
             if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalColorVtexCPath))
@@ -1574,10 +1918,9 @@ namespace DeadlockPlayground.Painter
                 return submesh.OriginalColorVtexCPath.Replace('\\', '/').TrimStart('/');
             }
 
-            // Default fallback
-            string matName = ResolveSubmeshMaterialName(submesh, heroCodename);
+            string fallbackMatName = ResolveSubmeshMaterialName(submesh, heroCodename);
             string fallbackFolder = ResolveHeroInternalFolder(heroCodename, null);
-            string defaultPath = $"{fallbackFolder}/materials/{matName}_color.vtex_c".Replace('\\', '/').TrimStart('/');
+            string defaultPath = $"{fallbackFolder}/materials/{fallbackMatName}_color.vtex_c".Replace('\\', '/').TrimStart('/');
             if (submesh != null)
             {
                 submesh.OriginalColorVtexCPath = defaultPath;
@@ -1603,7 +1946,6 @@ namespace DeadlockPlayground.Painter
 
             byte[] rawVtexCBytes = null;
 
-            // 1. Direct disk check if full path or relative to current working directory
             if (File.Exists(originalVtexCPath))
             {
                 try { rawVtexCBytes = File.ReadAllBytes(originalVtexCPath); } catch { }
@@ -1613,7 +1955,6 @@ namespace DeadlockPlayground.Painter
                 try { rawVtexCBytes = File.ReadAllBytes(normPath); } catch { }
             }
 
-            // 2. Query base pak01_dir.vpk if available (primary source for authentic assets)
             if (rawVtexCBytes == null && baseVpkPackage != null)
             {
                 var entry = baseVpkPackage.FindEntry(normPath);
@@ -1632,16 +1973,16 @@ namespace DeadlockPlayground.Painter
                 {
                     try
                     {
+                        normPath = entry.GetFullPath().Replace('\\', '/').TrimStart('/');
                         baseVpkPackage.ReadEntry(entry, out rawVtexCBytes);
                     }
                     catch (Exception ex)
                     {
-                        GD.Print($"[SkinExporter] Notice: Could not read entry '{normPath}' from base VPK: {ex.Message}");
+                        GD.Print($"[SkinExporter] Notice: Could not read entry '{normPath}' from VPK: {ex.Message}");
                     }
                 }
             }
 
-            // 3. Check within game citadel folder
             if (rawVtexCBytes == null && !string.IsNullOrEmpty(deadlockGamePath))
             {
                 string gameCitadelFile = Path.Combine(deadlockGamePath, "game", "citadel", normPath);
@@ -1651,7 +1992,6 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 4. Dynamic fallback search in project scratch / staging roots (without hardcoded drive letters or hero names)
             if (rawVtexCBytes == null)
             {
                 string projectDir = ProjectSettings.GlobalizePath("res://");
@@ -1676,7 +2016,6 @@ namespace DeadlockPlayground.Painter
                         try { rawVtexCBytes = File.ReadAllBytes(candidate); break; } catch { }
                     }
 
-                    // Recursive fallback search for texture filename inside workspace scratch
                     try
                     {
                         var matchingFiles = Directory.GetFiles(root, targetFileName, SearchOption.AllDirectories);
@@ -1749,17 +2088,17 @@ namespace DeadlockPlayground.Painter
 
                             if (isBgra)
                             {
-                                rawRgba[idx] = c2;     // R
-                                rawRgba[idx + 1] = c1; // G
-                                rawRgba[idx + 2] = c0; // B
-                                rawRgba[idx + 3] = 255; // Base RGB is 100% opaque for layer compositing and blend modes
+                                rawRgba[idx] = c2;
+                                rawRgba[idx + 1] = c1;
+                                rawRgba[idx + 2] = c0;
+                                rawRgba[idx + 3] = 255;
                             }
                             else
                             {
-                                rawRgba[idx] = c0;     // R
-                                rawRgba[idx + 1] = c1; // G
-                                rawRgba[idx + 2] = c2; // B
-                                rawRgba[idx + 3] = 255; // Base RGB is 100% opaque for layer compositing and blend modes
+                                rawRgba[idx] = c0;
+                                rawRgba[idx + 1] = c1;
+                                rawRgba[idx + 2] = c2;
+                                rawRgba[idx + 3] = 255;
                             }
                         }
 
@@ -1793,7 +2132,6 @@ namespace DeadlockPlayground.Painter
         {
             string texPath = FormatVtexCResource(relativeColorTexturePath);
 
-            // Attempt to enrich submesh with original base textures from VPK if missing
             if (submesh != null)
             {
                 TryExtractOriginalVmatTexturesFromVpk(deadlockGamePath, submesh, baseVpkPackage);
@@ -1815,7 +2153,6 @@ namespace DeadlockPlayground.Painter
                 ? FormatVtexCResource(submesh.OriginalMaskVtex)
                 : null;
 
-            // Ensure referenced textures exist in game tree so resourcecompiler doesn't fail
             if (!string.IsNullOrEmpty(gameStagingRoot))
             {
                 if (!string.IsNullOrEmpty(normalVtex)) EnsureTextureStagedInGameTree(gameStagingRoot, normalVtex, baseVpkPackage);
@@ -1897,7 +2234,6 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
-                // Place empty placeholder so resourcecompiler validates file existence in game tree
                 File.WriteAllBytes(fullPath, Array.Empty<byte>());
             }
             catch (Exception ex)
@@ -1914,7 +2250,7 @@ namespace DeadlockPlayground.Painter
             if (submesh == null) return;
             if (!string.IsNullOrEmpty(submesh.OriginalNormalVtex) && !string.IsNullOrEmpty(submesh.OriginalAoVtex))
             {
-                return; // Already populated from Godot material metadata
+                return;
             }
 
             Package pkg = baseVpkPackage;
@@ -1935,39 +2271,7 @@ namespace DeadlockPlayground.Painter
 
                 if (pkg == null) return;
 
-                var candidates = new List<string>();
-                if (!string.IsNullOrEmpty(submesh.OriginalVmatPath)) candidates.Add(submesh.OriginalVmatPath);
-                if (!string.IsNullOrEmpty(submesh.MaterialName))
-                {
-                    candidates.Add($"materials/{submesh.MaterialName}.vmat_c");
-                    candidates.Add($"models/{submesh.MaterialName}.vmat_c");
-                }
-
-                PackageEntry foundEntry = null;
-                foreach (var c in candidates)
-                {
-                    string norm = c.Replace('\\', '/').TrimStart('/');
-                    if (!norm.EndsWith("_c")) norm += "_c";
-                    foundEntry = pkg.FindEntry(norm);
-                    if (foundEntry != null) break;
-                }
-
-                if (foundEntry == null && !string.IsNullOrEmpty(submesh.MaterialName))
-                {
-                    string targetFile = $"{submesh.MaterialName}.vmat_c";
-                    foreach (var extGroup in pkg.Entries.Values)
-                    {
-                        foreach (var entry in extGroup)
-                        {
-                            if (string.Equals(entry.FileName + "." + entry.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
-                            {
-                                foundEntry = entry;
-                                break;
-                            }
-                        }
-                        if (foundEntry != null) break;
-                    }
-                }
+                PackageEntry foundEntry = FindVmatEntryInPackage(pkg, submesh);
 
                 if (foundEntry != null)
                 {
@@ -2145,17 +2449,10 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
         private static bool HasMeaningfulVpcfOverrides(string kv3Text, EmitterOverrideData ov)
         {
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return false;
-
-            // 1. Visibility toggle
             if (!ov.Visible) return true;
-
-            // 2. Custom Size scale (vanilla is 1.0f)
             if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f) return true;
-
-            // 3. Custom Alpha scale (vanilla is 1.0f)
             if (Math.Abs(ov.AlphaScale - 1.0f) > 0.01f) return true;
 
-            // 4. Constant Color / Tint
             if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
             {
                 int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
@@ -2177,8 +2474,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
                 else
                 {
-                    // If the particle has no m_ConstantColor in vanilla, it defaults to pure white [255, 255, 255].
-                    // If the user picked a different tint color, it's a modification!
                     if (r < 250 || g < 250 || b < 250)
                     {
                         return true;
@@ -2186,7 +2481,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 5. C_INIT_RandomColor
             if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
             {
                 if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
@@ -2230,7 +2524,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 6. C_OP_ColorInterpolate
             if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
             {
                 int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
@@ -2256,18 +2549,13 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
 
         private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
         {
-
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
-            // 0a. Compatibilidad de versión de formato: Si el .vpcf viene de Deadlock con versión > vpcf63 (ej. vpcf64, vpcf65, vpcf66),
-            // degradar el encabezado a vpcf63 para que bin_cs2/resourcecompiler.exe pueda compilarlo sin error
-            // "RESOURCE COMPILE ERROR: No valid format conversion from 'vpcf65' to 'vpcf63'"
             kv3Text = System.Text.RegularExpressions.Regex.Replace(
                 kv3Text,
                 @"format:vpcf(6[4-9]|[7-9]\d+|\d{3,}):version\{[a-f0-9\-]+\}",
                 "format:vpcf63:version{a6e6a69e-52d3-4527-8b9c-ff3bb91aca3e}");
 
-            // 0b. Sanear propiedades exclusivas de Deadlock vpcf61+ que causan [FAIL] en bin_cs2/resourcecompiler.exe (ej. explode_warp, explode_elec)
             string[] incompatibleCs2Keys = new[]
             {
                 @"^\s*m_NamedValue\s*=\s*""""\s*\r?\n",
@@ -2297,7 +2585,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
 
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
-            // 1. Asegurar que m_ForceGenerators = [  ] esté presente (como en los .vpcf_c vanilla)
             if (!kv3Text.Contains("m_ForceGenerators"))
             {
                 int renderersIdx = kv3Text.IndexOf("m_Renderers", StringComparison.Ordinal);
@@ -2307,7 +2594,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 2. Si el usuario ocultó este emisor (Visible = false), ponemos m_nMaxParticles = 0
             if (!ov.Visible)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_nMaxParticles\s*=\s*\d+"))
@@ -2322,7 +2608,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-           // 3a. m_ConstantColor + AlphaScale
             if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
             {
                 int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
@@ -2346,7 +2631,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 3b. C_INIT_RandomColor: m_ColorMin y m_ColorMax independientes!
             if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
             {
                 if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
@@ -2365,7 +2649,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 3c. C_OP_ColorInterpolate: m_ColorFade independiente!
             if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
             {
                 int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
@@ -2374,7 +2657,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorFade\s*=\s*\[[^\]]*\]", $"m_ColorFade = [ {rFade}, {gFade}, {bFade} ]");
             }
 
-            // 4. Si cambió SizeScale, escalamos m_flConstantRadius e inyectamos/escalamos m_flRadiusScale en el Renderer
             if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f)
             {
                 string scaleStr = ov.SizeScale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
@@ -2394,7 +2676,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                         kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_flConstantRadius = {(5.0f * ov.SizeScale).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
                 }
 
-                // Inyectar m_flRadiusScale en el primer Renderer si no lo tiene, para que escale incluso cuando C_INIT_InitFloat pisa el radio
                 if (!kv3Text.Contains("m_flRadiusScale"))
                 {
                     kv3Text = System.Text.RegularExpressions.Regex.Replace(
@@ -2499,9 +2780,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
             return null;
         }
 
-        // =========================================================================
-        // Legacy Compatibility Methods
-        // =========================================================================
         public SkinExportResult ExportFlattenedPng(string filePath)
         {
             var result = new SkinExportResult();
