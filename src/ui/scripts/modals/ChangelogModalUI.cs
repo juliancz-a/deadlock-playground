@@ -96,7 +96,7 @@ public partial class ChangelogModalUI : PanelContainer
         if (_statusBadge != null)
         {
             _statusBadge.Text = "Checking...";
-            _statusBadge.AddThemeColorOverride("font_color", new Color(0.95f, 0.75f, 0.2f, 1f));
+            _statusBadge.ThemeTypeVariation = "BadgeLabelWarning";
         }
 
         try
@@ -140,17 +140,17 @@ public partial class ChangelogModalUI : PanelContainer
                     if (payload.IsFromRemote)
                     {
                         _statusBadge.Text = $"{_activeVersion} • Online";
-                        _statusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.75f, 0.55f, 1f));
+                        _statusBadge.ThemeTypeVariation = "BadgeLabelSuccess";
                     }
                     else if (payload.IsFromCache)
                     {
                         _statusBadge.Text = $"{_activeVersion} • Cached";
-                        _statusBadge.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f, 0.8f));
+                        _statusBadge.ThemeTypeVariation = "MutedLabel";
                     }
                     else
                     {
                         _statusBadge.Text = $"{_activeVersion} • Offline";
-                        _statusBadge.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                        _statusBadge.ThemeTypeVariation = "MutedLabel";
                     }
                 }
 
@@ -169,7 +169,7 @@ public partial class ChangelogModalUI : PanelContainer
             if (_statusBadge != null)
             {
                 _statusBadge.Text = $"{_activeVersion} • Offline";
-                _statusBadge.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                _statusBadge.ThemeTypeVariation = "MutedLabel";
             }
         }
         finally

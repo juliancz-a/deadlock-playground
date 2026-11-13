@@ -50,59 +50,7 @@ public partial class ParticleCardUI : PanelContainer
 
     private void InitStyles()
     {
-        _styleNormal = new StyleBoxFlat
-        {
-            BgColor = new Color(0.12f, 0.14f, 0.17f, 0.95f),
-            CornerRadiusTopLeft = 6,
-            CornerRadiusTopRight = 6,
-            CornerRadiusBottomLeft = 6,
-            CornerRadiusBottomRight = 6,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.22f, 0.26f, 0.32f, 0.8f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
-
-        _styleHover = new StyleBoxFlat
-        {
-            BgColor = new Color(0.16f, 0.19f, 0.24f, 0.98f),
-            CornerRadiusTopLeft = 6,
-            CornerRadiusTopRight = 6,
-            CornerRadiusBottomLeft = 6,
-            CornerRadiusBottomRight = 6,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.35f, 0.55f, 0.85f, 0.9f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
-
-        _styleSelected = new StyleBoxFlat
-        {
-            BgColor = new Color(0.18f, 0.24f, 0.32f, 1.0f),
-            CornerRadiusTopLeft = 6,
-            CornerRadiusTopRight = 6,
-            CornerRadiusBottomLeft = 6,
-            CornerRadiusBottomRight = 6,
-            BorderWidthLeft = 2,
-            BorderWidthRight = 2,
-            BorderWidthTop = 2,
-            BorderWidthBottom = 2,
-            BorderColor = new Color(0.40f, 0.75f, 1.0f, 1.0f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
+        (_styleNormal, _styleHover, _styleSelected) = PlaygroundThemeHelper.CreateCardStateStyles(cornerRadius: 6, padding: 6);
     }
 
     private void BuildUI()
@@ -153,10 +101,9 @@ public partial class ParticleCardUI : PanelContainer
             HorizontalAlignment = HorizontalAlignment.Center,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
             SizeFlagsHorizontal = SizeFlags.Fill,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        _lblVariant.AddThemeColorOverride("font_color", new Color(0.95f, 0.95f, 0.95f, 1.0f));
-        _lblVariant.AddThemeFontSizeOverride("font_size", 14);
         vbox.AddChild(_lblVariant);
 
         // Ability Name Label (Secondary)
@@ -166,10 +113,9 @@ public partial class ParticleCardUI : PanelContainer
             HorizontalAlignment = HorizontalAlignment.Center,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
             SizeFlagsHorizontal = SizeFlags.Fill,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "MutedLabel"
         };
-        _lblAbility.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 0.95f));
-        _lblAbility.AddThemeFontSizeOverride("font_size", 13);
         vbox.AddChild(_lblAbility);
     }
 

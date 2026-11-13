@@ -111,7 +111,7 @@ layout_mode = 2
 size_flags_horizontal = 4
 theme_override_colors/font_color = Color(0.77678007, 0.52605486, 0.18015891, 1)
 theme_override_fonts/font = ExtResource("3_jha30")
-theme_override_font_sizes/font_size = 48
+theme_override_font_sizes/font_size = 50
 text = "Deadlock Playground"
 
 [node name="HSeparator" type="HSeparator" parent="PanelContainer/MarginContainer/VBoxContainer" unique_id=721870756]

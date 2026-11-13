@@ -1,6 +1,8 @@
 [gd_scene format=3 uid="uid://csvusgj1vik1u"]
 
 [ext_resource type="Script" uid="uid://c8iqg3e0fyesi" path="res://ui/scripts/tabs/PaintTabUI.cs" id="1_paint"]
+[ext_resource type="Texture2D" path="res://assets/at-icons/arrow_up.svg" id="2_arrow_up"]
+[ext_resource type="Texture2D" path="res://assets/at-icons/arrow_down.svg" id="3_arrow_down"]
 
 [node name="PaintTab" type="VBoxContainer" unique_id=1849204999]
 anchors_preset = 15
@@ -27,8 +29,8 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"TitleLabel"
-theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
 text = "HERO: NONE"
+autowrap_mode = 2
 
 [node name="HBoxTarget" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101006]
 layout_mode = 2
@@ -58,27 +60,30 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "2048 x 2048"
 
-[node name="HBoxProject" type="HBoxContainer" parent="HeaderCard/VBox" unique_id=1010101099]
+[node name="HBoxProject" type="HFlowContainer" parent="HeaderCard/VBox" unique_id=1010101099]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
 
 [node name="BtnSaveProject" type="Button" parent="HeaderCard/VBox/HBoxProject" unique_id=1010101091]
+custom_minimum_size = Vector2(200, 32)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 text = "Save Project (.dpp)..."
+tooltip_text = "Save Paint Project (.dpp)..."
 
 [node name="BtnLoadProject" type="Button" parent="HeaderCard/VBox/HBoxProject" unique_id=1010101092]
+custom_minimum_size = Vector2(160, 32)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 text = "Load Project..."
+tooltip_text = "Load Paint Project..."
 
 [node name="ActiveMeshLabel" type="Label" parent="HeaderCard/VBox" unique_id=1010101012]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
+theme_type_variation = &"MutedLabel"
 text = "Target: None"
+autowrap_mode = 2
 
 [node name="HSeparator1" type="HSeparator" parent="." unique_id=1010101013]
 layout_mode = 2
@@ -94,25 +99,25 @@ theme_override_constants/separation = 6
 [node name="Title" type="Label" parent="SubmeshCard/VBox" unique_id=1010101016]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
-text = "Submesh Hierarchy & Soloing"
+text = "Submeshes"
+autowrap_mode = 2
 
-[node name="HBoxActions" type="HBoxContainer" parent="SubmeshCard/VBox" unique_id=1010101017]
+[node name="HBoxActions" type="HFlowContainer" parent="SubmeshCard/VBox" unique_id=1010101017]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
 
 [node name="BtnShowAll" type="Button" parent="SubmeshCard/VBox/HBoxActions" unique_id=1010101018]
+custom_minimum_size = Vector2(115, 30)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 text = "Show All"
 
 [node name="BtnHideAcc" type="Button" parent="SubmeshCard/VBox/HBoxActions" unique_id=1010101019]
+custom_minimum_size = Vector2(175, 30)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 text = "Hide Accessories"
-text_overrun_behavior = 3
-clip_text = true
 
 [node name="ScrollContainer" type="ScrollContainer" parent="SubmeshCard/VBox" unique_id=1010101020]
 custom_minimum_size = Vector2(0, 180)
@@ -146,32 +151,41 @@ layout_mode = 2
 theme_override_constants/separation = 4
 
 [node name="BtnAddLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101027]
+custom_minimum_size = Vector2(76, 30)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
-text = "+ LAYER"
+text = "+ Layer"
 
 [node name="BtnDeleteLayer" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101028]
+custom_minimum_size = Vector2(54, 30)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
-text = "DELETE"
+text = "Del"
 
 [node name="BtnAlphaLock" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101029]
-custom_minimum_size = Vector2(28, 26)
+custom_minimum_size = Vector2(30, 30)
 layout_mode = 2
+theme_type_variation = &"IconButton"
 toggle_mode = true
 tooltip_text = "Lock Layer Transparency (Alpha Lock)"
 
 [node name="BtnMoveUp" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101030]
-custom_minimum_size = Vector2(28, 0)
+custom_minimum_size = Vector2(30, 30)
 layout_mode = 2
-text = "▲"
+theme_type_variation = &"IconButton"
+tooltip_text = "Move Layer Up"
+icon = ExtResource("2_arrow_up")
+icon_alignment = 1
+expand_icon = true
 
 [node name="BtnMoveDown" type="Button" parent="LayersCard/VBox/HBoxToolbar" unique_id=1010101031]
-custom_minimum_size = Vector2(28, 0)
+custom_minimum_size = Vector2(30, 30)
 layout_mode = 2
-text = "▼"
+theme_type_variation = &"IconButton"
+tooltip_text = "Move Layer Down"
+icon = ExtResource("3_arrow_down")
+icon_alignment = 1
+expand_icon = true
 
 [node name="ScrollContainer" type="ScrollContainer" parent="LayersCard/VBox" unique_id=1010101032]
 custom_minimum_size = Vector2(0, 90)

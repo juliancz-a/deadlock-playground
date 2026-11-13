@@ -1,0 +1,92 @@
+[gd_scene format=3 uid="uid://dtheme5tab7ui"]
+
+[ext_resource type="Script" path="res://ui/scripts/components/ThemesSettingsTabUI.cs" id="1_script"]
+
+[node name="ThemesSettingsTab" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+script = ExtResource("1_script")
+
+[node name="PresetBar" type="PanelContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"InspectorSectionPanel"
+
+[node name="VBox" type="VBoxContainer" parent="PresetBar"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PresetRow" type="HBoxContainer" parent="PresetBar/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PresetLabel" type="Label" parent="PresetBar/VBox/PresetRow"]
+layout_mode = 2
+theme_type_variation = &"HeaderLabel"
+text = "Active Theme"
+
+[node name="PresetOption" type="OptionButton" parent="PresetBar/VBox/PresetRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ActionsFlow" type="HFlowContainer" parent="PresetBar/VBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+
+[node name="BtnApplyTheme" type="Button" parent="PresetBar/VBox/ActionsFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"PrimaryActionButton"
+text = "Apply Theme"
+
+[node name="BtnSaveCustom" type="Button" parent="PresetBar/VBox/ActionsFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SecondaryButton"
+text = "Save As Custom Theme..."
+
+[node name="BtnExportTheme" type="Button" parent="PresetBar/VBox/ActionsFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SecondaryButton"
+text = "Export Theme (.json)..."
+
+[node name="BtnImportTheme" type="Button" parent="PresetBar/VBox/ActionsFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SecondaryButton"
+text = "Import Theme (.json)..."
+
+[node name="BtnResetTheme" type="Button" parent="PresetBar/VBox/ActionsFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DangerButton"
+text = "Reset to Default"
+
+[node name="StatusLabel" type="Label" parent="PresetBar/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"BadgeLabelInfo"
+autowrap_mode = 2
+
+[node name="EditorScroll" type="ScrollContainer" parent="."]
+custom_minimum_size = Vector2(0, 320)
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="EditorVBox" type="VBoxContainer" parent="EditorScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+

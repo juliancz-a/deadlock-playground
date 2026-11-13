@@ -71,6 +71,7 @@ public partial class PlayerTabUI : VBoxContainer
         AnimationTransportService.Instance.LoopChanged += OnTransportLoopChanged;
         ModWorkspaceSession.Instance.OnAnimationDiscarded += OnWorkspaceAnimationDiscarded;
         ModWorkspaceSession.Instance.OnWorkspaceCleared += OnWorkspaceCleared;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
 
         if (_animSearch != null)
         {
@@ -165,6 +166,7 @@ public partial class PlayerTabUI : VBoxContainer
     public override void _ExitTree()
     {
         SkeletonGizmoManager.OnBonePoseChanged -= OnGizmoBonePoseChanged;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
         AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
         AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
         AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
@@ -177,6 +179,14 @@ public partial class PlayerTabUI : VBoxContainer
         {
             _animStudioDock.AnimationModified -= OnAnimStudioAnimationModified;
             _animStudioDock.VisibilityToggled -= OnAnimStudioVisibilityToggled;
+        }
+    }
+
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
+    {
+        if (IsInsideTree() && _currentHeroAnimations.Count > 0)
+        {
+            PopulateAnimationTree();
         }
     }
 
@@ -994,11 +1004,13 @@ public partial class PlayerTabUI : VBoxContainer
             {
                 if (category == "Remapped" && string.IsNullOrEmpty(filter))
                 {
+                    bool isLight = DeadlockPlayground.Theming.ThemeManager.IsLightTheme();
                     TreeItem emptyCategory = _animTree.CreateItem(root);
                     var iconEmpty = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg") ?? _iconFolder;
                     emptyCategory.SetIcon(0, iconEmpty);
                     emptyCategory.SetIconMaxWidth(0, 16);
-                    emptyCategory.SetCustomColor(0, new Color(0.31f, 0.93f, 0.69f, 0.8f));
+                    emptyCategory.SetIconModulate(0, isLight ? new Color(0.16f, 0.20f, 0.24f, 1.0f) : Colors.White);
+                    emptyCategory.SetCustomColor(0, isLight ? new Color(0.06f, 0.48f, 0.32f, 1.0f) : new Color(0.31f, 0.93f, 0.69f, 0.85f));
                     emptyCategory.SetCustomMinimumHeight(28);
                     emptyCategory.SetText(0, "Imported / Remapped (0)");
                     emptyCategory.SetSelectable(0, false);
@@ -1006,7 +1018,7 @@ public partial class PlayerTabUI : VBoxContainer
 
                     TreeItem emptyPlaceholder = _animTree.CreateItem(emptyCategory);
                     emptyPlaceholder.SetText(0, "(No imported animations yet)");
-                    emptyPlaceholder.SetCustomColor(0, new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                    emptyPlaceholder.SetCustomColor(0, DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.TextSecondary)));
                     emptyPlaceholder.SetSelectable(0, false);
                 }
                 continue;
@@ -1018,20 +1030,37 @@ public partial class PlayerTabUI : VBoxContainer
                 : _iconFolder;
             categoryItem.SetIcon(0, iconCat);
             categoryItem.SetIconMaxWidth(0, 16);
-            Color catColor = category switch
-            {
-                "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
-                "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
-                "Idles & Stances" or "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
-                "Locomotion" => new Color(0.45f, 0.85f, 0.95f, 1.0f),
-                "Traversal & Zipline" => new Color(0.55f, 0.90f, 0.70f, 1.0f),
-                "Combat & Attacks" or "Combat" => new Color(0.95f, 0.55f, 0.45f, 1.0f),
-                "Abilities & Magic" or "Abilities" => new Color(0.85f, 0.60f, 0.95f, 1.0f),
-                "Reactions & Status" or "Reactions" => new Color(0.95f, 0.75f, 0.45f, 1.0f),
-                "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.95f, 0.65f, 0.85f, 1.0f),
-                "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
-                _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
-            };
+            bool isLightTheme = DeadlockPlayground.Theming.ThemeManager.IsLightTheme();
+            categoryItem.SetIconModulate(0, isLightTheme ? new Color(0.16f, 0.20f, 0.24f, 1.0f) : Colors.White);
+            Color catColor = isLightTheme
+                ? category switch
+                {
+                    "Remapped" => new Color(0.06f, 0.48f, 0.32f, 1.0f),
+                    "Exported" => new Color(0.06f, 0.42f, 0.68f, 1.0f),
+                    "Idles & Stances" or "Idle" => new Color(0.58f, 0.36f, 0.04f, 1.0f),
+                    "Locomotion" => new Color(0.07f, 0.42f, 0.62f, 1.0f),
+                    "Traversal & Zipline" => new Color(0.10f, 0.48f, 0.24f, 1.0f),
+                    "Combat & Attacks" or "Combat" => new Color(0.72f, 0.16f, 0.12f, 1.0f),
+                    "Abilities & Magic" or "Abilities" => new Color(0.46f, 0.16f, 0.65f, 1.0f),
+                    "Reactions & Status" or "Reactions" => new Color(0.66f, 0.34f, 0.04f, 1.0f),
+                    "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.68f, 0.16f, 0.45f, 1.0f),
+                    "Additive Layers" => new Color(0.14f, 0.38f, 0.72f, 1.0f),
+                    _ => new Color(0.18f, 0.20f, 0.24f, 1.0f)
+                }
+                : category switch
+                {
+                    "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
+                    "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
+                    "Idles & Stances" or "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
+                    "Locomotion" => new Color(0.45f, 0.85f, 0.95f, 1.0f),
+                    "Traversal & Zipline" => new Color(0.55f, 0.90f, 0.70f, 1.0f),
+                    "Combat & Attacks" or "Combat" => new Color(0.95f, 0.55f, 0.45f, 1.0f),
+                    "Abilities & Magic" or "Abilities" => new Color(0.85f, 0.60f, 0.95f, 1.0f),
+                    "Reactions & Status" or "Reactions" => new Color(0.95f, 0.75f, 0.45f, 1.0f),
+                    "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.95f, 0.65f, 0.85f, 1.0f),
+                    "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
+                    _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
+                };
             categoryItem.SetCustomColor(0, catColor);
             categoryItem.SetCustomMinimumHeight(28);
             categoryItem.SetText(0, category == "Remapped" ? $"Imported / Remapped ({itemsInCategory.Count})" : $"{category} ({itemsInCategory.Count})");

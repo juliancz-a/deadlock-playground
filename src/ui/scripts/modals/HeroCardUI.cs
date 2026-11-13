@@ -182,59 +182,7 @@ public partial class HeroCardUI : PanelContainer
 
     private void InitStyles()
     {
-        _styleNormal = new StyleBoxFlat
-        {
-            BgColor = new Color(0.10f, 0.12f, 0.16f, 0.95f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.22f, 0.26f, 0.34f, 0.8f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
-
-        _styleHover = new StyleBoxFlat
-        {
-            BgColor = new Color(0.14f, 0.17f, 0.22f, 0.98f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.95f, 0.85f, 0.40f, 0.9f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
-
-        _styleSelected = new StyleBoxFlat
-        {
-            BgColor = new Color(0.16f, 0.22f, 0.30f, 1.0f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 2,
-            BorderWidthRight = 2,
-            BorderWidthTop = 2,
-            BorderWidthBottom = 2,
-            BorderColor = new Color(0.95f, 0.85f, 0.30f, 1.0f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
+        (_styleNormal, _styleHover, _styleSelected) = PlaygroundThemeHelper.CreateCardStateStyles(cornerRadius: 8, padding: 6);
     }
 
     private void BuildUI()
@@ -303,14 +251,9 @@ public partial class HeroCardUI : PanelContainer
         _lblTag = new Label
         {
             Text = "Hero",
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "BadgeLabelInfo"
         };
-        var colusFont = PlaygroundThemeHelper.GetFontColus();
-        if (colusFont != null)
-        {
-            _lblTag.AddThemeFontOverride("font", colusFont);
-        }
-        _lblTag.AddThemeFontSizeOverride("font_size", 12);
         _tagPanel.AddChild(_lblTag);
         _thumbPanel.AddChild(_tagPanel);
 
@@ -321,14 +264,9 @@ public partial class HeroCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        if (colusFont != null)
-        {
-            _lblName.AddThemeFontOverride("font", colusFont);
-        }
-        _lblName.AddThemeFontSizeOverride("font_size", 14);
-        _lblName.AddThemeColorOverride("font_color", Colors.White);
         vbox.AddChild(_lblName);
 
         // 3. Hero Codename / Subtitle
@@ -338,10 +276,9 @@ public partial class HeroCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "MutedLabel"
         };
-        _lblCodename.AddThemeFontSizeOverride("font_size", 13);
-        _lblCodename.AddThemeColorOverride("font_color", new Color(0.78f, 0.82f, 0.90f, 1.0f));
         vbox.AddChild(_lblCodename);
 
         if (Hero != null)

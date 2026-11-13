@@ -182,8 +182,9 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         var keymapHint = GetNodeOrNull<Control>("%KeymapHintContainer") ?? FindChild("KeymapHintContainer", true, false) as Control;
         if (keymapHint != null) keymapHint.MouseFilter = MouseFilterEnum.Ignore;
 
-        CreateButtonStyles();
         LinkControls();
+        NormalizeFlyoutLabelSizes();
+        CreateButtonStyles();
         if (_flyoutPanel != null) _flyoutPanel.MouseFilter = MouseFilterEnum.Stop;
         ConnectEvents();
         
@@ -196,6 +197,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         ApplyIdleModulates();
         KeybindsManager.OnKeybindsChanged += UpdateTooltipsAndKeymaps;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
         SelectTool(BrushToolMode.Paint, forceFlyoutOpen: true);
 
         Resized += () => CallDeferred(nameof(ClampPositionToBounds));
@@ -227,43 +229,94 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToggleFlyout != null) _btnToggleFlyout.Modulate = idleCol;
     }
 
+    private void NormalizeFlyoutLabelSizes()
+    {
+        var flyout = _flyoutPanel ?? FindChild("FlyoutPanel", true, false) as Control;
+        if (flyout == null) return;
+        ApplyCompactLabelsRecursive(flyout);
+    }
+
+    private static void ApplyCompactLabelsRecursive(Node node)
+    {
+        foreach (Node child in node.GetChildren())
+        {
+            if (child is Label lbl)
+            {
+                string name = lbl.Name.ToString();
+                if (name == "LblTitle" || name.Contains("Value") || name.StartsWith("Val"))
+                {
+                    lbl.ThemeTypeVariation = "CompactLabel";
+                }
+            }
+            ApplyCompactLabelsRecursive(child);
+        }
+    }
+
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
+    {
+        CreateButtonStyles();
+        UpdatePinVisuals();
+        ApplyIdleModulates();
+    }
+
     private void UpdatePinVisuals()
     {
         if (_btnPin == null) return;
-        _btnPin.Text = IsPinned ? "PIN" : "UNPIN";
-        _btnPin.Modulate = IsPinned ? new Color(1.0f, 0.85f, 0.4f, 1.0f) : new Color(0.6f, 0.6f, 0.6f, 1.0f);
+        _btnPin.Text = "";
+        _btnPin.ExpandIcon = true;
+        _btnPin.IconAlignment = HorizontalAlignment.Center;
+        _btnPin.Icon = GD.Load<Texture2D>(IsPinned
+            ? "res://assets/at-icons/thumbtack.svg"
+            : "res://assets/at-icons/thumbtack_diagonal.svg");
+        _btnPin.Modulate = IsPinned
+            ? DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary))
+            : DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.TextSecondary));
         _btnPin.TooltipText = IsPinned ? "Panel Pinned (Click to Unpin)" : "Panel Unpinned (Click to Pin)";
     }
 
     private void CreateButtonStyles()
     {
-        _activeButtonStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.2f, 0.22f, 0.28f, 1.0f),
-            BorderColor = new Color(0.95f, 0.8f, 0.4f, 1.0f),
-            BorderWidthLeft = 2,
-            BorderWidthTop = 2,
-            BorderWidthRight = 2,
-            BorderWidthBottom = 2,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomRight = 4,
-            CornerRadiusBottomLeft = 4
-        };
+        Color bgNormal = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.BackgroundPrimary));
+        Color bgActive = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.SurfaceHeader));
+        Color borderNormal = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.BorderColor));
+        Color borderActive = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary));
 
-        _normalButtonStyle = new StyleBoxFlat
+        _activeButtonStyle ??= new StyleBoxFlat();
+        _activeButtonStyle.BgColor = bgActive;
+        _activeButtonStyle.BorderColor = borderActive;
+        _activeButtonStyle.BorderWidthLeft = 2;
+        _activeButtonStyle.BorderWidthTop = 2;
+        _activeButtonStyle.BorderWidthRight = 2;
+        _activeButtonStyle.BorderWidthBottom = 2;
+        _activeButtonStyle.CornerRadiusTopLeft = 4;
+        _activeButtonStyle.CornerRadiusTopRight = 4;
+        _activeButtonStyle.CornerRadiusBottomRight = 4;
+        _activeButtonStyle.CornerRadiusBottomLeft = 4;
+        _activeButtonStyle.ContentMarginLeft = 4;
+        _activeButtonStyle.ContentMarginTop = 4;
+        _activeButtonStyle.ContentMarginRight = 4;
+        _activeButtonStyle.ContentMarginBottom = 4;
+
+        _normalButtonStyle ??= new StyleBoxFlat();
+        _normalButtonStyle.BgColor = bgNormal;
+        _normalButtonStyle.BorderColor = new Color(borderNormal.R, borderNormal.G, borderNormal.B, 0.7f);
+        _normalButtonStyle.BorderWidthLeft = 1;
+        _normalButtonStyle.BorderWidthTop = 1;
+        _normalButtonStyle.BorderWidthRight = 1;
+        _normalButtonStyle.BorderWidthBottom = 1;
+        _normalButtonStyle.CornerRadiusTopLeft = 4;
+        _normalButtonStyle.CornerRadiusTopRight = 4;
+        _normalButtonStyle.CornerRadiusBottomRight = 4;
+        _normalButtonStyle.CornerRadiusBottomLeft = 4;
+        _normalButtonStyle.ContentMarginLeft = 4;
+        _normalButtonStyle.ContentMarginTop = 4;
+        _normalButtonStyle.ContentMarginRight = 4;
+        _normalButtonStyle.ContentMarginBottom = 4;
+
+        foreach (var iconBtn in new[] { _btnMirror, _btnUndo, _btnRedo, _btnToggleFlyout, _btnPin })
         {
-            BgColor = new Color(0.12f, 0.13f, 0.16f, 0.9f),
-            BorderColor = new Color(0.28f, 0.3f, 0.38f, 0.6f),
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomRight = 4,
-            CornerRadiusBottomLeft = 4
-        };
+            if (iconBtn != null) iconBtn.ThemeTypeVariation = "IconButton";
+        }
     }
 
     public void Setup(MeshPainter3D painter, DecalStamper decalStamper, TextProjector textProjector = null)
@@ -384,7 +437,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         // Toolbar strip & Flyout container
         _toolStripPanel = ResolveNode<Control>("ToolStripPanel", "ToolStripPanel")
                        ?? FindChild("ToolStripPanel", true, false) as Control;
-        _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel");
+        _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel")
+                    ?? FindChild("FlyoutPanel", true, false) as Control;
         _chkFrontFacesOnly = ResolveNode<CheckBox>("ChkFrontFacesOnly", "ChkFrontFacesOnly");
         if (_flyoutPanel != null)
         {
@@ -2037,6 +2091,7 @@ public void UpdateTooltipsAndKeymaps()
     public override void _ExitTree()
     {
         KeybindsManager.OnKeybindsChanged -= UpdateTooltipsAndKeymaps;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
         if (_painter != null && GodotObject.IsInstanceValid(_painter))
         {
             _painter.ColorSampled -= OnColorSampled;

@@ -104,8 +104,6 @@ public partial class CharacterTabUI : VBoxContainer
                 _btnImportCustomModel.ExpandIcon = true;
                 _btnImportCustomModel.AddThemeConstantOverride("icon_max_width", 20);
                 _btnImportCustomModel.AddThemeConstantOverride("h_separation", 8);
-                _btnImportCustomModel.AddThemeColorOverride("icon_normal_color", new Color(0.937255f, 0.870588f, 0.74902f, 1f));
-                _btnImportCustomModel.AddThemeColorOverride("icon_hover_color", new Color(1f, 0.95f, 0.85f, 1f));
             }
         }
 
@@ -125,13 +123,12 @@ public partial class CharacterTabUI : VBoxContainer
                 _btnEditCustomModel.ExpandIcon = true;
                 _btnEditCustomModel.AddThemeConstantOverride("icon_max_width", 20);
                 _btnEditCustomModel.AddThemeConstantOverride("h_separation", 8);
-                _btnEditCustomModel.AddThemeColorOverride("icon_normal_color", new Color(0.937255f, 0.870588f, 0.74902f, 1f));
-                _btnEditCustomModel.AddThemeColorOverride("icon_hover_color", new Color(1f, 0.95f, 0.85f, 1f));
             }
         }
 
         if (_btnResetCustomModel != null)
         {
+            _btnResetCustomModel.ThemeTypeVariation = "DangerButton";
             var iconReset = GD.Load<Texture2D>("res://assets/at-icons/rotate.svg");
             if (iconReset != null)
             {
@@ -139,8 +136,6 @@ public partial class CharacterTabUI : VBoxContainer
                 _btnResetCustomModel.ExpandIcon = true;
                 _btnResetCustomModel.AddThemeConstantOverride("icon_max_width", 20);
                 _btnResetCustomModel.AddThemeConstantOverride("h_separation", 8);
-                _btnResetCustomModel.AddThemeColorOverride("icon_normal_color", new Color(0.95f, 0.65f, 0.65f, 1f));
-                _btnResetCustomModel.AddThemeColorOverride("icon_hover_color", new Color(1f, 0.75f, 0.75f, 1f));
             }
         }
 
@@ -820,7 +815,7 @@ public partial class CharacterTabUI : VBoxContainer
                 TooltipText = displayName
             };
             nameBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-            nameBtn.AddThemeFontSizeOverride("font_size", 11);
+            nameBtn.ThemeTypeVariation = "ToolbarButton";
             nameBtn.Pressed += () =>
             {
                 cb.ButtonPressed = !cb.ButtonPressed;
@@ -1272,7 +1267,7 @@ public partial class CharacterTabUI : VBoxContainer
             nameBtn.OffsetTop = 0;
             nameBtn.OffsetRight = 0;
             nameBtn.OffsetBottom = 0;
-            nameBtn.AddThemeFontSizeOverride("font_size", 11);
+            nameBtn.ThemeTypeVariation = "ToolbarButton";
             nameBtn.Pressed += () =>
             {
                 cb.ButtonPressed = !cb.ButtonPressed;

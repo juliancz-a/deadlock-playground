@@ -39,22 +39,7 @@ namespace DeadlockPlayground.UI
             Size = new Vector2(820, 580);
             CenterModal();
 
-            var panelStyle = new StyleBoxFlat
-            {
-                BgColor = new Color(0.08f, 0.09f, 0.12f, 0.96f),
-                BorderWidthBottom = 2,
-                BorderWidthLeft = 2,
-                BorderWidthRight = 2,
-                BorderWidthTop = 2,
-                BorderColor = new Color(0.24f, 0.28f, 0.35f, 0.9f),
-                CornerRadiusBottomLeft = 8,
-                CornerRadiusBottomRight = 8,
-                CornerRadiusTopLeft = 8,
-                CornerRadiusTopRight = 8,
-                ShadowColor = new Color(0, 0, 0, 0.6f),
-                ShadowSize = 16
-            };
-            AddThemeStyleboxOverride("panel", panelStyle);
+            ThemeTypeVariation = "ModalPanel";
 
             BuildUI();
 
@@ -99,19 +84,17 @@ namespace DeadlockPlayground.UI
             var titleLbl = new Label
             {
                 Text = "WORKSPACE MOD CHANGES",
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ThemeTypeVariation = "ModalTitleLabel"
             };
-            if (colus != null) titleLbl.AddThemeFontOverride("font", colus);
-            titleLbl.AddThemeFontSizeOverride("font_size", 16);
             headerBar.AddChild(titleLbl);
 
             _lblCountBadge = new Label
             {
                 Text = "[0]",
-                Modulate = new Color(0.95f, 0.75f, 0.30f),
+                ThemeTypeVariation = "BadgeLabelInfo",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
-            _lblCountBadge.AddThemeFontSizeOverride("font_size", 12);
             headerBar.AddChild(_lblCountBadge);
 
             _btnClose = new Button
@@ -127,10 +110,9 @@ namespace DeadlockPlayground.UI
             _lblSubtitle = new Label
             {
                 Text = "Centralized overview of all staged character paints, extra model customizations, and particle VFX modifications.",
-                Modulate = new Color(0.82f, 0.85f, 0.90f),
+                ThemeTypeVariation = "MutedLabel",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
-            _lblSubtitle.AddThemeFontSizeOverride("font_size", 14);
             rootVBox.AddChild(_lblSubtitle);
 
             rootVBox.AddChild(new HSeparator());
@@ -293,20 +275,11 @@ namespace DeadlockPlayground.UI
 
             if (session.Manifest.Heroes.Count == 0)
             {
-                var emptyPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-                var emptyStyle = new StyleBoxFlat
+                var emptyPanel = new PanelContainer
                 {
-                    BgColor = new Color(0.12f, 0.14f, 0.18f, 0.7f),
-                    CornerRadiusBottomLeft = 6,
-                    CornerRadiusBottomRight = 6,
-                    CornerRadiusTopLeft = 6,
-                    CornerRadiusTopRight = 6,
-                    ContentMarginLeft = 20,
-                    ContentMarginRight = 20,
-                    ContentMarginTop = 30,
-                    ContentMarginBottom = 30
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    ThemeTypeVariation = "CardPanel"
                 };
-                emptyPanel.AddThemeStyleboxOverride("panel", emptyStyle);
 
                 var emptyLbl = new Label
                 {
@@ -314,9 +287,8 @@ namespace DeadlockPlayground.UI
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                    Modulate = new Color(0.75f, 0.78f, 0.84f)
+                    ThemeTypeVariation = "MutedLabel"
                 };
-                emptyLbl.AddThemeFontSizeOverride("font_size", 14);
                 emptyPanel.AddChild(emptyLbl);
                 _contentContainer.AddChild(emptyPanel);
                 return;
@@ -335,29 +307,11 @@ namespace DeadlockPlayground.UI
             {
                 bool isCurrentActiveHero = string.Equals(hero.HeroId, curHeroId, StringComparison.OrdinalIgnoreCase);
 
-                var heroCard = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-                var heroCardStyle = new StyleBoxFlat
+                var heroCard = new PanelContainer
                 {
-                    BgColor = isCurrentActiveHero 
-                        ? new Color(0.14f, 0.18f, 0.22f, 0.95f) 
-                        : new Color(0.12f, 0.14f, 0.18f, 0.85f),
-                    BorderWidthBottom = isCurrentActiveHero ? 2 : 1,
-                    BorderWidthLeft = isCurrentActiveHero ? 2 : 1,
-                    BorderWidthRight = isCurrentActiveHero ? 2 : 1,
-                    BorderWidthTop = isCurrentActiveHero ? 2 : 1,
-                    BorderColor = isCurrentActiveHero 
-                        ? new Color(0.95f, 0.78f, 0.32f, 0.95f) //Highlight
-                        : new Color(0.22f, 0.26f, 0.32f, 0.6f),
-                    CornerRadiusBottomLeft = 6,
-                    CornerRadiusBottomRight = 6,
-                    CornerRadiusTopLeft = 6,
-                    CornerRadiusTopRight = 6,
-                    ContentMarginLeft = 14,
-                    ContentMarginRight = 14,
-                    ContentMarginTop = 10,
-                    ContentMarginBottom = 10
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    ThemeTypeVariation = isCurrentActiveHero ? "InspectorSectionPanel" : "CardPanel"
                 };
-                heroCard.AddThemeStyleboxOverride("panel", heroCardStyle);
 
                 var cardVBox = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
                 cardVBox.AddThemeConstantOverride("separation", 8);
@@ -369,24 +323,20 @@ namespace DeadlockPlayground.UI
                 var heroTitle = new Label
                 {
                     Text = isCurrentActiveHero 
-                        ? $"★ HERO: {hero.DisplayName.ToUpperInvariant()} ({hero.HeroId}) — [ACTIVE]"
+                        ? $"HERO: {hero.DisplayName.ToUpperInvariant()} ({hero.HeroId}) — [ACTIVE]"
                         : $"HERO: {hero.DisplayName.ToUpperInvariant()} ({hero.HeroId})",
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
-                    Modulate = isCurrentActiveHero ? new Color(1.0f, 0.88f, 0.45f) : Colors.White
+                    ThemeTypeVariation = isCurrentActiveHero ? "SectionHeaderLabel" : "SubheaderLabel"
                 };
-                if (colus != null) heroTitle.AddThemeFontOverride("font", colus);
-                heroTitle.AddThemeFontSizeOverride("font_size", 15);
                 heroHeader.AddChild(heroTitle);
 
                 var exportHeroBtn = new Button
                 {
                     Text = "Export Mod (VPK)",
-                    CustomMinimumSize = new Vector2(145, 28),
+                    CustomMinimumSize = new Vector2(155, 30),
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                    Modulate = new Color(0.45f, 0.92f, 0.55f)
+                    ThemeTypeVariation = "PrimaryActionButton"
                 };
-                if (colus != null) exportHeroBtn.AddThemeFontOverride("font", colus);
-                exportHeroBtn.AddThemeFontSizeOverride("font_size", 12);
                 string expHeroId = hero.HeroId;
                 string expHeroDisplay = hero.DisplayName;
                 exportHeroBtn.Pressed += () =>
@@ -413,10 +363,7 @@ namespace DeadlockPlayground.UI
                 // 1. Character Model
                 if (charModels.Count > 0)
                 {
-                    var catHead = new Label { Text = "• Character Model", Modulate = new Color(0.92f, 0.95f, 0.98f) };
-                    if (colus != null) catHead.AddThemeFontOverride("font", colus);
-                    catHead.AddThemeFontSizeOverride("font_size", 13);
-                    cardVBox.AddChild(catHead);
+                    cardVBox.AddChild(new Label { Text = "• Character Model", ThemeTypeVariation = "HeaderLabel" });
 
                     foreach (var a in charModels)
                     {
@@ -428,10 +375,7 @@ namespace DeadlockPlayground.UI
                 // 2. Extra Models
                 if (extraModels.Count > 0)
                 {
-                    var catHead = new Label { Text = "• Extra Models", Modulate = new Color(0.92f, 0.95f, 0.98f) };
-                    if (colus != null) catHead.AddThemeFontOverride("font", colus);
-                    catHead.AddThemeFontSizeOverride("font_size", 13);
-                    cardVBox.AddChild(catHead);
+                    cardVBox.AddChild(new Label { Text = "• Extra Models", ThemeTypeVariation = "HeaderLabel" });
 
                     foreach (var a in extraModels)
                     {
@@ -443,10 +387,7 @@ namespace DeadlockPlayground.UI
                 // 3. Particle VFX
                 if (vfxAssets.Count > 0)
                 {
-                    var catHead = new Label { Text = "• VFX (Particles)", Modulate = new Color(0.92f, 0.95f, 0.98f) };
-                    if (colus != null) catHead.AddThemeFontOverride("font", colus);
-                    catHead.AddThemeFontSizeOverride("font_size", 13);
-                    cardVBox.AddChild(catHead);
+                    cardVBox.AddChild(new Label { Text = "• VFX (Particles)", ThemeTypeVariation = "HeaderLabel" });
 
                     foreach (var a in vfxAssets)
                     {
@@ -484,24 +425,19 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                TooltipText = asset.VpkPath
+                TooltipText = asset.VpkPath,
+                ThemeTypeVariation = "BodyLabel"
             };
-            nameLbl.AddThemeFontSizeOverride("font_size", 13);
-            nameLbl.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.96f));
             row.AddChild(nameLbl);
-
-            var colus = PlaygroundThemeHelper.GetFontColus();
 
             if (isActive)
             {
                 var activeBadge = new Label
                 {
                     Text = isModel ? "[Active Model]" : "[Active Particle]",
-                    Modulate = new Color(0.45f, 0.95f, 0.55f),
+                    ThemeTypeVariation = "BadgeLabelSuccess",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter
                 };
-                if (colus != null) activeBadge.AddThemeFontOverride("font", colus);
-                activeBadge.AddThemeFontSizeOverride("font_size", 12);
                 row.AddChild(activeBadge);
             }
             else
@@ -509,11 +445,10 @@ namespace DeadlockPlayground.UI
                 var loadBtn = new Button
                 {
                     Text = isModel ? "Load Model" : "Load Particle",
-                    CustomMinimumSize = new Vector2(110, 26),
-                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                    CustomMinimumSize = new Vector2(120, 28),
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    ThemeTypeVariation = "ToolbarButton"
                 };
-                if (colus != null) loadBtn.AddThemeFontOverride("font", colus);
-                loadBtn.AddThemeFontSizeOverride("font_size", 12);
 
                 string localHeroId = heroId;
                 string localPath = asset.VpkPath;
@@ -570,11 +505,9 @@ namespace DeadlockPlayground.UI
                     var animBadge = new Label
                     {
                         Text = "[ANIM]",
-                        Modulate = new Color(0.35f, 0.75f, 1.0f),
+                        ThemeTypeVariation = "BadgeLabelInfo",
                         SizeFlagsVertical = SizeFlags.ShrinkCenter
                     };
-                    if (colus != null) animBadge.AddThemeFontOverride("font", colus);
-                    animBadge.AddThemeFontSizeOverride("font_size", 11);
                     animRow.AddChild(animBadge);
 
                     var animNameLbl = new Label
@@ -583,9 +516,8 @@ namespace DeadlockPlayground.UI
                         SizeFlagsHorizontal = SizeFlags.ExpandFill,
                         ClipText = true,
                         TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                        Modulate = new Color(0.85f, 0.88f, 0.94f)
+                        ThemeTypeVariation = "MutedLabel"
                     };
-                    animNameLbl.AddThemeFontSizeOverride("font_size", 12);
                     animRow.AddChild(animNameLbl);
 
                     var animDiscardBtn = new Button

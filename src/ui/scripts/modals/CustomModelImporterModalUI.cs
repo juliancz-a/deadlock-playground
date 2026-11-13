@@ -287,7 +287,6 @@ namespace DeadlockPlayground.UI
                 Text = "CUSTOM 3D MODEL IMPORTER & AUTO-RIGGER",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            _lblTitle.AddThemeFontSizeOverride("font_size", 14);
             _lblTitle.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.98f));
             headerHBox.AddChild(_lblTitle);
 
@@ -296,7 +295,6 @@ namespace DeadlockPlayground.UI
                 Text = "No file loaded",
                 HorizontalAlignment = HorizontalAlignment.Right
             };
-            _lblFileBadge.AddThemeFontSizeOverride("font_size", 11);
             _lblFileBadge.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.80f));
             headerHBox.AddChild(_lblFileBadge);
 
@@ -409,7 +407,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Toggle Reference Hero Ghost Mannequin"
             };
-            _btnToggleGhost.AddThemeFontSizeOverride("font_size", 11);
             _btnToggleGhost.AddThemeStyleboxOverride("normal", tbBtnNormal);
             _btnToggleGhost.AddThemeStyleboxOverride("hover", tbBtnHover);
             SetButtonIcon(_btnToggleGhost, "res://assets/at-icons/eye.svg", 20, new Color(0.40f, 0.85f, 1.0f));
@@ -454,7 +451,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Toggle Skeleton Bone Wireframe"
             };
-            _btnToggleBones.AddThemeFontSizeOverride("font_size", 11);
             _btnToggleBones.AddThemeStyleboxOverride("normal", tbBtnNormal);
             _btnToggleBones.AddThemeStyleboxOverride("hover", tbBtnHover);
             SetButtonIcon(_btnToggleBones, "res://assets/at-icons/bone.svg", 20, new Color(1.0f, 0.85f, 0.30f));
@@ -469,7 +465,6 @@ namespace DeadlockPlayground.UI
             tbRow1.AddChild(new VSeparator());
 
             var lblAnim = new Label { Text = "Test Anim:" };
-            lblAnim.AddThemeFontSizeOverride("font_size", 10);
             lblAnim.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.85f));
             tbRow1.AddChild(lblAnim);
 
@@ -479,7 +474,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Preview how the rigged model animates right inside this modal"
             };
-            _optTestAnim.AddThemeFontSizeOverride("font_size", 10);
             _optTestAnim.AddItem("Bind Pose (Rest)", 0);
             _optTestAnim.ItemSelected += OnTestAnimSelected;
             tbRow1.AddChild(_optTestAnim);
@@ -548,7 +542,6 @@ namespace DeadlockPlayground.UI
 
             // Transport: Time Label
             _lblAnimTime = new Label { Text = "0.00s" };
-            _lblAnimTime.AddThemeFontSizeOverride("font_size", 10);
             _lblAnimTime.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.80f));
             _lblAnimTime.CustomMinimumSize = new Vector2(65, 0);
             tbRow1.AddChild(_lblAnimTime);
@@ -586,7 +579,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Animation Playback Speed"
             };
-            _optAnimSpeed.AddThemeFontSizeOverride("font_size", 10);
             _optAnimSpeed.AddItem("0.25x", 0);
             _optAnimSpeed.AddItem("0.5x", 1);
             _optAnimSpeed.AddItem("1.0x", 2);
@@ -611,7 +603,6 @@ namespace DeadlockPlayground.UI
 
             // --- Row 2: Manipulators & Alignment Tools ---
             var lblGizmo = new Label { Text = "Gizmo:" };
-            lblGizmo.AddThemeFontSizeOverride("font_size", 10);
             lblGizmo.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.85f));
             tbRow2.AddChild(lblGizmo);
 
@@ -621,7 +612,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Select bone joint or weapon to control interactively in 3D viewport"
             };
-            _optGizmoTarget.AddThemeFontSizeOverride("font_size", 10);
             _optGizmoTarget.AddItem("Gizmo: Off", 0);
             _optGizmoTarget.AddItem("Weapon (R) [weapon_hand_R]", 1);
             _optGizmoTarget.AddItem("Weapon (L) [weapon_hand_L]", 2);
@@ -635,7 +625,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Instantly aligns the active weapon grip into the hero's hand with forward rotation"
             };
-            _btnSnapGripPalm.AddThemeFontSizeOverride("font_size", 11);
             _btnSnapGripPalm.AddThemeStyleboxOverride("normal", tbBtnNormal);
             _btnSnapGripPalm.AddThemeStyleboxOverride("hover", tbBtnHover);
             SetButtonIcon(_btnSnapGripPalm, "res://assets/at-icons/sparkles.svg", 20, new Color(0.95f, 0.85f, 0.40f));
@@ -649,7 +638,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Auto-detects barrel principal axis and straightens weapon forward (+Z)"
             };
-            _btnStraightenWeapon.AddThemeFontSizeOverride("font_size", 11);
             _btnStraightenWeapon.AddThemeStyleboxOverride("normal", tbBtnNormal);
             _btnStraightenWeapon.AddThemeStyleboxOverride("hover", tbBtnHover);
             SetButtonIcon(_btnStraightenWeapon, "res://assets/at-icons/sparkles.svg", 20, new Color(0.40f, 0.90f, 1.0f));
@@ -730,7 +718,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 SizeFlagsVertical = Control.SizeFlags.ExpandFill
             };
-            tabs.AddThemeFontSizeOverride("font_size", 12);
             rightPanel.AddChild(tabs);
 
             tabs.AddChild(BuildTab1AlignAndScale());
@@ -751,7 +738,6 @@ namespace DeadlockPlayground.UI
                 Text = "Ready to align, test rig, or apply.",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            _lblBottomStatus.AddThemeFontSizeOverride("font_size", 11);
             _lblBottomStatus.AddThemeColorOverride("font_color", new Color(0.65f, 0.75f, 0.85f));
             footerHBox.AddChild(_lblBottomStatus);
 
@@ -770,7 +756,6 @@ namespace DeadlockPlayground.UI
                 VerticalAlignment = VerticalAlignment.Center,
                 CustomMinimumSize = new Vector2(130, 36)
             };
-            _lblRigStatusChip.AddThemeFontSizeOverride("font_size", 11);
             _lblRigStatusChip.AddThemeColorOverride("font_color", new Color(0.40f, 0.95f, 0.55f));
             footerHBox.AddChild(_lblRigStatusChip);
 
@@ -1031,7 +1016,6 @@ namespace DeadlockPlayground.UI
                 Text = "Geometry: 0 vertices | 0 triangles",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
-            _lblGeometryStats.AddThemeFontSizeOverride("font_size", 11);
             _lblGeometryStats.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.85f));
             vBox.AddChild(_lblGeometryStats);
 
@@ -1045,18 +1029,16 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 CustomMinimumSize = new Vector2(0, 32)
             };
-            _btnAutoFit.AddThemeFontSizeOverride("font_size", 11);
             SetButtonIcon(_btnAutoFit, "res://assets/at-icons/sparkles.svg", 20, new Color(0.95f, 0.85f, 0.40f));
             _btnAutoFit.Pressed += AutoFitToHero;
             fitHBox.AddChild(_btnAutoFit);
 
             _btnFlipYaw = new Button
             {
-                Text = "Flip 180°",
+                Text = "Flip 180Â°",
                 CustomMinimumSize = new Vector2(95, 32),
-                TooltipText = "Rotates model 180° around Y axis (Yaw) to match hero facing direction"
+                TooltipText = "Rotates model 180Â° around Y axis (Yaw) to match hero facing direction"
             };
-            _btnFlipYaw.AddThemeFontSizeOverride("font_size", 11);
             SetButtonIcon(_btnFlipYaw, "res://assets/at-icons/rotate.svg", 18, new Color(0.70f, 0.85f, 1.0f));
             _btnFlipYaw.Pressed += () =>
             {
@@ -1074,7 +1056,6 @@ namespace DeadlockPlayground.UI
                 Text = "Snap Feet (Y=0)",
                 CustomMinimumSize = new Vector2(125, 32)
             };
-            _btnSnapFeet.AddThemeFontSizeOverride("font_size", 11);
             SetButtonIcon(_btnSnapFeet, "res://assets/at-icons/arrow_down.svg", 20, new Color(0.75f, 0.85f, 0.95f));
             _btnSnapFeet.Pressed += SnapFeetToFloor;
             fitHBox.AddChild(_btnSnapFeet);
@@ -1084,7 +1065,6 @@ namespace DeadlockPlayground.UI
                 Text = "Reset",
                 CustomMinimumSize = new Vector2(75, 32)
             };
-            _btnResetTransform.AddThemeFontSizeOverride("font_size", 11);
             SetButtonIcon(_btnResetTransform, "res://assets/at-icons/arrow_counterclockwise.svg", 20, new Color(0.75f, 0.80f, 0.85f));
             _btnResetTransform.Pressed += ResetTransform;
             fitHBox.AddChild(_btnResetTransform);
@@ -1094,7 +1074,6 @@ namespace DeadlockPlayground.UI
 
             // Uniform Scale
             var lblScale = new Label { Text = "Uniform Scale Factor:" };
-            lblScale.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblScale);
 
             var scaleHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1138,7 +1117,6 @@ namespace DeadlockPlayground.UI
 
             // Position Offset (X, Y, Z meters)
             var lblPos = new Label { Text = "Position Offset (X, Y, Z meters):" };
-            lblPos.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblPos);
 
             var posHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1156,7 +1134,6 @@ namespace DeadlockPlayground.UI
 
             // Rotation (Pitch, Yaw, Roll degrees)
             var lblRot = new Label { Text = "Rotation (Pitch, Yaw, Roll degrees):" };
-            lblRot.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblRot);
 
             var rotHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1176,7 +1153,6 @@ namespace DeadlockPlayground.UI
 
             // Source Pose Preset
             var lblPreset = new Label { Text = "Source Mesh Pose Preset:" };
-            lblPreset.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblPreset);
 
             _optPosePreset = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1192,11 +1168,9 @@ namespace DeadlockPlayground.UI
             _boxCustomArmAngle = new VBoxContainer { Visible = false };
             var armHBox = new HBoxContainer();
             var lblArm = new Label { Text = "Arm Pitch Angle:", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            lblArm.AddThemeFontSizeOverride("font_size", 11);
             armHBox.AddChild(lblArm);
 
-            _lblArmAngleVal = new Label { Text = "0°" };
-            _lblArmAngleVal.AddThemeFontSizeOverride("font_size", 11);
+            _lblArmAngleVal = new Label { Text = "0Â°" };
             armHBox.AddChild(_lblArmAngleVal);
             _boxCustomArmAngle.AddChild(armHBox);
 
@@ -1209,7 +1183,7 @@ namespace DeadlockPlayground.UI
             };
             _sliderArmAngle.ValueChanged += (v) =>
             {
-                _lblArmAngleVal.Text = $"{v:0}°";
+                _lblArmAngleVal.Text = $"{v:0}Â°";
             };
             _boxCustomArmAngle.AddChild(_sliderArmAngle);
             vBox.AddChild(_boxCustomArmAngle);
@@ -1217,7 +1191,6 @@ namespace DeadlockPlayground.UI
             // Rigid Bone Box
             _boxRigidBone = new VBoxContainer { Visible = false };
             var lblRigid = new Label { Text = "Target Hero Attachment Bone:" };
-            lblRigid.AddThemeFontSizeOverride("font_size", 11);
             _boxRigidBone.AddChild(lblRigid);
 
             _optRigidBone = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1237,7 +1210,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "Aligns source arm segments (shoulder, elbow, wrist) to Deadlock hero rest pivots in Hero Space. Prevents wrist breaking and aligns weapon to palm."
             };
-            _chkAutoAlignArms.AddThemeFontSizeOverride("font_size", 11);
             _chkAutoAlignArms.Toggled += (v) => TriggerRealtimeRigUpdate();
             limbVBox.AddChild(_chkAutoAlignArms);
 
@@ -1248,7 +1220,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "Aligns source leg segments (thigh, calf, ankle) to Deadlock hero athletic stance in Hero Space, keeping soles flat on the floor (Y >= 0)."
             };
-            _chkAutoAlignLegs.AddThemeFontSizeOverride("font_size", 11);
             _chkAutoAlignLegs.Toggled += (v) => TriggerRealtimeRigUpdate();
             limbVBox.AddChild(_chkAutoAlignLegs);
 
@@ -1259,7 +1230,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "Aligns source neck and head to Deadlock hero cervical pivot in Hero Space with clamped tilt angle, keeping head upright."
             };
-            _chkAutoAlignHead.AddThemeFontSizeOverride("font_size", 11);
             _chkAutoAlignHead.Toggled += (v) => TriggerRealtimeRigUpdate();
             limbVBox.AddChild(_chkAutoAlignHead);
 
@@ -1270,7 +1240,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "Clamps animated limb bone translation displacement (shoulders, elbows, wrists, knees) to 1.5 cm maximum, preserving 100% rotational arcs while preventing melee swings from stretching arms apart."
             };
-            _chkClampLimbStretching.AddThemeFontSizeOverride("font_size", 11);
             _chkClampLimbStretching.Toggled += (v) => TriggerRealtimeRigUpdate();
             limbVBox.AddChild(_chkClampLimbStretching);
 
@@ -1281,7 +1250,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "Binds head and neck vertices to the cervical pivot (neck_0) so floating-head heroes (like Paradox/Chrono) don't pull or stretch the neck during jumping or zipline animations in-game."
             };
-            _chkStabilizeNeckFloatingHead.AddThemeFontSizeOverride("font_size", 11);
             _chkStabilizeNeckFloatingHead.Toggled += (v) => TriggerRealtimeRigUpdate();
             limbVBox.AddChild(_chkStabilizeNeckFloatingHead);
 
@@ -1301,7 +1269,6 @@ namespace DeadlockPlayground.UI
                 Prefix = prefix + ":",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            sb.AddThemeFontSizeOverride("font_size", 11);
             return sb;
         }
 
@@ -1335,7 +1302,6 @@ namespace DeadlockPlayground.UI
             {
                 Text = "Analyzing Model Rig Status..."
             };
-            _lblRigStatusBadge.AddThemeFontSizeOverride("font_size", 12);
             _lblRigStatusBadge.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.40f));
             vBox.AddChild(_lblRigStatusBadge);
 
@@ -1343,7 +1309,6 @@ namespace DeadlockPlayground.UI
 
             // Rigging Method Selector
             var lblMethod = new Label { Text = "Rigging Method:" };
-            lblMethod.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblMethod);
 
             _optRiggingMethod = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1361,12 +1326,10 @@ namespace DeadlockPlayground.UI
             _boxKnnParameters.AddThemeConstantOverride("separation", 8);
 
             var lblTransferTitle = new Label { Text = "Unrigged Skinning / Weight Transfer Parameters:" };
-            lblTransferTitle.AddThemeFontSizeOverride("font_size", 11);
             _boxKnnParameters.AddChild(lblTransferTitle);
 
             // KNN Search Radius
             var lblKnn = new Label { Text = "KNN Donor Search Radius (meters):" };
-            lblKnn.AddThemeFontSizeOverride("font_size", 10);
             lblKnn.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.85f));
             _boxKnnParameters.AddChild(lblKnn);
 
@@ -1409,7 +1372,6 @@ namespace DeadlockPlayground.UI
 
             // Laplacian Smoothing Iterations
             var lblLap = new Label { Text = "Laplacian Smoothing Iterations (0..5):" };
-            lblLap.AddThemeFontSizeOverride("font_size", 10);
             lblLap.AddThemeColorOverride("font_color", new Color(0.70f, 0.75f, 0.85f));
             _boxKnnParameters.AddChild(lblLap);
 
@@ -1427,7 +1389,6 @@ namespace DeadlockPlayground.UI
                 Text = "Exclude Cloth & Hair Donor Bones (Protects character body)",
                 ButtonPressed = true
             };
-            _chkExcludeClothHair.AddThemeFontSizeOverride("font_size", 11);
             _boxKnnParameters.AddChild(_chkExcludeClothHair);
 
             vBox.AddChild(_boxKnnParameters);
@@ -1441,7 +1402,6 @@ namespace DeadlockPlayground.UI
             _boxPreRiggedMapping.AddThemeConstantOverride("separation", 8);
 
             var lblMapHeader = new Label { Text = "Humanoid Bone Remapping Table (Pre-Rigged Models):" };
-            lblMapHeader.AddThemeFontSizeOverride("font_size", 11);
             _boxPreRiggedMapping.AddChild(lblMapHeader);
 
             _chkKeepFingersRigid = new CheckBox
@@ -1449,7 +1409,6 @@ namespace DeadlockPlayground.UI
                 Text = "Keep Fingers Rigid on Hand (Prevents Finger Twisting)",
                 ButtonPressed = false
             };
-            _chkKeepFingersRigid.AddThemeFontSizeOverride("font_size", 11);
             _chkKeepFingersRigid.Toggled += (_) => TriggerRealtimeRigUpdate();
             _boxPreRiggedMapping.AddChild(_chkKeepFingersRigid);
 
@@ -1506,7 +1465,6 @@ namespace DeadlockPlayground.UI
             margin.AddChild(vBox);
 
             var lblMode = new Label { Text = "Character Replacement Mode:" };
-            lblMode.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblMode);
 
             _optReplaceMode = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1518,7 +1476,6 @@ namespace DeadlockPlayground.UI
             vBox.AddChild(new HSeparator());
 
             var lblImported = new Label { Text = "Imported 3D Model Submeshes:" };
-            lblImported.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblImported);
 
             _chkIncludeBakedOutlines = new CheckBox
@@ -1528,7 +1485,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "Toggles inclusion of all submeshes flagged as Inverted-Hull Outline Shells with one click."
             };
-            _chkIncludeBakedOutlines.AddThemeFontSizeOverride("font_size", 11);
             _chkIncludeBakedOutlines.Toggled += (includeOutlines) =>
             {
                 if (_isGizmoUpdatingFromUI) return;
@@ -1552,7 +1508,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 TooltipText = "When enabled, changing bone, replacement target, rotation, position, or scale on any weapon submesh automatically synchronizes all other weapon submeshes."
             };
-            _chkLinkWeaponSubmeshes.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(_chkLinkWeaponSubmeshes);
 
             _boxImportedSubmeshes = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1561,7 +1516,6 @@ namespace DeadlockPlayground.UI
             vBox.AddChild(new HSeparator());
 
             var lblHeroParts = new Label { Text = "Keep Visible from Original Deadlock Hero:" };
-            lblHeroParts.AddThemeFontSizeOverride("font_size", 11);
             vBox.AddChild(lblHeroParts);
 
             _boxHeroSubmeshes = new VBoxContainer
@@ -1710,13 +1664,13 @@ namespace DeadlockPlayground.UI
             if (_sliderArmAngle != null)
             {
                 _sliderArmAngle.Value = options.CustomArmAngleDeg;
-                if (_lblArmAngleVal != null) _lblArmAngleVal.Text = $"{options.CustomArmAngleDeg:0}°";
+                if (_lblArmAngleVal != null) _lblArmAngleVal.Text = $"{options.CustomArmAngleDeg:0}Â°";
             }
             if (!string.IsNullOrEmpty(options.RigidBoneName) && _optRigidBone != null)
             {
                 for (int i = 0; i < _optRigidBone.ItemCount; i++)
                 {
-                    if (_optRigidBone.GetItemText(i).Replace("★ ", "") == options.RigidBoneName)
+                    if (_optRigidBone.GetItemText(i).Replace("â˜… ", "") == options.RigidBoneName)
                     {
                         _optRigidBone.Select(i);
                         break;
@@ -1838,7 +1792,7 @@ namespace DeadlockPlayground.UI
 
                     for (int i = 0; i < ctrl.Socket.ItemCount; i++)
                     {
-                        if (ctrl.Socket.GetItemText(i).Replace("★ ", "") == bName)
+                        if (ctrl.Socket.GetItemText(i).Replace("â˜… ", "") == bName)
                         {
                             ctrl.Socket.Select(i);
                             break;
@@ -2142,7 +2096,7 @@ namespace DeadlockPlayground.UI
                 var list = items.OrderBy(a => a.CleanName).ToList();
                 if (list.Count == 0) return;
 
-                _optTestAnim.AddSeparator($"── {title} ──");
+                _optTestAnim.AddSeparator($"â”€â”€ {title} â”€â”€");
                 foreach (var item in list)
                 {
                     int idx = _optTestAnim.ItemCount;
@@ -2154,7 +2108,7 @@ namespace DeadlockPlayground.UI
             // Add Stress Test first!
             if (stressTests.Count > 0)
             {
-                AddCategoryGroup("★ Stress Test (Deformation)", stressTests);
+                AddCategoryGroup("â˜… Stress Test (Deformation)", stressTests);
             }
 
             // Standard categories
@@ -2197,7 +2151,7 @@ namespace DeadlockPlayground.UI
                 int bIdx = _previewHeroSkeleton.FindBone(p);
                 if (bIdx >= 0)
                 {
-                    _optRigidBone.AddItem($"★ {p}", bIdx);
+                    _optRigidBone.AddItem($"â˜… {p}", bIdx);
                 }
             }
 
@@ -2238,7 +2192,6 @@ namespace DeadlockPlayground.UI
                     ButtonPressed = false
                 };
                 chk.SetMeta("SubmeshName", mi.Name.ToString());
-                chk.AddThemeFontSizeOverride("font_size", 10);
                 _heroKeepCheckboxes.Add(chk);
                 _boxHeroSubmeshes.AddChild(chk);
             }
@@ -2343,7 +2296,6 @@ namespace DeadlockPlayground.UI
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
                 chk.SetMeta("SubmeshName", rawMeshName);
-                chk.AddThemeFontSizeOverride("font_size", 10);
                 chk.Toggled += (v) => { mi.Visible = v; TriggerRealtimeRigUpdate(); };
                 _importedSubmeshCheckboxes.Add(chk);
                 headerRow.AddChild(chk);
@@ -2353,7 +2305,6 @@ namespace DeadlockPlayground.UI
                     Text = "[OUTLINE SHELL]",
                     Visible = isOutlineShell
                 };
-                lblOutlineBadge.AddThemeFontSizeOverride("font_size", 9);
                 lblOutlineBadge.AddThemeColorOverride("font_color", new Color(0.35f, 0.88f, 0.98f));
                 _submeshOutlineBadges[rawMeshName] = lblOutlineBadge;
                 headerRow.AddChild(lblOutlineBadge);
@@ -2364,7 +2315,6 @@ namespace DeadlockPlayground.UI
                     ButtonPressed = isOutlineShell,
                     TooltipText = "Mark or unmark this submesh as an Inverted-Hull Outline Shell (single-sided backface culling, unlit, no extra toon outline)."
                 };
-                chkOutlineShell.AddThemeFontSizeOverride("font_size", 9);
                 chkOutlineShell.Toggled += (isOut) =>
                 {
                     _submeshIsOutlineShell[rawMeshName] = isOut;
@@ -2385,7 +2335,6 @@ namespace DeadlockPlayground.UI
                     Text = "Role:",
                     CustomMinimumSize = new Vector2(40, 0)
                 };
-                lblRole.AddThemeFontSizeOverride("font_size", 10);
                 lblRole.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 roleRow.AddChild(lblRole);
 
@@ -2393,7 +2342,6 @@ namespace DeadlockPlayground.UI
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
-                optRole.AddThemeFontSizeOverride("font_size", 10);
                 optRole.AddItem("Skinned Body (Deforms with Skeleton)", 0);
                 optRole.AddItem("Socket / Weapon (Rigid Attachment to Bone)", 1);
                 roleRow.AddChild(optRole);
@@ -2412,7 +2360,6 @@ namespace DeadlockPlayground.UI
                     Text = "Bone:",
                     CustomMinimumSize = new Vector2(40, 0)
                 };
-                lblSocket.AddThemeFontSizeOverride("font_size", 10);
                 lblSocket.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 socketRow.AddChild(lblSocket);
 
@@ -2420,7 +2367,6 @@ namespace DeadlockPlayground.UI
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
-                optSocket.AddThemeFontSizeOverride("font_size", 10);
 
                 string preferredSocket = isLeftWeapon ? "weapon_hand_L" : "weapon_hand_R";
                 string fallbackSocket = isLeftWeapon ? "hand_L" : "hand_R";
@@ -2449,7 +2395,6 @@ namespace DeadlockPlayground.UI
                     Text = "Replaces:",
                     CustomMinimumSize = new Vector2(55, 0)
                 };
-                lblReplaces.AddThemeFontSizeOverride("font_size", 10);
                 lblReplaces.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 socketRow.AddChild(lblReplaces);
 
@@ -2457,7 +2402,6 @@ namespace DeadlockPlayground.UI
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
-                optReplaces.AddThemeFontSizeOverride("font_size", 10);
                 optReplaces.AddItem("[ None ]", 0);
                 int selectedReplIdx = 0;
                 for (int h = 0; h < heroMeshes.Count; h++)
@@ -2502,7 +2446,6 @@ namespace DeadlockPlayground.UI
                     Text = "Fit:",
                     CustomMinimumSize = new Vector2(40, 0)
                 };
-                lblPlacement.AddThemeFontSizeOverride("font_size", 10);
                 lblPlacement.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 placementRow.AddChild(lblPlacement);
 
@@ -2510,7 +2453,6 @@ namespace DeadlockPlayground.UI
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
-                optPlacement.AddThemeFontSizeOverride("font_size", 10);
                 optPlacement.AddItem("Keep Authored Position (e.g. Holstered on Hip)", 0);
                 optPlacement.AddItem("Snap to Bone Joint (e.g. Grip in Hand)", 1);
                 placementRow.AddChild(optPlacement);
@@ -2527,8 +2469,7 @@ namespace DeadlockPlayground.UI
                 // Rotations: Pitch, Yaw, Roll
                 var rotRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
                 rotRow.AddThemeConstantOverride("separation", 4);
-                var lblRot = new Label { Text = "Rot (°):", CustomMinimumSize = new Vector2(40, 0) };
-                lblRot.AddThemeFontSizeOverride("font_size", 10);
+                var lblRot = new Label { Text = "Rot (Â°):", CustomMinimumSize = new Vector2(40, 0) };
                 lblRot.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 rotRow.AddChild(lblRot);
 
@@ -2544,7 +2485,6 @@ namespace DeadlockPlayground.UI
                 var posRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
                 posRow.AddThemeConstantOverride("separation", 4);
                 var lblPos = new Label { Text = "Pos (m):", CustomMinimumSize = new Vector2(40, 0) };
-                lblPos.AddThemeFontSizeOverride("font_size", 10);
                 lblPos.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 posRow.AddChild(lblPos);
 
@@ -2561,32 +2501,25 @@ namespace DeadlockPlayground.UI
                 presetRow.AddThemeConstantOverride("separation", 4);
 
                 var lblWpScale = new Label { Text = "Scale:", CustomMinimumSize = new Vector2(40, 0) };
-                lblWpScale.AddThemeFontSizeOverride("font_size", 10);
                 lblWpScale.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
                 presetRow.AddChild(lblWpScale);
 
                 var spinWpScale = new SpinBox { MinValue = 0.1, MaxValue = 5.0, Step = 0.05, Value = 1.0, CustomMinimumSize = new Vector2(65, 0) };
-                spinWpScale.AddThemeFontSizeOverride("font_size", 10);
                 presetRow.AddChild(spinWpScale);
 
-                var btnHandGrip = new Button { Text = "Grip Forward", CustomMinimumSize = new Vector2(75, 24), TooltipText = "Sets forward hand grip rotation (Pitch 90°)" };
-                btnHandGrip.AddThemeFontSizeOverride("font_size", 9);
+                var btnHandGrip = new Button { Text = "Grip Forward", CustomMinimumSize = new Vector2(75, 24), TooltipText = "Sets forward hand grip rotation (Pitch 90Â°)" };
                 presetRow.AddChild(btnHandGrip);
 
                 var btnStraightenCard = new Button { Text = "Straighten", CustomMinimumSize = new Vector2(65, 24), TooltipText = "Auto-aligns weapon barrel forward (+Z)" };
-                btnStraightenCard.AddThemeFontSizeOverride("font_size", 9);
                 presetRow.AddChild(btnStraightenCard);
 
-                var btnYaw90 = new Button { Text = "+90° Y", CustomMinimumSize = new Vector2(48, 24), TooltipText = "Rotate 90° Yaw" };
-                btnYaw90.AddThemeFontSizeOverride("font_size", 9);
+                var btnYaw90 = new Button { Text = "+90Â° Y", CustomMinimumSize = new Vector2(48, 24), TooltipText = "Rotate 90Â° Yaw" };
                 presetRow.AddChild(btnYaw90);
 
-                var btnPitch90 = new Button { Text = "+90° P", CustomMinimumSize = new Vector2(48, 24), TooltipText = "Rotate 90° Pitch" };
-                btnPitch90.AddThemeFontSizeOverride("font_size", 9);
+                var btnPitch90 = new Button { Text = "+90Â° P", CustomMinimumSize = new Vector2(48, 24), TooltipText = "Rotate 90Â° Pitch" };
                 presetRow.AddChild(btnPitch90);
 
                 var btnResetWp = new Button { Text = "Reset", CustomMinimumSize = new Vector2(44, 24) };
-                btnResetWp.AddThemeFontSizeOverride("font_size", 9);
                 presetRow.AddChild(btnResetWp);
 
                 weaponTransformBox.AddChild(presetRow);
@@ -2675,7 +2608,7 @@ namespace DeadlockPlayground.UI
                 if (isLikelyWeapon)
                 {
                     optRole.Select(1); // Socket / Weapon
-                    string chosenBone = optSocket.GetItemText(optSocket.Selected).Replace("★ ", "");
+                    string chosenBone = optSocket.GetItemText(optSocket.Selected).Replace("â˜… ", "");
                     _submeshSocketAssignments[rawMeshName] = chosenBone;
                     if (optReplaces.Selected > 0)
                     {
@@ -2700,7 +2633,7 @@ namespace DeadlockPlayground.UI
                     weaponTransformBox.Visible = isSocket;
                     if (isSocket)
                     {
-                        string bName = optSocket.GetItemText(optSocket.Selected).Replace("★ ", "");
+                        string bName = optSocket.GetItemText(optSocket.Selected).Replace("â˜… ", "");
                         _submeshSocketAssignments[rawMeshName] = bName;
                         if (optReplaces.Selected > 0)
                         {
@@ -2744,7 +2677,7 @@ namespace DeadlockPlayground.UI
                 {
                     if (optRole.Selected == 1)
                     {
-                        string bName = optSocket.GetItemText((int)idx).Replace("★ ", "");
+                        string bName = optSocket.GetItemText((int)idx).Replace("â˜… ", "");
                         _submeshSocketAssignments[rawMeshName] = bName;
                         if (bName.Contains("hand"))
                         {
@@ -2843,7 +2776,6 @@ namespace DeadlockPlayground.UI
                         Text = $"{def.DisplayLabel}:",
                         CustomMinimumSize = new Vector2(150, 26)
                     };
-                    lblTarget.AddThemeFontSizeOverride("font_size", 11);
                     row.AddChild(lblTarget);
 
                     var optBone = new OptionButton
@@ -2851,7 +2783,6 @@ namespace DeadlockPlayground.UI
                         SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                         CustomMinimumSize = new Vector2(0, 26)
                     };
-                    optBone.AddThemeFontSizeOverride("font_size", 10);
                     optBone.AddItem("[Auto-Collapse to Parent]", -1);
 
                     for (int b = 0; b < sourceSkeleton.GetBoneCount(); b++)
@@ -2917,7 +2848,6 @@ namespace DeadlockPlayground.UI
                     Text = "Vertex weights will be transferred automatically from Deadlock's donor cloud using CPU Linear Blend Skinning and Laplacian smoothing.",
                     AutowrapMode = TextServer.AutowrapMode.WordSmart
                 };
-                lblInfo.AddThemeFontSizeOverride("font_size", 10);
                 lblInfo.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.80f));
                 _boxBoneMappingContainer.AddChild(lblInfo);
             }
@@ -2959,12 +2889,12 @@ namespace DeadlockPlayground.UI
             _spinScale.Value = Math.Round(scale, 4);
 
             // 2. Default glTF character faces -Z in Godot, whereas Deadlock hero faces +Z.
-            // Setting Yaw to 180° aligns both characters facing forward towards the camera!
+            // Setting Yaw to 180Â° aligns both characters facing forward towards the camera!
             _spinRotPitch.Value = 0.0;
             _spinRotYaw.Value = 180.0;
             _spinRotRoll.Value = 0.0;
 
-            // 3. Calculate Center X and Z (under Yaw = 180°, local X -> -X and local Z -> -Z)
+            // 3. Calculate Center X and Z (under Yaw = 180Â°, local X -> -X and local Z -> -Z)
             Vector3 heroCenter = (heroMin + heroMax) * 0.5f;
             Vector3 modelCenter = (modelMin + modelMax) * 0.5f;
 
@@ -2987,7 +2917,7 @@ namespace DeadlockPlayground.UI
             _orbitYaw = 0.0f;
             UpdateCamera();
 
-            _lblBottomStatus.Text = $"Auto-Fit applied: Scale={scale:F3}x | Pos=({posX:F2}, {posY:F2}, {posZ:F2}) | Yaw=180°";
+            _lblBottomStatus.Text = $"Auto-Fit applied: Scale={scale:F3}x | Pos=({posX:F2}, {posY:F2}, {posZ:F2}) | Yaw=180Â°";
             TriggerRealtimeRigUpdate();
         }
 
@@ -3183,7 +3113,7 @@ namespace DeadlockPlayground.UI
                 Method = method,
                 Preset = _optPosePreset.Selected >= 0 ? (CustomModelAutoRigger.PosePreset)_optPosePreset.GetItemId(_optPosePreset.Selected) : CustomModelAutoRigger.PosePreset.TPose,
                 CustomArmAngleDeg = (float)_sliderArmAngle.Value,
-                RigidBoneName = _optRigidBone.Selected >= 0 ? _optRigidBone.GetItemText(_optRigidBone.Selected).Replace("★ ", "") : "",
+                RigidBoneName = _optRigidBone.Selected >= 0 ? _optRigidBone.GetItemText(_optRigidBone.Selected).Replace("â˜… ", "") : "",
                 Mode = _optReplaceMode.Selected >= 0 ? (CustomModelAutoRigger.ReplaceMode)_optReplaceMode.GetItemId(_optReplaceMode.Selected) : CustomModelAutoRigger.ReplaceMode.FullReplacement,
                 IncludedImportedSubmeshNames = _importedSubmeshCheckboxes
                     .Where(c => c.ButtonPressed && c.HasMeta("SubmeshName"))
@@ -3542,7 +3472,7 @@ namespace DeadlockPlayground.UI
             }
             _isGizmoUpdatingFromUI = false;
 
-            _lblBottomStatus.Text = $"Straightened {targetMeshes.Count} weapon mesh(es) intrinsic to barrel (0° Pitch/Yaw/Roll, aligned with Gizmo +Z Forward).";
+            _lblBottomStatus.Text = $"Straightened {targetMeshes.Count} weapon mesh(es) intrinsic to barrel (0Â° Pitch/Yaw/Roll, aligned with Gizmo +Z Forward).";
             _lblBottomStatus.AddThemeColorOverride("font_color", new Color(0.40f, 0.95f, 0.55f));
 
             OnGizmoTargetChanged(_optGizmoTarget?.Selected ?? 0);

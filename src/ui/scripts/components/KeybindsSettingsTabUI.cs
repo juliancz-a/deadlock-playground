@@ -44,20 +44,18 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
         var descLabel = new Label
         {
             Text = "Customize editor shortcuts. Click any keybind button to assign a new key.\nSupports modifiers (Ctrl, Shift, Alt). Press Escape while listening to cancel.",
-            AutowrapMode = TextServer.AutowrapMode.WordSmart
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            ThemeTypeVariation = "MutedLabel"
         };
-        descLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.72f, 0.78f));
-        descLabel.AddThemeFontSizeOverride("font_size", 12);
         AddChild(descLabel);
 
         // 2. Conflict Warning Label
         _lblConflictWarning = new Label
         {
             Visible = false,
-            AutowrapMode = TextServer.AutowrapMode.WordSmart
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            ThemeTypeVariation = "BadgeLabelDanger"
         };
-        _lblConflictWarning.AddThemeColorOverride("font_color", new Color(1.0f, 0.4f, 0.35f));
-        _lblConflictWarning.AddThemeFontSizeOverride("font_size", 12);
         AddChild(_lblConflictWarning);
 
         // 3. Category TabContainer
@@ -165,22 +163,16 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
                     continue;
             }
 
-            var row = new PanelContainer();
-            var rowStyle = new StyleBoxFlat
+            var row = new PanelContainer
             {
-                BgColor = new Color(0.11f, 0.12f, 0.15f, 0.8f),
-                CornerRadiusTopLeft = 4,
-                CornerRadiusTopRight = 4,
-                CornerRadiusBottomRight = 4,
-                CornerRadiusBottomLeft = 4
+                ThemeTypeVariation = "CardPanel"
             };
-            row.AddThemeStyleboxOverride("panel", rowStyle);
 
             var margin = new MarginContainer();
-            margin.AddThemeConstantOverride("margin_left", 12);
-            margin.AddThemeConstantOverride("margin_top", 6);
-            margin.AddThemeConstantOverride("margin_right", 12);
-            margin.AddThemeConstantOverride("margin_bottom", 6);
+            margin.AddThemeConstantOverride("margin_left", 8);
+            margin.AddThemeConstantOverride("margin_top", 4);
+            margin.AddThemeConstantOverride("margin_right", 8);
+            margin.AddThemeConstantOverride("margin_bottom", 4);
 
             var hbox = new HBoxContainer();
             hbox.AddThemeConstantOverride("separation", 12);
@@ -190,17 +182,14 @@ public partial class KeybindsSettingsTabUI : VBoxContainer
             var titleLbl = new Label
             {
                 Text = binding.DisplayName,
-                ThemeTypeVariation = "HeaderSmall"
+                ThemeTypeVariation = "SubheaderLabel"
             };
-            titleLbl.AddThemeColorOverride("font_color", new Color(0.92f, 0.93f, 0.95f));
-            titleLbl.AddThemeFontSizeOverride("font_size", 14);
 
             var descLbl = new Label
             {
-                Text = binding.Description
+                Text = binding.Description,
+                ThemeTypeVariation = "MutedLabel"
             };
-            descLbl.AddThemeColorOverride("font_color", new Color(0.75f, 0.78f, 0.85f));
-            descLbl.AddThemeFontSizeOverride("font_size", 13);
 
             vboxText.AddChild(titleLbl);
             vboxText.AddChild(descLbl);

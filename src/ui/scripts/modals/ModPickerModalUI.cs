@@ -69,24 +69,7 @@ public partial class ModPickerModalUI : PanelContainer
 
     private void BuildModalLayout()
     {
-        var mainStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.09f, 0.11f, 0.14f, 0.98f),
-            CornerRadiusTopLeft = 10,
-            CornerRadiusTopRight = 10,
-            CornerRadiusBottomLeft = 10,
-            CornerRadiusBottomRight = 10,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.26f, 0.32f, 0.42f, 0.8f),
-            ContentMarginLeft = 20,
-            ContentMarginRight = 20,
-            ContentMarginTop = 16,
-            ContentMarginBottom = 16
-        };
-        AddThemeStyleboxOverride("panel", mainStyle);
+        ThemeTypeVariation = "ModalPanel";
 
         var rootVbox = new VBoxContainer
         {
@@ -104,11 +87,9 @@ public partial class ModPickerModalUI : PanelContainer
         var titleLabel = new Label
         {
             Text = "MODDED CHARACTER MODELS",
-            ThemeTypeVariation = "TitleLabel",
+            ThemeTypeVariation = "ModalTitleLabel",
             SizeFlagsHorizontal = SizeFlags.ShrinkBegin
         };
-        titleLabel.AddThemeFontSizeOverride("font_size", 16);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.40f, 0.75f, 1.0f, 1.0f));
         header.AddChild(titleLabel);
 
         _searchBar = new LineEdit
@@ -151,8 +132,6 @@ public partial class ModPickerModalUI : PanelContainer
             MouseDefaultCursorShape = CursorShape.PointingHand,
             TooltipText = "Show .vpk mods that do not follow the standard top-level *_dir.vpk structure (e.g., single-file .vpk or subfolder mods)."
         };
-        _chkShowNonStandard.AddThemeFontSizeOverride("font_size", 12);
-        _chkShowNonStandard.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 1.0f));
         _chkShowNonStandard.Toggled += (_) =>
         {
             UpdateFilterCounts(_currentMods);
@@ -193,16 +172,16 @@ public partial class ModPickerModalUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MaxLinesVisible = 2
+            MaxLinesVisible = 2,
+            ThemeTypeVariation = "BodyLabel"
         };
-        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 14);
-        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.85f, 0.88f, 0.94f, 1.0f));
         footer.AddChild(_lblSelectedInfo);
 
         _btnCancel = new Button
         {
             Text = "Cancel",
-            CustomMinimumSize = new Vector2(90, 32)
+            CustomMinimumSize = new Vector2(90, 32),
+            ThemeTypeVariation = "SecondaryButton"
         };
         footer.AddChild(_btnCancel);
 
@@ -210,9 +189,9 @@ public partial class ModPickerModalUI : PanelContainer
         {
             Text = "Load Mod",
             CustomMinimumSize = new Vector2(130, 32),
-            Disabled = true
+            Disabled = true,
+            ThemeTypeVariation = "PrimaryActionButton"
         };
-        _btnSelect.AddThemeColorOverride("font_color", new Color(0.40f, 0.75f, 1.0f, 1.0f));
         footer.AddChild(_btnSelect);
     }
 
@@ -224,72 +203,9 @@ public partial class ModPickerModalUI : PanelContainer
             ToggleMode = true,
             FocusMode = FocusModeEnum.None,
             MouseDefaultCursorShape = CursorShape.PointingHand,
-            CustomMinimumSize = new Vector2(0, 28)
+            CustomMinimumSize = new Vector2(0, 30),
+            ThemeTypeVariation = "FilterPillButton"
         };
-
-        var normalStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.12f, 0.14f, 0.19f, 0.90f),
-            CornerRadiusTopLeft = 14,
-            CornerRadiusTopRight = 14,
-            CornerRadiusBottomLeft = 14,
-            CornerRadiusBottomRight = 14,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.24f, 0.28f, 0.36f, 0.85f),
-            ContentMarginLeft = 12,
-            ContentMarginRight = 12,
-            ContentMarginTop = 3,
-            ContentMarginBottom = 3
-        };
-
-        var hoverStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.16f, 0.19f, 0.25f, 0.95f),
-            CornerRadiusTopLeft = 14,
-            CornerRadiusTopRight = 14,
-            CornerRadiusBottomLeft = 14,
-            CornerRadiusBottomRight = 14,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(accentColor.R, accentColor.G, accentColor.B, 0.70f),
-            ContentMarginLeft = 12,
-            ContentMarginRight = 12,
-            ContentMarginTop = 3,
-            ContentMarginBottom = 3
-        };
-
-        var pressedStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(accentColor.R * 0.22f, accentColor.G * 0.22f, accentColor.B * 0.22f, 0.95f),
-            CornerRadiusTopLeft = 14,
-            CornerRadiusTopRight = 14,
-            CornerRadiusBottomLeft = 14,
-            CornerRadiusBottomRight = 14,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = accentColor,
-            ContentMarginLeft = 12,
-            ContentMarginRight = 12,
-            ContentMarginTop = 3,
-            ContentMarginBottom = 3
-        };
-
-        btn.AddThemeStyleboxOverride("normal", normalStyle);
-        btn.AddThemeStyleboxOverride("hover", hoverStyle);
-        btn.AddThemeStyleboxOverride("pressed", pressedStyle);
-        btn.AddThemeStyleboxOverride("hover_pressed", pressedStyle);
-        btn.AddThemeFontSizeOverride("font_size", 12);
-        btn.AddThemeColorOverride("font_color", new Color(0.78f, 0.82f, 0.90f, 1.0f));
-        btn.AddThemeColorOverride("font_hover_color", Colors.White);
-        btn.AddThemeColorOverride("font_pressed_color", accentColor);
-        btn.AddThemeColorOverride("font_hover_pressed_color", accentColor);
 
         btn.Pressed += () => SetActiveFilter(category, applyFilter: true);
 

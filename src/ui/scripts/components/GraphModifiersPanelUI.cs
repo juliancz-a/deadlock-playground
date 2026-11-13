@@ -102,7 +102,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
             };
-            _lblTargetChannel.AddThemeFontSizeOverride("font_size", 12);
             headerHBox.AddChild(_lblTargetChannel);
 
             _btnClose = new Button
@@ -126,21 +125,19 @@ namespace DeadlockPlayground.UI
 
             _btnAddModifier = new MenuButton
             {
-                Text = "Add Modifier ▼",
+                Text = "Add Modifier â–¼",
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 Flat = false
             };
-            _btnAddModifier.AddThemeFontSizeOverride("font_size", 12);
             SetupAddModifierMenu();
             actionsHBox.AddChild(_btnAddModifier);
 
             _btnDeleteModifiers = new MenuButton
             {
-                Text = "Delete ▼",
+                Text = "Delete â–¼",
                 SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
                 Flat = false
             };
-            _btnDeleteModifiers.AddThemeFontSizeOverride("font_size", 12);
             SetupDeleteModifiersMenu();
             actionsHBox.AddChild(_btnDeleteModifiers);
 
@@ -301,7 +298,6 @@ namespace DeadlockPlayground.UI
                     AutowrapMode = TextServer.AutowrapMode.Word,
                     Modulate = new Color(0.7f, 0.7f, 0.7f, 0.8f)
                 };
-                lblEmpty.AddThemeFontSizeOverride("font_size", 11);
                 _modifiersListVBox.AddChild(lblEmpty);
                 return;
             }
@@ -314,7 +310,6 @@ namespace DeadlockPlayground.UI
                     AutowrapMode = TextServer.AutowrapMode.Word,
                     Modulate = new Color(0.6f, 0.65f, 0.7f, 0.8f)
                 };
-                lblNone.AddThemeFontSizeOverride("font_size", 11);
                 _modifiersListVBox.AddChild(lblNone);
                 return;
             }
@@ -369,11 +364,10 @@ namespace DeadlockPlayground.UI
             // Reorder Up
             var btnUp = new Button
             {
-                Text = "▲",
+                Text = "â–²",
                 CustomMinimumSize = new Vector2(20, 20),
                 Disabled = index == 0 || mod.RequiresFirst
             };
-            btnUp.AddThemeFontSizeOverride("font_size", 10);
             btnUp.Pressed += () =>
             {
                 _canvas?.MoveModifier(_activeCurve, index, -1);
@@ -384,11 +378,10 @@ namespace DeadlockPlayground.UI
             // Reorder Down
             var btnDown = new Button
             {
-                Text = "▼",
+                Text = "â–¼",
                 CustomMinimumSize = new Vector2(20, 20),
                 Disabled = index == _activeCurve.Modifiers.Count - 1 || mod.RequiresFirst
             };
-            btnDown.AddThemeFontSizeOverride("font_size", 10);
             btnDown.Pressed += () =>
             {
                 _canvas?.MoveModifier(_activeCurve, index, 1);
@@ -416,7 +409,6 @@ namespace DeadlockPlayground.UI
                 Text = string.IsNullOrEmpty(mod.Name) ? mod.TypeName : mod.Name,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
-            editName.AddThemeFontSizeOverride("font_size", 11);
             editName.TextChanged += (txt) =>
             {
                 mod.Name = txt;
@@ -426,7 +418,7 @@ namespace DeadlockPlayground.UI
             // Delete Button [X]
             var btnDelete = new Button
             {
-                Text = "✕",
+                Text = "âœ•",
                 CustomMinimumSize = new Vector2(22, 20),
                 TooltipText = "Delete Modifier"
             };
@@ -454,7 +446,6 @@ namespace DeadlockPlayground.UI
             vbox.AddChild(infRow);
 
             var lblInf = new Label { Text = "Influence:", CustomMinimumSize = new Vector2(70, 0) };
-            lblInf.AddThemeFontSizeOverride("font_size", 11);
             infRow.AddChild(lblInf);
 
             var sliderInf = new HSlider
@@ -495,7 +486,6 @@ namespace DeadlockPlayground.UI
                 Text = "Restrict Frame Range",
                 ButtonPressed = mod.RestrictFrameRange
             };
-            chkRange.AddThemeFontSizeOverride("font_size", 11);
             vbox.AddChild(chkRange);
 
             var rangeContainer = new VBoxContainer
@@ -671,7 +661,7 @@ namespace DeadlockPlayground.UI
                         spinMax.ValueChanged += (v) => { pt.Max = (float)v; _canvas?.NotifyModifiersChanged(); };
                         ptRow.AddChild(spinMax);
 
-                        var btnDelPt = new Button { Text = "✕", CustomMinimumSize = new Vector2(20, 20) };
+                        var btnDelPt = new Button { Text = "âœ•", CustomMinimumSize = new Vector2(20, 20) };
                         btnDelPt.Pressed += () =>
                         {
                             env.ControlPoints.RemoveAt(ptIdx);
@@ -686,7 +676,6 @@ namespace DeadlockPlayground.UI
             else if (mod is CyclesModifier cyc)
             {
                 var lblNote = new Label { Text = "Cycles Mode (Must be first in stack):", Modulate = new Color(0.9f, 0.8f, 0.4f) };
-                lblNote.AddThemeFontSizeOverride("font_size", 10);
                 container.AddChild(lblNote);
 
                 var beforeRow = new HBoxContainer();
@@ -756,7 +745,6 @@ namespace DeadlockPlayground.UI
             else if (mod is GaussianSmoothModifier sm)
             {
                 var lblNote = new Label { Text = "Gaussian Smooth (Must be first in stack):", Modulate = new Color(0.9f, 0.8f, 0.4f) };
-                lblNote.AddThemeFontSizeOverride("font_size", 10);
                 container.AddChild(lblNote);
 
                 AddFloatRow(container, "Sigma:", sm.Sigma, 0.1f, 50f, 0.1f, (v) => sm.Sigma = v);
@@ -771,7 +759,6 @@ namespace DeadlockPlayground.UI
             parent.AddChild(row);
 
             var lbl = new Label { Text = label, CustomMinimumSize = new Vector2(90, 0) };
-            lbl.AddThemeFontSizeOverride("font_size", 11);
             row.AddChild(lbl);
 
             var spin = new SpinBox
@@ -797,7 +784,6 @@ namespace DeadlockPlayground.UI
             parent.AddChild(row);
 
             var chk = new CheckBox { Text = label, ButtonPressed = isChecked, CustomMinimumSize = new Vector2(100, 0) };
-            chk.AddThemeFontSizeOverride("font_size", 11);
             row.AddChild(chk);
 
             var spin = new SpinBox

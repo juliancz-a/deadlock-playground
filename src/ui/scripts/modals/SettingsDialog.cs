@@ -71,6 +71,18 @@ public partial class SettingsDialog : PanelContainer
         ConnectEvents();
         SyncFromSettings();
         OnTabChanged(_tabContainer?.CurrentTab ?? 0);
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
+    }
+
+    public override void _ExitTree()
+    {
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
+        base._ExitTree();
+    }
+
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
+    {
+        UpdateThemesTabIcon();
     }
 
     public void Setup(GamePathManager pathManager)
@@ -83,6 +95,7 @@ public partial class SettingsDialog : PanelContainer
     {
         _btnClose = GetNodeOrNull<Button>("VBoxContainer/HeaderBar/BtnClose");
         _tabContainer = GetNodeOrNull<TabContainer>("VBoxContainer/TabContainer");
+        UpdateThemesTabIcon();
 
         // General
         _langOption = GetNodeOrNull<OptionButton>("VBoxContainer/TabContainer/General/VBox/LangRow/LanguageButton");
@@ -481,10 +494,10 @@ public partial class SettingsDialog : PanelContainer
         Visible = true;
         MoveToFront();
         SetAnchorsPreset(LayoutPreset.Center);
-        OffsetLeft = -360;
-        OffsetTop = -270;
-        OffsetRight = 360;
-        OffsetBottom = 270;
+        OffsetLeft = -410;
+        OffsetTop = -310;
+        OffsetRight = 410;
+        OffsetBottom = 310;
         SyncFromSettings();
         UpdatePathFields();
         if (tabIndex >= 0 && _tabContainer != null)
@@ -505,6 +518,41 @@ public partial class SettingsDialog : PanelContainer
     {
         Visible = false;
         EmitSignal(SignalName.DialogClosed);
+    }
+
+    private void UpdateThemesTabIcon()
+    {
+        if (_tabContainer == null) return;
+        int themesIdx = _tabContainer.GetTabIdxFromControl(GetNodeOrNull<Control>("VBoxContainer/TabContainer/Themes"));
+        if (themesIdx < 0 || !ResourceLoader.Exists("res://assets/at-icons/palette.svg")) return;
+
+        var srcTex = GD.Load<Texture2D>("res://assets/at-icons/palette.svg");
+        var img = srcTex?.GetImage();
+        if (img == null)
+        {
+            _tabContainer.SetTabIcon(themesIdx, srcTex);
+            return;
+        }
+
+        if (img.IsCompressed()) img.Decompress();
+        if (img.GetFormat() != Image.Format.Rgba8) img.Convert(Image.Format.Rgba8);
+
+        Color tint = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.TextPrimary));
+        int w = img.GetWidth();
+        int h = img.GetHeight();
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                Color px = img.GetPixel(x, y);
+                if (px.A > 0.001f)
+                {
+                    img.SetPixel(x, y, new Color(tint.R, tint.G, tint.B, px.A));
+                }
+            }
+        }
+
+        _tabContainer.SetTabIcon(themesIdx, ImageTexture.CreateFromImage(img));
     }
 
     private void OnTabChanged(long tabIndex)

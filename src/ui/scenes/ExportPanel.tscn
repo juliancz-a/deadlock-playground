@@ -58,7 +58,6 @@ theme_override_constants/separation = 4
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1480415954]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_font_sizes/font_size = 12
 text = "FORMAT (ASPECT RATIO)"
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1646729911]
@@ -101,7 +100,6 @@ theme_override_constants/separation = 4
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ResBox" unique_id=571090747]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_font_sizes/font_size = 12
 text = "RESOLUTION PRESET"
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/ResBox" unique_id=924703207]
@@ -134,8 +132,7 @@ text = "4K"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.7, 0.78, 1)
 theme_override_fonts/font = ExtResource("2_dwmip")
-theme_override_font_sizes/font_size = 10
-text = "1920 × 1080 px"
+text = "1920 Ã— 1080 px"
 horizontal_alignment = 1
 
 [node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=534120226]
@@ -154,7 +151,6 @@ text = "Include Background"
 layout_mode = 2
 tooltip_text = "Renders bone gizmos, joints, and wireframe overlays in the captured export image."
 theme_override_colors/font_color = Color(0.41056433, 0.4646374, 0.4111739, 1)
-theme_override_font_sizes/font_size = 11
 text = "Include Bone & Wireframe Controls"
 autowrap_mode = 3
 

@@ -136,59 +136,7 @@ public partial class ModCardUI : PanelContainer
 
     private void InitStyles()
     {
-        _styleNormal = new StyleBoxFlat
-        {
-            BgColor = new Color(0.10f, 0.12f, 0.16f, 0.95f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.22f, 0.26f, 0.34f, 0.8f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
-
-        _styleHover = new StyleBoxFlat
-        {
-            BgColor = new Color(0.14f, 0.17f, 0.22f, 0.98f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.40f, 0.75f, 1.0f, 0.9f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
-
-        _styleSelected = new StyleBoxFlat
-        {
-            BgColor = new Color(0.16f, 0.22f, 0.30f, 1.0f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 2,
-            BorderWidthRight = 2,
-            BorderWidthTop = 2,
-            BorderWidthBottom = 2,
-            BorderColor = new Color(0.40f, 0.75f, 1.0f, 1.0f),
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 6,
-            ContentMarginBottom = 6
-        };
+        (_styleNormal, _styleHover, _styleSelected) = PlaygroundThemeHelper.CreateCardStateStyles(cornerRadius: 8, padding: 6);
     }
 
     private void BuildUI()
@@ -272,14 +220,7 @@ public partial class ModCardUI : PanelContainer
         };
         _tagPanel.AddThemeStyleboxOverride("panel", tagStyle);
 
-        var colusFont = PlaygroundThemeHelper.GetFontColus();
-
-        _lblTag = new Label { Text = "Mod", MouseFilter = MouseFilterEnum.Ignore };
-        if (colusFont != null)
-        {
-            _lblTag.AddThemeFontOverride("font", colusFont);
-        }
-        _lblTag.AddThemeFontSizeOverride("font_size", 12);
+        _lblTag = new Label { Text = "Mod", MouseFilter = MouseFilterEnum.Ignore, ThemeTypeVariation = "BadgeLabelInfo" };
         _tagPanel.AddChild(_lblTag);
         thumbPanel.AddChild(_tagPanel);
 
@@ -289,14 +230,9 @@ public partial class ModCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        if (colusFont != null)
-        {
-            _lblTitle.AddThemeFontOverride("font", colusFont);
-        }
-        _lblTitle.AddThemeFontSizeOverride("font_size", 14);
-        _lblTitle.AddThemeColorOverride("font_color", Colors.White);
         vbox.AddChild(_lblTitle);
 
         _lblHero = new Label
@@ -305,10 +241,9 @@ public partial class ModCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "MutedLabel"
         };
-        _lblHero.AddThemeFontSizeOverride("font_size", 13);
-        _lblHero.AddThemeColorOverride("font_color", new Color(0.78f, 0.82f, 0.90f, 1.0f));
         vbox.AddChild(_lblHero);
 
         _lblFilename = new Label
@@ -317,10 +252,9 @@ public partial class ModCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "MutedLabel"
         };
-        _lblFilename.AddThemeFontSizeOverride("font_size", 13);
-        _lblFilename.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f, 1.0f));
         vbox.AddChild(_lblFilename);
 
         if (ModInfo != null || IsVanilla)

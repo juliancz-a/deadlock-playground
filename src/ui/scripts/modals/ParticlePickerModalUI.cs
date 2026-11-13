@@ -65,25 +65,7 @@ public partial class ParticlePickerModalUI : PanelContainer
     {
         CustomMinimumSize = new Vector2(980, 640);
         CenterModal();
-
-        var mainStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.10f, 0.12f, 0.15f, 0.98f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.24f, 0.30f, 0.38f, 1.0f),
-            ContentMarginLeft = 16,
-            ContentMarginRight = 16,
-            ContentMarginTop = 14,
-            ContentMarginBottom = 14
-        };
-        AddThemeStyleboxOverride("panel", mainStyle);
+        ThemeTypeVariation = "ModalPanel";
 
         var rootVbox = new VBoxContainer
         {
@@ -114,10 +96,9 @@ public partial class ParticlePickerModalUI : PanelContainer
         _lblTitle = new Label
         {
             Text = "Hero Particles",
-            SizeFlagsHorizontal = SizeFlags.ShrinkBegin
+            SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+            ThemeTypeVariation = "ModalTitleLabel"
         };
-        _lblTitle.AddThemeFontSizeOverride("font_size", 16);
-        _lblTitle.AddThemeColorOverride("font_color", Colors.White);
         header.AddChild(_lblTitle);
 
         // Search bar
@@ -159,16 +140,12 @@ public partial class ParticlePickerModalUI : PanelContainer
         leftVbox.AddThemeConstantOverride("separation", 6);
         split.AddChild(leftVbox);
 
-        var colus = PlaygroundThemeHelper.GetFontColus();
-
         var lblTreeHeader = new Label
         {
             Text = "Abilities & Sets",
-            SizeFlagsHorizontal = SizeFlags.Fill
+            SizeFlagsHorizontal = SizeFlags.Fill,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        if (colus != null) lblTreeHeader.AddThemeFontOverride("font", colus);
-        lblTreeHeader.AddThemeFontSizeOverride("font_size", 14);
-        lblTreeHeader.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.98f, 1.0f));
         leftVbox.AddChild(lblTreeHeader);
 
         _abilityTree = new Tree
@@ -223,10 +200,9 @@ public partial class ParticlePickerModalUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MaxLinesVisible = 2
+            MaxLinesVisible = 2,
+            ThemeTypeVariation = "BodyLabel"
         };
-        _lblSelectedDetails.AddThemeColorOverride("font_color", new Color(0.82f, 0.85f, 0.90f, 1.0f));
-        _lblSelectedDetails.AddThemeFontSizeOverride("font_size", 13);
         footer.AddChild(_lblSelectedDetails);
 
         _btnCancel = new Button

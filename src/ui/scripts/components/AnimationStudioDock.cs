@@ -380,14 +380,11 @@ namespace DeadlockPlayground.UI
             _boneSearch = FindSceneNode<LineEdit>("BoneSearch");
             if (_boneSearch != null)
             {
-                _boneSearch.AddThemeFontSizeOverride("font_size", 13);
             }
             var lblSummary = FindSceneNode<Label>("LblSummaryRow");
             if (lblSummary != null)
             {
                 var fontColus = PlaygroundThemeHelper.GetFontColus();
-                if (fontColus != null) lblSummary.AddThemeFontOverride("font", fontColus);
-                lblSummary.AddThemeFontSizeOverride("font_size", 13);
             }
             _boneListCanvas = FindSceneNode<BoneListCanvas>("BoneListCanvas");
             _boneListVScrollBar = FindSceneNode<VScrollBar>("BoneListVScrollBar");
@@ -667,10 +664,10 @@ namespace DeadlockPlayground.UI
                         if (!string.IsNullOrEmpty(status))
                         {
                             _lblTransformMode.TooltipText = "Modal Transform Active:\n" +
-                                "• X: Lock Time Axis\n" +
-                                "• Y: Lock Value Axis\n" +
-                                "• Enter / Left Click: Confirm Transform\n" +
-                                "• Escape / Right Click: Cancel Transform";
+                                "â€¢ X: Lock Time Axis\n" +
+                                "â€¢ Y: Lock Value Axis\n" +
+                                "â€¢ Enter / Left Click: Confirm Transform\n" +
+                                "â€¢ Escape / Right Click: Cancel Transform";
                         }
                     }
                 };
@@ -1774,7 +1771,6 @@ namespace DeadlockPlayground.UI
                         Modulate = new Color(0.4f, 0.85f, 1.0f, 0.9f),
                         TooltipText = $"{curve.Modifiers.Count} Modifier(s) on this curve (Right-click to manage)"
                     };
-                    badge.AddThemeFontSizeOverride("font_size", 10);
                     row.AddChild(badge);
                 }
 
@@ -1938,9 +1934,9 @@ namespace DeadlockPlayground.UI
             if (_sliderBoneRotY != null) _sliderBoneRotY.SetValueNoSignal(degY);
             if (_sliderBoneRotZ != null) _sliderBoneRotZ.SetValueNoSignal(degZ);
 
-            if (_lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {degX:F1}°";
-            if (_lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {degY:F1}°";
-            if (_lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {degZ:F1}°";
+            if (_lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {degX:F1}Â°";
+            if (_lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {degY:F1}Â°";
+            if (_lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {degZ:F1}Â°";
 
             _isUpdatingBoneSliders = false;
         }
@@ -1956,9 +1952,9 @@ namespace DeadlockPlayground.UI
             float degY = (float)(_sliderBoneRotY?.Value ?? 0);
             float degZ = (float)(_sliderBoneRotZ?.Value ?? 0);
 
-            if (axis == 0 && _lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {val:F1}°";
-            if (axis == 1 && _lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {val:F1}°";
-            if (axis == 2 && _lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {val:F1}°";
+            if (axis == 0 && _lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {val:F1}Â°";
+            if (axis == 1 && _lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {val:F1}Â°";
+            if (axis == 2 && _lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {val:F1}Â°";
 
             Vector3 eulerRad = new(Mathf.DegToRad(degX), Mathf.DegToRad(degY), Mathf.DegToRad(degZ));
             Quaternion newRot = Quaternion.FromEuler(eulerRad).Normalized();

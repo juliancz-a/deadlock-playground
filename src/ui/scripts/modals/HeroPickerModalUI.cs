@@ -38,7 +38,7 @@ public partial class HeroPickerModalUI : PanelContainer
 
     public override void _Ready()
     {
-        CustomMinimumSize = new Vector2(1040, 700);
+        CustomMinimumSize = new Vector2(960, 680);
         Theme = GD.Load<Theme>("res://assets/themes/PlaygroundTheme.tres");
         BuildModalLayout();
         CenterModal();
@@ -64,24 +64,7 @@ public partial class HeroPickerModalUI : PanelContainer
 
     private void BuildModalLayout()
     {
-        var mainStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.09f, 0.11f, 0.14f, 0.98f),
-            CornerRadiusTopLeft = 10,
-            CornerRadiusTopRight = 10,
-            CornerRadiusBottomLeft = 10,
-            CornerRadiusBottomRight = 10,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.26f, 0.32f, 0.42f, 0.8f),
-            ContentMarginLeft = 20,
-            ContentMarginRight = 20,
-            ContentMarginTop = 16,
-            ContentMarginBottom = 16
-        };
-        AddThemeStyleboxOverride("panel", mainStyle);
+        ThemeTypeVariation = "ModalPanel";
 
         var rootVbox = new VBoxContainer
         {
@@ -102,11 +85,9 @@ public partial class HeroPickerModalUI : PanelContainer
         var titleLabel = new Label
         {
             Text = "SELECT A CHARACTER MODEL",
-            ThemeTypeVariation = "TitleLabel",
+            ThemeTypeVariation = "ModalTitleLabel",
             SizeFlagsHorizontal = SizeFlags.ShrinkBegin
         };
-        titleLabel.AddThemeFontSizeOverride("font_size", 16);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.40f, 1.0f));
         header.AddChild(titleLabel);
 
         _searchBar = new LineEdit
@@ -169,26 +150,26 @@ public partial class HeroPickerModalUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MaxLinesVisible = 2
+            MaxLinesVisible = 2,
+            ThemeTypeVariation = "BodyLabel"
         };
-        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 14);
-        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.85f, 0.88f, 0.94f, 1.0f));
         footer.AddChild(_lblSelectedInfo);
 
         _btnCancel = new Button
         {
             Text = "Cancel",
-            CustomMinimumSize = new Vector2(90, 32)
+            CustomMinimumSize = new Vector2(90, 32),
+            ThemeTypeVariation = "SecondaryButton"
         };
         footer.AddChild(_btnCancel);
 
         _btnSelect = new Button
         {
             Text = "Select Character",
-            CustomMinimumSize = new Vector2(140, 32),
-            Disabled = true
+            CustomMinimumSize = new Vector2(185, 36),
+            Disabled = true,
+            ThemeTypeVariation = "PrimaryActionButton"
         };
-        _btnSelect.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.30f, 1.0f));
         footer.AddChild(_btnSelect);
     }
 
@@ -203,10 +184,9 @@ public partial class HeroPickerModalUI : PanelContainer
 
         var lbl = new Label
         {
-            Text = titleText
+            Text = titleText,
+            ThemeTypeVariation = "SectionHeaderLabel"
         };
-        lbl.AddThemeFontSizeOverride("font_size", 16);
-        lbl.AddThemeColorOverride("font_color", headerColor);
         section.AddChild(lbl);
 
         flowContainer = new HFlowContainer

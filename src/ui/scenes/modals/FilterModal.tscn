@@ -157,20 +157,18 @@ theme_override_constants/separation = 2
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.85, 0.55, 1)
 theme_override_fonts/font = ExtResource("3_colus")
-theme_override_font_sizes/font_size = 16
 text = "FILTER"
 
 [node name="Subtitle" type="Label" parent="VBoxContainer/HeaderBar/VBoxTitle"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.68, 0.75, 1)
-theme_override_font_sizes/font_size = 11
 text = "Apply raster filter"
 
 [node name="BtnClose" type="Button" parent="VBoxContainer/HeaderBar"]
 custom_minimum_size = Vector2(26, 26)
 layout_mode = 2
 size_flags_vertical = 4
-text = "✕"
+text = "X"
 
 [node name="HSeparator1" type="HSeparator" parent="VBoxContainer"]
 layout_mode = 2
@@ -189,7 +187,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelBlur/RadiusRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Radius:"
 
 [node name="SliderBlurRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelBlur/RadiusRow"]
@@ -204,7 +201,6 @@ value = 4.0
 [node name="LblBlurRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelBlur/RadiusRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "4.0px"
 horizontal_alignment = 2
 
@@ -219,7 +215,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Angle:"
 
 [node name="SliderMotionAngle" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow"]
@@ -232,8 +227,7 @@ value = 0.0
 [node name="LblMotionAngleVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/AngleRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "0°"
+text = "0Â°"
 horizontal_alignment = 2
 
 [node name="DistRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelMotionBlur"]
@@ -242,7 +236,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Distance:"
 
 [node name="SliderMotionDist" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow"]
@@ -256,7 +249,6 @@ value = 12.0
 [node name="LblMotionDistVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMotionBlur/DistRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "12px"
 horizontal_alignment = 2
 
@@ -271,7 +263,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Amount:"
 
 [node name="SliderAmount" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow"]
@@ -284,7 +275,6 @@ value = 100.0
 [node name="LblAmountVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/AmountRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "100%"
 horizontal_alignment = 2
 
@@ -294,7 +284,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Radius:"
 
 [node name="SliderRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow"]
@@ -309,7 +298,6 @@ value = 2.0
 [node name="LblRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/RadiusRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "2.0px"
 horizontal_alignment = 2
 
@@ -319,7 +307,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Threshold:"
 
 [node name="SliderThresh" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow"]
@@ -332,7 +319,6 @@ value = 0.0
 [node name="LblThreshVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelUnsharpMask/ThreshRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "0"
 horizontal_alignment = 2
 
@@ -347,7 +333,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Amount:"
 
 [node name="SliderNoiseAmount" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow"]
@@ -360,7 +345,6 @@ value = 15.0
 [node name="LblNoiseAmountVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelAddNoise/AmountRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "15%"
 horizontal_alignment = 2
 
@@ -370,19 +354,16 @@ theme_override_constants/separation = 12
 
 [node name="ChkMonochromatic" type="CheckBox" parent="VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 button_pressed = true
 text = "Monochromatic"
 
 [node name="LblDist" type="Label" parent="VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Dist:"
 
 [node name="OptDist" type="OptionButton" parent="VBoxContainer/PanelsContainer/PanelAddNoise/OptionsRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 
 [node name="PanelMedian" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
 visible = false
@@ -395,7 +376,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMedian/RadiusRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Radius:"
 
 [node name="SliderMedianRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMedian/RadiusRow"]
@@ -409,7 +389,6 @@ value = 2.0
 [node name="LblMedianRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMedian/RadiusRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "2px"
 horizontal_alignment = 2
 
@@ -424,7 +403,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelMosaic/CellRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Cell Size:"
 
 [node name="SliderCellSize" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelMosaic/CellRow"]
@@ -438,7 +416,6 @@ value = 8.0
 [node name="LblCellSizeVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelMosaic/CellRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "8px"
 horizontal_alignment = 2
 
@@ -453,7 +430,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/DotRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Dot Size:"
 
 [node name="SliderDotSize" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelHalftone/DotRow"]
@@ -467,7 +443,6 @@ value = 6.0
 [node name="LblDotSizeVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/DotRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "6px"
 horizontal_alignment = 2
 
@@ -477,7 +452,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Levels:"
 
 [node name="SliderLevels" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow"]
@@ -491,7 +465,6 @@ value = 4.0
 [node name="LblLevelsVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelHalftone/LevelsRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "4"
 horizontal_alignment = 2
 
@@ -506,7 +479,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AngleRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Angle:"
 
 [node name="SliderAngle" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelEmboss/AngleRow"]
@@ -520,8 +492,7 @@ value = 45.0
 [node name="LblAngleVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AngleRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "45°"
+text = "45Â°"
 horizontal_alignment = 2
 
 [node name="HeightRow" type="HBoxContainer" parent="VBoxContainer/PanelsContainer/PanelEmboss"]
@@ -530,7 +501,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/HeightRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Height:"
 
 [node name="SliderHeight" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelEmboss/HeightRow"]
@@ -545,7 +515,6 @@ value = 2.0
 [node name="LblHeightVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/HeightRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "2.0px"
 horizontal_alignment = 2
 
@@ -555,7 +524,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AmountRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Amount:"
 
 [node name="SliderAmount" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelEmboss/AmountRow"]
@@ -569,7 +537,6 @@ value = 100.0
 [node name="LblAmountVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelEmboss/AmountRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "100%"
 horizontal_alignment = 2
 
@@ -584,7 +551,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Radius:"
 
 [node name="SliderOilRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow"]
@@ -598,7 +564,6 @@ value = 3.0
 [node name="LblOilRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelOilPaint/RadiusRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "3px"
 horizontal_alignment = 2
 
@@ -613,7 +578,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Shift X:"
 
 [node name="SliderShiftX" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow"]
@@ -627,7 +591,6 @@ value = 4.0
 [node name="LblShiftXVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftXRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "4px"
 horizontal_alignment = 2
 
@@ -637,7 +600,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Shift Y:"
 
 [node name="SliderShiftY" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow"]
@@ -651,7 +613,6 @@ value = 0.0
 [node name="LblShiftYVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelChromaticAberration/ShiftYRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "0px"
 horizontal_alignment = 2
 
@@ -666,7 +627,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Thickness:"
 
 [node name="SliderThickness" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow"]
@@ -680,7 +640,6 @@ value = 3.0
 [node name="LblThicknessVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/ThicknessRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "3px"
 horizontal_alignment = 2
 
@@ -690,7 +649,6 @@ theme_override_constants/separation = 10
 
 [node name="LblColor" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Color:"
 
 [node name="ColorPickerOutline" type="ColorPickerButton" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
@@ -700,13 +658,11 @@ color = Color(0.85, 0.68, 0.32, 1)
 
 [node name="LblPos" type="Label" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Position:"
 
 [node name="OptOutlinePos" type="OptionButton" parent="VBoxContainer/PanelsContainer/PanelOutlineStroke/StyleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 11
 
 [node name="PanelHighPass" type="VBoxContainer" parent="VBoxContainer/PanelsContainer"]
 visible = false
@@ -719,7 +675,6 @@ layout_mode = 2
 [node name="Lbl" type="Label" parent="VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow"]
 custom_minimum_size = Vector2(90, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Radius:"
 
 [node name="SliderHighPassRadius" type="HSlider" parent="VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow"]
@@ -734,7 +689,6 @@ value = 10.0
 [node name="LblHighPassRadiusVal" type="Label" parent="VBoxContainer/PanelsContainer/PanelHighPass/RadiusRow"]
 custom_minimum_size = Vector2(45, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "10.0px"
 horizontal_alignment = 2
 
@@ -747,25 +701,21 @@ theme_override_constants/separation = 8
 
 [node name="ChkPreview" type="CheckBox" parent="VBoxContainer/FooterBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 button_pressed = true
 text = "Preview"
 
 [node name="BtnReset" type="Button" parent="VBoxContainer/FooterBar"]
 layout_mode = 2
 size_flags_horizontal = 10
-theme_override_font_sizes/font_size = 11
 text = "Reset"
 
 [node name="BtnCancel" type="Button" parent="VBoxContainer/FooterBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Cancel"
 
 [node name="BtnApply" type="Button" parent="VBoxContainer/FooterBar"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_colus")
-theme_override_font_sizes/font_size = 12
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_apply_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_btn_apply_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_apply_pressed")

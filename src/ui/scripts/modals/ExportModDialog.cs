@@ -426,25 +426,55 @@ public partial class ExportModDialog : CanvasLayer
             }
         }
 
-        var colus = PlaygroundThemeHelper.GetFontColus();
-
-        void AddSectionHeader(string title, Color color)
+        void AddSectionHeader(string title)
         {
             var header = new Label
             {
-                Text = title
+                Text = title,
+                ThemeTypeVariation = "SectionHeaderLabel"
             };
-            if (colus != null) header.AddThemeFontOverride("font", colus);
-            header.AddThemeFontSizeOverride("font_size", 14);
-            header.AddThemeColorOverride("font_color", color);
             _submeshChecklistContainer.AddChild(header);
         }
 
-        void AddSubmeshRow(SubmeshNodeInfo submesh, bool isPreChecked)
+        HBoxContainer AddChecklistRow(string text, bool isPreChecked, string initialStatusText, string fileBadgeText, out CheckBox chkOut, out Label statusOut)
         {
             var hbox = new HBoxContainer();
             hbox.AddThemeConstantOverride("separation", 8);
 
+            var chk = new CheckBox
+            {
+                Text = text,
+                ButtonPressed = isPreChecked,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+
+            var lblStatusBadge = new Label
+            {
+                Text = initialStatusText,
+                ThemeTypeVariation = isPreChecked ? "BadgeLabelSuccess" : "MutedLabel"
+            };
+
+            hbox.AddChild(chk);
+            hbox.AddChild(lblStatusBadge);
+
+            if (!string.IsNullOrEmpty(fileBadgeText))
+            {
+                var lblBadge = new Label
+                {
+                    Text = fileBadgeText,
+                    ThemeTypeVariation = "BadgeLabelInfo"
+                };
+                hbox.AddChild(lblBadge);
+            }
+
+            _submeshChecklistContainer.AddChild(hbox);
+            chkOut = chk;
+            statusOut = lblStatusBadge;
+            return hbox;
+        }
+
+        void AddSubmeshRow(SubmeshNodeInfo submesh, bool isPreChecked)
+        {
             submesh.IsSelected = isPreChecked;
             if (isPreChecked)
             {
@@ -455,22 +485,10 @@ public partial class ExportModDialog : CanvasLayer
                              submesh.Mesh.HasMeta("IsOutlineShell") && submesh.Mesh.GetMeta("IsOutlineShell").AsBool();
             string outlineTag = isOutline ? " [OUTLINE SHELL]" : "";
 
-            var chk = new CheckBox
-            {
-                Text = $"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]{outlineTag}",
-                ButtonPressed = isPreChecked,
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-            };
-            if (colus != null) chk.AddThemeFontOverride("font", colus);
-            chk.AddThemeFontSizeOverride("font_size", 14);
+            string statusText = isPreChecked ? (submesh.IsDirty ? "[SELECTED]" : "[MODIFIED]") : "[UNMODIFIED]";
+            string fileBadge = !string.IsNullOrEmpty(submesh.OriginalVmatPath) ? Path.GetFileName(submesh.OriginalVmatPath) : null;
 
-            var lblStatusBadge = new Label
-            {
-                Text = isPreChecked ? (submesh.IsDirty ? "[SELECTED]" : "[MODIFIED]") : "[UNMODIFIED]"
-            };
-            if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-            lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-            lblStatusBadge.AddThemeColorOverride("font_color", isPreChecked ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+            AddChecklistRow($"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]{outlineTag}", isPreChecked, statusText, fileBadge, out var chk, out var lblStatusBadge);
 
             chk.Toggled += (pressed) =>
             {
@@ -479,34 +497,19 @@ public partial class ExportModDialog : CanvasLayer
                 {
                     submesh.IsDirty = true;
                     lblStatusBadge.Text = "[SELECTED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
+                    lblStatusBadge.ThemeTypeVariation = "BadgeLabelSuccess";
                 }
                 else
                 {
                     lblStatusBadge.Text = "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = "MutedLabel";
                 }
             };
 
             _submeshCheckboxes[chk] = submesh;
-            hbox.AddChild(chk);
-            hbox.AddChild(lblStatusBadge);
-
-            if (!string.IsNullOrEmpty(submesh.OriginalVmatPath))
-            {
-                var lblBadge = new Label
-                {
-                    Text = Path.GetFileName(submesh.OriginalVmatPath)
-                };
-                lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                hbox.AddChild(lblBadge);
-            }
-
-            _submeshChecklistContainer.AddChild(hbox);
         }
 
-        AddSectionHeader("👤 Hero Model Submeshes", new Color(0.95f, 0.85f, 0.45f));
+        AddSectionHeader("Hero Model Submeshes");
         bool hasCustomImportedModel = _allSubmeshes.Any(s =>
             s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
             s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool());
@@ -521,9 +524,6 @@ public partial class ExportModDialog : CanvasLayer
                 ButtonPressed = hasCustomImportedModel || dirtySubmeshes.Count > 0,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            if (colus != null) chkSelectAll.AddThemeFontOverride("font", colus);
-            chkSelectAll.AddThemeFontSizeOverride("font_size", 13);
-            chkSelectAll.AddThemeColorOverride("font_color", new Color(0.55f, 0.88f, 1.0f));
             chkSelectAll.Toggled += (selectAll) =>
             {
                 foreach (var kv in _submeshCheckboxes)
@@ -553,36 +553,18 @@ public partial class ExportModDialog : CanvasLayer
         {
             foreach (var charAsset in characterModelAssets)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
                 int texCount = charAsset.ModifiedTextures.Count;
-                var chk = new CheckBox
-                {
-                    Text = $"{charAsset.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
+                AddChecklistRow($"{charAsset.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})", true, "[MODIFIED]", null, out var chk, out _);
                 _extraModelCheckboxes[chk] = charAsset;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
         else if (hasOtherWorkspaceMods)
         {
             var emptyLbl = new Label
             {
-                Text = "   (No character model submeshes modified)"
+                Text = "   (No character model submeshes modified)",
+                ThemeTypeVariation = "MutedLabel"
             };
-            emptyLbl.AddThemeFontSizeOverride("font_size", 13);
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f));
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
         else if (_allSubmeshes.Count > 0)
@@ -596,160 +578,66 @@ public partial class ExportModDialog : CanvasLayer
         {
             var emptyLbl = new Label
             {
-                Text = "   No submeshes found. Default body will be exported."
+                Text = "   No submeshes found. Default body will be exported.",
+                ThemeTypeVariation = "MutedLabel"
             };
-            emptyLbl.AddThemeFontSizeOverride("font_size", 13);
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f));
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
 
         if (extraModelAssets.Count > 0)
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
-            _submeshChecklistContainer.AddChild(spacer);
-
-            AddSectionHeader("🗡️ Extra Models", new Color(0.45f, 0.80f, 0.98f));
+            _submeshChecklistContainer.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+            AddSectionHeader("Extra Models");
 
             foreach (var extra in extraModelAssets)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
-
                 int texCount = extra.ModifiedTextures.Count;
-                var chk = new CheckBox
-                {
-                    Text = $"{extra.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
-
+                string modelFile = Path.GetFileName(extra.OwnerAssetPath);
+                AddChecklistRow($"{extra.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})", true, "[MODIFIED]", modelFile, out var chk, out var lblStatusBadge);
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = pressed ? "BadgeLabelSuccess" : "MutedLabel";
                 };
-
                 _extraModelCheckboxes[chk] = extra;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-
-                string modelFile = Path.GetFileName(extra.OwnerAssetPath);
-                if (!string.IsNullOrEmpty(modelFile))
-                {
-                    var lblBadge = new Label { Text = modelFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                    hbox.AddChild(lblBadge);
-                }
-
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
 
         if (particleAssets.Count > 0)
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
-            _submeshChecklistContainer.AddChild(spacer);
-
-            AddSectionHeader("✨ Particle VFX", new Color(0.90f, 0.60f, 0.98f));
+            _submeshChecklistContainer.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+            AddSectionHeader("Particle VFX");
 
             foreach (var part in particleAssets)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
-
                 int texCount = part.ModifiedTextures.Count;
-                var chk = new CheckBox
-                {
-                    Text = $"{part.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
-
+                string vpcfFile = Path.GetFileName(part.OwnerAssetPath);
+                AddChecklistRow($"{part.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})", true, "[MODIFIED]", vpcfFile, out var chk, out var lblStatusBadge);
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = pressed ? "BadgeLabelSuccess" : "MutedLabel";
                 };
-
                 _particleCheckboxes[chk] = part;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-
-                string vpcfFile = Path.GetFileName(part.OwnerAssetPath);
-                if (!string.IsNullOrEmpty(vpcfFile))
-                {
-                    var lblBadge = new Label { Text = vpcfFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                    hbox.AddChild(lblBadge);
-                }
-
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
 
         if (animationEntries.Count > 0)
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
-            _submeshChecklistContainer.AddChild(spacer);
-
-            AddSectionHeader("🎬 Animations", new Color(0.55f, 0.85f, 1.0f));
+            _submeshChecklistContainer.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+            AddSectionHeader("Animations");
 
             foreach (var animEntry in animationEntries)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
-
                 string label = !string.IsNullOrEmpty(animEntry.CleanName) ? animEntry.CleanName : animEntry.AnimName;
-                var chk = new CheckBox
-                {
-                    Text = $"{label} ({animEntry.Duration:0.00}s)",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
-
+                string clipFile = Path.GetFileName(animEntry.TargetVpkPath ?? animEntry.RelativeVnmclipPath ?? "");
+                AddChecklistRow($"{label} ({animEntry.Duration:0.00}s)", true, "[MODIFIED]", clipFile, out var chk, out var lblStatusBadge);
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = pressed ? "BadgeLabelSuccess" : "MutedLabel";
                 };
-
                 _animationCheckboxes[chk] = animEntry;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-
-                string clipFile = Path.GetFileName(animEntry.TargetVpkPath ?? animEntry.RelativeVnmclipPath ?? "");
-                if (!string.IsNullOrEmpty(clipFile))
-                {
-                    var lblBadge = new Label { Text = clipFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                    hbox.AddChild(lblBadge);
-                }
-
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
     }

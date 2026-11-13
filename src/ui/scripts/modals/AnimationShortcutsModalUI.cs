@@ -123,7 +123,6 @@ namespace DeadlockPlayground.UI
                 ThemeTypeVariation = "HeaderSmall"
             };
             titleLbl.AddThemeColorOverride("font_color", new Color(0.95f, 0.88f, 0.72f));
-            titleLbl.AddThemeFontSizeOverride("font_size", 15);
             titleHBox.AddChild(titleLbl);
             titleVBox.AddChild(titleHBox);
 
@@ -132,7 +131,6 @@ namespace DeadlockPlayground.UI
                 Text = "Blender-style shortcuts for timeline scrubbing, keyframe transforms, and F-Curve editing."
             };
             subLbl.AddThemeColorOverride("font_color", new Color(0.70f, 0.73f, 0.80f));
-            subLbl.AddThemeFontSizeOverride("font_size", 12);
             titleVBox.AddChild(subLbl);
             headerHBox.AddChild(titleVBox);
 
@@ -151,7 +149,7 @@ namespace DeadlockPlayground.UI
             // Close button
             _btnClose = new Button
             {
-                Text = "✕",
+                Text = "âœ•",
                 CustomMinimumSize = new Vector2(30, 28),
                 Flat = true,
                 TooltipText = "Close (Esc)"
@@ -229,7 +227,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
             tipLbl.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f));
-            tipLbl.AddThemeFontSizeOverride("font_size", 12);
             tipHBox.AddChild(tipLbl);
             footerHBox.AddChild(tipHBox);
 
@@ -381,7 +378,6 @@ namespace DeadlockPlayground.UI
                 Text = title
             };
             titleLbl.AddThemeColorOverride("font_color", new Color(0.95f, 0.82f, 0.45f));
-            titleLbl.AddThemeFontSizeOverride("font_size", 13);
             headerHBox.AddChild(titleLbl);
             vbox.AddChild(headerHBox);
 
@@ -401,7 +397,6 @@ namespace DeadlockPlayground.UI
                     SizeFlagsHorizontal = SizeFlags.ExpandFill
                 };
                 actionLbl.AddThemeColorOverride("font_color", new Color(0.85f, 0.87f, 0.90f));
-                actionLbl.AddThemeFontSizeOverride("font_size", 12);
                 rowHBox.AddChild(actionLbl);
 
                 string keyText = item.overrideKey;
@@ -439,7 +434,6 @@ namespace DeadlockPlayground.UI
                     Text = keyText
                 };
                 badgeLbl.AddThemeColorOverride("font_color", new Color(1.0f, 0.88f, 0.45f));
-                badgeLbl.AddThemeFontSizeOverride("font_size", 11);
                 badgeMargin.AddChild(badgeLbl);
                 badgePanel.AddChild(badgeMargin);
 

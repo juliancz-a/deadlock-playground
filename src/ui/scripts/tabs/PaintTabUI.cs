@@ -2135,9 +2135,9 @@ public partial class PaintTabUI : VBoxContainer
 
                 var headerPanel = new PanelContainer
                 {
-                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    ThemeTypeVariation = "InspectorSectionPanel"
                 };
-                headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
 
                 var headerRow = new HBoxContainer
                 {
@@ -2149,11 +2149,11 @@ public partial class PaintTabUI : VBoxContainer
                 {
                     Text = group.IsExpanded ? "▼" : "▶",
                     Flat = true,
-                    CustomMinimumSize = new Vector2(22, 22),
+                    CustomMinimumSize = new Vector2(24, 24),
                     TooltipText = "Expand/Collapse material group",
-                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    ThemeTypeVariation = "ToolbarButton"
                 };
-                toggleBtn.AddThemeFontSizeOverride("font_size", 12);
 
                 var titleLabel = new Label
                 {
@@ -2161,27 +2161,25 @@ public partial class PaintTabUI : VBoxContainer
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
                     ClipText = true,
                     TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                    TooltipText = $"Material: {group.MaterialKey}"
+                    TooltipText = $"Material: {group.MaterialKey}",
+                    ThemeTypeVariation = "SubheaderLabel"
                 };
-                if (colusFont != null) titleLabel.AddThemeFontOverride("font", colusFont);
-                titleLabel.AddThemeFontSizeOverride("font_size", 14);
 
             var badgeLabel = new Label
             {
                 Text = $"[{group.Submeshes.Count} {(group.Submeshes.Count == 1 ? "mesh" : "meshes")}]",
-                Modulate = new Color(0.72f, 0.76f, 0.82f),
+                ThemeTypeVariation = "MutedLabel",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
-            badgeLabel.AddThemeFontSizeOverride("font_size", 12);
 
             var paintBtn = new Button
             {
                 Text = "Paint",
-                CustomMinimumSize = new Vector2(56, 24),
+                CustomMinimumSize = new Vector2(64, 28),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                TooltipText = $"Paint material group '{group.DisplayName}'"
+                TooltipText = $"Paint material group '{group.DisplayName}'",
+                ThemeTypeVariation = "ToolbarButton"
             };
-            paintBtn.AddThemeFontSizeOverride("font_size", 12);
 
             var localGroup = group;
             paintBtn.Pressed += () =>
@@ -2243,10 +2241,9 @@ public partial class PaintTabUI : VBoxContainer
                 var branchLabel = new Label
                 {
                     Text = isLast ? "  └─" : "  ├─",
-                    Modulate = new Color(0.45f, 0.48f, 0.52f),
+                    ThemeTypeVariation = "MutedLabel",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter
                 };
-                branchLabel.AddThemeFontSizeOverride("font_size", 11);
                 row.AddChild(branchLabel);
 
                 bool isVis = submesh.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh) && submesh.Mesh.Visible;
@@ -2263,18 +2260,18 @@ public partial class PaintTabUI : VBoxContainer
                 var soloBtn = new Button
                 {
                     Text = submesh.IsSoloed ? "[Solo]" : "Solo",
-                    CustomMinimumSize = new Vector2(44, 24),
+                    CustomMinimumSize = new Vector2(52, 26),
                     ToggleMode = true,
                     ButtonPressed = submesh.IsSoloed,
                     TooltipText = "Solo submesh (hide others)",
-                    SizeFlagsVertical = SizeFlags.ShrinkCenter
+                    SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    ThemeTypeVariation = "ToolbarButton"
                 };
-                soloBtn.AddThemeFontSizeOverride("font_size", 10);
                 soloBtn.Pressed += () => _meshHierarchy.ToggleSolo(localSub);
                 row.AddChild(soloBtn);
 
                 int charLen = submesh.DisplayName?.Length ?? 0;
-                float minHeight = charLen > 40 ? 46f : (charLen > 22 ? 34f : 24f);
+                float minHeight = charLen > 40 ? 50f : (charLen > 22 ? 38f : 28f);
 
                 var btnWrapper = new Control
                 {
@@ -2291,14 +2288,14 @@ public partial class PaintTabUI : VBoxContainer
                     AutowrapMode = TextServer.AutowrapMode.WordSmart,
                     ClipText = true,
                     TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                    TooltipText = submesh.DisplayName
+                    TooltipText = submesh.DisplayName,
+                    ThemeTypeVariation = "ToolbarButton"
                 };
                 selectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
                 selectBtn.OffsetLeft = 0;
                 selectBtn.OffsetTop = 0;
                 selectBtn.OffsetRight = 0;
                 selectBtn.OffsetBottom = 0;
-                selectBtn.AddThemeFontSizeOverride("font_size", 10);
 
                 selectBtn.Pressed += () =>
                 {
@@ -2602,11 +2599,12 @@ public partial class PaintTabUI : VBoxContainer
             child.QueueFree();
         }
 
-        var colus = PlaygroundThemeHelper.GetFontColus();
-
         // 1. Particle Materials / Textures Section
-        var headerPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        headerPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
+        var headerPanel = new PanelContainer
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "InspectorSectionPanel"
+        };
 
         var headerRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         headerRow.AddThemeConstantOverride("separation", 6);
@@ -2625,19 +2623,17 @@ public partial class PaintTabUI : VBoxContainer
         var titleLabel = new Label
         {
             Text = "Particle Materials",
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        if (colus != null) titleLabel.AddThemeFontOverride("font", colus);
-        titleLabel.AddThemeFontSizeOverride("font_size", 14);
         headerRow.AddChild(titleLabel);
 
         var badgeLabel = new Label
         {
             Text = $"[{textures.Count}]",
-            Modulate = new Color(0.72f, 0.76f, 0.82f),
+            ThemeTypeVariation = "MutedLabel",
             SizeFlagsVertical = SizeFlags.ShrinkCenter
         };
-        badgeLabel.AddThemeFontSizeOverride("font_size", 12);
         headerRow.AddChild(badgeLabel);
 
         headerPanel.AddChild(headerRow);
@@ -2666,10 +2662,9 @@ public partial class PaintTabUI : VBoxContainer
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                TooltipText = vtexPath
+                TooltipText = vtexPath,
+                ThemeTypeVariation = "BodyLabel"
             };
-            if (colus != null) texLabel.AddThemeFontOverride("font", colus);
-            texLabel.AddThemeFontSizeOverride("font_size", 13);
             row.AddChild(texLabel);
 
             if (isShared)
@@ -2684,11 +2679,9 @@ public partial class PaintTabUI : VBoxContainer
                 {
                     Text = "[SHARED]",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                    ThemeTypeVariation = "BadgeLabelDanger",
                     TooltipText = "[!] Shared Global Material\nThis texture is used globally across heroes and environment effects in Deadlock.\nModifying it will affect all heroes and abilities that use it in-game."
                 };
-                if (colus != null) sharedBadge.AddThemeFontOverride("font", colus);
-                sharedBadge.AddThemeFontSizeOverride("font_size", 11);
-                sharedBadge.AddThemeColorOverride("font_color", new Color(1.0f, 0.28f, 0.28f, 1.0f)); // Danger red/coral
                 sharedContainer.AddChild(sharedBadge);
 
                 var infoBtn = new Button
@@ -2726,11 +2719,10 @@ public partial class PaintTabUI : VBoxContainer
             var paintBtn = new Button
             {
                 Text = isThisParticlePainting ? "Painting" : "Paint",
-                CustomMinimumSize = new Vector2(60, 24),
+                CustomMinimumSize = new Vector2(68, 28),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                Modulate = isThisParticlePainting ? new Color(1.0f, 0.85f, 0.4f, 1.0f) : Colors.White
+                ThemeTypeVariation = isThisParticlePainting ? "PrimaryActionButton" : "ToolbarButton"
             };
-            paintBtn.AddThemeFontSizeOverride("font_size", 12);
 
             string localPath = vtexPath;
             var localTex = imageTex;
@@ -2761,8 +2753,11 @@ public partial class PaintTabUI : VBoxContainer
         // 2. Individual Particle Emitters Section
         _particleTexturesGroupContainer.AddChild(new HSeparator());
 
-        var paramHeaderPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        paramHeaderPanel.AddThemeStyleboxOverride("panel", _groupHeaderStyle);
+        var paramHeaderPanel = new PanelContainer
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "InspectorSectionPanel"
+        };
         var paramHeaderRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         paramHeaderRow.AddThemeConstantOverride("separation", 6);
 
@@ -2780,19 +2775,17 @@ public partial class PaintTabUI : VBoxContainer
         var paramTitle = new Label
         {
             Text = "Particle Emitters",
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        if (colus != null) paramTitle.AddThemeFontOverride("font", colus);
-        paramTitle.AddThemeFontSizeOverride("font_size", 13);
         paramHeaderRow.AddChild(paramTitle);
 
         var countBadge = new Label
         {
             Text = $"[{stage.Renderers.Count}]",
-            Modulate = new Color(0.65f, 0.68f, 0.72f),
+            ThemeTypeVariation = "MutedLabel",
             SizeFlagsVertical = SizeFlags.ShrinkCenter
         };
-        countBadge.AddThemeFontSizeOverride("font_size", 10);
         paramHeaderRow.AddChild(countBadge);
 
         paramHeaderPanel.AddChild(paramHeaderRow);
@@ -2830,20 +2823,11 @@ public partial class PaintTabUI : VBoxContainer
                 emitterName = $"Emitter {i + 1}";
             }
 
-            var card = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-            var cardStyle = new StyleBoxFlat
+            var card = new PanelContainer
             {
-                BgColor = new Color(0.10f, 0.12f, 0.15f, 0.7f),
-                CornerRadiusTopLeft = 4,
-                CornerRadiusTopRight = 4,
-                CornerRadiusBottomLeft = 4,
-                CornerRadiusBottomRight = 4,
-                ContentMarginLeft = 6,
-                ContentMarginRight = 6,
-                ContentMarginTop = 4,
-                ContentMarginBottom = 4
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ThemeTypeVariation = "CardPanel"
             };
-            card.AddThemeStyleboxOverride("panel", cardStyle);
 
             var cardContent = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             cardContent.AddThemeConstantOverride("separation", 4);
@@ -2870,15 +2854,14 @@ public partial class PaintTabUI : VBoxContainer
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                TooltipText = renderer.Name.ToString()
+                TooltipText = renderer.Name.ToString(),
+                ThemeTypeVariation = "BodyLabel"
             };
-            if (colus != null) nameLbl.AddThemeFontOverride("font", colus);
-            nameLbl.AddThemeFontSizeOverride("font_size", 11);
             headRow.AddChild(nameLbl);
 
             var tintPicker = new ColorPickerButton
             {
-                CustomMinimumSize = new Vector2(36, 20),
+                CustomMinimumSize = new Vector2(36, 22),
                 Color = localRenderer.CustomTintColor,
                 TooltipText = "Emitter Tint Color",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
@@ -2888,11 +2871,11 @@ public partial class PaintTabUI : VBoxContainer
             {
                 Text = "▼",
                 Flat = true,
-                CustomMinimumSize = new Vector2(20, 20),
+                CustomMinimumSize = new Vector2(24, 24),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                TooltipText = "Show/Hide Emitter Controls"
+                TooltipText = "Show/Hide Emitter Controls",
+                ThemeTypeVariation = "ToolbarButton"
             };
-            toggleDetailsBtn.AddThemeFontSizeOverride("font_size", 9);
             headRow.AddChild(toggleDetailsBtn);
 
             cardContent.AddChild(headRow);
@@ -2916,21 +2899,19 @@ public partial class PaintTabUI : VBoxContainer
             if (randColInit != null)
             {
                 // Este .vpcf usa C_INIT_RandomColor -> Mostrar Color Min y Color Max
-                var lblMin = new Label { Text = "Min:" };
-                lblMin.AddThemeFontSizeOverride("font_size", 10);
+                var lblMin = new Label { Text = "Min:", ThemeTypeVariation = "MutedLabel" };
                 var pickerMin = new ColorPickerButton
                 {
-                    CustomMinimumSize = new Vector2(32, 20),
+                    CustomMinimumSize = new Vector2(32, 22),
                     Color = randColInit.ColorMin,
                     EditAlpha = false,
                     TooltipText = "Random Color Min (C_INIT_RandomColor)"
                 };
 
-                var lblMax = new Label { Text = "Max:" };
-                lblMax.AddThemeFontSizeOverride("font_size", 10);
+                var lblMax = new Label { Text = "Max:", ThemeTypeVariation = "MutedLabel" };
                 var pickerMax = new ColorPickerButton
                 {
-                    CustomMinimumSize = new Vector2(32, 20),
+                    CustomMinimumSize = new Vector2(32, 22),
                     Color = randColInit.ColorMax,
                     EditAlpha = false,
                     TooltipText = "Random Color Max (C_INIT_RandomColor)"
@@ -2947,11 +2928,10 @@ public partial class PaintTabUI : VBoxContainer
             else if (def != null)
             {
                 // Este .vpcf NO usa C_INIT_RandomColor -> Mostrar Constant Color
-                var lblConst = new Label { Text = "Color:" };
-                lblConst.AddThemeFontSizeOverride("font_size", 10);
+                var lblConst = new Label { Text = "Color:", ThemeTypeVariation = "MutedLabel" };
                 var pickerConst = new ColorPickerButton
                 {
-                    CustomMinimumSize = new Vector2(36, 20),
+                    CustomMinimumSize = new Vector2(36, 22),
                     Color = def.ConstantColor,
                     EditAlpha = false,
                     TooltipText = "Constant Color (m_ConstantColor)"
@@ -2965,11 +2945,10 @@ public partial class PaintTabUI : VBoxContainer
             if (colFadeOp != null)
             {
                 // Este .vpcf tiene C_OP_ColorInterpolate -> Mostrar Fade Color
-                var lblFade = new Label { Text = "Fade:" };
-                lblFade.AddThemeFontSizeOverride("font_size", 10);
+                var lblFade = new Label { Text = "Fade:", ThemeTypeVariation = "MutedLabel" };
                 var pickerFade = new ColorPickerButton
                 {
-                    CustomMinimumSize = new Vector2(32, 20),
+                    CustomMinimumSize = new Vector2(32, 22),
                     Color = colFadeOp.ColorFade,
                     EditAlpha = false,
                     TooltipText = "Interpolate Fade Color (C_OP_ColorInterpolate)"
@@ -2988,12 +2967,10 @@ public partial class PaintTabUI : VBoxContainer
             // Size Slider Row
             var sizeRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             sizeRow.AddThemeConstantOverride("separation", 6);
-            var sizeLbl = new Label { Text = "Size:", CustomMinimumSize = new Vector2(40, 0) };
-            sizeLbl.AddThemeFontSizeOverride("font_size", 10);
+            var sizeLbl = new Label { Text = "Size:", CustomMinimumSize = new Vector2(46, 0), ThemeTypeVariation = "MutedLabel" };
             sizeRow.AddChild(sizeLbl);
 
-            var sizeValLbl = new Label { Text = $"{localRenderer.CustomSizeScale:F1}x", CustomMinimumSize = new Vector2(32, 0) };
-            sizeValLbl.AddThemeFontSizeOverride("font_size", 10);
+            var sizeValLbl = new Label { Text = $"{localRenderer.CustomSizeScale:F1}x", CustomMinimumSize = new Vector2(40, 0), ThemeTypeVariation = "NumericLabel" };
 
             var sizeSlider = new HSlider
             {
@@ -3018,12 +2995,10 @@ public partial class PaintTabUI : VBoxContainer
             // Opacity Slider Row
             var alphaRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
             alphaRow.AddThemeConstantOverride("separation", 6);
-            var alphaLbl = new Label { Text = "Alpha:", CustomMinimumSize = new Vector2(40, 0) };
-            alphaLbl.AddThemeFontSizeOverride("font_size", 10);
+            var alphaLbl = new Label { Text = "Alpha:", CustomMinimumSize = new Vector2(46, 0), ThemeTypeVariation = "MutedLabel" };
             alphaRow.AddChild(alphaLbl);
 
-            var alphaValLbl = new Label { Text = $"{Mathf.RoundToInt(localRenderer.CustomAlphaScale * 100)}%", CustomMinimumSize = new Vector2(32, 0) };
-            alphaValLbl.AddThemeFontSizeOverride("font_size", 10);
+            var alphaValLbl = new Label { Text = $"{Mathf.RoundToInt(localRenderer.CustomAlphaScale * 100)}%", CustomMinimumSize = new Vector2(40, 0), ThemeTypeVariation = "NumericLabel" };
 
             var alphaSlider = new HSlider
             {
@@ -3058,10 +3033,10 @@ public partial class PaintTabUI : VBoxContainer
         var resetAllBtn = new Button
         {
             Text = "Reset All Emitters",
-            CustomMinimumSize = new Vector2(0, 24),
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            CustomMinimumSize = new Vector2(0, 28),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "ToolbarButton"
         };
-        resetAllBtn.AddThemeFontSizeOverride("font_size", 10);
         resetAllBtn.Pressed += () =>
         {
             stage.ResetEmitterParametersOnly();
@@ -3143,16 +3118,12 @@ public partial class PaintTabUI : VBoxContainer
                 Icon = _iconPencil,
                 ExpandIcon = true,
                 IconAlignment = HorizontalAlignment.Center,
-                CustomMinimumSize = new Vector2(26, 26),
+                CustomMinimumSize = new Vector2(28, 28),
                 TooltipText = "Rename layer",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                Disabled = layer.IsLocked
+                Disabled = layer.IsLocked,
+                ThemeTypeVariation = "ToolbarButton"
             };
-            renameBtn.AddThemeStyleboxOverride("normal", _renameBtnNormalStyle);
-            renameBtn.AddThemeStyleboxOverride("hover", _renameBtnHoverStyle);
-            renameBtn.AddThemeStyleboxOverride("pressed", _renameBtnPressedStyle);
-            renameBtn.AddThemeStyleboxOverride("disabled", _renameBtnDisabledStyle);
-            renameBtn.AddThemeStyleboxOverride("focus", _renameBtnNormalStyle);
 
             int capturedIdx = layerIndex;
             renameBtn.Pressed += () => ShowRenameLayerDialog(capturedIdx);
@@ -3207,22 +3178,17 @@ public partial class PaintTabUI : VBoxContainer
         };
         baseBtnWrapper.AddChild(baseSelectBtn);
 
-        EnsureRenameButtonStyles();
         _iconRefresh ??= GD.Load<Texture2D>("res://assets/at-icons/arrow_counterclockwise.svg");
         var resetBaseBtn = new Button
         {
             Icon = _iconRefresh,
             ExpandIcon = true,
             IconAlignment = HorizontalAlignment.Center,
-            CustomMinimumSize = new Vector2(26, 26),
+            CustomMinimumSize = new Vector2(28, 28),
             TooltipText = "Reset Base Texture to pristine vanilla texture",
-            SizeFlagsVertical = SizeFlags.ShrinkCenter
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            ThemeTypeVariation = "ToolbarButton"
         };
-        resetBaseBtn.AddThemeStyleboxOverride("normal", _renameBtnNormalStyle);
-        resetBaseBtn.AddThemeStyleboxOverride("hover", _renameBtnHoverStyle);
-        resetBaseBtn.AddThemeStyleboxOverride("pressed", _renameBtnPressedStyle);
-        resetBaseBtn.AddThemeStyleboxOverride("disabled", _renameBtnDisabledStyle);
-        resetBaseBtn.AddThemeStyleboxOverride("focus", _renameBtnNormalStyle);
 
         resetBaseBtn.Pressed += () =>
         {
