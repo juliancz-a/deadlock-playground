@@ -897,7 +897,7 @@ public partial class PlayerTabUI : VBoxContainer
 
                         if (existing != null)
                         {
-                            existing.Category = "Remapped";
+                            existing.Category = "Modified";
                             existing.Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0);
                             existing.IsLooping = stagedEntry.IsLooping;
                             existing.IsAdditive = stagedEntry.IsAdditive;
@@ -911,7 +911,7 @@ public partial class PlayerTabUI : VBoxContainer
                                 RawName = animKey,
                                 CleanName = animKey,
                                 DisplayName = DeadlockAnimLoader.FormatDisplayName(animKey),
-                                Category = "Remapped",
+                                Category = "Modified",
                                 Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0),
                                 IsLooping = stagedEntry.IsLooping,
                                 IsAdditive = stagedEntry.IsAdditive,
@@ -961,6 +961,7 @@ public partial class PlayerTabUI : VBoxContainer
         // Defined category order matching prompt requirements
         string[] categories = new[]
         {
+            "Modified",
             "Remapped",
             "Exported",
             "Idles & Stances",

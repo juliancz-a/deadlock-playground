@@ -39,6 +39,7 @@ public partial class ExportModDialog : CanvasLayer
     private readonly Dictionary<CheckBox, SubmeshNodeInfo> _submeshCheckboxes = new();
     private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _extraModelCheckboxes = new();
     private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _particleCheckboxes = new();
+    private readonly Dictionary<CheckBox, WorkspaceAnimationEntry> _animationCheckboxes = new();
     private Image _preBakedAtlas;
     private GamePathManager _pathManager;
     private bool _isBrowsingCsdk = false;
@@ -399,11 +400,13 @@ public partial class ExportModDialog : CanvasLayer
         _submeshCheckboxes.Clear();
         _extraModelCheckboxes.Clear();
         _particleCheckboxes.Clear();
+        _animationCheckboxes.Clear();
 
         var session = ModWorkspaceSession.Instance;
         var characterModelAssets = new List<WorkspaceAssetEntry>();
         var extraModelAssets = new List<WorkspaceAssetEntry>();
         var particleAssets = new List<WorkspaceAssetEntry>();
+        var animationEntries = new List<WorkspaceAnimationEntry>();
 
         if (session != null && session.Manifest != null)
         {
@@ -414,6 +417,11 @@ public partial class ExportModDialog : CanvasLayer
                     if (asset.Category == "CharacterModel") characterModelAssets.Add(asset);
                     else if (asset.Category == "ExtraModel") extraModelAssets.Add(asset);
                     else if (asset.Category == "ParticleVFX") particleAssets.Add(asset);
+
+                    if (asset.Animations != null && asset.Animations.Count > 0)
+                    {
+                        animationEntries.AddRange(asset.Animations);
+                    }
                 }
             }
         }
@@ -503,7 +511,7 @@ public partial class ExportModDialog : CanvasLayer
             s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
             s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool());
         var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
-        bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0;
+        bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0 || animationEntries.Count > 0;
 
         if (_allSubmeshes.Count > 1)
         {
@@ -694,6 +702,56 @@ public partial class ExportModDialog : CanvasLayer
                 _submeshChecklistContainer.AddChild(hbox);
             }
         }
+
+        if (animationEntries.Count > 0)
+        {
+            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
+            _submeshChecklistContainer.AddChild(spacer);
+
+            AddSectionHeader("🎬 Animations", new Color(0.55f, 0.85f, 1.0f));
+
+            foreach (var animEntry in animationEntries)
+            {
+                var hbox = new HBoxContainer();
+                hbox.AddThemeConstantOverride("separation", 8);
+
+                string label = !string.IsNullOrEmpty(animEntry.CleanName) ? animEntry.CleanName : animEntry.AnimName;
+                var chk = new CheckBox
+                {
+                    Text = $"{label} ({animEntry.Duration:0.00}s)",
+                    ButtonPressed = true,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                if (colus != null) chk.AddThemeFontOverride("font", colus);
+                chk.AddThemeFontSizeOverride("font_size", 14);
+
+                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
+                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
+                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
+                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
+
+                chk.Toggled += (pressed) =>
+                {
+                    lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
+                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+                };
+
+                _animationCheckboxes[chk] = animEntry;
+                hbox.AddChild(chk);
+                hbox.AddChild(lblStatusBadge);
+
+                string clipFile = Path.GetFileName(animEntry.TargetVpkPath ?? animEntry.RelativeVnmclipPath ?? "");
+                if (!string.IsNullOrEmpty(clipFile))
+                {
+                    var lblBadge = new Label { Text = clipFile };
+                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
+                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
+                    hbox.AddChild(lblBadge);
+                }
+
+                _submeshChecklistContainer.AddChild(hbox);
+            }
+        }
     }
 
     private void EnsureModMergeUICreated(Container parentContainer)
@@ -826,7 +884,8 @@ public partial class ExportModDialog : CanvasLayer
         int totalSelectedCount = selectedSubmeshes.Count;
         int totalExtraSelected = _extraModelCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
         int totalParticlesSelected = _particleCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
-        int totalItems = totalSelectedCount + totalExtraSelected + totalParticlesSelected;
+        int totalAnimsSelected = _animationCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
+        int totalItems = totalSelectedCount + totalExtraSelected + totalParticlesSelected + totalAnimsSelected;
 
         if (totalItems == 0 && ModWorkspaceSession.Instance.GetTotalModifiedCount() == 0)
         {
@@ -853,6 +912,19 @@ public partial class ExportModDialog : CanvasLayer
             {
                 if (!string.IsNullOrEmpty(kvp.Value.VpkPath)) excludedPaths.Add(kvp.Value.VpkPath);
                 if (!string.IsNullOrEmpty(kvp.Value.OwnerAssetPath)) excludedPaths.Add(kvp.Value.OwnerAssetPath);
+            }
+        }
+        foreach (var kvp in _animationCheckboxes)
+        {
+            if (!kvp.Key.ButtonPressed)
+            {
+                string targetVpk = !string.IsNullOrEmpty(kvp.Value.TargetVpkPath)
+                    ? kvp.Value.TargetVpkPath
+                    : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(_heroCodename, null, kvp.Value.CleanName);
+                if (!string.IsNullOrEmpty(targetVpk))
+                {
+                    excludedPaths.Add(targetVpk.Replace('\\', '/').TrimStart('/'));
+                }
             }
         }
 

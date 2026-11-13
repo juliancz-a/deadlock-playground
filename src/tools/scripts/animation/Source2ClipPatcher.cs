@@ -263,6 +263,11 @@ namespace DeadlockPlayground.Animation
                     bool isPelvis = bName.Equals("pelvis", StringComparison.OrdinalIgnoreCase);
                     bool isRootMotion = bName.Equals("root_motion", StringComparison.OrdinalIgnoreCase) ||
                                         bName.Equals("root", StringComparison.OrdinalIgnoreCase);
+                    bool isParentlessInGodot = gBoneIdx != -1 && skeleton.GetBoneParent(gBoneIdx) == -1;
+                    bool isSourceRootChild = targetBones == null ||
+                                             targetBones[b].Parent == null ||
+                                             targetBones[b].Parent.Name.Equals("root_motion", StringComparison.OrdinalIgnoreCase) ||
+                                             targetBones[b].Parent.Name.Equals("root", StringComparison.OrdinalIgnoreCase);
 
                     System.Numerics.Vector3 sPos;
                     System.Numerics.Quaternion sRot;
@@ -281,11 +286,11 @@ namespace DeadlockPlayground.Animation
                             gRot = godotAnim.RotationTrackInterpolate(rTrack, time).Normalized();
                         }
 
-                        if (isPelvis)
+                        if (isPelvis || (isParentlessInGodot && !isRootMotion && isSourceRootChild))
                         {
-                            // Pelvis in Godot (Y-up, meters) -> Source 2 (Z-up, inches).
-                            // In Godot, pelvis has SourceToGltfRotation applied during import to stand upright.
-                            // During export, GltfToSourceRotation converts Y-up waist height and orientation back to Source 2 Z-up!
+                            // Root-level bones in Godot (pelvis and other parentless bones that are direct children of root_motion in .vnmskel)
+                            // have SourceToGltfRotation applied during import to stand upright.
+                            // During export, GltfToSourceRotation converts Y-up coordinates and orientation back to Source 2 Z-up!
                             sPos = new System.Numerics.Vector3(gPos.X, gPos.Y, gPos.Z) * MetersToInches;
                             sPos = System.Numerics.Vector3.Transform(sPos, GltfToSourceRotation);
                             sRot = new System.Numerics.Quaternion(gRot.X, gRot.Y, gRot.Z, gRot.W);
@@ -298,9 +303,18 @@ namespace DeadlockPlayground.Animation
                             // on VRF-imported heroes, whereas custom Y-up rigs may leave root_motion rest at Identity.
                             var restRot = skeleton.GetBoneRest(gBoneIdx).Basis.GetRotationQuaternion();
                             var restNum = new System.Numerics.Quaternion(restRot.X, restRot.Y, restRot.Z, restRot.W);
-                            bool rootUsesSourceToGltf = MathF.Abs(System.Numerics.Quaternion.Dot(
+                            var trackRotNum = new System.Numerics.Quaternion(gRot.X, gRot.Y, gRot.Z, gRot.W);
+                            var convertedTrackRot = System.Numerics.Quaternion.Normalize(GltfToSourceRotation * trackRotNum);
+
+                            bool isDecodedByAnimLoader = godotAnim.HasMeta("decoded_by_anim_loader") && godotAnim.GetMeta("decoded_by_anim_loader").AsBool();
+                            bool restUsesSourceToGltf = MathF.Abs(System.Numerics.Quaternion.Dot(
                                 System.Numerics.Quaternion.Normalize(GltfToSourceRotation * restNum),
                                 System.Numerics.Quaternion.Identity)) > 0.99f;
+                            bool trackUsesSourceToGltf = rTrack != -1 &&
+                                (MathF.Abs(trackRotNum.X) > 0.1f || MathF.Abs(trackRotNum.Z) > 0.1f) &&
+                                MathF.Abs(convertedTrackRot.X) < 0.05f && MathF.Abs(convertedTrackRot.Y) < 0.05f;
+
+                            bool rootUsesSourceToGltf = isDecodedByAnimLoader || restUsesSourceToGltf || trackUsesSourceToGltf;
 
                             if (rootUsesSourceToGltf)
                             {
@@ -373,6 +387,7 @@ namespace DeadlockPlayground.Animation
             var transStart = new System.Numerics.Vector3[boneCount];
             var transLength = new System.Numerics.Vector3[boneCount];
             var constRot = new System.Numerics.Quaternion[boneCount];
+            int trackReadOffset = 0;
 
             for (int b = 0; b < boneCount; b++)
             {
@@ -426,8 +441,10 @@ namespace DeadlockPlayground.Animation
 
                 var sR = KVObject.Collection();
                 sR.Add("m_flRangeStart", 1.0f);
-                sR.Add("m_flRangeLength", 0f);
+                sR.Add("m_flRangeLength", 0.1f);
                 setting.Add("m_scaleRange", sR);
+
+                setting.Add("m_nTrackReadOffset", trackReadOffset);
 
                 var cRot = KVObject.Array();
                 cRot.Add(constRot[b].X);
@@ -437,6 +454,9 @@ namespace DeadlockPlayground.Animation
                 setting.Add("m_constantRotation", cRot);
 
                 trackCompressionSettings[b] = setting;
+
+                if (!isRotStatic[b]) trackReadOffset += 3;
+                if (!isTransStatic[b]) trackReadOffset += 3;
             }
 
             // 4. Encode frames into compressed ushort buffer

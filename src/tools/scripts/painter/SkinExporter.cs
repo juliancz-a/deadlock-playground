@@ -1103,6 +1103,10 @@ bool isSourceModInTargetAddons = false;
                                                         ? animEntry.TargetVpkPath
                                                         : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(config.HeroCodename, null, animEntry.CleanName);
                                                     targetVpkPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
+                                                    if (config.ExcludedAssetVpkPaths != null && config.ExcludedAssetVpkPaths.Contains(targetVpkPath))
+                                                    {
+                                                        continue;
+                                                    }
                                                     if (addedPaths.Add(targetVpkPath))
                                                     {
                                                         package.AddFile(targetVpkPath, clipData);

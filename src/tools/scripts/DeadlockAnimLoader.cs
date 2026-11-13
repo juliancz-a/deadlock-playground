@@ -560,6 +560,7 @@ public static class DeadlockAnimLoader
 
     public static int GetCategoryPriority(string category) => category switch
     {
+        "Modified" => -1,
         "Remapped" => 0,
         "Exported" => 0,
         "Idles & Stances" or "Idle" => 1,

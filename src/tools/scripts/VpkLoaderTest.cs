@@ -821,16 +821,21 @@ public partial class VpkLoaderTest : Node3D
 			// Note: Retargeted, clean poses were exported directly into glTF AnimationPlayer by VRF.
 			// DeadlockAnimLoader.LoadHeroPoses is bypassed here so it does not clear AnimationPlayer or push unretargeted raw bone frames.
 
-			EmitSignal(SignalName.HeroLoaded, modelScene);
-			DeadlockPlayground.Painter.SkinLayerManager.RunHeroMaterialAudit(modelScene);
-
 			// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
 			var skeleton = SearchSkeleton(modelScene);
 			var animPlayer = SearchAnimationPlayer(modelScene);
+			if (skeleton != null)
+			{
+				GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
+				ProceduralClothSolver.EnsureClothingBonesParented(skeleton);
+				StageAddonAnimationsToWorkspace(hero, vrfModel, skeleton, animPlayer, addonPackage);
+			}
+
+			EmitSignal(SignalName.HeroLoaded, modelScene);
+			DeadlockPlayground.Painter.SkinLayerManager.RunHeroMaterialAudit(modelScene);
+
 		if (skeleton != null)
 		{
-			GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
-			ProceduralClothSolver.EnsureClothingBonesParented(skeleton);
 			
 			// Instanciar y configurar la UI del Pose Editor legacy si está explícitamente asignada
 			if (PoseEditorScene != null)
@@ -870,6 +875,72 @@ public partial class VpkLoaderTest : Node3D
 		catch (Exception ex)
 		{
 			GD.PrintErr($"[InstantiateInScene Crash]: {ex.Message}\n{ex.StackTrace}");
+		}
+	}
+
+	private void StageAddonAnimationsToWorkspace(string heroKey, Model vrfModel, Skeleton3D skeleton, AnimationPlayer animPlayer, Package addonPackage)
+	{
+		if (addonPackage == null || ActiveAddonInfo?.AnimationEntries == null || ActiveAddonInfo.AnimationEntries.Count == 0)
+			return;
+
+		var session = DeadlockPlayground.Workspace.ModWorkspaceSession.Instance;
+		if (session == null || skeleton == null || animPlayer == null || CurrentHeroAnimations == null)
+			return;
+
+		string heroDisplayName = LastLoadedDisplayName ?? heroKey;
+		string modelVpkPath = LastLoadedVmdlPath ?? "";
+
+		var idleInfo = CurrentHeroAnimations.FirstOrDefault(a =>
+			a.CleanName.Equals("stand_idle", StringComparison.OrdinalIgnoreCase) ||
+			a.CleanName.Equals("idle", StringComparison.OrdinalIgnoreCase))
+			?? CurrentHeroAnimations.FirstOrDefault(a => a.Category == "Idles & Stances" && !a.IsAdditive);
+
+		foreach (var addonAnim in ActiveAddonInfo.AnimationEntries)
+		{
+			if (string.IsNullOrEmpty(addonAnim)) continue;
+			string normPath = addonAnim.Replace('\\', '/').TrimStart('/');
+			if (!normPath.EndsWith(".vnmclip_c", StringComparison.OrdinalIgnoreCase) &&
+			    !normPath.EndsWith(".vnmclip", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string clipFileName = Path.GetFileNameWithoutExtension(normPath);
+			if (clipFileName.EndsWith(".vnmclip", StringComparison.OrdinalIgnoreCase))
+				clipFileName = Path.GetFileNameWithoutExtension(clipFileName);
+
+			var match = CurrentHeroAnimations.FirstOrDefault(a =>
+				(!string.IsNullOrEmpty(a.VpkClipPath) && a.VpkClipPath.Replace('\\', '/').TrimStart('/').Equals(normPath, StringComparison.OrdinalIgnoreCase)) ||
+				a.CleanName.Equals(clipFileName, StringComparison.OrdinalIgnoreCase) ||
+				a.RawName.Equals(clipFileName, StringComparison.OrdinalIgnoreCase));
+
+			if (match == null) continue;
+
+			if (session.Manifest?.Heroes != null &&
+			    session.Manifest.Heroes.TryGetValue(heroKey, out var hEntry) &&
+			    hEntry.Assets.Any(ast => ast.Animations.Any(sa => sa.CleanName.Equals(match.CleanName, StringComparison.OrdinalIgnoreCase))))
+			{
+				continue;
+			}
+
+			var decodedAnim = DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(
+				match, skeleton, animPlayer, vrfModel, _currentFileLoader, idleInfo, match.CleanName, inPlace: true);
+
+			if (decodedAnim != null)
+			{
+				string targetVpkPath = !string.IsNullOrEmpty(match.VpkClipPath) ? match.VpkClipPath : normPath;
+				session.StageAnimation(
+					heroKey,
+					heroDisplayName,
+					modelVpkPath,
+					match.RawName,
+					match.CleanName,
+					decodedAnim,
+					match.Fps > 0 ? match.Fps : 30f,
+					skeleton,
+					targetVpkPath);
+				GD.Print($"[VpkLoader] Staged addon animation '{match.CleanName}' -> '{targetVpkPath}' into ModWorkspaceSession.");
+			}
 		}
 	}
 
