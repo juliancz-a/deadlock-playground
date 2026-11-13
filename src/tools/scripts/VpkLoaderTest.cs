@@ -12,7 +12,8 @@ using DeadlockPlayground.Tools;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Addons;
-using SteamDatabase.ValvePak;
+using DeadlockPlayground.Animation;
+using ValvePak;
 
 public partial class VpkLoaderTest : Node3D
 {
@@ -529,7 +530,7 @@ public partial class VpkLoaderTest : Node3D
 
 						var validAnims = allAnims.Where(a =>
 						{
-							if (DeadlockPlayground.Tools.DeadlockAnimLoader.IsBlacklisted(a.Name, a.IsAdditive)) return false;
+							if (DeadlockPlayground.Tools.DeadlockAnimLoader.IsBlacklisted(a.Name, a.IsAdditive, a.TargetSkeletonName)) return false;
 
 							string n = a.Name.ToLowerInvariant();
 							if (n.Contains("_nw") || n.Contains("_ne") || n.Contains("_sw") || n.Contains("_se") ||
@@ -539,10 +540,10 @@ public partial class VpkLoaderTest : Node3D
 						}).ToList();
 
 						var categorized = validAnims
-							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name)))
+							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name), a.IsAdditive))
 							.ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
+						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>();
 
 						// Idle clips (take up to 4, prioritized)
 						if (categorized.TryGetValue("Idles & Stances", out var idles) || categorized.TryGetValue("Idle", out idles))
@@ -680,14 +681,16 @@ public partial class VpkLoaderTest : Node3D
 		}
 		finally
 		{
+			_currentFileLoader = null;
 			addonPackage?.Dispose();
 		}
 	}
 
     private void CleanupCurrentHero()
     {
-        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
-                     ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+        SceneTree tree = IsInsideTree() ? GetTree() : null;
+        var paintTab = (tree?.Root?.FindChild("PaintTab", true, false) 
+                     ?? tree?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
         paintTab?.FlushActiveChangesToWorkspace(true);
 
         EmitSignal(SignalName.HeroUnloaded);
@@ -720,9 +723,9 @@ public partial class VpkLoaderTest : Node3D
         _currentFileLoader = null;
 
         // Unload active particle effect and badge
-        var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+        var stage = tree?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
         stage?.UnloadActiveParticle();
-        var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+        var badge = tree?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
         badge?.HideBadge();
 
         // Clean texture cache so reloading a hero or switching heroes never accesses disposed texture objects
@@ -766,7 +769,7 @@ public partial class VpkLoaderTest : Node3D
 			return map;
 		}
 
-		foreach (var (mesh, meshIndex, meshName) in model.GetEmbeddedMeshes())
+		foreach (var (mesh, meshIndex, meshName, _) in model.GetEmbeddedMeshes())
 		{
 			var materials = new List<string>();
 
@@ -850,6 +853,18 @@ public partial class VpkLoaderTest : Node3D
 			{
 				GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
 				ProceduralClothSolver.EnsureClothingBonesParented(skeleton);
+				if (vrfModel != null && (vrfModel.BoneConstraints.Count > 0 || (vrfModel.GetEmbeddedPhys()?.FeModel?.JiggleBones.Length ?? 0) > 0))
+				{
+					var constraintDriver = new Source2BoneConstraintDriver
+					{
+						Name = "Source2BoneConstraintDriver",
+						ProcessPriority = 50
+					};
+					modelScene.AddChild(constraintDriver);
+					constraintDriver.Initialize(vrfModel, skeleton, modelScene);
+					constraintDriver.EvaluateNow(0f);
+					GD.Print($"[Constraints] Attached Source2BoneConstraintDriver ({constraintDriver.ConstraintCount} constraints, {constraintDriver.JiggleBoneCount} jiggle bones).");
+				}
 				StageAddonAnimationsToWorkspace(hero, vrfModel, skeleton, animPlayer, addonPackage);
 			}
 

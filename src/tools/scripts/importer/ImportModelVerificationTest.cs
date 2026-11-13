@@ -1295,7 +1295,7 @@ namespace DeadlockPlayground.Tests
                         }
                         else
                         {
-                            using var outPkg = new SteamDatabase.ValvePak.Package();
+                            using var outPkg = new ValvePak.Package();
                             outPkg.Read(tempVpkPath);
 
                             var allVpkPaths = new System.Collections.Generic.List<string>();

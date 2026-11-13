@@ -25,13 +25,19 @@ public static class ModelAttachmentRegistry
 {
     private const float InchesToMeters = 0.0254f;
     private static readonly Dictionary<int, Dictionary<string, ModelAttachmentInfo>> _heroAttachmentCache = new();
+    private static readonly Dictionary<int, Model> _heroModelCache = new();
 
     /// <summary>
     /// Registers all attachment sockets from a compiled VRF Model onto the target Godot hero node.
     /// </summary>
     public static void RegisterAttachments(Node3D heroNode, Model vrfModel)
     {
-        if (heroNode == null || vrfModel == null || vrfModel.Attachments == null) return;
+        if (heroNode == null || vrfModel == null) return;
+
+        int heroId = heroNode.GetInstanceId().GetHashCode();
+        _heroModelCache[heroId] = vrfModel;
+
+        if (vrfModel.Attachments == null) return;
 
         var registry = new Dictionary<string, ModelAttachmentInfo>(StringComparer.OrdinalIgnoreCase);
 
@@ -66,10 +72,20 @@ public static class ModelAttachmentRegistry
             };
         }
 
-        int heroId = heroNode.GetInstanceId().GetHashCode();
         _heroAttachmentCache[heroId] = registry;
 
         GD.Print($"[ModelAttachmentRegistry] Registered {registry.Count} authoritative attachment sockets for '{heroNode.Name}'.");
+    }
+
+    /// <summary>
+    /// Attempts to retrieve the compiled VRF Model associated with a loaded hero node.
+    /// </summary>
+    public static bool TryGetHeroModel(Node3D heroNode, out Model model)
+    {
+        model = null;
+        if (heroNode == null) return false;
+        int heroId = heroNode.GetInstanceId().GetHashCode();
+        return _heroModelCache.TryGetValue(heroId, out model);
     }
 
     /// <summary>
@@ -97,5 +113,6 @@ public static class ModelAttachmentRegistry
         if (heroNode == null) return;
         int heroId = heroNode.GetInstanceId().GetHashCode();
         _heroAttachmentCache.Remove(heroId);
+        _heroModelCache.Remove(heroId);
     }
 }

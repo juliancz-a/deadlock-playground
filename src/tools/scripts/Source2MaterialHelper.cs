@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using DeadlockPlayground.Materials;
@@ -124,10 +124,9 @@ public static class Source2MaterialHelper
             return null;
         }
 
-        targetPackage.ReadEntry(entry, out byte[] data);
-        using var resource = new ValveResourceFormat.Resource();
-        using var ms = new MemoryStream(data);
-        resource.Read(ms);
+        using var stream = targetPackage.GetMemoryMappedStreamIfPossible(entry);
+        using var resource = new ValveResourceFormat.Resource { FileName = vmatPath };
+        resource.Read(stream, leaveOpen: true, mode: ReadMode.Deferred);
 
         if (resource.ResourceType != ResourceType.Material)
         {
@@ -301,9 +300,65 @@ public static class Source2MaterialHelper
             {
                 createdMat.SetMeta("OriginalAllColorVtexCPaths", string.Join(",", allColorList));
             }
+
+            string rimMaskPath = Source2TextureLoader.GetTextureParam(matResource, "g_tTintMaskRimLightMask")
+                              ?? Source2TextureLoader.GetTextureParam(matResource, "TextureTintMaskRimLightMask");
+            if (!string.IsNullOrEmpty(rimMaskPath) && !IsEngineDummyOrPlaceholderTexture(rimMaskPath))
+            {
+                createdMat.SetMeta("OriginalRimMaskVtexCPath", NormalizeVtexCPath(rimMaskPath));
+                var rimMaskTex = Source2TextureLoader.GetOrLoadTexture(package, rimMaskPath, forceOpaque: true, addonPackage);
+                if (rimMaskTex != null)
+                {
+                    createdMat.SetMeta("RimMaskTexture", rimMaskTex);
+                    createdMat.SetMeta("RimMaskFromGreenChannel", true);
+                }
+            }
+
+            if (!createdMat.HasMeta("SelfIllumAlbedoFactor"))
+            {
+                float selfIllumAlbedoFactor = 1.0f;
+                if (matResource.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor1", out float af1)) selfIllumAlbedoFactor = Mathf.Clamp(af1, 0.0f, 1.0f);
+                else if (matResource.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor", out float af0)) selfIllumAlbedoFactor = Mathf.Clamp(af0, 0.0f, 1.0f);
+                createdMat.SetMeta("SelfIllumAlbedoFactor", selfIllumAlbedoFactor);
+            }
         }
 
         return createdMat;
+    }
+
+    /// <summary>
+    /// Transfers extracted Source 2 NPR metadata (rim mask, channel flag, self-illum albedo factor)
+    /// onto a ShaderMaterial using toon_shader.gdshader.
+    /// </summary>
+    public static void ApplyToonNprMetadata(ShaderMaterial toonMat, Godot.Material origMat, Package package = null, Package addonPackage = null)
+    {
+        if (toonMat == null || origMat == null) return;
+
+        if (origMat.HasMeta("SelfIllumAlbedoFactor"))
+        {
+            toonMat.SetShaderParameter("self_illum_albedo_factor", (float)origMat.GetMeta("SelfIllumAlbedoFactor"));
+        }
+
+        Texture2D rimMaskTex = null;
+        if (origMat.HasMeta("RimMaskTexture"))
+        {
+            rimMaskTex = origMat.GetMeta("RimMaskTexture").As<Texture2D>();
+        }
+        else if ((package != null || addonPackage != null) && origMat.HasMeta("OriginalRimMaskVtexCPath"))
+        {
+            string rimPath = (string)origMat.GetMeta("OriginalRimMaskVtexCPath");
+            if (!string.IsNullOrEmpty(rimPath))
+            {
+                rimMaskTex = Source2TextureLoader.GetOrLoadTexture(package, rimPath, forceOpaque: true, addonPackage);
+            }
+        }
+
+        if (rimMaskTex != null)
+        {
+            toonMat.SetShaderParameter("rim_mask_texture", rimMaskTex);
+            bool fromGreen = !origMat.HasMeta("RimMaskFromGreenChannel") || (bool)origMat.GetMeta("RimMaskFromGreenChannel");
+            toonMat.SetShaderParameter("rim_mask_from_green_channel", fromGreen);
+        }
     }
 
     public static bool IsEngineDummyOrPlaceholderTexture(string path)
@@ -492,13 +547,13 @@ public static class Source2MaterialHelper
 
         try
         {
-            targetPkg.ReadEntry(entry, out byte[] data);
-            using var resource = new ValveResourceFormat.Resource();
-            using var ms = new MemoryStream(data);
-            resource.Read(ms);
-            if (resource.ResourceType == ResourceType.Material)
+            using var stream = targetPkg.GetMemoryMappedStreamIfPossible(entry);
+            using var resource = new ValveResourceFormat.Resource { FileName = vmatPath };
+            resource.Read(stream, leaveOpen: true, mode: ReadMode.Deferred);
+            if (resource.ResourceType == ResourceType.Material && resource.DataBlock is VrfMaterial mat)
             {
-                return (VrfMaterial)resource.DataBlock;
+                _ = mat.Data;
+                return mat;
             }
         }
         catch (Exception ex)

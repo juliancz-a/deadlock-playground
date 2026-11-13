@@ -41,6 +41,7 @@ public interface IParticleRendererDef
     string ClassName { get; }
     string BlendMode { get; set; }
     string PrimaryTexturePath { get; set; }
+    string SecondaryTexturePath { get => string.Empty; set { } }
 }
 
 #endregion
@@ -259,6 +260,7 @@ public class RenderTrailsDef : IParticleRendererDef
     public string ClassName => "C_OP_RenderTrails";
     public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ALPHA";
     public string PrimaryTexturePath { get; set; } = string.Empty;
+    public string SecondaryTexturePath { get; set; } = string.Empty;
     public float OverbrightFactor { get; set; } = 1.0f;
     public float LengthScale { get; set; } = 1.0f;
     public float MaxLength { get; set; } = 2000.0f; // inches
@@ -268,10 +270,17 @@ public class RenderTrailsDef : IParticleRendererDef
     public ParticleVecInput TailColorScale { get; set; } = ParticleVecInput.FromLiteral(Vector3.One);
     public bool IgnoreDT { get; set; } = false;
     public ParticleFloatInput RadiusScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public ParticleFloatInput AlphaScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
     public float ConstrainRadiusToLengthRatio { get; set; } = 1.0f;
+    public float ForwardShift { get; set; } = 0.0f;
     public float AddSelfAmount { get; set; } = 0.0f;
     public float SelfIllumAmount { get; set; } = 0.0f;
     public Vector4 UVTransform { get; set; } = new(1f, 1f, 0f, 0f);
+    public Vector4 SecondaryUVTransform { get; set; } = new(1f, 1f, 0f, 0f);
+    public string OrientationType { get; set; } = "PARTICLE_ORIENTATION_SCREEN_ALIGNED";
+    public float AnimationRate { get; set; } = 0.1f;
+    public bool AnimateInFps { get; set; } = false;
+    public bool CropsFrames { get; set; } = false;
 }
 
 public class RenderSpritesDef : IParticleRendererDef
@@ -279,17 +288,27 @@ public class RenderSpritesDef : IParticleRendererDef
     public string ClassName => "C_OP_RenderSprites";
     public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ALPHA";
     public string PrimaryTexturePath { get; set; } = string.Empty;
+    public string SecondaryTexturePath { get; set; } = string.Empty;
     public float OverbrightFactor { get; set; } = 1.0f;
     public float AddSelfAmount { get; set; } = 0.0f;
     public float SelfIllumAmount { get; set; } = 0.0f;
     public ParticleFloatInput RadiusScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public ParticleFloatInput AlphaScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
     public int ConstantSequenceNumber { get; set; } = 0;
     public bool HasConstantSequenceNumber { get; set; } = false;
+    public int SequenceOverride { get; set; } = -1;
+    public bool SequenceNumbersAreRawIndices { get; set; } = false;
     public Vector4 UVTransform { get; set; } = new(1f, 1f, 0f, 0f);
+    public Vector4 SecondaryUVTransform { get; set; } = new(1f, 1f, 0f, 0f);
     public Vector4 UVRect { get; set; } = new(0f, 0f, 1f, 1f);
     public bool IsRefract { get; set; } = false;
     public float RefractAmount { get; set; } = 0.1f;
     public float RefractBlurRadius { get; set; } = 3.0f;
+    public string OrientationType { get; set; } = "PARTICLE_ORIENTATION_SCREEN_ALIGNED";
+    public bool UseYawWithNormalAligned { get; set; } = false;
+    public float AnimationRate { get; set; } = 0.1f;
+    public bool AnimateInFps { get; set; } = false;
+    public bool CropsFrames { get; set; } = false;
 }
 
 public class MaterialVarMapping
@@ -304,14 +323,26 @@ public class RenderModelsDef : IParticleRendererDef
     public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ALPHA";
     public string PrimaryTexturePath { get; set; } = string.Empty;
     public string ModelPath { get; set; } = string.Empty;
+    public List<string> ModelPaths { get; } = new();
+    public string ActivityName { get; set; } = string.Empty;
+    public string SequenceName { get; set; } = string.Empty;
     public string OverrideMaterialPath { get; set; } = string.Empty;
     public bool OrientZ { get; set; } = true;
+    public bool IgnoreNormal { get; set; } = false;
+    public bool LocalScale { get; set; } = false;
+    public ParticleFloatInput RadiusScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public ParticleFloatInput AlphaScale { get; set; } = ParticleFloatInput.FromLiteral(1.0f);
+    public ParticleVecInput ComponentScale { get; set; } = ParticleVecInput.FromLiteral(Vector3.One);
+    public Vector3 LocalRotationDeg { get; set; } = Vector3.Zero;
+    public Vector3 LocalOffset { get; set; } = Vector3.Zero;
+    public ParticleFloatInput SkinInput { get; set; } = ParticleFloatInput.FromLiteral(0.0f);
+    public int Skin { get; set; } = 0;
     public List<MaterialVarMapping> MaterialVars { get; } = new();
 }
 
 public class RenderRopesDef : IParticleRendererDef
 {
-    public string ClassName => "C_OP_RenderRopes";
+    public virtual string ClassName => "C_OP_RenderRopes";
     public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ALPHA";
     public string PrimaryTexturePath { get; set; } = string.Empty;
     public float OverbrightFactor { get; set; } = 1.0f;
@@ -326,6 +357,49 @@ public class RenderRopesDef : IParticleRendererDef
     public bool ClosedLoop { get; set; } = false;
     public bool UseScalarForTextureCoordinate { get; set; } = false;
     public int ScalarFieldForTextureCoordinate { get; set; } = 0;
+}
+
+public class RenderCablesDef : RenderRopesDef
+{
+    public override string ClassName => "C_OP_RenderCables";
+    public int Roundness { get; set; } = 1;
+    public bool DrawCableCaps { get; set; } = false;
+    public float CapRoundness { get; set; } = 1.0f;
+    public float CapOffset { get; set; } = 1.0f;
+}
+
+public class RenderLightBeamDef : IParticleRendererDef
+{
+    public string ClassName => "C_OP_RenderLightBeam";
+    public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ADD";
+    public string PrimaryTexturePath { get; set; } = string.Empty;
+    public Vector3 ColorBlend { get; set; } = Vector3.One;
+    public float BrightnessLumensPerMeter { get; set; } = 1000.0f;
+    public int NumberOfLightsToCreate { get; set; } = 1;
+    public float Range { get; set; } = 512.0f; // Source 2 inches
+    public float Thickness { get; set; } = 1.0f; // Source 2 inches
+    public float RadiusScale { get; set; } = 1.0f;
+    public float AlphaScale { get; set; } = 1.0f;
+    public bool CastShadows { get; set; } = false;
+}
+
+public class RenderLightDef : IParticleRendererDef
+{
+    public string ClassName { get; set; } = "C_OP_RenderStandardLight";
+    public string BlendMode { get; set; } = "PARTICLE_OUTPUT_BLEND_MODE_ADD";
+    public string PrimaryTexturePath { get; set; } = string.Empty;
+    public Vector3 ColorScale { get; set; } = Vector3.One;
+    public float Intensity { get; set; } = 1.0f;
+    public float BrightnessLumens { get; set; } = 1000.0f;
+    public float BrightnessCandelas { get; set; } = 1000.0f;
+    public string BrightnessUnit { get; set; } = "PARTICLE_LIGHT_UNIT_LUMENS";
+    public float RadiusMultiplier { get; set; } = 8.0f;
+    public float RangeInches { get; set; } = 512.0f;
+    public float AlphaScale { get; set; } = 1.0f;
+    public float RadiusScale { get; set; } = 1.0f;
+    public bool CastShadows { get; set; } = false;
+    public bool IsDeferred => string.Equals(ClassName, "C_OP_RenderDeferredLight", StringComparison.OrdinalIgnoreCase);
+    public bool IsOmni2 => string.Equals(ClassName, "C_OP_RenderOmni2Light", StringComparison.OrdinalIgnoreCase);
 }
 
 #endregion

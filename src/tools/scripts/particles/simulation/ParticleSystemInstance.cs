@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
+using ValveResourceFormat.Particles;
 
 namespace DeadlockPlayground.Particles;
 
@@ -14,11 +15,14 @@ public enum SystemSimulationState
 
 /// <summary>
 /// Active runtime instance of a single ParticleSystemDefinition.
-/// Executes deterministic CPU simulation over an unmanaged particle pool.
+/// Executes either VRF 21.1's authoritative ParticleSystemSimulation SoA backend or fallback CPU simulation.
 /// </summary>
 public class ParticleSystemInstance
 {
+    private const int SafeMaxVrfCapacity = 20000;
+
     public ParticleSystemDefinition Definition { get; }
+    public ParticleSystemSimulation VrfSimulation { get; }
     public SystemSimulationState State { get; private set; } = SystemSimulationState.Inactive;
     public float Delay { get; set; } = 0.0f;
     public bool IsEndCap { get; set; } = false;
@@ -27,8 +31,18 @@ public class ParticleSystemInstance
     public bool IsEmissionEnabled { get; set; } = true;
     public ControlPointRegistry ControlPoints { get; set; } = new();
 
-    private readonly CpuParticle[] _particles;
-    private readonly int _maxParticles;
+    // Workspace / live UI overrides preserved on top of VRF SoA simulation output
+    public Color? ConstantColorOverride { get; set; }
+    public bool HasRandomColorOverride { get; set; }
+    public Color RandomColorMinOverride { get; set; } = Colors.White;
+    public Color RandomColorMaxOverride { get; set; } = Colors.White;
+    public bool HasColorFadeOverride { get; set; }
+    public Color ColorFadeOverride { get; set; } = Colors.White;
+    public float? RadiusOverrideInches { get; set; }
+
+    private CpuParticle[] _particles;
+    private int _maxParticles;
+    private int _lastSyncedAliveCount = 0;
     private float _spawnAccumulator = 0.0f;
     private bool _instantaneousEmitted = false;
     private uint _seed;
@@ -36,12 +50,18 @@ public class ParticleSystemInstance
     private bool _hasPrevCpTransform = false;
     private uint _ringWaveOrbitCount = 0;
     private float _sequentialPathParameter = 0.0f;
+    private Dictionary<int, Vector3> _prevPositionsById = new();
+    private Dictionary<int, Vector3> _currPositionsTemp = new();
 
     public ReadOnlySpan<CpuParticle> Particles => _particles;
     public int ActiveParticleCount
     {
         get
         {
+            if (VrfSimulation != null)
+            {
+                return VrfSimulation.Particles.Current.Length;
+            }
             int c = 0;
             for (int i = 0; i < _maxParticles; i++)
             {
@@ -51,18 +71,176 @@ public class ParticleSystemInstance
         }
     }
 
-    public ParticleSystemInstance(ParticleSystemDefinition definition, uint seed = 1337)
+    public ParticleSystemInstance(ParticleSystemDefinition definition, uint seed = 1337, ParticleSystemSimulation vrfSimulation = null)
     {
         Definition = definition ?? throw new ArgumentNullException(nameof(definition));
+        VrfSimulation = vrfSimulation;
         _seed = seed == 0 ? 1337 : seed;
 
         // Pure orchestrators like root chrono_time_wall_charge have MaxParticles = 0
-        _maxParticles = Math.Clamp(definition.MaxParticles, 0, 1024);
+        int initialCap = vrfSimulation != null
+            ? Math.Clamp(Math.Max(definition.MaxParticles, vrfSimulation.Particles.Capacity), 0, SafeMaxVrfCapacity)
+            : Math.Clamp(definition.MaxParticles, 0, 1024);
+
+        _maxParticles = initialCap;
         _particles = new CpuParticle[_maxParticles];
         for (int i = 0; i < _maxParticles; i++)
         {
             _particles[i].Clear();
         }
+    }
+
+    public void ClearOverrides()
+    {
+        ConstantColorOverride = null;
+        HasRandomColorOverride = false;
+        HasColorFadeOverride = false;
+        RadiusOverrideInches = null;
+    }
+
+    private void EnsureCapacity(int needed)
+    {
+        int clampedNeeded = Math.Min(needed, SafeMaxVrfCapacity);
+        if (clampedNeeded <= _particles.Length) return;
+
+        int newCap = Math.Min(SafeMaxVrfCapacity, Math.Max(clampedNeeded, Math.Max(64, _particles.Length * 2)));
+        int oldLen = _particles.Length;
+        Array.Resize(ref _particles, newCap);
+        for (int i = oldLen; i < newCap; i++)
+        {
+            _particles[i].Clear();
+        }
+        _maxParticles = newCap;
+    }
+
+    public void SyncFromVrfSimulation(float dt)
+    {
+        if (VrfSimulation == null) return;
+
+        CollectionAge = VrfSimulation.RenderState.Age;
+        CurrentFrameTime = dt > 1e-6f ? dt : (1.0f / 60.0f);
+
+        var span = VrfSimulation.Particles.Current;
+        int aliveCount = Math.Min(span.Length, SafeMaxVrfCapacity);
+        if (aliveCount > 0)
+        {
+            EnsureCapacity(aliveCount);
+        }
+
+        _currPositionsTemp.Clear();
+
+        for (int i = 0; i < aliveCount; i++)
+        {
+            var sPos = span.ReadVector(ParticleField.Position, i);
+            var sPrevPos = span.ReadVector(ParticleField.PositionPrevious, i);
+            var sNormal = span.ReadVector(ParticleField.Normal, i);
+            var sCol = span.ReadVector(ParticleField.Color, i);
+
+            float alpha = span.ReadFloat(ParticleField.Alpha, i);
+            float alphaAlt = span.ReadFloat(ParticleField.AlphaAlternate, i);
+            float radiusIn = span.ReadFloat(ParticleField.Radius, i);
+            float life = span.ReadFloat(ParticleField.LifeDuration, i);
+            float creationTime = span.ReadFloat(ParticleField.CreationTime, i);
+            float age = MathF.Max(0f, span.Time - creationTime);
+
+            float pitch = span.ReadFloat(ParticleField.Pitch, i);
+            float yaw = span.ReadFloat(ParticleField.Yaw, i);
+            float roll = span.ReadFloat(ParticleField.Roll, i);
+            float rollSpeed = span.ReadFloat(ParticleField.RollSpeed, i);
+            float trailLength = span.ReadFloat(ParticleField.TrailLength, i);
+            float extra1 = span.ReadFloat(ParticleField.ShaderExtraData1, i);
+            float extra2 = span.ReadFloat(ParticleField.ShaderExtraData2, i);
+
+            int seq0 = (int)span.ReadFloat(ParticleField.SequenceNumber, i);
+            int seq1 = (int)span.ReadFloat(ParticleField.SecondSequenceNumber, i);
+            int pid = span.ReadInteger(ParticleField.ParticleId, i);
+
+            Vector3 pos = ParticleCoordUtils.Source2ToGodotPosition(sPos);
+            Vector3 prevPos;
+            if (sPrevPos == System.Numerics.Vector3.Zero && sPos != System.Numerics.Vector3.Zero)
+            {
+                prevPos = _prevPositionsById.TryGetValue(pid, out var trackedPrev) ? trackedPrev : pos;
+            }
+            else
+            {
+                prevPos = ParticleCoordUtils.Source2ToGodotPosition(sPrevPos);
+            }
+            _currPositionsTemp[pid] = pos;
+
+            Vector3 godotNormal = ParticleCoordUtils.Source2ToGodotDirection(sNormal);
+            Vector3 normalizedNormal = godotNormal.LengthSquared() > 1e-6f ? godotNormal.Normalized() : Vector3.Up;
+
+            float finalAlpha = Math.Clamp(alpha * alphaAlt, 0f, 4f);
+            Color color = new Color(sCol.X, sCol.Y, sCol.Z, finalAlpha);
+
+            if (HasRandomColorOverride)
+            {
+                uint hash = unchecked((uint)pid * 747796405u + 2891336453u);
+                float tRand = (hash & 0xFFFFu) / 65535.0f;
+                color = RandomColorMinOverride.Lerp(RandomColorMaxOverride, tRand);
+                color.A = finalAlpha;
+            }
+            else if (ConstantColorOverride.HasValue)
+            {
+                var c = ConstantColorOverride.Value;
+                color = new Color(c.R, c.G, c.B, finalAlpha * c.A);
+            }
+
+            if (HasColorFadeOverride)
+            {
+                float tLife = life > 1e-5f ? Math.Clamp(age / life, 0f, 1f) : 0f;
+                var faded = color.Lerp(ColorFadeOverride, tLife);
+                color = new Color(faded.R, faded.G, faded.B, finalAlpha);
+            }
+
+            float radiusM = (RadiusOverrideInches ?? radiusIn) * ParticleCoordUtils.InchesToMeters;
+
+            ref var p = ref _particles[i];
+            p.IsAlive = true;
+            p.Position = pos;
+            p.PrevPosition = prevPos;
+            p.Velocity = CurrentFrameTime > 1e-5f ? (pos - prevPos) / CurrentFrameTime : Vector3.Zero;
+            p.Normal = normalizedNormal;
+            p.Radius = radiusM;
+            p.BaseRadius = radiusM;
+            p.Color = color;
+            p.InitialColor = color;
+            p.Alpha = color.A;
+            p.AlphaAlternate = alphaAlt;
+            p.Lifetime = life > 1e-5f ? life : 1.0f;
+            p.Age = age;
+            p.Pitch = pitch;
+            p.Yaw = yaw;
+            p.Roll = roll;
+            p.Rotation = roll;
+            p.RotationalVelocity = rollSpeed;
+            p.TrailLength = trailLength;
+            p.ShaderExtraData1 = extra1;
+            p.ShaderExtraData2 = extra2;
+            p.SequenceIndex = seq0;
+            p.SequenceIndex1 = seq1;
+            p.ParticleId = pid;
+
+            p.SetField(1, p.Lifetime);
+            p.SetField(3, radiusM);
+            p.SetField(7, color.A);
+            p.SetField(10, trailLength);
+            p.SetField(17, span.ReadFloat(ParticleField.GlowAlpha, i));
+            p.SetField(18, span.ReadFloat(ParticleField.ScratchFloat, i));
+            p.SetField(26, span.ReadFloat(ParticleField.ScratchFloat1, i));
+            p.SetField(27, span.ReadFloat(ParticleField.ScratchFloat2, i));
+        }
+
+        for (int i = aliveCount; i < _lastSyncedAliveCount && i < _particles.Length; i++)
+        {
+            _particles[i].IsAlive = false;
+        }
+        _lastSyncedAliveCount = aliveCount;
+        (_prevPositionsById, _currPositionsTemp) = (_currPositionsTemp, _prevPositionsById);
+
+        State = VrfSimulation.RenderState.InEndCap
+            ? (aliveCount == 0 ? SystemSimulationState.Dead : SystemSimulationState.Ending)
+            : SystemSimulationState.Running;
     }
 
     public void Reset()
@@ -74,8 +252,11 @@ public class ParticleSystemInstance
         _hasPrevCpTransform = false;
         _ringWaveOrbitCount = 0;
         _sequentialPathParameter = 0.0f;
+        _lastSyncedAliveCount = 0;
+        _prevPositionsById.Clear();
+        _currPositionsTemp.Clear();
 
-        for (int i = 0; i < _maxParticles; i++)
+        for (int i = 0; i < _particles.Length; i++)
         {
             _particles[i].Clear();
         }
@@ -106,6 +287,13 @@ public class ParticleSystemInstance
 
     public void TriggerEndCap()
     {
+        if (VrfSimulation != null)
+        {
+            VrfSimulation.PlayEndCap();
+            State = SystemSimulationState.Ending;
+            return;
+        }
+
         if (IsEndCap)
         {
             // EndCap children activate when the release signal is received
@@ -123,6 +311,13 @@ public class ParticleSystemInstance
     public void Step(float dt, float totalElapsed, ControlPointRegistry cpRegistry)
     {
         CurrentFrameTime = dt;
+
+        if (VrfSimulation != null)
+        {
+            SyncFromVrfSimulation(dt);
+            return;
+        }
+
         var activeCp = cpRegistry ?? ControlPoints ?? new ControlPointRegistry();
 
         if (State == SystemSimulationState.Inactive)
@@ -353,9 +548,8 @@ public class ParticleSystemInstance
                     theta = NextRandomFloat() * Mathf.Tau;
                 }
 
-                // VRF Ground Truth: In Source 2, ring lies in the horizontal XY plane (Z=0).
-                // Convert Source (X fwd, Y left, Z up) to Godot (X right, Y up, Z back): (x, y, z) -> (x, z, -y)
-                Vector3 radialDir = new Vector3(Mathf.Cos(theta), 0.0f, -Mathf.Sin(theta));
+                // Source 2 ring lies in horizontal XY plane (Z=0): Source (+X, +Y, +Z) -> glTF/Godot (+Z, +X, +Y).
+                Vector3 radialDir = new Vector3(Mathf.Sin(theta), 0.0f, Mathf.Cos(theta));
                 Vector3 godotOffset = radialDir * radiusM;
 
                 if (thickM > 0.0f)

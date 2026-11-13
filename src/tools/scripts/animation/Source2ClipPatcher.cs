@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveKeyValue;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
@@ -251,7 +251,7 @@ namespace DeadlockPlayground.Animation
 
             for (int f = 0; f < numFrames; f++)
             {
-                double time = numFrames > 1 ? (f / (double)fps) : 0.0;
+                double time = numFrames > 1 ? (f * (double)godotAnim.Length / (numFrames - 1)) : 0.0;
                 if (time > godotAnim.Length) time = godotAnim.Length;
 
                 for (int b = 0; b < boneCount; b++)

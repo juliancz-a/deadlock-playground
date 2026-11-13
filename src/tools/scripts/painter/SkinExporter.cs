@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using System.Text;
 using System.Runtime.InteropServices;
 using SkiaSharp;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
@@ -546,8 +546,7 @@ bool isSourceModInTargetAddons = false;
                     {
                         try
                         {
-                            sourceModPackage = new Package();
-                            sourceModPackage.Read(config.SourceModVpkPath);
+                            sourceModPackage = OpenSharedReadPackage(config.SourceModVpkPath);
                             progress?.Report(new ExportProgressReport(0.14f, $"[INFO] Mounted source mod VPK: {Path.GetFileName(config.SourceModVpkPath)}"));
                         }
                         catch (Exception ex)
@@ -567,8 +566,7 @@ bool isSourceModInTargetAddons = false;
                     {
                         try
                         {
-                            baseVpkPackage = new Package();
-                            baseVpkPackage.Read(baseVpkPath);
+                            baseVpkPackage = OpenSharedReadPackage(baseVpkPath);
                         }
                         catch (Exception ex)
                         {
@@ -615,56 +613,68 @@ bool isSourceModInTargetAddons = false;
                             var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(colorVtexC, sourceModPackage, deadlockPath) : null)
                                         ?? LoadOriginalVtexMetadata(colorVtexC, baseVpkPackage, deadlockPath);
 
-                            if (origMeta != null && (origMeta.Width < 64 || origMeta.Height < 64))
+                            try
                             {
-                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping low-res placeholder texture ({origMeta.Width}x{origMeta.Height}): {colorVtexC}"));
-                                continue;
+                                if (origMeta != null && (origMeta.Width < 64 || origMeta.Height < 64))
+                                {
+                                    progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping low-res placeholder texture ({origMeta.Width}x{origMeta.Height}): {colorVtexC}"));
+                                    continue;
+                                }
+
+                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {colorVtexC}"));
+
+                                string pngFileName = $"{cleanTexBaseName}.png";
+                                string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
+
+                                if (origMeta != null)
+                                {
+                                    progress?.Report(new ExportProgressReport(0.19f, $"[INFO] Loaded original texture specs for '{cleanTexBaseName}': {origMeta.Width}x{origMeta.Height}, Format={origMeta.Format}, Flags={origMeta.Flags}, NonUniformAlpha={origMeta.HasNonUniformAlpha}"));
+                                }
+
+                                progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {cleanTexBaseName} composite -> {pngFileName}..."));
+
+                                using Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution, origMeta);
+                                if (submeshImage == null)
+                                {
+                                    string err = $"Failed to extract image for submesh '{submesh.DisplayName}' ({cleanTexBaseName}).";
+                                    progress?.Report(new ExportProgressReport(0.20f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                    result.Success = false;
+                                    result.ErrorMessage = err;
+                                    return result;
+                                }
+
+                                Error saveErr = submeshImage.SavePng(fullPngPath);
+                                if (saveErr != Error.Ok)
+                                {
+                                    string err = $"Failed to write PNG '{fullPngPath}' (Code: {saveErr}).";
+                                    progress?.Report(new ExportProgressReport(0.25f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                    result.Success = false;
+                                    result.ErrorMessage = err;
+                                    return result;
+                                }
+
+                                string vtexFileName = $"{cleanTexBaseName}.vtex";
+                                string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
+                                string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
+
+                                string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                                VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                                string vtexContent = GenerateSource2DmxVtex(relativePngPath, outputFormat, vtexFlags);
+                                File.WriteAllText(fullVtexPath, vtexContent);
+                                progress?.Report(new ExportProgressReport(0.28f, $"[INFO] Generated DMX VTEX descriptor: {vtexFileName} (Format: {outputFormat}, Flags: {vtexFlags})"));
+
+                                stagedTextures.Add((cleanTexBaseName, fullPngPath, fullVtexPath, colorVtexC));
                             }
-
-                            progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {colorVtexC}"));
-
-                            string pngFileName = $"{cleanTexBaseName}.png";
-                            string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
-
-                            if (origMeta != null)
+                            finally
                             {
-                                progress?.Report(new ExportProgressReport(0.19f, $"[INFO] Loaded original texture specs for '{cleanTexBaseName}': {origMeta.Width}x{origMeta.Height}, Format={origMeta.Format}, Flags={origMeta.Flags}, NonUniformAlpha={origMeta.HasNonUniformAlpha}"));
+                                if (origMeta != null)
+                                {
+                                    origMeta.BaseRgbaImage?.Dispose();
+                                    origMeta.BaseRgbaImage = null;
+                                    origMeta.RawAlpha = null;
+                                }
                             }
-
-                            progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {cleanTexBaseName} composite -> {pngFileName}..."));
-
-                            Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution, origMeta);
-                            if (submeshImage == null)
-                            {
-                                string err = $"Failed to extract image for submesh '{submesh.DisplayName}' ({cleanTexBaseName}).";
-                                progress?.Report(new ExportProgressReport(0.20f, $"[ERROR] {err}", ExportLogLevel.Error));
-                                result.Success = false;
-                                result.ErrorMessage = err;
-                                return result;
-                            }
-
-                            Error saveErr = submeshImage.SavePng(fullPngPath);
-                            if (saveErr != Error.Ok)
-                            {
-                                string err = $"Failed to write PNG '{fullPngPath}' (Code: {saveErr}).";
-                                progress?.Report(new ExportProgressReport(0.25f, $"[ERROR] {err}", ExportLogLevel.Error));
-                                result.Success = false;
-                                result.ErrorMessage = err;
-                                return result;
-                            }
-
-                            string vtexFileName = $"{cleanTexBaseName}.vtex";
-                            string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
-                            string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
-
-                            string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
-                            VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
-
-                            string vtexContent = GenerateSource2DmxVtex(relativePngPath, outputFormat, vtexFlags);
-                            File.WriteAllText(fullVtexPath, vtexContent);
-                            progress?.Report(new ExportProgressReport(0.28f, $"[INFO] Generated DMX VTEX descriptor: {vtexFileName} (Format: {outputFormat}, Flags: {vtexFlags})"));
-
-                            stagedTextures.Add((cleanTexBaseName, fullPngPath, fullVtexPath, colorVtexC));
                         }
                     }
 
@@ -715,59 +725,90 @@ bool isSourceModInTargetAddons = false;
 
                                 string targetPngFileName = $"{baseName}.png";
                                 string targetPngFull = Path.Combine(assetContentDir, targetPngFileName);
-                                if (File.Exists(stagedPngFull))
+                                try
                                 {
-                                    if (origMeta != null && origMeta.RawAlpha != null)
+                                    if (File.Exists(stagedPngFull))
                                     {
-                                        var loadedImg = Image.LoadFromFile(stagedPngFull);
-                                        if (loadedImg != null)
+                                        if (origMeta != null && origMeta.RawAlpha != null)
                                         {
-                                            loadedImg = ApplyOriginalAlphaChannel(loadedImg, origMeta);
-                                            loadedImg.SavePng(targetPngFull);
+                                            using var loadedImg = Image.LoadFromFile(stagedPngFull);
+                                            if (loadedImg != null)
+                                            {
+                                                var processedImg = ApplyOriginalAlphaChannel(loadedImg, origMeta);
+                                                try
+                                                {
+                                                    processedImg.SavePng(targetPngFull);
+                                                }
+                                                finally
+                                                {
+                                                    if (!ReferenceEquals(processedImg, loadedImg))
+                                                    {
+                                                        processedImg.Dispose();
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                File.Copy(stagedPngFull, targetPngFull, true);
+                                            }
                                         }
                                         else
                                         {
                                             File.Copy(stagedPngFull, targetPngFull, true);
                                         }
                                     }
-                                    else
+                                    else if (inMemImg != null)
                                     {
-                                        File.Copy(stagedPngFull, targetPngFull, true);
+                                        if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
+                                        Image exportImg = origMeta != null
+                                            ? ApplyOriginalAlphaChannel(inMemImg, origMeta)
+                                            : inMemImg;
+                                        try
+                                        {
+                                            exportImg.SavePng(targetPngFull);
+                                        }
+                                        finally
+                                        {
+                                            if (!ReferenceEquals(exportImg, inMemImg))
+                                            {
+                                                exportImg.Dispose();
+                                            }
+                                        }
                                     }
+
+                                    string targetVtexFileName = $"{baseName}.vtex";
+                                    string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
+                                    string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
+
+                                    string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                                    VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                                    string vtexDesc = GenerateSource2DmxVtex(relPng, outputFormat, vtexFlags);
+                                    File.WriteAllText(targetVtexFull, vtexDesc);
+
+                                    string targetCompiledVtexCPath = origMeta != null && !string.IsNullOrEmpty(origMeta.VtexCPath)
+                                        ? origMeta.VtexCPath
+                                        : normVtex;
+                                    if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        targetCompiledVtexCPath += "_c";
+                                    }
+
+                                    stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
+                                    existingVtexPaths.Add(vtexKey);
+                                    existingVtexPaths.Add(targetCompiledVtexCPath);
+
+                                    progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {targetCompiledVtexCPath}"));
                                 }
-                                else if (inMemImg != null)
+                                finally
                                 {
-                                    if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
                                     if (origMeta != null)
                                     {
-                                        inMemImg = ApplyOriginalAlphaChannel(inMemImg, origMeta);
+                                        origMeta.BaseRgbaImage?.Dispose();
+                                        origMeta.BaseRgbaImage = null;
+                                        origMeta.RawAlpha = null;
                                     }
-                                    inMemImg.SavePng(targetPngFull);
                                 }
-
-                                string targetVtexFileName = $"{baseName}.vtex";
-                                string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
-                                string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
-
-                                string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
-                                VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
-
-                                string vtexDesc = GenerateSource2DmxVtex(relPng, outputFormat, vtexFlags);
-                                File.WriteAllText(targetVtexFull, vtexDesc);
-
-                                string targetCompiledVtexCPath = origMeta != null && !string.IsNullOrEmpty(origMeta.VtexCPath)
-                                    ? origMeta.VtexCPath
-                                    : normVtex;
-                                if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    targetCompiledVtexCPath += "_c";
-                                }
-
-                                stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
-                                existingVtexPaths.Add(vtexKey);
-                                existingVtexPaths.Add(targetCompiledVtexCPath);
-
-                                progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {targetCompiledVtexCPath}"));
                             }
                         }
                     }
@@ -940,10 +981,9 @@ bool isSourceModInTargetAddons = false;
                                     continue;
                                 }
 
-                                ownerPkg.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
-                                using var vrfRes = new ValveResourceFormat.Resource();
-                                using var ms = new MemoryStream(rawVpcfBytes);
-                                vrfRes.Read(ms);
+                                using var vpcfStream = ownerPkg.GetMemoryMappedStreamIfPossible(vpkEntry);
+                                using var vrfRes = new ValveResourceFormat.Resource { FileName = compiledVpcfPath };
+                                vrfRes.Read(vpcfStream, leaveOpen: true, mode: ReadMode.Deferred);
 
                                 string kv3Text = vrfRes.DataBlock?.ToString();
                                 if (string.IsNullOrEmpty(kv3Text)) continue;
@@ -1209,6 +1249,7 @@ bool isSourceModInTargetAddons = false;
                             }
 
                             package.Write(finalVpkPath);
+                            baseModFilesToMerge.Clear();
                         }
 
                         if (!File.Exists(finalVpkPath))
@@ -1606,7 +1647,7 @@ bool isSourceModInTargetAddons = false;
 
             if (baseImg != null && !baseImg.IsEmpty())
             {
-                var baseUnscaled = (Image)baseImg.Duplicate();
+                using var baseUnscaled = (Image)baseImg.Duplicate();
                 if (baseUnscaled.IsCompressed())
                 {
                     baseUnscaled.Decompress();
@@ -1684,6 +1725,7 @@ bool isSourceModInTargetAddons = false;
                     {
                         Array.Resize(ref paintData, expectedBytes);
                     }
+                    finalImage.Dispose();
                     finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
             }
@@ -1722,6 +1764,7 @@ bool isSourceModInTargetAddons = false;
                     {
                         Array.Resize(ref paintData, expectedBytes);
                     }
+                    finalImage.Dispose();
                     finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
             }
@@ -1903,10 +1946,9 @@ bool isSourceModInTargetAddons = false;
                 {
                     try
                     {
-                        ownerPkg.ReadEntry(foundEntry, out byte[] data);
+                        using var vmatStream = ownerPkg.GetMemoryMappedStreamIfPossible(foundEntry);
                         using var resource = new ValveResourceFormat.Resource();
-                        using var ms = new MemoryStream(data);
-                        resource.Read(ms);
+                        resource.Read(vmatStream, leaveOpen: true, mode: ReadMode.Deferred);
 
                         if (resource.ResourceType == ResourceType.Material && resource.DataBlock is VrfMaterial vmat)
                         {
@@ -2041,18 +2083,18 @@ bool isSourceModInTargetAddons = false;
                 else normPath += ".vtex_c";
             }
 
-            byte[] rawVtexCBytes = null;
+            Stream vtexStream = null;
 
             if (File.Exists(originalVtexCPath))
             {
-                try { rawVtexCBytes = File.ReadAllBytes(originalVtexCPath); } catch { }
+                vtexStream = OpenSharedFileReadStream(originalVtexCPath);
             }
             else if (File.Exists(normPath))
             {
-                try { rawVtexCBytes = File.ReadAllBytes(normPath); } catch { }
+                vtexStream = OpenSharedFileReadStream(normPath);
             }
 
-            if (rawVtexCBytes == null && baseVpkPackage != null)
+            if (vtexStream == null && baseVpkPackage != null)
             {
                 var entry = baseVpkPackage.FindEntry(normPath);
                 if (entry == null)
@@ -2071,7 +2113,7 @@ bool isSourceModInTargetAddons = false;
                     try
                     {
                         normPath = entry.GetFullPath().Replace('\\', '/').TrimStart('/');
-                        baseVpkPackage.ReadEntry(entry, out rawVtexCBytes);
+                        vtexStream = baseVpkPackage.GetMemoryMappedStreamIfPossible(entry);
                     }
                     catch (Exception ex)
                     {
@@ -2080,16 +2122,16 @@ bool isSourceModInTargetAddons = false;
                 }
             }
 
-            if (rawVtexCBytes == null && !string.IsNullOrEmpty(deadlockGamePath))
+            if (vtexStream == null && !string.IsNullOrEmpty(deadlockGamePath))
             {
                 string gameCitadelFile = Path.Combine(deadlockGamePath, "game", "citadel", normPath);
                 if (File.Exists(gameCitadelFile))
                 {
-                    try { rawVtexCBytes = File.ReadAllBytes(gameCitadelFile); } catch { }
+                    vtexStream = OpenSharedFileReadStream(gameCitadelFile);
                 }
             }
 
-            if (rawVtexCBytes == null)
+            if (vtexStream == null)
             {
                 string projectDir = ProjectSettings.GlobalizePath("res://");
                 string projectRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
@@ -2104,13 +2146,14 @@ bool isSourceModInTargetAddons = false;
 
                 foreach (var root in searchRoots)
                 {
-                    if (rawVtexCBytes != null) break;
+                    if (vtexStream != null) break;
                     if (!Directory.Exists(root)) continue;
 
                     string candidate = Path.Combine(root, normPath);
                     if (File.Exists(candidate))
                     {
-                        try { rawVtexCBytes = File.ReadAllBytes(candidate); break; } catch { }
+                        vtexStream = OpenSharedFileReadStream(candidate);
+                        if (vtexStream != null) break;
                     }
 
                     try
@@ -2118,99 +2161,107 @@ bool isSourceModInTargetAddons = false;
                         var matchingFiles = Directory.GetFiles(root, targetFileName, SearchOption.AllDirectories);
                         if (matchingFiles.Length > 0 && File.Exists(matchingFiles[0]))
                         {
-                            rawVtexCBytes = File.ReadAllBytes(matchingFiles[0]);
-                            break;
+                            vtexStream = OpenSharedFileReadStream(matchingFiles[0]);
+                            if (vtexStream != null) break;
                         }
                     }
                     catch { }
                 }
             }
 
-            if (rawVtexCBytes == null || rawVtexCBytes.Length == 0)
+            if (vtexStream == null)
             {
                 return null;
             }
 
-            try
+            using (vtexStream)
             {
-                using var resource = new ValveResourceFormat.Resource();
-                using var ms = new MemoryStream(rawVtexCBytes);
-                resource.Read(ms);
-
-                if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture vrfTex)
+                try
                 {
+                    using var resource = new ValveResourceFormat.Resource { FileName = normPath };
+                    resource.Read(vtexStream, leaveOpen: true, mode: ReadMode.Deferred);
+
+                    if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture vrfTex)
+                    {
+                        return null;
+                    }
+
+                    var meta = new OriginalVtexMetadata
+                    {
+                        VtexCPath = normPath,
+                        Width = (int)vrfTex.Width,
+                        Height = (int)vrfTex.Height,
+                        Format = vrfTex.Format.ToString(),
+                        Flags = vrfTex.Flags,
+                        NumMipLevels = (int)vrfTex.NumMipLevels
+                    };
+
+                    using var skBitmap = vrfTex.GenerateBitmap(depth: 0, mipLevel: 0);
+                    if (skBitmap != null)
+                    {
+                        int w = skBitmap.Width;
+                        int h = skBitmap.Height;
+                        meta.Width = w;
+                        meta.Height = h;
+                        int count = w * h;
+                        int rowBytes = skBitmap.RowBytes;
+                        IntPtr ptr = skBitmap.GetPixels();
+                        if (ptr != IntPtr.Zero && rowBytes >= w * 4 && skBitmap.ByteCount >= rowBytes * h)
+                        {
+                            byte[] rawAlpha = new byte[count];
+                            byte[] rawRgba = new byte[count * 4];
+                            bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
+                            bool hasNonOpaqueAlpha = false;
+
+                            unsafe
+                            {
+                                byte* srcBase = (byte*)ptr;
+                                fixed (byte* dstPtr = rawRgba)
+                                fixed (byte* alphaPtr = rawAlpha)
+                                {
+                                    uint* d32 = (uint*)dstPtr;
+                                    for (int y = 0; y < h; y++)
+                                    {
+                                        uint* s32 = (uint*)(srcBase + y * rowBytes);
+                                        int rowOffset = y * w;
+                                        for (int x = 0; x < w; x++)
+                                        {
+                                            uint c = s32[x];
+                                            byte a = (byte)((c >> 24) & 0xFF);
+                                            int dstIdx = rowOffset + x;
+                                            alphaPtr[dstIdx] = a;
+                                            if (a < 250) hasNonOpaqueAlpha = true;
+
+                                            if (isBgra)
+                                            {
+                                                byte b = (byte)(c & 0xFF);
+                                                byte g = (byte)((c >> 8) & 0xFF);
+                                                byte r = (byte)((c >> 16) & 0xFF);
+                                                d32[dstIdx] = (uint)(r | (g << 8) | (b << 16) | 0xFF000000u);
+                                            }
+                                            else
+                                            {
+                                                d32[dstIdx] = c | 0xFF000000u;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            meta.RawAlpha = rawAlpha;
+                            meta.HasNonUniformAlpha = hasNonOpaqueAlpha;
+                            meta.BaseRgbaImage = Image.CreateFromData(w, h, false, Image.Format.Rgba8, rawRgba);
+                            rawRgba = null;
+                        }
+                    }
+
+                    return meta;
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[SkinExporter] Failed to decode original .vtex_c metadata for '{normPath}': {ex.Message}");
                     return null;
                 }
-
-                var meta = new OriginalVtexMetadata
-                {
-                    VtexCPath = normPath,
-                    Width = (int)vrfTex.Width,
-                    Height = (int)vrfTex.Height,
-                    Format = vrfTex.Format.ToString(),
-                    Flags = vrfTex.Flags,
-                    NumMipLevels = (int)vrfTex.NumMipLevels
-                };
-
-                using var skBitmap = vrfTex.GenerateBitmap(depth: 0, mipLevel: 0);
-                if (skBitmap != null)
-                {
-                    int w = skBitmap.Width;
-                    int h = skBitmap.Height;
-                    meta.Width = w;
-                    meta.Height = h;
-                    int count = w * h;
-                    byte[] rawAlpha = new byte[count];
-                    byte[] rawRgba = new byte[count * 4];
-
-                    IntPtr ptr = skBitmap.GetPixels();
-                    if (ptr != IntPtr.Zero && skBitmap.ByteCount >= count * 4)
-                    {
-                        byte[] raw = new byte[count * 4];
-                        Marshal.Copy(ptr, raw, 0, raw.Length);
-
-                        bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
-                        bool hasNonOpaqueAlpha = false;
-
-                        for (int i = 0; i < count; i++)
-                        {
-                            int idx = i * 4;
-                            byte a = raw[idx + 3];
-                            rawAlpha[i] = a;
-                            if (a < 250) hasNonOpaqueAlpha = true;
-
-                            byte c0 = raw[idx];
-                            byte c1 = raw[idx + 1];
-                            byte c2 = raw[idx + 2];
-
-                            if (isBgra)
-                            {
-                                rawRgba[idx] = c2;
-                                rawRgba[idx + 1] = c1;
-                                rawRgba[idx + 2] = c0;
-                                rawRgba[idx + 3] = 255;
-                            }
-                            else
-                            {
-                                rawRgba[idx] = c0;
-                                rawRgba[idx + 1] = c1;
-                                rawRgba[idx + 2] = c2;
-                                rawRgba[idx + 3] = 255;
-                            }
-                        }
-
-                        meta.RawAlpha = rawAlpha;
-                        meta.HasNonUniformAlpha = hasNonOpaqueAlpha;
-                        meta.BaseRgbaImage = Image.CreateFromData(w, h, false, Image.Format.Rgba8, rawRgba);
-                    }
-                }
-
-                return meta;
-            }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[SkinExporter] Failed to decode original .vtex_c metadata for '{normPath}': {ex.Message}");
-                return null;
             }
         }
 
@@ -2305,6 +2356,38 @@ bool isSourceModInTargetAddons = false;
             return clean;
         }
 
+        private static Package OpenSharedReadPackage(string vpkPath)
+        {
+            var pkg = new Package();
+            FileStream fs = null;
+            try
+            {
+                fs = new FileStream(vpkPath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                pkg.SetFileName(vpkPath);
+                pkg.Read(fs);
+                fs = null; // Owned and disposed by pkg.Dispose()
+                return pkg;
+            }
+            catch
+            {
+                fs?.Dispose();
+                pkg.Dispose();
+                throw;
+            }
+        }
+
+        private static Stream OpenSharedFileReadStream(string filePath)
+        {
+            try
+            {
+                return new FileStream(filePath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static void EnsureTextureStagedInGameTree(string gameStagingRoot, string vtexCInternalPath, Package baseVpkPackage)
         {
             if (string.IsNullOrEmpty(gameStagingRoot) || string.IsNullOrEmpty(vtexCInternalPath)) return;
@@ -2325,8 +2408,9 @@ bool isSourceModInTargetAddons = false;
                     var entry = baseVpkPackage.FindEntry(normPath);
                     if (entry != null)
                     {
-                        baseVpkPackage.ReadEntry(entry, out byte[] bytes);
-                        File.WriteAllBytes(fullPath, bytes);
+                        using var src = baseVpkPackage.GetMemoryMappedStreamIfPossible(entry);
+                        using var dst = File.Create(fullPath);
+                        src.CopyTo(dst);
                         return;
                     }
                 }
@@ -2360,8 +2444,7 @@ bool isSourceModInTargetAddons = false;
                     string vpkPath = Path.Combine(deadlockGamePath, "game", "citadel", "pak01_dir.vpk");
                     if (File.Exists(vpkPath))
                     {
-                        pkg = new Package();
-                        pkg.Read(vpkPath);
+                        pkg = OpenSharedReadPackage(vpkPath);
                         disposePkg = true;
                     }
                 }
@@ -2372,10 +2455,9 @@ bool isSourceModInTargetAddons = false;
 
                 if (foundEntry != null)
                 {
-                    pkg.ReadEntry(foundEntry, out byte[] data);
+                    using var vmatStream = pkg.GetMemoryMappedStreamIfPossible(foundEntry);
                     using var resource = new ValveResourceFormat.Resource();
-                    using var ms = new MemoryStream(data);
-                    resource.Read(ms);
+                    resource.Read(vmatStream, leaveOpen: true, mode: ReadMode.Deferred);
 
                     if (resource.ResourceType == ResourceType.Material && resource.DataBlock is VrfMaterial vmat)
                     {

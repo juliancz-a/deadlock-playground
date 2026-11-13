@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using DeadlockPlayground.Materials.Heroes;
 
 namespace DeadlockPlayground.Materials;

@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using DeadlockPlayground.Catalog;
 
 namespace DeadlockPlayground.Addons
@@ -120,7 +120,18 @@ namespace DeadlockPlayground.Addons
             };
 
             using var package = new Package();
-            package.Read(vpkPath);
+            FileStream vpkStream = null;
+            try
+            {
+                vpkStream = new FileStream(vpkPath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                package.SetFileName(vpkPath);
+                package.Read(vpkStream);
+                vpkStream = null; // Owned and disposed by package.Dispose()
+            }
+            finally
+            {
+                vpkStream?.Dispose();
+            }
 
             var heroFrequency = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 

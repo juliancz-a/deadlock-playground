@@ -46,6 +46,11 @@ public static class VpcfDefinitionParser
         return ParseFromKv(vpcfPath, data);
     }
 
+    public static ParticleSystemDefinition ParseFromUpgradedData(string vpcfPath, KVObject upgradedData)
+    {
+        return ParseFromKv(vpcfPath, upgradedData);
+    }
+
     public static ParticleSystemDefinition ParseFromKv(string vpcfPath, KVObject data)
     {
         if (data == null) return null;
@@ -477,11 +482,19 @@ public static class VpcfDefinitionParser
                     TailColorScale = ParseVecInput(kv, "m_vecTailColorScale", Vector3.One),
                     IgnoreDT = ExtractBool(kv, "m_bIgnoreDT", false),
                     RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f),
-                    ConstrainRadiusToLengthRatio = ParseFloatInput(kv, "m_flConstrainRadiusToLengthRatio", 1.0f).LiteralValue
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f),
+                    ConstrainRadiusToLengthRatio = ParseFloatInput(kv, "m_flConstrainRadiusToLengthRatio", 1.0f).LiteralValue,
+                    ForwardShift = ExtractFloat(kv, "m_flForwardShift", 0.0f),
+                    OrientationType = ExtractString(kv, "m_nOrientationType", "PARTICLE_ORIENTATION_SCREEN_ALIGNED"),
+                    AnimationRate = ExtractFloat(kv, "m_flAnimationRate", 0.1f),
+                    AnimateInFps = ExtractBool(kv, "m_bAnimateInFPS", false),
+                    CropsFrames = ExtractBool(kv, "m_bCropFrames", false)
                 };
-                ParseTextureInputs(kv, trails, out var tPath1, out var uv1);
+                ParseTextureInputs(kv, trails, out var tPath1, out var uv1, out var secPath1, out var secUv1);
                 trails.PrimaryTexturePath = tPath1;
                 trails.UVTransform = uv1;
+                trails.SecondaryTexturePath = secPath1;
+                trails.SecondaryUVTransform = secUv1;
                 return trails;
 
             case "C_OP_RenderSprites":
@@ -492,26 +505,48 @@ public static class VpcfDefinitionParser
                     AddSelfAmount = ParseFloatInput(kv, "m_flAddSelfAmount", 0.0f).LiteralValue,
                     SelfIllumAmount = ParseFloatInput(kv, "m_flSelfIllumAmount", 0.0f).LiteralValue,
                     RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f),
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f),
                     IsRefract = ExtractBool(kv, "m_bRefract", false),
                     RefractAmount = ParseFloatInput(kv, "m_flRefractAmount", 0.1f).LiteralValue,
-                    RefractBlurRadius = ExtractFloat(kv, "m_nRefractBlurRadius", 3.0f)
+                    RefractBlurRadius = ExtractFloat(kv, "m_nRefractBlurRadius", 3.0f),
+                    OrientationType = ExtractString(kv, "m_nOrientationType", "PARTICLE_ORIENTATION_SCREEN_ALIGNED"),
+                    UseYawWithNormalAligned = ExtractBool(kv, "m_bUseYawWithNormalAligned", false),
+                    SequenceOverride = (int)ParseFloatInput(kv, "m_nSequenceOverride", -1.0f).LiteralValue,
+                    SequenceNumbersAreRawIndices = ExtractBool(kv, "m_bSequenceNumbersAreRawSequenceIndices", false),
+                    AnimationRate = ExtractFloat(kv, "m_flAnimationRate", 0.1f),
+                    AnimateInFps = ExtractBool(kv, "m_bAnimateInFPS", false),
+                    CropsFrames = ExtractBool(kv, "m_bCropFrames", false)
                 };
                 if (kv.TryGetValue("m_nConstantSequenceNumber", out var cSeq) && cSeq != null)
                 {
                     sprites.ConstantSequenceNumber = (int)Convert.ToInt64(cSeq.ToString());
                     sprites.HasConstantSequenceNumber = true;
                 }
-                ParseTextureInputs(kv, sprites, out var tPath2, out var uv2);
+                ParseTextureInputs(kv, sprites, out var tPath2, out var uv2, out var secPath2, out var secUv2);
                 sprites.PrimaryTexturePath = tPath2;
                 sprites.UVTransform = uv2;
+                sprites.SecondaryTexturePath = secPath2;
+                sprites.SecondaryUVTransform = secUv2;
                 return sprites;
 
             case "C_OP_RenderModels":
+                var skinInput = ParseFloatInput(kv, "m_nSkin", 0.0f);
                 var models = new RenderModelsDef
                 {
                     BlendMode = blendMode,
                     OverrideMaterialPath = ExtractString(kv, "m_hOverrideMaterial"),
-                    OrientZ = ExtractBool(kv, "m_bOrientZ", true)
+                    OrientZ = ExtractBool(kv, "m_bOrientZ", true),
+                    IgnoreNormal = ExtractBool(kv, "m_bIgnoreNormal", false),
+                    LocalScale = ExtractBool(kv, "m_bLocalScale", false),
+                    ActivityName = ExtractString(kv, "m_ActivityName", string.Empty),
+                    SequenceName = ExtractString(kv, "m_SequenceName", string.Empty),
+                    RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f),
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f),
+                    ComponentScale = ParseVecInput(kv, "m_vecComponentScale", Vector3.One),
+                    LocalRotationDeg = ParseRawVector3(kv, "m_vecLocalRotation"),
+                    LocalOffset = ParseVector3Offset(kv, "m_vecLocalOffset"),
+                    SkinInput = skinInput,
+                    Skin = (int)skinInput.LiteralValue
                 };
 
                 if (kv.TryGetValue("m_ModelList", out var mdlList) && mdlList != null)
@@ -521,8 +556,11 @@ public static class VpcfDefinitionParser
                         string m = ExtractString(mItem.Value, "m_model");
                         if (!string.IsNullOrEmpty(m))
                         {
-                            models.ModelPath = m;
-                            break;
+                            models.ModelPaths.Add(m);
+                            if (string.IsNullOrEmpty(models.ModelPath))
+                            {
+                                models.ModelPath = m;
+                            }
                         }
                     }
                 }
@@ -560,10 +598,69 @@ public static class VpcfDefinitionParser
                     UseScalarForTextureCoordinate = ExtractBool(kv, "m_bUseScalarForTextureCoordinate", false),
                     ScalarFieldForTextureCoordinate = (int)ExtractLong(kv, "m_nScalarFieldForTextureCoordinate", 0)
                 };
-                ParseTextureInputs(kv, ropes, out var tPathRopes, out var uvRopes);
+                ParseTextureInputs(kv, ropes, out var tPathRopes, out var uvRopes, out _, out _);
                 ropes.PrimaryTexturePath = tPathRopes;
                 ropes.UVTransform = uvRopes;
                 return ropes;
+
+            case "C_OP_RenderCables":
+                var cables = new RenderCablesDef
+                {
+                    BlendMode = blendMode,
+                    OverbrightFactor = ParseFloatInput(kv, "m_flOverbrightFactor", 1.0f).LiteralValue,
+                    AddSelfAmount = ParseFloatInput(kv, "m_flAddSelfAmount", 0.0f).LiteralValue,
+                    SelfIllumAmount = ParseFloatInput(kv, "m_flSelfIllumAmount", 0.0f).LiteralValue,
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f),
+                    RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f),
+                    OnlyRenderInEffectsBloomPass = ExtractBool(kv, "m_bOnlyRenderInEffectsBloomPass", false),
+                    MinTesselation = (int)ExtractLong(kv, "m_nMinTesselation", 4),
+                    MaxTesselation = (int)ExtractLong(kv, "m_nMaxTesselation", 128),
+                    ClosedLoop = ExtractBool(kv, "m_bClosedLoop", false),
+                    UseScalarForTextureCoordinate = ExtractBool(kv, "m_bUseScalarForTextureCoordinate", false),
+                    ScalarFieldForTextureCoordinate = (int)ExtractLong(kv, "m_nScalarFieldForTextureCoordinate", 0),
+                    Roundness = (int)ExtractLong(kv, "m_nRoundness", 1),
+                    DrawCableCaps = ExtractBool(kv, "m_bDrawCableCaps", false),
+                    CapRoundness = ExtractFloat(kv, "m_flCapRoundness", 1.0f),
+                    CapOffset = ExtractFloat(kv, "m_flCapOffsetAmount", 1.0f)
+                };
+                ParseTextureInputs(kv, cables, out var tPathCables, out var uvCables, out _, out _);
+                cables.PrimaryTexturePath = tPathCables;
+                cables.UVTransform = uvCables;
+                return cables;
+
+            case "C_OP_RenderLightBeam":
+                return new RenderLightBeamDef
+                {
+                    BlendMode = blendMode,
+                    ColorBlend = ParseVecInput(kv, "m_vColorBlend", Vector3.One).LiteralValue,
+                    BrightnessLumensPerMeter = ParseFloatInput(kv, "m_flBrightnessLumensPerMeter", 1000.0f).LiteralValue,
+                    NumberOfLightsToCreate = Math.Max(1, (int)ParseFloatInput(kv, "m_flNumberOfLightsToCreate", 1.0f).LiteralValue),
+                    Range = ParseFloatInput(kv, "m_flRange", 512.0f).LiteralValue,
+                    Thickness = ParseFloatInput(kv, "m_flThickness", 1.0f).LiteralValue,
+                    RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f).LiteralValue,
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f).LiteralValue,
+                    CastShadows = ExtractBool(kv, "m_bCastShadows", false)
+                };
+
+            case "C_OP_RenderStandardLight":
+            case "C_OP_RenderOmni2Light":
+            case "C_OP_RenderDeferredLight":
+                var colorVecKey = cls == "C_OP_RenderOmni2Light" ? "m_vColorBlend" : "m_vecColorScale";
+                return new RenderLightDef
+                {
+                    ClassName = cls,
+                    BlendMode = blendMode,
+                    ColorScale = ParseVecInput(kv, colorVecKey, Vector3.One).LiteralValue,
+                    Intensity = ParseFloatInput(kv, "m_flIntensity", 1.0f).LiteralValue,
+                    BrightnessLumens = ParseFloatInput(kv, "m_flBrightnessLumens", 1000.0f).LiteralValue,
+                    BrightnessCandelas = ParseFloatInput(kv, "m_flBrightnessCandelas", 1000.0f).LiteralValue,
+                    BrightnessUnit = ExtractString(kv, "m_nBrightnessUnit", "PARTICLE_LIGHT_UNIT_LUMENS"),
+                    RadiusMultiplier = ParseFloatInput(kv, "m_flRadiusMultiplier", 8.0f).LiteralValue,
+                    RangeInches = ParseFloatInput(kv, "m_flRange", 512.0f).LiteralValue,
+                    RadiusScale = ParseFloatInput(kv, "m_flRadiusScale", 1.0f).LiteralValue,
+                    AlphaScale = ParseFloatInput(kv, "m_flAlphaScale", 1.0f).LiteralValue,
+                    CastShadows = ExtractBool(kv, "m_bCastShadows", false)
+                };
 
             default:
                 Log($"[VpcfDefinitionParser] Unsupported Renderer class: '{cls}' in '{vpcfPath}'");
@@ -571,10 +668,19 @@ public static class VpcfDefinitionParser
         }
     }
 
-    private static void ParseTextureInputs(KVObject kv, IParticleRendererDef renderer, out string texturePath, out Vector4 uvTransform)
+    private static void ParseTextureInputs(
+        KVObject kv,
+        IParticleRendererDef renderer,
+        out string texturePath,
+        out Vector4 uvTransform,
+        out string secondaryTexturePath,
+        out Vector4 secondaryUvTransform)
     {
         texturePath = string.Empty;
         uvTransform = new Vector4(1f, 1f, 0f, 0f);
+        secondaryTexturePath = string.Empty;
+        secondaryUvTransform = new Vector4(1f, 1f, 0f, 0f);
+        int colorLayerCount = 0;
 
         if (kv.TryGetValue("m_vecTexturesInput", out var texIn) && texIn != null)
         {
@@ -588,22 +694,39 @@ public static class VpcfDefinitionParser
                     continue;
                 }
 
-                string tex = ExtractString(tVal, "m_hTexture");
-                if (!string.IsNullOrEmpty(tex))
+                string texType = ExtractString(tVal, "m_nTextureType", "SPRITECARD_TEXTURE_DIFFUSE");
+                if (texType.Contains("NORMALMAP", StringComparison.OrdinalIgnoreCase) ||
+                    texType.Contains("ANIMMOTIONVEC", StringComparison.OrdinalIgnoreCase) ||
+                    texType.Contains("DEPTH", StringComparison.OrdinalIgnoreCase))
                 {
-                    texturePath = tex;
+                    continue;
                 }
 
+                string tex = ExtractString(tVal, "m_hTexture");
+                Vector4 uv = new Vector4(1f, 1f, 0f, 0f);
                 if (tVal.TryGetValue("m_TextureControls", out var tc) && tc != null)
                 {
                     float scaleU = ExtractFloat(tc, "m_flFinalTextureScaleU", 1.0f);
                     float scaleV = ExtractFloat(tc, "m_flFinalTextureScaleV", 1.0f);
                     float offsetU = ExtractFloat(tc, "m_flFinalTextureOffsetU", 0.0f);
                     float offsetV = ExtractFloat(tc, "m_flFinalTextureOffsetV", 0.0f);
-                    uvTransform = new Vector4(scaleU, scaleV, offsetU, offsetV);
+                    uv = new Vector4(scaleU, scaleV, offsetU, offsetV);
                 }
 
-                if (!string.IsNullOrEmpty(texturePath)) break;
+                if (!string.IsNullOrEmpty(tex))
+                {
+                    if (colorLayerCount == 0)
+                    {
+                        texturePath = tex;
+                        uvTransform = uv;
+                    }
+                    else if (colorLayerCount == 1)
+                    {
+                        secondaryTexturePath = tex;
+                        secondaryUvTransform = uv;
+                    }
+                    colorLayerCount++;
+                }
             }
         }
 
@@ -722,7 +845,7 @@ public static class VpcfDefinitionParser
                 float sx = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
                 float sy = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
                 float sz = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
-                Vector3 litVec = isPosition ? new Vector3(sx * inToM, sz * inToM, -sy * inToM) : new Vector3(sx, sy, sz);
+                Vector3 litVec = isPosition ? new Vector3(sy * inToM, sz * inToM, sx * inToM) : new Vector3(sx, sy, sz);
                 return ParticleVecInput.FromLiteral(litVec, isPosition);
             }
             return ParticleVecInput.FromLiteral(fallback, isPosition);
@@ -743,7 +866,7 @@ public static class VpcfDefinitionParser
                 float sx = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
                 float sy = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
                 float sz = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
-                vec.LiteralValue = isPosition ? new Vector3(sx * inToM, sz * inToM, -sy * inToM) : new Vector3(sx, sy, sz);
+                vec.LiteralValue = isPosition ? new Vector3(sy * inToM, sz * inToM, sx * inToM) : new Vector3(sx, sy, sz);
             }
         }
         else if (obj.TryGetValue("m_LiteralColor", out var col) && col != null && col.IsArray)
@@ -871,9 +994,32 @@ public static class VpcfDefinitionParser
             float sx = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
             float sy = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
             float sz = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
-            // Source 2 (inches, Z-up: X fwd, Y left, Z up) to Godot (meters, Y-up: X right, Y up, Z back)
+            // Source 2 (inches, Z-up: +X fwd, +Y left, +Z up) to Godot/glTF (meters, Y-up: +X left, +Y up, +Z fwd)
             const float inToM = 0.0254f;
-            return new Vector3(sx * inToM, sz * inToM, -sy * inToM);
+            return new Vector3(sy * inToM, sz * inToM, sx * inToM);
+        }
+        return Vector3.Zero;
+    }
+
+    private static Vector3 ParseRawVector3(KVObject kv, string key)
+    {
+        if (kv == null || !kv.TryGetValue(key, out var obj) || obj == null) return Vector3.Zero;
+
+        KVObject target = obj;
+        if (!target.IsArray && target.TryGetValue("m_vLiteralValue", out var lit) && lit != null && lit.IsArray)
+        {
+            target = lit;
+        }
+
+        if (!target.IsArray) return Vector3.Zero;
+
+        var arr = target.Children.ToArray();
+        if (arr.Length >= 3)
+        {
+            float x = Convert.ToSingle(arr[0].Value, CultureInfo.InvariantCulture);
+            float y = Convert.ToSingle(arr[1].Value, CultureInfo.InvariantCulture);
+            float z = Convert.ToSingle(arr[2].Value, CultureInfo.InvariantCulture);
+            return new Vector3(x, y, z);
         }
         return Vector3.Zero;
     }

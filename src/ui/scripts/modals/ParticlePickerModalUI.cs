@@ -6,7 +6,7 @@ using System.Linq;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Particles;
 using DeadlockPlayground.Particles.Models;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat.IO;
 
 namespace DeadlockPlayground.UI;

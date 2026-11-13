@@ -2,15 +2,404 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValveKeyValue;
+using ValvePak;
+using ValveResourceFormat.CompiledShader;
 using ValveResourceFormat.IO;
+using ValveResourceFormat.Particles;
+using ValveResourceFormat.ResourceTypes;
+using ValveResourceFormat.Serialization.KeyValues;
 using VrfResource = ValveResourceFormat.Resource;
 
 namespace DeadlockPlayground.Particles;
 
+/// <summary>
+/// Composite IFileLoader wrapping an optional primary VRF IFileLoader and falling back
+/// to active addon, base, and core VPK packages for ParticleSystemSimulation child resolution.
+/// </summary>
+internal sealed class CompositeParticleFileLoader : IFileLoader
+{
+    private readonly IFileLoader _primaryLoader;
+    private readonly Package _basePackage;
+    private readonly Package _addonPackage;
+    private readonly Package _corePackage;
+
+    public CompositeParticleFileLoader(IFileLoader primaryLoader, Package basePackage = null, Package addonPackage = null)
+    {
+        _primaryLoader = primaryLoader;
+        _basePackage = basePackage;
+        _addonPackage = addonPackage;
+        _corePackage = DeadlockPlayground.Materials.Source2TextureLoader.CorePackage;
+    }
+
+    public GameInfo GameInfo => _primaryLoader?.GameInfo ?? GameInfo.Empty;
+
+    public VrfResource LoadFile(string file)
+    {
+        if (string.IsNullOrEmpty(file)) return null;
+
+        if (_primaryLoader != null)
+        {
+            var res = _primaryLoader.LoadFile(file);
+            if (res != null)
+            {
+                if (string.IsNullOrEmpty(res.FileName)) res.FileName = file;
+                return res;
+            }
+        }
+
+        string normalized = NormalizePath(file);
+        return TryReadResourceFromPackages(normalized)
+            ?? (!normalized.EndsWith("_c", StringComparison.OrdinalIgnoreCase)
+                ? TryReadResourceFromPackages(normalized + "_c")
+                : null);
+    }
+
+    public VrfResource LoadFileCompiled(string file)
+    {
+        if (string.IsNullOrEmpty(file)) return null;
+
+        if (_primaryLoader != null)
+        {
+            var res = _primaryLoader.LoadFileCompiled(file);
+            if (res != null)
+            {
+                if (string.IsNullOrEmpty(res.FileName)) res.FileName = EnsureCompiledPath(NormalizePath(file));
+                return res;
+            }
+        }
+
+        string compiledPath = EnsureCompiledPath(NormalizePath(file));
+        return TryReadResourceFromPackages(compiledPath);
+    }
+
+    public ShaderCollection LoadShader(string shaderName)
+    {
+        return _primaryLoader?.LoadShader(shaderName);
+    }
+
+    public Stream GetFileStream(string file)
+    {
+        if (string.IsNullOrEmpty(file)) return null;
+
+        var stream = _primaryLoader?.GetFileStream(file);
+        if (stream != null) return stream;
+
+        string normalized = NormalizePath(file);
+        byte[] bytes = TryReadBytesFromPackages(normalized);
+        return bytes != null ? new MemoryStream(bytes) : null;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        string norm = path.Replace('\\', '/').Trim();
+        while (norm.StartsWith("./", StringComparison.Ordinal)) norm = norm.Substring(2);
+        return norm.TrimStart('/');
+    }
+
+    private static string EnsureCompiledPath(string normalized)
+    {
+        return normalized.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? normalized : normalized + "_c";
+    }
+
+    private VrfResource TryReadResourceFromPackages(string path)
+    {
+        byte[] bytes = TryReadBytesFromPackages(path);
+        if (bytes == null) return null;
+
+        var res = new VrfResource
+        {
+            FileName = path
+        };
+        res.Read(new MemoryStream(bytes));
+        return res;
+    }
+
+    private byte[] TryReadBytesFromPackages(string path)
+    {
+        if (_addonPackage != null)
+        {
+            var entry = _addonPackage.FindEntry(path);
+            if (entry != null)
+            {
+                _addonPackage.ReadEntry(entry, out var bytes);
+                return bytes;
+            }
+        }
+
+        if (_basePackage != null)
+        {
+            lock (_basePackage)
+            {
+                var entry = _basePackage.FindEntry(path);
+                if (entry != null)
+                {
+                    _basePackage.ReadEntry(entry, out var bytes);
+                    return bytes;
+                }
+            }
+        }
+
+        if (_corePackage != null)
+        {
+            lock (_corePackage)
+            {
+                var entry = _corePackage.FindEntry(path);
+                if (entry != null)
+                {
+                    _corePackage.ReadEntry(entry, out var bytes);
+                    return bytes;
+                }
+            }
+        }
+
+        return null;
+    }
+}
+
 public static class ParticleHierarchyDefinitionLoader
 {
     public static Action<string> LogCallback { get; set; } = GD.Print;
+
+    public static ParticleSystemSimulation CreateVrfSimulation(
+        string vpcfPath,
+        IFileLoader fileLoader,
+        Package basePackage,
+        Package addonPackage,
+        out ParticleSystemDefinition rootDefinition,
+        out IFileLoader compositeLoader)
+    {
+        rootDefinition = null;
+        compositeLoader = new CompositeParticleFileLoader(fileLoader, basePackage, addonPackage);
+        if (string.IsNullOrEmpty(vpcfPath)) return null;
+
+        try
+        {
+            string normalized = vpcfPath.Replace('\\', '/').TrimStart('/');
+            using var res = compositeLoader.LoadFileCompiled(normalized);
+            if (res?.DataBlock is not ParticleSystem particleSystem)
+            {
+                return null;
+            }
+
+            var rootSim = new ParticleSystemSimulation(particleSystem, compositeLoader);
+            rootDefinition = VpcfDefinitionParser.ParseFromUpgradedData(normalized, rootSim.Definition);
+            return rootSim;
+        }
+        catch (Exception ex)
+        {
+            LogCallback?.Invoke($"[ParticleHierarchyDefinitionLoader] Failed to create VRF ParticleSystemSimulation for {vpcfPath}: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static List<(ParticleSystemSimulation Sim, ParticleSystemDefinition Def, float Delay, bool IsEndCap)> FlattenVrfSimulation(
+        ParticleSystemSimulation rootSim,
+        string rootVpcfPath)
+    {
+        var list = new List<(ParticleSystemSimulation Sim, ParticleSystemDefinition Def, float Delay, bool IsEndCap)>();
+        if (rootSim == null) return list;
+
+        void Traverse(ParticleSystemSimulation current, string vpcfPath, float accumulatedDelay, bool isEndCap)
+        {
+            string rawPath = !string.IsNullOrEmpty(current.Name) && current.Name != "<unnamed>" ? current.Name : vpcfPath;
+            string resolvedPath = StripCompiledSuffix(rawPath);
+            var def = VpcfDefinitionParser.ParseFromUpgradedData(resolvedPath, current.Definition);
+            list.Add((current, def, accumulatedDelay, isEndCap));
+
+            var childrenArr = current.Definition?.GetArray("m_Children");
+            int metaCursor = 0;
+
+            foreach (var childSim in current.Children)
+            {
+                float childDelay = 0.0f;
+                bool childEndCap = false;
+                string childRefPath = childSim.Name ?? string.Empty;
+
+                if (childrenArr != null)
+                {
+                    string childBase = StripCompiledSuffix(childSim.Name);
+                    for (int i = metaCursor; i < childrenArr.Count; i++)
+                    {
+                        var childKv = childrenArr[i];
+                        if (childKv == null) continue;
+                        if (childKv.GetBooleanProperty("m_bDisableChild")) continue;
+
+                        string refPath = childKv.GetStringProperty("m_ChildRef") ?? string.Empty;
+                        if (string.Equals(StripCompiledSuffix(refPath), childBase, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(childBase))
+                        {
+                            childDelay = childKv.GetFloatProperty("m_flDelay");
+                            childEndCap = childKv.GetBooleanProperty("m_bEndCap");
+                            if (!string.IsNullOrEmpty(refPath)) childRefPath = refPath;
+                            metaCursor = i + 1;
+                            break;
+                        }
+                    }
+                }
+
+                Traverse(childSim, childRefPath, accumulatedDelay + childDelay, isEndCap || childEndCap);
+            }
+        }
+
+        Traverse(rootSim, rootVpcfPath, 0.0f, false);
+        return list;
+    }
+
+    private static string StripCompiledSuffix(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return string.Empty;
+        string norm = path.Replace('\\', '/').Trim().TrimStart('/');
+        return norm.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? norm.Substring(0, norm.Length - 2) : norm;
+    }
+
+    public static float[] ExtractSpriteSheetDurations(
+        string vtexPath,
+        IFileLoader fileLoader,
+        Package basePackage = null,
+        Package addonPackage = null)
+    {
+        if (string.IsNullOrEmpty(vtexPath)) return null;
+
+        try
+        {
+            var loader = fileLoader as CompositeParticleFileLoader ?? new CompositeParticleFileLoader(fileLoader, basePackage, addonPackage);
+            using var res = loader.LoadFileCompiled(vtexPath);
+            if (res?.DataBlock is not ValveResourceFormat.ResourceTypes.Texture vTex) return null;
+
+            var sheet = vTex.GetSpriteSheetData();
+            if (sheet == null || sheet.SequenceIdCount <= 0) return null;
+
+            var durations = new float[sheet.SequenceIdCount];
+            for (int id = 0; id < durations.Length; id++)
+            {
+                int index = sheet.GetSequenceIndex(id);
+                if (index >= 0 && index < sheet.Sequences.Length)
+                {
+                    durations[id] = sheet.Sequences[index].TotalTime;
+                }
+            }
+            return durations;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void ApplyRuntimeControlPointDefaults(ParticleSystemSimulation rootSim, ControlPointRegistry registry)
+    {
+        if (rootSim == null) return;
+
+        var configuredCps = new HashSet<int>();
+
+        // 1. Apply runtime/preview m_controlPointConfigurations drivers (matching ParticleSceneNode pattern)
+        var configs = rootSim.Definition?.GetArray("m_controlPointConfigurations");
+        if (configs != null && configs.Count > 0)
+        {
+            KVObject chosenConfig = configs[0];
+            foreach (var cfg in configs)
+            {
+                if (string.Equals(cfg.GetStringProperty("m_name"), "preview", StringComparison.OrdinalIgnoreCase))
+                {
+                    chosenConfig = cfg;
+                    break;
+                }
+            }
+
+            var drivers = chosenConfig?.GetArray("m_drivers");
+            if (drivers != null)
+            {
+                foreach (var driver in drivers)
+                {
+                    int cpIdx = driver.GetInt32Property("m_iControlPoint");
+                    var offsetArr = driver.GetFloatArray("m_vecOffset");
+                    var offsetSrc2 = offsetArr is { Length: >= 3 }
+                        ? new System.Numerics.Vector3(offsetArr[0], offsetArr[1], offsetArr[2])
+                        : System.Numerics.Vector3.Zero;
+
+                    var angArr = driver.GetFloatArray("m_angOffset");
+                    var angSrc2 = angArr is { Length: >= 3 }
+                        ? new System.Numerics.Vector3(angArr[0], angArr[1], angArr[2])
+                        : System.Numerics.Vector3.Zero;
+
+                    if (cpIdx == 0)
+                    {
+                        // CP0 placement comes from the active stage/hero socket; record orientation offset if any
+                        if (angSrc2 != System.Numerics.Vector3.Zero)
+                        {
+                            var q = Source2AnglesDegreesToQuaternion(angSrc2);
+                            rootSim.GetControlPoint(0).SetOrientation(
+                                System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitX, q),
+                                System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, q),
+                                System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitZ, q));
+                        }
+                        continue;
+                    }
+
+                    configuredCps.Add(cpIdx);
+                    var cp = rootSim.GetControlPoint(cpIdx);
+                    cp.Position = offsetSrc2;
+
+                    if (angSrc2 != System.Numerics.Vector3.Zero)
+                    {
+                        var q = Source2AnglesDegreesToQuaternion(angSrc2);
+                        cp.SetOrientation(
+                            System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitX, q),
+                            System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, q),
+                            System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitZ, q));
+                    }
+
+                    if (registry != null && (offsetSrc2 != System.Numerics.Vector3.Zero || angSrc2 != System.Numerics.Vector3.Zero))
+                    {
+                        registry.SetPosition(cpIdx, ParticleCoordUtils.Source2ToGodotPosition(offsetSrc2));
+                        if (angSrc2 != System.Numerics.Vector3.Zero)
+                        {
+                            registry.SetOrientation(cpIdx, ParticleCoordUtils.Source2ToGodotRotation(Source2AnglesDegreesToQuaternion(angSrc2)));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Apply preview non-zero color defaults for renderer m_nTintCP if unset
+        void ApplyTintCpDefaults(ParticleSystemSimulation sim)
+        {
+            var renderers = sim.Definition?.GetArray("m_Renderers");
+            if (renderers != null)
+            {
+                foreach (var r in renderers)
+                {
+                    if (r == null) continue;
+                    int tintCp = r.ContainsKey("m_nTintCP") ? r.GetInt32Property("m_nTintCP") : -1;
+                    if (tintCp > 0 && tintCp != 1 && tintCp != 10 && !configuredCps.Contains(tintCp))
+                    {
+                        var vrfCp = rootSim.GetControlPoint(tintCp);
+                        if (vrfCp.Position == System.Numerics.Vector3.Zero)
+                        {
+                            vrfCp.Position = new System.Numerics.Vector3(255.0f, 255.0f, 255.0f);
+                        }
+                    }
+                }
+            }
+
+            foreach (var child in sim.Children)
+            {
+                ApplyTintCpDefaults(child);
+            }
+        }
+
+        ApplyTintCpDefaults(rootSim);
+    }
+
+    private static System.Numerics.Quaternion Source2AnglesDegreesToQuaternion(System.Numerics.Vector3 pitchYawRollDeg)
+    {
+        const float deg2Rad = MathF.PI / 180.0f;
+        var mat = ParticleCoordUtils.Source2EulerRadiansToMatrix(
+            pitchYawRollDeg.X * deg2Rad,
+            pitchYawRollDeg.Y * deg2Rad,
+            pitchYawRollDeg.Z * deg2Rad);
+        return System.Numerics.Quaternion.Normalize(System.Numerics.Quaternion.CreateFromRotationMatrix(mat));
+    }
 
     public static ParticleSystemDefinition LoadHierarchy(
         string vpcfPath,

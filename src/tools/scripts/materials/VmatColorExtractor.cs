@@ -42,7 +42,8 @@ public record SelfIllumParams(
     bool IsEmissive,
     Color EmissionColor,
     float EnergyMultiplier,
-    string MaskTexturePath
+    string MaskTexturePath,
+    float AlbedoFactor = 1.0f
 );
 
 /// <summary>
@@ -205,16 +206,24 @@ public static class VmatColorExtractor
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
         string shaderLower = mat.ShaderName?.ToLowerInvariant() ?? "";
 
-        bool isGlass = (mat.IntParams.TryGetValue("F_GLASS", out long glassVal) && glassVal == 1) ||
-                       shaderLower.Contains("glass") ||
-                       vmatLower.Contains("glass") || vmatLower.Contains("lens") ||
-                       vmatLower.Contains("specs") || vmatLower.Contains("spectacle") ||
-                       (mat.IntParams.TryGetValue("F_WRITE_DEPTH_BEFORE_ALPHA_BLENDING", out long depthBlend) && depthBlend == 1 &&
-                        (vmatLower.Contains("trans") || vmatLower.Contains("headglass")));
+        bool isOverlay = shaderLower.Contains("citadel_overlay") ||
+                         (mat.IntParams.TryGetValue("F_OVERLAY", out long overlayVal) && overlayVal == 1) ||
+                         mat.VectorParams.ContainsKey("g_vColorTranslucencyInputRange") ||
+                         mat.VectorParams.ContainsKey("g_vColorTranslucencyOutputRange");
 
-        bool isTranslucent = (mat.IntParams.TryGetValue("F_TRANSLUCENT", out long transVal) && transVal == 1) || isGlass;
+        bool isGlass = !isOverlay &&
+                       ((mat.IntParams.TryGetValue("F_GLASS", out long glassVal) && glassVal == 1) ||
+                        shaderLower.Contains("glass") ||
+                        vmatLower.Contains("glass") || vmatLower.Contains("lens") ||
+                        vmatLower.Contains("specs") || vmatLower.Contains("spectacle") ||
+                        (mat.IntParams.TryGetValue("F_WRITE_DEPTH_BEFORE_ALPHA_BLENDING", out long depthBlend) && depthBlend == 1 &&
+                         (vmatLower.Contains("trans") || vmatLower.Contains("headglass"))));
 
-        float opacity = 0.55f;
+        bool isTranslucent = (mat.IntParams.TryGetValue("F_TRANSLUCENT", out long transVal) && transVal == 1) ||
+                             isGlass ||
+                             isOverlay;
+
+        float opacity = isGlass ? 0.55f : 1.0f;
         if (mat.FloatParams.TryGetValue("g_flOpacityScale1", out float op1) && op1 > 0.001f)
         {
             opacity = op1;
@@ -476,11 +485,16 @@ public static class VmatColorExtractor
             }
         }
 
+        float albedoFactor = 1.0f;
+        if (mat.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor1", out float af1)) albedoFactor = Mathf.Clamp(af1, 0.0f, 1.0f);
+        else if (mat.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor", out float af0)) albedoFactor = Mathf.Clamp(af0, 0.0f, 1.0f);
+
         return new SelfIllumParams(
             shouldEmit,
             emissionColor,
             illumScale,
-            hasValidIllumMask ? selfIllumMaskPath : null
+            hasValidIllumMask ? selfIllumMaskPath : null,
+            albedoFactor
         );
     }
 

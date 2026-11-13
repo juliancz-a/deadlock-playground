@@ -34,6 +34,8 @@ public partial class PlayerTabUI : VBoxContainer
     private Label _labelCharge;
     private Button _btnRelease;
     private CheckBox _chkAutoLoop;
+    private OptionButton _optVfxPlaybackMode;
+    private CheckBox _chkCollideWithFloor;
     private const bool _isIdleUnderlayEnabled = false;
     private CheckBox _chkInPlaceMotion;
     private bool _isInPlaceMotionEnabled = true;
@@ -518,6 +520,46 @@ public partial class PlayerTabUI : VBoxContainer
             }
         };
         actionGroup.AddChild(_chkAutoLoop);
+
+        var modeGroup = new VBoxContainer();
+        modeGroup.AddThemeConstantOverride("separation", 2);
+        modeGroup.AddChild(new Label
+        {
+            Text = "Playback Mode",
+            ThemeTypeVariation = "HeaderSmall"
+        });
+
+        _optVfxPlaybackMode = new OptionButton
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 28)
+        };
+        _optVfxPlaybackMode.AddItem("Normal", (int)VfxPlaybackMode.Normal);
+        _optVfxPlaybackMode.AddItem("Normal + Endcap", (int)VfxPlaybackMode.NormalWithEndCap);
+        _optVfxPlaybackMode.AddItem("Endcap Only", (int)VfxPlaybackMode.EndCapOnly);
+        _optVfxPlaybackMode.ItemSelected += (long idx) =>
+        {
+            if (_particleStage != null && _optVfxPlaybackMode != null)
+            {
+                var mode = (VfxPlaybackMode)_optVfxPlaybackMode.GetItemId((int)idx);
+                _particleStage.SetVfxPlaybackMode(mode);
+            }
+        };
+        modeGroup.AddChild(_optVfxPlaybackMode);
+        actionGroup.AddChild(modeGroup);
+
+        _chkCollideWithFloor = new CheckBox
+        {
+            Text = "Collide With Floor",
+            ButtonPressed = false,
+            TooltipText = "Enable particle collision against the horizontal stage floor plane (Z = 0)"
+        };
+        _chkCollideWithFloor.Toggled += (bool toggled) =>
+        {
+            _particleStage?.SetCollideWithFloor(toggled);
+        };
+        actionGroup.AddChild(_chkCollideWithFloor);
+
         _particleControlsGroup.AddChild(actionGroup);
 
         transport.AddChild(_particleControlsGroup);
@@ -587,6 +629,15 @@ public partial class PlayerTabUI : VBoxContainer
             if (_chkAutoLoop != null)
             {
                 _chkAutoLoop.SetPressedNoSignal(_particleStage.AutoChargeLoop);
+            }
+            if (_optVfxPlaybackMode != null)
+            {
+                int modeIdx = _optVfxPlaybackMode.GetItemIndex((int)_particleStage.PlaybackMode);
+                if (modeIdx >= 0) _optVfxPlaybackMode.Select(modeIdx);
+            }
+            if (_chkCollideWithFloor != null)
+            {
+                _chkCollideWithFloor.SetPressedNoSignal(_particleStage.CollideWithFloor);
             }
         }
         AnimationTransportService.Instance.SetParticleMode(true);

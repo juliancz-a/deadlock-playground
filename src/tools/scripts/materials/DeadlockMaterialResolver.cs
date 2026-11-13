@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 
@@ -246,6 +246,13 @@ public static class DeadlockMaterialResolver
         string mLower = meshName?.ToLowerInvariant() ?? "";
         string matLower = vmatPath?.ToLowerInvariant() ?? "";
         string rName = material.ResourceName?.ToLowerInvariant() ?? "";
+        string origShader = material.HasMeta("OriginalShader") ? ((string)material.GetMeta("OriginalShader") ?? "").ToLowerInvariant() : "";
+
+        // Overlay decals / translucent overlays (citadel_overlay.vfx) must preserve alpha blending
+        if (origShader.Contains("citadel_overlay"))
+        {
+            return true;
+        }
 
         // Built-in outline geometry and dev materials
         if (mLower.Contains("outline") || matLower.Contains("outline") ||

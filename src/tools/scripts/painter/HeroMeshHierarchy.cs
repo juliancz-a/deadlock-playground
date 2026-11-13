@@ -608,6 +608,7 @@ namespace DeadlockPlayground.Painter
             toonMat.SetShaderParameter("rim_smoothness", 0.2f);
             toonMat.SetShaderParameter("rim_blend", 1.0f);
             toonMat.SetShaderParameter("rim_mask_shadow", 1.0f);
+            global::Source2MaterialHelper.ApplyToonNprMetadata(toonMat, origMat);
 
             return (toonMat, outlineMat, false);
         }

@@ -1,6 +1,6 @@
 using System;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using DeadlockPlayground.Materials.Archetypes;
 
 namespace DeadlockPlayground.Materials.Heroes;

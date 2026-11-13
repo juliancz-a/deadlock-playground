@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using Godot;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Painter;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveKeyValue;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
@@ -791,9 +791,9 @@ namespace DeadlockPlayground.Importer
 
                     // 1. Decompile vanilla hero .vmdl_c via ValveResourceFormat.IO.ModelExtract
                     progress?.Report(new ExportProgressReport(0.30f, $"[INFO] Extracting authentic ModelDoc template from vanilla '{vmdlRel}_c' via ValveResourceFormat..."));
-                    var (decompiledVmdlText, extractedSubfiles, vrfBones) = DecompileVanillaHeroVmdl(bundle, vmdlRel + "_c", modelFolderRel);
+                    var (decompiledVmdlText, extractedSubfiles, vrfBones) = DecompileVanillaHeroVmdl(bundle, vmdlRel + "_c", modelFolderRel, reconstructSoftbody: false);
 
-                    // Write physics hull/mesh .dmx subfiles and any non-replaced weapon .dmx subfiles into contentModelDir
+                    // Write physics hull/mesh .dmx subfiles, cloth proxies (when enabled), and non-replaced weapon .dmx subfiles into contentModelDir
                     var writtenSubfileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     bool customReplacesWeapon = bundle.Submeshes.Any(sm => IsWeaponReplacementSubmesh(sm));
 
@@ -804,11 +804,12 @@ namespace DeadlockPlayground.Importer
                         string lowerLeaf = leafName.ToLowerInvariant();
 
                         bool isPhysicsShape = lowerLeaf.Contains("hull") || lowerLeaf.Contains("phys");
+                        bool isClothProxy = lowerLeaf.Contains("cloth_proxy");
                         bool isWeaponDmx = !customReplacesWeapon &&
                                            (lowerLeaf.Contains("gun") || lowerLeaf.Contains("weapon")) &&
                                            !lowerLeaf.Contains("_lod");
 
-                        if (isPhysicsShape || isWeaponDmx)
+                        if (isPhysicsShape || isClothProxy || isWeaponDmx)
                         {
                             string outSubPath = Path.Combine(contentModelDir, leafName);
                             File.WriteAllBytes(outSubPath, subBytes);
@@ -1076,10 +1077,19 @@ namespace DeadlockPlayground.Importer
         /// Opens the vanilla hero's .vmdl_c from OriginalHeroVmdlCBytes or Deadlock's pak01_dir.vpk
         /// and decompiles it via ValveResourceFormat.IO.ModelExtract.
         /// </summary>
-        private static (string DecompiledVmdl, Dictionary<string, byte[]> Subfiles, List<VmdlSkeletonBone> VrfBones) DecompileVanillaHeroVmdl(
+        private sealed class EmptyFileLoader : IFileLoader
+        {
+            public ValveResourceFormat.Resource LoadFile(string file) => null;
+            public ValveResourceFormat.Resource LoadFileCompiled(string file) => null;
+            public ValveResourceFormat.CompiledShader.ShaderCollection LoadShader(string shaderName) => null;
+            public Stream GetFileStream(string file) => null;
+        }
+
+        public static (string DecompiledVmdl, Dictionary<string, byte[]> Subfiles, List<VmdlSkeletonBone> VrfBones) DecompileVanillaHeroVmdl(
             CustomModelExportBundle bundle,
             string vmdlCPath,
-            string modelFolderRel)
+            string modelFolderRel,
+            bool reconstructSoftbody = false)
         {
             var subfiles = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var vrfBones = new List<VmdlSkeletonBone>();
@@ -1152,7 +1162,12 @@ namespace DeadlockPlayground.Importer
                         }
                     }
 
-                    var extractor = new ModelExtract(vrfResource, fileLoader);
+                    IFileLoader effectiveLoader = (IFileLoader)fileLoader ?? new EmptyFileLoader();
+                    var extractor = new ModelExtract(vrfResource, effectiveLoader)
+                    {
+                        Type = ModelExtract.ModelExtractType.Default,
+                        ReconstructSoftbody = reconstructSoftbody
+                    };
                     extractor.AnimationsToExtract.Clear();
                     using var contentFile = extractor.ToContentFile();
                     if (contentFile.Data != null && contentFile.Data.Length > 0)
@@ -1170,7 +1185,9 @@ namespace DeadlockPlayground.Importer
                         {
                             if (sf?.Extract == null || string.IsNullOrEmpty(sf.FileName)) continue;
                             string fn = sf.FileName;
-                            if (fn.Contains("_lod", StringComparison.OrdinalIgnoreCase) || fn.Contains("cloth_proxy", StringComparison.OrdinalIgnoreCase))
+                            if (fn.Contains("_lod", StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            if (!reconstructSoftbody && fn.Contains("cloth_proxy", StringComparison.OrdinalIgnoreCase))
                                 continue;
                             try
                             {
@@ -1540,8 +1557,8 @@ namespace DeadlockPlayground.Importer
 
                 foreach (var (cls, blockText) in blocks)
                 {
-                    // Strip legacy AnimGraph 1 AnimationList and vanilla cloth proxy blocks
-                    if (cls == "AnimationList" || cls == "ClothProxyMeshList" || cls == "Softbody")
+                    // Strip legacy AnimGraph 1 AnimationList; softbody/cloth blocks are omitted natively when ModelExtract.ReconstructSoftbody == false
+                    if (cls == "AnimationList")
                         continue;
 
                     if (!includeAnimGraph2Nodes && (cls == "NmSkeletonList" || cls == "AnimGraph2List"))

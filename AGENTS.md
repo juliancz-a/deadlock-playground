@@ -11,9 +11,9 @@ Always consult this guide before implementing new features, modifying shaders, a
 | Component | Specification | Technical Notes |
 |---|---|---|
 | **Game Engine** | **Godot Engine 4.7.2 (.NET / C#)** | Project SDK: `Godot.NET.Sdk/4.7.2` configured in `src/Deadlock_Playground.csproj` (Godot engine root is `src/`). |
-| **Runtime Target** | **.NET 10.0 (`net10.0`)** | High-performance C# 13 runtime (with `net9.0` condition for Android). |
+| **Runtime Target** | **.NET 11.0 (`net11.0`)** | High-performance C# runtime aligned with `ValveResourceFormat 21.1.7798` (`lib/net11.0`) and built-in .NET 11 Zstandard compression (with `net9.0` condition for Android). |
 | **Language Stack** | **C# 13 + GLSL (`.gdshader` / compute `.glsl`) + GDScript** | GDScript is used only for the `gpu_texture_painter` addon pipeline; all core logic is C#. |
-| **Unsafe Blocks** | `AllowUnsafeBlocks = true` | Unmanaged pointers (`ulong*`, `Half*`) used in `SkinLayerManager.cs` for 60 FPS 4K compositing. |
+| **Unsafe Blocks** | `AllowUnsafeBlocks = true` | Unmanaged pointers (`ulong*`, `Half*`, `byte*`) used in `SkinLayerManager.cs`, `Source2TextureLoader.cs`, and `SkinExporter.cs`. |
 | **Rendering Backend** | **Forward+ (Direct3D 12 on Windows / Vulkan)** | Driver set to `d3d12` via `rendering_device/driver.windows="d3d12"` in `src/project.godot`. |
 | **Physics Engine** | **Jolt Physics** | Configured via `3d/physics_engine="Jolt Physics"` in `src/project.godot`. |
 | **Physics Layer 32** | `"Bone Picking"` | Reserved for bone gizmo selection raycasts. |
@@ -22,9 +22,10 @@ Always consult this guide before implementing new features, modifying shaders, a
 | **UI Theme** | `res://assets/themes/PlaygroundTheme.tres` | Global custom theme applied in `src/project.godot`. |
 
 ### Primary NuGet Dependencies
-- **`ValveResourceFormat` (`20.0.7461`)**: Reverse-engineered Source 2 parser by SteamDatabase (local nupkg compiled from commit `d53ad1c63`). Ingests compiled `.vmdl_c`, `.vmat_c`, `.vtex_c`, `.vanim_c`, supporting Source 2 KV3 uint32 constants (`datatype: 26 (0x1A) / 27`).
-- **`ValvePak` (`6.0.0.182`)**: Reads, indexes, extracts, and packages Source 2 VPK archives (`pak01_dir.vpk` and mod `pak##_dir.vpk` files). Uses namespace `ValvePak`.
-- **`ValveKeyValue` (`0.71.0.528`)**: High-speed KeyValues3 (KV3) deserializer/serializer used in material analysis and mod packaging.
+- **`ValveResourceFormat` (`21.1.7798`)**: Reverse-engineered Source 2 parser, decompiler, and runtime simulator by SteamDatabase (`lib/net11.0/ValveResourceFormat.dll`). Ingests compiled `.vmdl_c`, `.vmat_c`, `.vtex_c`, `.vanim_c`, `.vnmclip_c`, `.vdata_c`, and `.vpcf_c` directly from Deadlock VPKs, provides SoA `ParticleSystemSimulation`, `ModelExtract`, `BoneConstraintBase`/`FeModel` constraint data, `SharpGLTF.Core` (`1.0.7`) alignment, and built-in .NET 11 Zstandard support (no `ZstdSharp` package needed).
+- **`ValvePak` (`7.2.0.221`)**: Reads, indexes, extracts, and packages Source 2 VPK archives (`pak01_dir.vpk` and mod `pak##_dir.vpk` files). Uses namespace `ValvePak` (upgraded from `SteamDatabase.ValvePak` in 6.x) and provides `GetMemoryMappedStreamIfPossible(...)` for zero-copy streaming reads.
+- **`ValveKeyValue` (`0.80.0.542`)**: High-speed KeyValues3 (KV3) deserializer/serializer used in material analysis, particle definition parsing, and mod packaging.
+- **`SharpCompress` (`0.50.4`)**: Archive/compression dependency configured in `src/Deadlock_Playground.csproj`.
 - **`nuget.config` Global Cache**: Configured to `globalPackagesFolder="D:\GameDev\.nuget_packages"` to store all packages on Drive D and prevent filling Drive C.
 
 ### Active Godot Plugins
@@ -80,9 +81,9 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Always write fallback discovery code: `GetNodeOrNull<T>(path) ?? FindChild(name, true, false) as T;`.
 
 ### B. Shaders & GPU Texture Painter Rules
-1. **Layer 21 Isolation**:
+1. **Visual Layer 21 Isolation**:
    - Visual Layer 21 (bit index 20, `1 << 20`) is used strictly by the `CameraBrush` orthographic culling mask.
-   - Any helper geometry (such as selection outline followers `_selectionOutlineMesh`, 3D ring gizmo, decal projectors) **must clear bit 20** (`Layers &= ~(1 << 20)`) so the painting camera does not capture or stamp over them.
+   - Any helper geometry (such as selection outline followers `_selectionOutlineMesh`, 3D ring gizmo, decal projectors) **and all particle stage renderers** (`ParticleMultiMeshRenderer`'s `MultiMeshInstance3D`, `_ropeMeshInstance`, `_beamMeshInstance`, and pooled `OmniLight3D` nodes) **must clear bit 20** (`Layers &= ~(1u << 20)` and `LightCullMask &= ~(1u << 20)`) so the painting camera does not capture, light, or stamp over them.
 2. **Linear vs. sRGB Color Space Discipline**:
    - UI color pickers supply colors in standard sRGB.
    - The texture atlas (`GpuData`) is stored in **Linear HDR half-float format**.
@@ -140,7 +141,14 @@ In-depth technical guides are maintained in the [`docs/`](file:///d:/GameDev/dea
    - Never assume a single top root via `.FirstOrDefault(b => b.Parent == null)`. Apply `SourceToGltfRotation` (-90° X) to **all parentless joints** (`isParentless = (vrfBone.Parent == null)`).
 8. **AnimGraph Secondary Skeleton Retargeting (`.vnmskel`)**:
    - Locomotion, traversal, and action sequences targeting secondary `.vnmskel` skeletons must be retargeted via `SkeletonRetargeter` against the model skeleton.
+   - When retargeting an additive clip (`isAdditive == true`), decode into `secFrame.ClearToIdentity()` and invoke `info.VrfAnimation.ComposeAdditiveOverBindPose(secFrame.Bones, secondarySkel)` prior to `retargeter.Retarget(secFrame, modelWorld)`, then compose non-root bone deltas against the idle base pose.
    - Decomposing retargeted world matrices $M_{\text{local}} = M_{\text{world}}[b] \times (M_{\text{world}}[p])^{-1}$ delivers an exact match (0.0° error) against VRF's glTF-baked oracle.
+9. **Source 2 Bone Constraints, Jiggle Bones & `AnimationBase` (`VRF 21.1`)**:
+   - Models declaring `vrfModel.BoneConstraints` or physics `FeModel.JiggleBones` attach `Source2BoneConstraintDriver` (`ProcessPriority = 50`) to evaluate all 11 ModelDoc constraint types (`BoneConstraintSolverCore`), jiggle spring physics (`JiggleBoneSolverCore`), and constraint-driven morph blend shapes after `AnimationPlayer` and `SkeletonGizmoManager` run.
+   - VRF 21.1 exposes all model animations as `AnimationBase` (replacing concrete `Animation` in `GetAllAnimations`). Keep `AnimationBase.IsAdditive` as the single source of truth.
+10. **VRF 21.1 Particle Simulation, `ModelExtract` & Lock-Free Deferred VPK Streaming**:
+   - Compiled `.vpcf_c` systems run through VRF's SoA `ParticleSystemSimulation` (`ParticleHierarchyDefinitionLoader.CreateVrfSimulation` + `CompositeParticleFileLoader`) with `GodotParticleCollision` (`IParticleCollision`) and `GodotParticleModelObject` (`IParticleModelObject` via `ModelAttachmentRegistry.TryGetHeroModel`), synced into `ParticleSystemInstance` / `CpuParticleSimulator` (`VfxPlaybackMode`).
+   - Vanilla `.vmdl_c` decompilation uses `ModelExtract` (`ReconstructSoftbody` toggle and `EmptyFileLoader` fallback when standalone); VPK reading opens archives with `FileShare.ReadWrite | FileShare.Delete` (`OpenSharedReadPackage`) and parses resources via `GetMemoryMappedStreamIfPossible(...)` + `ReadMode.Deferred`.
 
 ### E. Mandatory Documentation Synchronization & Maintenance
 > [!IMPORTANT]

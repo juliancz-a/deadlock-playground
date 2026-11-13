@@ -3,10 +3,11 @@ using System.IO;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using ValveResourceFormat.Serialization.KeyValues;
+using ValveResourceFormat.TextureDecoders;
 using ValveResourceFormat.IO;
 using SkiaSharp;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
@@ -37,7 +38,13 @@ public static class Source2TextureLoader
     /// <summary>
     /// Retrieves a cached texture or extracts it from the VPK (checking active addon first, then base game).
     /// </summary>
-    public static ImageTexture GetOrLoadTexture(Package package, string internalPath, bool forceOpaque, Package addonPackage = null)
+    public static ImageTexture GetOrLoadTexture(
+        Package package,
+        string internalPath,
+        bool forceOpaque,
+        Package addonPackage = null,
+        Vector2? alphaRemapInRange = null,
+        Vector2? alphaRemapOutRange = null)
     {
         if (string.IsNullOrWhiteSpace(internalPath)) return null;
 
@@ -48,7 +55,10 @@ public static class Source2TextureLoader
         internalPath = internalPath.Trim('"', '\'', ' ');
 
         string addonTag = addonPackage != null ? $"_addon_{addonPackage.FileName.GetHashCode():X}" : "";
-        string cacheKey = internalPath + (forceOpaque ? "_opq" : "") + addonTag;
+        string remapTag = (alphaRemapInRange.HasValue || alphaRemapOutRange.HasValue)
+            ? $"_remap_{alphaRemapInRange?.X ?? 0f:F4}_{alphaRemapInRange?.Y ?? 1f:F4}_{alphaRemapOutRange?.X ?? 0f:F4}_{alphaRemapOutRange?.Y ?? 1f:F4}"
+            : "";
+        string cacheKey = internalPath + (forceOpaque ? "_opq" : "") + addonTag + remapTag;
         if (_textureCache.TryGetValue(cacheKey, out var cached))
         {
             if (GodotObject.IsInstanceValid(cached))
@@ -58,7 +68,7 @@ public static class Source2TextureLoader
             _textureCache.Remove(cacheKey);
         }
 
-        var tex = ExtractVtexToGodot(package, internalPath, maxDimension: 4096, forceOpaque: forceOpaque, addonPackage: addonPackage);
+        var tex = ExtractVtexToGodot(package, internalPath, maxDimension: 4096, forceOpaque: forceOpaque, addonPackage: addonPackage, alphaRemapInRange: alphaRemapInRange, alphaRemapOutRange: alphaRemapOutRange);
         if (tex != null)
         {
             tex.ResourceName = internalPath;
@@ -152,7 +162,14 @@ public static class Source2TextureLoader
     /// Priority 2: Base Game VPK.
     /// Converts Skia Bgra8888 -> Rgba8888 and handles forceOpaque vs alpha cutout preservation.
     /// </summary>
-    public static ImageTexture ExtractVtexToGodot(Package package, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = true, Package addonPackage = null)
+    public static ImageTexture ExtractVtexToGodot(
+        Package package,
+        string vtexInternalPath,
+        int maxDimension = 4096,
+        bool forceOpaque = true,
+        Package addonPackage = null,
+        Vector2? alphaRemapInRange = null,
+        Vector2? alphaRemapOutRange = null)
     {
         if (package == null && addonPackage == null) return null;
         if (string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
@@ -203,23 +220,29 @@ public static class Source2TextureLoader
             return null;
         }
 
-        targetPackage.ReadEntry(entry, out byte[] data);
-        using var resource = new ValveResourceFormat.Resource();
-        using var ms = new MemoryStream(data);
-        resource.Read(ms);
+        using var stream = targetPackage.GetMemoryMappedStreamIfPossible(entry);
+        using var resource = new ValveResourceFormat.Resource { FileName = vtexInternalPath };
+        resource.Read(stream, leaveOpen: true, mode: ReadMode.Deferred);
 
-        if (resource.ResourceType != ResourceType.Texture)
+        if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture texture)
         {
             return null;
         }
 
-        return DecodeTextureToGodot((ValveResourceFormat.ResourceTypes.Texture)resource.DataBlock, vtexInternalPath, maxDimension, forceOpaque);
+        bool averageAnisoRg = IsAnisoRoughnessRg(resource);
+        return DecodeTextureToGodot(texture, vtexInternalPath, maxDimension, forceOpaque, averageAnisoRg, alphaRemapInRange, alphaRemapOutRange);
     }
 
     /// <summary>
     /// Extracts a .vtex_c file from an IFileLoader into a Godot ImageTexture.
     /// </summary>
-    public static ImageTexture ExtractVtexToGodot(IFileLoader fileLoader, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = false)
+    public static ImageTexture ExtractVtexToGodot(
+        IFileLoader fileLoader,
+        string vtexInternalPath,
+        int maxDimension = 4096,
+        bool forceOpaque = false,
+        Vector2? alphaRemapInRange = null,
+        Vector2? alphaRemapOutRange = null)
     {
         if (fileLoader == null || string.IsNullOrWhiteSpace(vtexInternalPath)) return null;
 
@@ -266,13 +289,59 @@ public static class Source2TextureLoader
                 return null;
             }
 
-            return DecodeTextureToGodot(texture, vtexInternalPath, maxDimension, forceOpaque);
+            return DecodeTextureToGodot(
+                texture,
+                vtexInternalPath,
+                maxDimension,
+                forceOpaque,
+                IsAnisoRoughnessRg(resource),
+                alphaRemapInRange,
+                alphaRemapOutRange);
         }
     }
 
-    public static ImageTexture DecodeTextureToGodot(ValveResourceFormat.ResourceTypes.Texture texture, string vtexInternalPath, int maxDimension = 4096, bool forceOpaque = false)
+    private static bool IsAnisoRoughnessRg(ValveResourceFormat.Resource resource)
+    {
+        var deps = resource?.EditInfo?.SpecialDependencies;
+        if (deps == null) return false;
+        for (int i = 0; i < deps.Count; i++)
+        {
+            var dep = deps[i];
+            if (dep.CompilerIdentifier == "CompileTexture" &&
+                dep.String == "Texture Compiler Version Mip AnisoRoughness_RG")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static byte RemapAlphaByte(byte a, Vector2 inRange, Vector2 outRange)
+    {
+        float alpha01 = a / 255f;
+        float span = inRange.Y - inRange.X;
+        float normalized = Mathf.Clamp((alpha01 - inRange.X) / (MathF.Abs(span) < 1e-6f ? 1f : span), 0f, 1f);
+        float remapped = Mathf.Clamp(normalized * (outRange.Y - outRange.X) + outRange.X, 0f, 1f);
+        return (byte)Mathf.RoundToInt(remapped * 255f);
+    }
+
+    public static ImageTexture DecodeTextureToGodot(
+        ValveResourceFormat.ResourceTypes.Texture texture,
+        string vtexInternalPath,
+        int maxDimension = 4096,
+        bool forceOpaque = false,
+        bool averageAnisoRg = false,
+        Vector2? alphaRemapInRange = null,
+        Vector2? alphaRemapOutRange = null)
     {
         if (texture == null) return null;
+
+        averageAnisoRg |= IsAnisoRoughnessRg(texture.Resource);
+        TextureCodec codec = texture.RetrieveCodecFromResourceEditInfo();
+        bool hasBlueToAlphaRoughness = codec.HasFlag(TextureCodec.BlueToAlpha);
+        bool hasAlphaRemap = !hasBlueToAlphaRoughness && !averageAnisoRg && (alphaRemapInRange.HasValue || alphaRemapOutRange.HasValue);
+        Vector2 inRange = alphaRemapInRange ?? new Vector2(0f, 1f);
+        Vector2 outRange = alphaRemapOutRange ?? new Vector2(0f, 1f);
 
         uint maxMip = texture.NumMipLevels > 0 ? (uint)(texture.NumMipLevels - 1) : 0;
         uint mipLevel = 0;
@@ -308,6 +377,8 @@ public static class Source2TextureLoader
         bool isSparkle = vtexInternalPath.Contains("sparkle", StringComparison.OrdinalIgnoreCase) ||
                          vtexInternalPath.Contains("lash_sparkles", StringComparison.OrdinalIgnoreCase);
         bool isAlphaCardTexture = !forceOpaque ||
+                                  hasBlueToAlphaRoughness ||
+                                  hasAlphaRemap ||
                                   isSparkle ||
                                   vtexInternalPath.Contains("fur", StringComparison.OrdinalIgnoreCase) ||
                                   vtexInternalPath.Contains("geist_shawl_test", StringComparison.OrdinalIgnoreCase) ||
@@ -322,6 +393,7 @@ public static class Source2TextureLoader
         int width = skBitmap.Width;
         int height = skBitmap.Height;
         int pixelCount = width * height;
+        int rowBytes = skBitmap.RowBytes;
         IntPtr pixelsPtr = skBitmap.GetPixels();
         int byteCount = skBitmap.ByteCount;
         if (pixelsPtr == IntPtr.Zero || byteCount <= 0 || width <= 0 || height <= 0) return null;
@@ -330,103 +402,187 @@ public static class Source2TextureLoader
         byte[] rgbaBytes = new byte[pixelCount * 4];
 
         // Format 1: 32-bit BGRA (Most common Source 2 format from VRF on Windows)
-        if (skBitmap.ColorType == SKColorType.Bgra8888 && byteCount >= pixelCount * 4)
+        if (skBitmap.ColorType == SKColorType.Bgra8888 && rowBytes >= width * 4 && byteCount >= rowBytes * height)
         {
-            byte[] rawBytes = new byte[pixelCount * 4];
-            Marshal.Copy(pixelsPtr, rawBytes, 0, rawBytes.Length);
-
             unsafe
             {
-                fixed (byte* srcPtr = rawBytes)
+                byte* srcBase = (byte*)pixelsPtr;
                 fixed (byte* dstPtr = rgbaBytes)
                 {
-                    uint* s32 = (uint*)srcPtr;
                     uint* d32 = (uint*)dstPtr;
 
-                    if (!isAlphaCardTexture)
+                    if (hasBlueToAlphaRoughness)
                     {
-                        for (int i = 0; i < pixelCount; i++)
+                        for (int y = 0; y < height; y++)
                         {
-                            uint c = s32[i];
-                            byte b = (byte)(c & 0xFF);
-                            byte g = (byte)((c >> 8) & 0xFF);
-                            byte r = (byte)((c >> 16) & 0xFF);
-                            byte a = forceOpaque ? (byte)0xFF : (byte)((c >> 24) & 0xFF);
-                            d32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            int rowOffset = y * width;
+                            for (int x = 0; x < width; x++)
+                            {
+                                uint c = s32[x];
+                                byte b = (byte)(c & 0xFF);
+                                byte g = (byte)((c >> 8) & 0xFF);
+                                byte r = (byte)((c >> 16) & 0xFF);
+                                byte a = (byte)((c >> 24) & 0xFF);
+                                d32[rowOffset + x] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            }
+                        }
+                    }
+                    else if (averageAnisoRg)
+                    {
+                        for (int y = 0; y < height; y++)
+                        {
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            int rowOffset = y * width;
+                            for (int x = 0; x < width; x++)
+                            {
+                                uint c = s32[x];
+                                byte g = (byte)((c >> 8) & 0xFF);
+                                byte r = (byte)((c >> 16) & 0xFF);
+                                byte avg = (byte)((r + g + 1) / 2);
+                                byte a = forceOpaque ? (byte)0xFF : (byte)((c >> 24) & 0xFF);
+                                d32[rowOffset + x] = (uint)(avg | (avg << 8) | (avg << 16) | (a << 24));
+                            }
+                        }
+                    }
+                    else if (!isAlphaCardTexture)
+                    {
+                        for (int y = 0; y < height; y++)
+                        {
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            int rowOffset = y * width;
+                            for (int x = 0; x < width; x++)
+                            {
+                                uint c = s32[x];
+                                byte b = (byte)(c & 0xFF);
+                                byte g = (byte)((c >> 8) & 0xFF);
+                                byte r = (byte)((c >> 16) & 0xFF);
+                                byte a = forceOpaque ? (byte)0xFF : (byte)((c >> 24) & 0xFF);
+                                d32[rowOffset + x] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            }
+                        }
+                    }
+                    else if (hasAlphaRemap)
+                    {
+                        for (int y = 0; y < height; y++)
+                        {
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            int rowOffset = y * width;
+                            for (int x = 0; x < width; x++)
+                            {
+                                uint c = s32[x];
+                                byte b = (byte)(c & 0xFF);
+                                byte g = (byte)((c >> 8) & 0xFF);
+                                byte r = (byte)((c >> 16) & 0xFF);
+                                byte a = RemapAlphaByte((byte)((c >> 24) & 0xFF), inRange, outRange);
+                                d32[rowOffset + x] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            }
                         }
                     }
                     else
                     {
                         bool hasVisiblePixels = false;
-                        for (int i = 0; i < pixelCount; i++)
+                        for (int y = 0; y < height && !hasVisiblePixels; y++)
                         {
-                            uint c = s32[i];
-                            byte a = (byte)((c >> 24) & 0xFF);
-                            if (a > 12) { hasVisiblePixels = true; break; }
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            for (int x = 0; x < width; x++)
+                            {
+                                byte a = (byte)((s32[x] >> 24) & 0xFF);
+                                if (a > 12) { hasVisiblePixels = true; break; }
+                            }
                         }
 
-                        for (int i = 0; i < pixelCount; i++)
+                        for (int y = 0; y < height; y++)
                         {
-                            uint c = s32[i];
-                            byte b = (byte)(c & 0xFF);
-                            byte g = (byte)((c >> 8) & 0xFF);
-                            byte r = (byte)((c >> 16) & 0xFF);
-                            byte a = (byte)((c >> 24) & 0xFF);
-                            if (!hasVisiblePixels) a = 0xFF;
-                            d32[i] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            int rowOffset = y * width;
+                            for (int x = 0; x < width; x++)
+                            {
+                                uint c = s32[x];
+                                byte b = (byte)(c & 0xFF);
+                                byte g = (byte)((c >> 8) & 0xFF);
+                                byte r = (byte)((c >> 16) & 0xFF);
+                                byte a = hasVisiblePixels ? (byte)((c >> 24) & 0xFF) : (byte)0xFF;
+                                d32[rowOffset + x] = (uint)(r | (g << 8) | (b << 16) | (a << 24));
+                            }
                         }
                     }
                 }
             }
         }
         // Format 2: 32-bit RGBA
-        else if (skBitmap.ColorType == SKColorType.Rgba8888 && byteCount >= pixelCount * 4)
+        else if (skBitmap.ColorType == SKColorType.Rgba8888 && rowBytes >= width * 4 && byteCount >= rowBytes * height)
         {
-            Marshal.Copy(pixelsPtr, rgbaBytes, 0, rgbaBytes.Length);
             unsafe
             {
+                byte* srcBase = (byte*)pixelsPtr;
                 fixed (byte* ptr = rgbaBytes)
                 {
                     uint* d32 = (uint*)ptr;
-                    if (!isAlphaCardTexture && forceOpaque)
+                    bool hasVisiblePixels = !isAlphaCardTexture || hasBlueToAlphaRoughness || hasAlphaRemap;
+                    if (isAlphaCardTexture && !hasBlueToAlphaRoughness && !hasAlphaRemap)
                     {
-                        for (int i = 0; i < pixelCount; i++)
+                        hasVisiblePixels = false;
+                        for (int y = 0; y < height && !hasVisiblePixels; y++)
                         {
-                            d32[i] |= 0xFF000000;
+                            uint* s32 = (uint*)(srcBase + y * rowBytes);
+                            for (int x = 0; x < width; x++)
+                            {
+                                if (((s32[x] >> 24) & 0xFF) > 12) { hasVisiblePixels = true; break; }
+                            }
                         }
                     }
-                    else if (isAlphaCardTexture)
+
+                    for (int y = 0; y < height; y++)
                     {
-                        bool hasVisiblePixels = false;
-                        for (int i = 0; i < pixelCount; i++)
+                        uint* s32 = (uint*)(srcBase + y * rowBytes);
+                        int rowOffset = y * width;
+                        for (int x = 0; x < width; x++)
                         {
-                            if (((d32[i] >> 24) & 0xFF) > 12) { hasVisiblePixels = true; break; }
-                        }
-                        if (!hasVisiblePixels)
-                        {
-                            for (int i = 0; i < pixelCount; i++) d32[i] |= 0xFF000000;
+                            uint c = s32[x];
+                            if (averageAnisoRg)
+                            {
+                                byte r = (byte)(c & 0xFF);
+                                byte g = (byte)((c >> 8) & 0xFF);
+                                byte avg = (byte)((r + g + 1) / 2);
+                                byte a = forceOpaque ? (byte)0xFF : (byte)((c >> 24) & 0xFF);
+                                c = (uint)(avg | (avg << 8) | (avg << 16) | (a << 24));
+                            }
+                            else if (hasAlphaRemap)
+                            {
+                                byte a = RemapAlphaByte((byte)((c >> 24) & 0xFF), inRange, outRange);
+                                c = (c & 0x00FFFFFFu) | ((uint)a << 24);
+                            }
+                            else if (!hasBlueToAlphaRoughness && ((!isAlphaCardTexture && forceOpaque) || (isAlphaCardTexture && !hasVisiblePixels)))
+                            {
+                                c |= 0xFF000000u;
+                            }
+                            d32[rowOffset + x] = c;
                         }
                     }
                 }
             }
         }
         // Format 3: 8-bit Single Channel (Gray8 or Alpha8 - masks like lash_sparkles_mask, jitter_mask, etc.)
-        else if ((skBitmap.ColorType == SKColorType.Gray8 || skBitmap.ColorType == SKColorType.Alpha8) && byteCount >= pixelCount)
+        else if ((skBitmap.ColorType == SKColorType.Gray8 || skBitmap.ColorType == SKColorType.Alpha8) && rowBytes >= width && byteCount >= rowBytes * height)
         {
-            byte[] rawBytes = new byte[pixelCount];
-            Marshal.Copy(pixelsPtr, rawBytes, 0, rawBytes.Length);
-
             unsafe
             {
-                fixed (byte* srcPtr = rawBytes)
+                byte* srcBase = (byte*)pixelsPtr;
                 fixed (byte* dstPtr = rgbaBytes)
                 {
                     uint* d32 = (uint*)dstPtr;
-                    for (int i = 0; i < pixelCount; i++)
+                    for (int y = 0; y < height; y++)
                     {
-                        byte v = srcPtr[i];
-                        // Replicate value across R, G, B, and A so shaders sampling .r, .rgb, or .a get the exact mask value
-                        d32[i] = (uint)(v | (v << 8) | (v << 16) | (v << 24));
+                        byte* srcRow = srcBase + y * rowBytes;
+                        int rowOffset = y * width;
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte v = srcRow[x];
+                            byte a = hasAlphaRemap ? RemapAlphaByte(v, inRange, outRange) : v;
+                            // Replicate value across R, G, B (and A unless remapped) so shaders sampling .r, .rgb, or .a get the exact mask value
+                            d32[rowOffset + x] = (uint)(v | (v << 8) | (v << 16) | (a << 24));
+                        }
                     }
                 }
             }
@@ -445,20 +601,42 @@ public static class Source2TextureLoader
                         for (int x = 0; x < width; x++)
                         {
                             var col = skBitmap.GetPixel(x, y);
-                            byte a = (!isAlphaCardTexture && forceOpaque) ? (byte)0xFF : col.Alpha;
-                            d32[idx++] = (uint)(col.Red | (col.Green << 8) | (col.Blue << 16) | (a << 24));
+                            if (averageAnisoRg)
+                            {
+                                byte avg = (byte)((col.Red + col.Green + 1) / 2);
+                                byte a = forceOpaque ? (byte)0xFF : col.Alpha;
+                                d32[idx++] = (uint)(avg | (avg << 8) | (avg << 16) | (a << 24));
+                            }
+                            else
+                            {
+                                byte a = hasBlueToAlphaRoughness
+                                    ? col.Alpha
+                                    : hasAlphaRemap
+                                        ? RemapAlphaByte(col.Alpha, inRange, outRange)
+                                        : ((!isAlphaCardTexture && forceOpaque) ? (byte)0xFF : col.Alpha);
+                                d32[idx++] = (uint)(col.Red | (col.Green << 8) | (col.Blue << 16) | (a << 24));
+                            }
                         }
                     }
                 }
             }
         }
 
-        var godotImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, rgbaBytes);
+        using var godotImage = Image.CreateFromData(width, height, false, Image.Format.Rgba8, rgbaBytes);
+        rgbaBytes = null;
         godotImage.GenerateMipmaps();
         var imageTex = ImageTexture.CreateFromImage(godotImage);
         if (imageTex != null)
         {
             imageTex.ResourceName = vtexInternalPath;
+            if (hasBlueToAlphaRoughness)
+            {
+                imageTex.SetMeta("HasBlueToAlphaRoughness", true);
+            }
+            if (averageAnisoRg)
+            {
+                imageTex.SetMeta("IsAnisoRoughnessAveraged", true);
+            }
         }
         return imageTex;
     }
@@ -497,10 +675,9 @@ public static class Source2TextureLoader
 
         try
         {
-            targetPackage.ReadEntry(entry, out byte[] data);
-            using var resource = new ValveResourceFormat.Resource();
-            using var ms = new MemoryStream(data);
-            resource.Read(ms);
+            using var stream = targetPackage.GetMemoryMappedStreamIfPossible(entry);
+            using var resource = new ValveResourceFormat.Resource { FileName = vtexInternalPath };
+            resource.Read(stream, leaveOpen: true, mode: ReadMode.Deferred);
 
             if (resource.ResourceType != ResourceType.Texture) return null;
 
@@ -597,6 +774,7 @@ public static class Source2TextureLoader
         if (!searchPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) searchPath += "_c";
 
         ValveResourceFormat.Resource res = null;
+        Stream backingStream = null;
         try
         {
             if (fileLoader != null)
@@ -619,40 +797,39 @@ public static class Source2TextureLoader
 
             if (res == null && addonPackage != null)
             {
-                var entry = FindVtexEntry(addonPackage, searchPath);
-                if (entry != null)
-                {
-                    addonPackage.ReadEntry(entry, out var bytes);
-                    res = new ValveResourceFormat.Resource();
-                    res.Read(new MemoryStream(bytes));
-                }
+                res = OpenVtexResourceDeferred(addonPackage, searchPath, out backingStream);
             }
 
             if (res == null && basePackage != null)
             {
-                lock (basePackage)
-                {
-                    var entry = FindVtexEntry(basePackage, searchPath);
-                    if (entry != null)
-                    {
-                        basePackage.ReadEntry(entry, out var bytes);
-                        res = new ValveResourceFormat.Resource();
-                        res.Read(new MemoryStream(bytes));
-                    }
-                }
+                res = OpenVtexResourceDeferred(basePackage, searchPath, out backingStream);
             }
 
             if (res == null && CorePackage != null)
             {
-                lock (CorePackage)
+                res = OpenVtexResourceDeferred(CorePackage, searchPath, out backingStream);
+            }
+
+            if (res != null && res.DataBlock is ValveResourceFormat.ResourceTypes.Texture vTex)
+            {
+                var sheet = vTex.GetSpriteSheetData();
+                if (sheet != null && sheet.Sequences.Length > 0)
                 {
-                    var entry = FindVtexEntry(CorePackage, searchPath);
-                    if (entry != null)
+                    var rects = new Vector4[sheet.Sequences.Length];
+                    for (int i = 0; i < sheet.Sequences.Length; i++)
                     {
-                        CorePackage.ReadEntry(entry, out var bytes);
-                        res = new ValveResourceFormat.Resource();
-                        res.Read(new MemoryStream(bytes));
+                        var seq = sheet.Sequences[i];
+                        if (seq.Frames.Length > 0 && seq.Frames[0].Images.Length > 0)
+                        {
+                            var img = seq.Frames[0].Images[0];
+                            rects[i] = new Vector4(img.UncroppedMin.X, img.UncroppedMin.Y, img.UncroppedMax.X, img.UncroppedMax.Y);
+                        }
+                        else
+                        {
+                            rects[i] = new Vector4(0f, 0f, 1f, 1f);
+                        }
                     }
+                    return rects;
                 }
             }
         }
@@ -660,36 +837,36 @@ public static class Source2TextureLoader
         {
             GD.PrintErr($"[TextureLoader] Error reading spritesheet metadata ({vtexPath}): {ex.Message}");
         }
-
-        if (res != null)
+        finally
         {
-            using (res)
-            {
-                if (res.DataBlock is ValveResourceFormat.ResourceTypes.Texture vTex)
-                {
-                    var sheet = vTex.GetSpriteSheetData();
-                    if (sheet != null && sheet.Sequences.Length > 0)
-                    {
-                        var rects = new Vector4[sheet.Sequences.Length];
-                        for (int i = 0; i < sheet.Sequences.Length; i++)
-                        {
-                            var seq = sheet.Sequences[i];
-                            if (seq.Frames.Length > 0 && seq.Frames[0].Images.Length > 0)
-                            {
-                                var img = seq.Frames[0].Images[0];
-                                rects[i] = new Vector4(img.UncroppedMin.X, img.UncroppedMin.Y, img.UncroppedMax.X, img.UncroppedMax.Y);
-                            }
-                            else
-                            {
-                                rects[i] = new Vector4(0f, 0f, 1f, 1f);
-                            }
-                        }
-                        return rects;
-                    }
-                }
-            }
+            res?.Dispose();
+            backingStream?.Dispose();
         }
 
         return Array.Empty<Vector4>();
+    }
+
+    private static ValveResourceFormat.Resource OpenVtexResourceDeferred(Package pkg, string searchPath, out Stream backingStream)
+    {
+        backingStream = null;
+        if (pkg == null) return null;
+
+        var entry = FindVtexEntry(pkg, searchPath);
+        if (entry == null) return null;
+
+        backingStream = pkg.GetMemoryMappedStreamIfPossible(entry);
+        var res = new ValveResourceFormat.Resource { FileName = searchPath };
+        try
+        {
+            res.Read(backingStream, leaveOpen: true, mode: ReadMode.Deferred);
+            return res;
+        }
+        catch
+        {
+            res.Dispose();
+            backingStream.Dispose();
+            backingStream = null;
+            throw;
+        }
     }
 }

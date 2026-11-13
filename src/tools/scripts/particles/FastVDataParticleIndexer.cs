@@ -24,14 +24,14 @@ public static class FastVDataParticleIndexer
         }
 
         using var resource = new Resource();
-        resource.Read(vdataFilePath);
+        resource.Read(vdataFilePath, ReadMode.Deferred);
         return ParseFromResource(resource);
     }
 
     public static HeroParticleIndex ParseFromStream(Stream stream)
     {
         using var resource = new Resource();
-        resource.Read(stream);
+        resource.Read(stream, mode: ReadMode.Deferred);
         return ParseFromResource(resource);
     }
 
