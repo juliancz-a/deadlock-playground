@@ -771,16 +771,16 @@ public partial class ExportModDialog : CanvasLayer
             Text = "Bundle Base Mod Files (Standalone Merged VPK)",
             ButtonPressed = true,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            TooltipText = "Includes the original mod's 3D model (.vmdl_c) and materials (.vmat_c) alongside your recolored textures in the new VPK."
+            TooltipText = "Includes the original mod's 3D model (.vmdl_c), materials (.vmat_c), and base assets alongside your exported changes (animation/recolor/VFX/misc) in the new VPK."
         };
         _chkMergeBaseMod.Toggled += (_) => UpdateTargetVpkInfo();
 
         _chkPrioritizeNewMod = new CheckBox
         {
-            Text = "Give New Recolor Highest Load Priority (Takes lower pakXX number & shifts original mod up)",
-            ButtonPressed = true, // TRUE by default so the new recolor wins in Deadlock without deleting the original!
+            Text = "Give New Export Highest Load Priority (Takes lower pakXX number & shifts original mod up)",
+            ButtonPressed = true, // TRUE by default so the new export (animation/recolor/VFX/misc) wins in Deadlock without deleting the original!
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            TooltipText = "In Source 2, lower pakXX numbers have higher priority. This places your new recolor in the original mod's slot and moves the original mod to the next pakXX slot so nothing is lost."
+            TooltipText = "In Source 2, lower pakXX numbers have higher priority. This places your new mod (animation/recolor/VFX/misc) in the original mod's slot and moves the original mod to the next pakXX slot so nothing is lost."
         };
         _chkPrioritizeNewMod.Toggled += (_) => UpdateTargetVpkInfo();
 

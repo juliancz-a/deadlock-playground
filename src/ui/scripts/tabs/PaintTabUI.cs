@@ -3882,6 +3882,9 @@ public partial class PaintTabUI : VBoxContainer
 
         try
         {
+            var vpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as global::VpkLoaderTest;
+            vpkLoader?.ReleaseAddonFileLocks();
+
             _exporter ??= new SkinExporter(_layerManager);
             var res = await _exporter.ExportModAsync(config, _progressDialogInstance, cts.Token);
             _progressDialogInstance.OnExportFinished(res);

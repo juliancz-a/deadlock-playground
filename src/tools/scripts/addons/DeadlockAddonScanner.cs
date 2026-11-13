@@ -24,6 +24,7 @@ namespace DeadlockPlayground.Addons
     {
         public string FilePath { get; set; } = "";
         public string FileName { get; set; } = "";
+        public bool IsStandardPakFormat { get; set; } = true;
         public AddonModType ModType { get; set; } = AddonModType.Unknown;
         public string DetectedHeroCodename { get; set; } = "";
         public string DetectedHeroDisplayName { get; set; } = "";
@@ -50,8 +51,14 @@ namespace DeadlockPlayground.Addons
             RegexOptions.IgnoreCase | RegexOptions.Compiled
         );
 
+        private static readonly Regex DataChunkVpkRegex = new(
+            @"_\d{3}\.vpk$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
+
         /// <summary>
-        /// Scans the specified addons directory for all *_dir.vpk archives and inspects their contents.
+        /// Scans the specified addons directory (including subfolders and non-standard single-file .vpk archives)
+        /// and inspects their contents.
         /// </summary>
         public static List<AddonModInfo> ScanAddons(string addonsDirectory)
         {
@@ -64,7 +71,10 @@ namespace DeadlockPlayground.Addons
 
             try
             {
-                var vpkFiles = Directory.GetFiles(addonsDirectory, "*_dir.vpk");
+                string rootFull = Path.GetFullPath(addonsDirectory).TrimEnd('\\', '/');
+                var vpkFiles = Directory.GetFiles(addonsDirectory, "*.vpk", SearchOption.AllDirectories)
+                    .Where(f => !DataChunkVpkRegex.IsMatch(Path.GetFileName(f)))
+                    .ToArray();
                 Array.Sort(vpkFiles, StringComparer.OrdinalIgnoreCase);
 
                 foreach (var filePath in vpkFiles)
@@ -74,6 +84,10 @@ namespace DeadlockPlayground.Addons
                         var info = InspectAddonPackage(filePath);
                         if (info != null)
                         {
+                            string fileDir = Path.GetDirectoryName(Path.GetFullPath(filePath))?.TrimEnd('\\', '/') ?? "";
+                            bool isTopLevel = string.Equals(fileDir, rootFull, StringComparison.OrdinalIgnoreCase);
+                            bool isDirVpk = info.FileName.EndsWith("_dir.vpk", StringComparison.OrdinalIgnoreCase);
+                            info.IsStandardPakFormat = isTopLevel && isDirVpk;
                             results.Add(info);
                         }
                     }

@@ -30,7 +30,10 @@ public partial class ModPickerModalUI : PanelContainer
     private Button _btnCancel;
     private Label _lblSelectedInfo;
     private HFlowContainer _filterFlow;
+    private CheckBox _chkShowNonStandard;
     private HFlowContainer _flowMods;
+
+    private IReadOnlyList<AddonModInfo> _currentMods;
 
     private readonly Dictionary<ModFilterCategory, Button> _filterButtons = new();
     private ModFilterCategory _activeFilter = ModFilterCategory.All;
@@ -139,6 +142,23 @@ public partial class ModPickerModalUI : PanelContainer
         CreateFilterPill(ModFilterCategory.Animations, "Animation Mods", new Color(0.82f, 0.52f, 0.98f, 1.0f));
         CreateFilterPill(ModFilterCategory.VfxOther, "VFX / Other", new Color(1.0f, 0.62f, 0.25f, 1.0f));
         SetActiveFilter(ModFilterCategory.All, applyFilter: false);
+
+        _chkShowNonStandard = new CheckBox
+        {
+            Text = "Show Non-Standard VPKs",
+            ButtonPressed = true,
+            FocusMode = FocusModeEnum.None,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+            TooltipText = "Show .vpk mods that do not follow the standard top-level *_dir.vpk structure (e.g., single-file .vpk or subfolder mods)."
+        };
+        _chkShowNonStandard.AddThemeFontSizeOverride("font_size", 12);
+        _chkShowNonStandard.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 1.0f));
+        _chkShowNonStandard.Toggled += (_) =>
+        {
+            UpdateFilterCounts(_currentMods);
+            ApplyFilters();
+        };
+        _filterFlow.AddChild(_chkShowNonStandard);
 
         rootVbox.AddChild(new HSeparator());
 
@@ -293,7 +313,8 @@ public partial class ModPickerModalUI : PanelContainer
 
     private void UpdateFilterCounts(IReadOnlyList<AddonModInfo> mods)
     {
-        int totalCount = 1 + (mods?.Count ?? 0); // Includes Vanilla card
+        bool showNonStandard = _chkShowNonStandard?.ButtonPressed ?? true;
+        int totalCount = 1; // Includes Vanilla card
         int modelCount = 0;
         int textureCount = 0;
         int animCount = 0;
@@ -304,6 +325,8 @@ public partial class ModPickerModalUI : PanelContainer
             foreach (var mod in mods)
             {
                 if (mod == null) continue;
+                if (!showNonStandard && !mod.IsStandardPakFormat) continue;
+                totalCount++;
                 switch (mod.ModType)
                 {
                     case AddonModType.FullModel:
@@ -354,6 +377,7 @@ public partial class ModPickerModalUI : PanelContainer
 
     public void PopulateMods(IReadOnlyList<AddonModInfo> mods, string activeModPath = null)
     {
+        _currentMods = mods;
         _allCards.Clear();
         foreach (Node child in _flowMods.GetChildren())
         {
@@ -456,6 +480,13 @@ public partial class ModPickerModalUI : PanelContainer
 
             var mod = card.ModInfo;
             if (mod == null) continue;
+
+            bool showNonStandard = _chkShowNonStandard?.ButtonPressed ?? true;
+            if (!showNonStandard && !mod.IsStandardPakFormat)
+            {
+                card.Visible = false;
+                continue;
+            }
 
             bool matchesCategory = _activeFilter switch
             {

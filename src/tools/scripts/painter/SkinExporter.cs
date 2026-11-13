@@ -452,7 +452,7 @@ bool isSourceModInTargetAddons = false;
                         string nextFreeSlotName = VpkIndexResolver.ResolveNextFileName(targetDir);
                         shiftedOriginalModDestinationPath = Path.Combine(targetDir, nextFreeSlotName);
                         vpkFileName = Path.GetFileName(config.SourceModVpkPath);
-                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New recolor will take '{vpkFileName}' (higher priority) and original mod will be preserved as '{nextFreeSlotName}'."));
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New export (animation/recolor/VFX/misc) will take '{vpkFileName}' (higher priority) and original mod will be preserved as '{nextFreeSlotName}'."));
                     }
                     else
                     {
@@ -1048,22 +1048,46 @@ bool isSourceModInTargetAddons = false;
                             }
                         }
 
-                       // Release read lock on sourceModPackage before moving or overwriting it
-                        if (sourceModPackage != null &&
-                            string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath), StringComparison.OrdinalIgnoreCase))
+                       // Always release read lock on sourceModPackage now that entries are buffered in memory
+                        if (sourceModPackage != null)
                         {
                             sourceModPackage.Dispose();
                             sourceModPackage = null;
+                        }
 
-                            // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al siguiente slot pakXX libre!
-                            if (!string.IsNullOrEmpty(shiftedOriginalModDestinationPath) && File.Exists(config.SourceModVpkPath))
+                        // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al siguiente slot pakXX libre!
+                        if (string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath ?? ""), StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrEmpty(shiftedOriginalModDestinationPath) && File.Exists(config.SourceModVpkPath))
+                        {
+                            if (File.Exists(shiftedOriginalModDestinationPath))
                             {
-                                if (File.Exists(shiftedOriginalModDestinationPath))
-                                {
-                                    File.Delete(shiftedOriginalModDestinationPath);
-                                }
+                                File.Delete(shiftedOriginalModDestinationPath);
+                            }
+                            try
+                            {
                                 File.Move(config.SourceModVpkPath, shiftedOriginalModDestinationPath);
-                                progress?.Report(new ExportProgressReport(0.88f, $"[INFO] Preserved original mod VPK -> moved to '{Path.GetFileName(shiftedOriginalModDestinationPath)}'."));
+                            }
+                            catch (IOException)
+                            {
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                                File.Move(config.SourceModVpkPath, shiftedOriginalModDestinationPath);
+                            }
+                            progress?.Report(new ExportProgressReport(0.88f, $"[INFO] Preserved original mod VPK -> moved to '{Path.GetFileName(shiftedOriginalModDestinationPath)}'."));
+                        }
+
+                        // If overwriting an existing VPK in-place, delete it first (forcing GC finalizers if a memory-mapped section was still pending)
+                        if (File.Exists(finalVpkPath))
+                        {
+                            try
+                            {
+                                File.Delete(finalVpkPath);
+                            }
+                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                            {
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                                File.Delete(finalVpkPath);
                             }
                         }
 

@@ -60,6 +60,7 @@ public partial class VpkLoaderTest : Node3D
 
     private Package _basePackage;
     private Package _corePackage;
+    private Package _addonPackage;
 
     public void EnsureVpkPathResolved()
     {
@@ -158,13 +159,16 @@ public partial class VpkLoaderTest : Node3D
         {
             try
             {
-                var addonPkg = new Package();
-                addonPkg.Read(AddonVpkPath);
-                IFileLoader addonLoader = new GameFileLoader(addonPkg, "");
+                _addonPackage?.Dispose();
+                _addonPackage = new Package();
+                _addonPackage.Read(AddonVpkPath);
+                IFileLoader addonLoader = new GameFileLoader(_addonPackage, "");
                 _currentFileLoader = new DualLayerGameFileLoader(addonLoader, composite);
             }
             catch
             {
+                _addonPackage?.Dispose();
+                _addonPackage = null;
                 _currentFileLoader = composite;
             }
         }
@@ -195,11 +199,29 @@ public partial class VpkLoaderTest : Node3D
 		EmitSignal(SignalName.LoadProgress, msg);
 	}
 
+	/// <summary>
+	/// Releases any open memory-mapped file handles on the currently mounted addon VPK
+	/// so the file can be safely overwritten or moved during mod export.
+	/// </summary>
+	public void ReleaseAddonFileLocks()
+	{
+		_currentFileLoader = null;
+		if (_addonPackage != null)
+		{
+			try
+			{
+				_addonPackage.Dispose();
+			}
+			catch { }
+			_addonPackage = null;
+		}
+	}
+
 	public void SetActiveAddon(string addonVpkPath, AddonModInfo modInfo = null)
 	{
 		AddonVpkPath = addonVpkPath ?? "";
 		ActiveAddonInfo = modInfo;
-		_currentFileLoader = null;
+		ReleaseAddonFileLocks();
 		GD.Print($"[VpkLoader] Active Addon set to: {(string.IsNullOrEmpty(AddonVpkPath) ? "None (Vanilla)" : Path.GetFileName(AddonVpkPath))}");
 	}
 
