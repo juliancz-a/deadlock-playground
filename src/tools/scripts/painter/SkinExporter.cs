@@ -253,9 +253,40 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
+            // Ensure IsCustomImportedMesh is populated on the main thread for all custom submeshes
+            if (config.TargetSubmeshes != null)
+            {
+                foreach (var sm in config.TargetSubmeshes)
+                {
+                    if (sm == null || sm.IsCustomImportedMesh) continue;
+                    if (sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh))
+                    {
+                        if ((sm.Mesh.HasMeta("IsCustomImportedMesh") && sm.Mesh.GetMeta("IsCustomImportedMesh").AsBool()) ||
+                            sm.Mesh.Name.ToString().StartsWith("Custom_"))
+                        {
+                            sm.IsCustomImportedMesh = true;
+                        }
+                        else
+                        {
+                            Node curr = sm.Mesh.GetParent();
+                            while (curr != null)
+                            {
+                                if (curr.Name.ToString().Contains("Custom_Rigged_Character") ||
+                                    (curr.HasMeta("IsCustomImportedMesh") && curr.GetMeta("IsCustomImportedMesh").AsBool()))
+                                {
+                                    sm.IsCustomImportedMesh = true;
+                                    break;
+                                }
+                                curr = curr.GetParent();
+                            }
+                        }
+                    }
+                }
+            }
+
             // Pre-extract custom imported meshes on the main thread to prevent cross-thread Godot crashes
             var preExtractedCustomMeshes = config.TargetSubmeshes?
-                .Where(sm => sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("IsCustomImportedMesh") && sm.Mesh.Visible)
+                .Where(sm => sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.IsCustomImportedMesh && sm.Mesh.Visible)
                 .Select(sm => sm.Mesh)
                 .Distinct()
                 .ToList() ?? new List<MeshInstance3D>();
@@ -298,17 +329,18 @@ namespace DeadlockPlayground.Painter
                     deadlockGamePath: config.DeadlockGamePath
                 );
 
-                // If the user painted on any custom submesh in the 3D painter, merge the baked paint strokes
+                // If the user actually painted on a specific custom submesh in the 3D painter, merge the baked paint strokes
                 // directly into preExtractedCustomBundle.Submeshes so CustomModelExporter compiles the painted texture.
+                // If the user did NOT paint strokes on that submesh, leave the original custom texture/color untouched!
                 if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
                 {
                     foreach (var sm in config.TargetSubmeshes)
                     {
-                        if (sm?.Mesh == null || !sm.Mesh.HasMeta("IsCustomImportedMesh")) continue;
+                        if (sm?.Mesh == null || !sm.IsCustomImportedMesh) continue;
                         string smKey = !string.IsNullOrEmpty(sm.DisplayName) ? sm.DisplayName : sm.Mesh.Name.ToString();
-                        bool hasPaintedOverlay = (config.PreBakedAtlasesBySubmesh != null && !string.IsNullOrEmpty(smKey) && config.PreBakedAtlasesBySubmesh.ContainsKey(smKey))
-                                                 || config.PreBakedAtlas != null;
-                        if (!hasPaintedOverlay) continue;
+                        string matKey = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
+                        bool hasPaint = _layerManager != null && _layerManager.HasPaintStrokes(matKey);
+                        if (!hasPaint) continue;
 
                         int targetRes = config.Resolution > 0 ? config.Resolution : 2048;
                         Image blendedImg = ExtractAndBlendSubmeshImage(config, sm, targetRes);
@@ -482,7 +514,7 @@ bool isSourceModInTargetAddons = false;
                     // Custom imported meshes are compiled with their own .vmat_c and .vtex_c in Step 2.5 (CustomModelExporter).
                     // Exclude IsCustomImportedMesh from Step A so we never emit duplicate unreferenced <mat>_color.vtex_c files!
                     submeshesToExport = submeshesToExport
-                        .Where(s => s.IsDirty && !(s.Mesh != null && s.Mesh.HasMeta("IsCustomImportedMesh")))
+                        .Where(s => s.IsDirty && !s.IsCustomImportedMesh)
                         .ToList();
                 }
 

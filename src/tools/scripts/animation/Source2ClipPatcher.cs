@@ -294,27 +294,44 @@ namespace DeadlockPlayground.Animation
                         else if (isRootMotion)
                         {
                             // In Source 2 AnimGraph 2 (.vnmskel), root_motion is the top-level ground reference frame (Z-up, X-forward).
-                            // Its native rest orientation in Source 2 is Identity (0, 0, 0, 1).
-                            // All character bones (including pelvis and IK targets) are parented to root_motion.
-                            // Applying GltfToSourceRotation to root_motion would pitch the ENTIRE secondary skeleton 90 degrees horizontal!
-                            if (pTrack == -1 || (MathF.Abs(gPos.X) < 0.001f && MathF.Abs(gPos.Z) < 0.001f))
-                            {
-                                sPos = System.Numerics.Vector3.Zero;
-                            }
-                            else
-                            {
-                                // Godot (-Z forward, +X right, +Y up) -> Source 2 (+X forward, -Y right, +Z up)
-                                sPos = new System.Numerics.Vector3(-gPos.Z, -gPos.X, gPos.Y) * MetersToInches;
-                            }
+                            // DeadlockAnimLoader applies SourceToGltfRotation = Q(-0.5, -0.5, -0.5, 0.5) to parentless root_motion
+                            // on VRF-imported heroes, whereas custom Y-up rigs may leave root_motion rest at Identity.
+                            var restRot = skeleton.GetBoneRest(gBoneIdx).Basis.GetRotationQuaternion();
+                            var restNum = new System.Numerics.Quaternion(restRot.X, restRot.Y, restRot.Z, restRot.W);
+                            bool rootUsesSourceToGltf = MathF.Abs(System.Numerics.Quaternion.Dot(
+                                System.Numerics.Quaternion.Normalize(GltfToSourceRotation * restNum),
+                                System.Numerics.Quaternion.Identity)) > 0.99f;
 
-                            if (rTrack == -1 || (MathF.Abs(gRot.X) < 0.001f && MathF.Abs(gRot.Z) < 0.001f && MathF.Abs(gRot.Y) < 0.001f))
+                            if (rootUsesSourceToGltf)
                             {
-                                sRot = System.Numerics.Quaternion.Identity;
+                                sPos = pTrack == -1
+                                    ? System.Numerics.Vector3.Zero
+                                    : System.Numerics.Vector3.Transform(new System.Numerics.Vector3(gPos.X, gPos.Y, gPos.Z) * MetersToInches, GltfToSourceRotation);
+                                sRot = rTrack == -1
+                                    ? System.Numerics.Quaternion.Identity
+                                    : System.Numerics.Quaternion.Normalize(GltfToSourceRotation * new System.Numerics.Quaternion(gRot.X, gRot.Y, gRot.Z, gRot.W));
                             }
                             else
                             {
-                                // Godot yaw around Y to Source 2 yaw around Z
-                                sRot = new System.Numerics.Quaternion(0f, 0f, -gRot.Y, gRot.W);
+                                if (pTrack == -1 || (MathF.Abs(gPos.X) < 0.001f && MathF.Abs(gPos.Z) < 0.001f))
+                                {
+                                    sPos = System.Numerics.Vector3.Zero;
+                                }
+                                else
+                                {
+                                    // Godot (-Z forward, +X right, +Y up) -> Source 2 (+X forward, -Y right, +Z up)
+                                    sPos = new System.Numerics.Vector3(-gPos.Z, -gPos.X, gPos.Y) * MetersToInches;
+                                }
+
+                                if (rTrack == -1 || (MathF.Abs(gRot.X) < 0.001f && MathF.Abs(gRot.Z) < 0.001f && MathF.Abs(gRot.Y) < 0.001f))
+                                {
+                                    sRot = System.Numerics.Quaternion.Identity;
+                                }
+                                else
+                                {
+                                    // Godot yaw around Y to Source 2 yaw around Z
+                                    sRot = System.Numerics.Quaternion.Normalize(new System.Numerics.Quaternion(0f, 0f, -gRot.Y, gRot.W));
+                                }
                             }
                         }
                         else

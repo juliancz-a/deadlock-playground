@@ -14,6 +14,9 @@ namespace DeadlockPlayground.Addons
         Vanilla,
         FullModel,
         TextureOnly,
+        AnimationOnly,
+        ParticleOnly,
+        Mixed,
         Unknown
     }
 
@@ -29,6 +32,8 @@ namespace DeadlockPlayground.Addons
         public List<string> ModelEntries { get; } = new();
         public List<string> MaterialEntries { get; } = new();
         public List<string> TextureEntries { get; } = new();
+        public List<string> AnimationEntries { get; } = new();
+        public List<string> ParticleEntries { get; } = new();
         public List<string> AllEntries { get; } = new();
 
         public override string ToString() => DisplayTitle;
@@ -145,13 +150,28 @@ namespace DeadlockPlayground.Addons
                     {
                         modInfo.TextureEntries.Add(fullPath);
                     }
+                    else if (lower.EndsWith(".vnmclip_c") || lower.EndsWith(".vnmclip") ||
+                             lower.EndsWith(".vanim_c") || lower.EndsWith(".vanim") ||
+                             lower.EndsWith(".vagrp_c") || lower.EndsWith(".vagrp") ||
+                             lower.EndsWith(".vnmgraph_c") || lower.EndsWith(".vnmgraph"))
+                    {
+                        modInfo.AnimationEntries.Add(fullPath);
+                    }
+                    else if (lower.EndsWith(".vpcf_c") || lower.EndsWith(".vpcf"))
+                    {
+                        modInfo.ParticleEntries.Add(fullPath);
+                    }
                 }
             }
 
-            // Exclude packages that do not contain models, materials or textures
-            if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && modInfo.MaterialEntries.Count == 0)
+            // Exclude packages that do not contain models, materials, textures, animations or particles
+            if (modInfo.ModelEntries.Count == 0 &&
+                modInfo.TextureEntries.Count == 0 &&
+                modInfo.MaterialEntries.Count == 0 &&
+                modInfo.AnimationEntries.Count == 0 &&
+                modInfo.ParticleEntries.Count == 0)
             {
-                GD.Print($"[AddonScanner] Skipping '{fileName}': does not contain models, materials or textures.");
+                GD.Print($"[AddonScanner] Skipping '{fileName}': does not contain models, materials, textures, animations or particles.");
                 return null;
             }
 
@@ -222,21 +242,41 @@ namespace DeadlockPlayground.Addons
 
             // Classify mod type:
             // 1. If it contains .vmdl_c -> Full Model Replacement Mod
-            // 2. If it contains .vtex_c or .vmat_c without a base model -> Texture-Only Mod
+            // 2. Otherwise inspect non-model asset categories (Textures/Materials, Animations, Particles)
+            bool hasTextures = modInfo.TextureEntries.Count > 0 || modInfo.MaterialEntries.Count > 0;
+            bool hasAnimations = modInfo.AnimationEntries.Count > 0;
+            bool hasParticles = modInfo.ParticleEntries.Count > 0;
+
             if (modInfo.ModelEntries.Count > 0)
             {
                 modInfo.ModType = AddonModType.FullModel;
             }
-            else if (modInfo.TextureEntries.Count > 0 || modInfo.MaterialEntries.Count > 0)
-            {
-                modInfo.ModType = AddonModType.TextureOnly;
-            }
             else
             {
-                modInfo.ModType = AddonModType.Unknown;
+                int activeCategories = (hasTextures ? 1 : 0) + (hasAnimations ? 1 : 0) + (hasParticles ? 1 : 0);
+                if (activeCategories > 1)
+                {
+                    modInfo.ModType = AddonModType.Mixed;
+                }
+                else if (hasTextures)
+                {
+                    modInfo.ModType = AddonModType.TextureOnly;
+                }
+                else if (hasAnimations)
+                {
+                    modInfo.ModType = AddonModType.AnimationOnly;
+                }
+                else if (hasParticles)
+                {
+                    modInfo.ModType = AddonModType.ParticleOnly;
+                }
+                else
+                {
+                    modInfo.ModType = AddonModType.Unknown;
+                }
             }
 
-            // Format readable DisplayTitle: "Vindicta Model - pak_10_dir.vpk"
+            // Format readable DisplayTitle: "Vindicta Model" / "Vindicta Animation Mod"
             string heroName = !string.IsNullOrEmpty(modInfo.DetectedHeroDisplayName)
                 ? modInfo.DetectedHeroDisplayName
                 : "Custom Character";
@@ -245,6 +285,9 @@ namespace DeadlockPlayground.Addons
             {
                 AddonModType.FullModel => $"{heroName} Model",
                 AddonModType.TextureOnly => $"{heroName} Texture Mod",
+                AddonModType.AnimationOnly => $"{heroName} Animation Mod",
+                AddonModType.ParticleOnly => $"{heroName} VFX Mod",
+                AddonModType.Mixed => $"{heroName} Mixed Mod",
                 _ => $"{heroName} Mod"
             };
 

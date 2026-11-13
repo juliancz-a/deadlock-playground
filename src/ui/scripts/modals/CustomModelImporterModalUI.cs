@@ -44,6 +44,7 @@ namespace DeadlockPlayground.UI
         private float _ghostOpacity = 0.35f;
         private bool _showBones = false;
         private bool _showGhost = true;
+        private string _heroCodename = "";
 
         // Camera Orbit Controls
         private Vector3 _orbitTarget = new Vector3(0, 0.9f, 0);
@@ -122,6 +123,7 @@ namespace DeadlockPlayground.UI
         private CheckBox _chkAutoAlignLegs;
         private CheckBox _chkAutoAlignHead;
         private CheckBox _chkClampLimbStretching;
+        private CheckBox _chkStabilizeNeckFloatingHead;
 
         public CustomModelAutoRigger.RiggingOptions LastRiggingOptions { get; private set; }
         public Transform3D GetAlignedTransform() => _previewModelRoot?.Transform ?? Transform3D.Identity;
@@ -1272,6 +1274,17 @@ namespace DeadlockPlayground.UI
             _chkClampLimbStretching.Toggled += (v) => TriggerRealtimeRigUpdate();
             limbVBox.AddChild(_chkClampLimbStretching);
 
+            _chkStabilizeNeckFloatingHead = new CheckBox
+            {
+                Text = "Stabilize Neck Against Floating-Head Stretch (Bind Head/Neck to Cervical Pivot)",
+                ButtonPressed = _heroCodename == "chrono",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Binds head and neck vertices to the cervical pivot (neck_0) so floating-head heroes (like Paradox/Chrono) don't pull or stretch the neck during jumping or zipline animations in-game."
+            };
+            _chkStabilizeNeckFloatingHead.AddThemeFontSizeOverride("font_size", 11);
+            _chkStabilizeNeckFloatingHead.Toggled += (v) => TriggerRealtimeRigUpdate();
+            limbVBox.AddChild(_chkStabilizeNeckFloatingHead);
+
             vBox.AddChild(limbVBox);
 
             return scroll;
@@ -1570,6 +1583,7 @@ namespace DeadlockPlayground.UI
             _liveHeroNode = heroNode;
             _liveImportedScene = importedScene;
             _filePath = filePath;
+            _heroCodename = heroNode?.Name.ToString().ToLowerInvariant().Replace("hero_", "").Trim() ?? "";
 
             string fileName = Path.GetFileName(filePath);
             _lblFileBadge.Text = $"File: {fileName}";
@@ -1713,6 +1727,7 @@ namespace DeadlockPlayground.UI
             if (_chkAutoAlignLegs != null) _chkAutoAlignLegs.ButtonPressed = options.AutoSnapLegsToHero;
             if (_chkAutoAlignHead != null) _chkAutoAlignHead.ButtonPressed = options.AutoSnapHeadToHero;
             if (_chkClampLimbStretching != null) _chkClampLimbStretching.ButtonPressed = options.ClampLimbStretching;
+            if (_chkStabilizeNeckFloatingHead != null) _chkStabilizeNeckFloatingHead.ButtonPressed = options.StabilizeNeckFloatingHead;
 
             // 3. Restore Rigging Method
             for (int i = 0; i < _optRiggingMethod.ItemCount; i++)
@@ -3195,6 +3210,7 @@ namespace DeadlockPlayground.UI
                 AutoSnapLegsToHero = _chkAutoAlignLegs?.ButtonPressed ?? true,
                 AutoSnapHeadToHero = _chkAutoAlignHead?.ButtonPressed ?? true,
                 ClampLimbStretching = _chkClampLimbStretching?.ButtonPressed ?? true,
+                StabilizeNeckFloatingHead = _chkStabilizeNeckFloatingHead?.ButtonPressed ?? (_heroCodename == "chrono"),
                 RootPosition = new Vector3((float)_spinPosX.Value, (float)_spinPosY.Value, (float)_spinPosZ.Value),
                 RootRotationDeg = new Vector3((float)_spinRotPitch.Value, (float)_spinRotYaw.Value, (float)_spinRotRoll.Value),
                 RootScale = (float)_spinScale.Value

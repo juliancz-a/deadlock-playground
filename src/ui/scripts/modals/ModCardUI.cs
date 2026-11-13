@@ -16,6 +16,7 @@ public partial class ModCardUI : PanelContainer
     public bool IsVanilla { get; private set; }
 
     private TextureRect _thumbRect;
+    private TextureRect _iconRect;
     private Label _lblTitle;
     private Label _lblHero;
     private Label _lblFilename;
@@ -59,26 +60,78 @@ public partial class ModCardUI : PanelContainer
         {
             if (isVanilla)
             {
+                Color cyanAccent = new Color(0.40f, 0.75f, 1.0f, 1.0f);
                 _lblTitle.Text = "Vanilla Character";
                 _lblHero.Text = "Default Source 2 Assets";
                 _lblFilename.Text = "pak01_dir.vpk";
-                _lblTag.Text = "Official";
-                _lblTag.Modulate = new Color(0.40f, 0.75f, 1.0f, 1.0f);
+                _lblTag.Text = "OFFICIAL";
+                _lblTag.Modulate = cyanAccent;
+                ApplyCardIcon("res://assets/at-icons/checkmark.svg", cyanAccent);
             }
             else if (mod != null)
             {
                 string heroName = !string.IsNullOrEmpty(mod.DetectedHeroDisplayName) ? mod.DetectedHeroDisplayName : "Custom Hero";
-                string typeName = mod.ModType == AddonModType.FullModel ? "Model Mod" : "Texture Mod";
-                _lblTitle.Text = heroName;
-                _lblHero.Text = typeName;
-                _lblFilename.Text = mod.FileName;
+                var (typeLabel, badgeLabel, iconPath, accentColor) = GetModVisuals(mod.ModType);
 
-                _lblTag.Text = typeName;
-                _lblTag.Modulate = mod.ModType == AddonModType.FullModel
-                    ? new Color(0.95f, 0.85f, 0.30f, 1.0f)
-                    : new Color(0.60f, 0.85f, 0.50f, 1.0f);
+                _lblTitle.Text = heroName;
+                _lblHero.Text = typeLabel;
+                _lblFilename.Text = mod.FileName;
+                _lblTag.Text = badgeLabel;
+                _lblTag.Modulate = accentColor;
+                ApplyCardIcon(iconPath, accentColor);
             }
         }
+    }
+
+    private void ApplyCardIcon(string iconPath, Color accentColor)
+    {
+        if (_iconRect == null) return;
+        var tex = GD.Load<Texture2D>(iconPath) ?? GD.Load<Texture2D>("res://assets/at-icons/folder.svg");
+        _iconRect.Texture = tex;
+        _iconRect.Modulate = new Color(accentColor.R, accentColor.G, accentColor.B, 0.78f);
+    }
+
+    private static (string typeLabel, string badgeLabel, string iconPath, Color accentColor) GetModVisuals(AddonModType modType)
+    {
+        return modType switch
+        {
+            AddonModType.FullModel => (
+                "Model Mod",
+                "MODEL MOD",
+                "res://assets/at-icons/person_body.svg",
+                new Color(0.95f, 0.85f, 0.30f, 1.0f)
+            ),
+            AddonModType.TextureOnly => (
+                "Texture Mod",
+                "TEXTURE MOD",
+                "res://assets/at-icons/palette.svg",
+                new Color(0.60f, 0.85f, 0.50f, 1.0f)
+            ),
+            AddonModType.AnimationOnly => (
+                "Animation Mod",
+                "ANIMATION MOD",
+                "res://assets/at-icons/film.svg",
+                new Color(0.82f, 0.52f, 0.98f, 1.0f)
+            ),
+            AddonModType.ParticleOnly => (
+                "VFX Mod",
+                "VFX MOD",
+                "res://assets/at-icons/sparkles.svg",
+                new Color(1.0f, 0.62f, 0.25f, 1.0f)
+            ),
+            AddonModType.Mixed => (
+                "Mixed Mod",
+                "MIXED MOD",
+                "res://assets/at-icons/layers.svg",
+                new Color(0.35f, 0.88f, 0.85f, 1.0f)
+            ),
+            _ => (
+                "Addon Mod",
+                "MOD",
+                "res://assets/at-icons/folder.svg",
+                new Color(0.60f, 0.68f, 0.78f, 1.0f)
+            )
+        };
     }
 
     private void InitStyles()
@@ -178,23 +231,23 @@ public partial class ModCardUI : PanelContainer
         };
         thumbPanel.AddChild(_thumbRect);
 
-        // Fallback default icon in thumbnail
+        // Fallback / category icon in thumbnail
         var iconCenter = new CenterContainer
         {
             SizeFlagsHorizontal = SizeFlags.Fill,
             SizeFlagsVertical = SizeFlags.Fill,
             MouseFilter = MouseFilterEnum.Ignore
         };
-        var iconRect = new TextureRect
+        _iconRect = new TextureRect
         {
             Texture = GD.Load<Texture2D>("res://assets/at-icons/folder.svg"),
-            CustomMinimumSize = new Vector2(40, 40),
+            CustomMinimumSize = new Vector2(44, 44),
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            Modulate = new Color(0.40f, 0.75f, 1.0f, 0.6f),
+            Modulate = new Color(0.40f, 0.75f, 1.0f, 0.78f),
             MouseFilter = MouseFilterEnum.Ignore
         };
-        iconCenter.AddChild(iconRect);
+        iconCenter.AddChild(_iconRect);
         thumbPanel.AddChild(iconCenter);
 
         // Tag badge

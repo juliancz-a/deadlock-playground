@@ -224,8 +224,12 @@ public partial class VpkLoaderTest : Node3D
 
 		SetActiveAddon(modInfo.FilePath, modInfo);
 
-		// If package info is incomplete, inspect package directly to populate model and texture entries
-		if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && File.Exists(modInfo.FilePath))
+		// If package info is incomplete, inspect package directly to populate model, texture, animation and particle entries
+		if (modInfo.ModelEntries.Count == 0 &&
+			modInfo.TextureEntries.Count == 0 &&
+			modInfo.AnimationEntries.Count == 0 &&
+			modInfo.ParticleEntries.Count == 0 &&
+			File.Exists(modInfo.FilePath))
 		{
 			var inspected = DeadlockAddonScanner.InspectAddonPackage(modInfo.FilePath);
 			if (inspected != null)
@@ -235,8 +239,11 @@ public partial class VpkLoaderTest : Node3D
 			}
 		}
 
-		// If texture-only mod with detected hero, load the corresponding hero from catalog
-		if (modInfo.ModType == AddonModType.TextureOnly)
+		// If non-model mod (TextureOnly, AnimationOnly, ParticleOnly, Mixed) with detected hero, load the corresponding hero from catalog
+		if (modInfo.ModType == AddonModType.TextureOnly ||
+			modInfo.ModType == AddonModType.AnimationOnly ||
+			modInfo.ModType == AddonModType.ParticleOnly ||
+			modInfo.ModType == AddonModType.Mixed)
 		{
 			var catalogEntry = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
 				? (DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename) ?? DeadlockHeroCatalog.ResolveHero(modInfo.DetectedHeroCodename))
@@ -246,7 +253,7 @@ public partial class VpkLoaderTest : Node3D
 
 			if (catalogEntry != null)
 			{
-				GD.Print($"[VpkLoader] Loading hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
+				GD.Print($"[VpkLoader] Loading hero '{catalogEntry.DisplayName}' with addon ({modInfo.ModType}) from '{modInfo.FileName}'...");
 				return await LoadHeroModelAsync(catalogEntry);
 			}
 		}

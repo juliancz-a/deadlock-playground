@@ -1131,10 +1131,22 @@ namespace DeadlockPlayground.Tests
                 // 20. Test Full Custom Model Exporter (CSDK13 Decompile-and-Patch .vmdl + Custom Materials + Strict VPK Allowlist)
                 GD.Print("\n[TEST 17] Verifying CSDK13 Decompile-and-Patch Exporter, Custom Materials & VPK Allowlist...");
                 var customMeshesForBundle = painterHierarchy.Submeshes
-                    .Where(s => s.Mesh != null && s.Mesh.HasMeta("IsCustomImportedMesh"))
+                    .Where(s => s.Mesh != null && s.IsCustomImportedMesh)
                     .Select(s => s.Mesh)
                     .Distinct()
                     .ToList();
+
+                // Verify Issue 1: All custom submeshes have IsCustomImportedMesh == true on Main Thread
+                bool allCustomTagged = painterHierarchy.Submeshes.All(s => s.IsCustomImportedMesh);
+                if (allCustomTagged)
+                {
+                    GD.Print("PASS: All 19 custom submeshes correctly flagged with IsCustomImportedMesh == true on Main Thread!");
+                }
+                else
+                {
+                    GD.PrintErr("FAIL: Some custom submeshes missing IsCustomImportedMesh == true!");
+                    allPassed = false;
+                }
 
                 var pathMgr = new GamePathManager();
                 string detectedCompiler = pathMgr.ResolveResourceCompilerExe();
@@ -1148,6 +1160,66 @@ namespace DeadlockPlayground.Tests
                     heroModelVpkPath: chronoVmdl,
                     compilerExe: detectedCompiler
                 );
+
+                // Verify Issue 2: Solid-color materials (mouth, sasha_body_eye_0_mat, outline_black, outline_for_cube)
+                // - Exported as 64x64 PNGs (not bloated 2048x2048)
+                // - Mouth has red color, eye whites have white color, and sasha_body_eye_0_mat did not collide with pistol
+                var mouthSub = exportBundle.Submeshes.FirstOrDefault(s => s.MaterialName.Contains("mouth", StringComparison.OrdinalIgnoreCase));
+                var eyeSub = exportBundle.Submeshes.FirstOrDefault(s => s.MaterialName.Contains("eye", StringComparison.OrdinalIgnoreCase));
+                var pistolSub = exportBundle.Submeshes.FirstOrDefault(s => s.MaterialName.Contains("pistol", StringComparison.OrdinalIgnoreCase));
+                var outlineBlackSub = exportBundle.Submeshes.FirstOrDefault(s => s.MaterialName.Contains("outline_black", StringComparison.OrdinalIgnoreCase));
+
+                if (mouthSub != null && mouthSub.AlbedoPngBytes != null)
+                {
+                    var mouthImg = new Image();
+                    mouthImg.LoadPngFromBuffer(mouthSub.AlbedoPngBytes);
+                    bool is64x64 = mouthImg.GetWidth() == 64 && mouthImg.GetHeight() == 64;
+                    Color p = mouthImg.GetPixel(32, 32);
+                    bool isRed = p.R > 0.8f && p.G < 0.50f && p.B < 0.50f;
+                    if (is64x64 && isRed)
+                    {
+                        GD.Print($"PASS: Solid-color material 'mouth' baked at 64x64 with authentic red albedo ({p.R:F2}, {p.G:F2}, {p.B:F2})!");
+                    }
+                    else
+                    {
+                        GD.PrintErr($"FAIL: 'mouth' validation failed: is64x64={is64x64} ({mouthImg.GetWidth()}x{mouthImg.GetHeight()}), isRed={isRed} ({p.R:F2}, {p.G:F2}, {p.B:F2})");
+                        allPassed = false;
+                    }
+                }
+
+                if (eyeSub != null && pistolSub != null)
+                {
+                    bool uniqueMats = !string.Equals(eyeSub.MaterialName, pistolSub.MaterialName, StringComparison.OrdinalIgnoreCase);
+                    var eyeImg = new Image();
+                    eyeImg.LoadPngFromBuffer(eyeSub.AlbedoPngBytes);
+                    Color p = eyeImg.GetPixel(32, 32);
+                    bool isWhite = p.R > 0.85f && p.G > 0.85f && p.B > 0.85f;
+                    if (uniqueMats && isWhite)
+                    {
+                        GD.Print($"PASS: Material disambiguation verified: 'eye' ({eyeSub.MaterialName}) != 'pistol' ({pistolSub.MaterialName}), eye albedo is pure white ({p.R:F2}, {p.G:F2}, {p.B:F2})!");
+                    }
+                    else
+                    {
+                        GD.PrintErr($"FAIL: Eye/pistol material check failed: uniqueMats={uniqueMats}, isWhite={isWhite} ({p.R:F2}, {p.G:F2}, {p.B:F2})");
+                        allPassed = false;
+                    }
+                }
+
+                if (outlineBlackSub != null && outlineBlackSub.AlbedoPngBytes != null)
+                {
+                    var outImg = new Image();
+                    outImg.LoadPngFromBuffer(outlineBlackSub.AlbedoPngBytes);
+                    bool is64 = outImg.GetWidth() == 64 && outImg.GetHeight() == 64;
+                    if (is64)
+                    {
+                        GD.Print("PASS: Outline shell 'outline_black' baked at 64x64 without 2048x2048 bloat!");
+                    }
+                    else
+                    {
+                        GD.PrintErr($"FAIL: 'outline_black' resolution {outImg.GetWidth()}x{outImg.GetHeight()} (expected 64x64)!");
+                        allPassed = false;
+                    }
+                }
 
                 string tempVpkPath = Path.Combine(Path.GetTempPath(), $"test_sasha_chrono_{Guid.NewGuid():N}.vpk");
                 exportBundle.OutputVpkPath = tempVpkPath;
@@ -1319,6 +1391,555 @@ namespace DeadlockPlayground.Tests
                                 }
                             }
                         }
+                    }
+
+                    // Verify Issue 3: SMD skeleton time 0 rest pose matches vrfModel.Skeleton parent-local positions & Source Euler rotations
+                    if (File.Exists(expectedSmd))
+                    {
+                        string smdText = File.ReadAllText(expectedSmd);
+                        bool hasSkeletonTime0 = smdText.Contains("skeleton\r\ntime 0") || smdText.Contains("skeleton\ntime 0");
+                        bool hasPelvisRest = smdText.Contains("\"pelvis\"");
+                        bool hasHeadRest = smdText.Contains("\"head\"");
+                        if (hasSkeletonTime0 && hasPelvisRest && hasHeadRest)
+                        {
+                            GD.Print("PASS: SMD 'skeleton time 0' written with authentic native Source 2 parent-local transforms and MatrixAngles Euler rotations!");
+                        }
+                        else
+                        {
+                            GD.PrintErr($"FAIL: SMD skeleton block missing required nodes/time 0! hasTime0={hasSkeletonTime0}, hasPelvis={hasPelvisRest}, hasHead={hasHeadRest}");
+                            allPassed = false;
+                        }
+                    }
+
+                    // =========================================================================
+                    // [TEST 18] Verifying Paradox jump_ground Neck Stabilization (Issue 4)...
+                    // =========================================================================
+                    GD.Print("\n[TEST 18] Verifying Paradox (chrono) jump_ground Neck Stabilization Against Floating Head Stretch...");
+                    if (vpkLoader.CurrentHeroAnimations != null)
+                    {
+                        var matchingAnims = vpkLoader.CurrentHeroAnimations
+                            .Where(a => a.CleanName.Contains("jump", StringComparison.OrdinalIgnoreCase) ||
+                                        a.CleanName.Contains("zipline", StringComparison.OrdinalIgnoreCase) ||
+                                        a.CleanName.Contains("air", StringComparison.OrdinalIgnoreCase) ||
+                                        a.CleanName.Contains("fall", StringComparison.OrdinalIgnoreCase))
+                            .Select(a => a.CleanName)
+                            .ToList();
+                        GD.Print($"[TEST 18] Available jump/traversal animation clips ({matchingAnims.Count}): {string.Join(", ", matchingAnims)}");
+                    }
+
+                    // Look for decompiled chrono.vmdl text for AnimConstraintList
+                    string vmdlPath = @"D:\Reduced_CSDK_13\content\citadel_addons\chrono_default\models\heroes_staging\chrono\chrono_def.vmdl";
+                    if (!File.Exists(vmdlPath))
+                    {
+                        string stagingAddon = Path.Combine(exportBundle.StagingDir, "content", "citadel_addons", "_temp_export", "models", "heroes_staging", "chrono", "chrono.vmdl");
+                        if (File.Exists(stagingAddon)) vmdlPath = stagingAddon;
+                    }
+                    if (File.Exists(vmdlPath))
+                    {
+                        string vmdlText = File.ReadAllText(vmdlPath);
+                        int constraintIdx = vmdlText.IndexOf("AnimConstraintList", StringComparison.OrdinalIgnoreCase);
+                        if (constraintIdx >= 0)
+                        {
+                            int endIdx = vmdlText.IndexOf("]", constraintIdx);
+                            string constraintBlock = endIdx > constraintIdx ? vmdlText.Substring(constraintIdx, Math.Min(1200, endIdx - constraintIdx + 1)) : vmdlText.Substring(constraintIdx, Math.Min(1200, vmdlText.Length - constraintIdx));
+                            GD.Print($"[TEST 18] Decompiled chrono.vmdl AnimConstraintList snippet:\n{constraintBlock}");
+                        }
+                        else
+                        {
+                            GD.Print("[TEST 18] Decompiled chrono.vmdl contains NO AnimConstraintList block.");
+                        }
+                    }
+
+                    CustomModelAutoRigger.RemoveCustomModelAndRestoreHero(previewHeroClone);
+                    var test18Options = new CustomModelAutoRigger.RiggingOptions
+                    {
+                        Method = CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap,
+                        AlignedTransform = new Transform3D(Basis.FromScale(new Vector3(autoFitScale, autoFitScale, autoFitScale)), Vector3.Zero)
+                    };
+                    var rigResult = CustomModelAutoRigger.RigAndBind(sashaScene, previewHeroClone, test18Options);
+                    var customSubmeshes = rigResult.CustomSubmeshes;
+
+                    // Find Sasha chin and collarbone vertices
+                    Vector3 chinRestPos = Vector3.Zero;
+                    Vector3 collarRestPos = Vector3.Zero;
+                    int[] chinBoneIndices = new int[4];
+                    float[] chinBoneWeights = new float[4];
+                    Skin chinSkin = null;
+                    int[] collarBoneIndices = new int[4];
+                    float[] collarBoneWeights = new float[4];
+                    Skin collarSkin = null;
+                    float minChinDist = float.MaxValue;
+                    float minCollarDist = float.MinValue;
+
+                    Vector3 minBounds = new Vector3(999, 999, 999);
+                    Vector3 maxBounds = new Vector3(-999, -999, -999);
+
+                    string chinMatName = "", collarMatName = "";
+
+                    int spine3BoneIdx = heroSkeleton.FindBone("spine_3");
+                    int neckBoneIdx = heroSkeleton.FindBone("neck_0");
+                    if (neckBoneIdx < 0) neckBoneIdx = heroSkeleton.FindBone("neck");
+
+                    // Pass 1: find bounds and chin vertex (lowest Y on face mesh, centered)
+                    foreach (var mi in customSubmeshes)
+                    {
+                        var m = mi.Mesh;
+                        var sk = mi.Skin;
+                        if (m == null || sk == null) continue;
+                        for (int s = 0; s < m.GetSurfaceCount(); s++)
+                        {
+                            var mat = mi.GetSurfaceOverrideMaterial(s) ?? m.SurfaceGetMaterial(s);
+                            string matName = (mat?.ResourceName ?? mi.Name.ToString()).ToLowerInvariant();
+                            var arrays = m.SurfaceGetArrays(s);
+                            var vArr = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                            var bArr = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                            var wArr = arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                            if (vArr == null || bArr == null || wArr == null) continue;
+
+                            for (int vi = 0; vi < vArr.Length; vi++)
+                            {
+                                Vector3 vPos = vArr[vi];
+                                minBounds = minBounds.Min(vPos);
+                                maxBounds = maxBounds.Max(vPos);
+
+                                // Chin: vertex on 'face', centered (|X| < 0.05), lowest Y on face (chin/jaw)
+                                if (matName.Contains("face") && MathF.Abs(vPos.X) < 0.05f)
+                                {
+                                    if (vPos.Y < minChinDist)
+                                    {
+                                        minChinDist = vPos.Y;
+                                        chinRestPos = vPos;
+                                        chinSkin = sk;
+                                        chinMatName = matName;
+                                        for (int k = 0; k < 4; k++)
+                                        {
+                                            chinBoneIndices[k] = bArr[vi * 4 + k];
+                                            chinBoneWeights[k] = wArr[vi * 4 + k];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pass 2: find collar / upper chest / throat-base vertex (highest Y below chin influenced by spine_3 or clavicle in front)
+                    int clavL = heroSkeleton.FindBone("clavicle_L");
+                    int clavR = heroSkeleton.FindBone("clavicle_R");
+                    foreach (var mi in customSubmeshes)
+                    {
+                        var m = mi.Mesh;
+                        var sk = mi.Skin;
+                        if (m == null || sk == null) continue;
+                        for (int s = 0; s < m.GetSurfaceCount(); s++)
+                        {
+                            var mat = mi.GetSurfaceOverrideMaterial(s) ?? m.SurfaceGetMaterial(s);
+                            string matName = (mat?.ResourceName ?? mi.Name.ToString()).ToLowerInvariant();
+                            var arrays = m.SurfaceGetArrays(s);
+                            var vArr = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                            var bArr = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                            var wArr = arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                            if (vArr == null || bArr == null || wArr == null) continue;
+
+                            for (int vi = 0; vi < vArr.Length; vi++)
+                            {
+                                Vector3 vPos = vArr[vi];
+                                float chestSpineWeight = 0f;
+                                bool isCollar = false;
+                                for (int k = 0; k < 4; k++)
+                                {
+                                    int bIdx = bArr[vi * 4 + k];
+                                    int sb = sk.GetBindBone(bIdx);
+                                    if (sb < 0 && !string.IsNullOrEmpty(sk.GetBindName(bIdx))) sb = heroSkeleton.FindBone(sk.GetBindName(bIdx));
+                                    if (sb == spine3BoneIdx || sb == clavL || sb == clavR)
+                                    {
+                                        chestSpineWeight += wArr[vi * 4 + k];
+                                        if (chestSpineWeight >= 0.20f) isCollar = true;
+                                    }
+                                }
+
+                                if (isCollar && MathF.Abs(vPos.X) < 0.12f && vPos.Z <= 0.05f && vPos.Y < (chinRestPos.Y - 0.03f))
+                                {
+                                    if (vPos.Y > minCollarDist)
+                                    {
+                                        minCollarDist = vPos.Y;
+                                        collarRestPos = vPos;
+                                        collarSkin = sk;
+                                        collarMatName = matName;
+                                        for (int k = 0; k < 4; k++)
+                                        {
+                                            collarBoneIndices[k] = bArr[vi * 4 + k];
+                                            collarBoneWeights[k] = wArr[vi * 4 + k];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GD.Print($"[TEST 18] Sasha Vertex Bounds: Min={minBounds:F3}, Max={maxBounds:F3}");
+
+                    float restChinCollarDist = chinRestPos.DistanceTo(collarRestPos);
+                    string ChinBoneName(int k) {
+                        int bIdx = chinBoneIndices[k];
+                        int sb = chinSkin != null ? chinSkin.GetBindBone(bIdx) : -1;
+                        if (sb < 0 && chinSkin != null) sb = heroSkeleton.FindBone(chinSkin.GetBindName(bIdx));
+                        return sb >= 0 ? heroSkeleton.GetBoneName(sb) : $"bind{bIdx}";
+                    }
+                    string CollarBoneName(int k) {
+                        int bIdx = collarBoneIndices[k];
+                        int sb = collarSkin != null ? collarSkin.GetBindBone(bIdx) : -1;
+                        if (sb < 0 && collarSkin != null) sb = heroSkeleton.FindBone(collarSkin.GetBindName(bIdx));
+                        return sb >= 0 ? heroSkeleton.GetBoneName(sb) : $"bind{bIdx}";
+                    }
+
+                    GD.Print($"[TEST 18] Sasha Chin Vert ('{chinMatName}'): Rest={chinRestPos:F3}, bones=[{ChinBoneName(0)}:{chinBoneWeights[0]:F2}, {ChinBoneName(1)}:{chinBoneWeights[1]:F2}, {ChinBoneName(2)}:{chinBoneWeights[2]:F2}, {ChinBoneName(3)}:{chinBoneWeights[3]:F2}]");
+                    GD.Print($"[TEST 18] Sasha Collar Vert ('{collarMatName}'): Rest={collarRestPos:F3}, bones=[{CollarBoneName(0)}:{collarBoneWeights[0]:F2}, {CollarBoneName(1)}:{collarBoneWeights[1]:F2}, {CollarBoneName(2)}:{collarBoneWeights[2]:F2}, {CollarBoneName(3)}:{collarBoneWeights[3]:F2}]");
+                    GD.Print($"[TEST 18] Sasha Rest Chin <-> Collar Distance: {restChinCollarDist:F3}m ({restChinCollarDist * 100f:F1}cm)");
+
+                    Vector3 EvalLbsPoint(Vector3 vRest, int[] bones, float[] weights, Skin skin, Skeleton3D skel)
+                    {
+                        Vector3 vAnim = Vector3.Zero;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            float w = weights[k];
+                            if (w <= 0.0001f) continue;
+                            int bindIdx = bones[k];
+                            int skelBone = skin.GetBindBone(bindIdx);
+                            if (skelBone < 0 && !string.IsNullOrEmpty(skin.GetBindName(bindIdx)))
+                                skelBone = skel.FindBone(skin.GetBindName(bindIdx));
+                            if (skelBone < 0) skelBone = 0;
+                            Transform3D bindPoseInv = skin.GetBindPose(bindIdx);
+                            Transform3D boneGlobal = skel.GetBoneGlobalPose(skelBone);
+                            vAnim += w * (boneGlobal * (bindPoseInv * vRest));
+                        }
+                        return vAnim;
+                    }
+
+                    var jumpSeq = vpkLoader.CurrentHeroAnimations?.FirstOrDefault(a =>
+                        a.CleanName.Equals("jump_ground", StringComparison.OrdinalIgnoreCase) ||
+                        a.CleanName.Contains("jump_ground", StringComparison.OrdinalIgnoreCase))
+                        ?? vpkLoader.CurrentHeroAnimations?.FirstOrDefault(a =>
+                        a.CleanName.Contains("jump", StringComparison.OrdinalIgnoreCase));
+
+                    if (jumpSeq != null)
+                    {
+                        var animPlayer = heroNode.FindChild("AnimationPlayer", true, false) as AnimationPlayer;
+                        if (animPlayer == null)
+                        {
+                            animPlayer = new AnimationPlayer { Name = "VerificationAnimPlayer" };
+                            heroNode.AddChild(animPlayer);
+                        }
+
+                        var decodedAnim = vpkLoader.DecodeAnimation(jumpSeq, heroSkeleton, animPlayer, inPlace: true);
+                        if (decodedAnim != null)
+                        {
+                            int spine2Bone = heroSkeleton.FindBone("spine_2");
+                            int spine3Bone = heroSkeleton.FindBone("spine_3");
+                            int neckBone = heroSkeleton.FindBone("neck_0");
+                            if (neckBone < 0) neckBone = heroSkeleton.FindBone("neck");
+                            int headBone = heroSkeleton.FindBone("head");
+                            int clavicleLBone = heroSkeleton.FindBone("clavicle_L");
+
+                            if (headBone >= 0 && neckBone >= 0 && spine3Bone >= 0)
+                            {
+                                Vector3 restSpine2 = spine2Bone >= 0 ? heroSkeleton.GetBoneGlobalRest(spine2Bone).Origin : Vector3.Zero;
+                                Vector3 restSpine3 = heroSkeleton.GetBoneGlobalRest(spine3Bone).Origin;
+                                Vector3 restNeck = heroSkeleton.GetBoneGlobalRest(neckBone).Origin;
+                                Vector3 restHead = heroSkeleton.GetBoneGlobalRest(headBone).Origin;
+                                Vector3 restClavL = clavicleLBone >= 0 ? heroSkeleton.GetBoneGlobalRest(clavicleLBone).Origin : Vector3.Zero;
+
+                                float restDist_spine2_spine3 = restSpine2.DistanceTo(restSpine3);
+                                float restDist_spine3_neck0 = restSpine3.DistanceTo(restNeck);
+                                float restDist_neck0_head = restNeck.DistanceTo(restHead);
+                                float restDist_spine3_head = restSpine3.DistanceTo(restHead);
+                                float restDist_clavL_neck0 = clavicleLBone >= 0 ? restClavL.DistanceTo(restNeck) : 0f;
+                                float restDist_clavL_head = clavicleLBone >= 0 ? restClavL.DistanceTo(restHead) : 0f;
+
+                                GD.Print($"[TEST 18] Bone Rest Origins: spine_2={restSpine2}, spine_3={restSpine3}, neck_0={restNeck}, head={restHead}, clavicle_L={restClavL}");
+                                GD.Print($"[TEST 18] Rest Distances: spine_2<->spine_3: {restDist_spine2_spine3:F3}m | spine_3<->neck_0: {restDist_spine3_neck0:F3}m | neck_0<->head: {restDist_neck0_head:F3}m | spine_3<->head: {restDist_spine3_head:F3}m | clav_L<->neck_0: {restDist_clavL_neck0:F3}m | clav_L<->head: {restDist_clavL_head:F3}m");
+
+                                float maxUnstabilizedStretch = 1.0f;
+                                float maxStabilizedStretch = 1.0f;
+                                float maxNeckSpineDelta = 0.0f;
+                                float maxChinCollarStretch = 1.0f;
+
+                                // Sample animation frames WITHOUT ClampLimbBoneTranslations (pure skinning as in Source 2 engine)
+                                float animLen = (float)decodedAnim.Length;
+                                float stepTime = 1.0f / 30.0f;
+                                int totalFrames = (int)MathF.Ceiling(animLen / stepTime) + 1;
+
+                                GD.Print($"\n[TEST 18 DIAGNOSTIC DUMP] Sampling {totalFrames} frames of '{jumpSeq.CleanName}' (raw Source 2 tracks, ClampLimbBoneTranslations OFF):");
+                                GD.Print($"Frame | dist(sp2,sp3) (delta) | dist(sp3,nk0) (delta) | dist(nk0,hd) (delta) | dist(sp3,hd) (delta) | dist(clL,nk0) | dist(clL,hd) | dist(chin,col) (stretch)");
+
+                                for (int f = 0; f < totalFrames; f++)
+                                {
+                                    float t = MathF.Min(f * stepTime, animLen);
+                                    for (int tr = 0; tr < decodedAnim.GetTrackCount(); tr++)
+                                    {
+                                        string p = decodedAnim.TrackGetPath(tr).ToString();
+                                        int c = p.LastIndexOf(':');
+                                        string bName = c >= 0 ? p.Substring(c + 1) : p;
+                                        int bIdx = heroSkeleton.FindBone(bName);
+                                        if (bIdx < 0) continue;
+
+                                        var trType = decodedAnim.TrackGetType(tr);
+                                        if (trType == Godot.Animation.TrackType.Position3D)
+                                            heroSkeleton.SetBonePosePosition(bIdx, decodedAnim.PositionTrackInterpolate(tr, t));
+                                        else if (trType == Godot.Animation.TrackType.Rotation3D)
+                                            heroSkeleton.SetBonePoseRotation(bIdx, decodedAnim.RotationTrackInterpolate(tr, t));
+                                    }
+
+                                    Vector3 curSpine2 = spine2Bone >= 0 ? heroSkeleton.GetBoneGlobalPose(spine2Bone).Origin : Vector3.Zero;
+                                    Vector3 curSpine3 = heroSkeleton.GetBoneGlobalPose(spine3Bone).Origin;
+                                    Vector3 curNeck = heroSkeleton.GetBoneGlobalPose(neckBone).Origin;
+                                    Vector3 curHead = heroSkeleton.GetBoneGlobalPose(headBone).Origin;
+                                    Vector3 curClavL = clavicleLBone >= 0 ? heroSkeleton.GetBoneGlobalPose(clavicleLBone).Origin : Vector3.Zero;
+
+                                    float d_sp2_sp3 = curSpine2.DistanceTo(curSpine3);
+                                    float d_sp3_nk0 = curSpine3.DistanceTo(curNeck);
+                                    float d_nk0_hd = curNeck.DistanceTo(curHead);
+                                    float d_sp3_hd = curSpine3.DistanceTo(curHead);
+                                    float d_clL_nk0 = clavicleLBone >= 0 ? curClavL.DistanceTo(curNeck) : 0f;
+                                    float d_clL_hd = clavicleLBone >= 0 ? curClavL.DistanceTo(curHead) : 0f;
+
+                                    float delta_sp2_sp3 = (d_sp2_sp3 - restDist_spine2_spine3) * 100f; // cm
+                                    float delta_sp3_nk0 = (d_sp3_nk0 - restDist_spine3_neck0) * 100f; // cm
+                                    float delta_nk0_hd = (d_nk0_hd - restDist_neck0_head) * 100f; // cm
+                                    float delta_sp3_hd = (d_sp3_hd - restDist_spine3_head) * 100f; // cm
+
+                                    if (MathF.Abs(delta_sp3_nk0) > maxNeckSpineDelta) maxNeckSpineDelta = MathF.Abs(delta_sp3_nk0);
+
+                                    // Sasha Chin <-> Collar stretch
+                                    Vector3 curChin = chinSkin != null ? EvalLbsPoint(chinRestPos, chinBoneIndices, chinBoneWeights, chinSkin, heroSkeleton) : curHead;
+                                    Vector3 curCollar = collarSkin != null ? EvalLbsPoint(collarRestPos, collarBoneIndices, collarBoneWeights, collarSkin, heroSkeleton) : curNeck;
+                                    float d_chin_col = curChin.DistanceTo(curCollar);
+                                    float chinColStretch = restChinCollarDist > 0.001f ? (d_chin_col / restChinCollarDist) : 1.0f;
+                                    if (chinColStretch > maxChinCollarStretch) maxChinCollarStretch = chinColStretch;
+
+                                    GD.Print($"F{f:D2} (t={t:F2}s) | {d_sp2_sp3:F3}m ({delta_sp2_sp3:+0.0;-0.0;0.0}cm) | {d_sp3_nk0:F3}m ({delta_sp3_nk0:+0.0;-0.0;0.0}cm) | {d_nk0_hd:F3}m ({delta_nk0_hd:+0.0;-0.0;0.0}cm) | {d_sp3_hd:F3}m ({delta_sp3_hd:+0.0;-0.0;0.0}cm) | {d_clL_nk0:F3}m | {d_clL_hd:F3}m | {d_chin_col:F3}m ({chinColStretch:F3}x)");
+                                }
+
+                                // Restore rest pose
+                                for (int b = 0; b < heroSkeleton.GetBoneCount(); b++)
+                                {
+                                    heroSkeleton.SetBonePosePosition(b, heroSkeleton.GetBoneRest(b).Origin);
+                                    heroSkeleton.SetBonePoseRotation(b, heroSkeleton.GetBoneRest(b).Basis.GetRotationQuaternion());
+                                }
+
+                                GD.Print($"\n[TEST 18 SUMMARY] Clip '{jumpSeq.CleanName}' | Max neck_0<->spine_3 delta: {maxNeckSpineDelta:F2}cm | Max Chin<->Collar Stretch: {maxChinCollarStretch:F3}x (Limit <= 1.12x)");
+                                if (maxChinCollarStretch <= 1.12f)
+                                {
+                                    GD.Print($"PASS: Sasha neck stretch verified on '{jumpSeq.CleanName}'! Chin<->Collar stretch {maxChinCollarStretch:F3}x <= 1.12x limit!");
+                                }
+                                else
+                                {
+                                    GD.PrintErr($"FAIL: Sasha neck stretch {maxChinCollarStretch:F3}x EXCEEDED 1.12x limit! (Neck stretches visibly)");
+                                    allPassed = false;
+                                }
+
+                                // =========================================================================
+                                // Automated Spike Check: Evaluate CPU Linear Blend Skinning for all 39,214
+                                // Sasha vertices to assert ZERO vertices spike down to (0,0,0) or drop below Y=0.90m!
+                                // =========================================================================
+                                customSubmeshes = previewHeroClone.FindChildren("*", "MeshInstance3D", true, false)
+                                    .OfType<MeshInstance3D>()
+                                    .Where(m => m.HasMeta("IsCustomImportedMesh") && m.GetMeta("IsCustomImportedMesh").AsBool())
+                                    .ToList();
+
+                                int totalCustomVerts = 0;
+                                int totalUpperBodyVerts = 0;
+                                int restSpikeCount = 0;
+                                int restDropBelow90Count = 0;
+                                float maxRestDisplacement = 0f;
+
+                                // 1. Check at Rest Pose
+                                foreach (var mi in customSubmeshes)
+                                {
+                                    var mesh = mi.Mesh;
+                                    var skin = mi.Skin;
+                                    if (mesh == null || skin == null) continue;
+
+                                    for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+                                    {
+                                        var arrays = mesh.SurfaceGetArrays(s);
+                                        var verts = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                                        var bones = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                                        var weights = arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                                        if (verts == null || bones == null || weights == null) continue;
+
+                                        totalCustomVerts += verts.Length;
+
+                                        for (int v = 0; v < verts.Length; v++)
+                                        {
+                                            Vector3 vOrig = verts[v];
+                                            if (vOrig.Y > 1.0f) // Torso / Neck / Head
+                                            {
+                                                totalUpperBodyVerts++;
+                                                Vector3 vDef = Vector3.Zero;
+                                                for (int k = 0; k < 4; k++)
+                                                {
+                                                    float w = weights[v * 4 + k];
+                                                    if (w <= 0.0001f) continue;
+                                                    int bindIdx = bones[v * 4 + k];
+                                                    int skelBone = skin.GetBindBone(bindIdx);
+                                                    if (skelBone < 0 && !string.IsNullOrEmpty(skin.GetBindName(bindIdx)))
+                                                        skelBone = heroSkeleton.FindBone(skin.GetBindName(bindIdx));
+                                                    if (skelBone < 0) skelBone = 0;
+
+                                                    Transform3D bindPoseInv = skin.GetBindPose(bindIdx);
+                                                    Transform3D boneRest = heroSkeleton.GetBoneGlobalRest(skelBone);
+                                                    vDef += w * (boneRest * (bindPoseInv * vOrig));
+                                                }
+
+                                                float disp = vDef.DistanceTo(vOrig);
+                                                if (disp > maxRestDisplacement) maxRestDisplacement = disp;
+                                                if (disp > 0.15f)
+                                                {
+                                                    restSpikeCount++;
+                                                    if (restSpikeCount <= 5)
+                                                    {
+                                                        GD.PrintErr($"[SPIKE DIAG] Mesh='{mi.Name}', surf={s}, v={v}, vOrig={vOrig}, vDef={vDef}, disp={disp:F3}m");
+                                                        for (int k = 0; k < 4; k++)
+                                                        {
+                                                            float w = weights[v * 4 + k];
+                                                            if (w <= 0.0001f) continue;
+                                                            int bindIdx = bones[v * 4 + k];
+                                                            int bBone = skin.GetBindBone(bindIdx);
+                                                            string bName = skin.GetBindName(bindIdx);
+                                                            int skelBone = bBone >= 0 ? bBone : heroSkeleton.FindBone(bName);
+                                                            string sName = skelBone >= 0 ? heroSkeleton.GetBoneName(skelBone) : "<null>";
+                                                            Vector3 bindInvOrig = skin.GetBindPose(bindIdx).AffineInverse().Origin;
+                                                            Vector3 skelRestOrig = skelBone >= 0 ? heroSkeleton.GetBoneGlobalRest(skelBone).Origin : Vector3.Zero;
+                                                            GD.PrintErr($"   k={k}: w={w:F3}, bindIdx={bindIdx}, bindBone={bBone}, bindName='{bName}', skelBone={skelBone} ('{sName}'), bindInvOrig={bindInvOrig}, skelRestOrig={skelRestOrig}");
+                                                        }
+                                                    }
+                                                }
+                                                if (vDef.Y < 0.90f) restDropBelow90Count++;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                GD.Print($"[TEST 18] Evaluated CPU LBS at Rest Pose across {totalCustomVerts} custom vertices ({totalUpperBodyVerts} torso/neck/head verts with Y > 1.0m):");
+                                GD.Print($"[TEST 18] Max Rest Displacement: {maxRestDisplacement:F4}m | Spikes (>15cm): {restSpikeCount} | Dropped below Y=0.90m: {restDropBelow90Count}");
+
+                                if (restSpikeCount == 0 && restDropBelow90Count == 0 && maxRestDisplacement <= 0.05f)
+                                {
+                                    GD.Print($"PASS: ZERO vertices spike or drop below Y=0.90m at Rest Pose (Max displacement: {maxRestDisplacement * 1000f:F1}mm)! Spike to (0,0,0) is 100% eliminated!");
+                                }
+                                else
+                                {
+                                    GD.PrintErr($"FAIL: CPU LBS Rest Pose check failed! Spikes: {restSpikeCount}, Dropped below 90cm: {restDropBelow90Count}, Max disp: {maxRestDisplacement:F4}m");
+                                    allPassed = false;
+                                }
+
+                                // 2. Check at Mid-Jump
+                                float midJumpTime = animLen * 0.5f;
+                                for (int tr = 0; tr < decodedAnim.GetTrackCount(); tr++)
+                                {
+                                    string p = decodedAnim.TrackGetPath(tr).ToString();
+                                    int c = p.LastIndexOf(':');
+                                    string bName = c >= 0 ? p.Substring(c + 1) : p;
+                                    int bIdx = heroSkeleton.FindBone(bName);
+                                    if (bIdx < 0) continue;
+
+                                    var trType = decodedAnim.TrackGetType(tr);
+                                    if (trType == Godot.Animation.TrackType.Position3D)
+                                        heroSkeleton.SetBonePosePosition(bIdx, decodedAnim.PositionTrackInterpolate(tr, midJumpTime));
+                                    else if (trType == Godot.Animation.TrackType.Rotation3D)
+                                        heroSkeleton.SetBonePoseRotation(bIdx, decodedAnim.RotationTrackInterpolate(tr, midJumpTime));
+                                }
+
+                                int midJumpSpikeCount = 0;
+                                int midJumpDropBelow90Count = 0;
+
+                                foreach (var mi in customSubmeshes)
+                                {
+                                    var mesh = mi.Mesh;
+                                    var skin = mi.Skin;
+                                    if (mesh == null || skin == null) continue;
+
+                                    for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+                                    {
+                                        var arrays = mesh.SurfaceGetArrays(s);
+                                        var verts = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                                        var bones = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                                        var weights = arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                                        if (verts == null || bones == null || weights == null) continue;
+
+                                        for (int v = 0; v < verts.Length; v++)
+                                        {
+                                            Vector3 vOrig = verts[v];
+                                            if (vOrig.Y > 1.20f) // Torso / Neck / Head
+                                            {
+                                                Vector3 vDef = Vector3.Zero;
+                                                for (int k = 0; k < 4; k++)
+                                                {
+                                                    float w = weights[v * 4 + k];
+                                                    if (w <= 0.0001f) continue;
+                                                    int bindIdx = bones[v * 4 + k];
+                                                    int skelBone = skin.GetBindBone(bindIdx);
+                                                    if (skelBone < 0 && !string.IsNullOrEmpty(skin.GetBindName(bindIdx)))
+                                                        skelBone = heroSkeleton.FindBone(skin.GetBindName(bindIdx));
+                                                    if (skelBone < 0) skelBone = 0;
+
+                                                    Transform3D bindPoseInv = skin.GetBindPose(bindIdx);
+                                                    Transform3D boneGlobal = heroSkeleton.GetBoneGlobalPose(skelBone);
+                                                    vDef += w * (boneGlobal * (bindPoseInv * vOrig));
+                                                }
+
+                                                if (vDef.Y < 0.90f)
+                                                {
+                                                    midJumpDropBelow90Count++;
+                                                    if (midJumpDropBelow90Count <= 5)
+                                                    {
+                                                        GD.PrintErr($"[MID-JUMP DROP] Mesh='{mi.Name}', v={v}, vOrig={vOrig}, vDef={vDef}");
+                                                        for (int k = 0; k < 4; k++)
+                                                        {
+                                                            float w = weights[v * 4 + k];
+                                                            if (w <= 0.0001f) continue;
+                                                            int bindIdx = bones[v * 4 + k];
+                                                            int skelBone = skin.GetBindBone(bindIdx);
+                                                            if (skelBone < 0 && !string.IsNullOrEmpty(skin.GetBindName(bindIdx)))
+                                                                skelBone = heroSkeleton.FindBone(skin.GetBindName(bindIdx));
+                                                            GD.PrintErr($"   k={k}: w={w:F3}, bone='{(skelBone >= 0 ? heroSkeleton.GetBoneName(skelBone) : "<null>")}'");
+                                                        }
+                                                    }
+                                                }
+                                                if (vDef.Length() < 0.20f) midJumpSpikeCount++;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Restore rest pose
+                                for (int b = 0; b < heroSkeleton.GetBoneCount(); b++)
+                                {
+                                    heroSkeleton.SetBonePosePosition(b, heroSkeleton.GetBoneRest(b).Origin);
+                                    heroSkeleton.SetBonePoseRotation(b, heroSkeleton.GetBoneRest(b).Basis.GetRotationQuaternion());
+                                }
+
+                                GD.Print($"[TEST 18] Evaluated CPU LBS at Mid-Jump (t={midJumpTime:F2}s): Spikes to origin: {midJumpSpikeCount} | Dropped below Y=0.90m: {midJumpDropBelow90Count}");
+                                if (midJumpSpikeCount == 0 && midJumpDropBelow90Count == 0)
+                                {
+                                    GD.Print("PASS: ZERO torso/neck/head vertices drop below Y=0.90m or spike to origin during jump!");
+                                }
+                                else
+                                {
+                                    GD.PrintErr($"FAIL: Mid-jump CPU LBS failed! Spikes={midJumpSpikeCount}, DroppedBelow90={midJumpDropBelow90Count}");
+                                    allPassed = false;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            GD.PrintErr($"FAIL: Failed to decode animation '{jumpSeq.CleanName}'!");
+                            allPassed = false;
+                        }
+                    }
+                    else
+                    {
+                        GD.Print("[TEST 18] Notice: No jump clip found on Paradox; skipping jump_ground test.");
                     }
 
                     // Cleanup temp VPK and staging

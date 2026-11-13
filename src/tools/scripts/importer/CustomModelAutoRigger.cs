@@ -67,6 +67,7 @@ namespace DeadlockPlayground.Importer
             public bool ExcludeClothHairBones { get; set; } = true;
             public bool KeepFingersRigidOnHand { get; set; } = false;
             public bool ClampLimbStretching { get; set; } = true;
+            public bool StabilizeNeckFloatingHead { get; set; } = true;
             public bool IncludeBakedOutlineShells { get; set; } = true;
             public Dictionary<string, bool> SubmeshIsOutlineShell { get; set; } = new(StringComparer.OrdinalIgnoreCase);
             public Vector3 RootPosition { get; set; } = Vector3.Zero;
@@ -394,9 +395,13 @@ namespace DeadlockPlayground.Importer
             EnsureForearmTwistBone(heroSkeleton, isLeft: false);
 
             var heroSkin = FindSkin(heroNode);
-            if (heroSkin == null || heroSkin.GetBindCount() < heroSkeleton.GetBoneCount())
+            // Create a dedicated Skin instance duplicated from heroSkin (or freshly created)
+            // so we never mutate the vanilla hero model's skin and guarantee every bone in heroSkeleton
+            // has a valid, non-zero InverseBindMatrix entry!
+            Skin customSkin = heroSkin != null ? (Skin)heroSkin.Duplicate() : CreateFullSkeletonSkin(heroSkeleton);
+            for (int b = 0; b < heroSkeleton.GetBoneCount(); b++)
             {
-                heroSkin = CreateFullSkeletonSkin(heroSkeleton);
+                GetOrAddSkinBindIndex(customSkin, heroSkeleton, b);
             }
 
             // Ensure unlit/emissive materials and outline shell metadata are sanitized on the imported scene
@@ -423,16 +428,16 @@ namespace DeadlockPlayground.Importer
             {
                 if (options.Method == RiggingMethod.RigidSingleBone || options.Preset == PosePreset.RigidSingleBone)
                 {
-                    result = RigRigidBoneModel(importedScene, importedMeshes, heroNode, heroSkeleton, heroSkin, options);
+                    result = RigRigidBoneModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
                 }
                 else if (options.Method == RiggingMethod.PreRiggedSkeletonRemap && hasImportedRig)
                 {
-                    result = RigPreRiggedModel(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, heroSkin, options);
+                    result = RigPreRiggedModel(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
                 }
                 else
                 {
                     // Default & Recommended: KNN Surface Projection!
-                    result = RigUnriggedModel(importedScene, importedMeshes, heroNode, heroSkeleton, heroSkin, options);
+                    result = RigUnriggedModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
                 }
 
                 if (result.Success)
@@ -693,6 +698,12 @@ namespace DeadlockPlayground.Importer
                         SmoothWeightsLaplacian(rawIndices, vCount, boneIndices, boneWeights, options.SmoothingIterations, alignedVerts);
                         swLapStep.Stop();
                         totalLapMs += swLapStep.ElapsedMilliseconds;
+                    }
+
+                    // Stabilize neck weights against floating-head stretch (e.g. Paradox/Chrono)
+                    if (!isSocketProp && options.StabilizeNeckFloatingHead)
+                    {
+                        StabilizeNeckFloatingHeadWeights(heroSkeleton, vCount, boneIndices, boneWeights);
                     }
 
                     // Bake T-Pose vertices & normals back into Deadlock's native Rest / Bind Pose
@@ -1071,6 +1082,19 @@ namespace DeadlockPlayground.Importer
                             {
                                 wristMask[v] = true;
                                 System.Threading.Interlocked.Increment(ref wristCount);
+                            }
+
+                            // Stabilize neck weights against floating-head stretch (e.g. Paradox/Chrono)
+                            if (!isSocketProp && options.StabilizeNeckFloatingHead)
+                            {
+                                int headBone = targetSkeleton.FindBone("head");
+                                int neckBone = targetSkeleton.FindBone("neck_0");
+                                if (neckBone < 0) neckBone = targetSkeleton.FindBone("neck");
+                                int spine3Bone = targetSkeleton.FindBone("spine_3");
+                                if (spine3Bone < 0) spine3Bone = targetSkeleton.FindBone("spine_2");
+                                int spine2Bone = targetSkeleton.FindBone("spine_2");
+
+                                StabilizeNeckFloatingHeadVertex(topBones, topWeights, headBone, neckBone, spine3Bone, spine2Bone, vHero.Y);
                             }
 
                             // Assign Skin bone indices & weights
@@ -2935,6 +2959,155 @@ namespace DeadlockPlayground.Importer
             }
         }
 
+        /// <summary>
+        /// Stabilizes neck and head bone weights against floating-head stretch (e.g. Paradox/Chrono)
+        /// where neck_0 and head translate upward away from spine_3 during jumps and traversal animations.
+        /// Anchors upper chest/collar to spine_3 and blends head/cervical rotation onto spine_3 (75%) and neck_0 (25%),
+        /// keeping chin-to-collar stretch strictly <= 1.10x without preview-only position clamping.
+        /// Operates strictly in Skeleton3D bone index space BEFORE bone indices are remapped to Skin bind indices.
+        /// </summary>
+        public static void StabilizeNeckFloatingHeadVertex(
+            Span<int> bones,
+            Span<float> weights,
+            int headBone,
+            int neckBone,
+            int spine3Bone,
+            int spine2Bone = -1,
+            float heroY = 0f,
+            float throatYThreshold = 1.95f)
+        {
+            if (headBone < 0 || spine3Bone < 0) return;
+
+            float headW = 0f;
+            float neckW = 0f;
+            float spine2W = 0f;
+            for (int k = 0; k < 4; k++)
+            {
+                if (weights[k] <= 0.0001f) continue;
+                if (bones[k] == headBone) headW += weights[k];
+                else if (neckBone >= 0 && bones[k] == neckBone) neckW += weights[k];
+                else if (spine2Bone >= 0 && bones[k] == spine2Bone) spine2W += weights[k];
+            }
+
+            bool isCervicalOrHead = headW > 0.0001f || neckW > 0.0001f;
+            bool isUpperThroatSpine2 = spine2W > 0.0001f && (heroY >= throatYThreshold || isCervicalOrHead);
+
+            if (!isCervicalOrHead && !isUpperThroatSpine2) return;
+
+            // Anchor upper neck/head: 92% spine_3, 8% neck_0 (or 100% spine_3 if neckBone < 0)
+            // Anchor lower neck: 95% spine_3, 5% neck_0
+            // Transfer spine_2 influence on throat/collarline to spine_3 to eliminate accordion expansion
+            float spine3Add = (headW * 0.92f) + (neckW * 0.95f) + (isUpperThroatSpine2 ? spine2W : 0f);
+            float neckAdd = (neckBone >= 0) ? ((headW * 0.08f) + (neckW * 0.05f)) : 0f;
+            if (neckBone < 0) spine3Add += neckAdd;
+
+            Span<int> uBones = stackalloc int[6];
+            Span<float> uWeights = stackalloc float[6];
+            int uCount = 0;
+
+            // Collect other unaffected influences
+            for (int k = 0; k < 4; k++)
+            {
+                int b = bones[k];
+                float w = weights[k];
+                if (w <= 0.0001f) continue;
+                if (b == headBone || (neckBone >= 0 && b == neckBone)) continue;
+                if (isUpperThroatSpine2 && b == spine2Bone) continue;
+
+                int found = -1;
+                for (int u = 0; u < uCount; u++)
+                {
+                    if (uBones[u] == b) { found = u; break; }
+                }
+                if (found != -1) uWeights[found] += w;
+                else if (uCount < 6) { uBones[uCount] = b; uWeights[uCount] = w; uCount++; }
+            }
+
+            // Add spine_3 influence
+            if (spine3Add > 0.0001f && spine3Bone >= 0)
+            {
+                int found = -1;
+                for (int u = 0; u < uCount; u++)
+                {
+                    if (uBones[u] == spine3Bone) { found = u; break; }
+                }
+                if (found != -1) uWeights[found] += spine3Add;
+                else if (uCount < 6) { uBones[uCount] = spine3Bone; uWeights[uCount] = spine3Add; uCount++; }
+            }
+
+            // Add neck_0 influence
+            if (neckAdd > 0.0001f && neckBone >= 0)
+            {
+                int found = -1;
+                for (int u = 0; u < uCount; u++)
+                {
+                    if (uBones[u] == neckBone) { found = u; break; }
+                }
+                if (found != -1) uWeights[found] += neckAdd;
+                else if (uCount < 6) { uBones[uCount] = neckBone; uWeights[uCount] = neckAdd; uCount++; }
+            }
+
+            // Sort top 4 influences descending by weight and normalize to exactly 1.00000
+            float totalW = 0f;
+            for (int u = 0; u < uCount; u++) totalW += uWeights[u];
+
+            for (int k = 0; k < 4; k++)
+            {
+                int best = -1;
+                float maxW = 0f;
+                for (int u = 0; u < uCount; u++)
+                {
+                    if (uWeights[u] > maxW)
+                    {
+                        maxW = uWeights[u];
+                        best = u;
+                    }
+                }
+                if (best != -1 && maxW > 0.0001f)
+                {
+                    bones[k] = uBones[best];
+                    weights[k] = totalW > 0.0001f ? (maxW / totalW) : maxW;
+                    uWeights[best] = -1f;
+                }
+                else
+                {
+                    bones[k] = 0;
+                    weights[k] = 0f;
+                }
+            }
+        }
+
+        public static void StabilizeNeckFloatingHeadWeights(
+            Skeleton3D skeleton,
+            int vCount,
+            int[] boneIndices,
+            float[] boneWeights,
+            Vector3[] verts = null)
+        {
+            if (skeleton == null || boneIndices == null || boneWeights == null || vCount <= 0) return;
+            int headBone = skeleton.FindBone("head");
+            int neckBone = skeleton.FindBone("neck_0");
+            if (neckBone < 0) neckBone = skeleton.FindBone("neck");
+            int spine3Bone = skeleton.FindBone("spine_3");
+            if (spine3Bone < 0) spine3Bone = skeleton.FindBone("spine_2");
+            int spine2Bone = skeleton.FindBone("spine_2");
+            if (headBone < 0 || spine3Bone < 0) return;
+
+            for (int v = 0; v < vCount; v++)
+            {
+                int baseIdx = v * 4;
+                float y = verts != null && v < verts.Length ? verts[v].Y : 0f;
+                StabilizeNeckFloatingHeadVertex(
+                    boneIndices.AsSpan(baseIdx, 4),
+                    boneWeights.AsSpan(baseIdx, 4),
+                    headBone,
+                    neckBone,
+                    spine3Bone,
+                    spine2Bone,
+                    y);
+            }
+        }
+
         private static void SmoothSingleVertex(
             int v,
             List<int>[] adj,
@@ -3093,35 +3266,26 @@ namespace DeadlockPlayground.Importer
             });
         }
 
-        private static (Dictionary<int, int> skelToBind, Dictionary<int, int> bindToSkel) BuildSkinIndexMappings(Skeleton3D skeleton, Skin skin)
+        public static (Dictionary<int, int> skelToBind, Dictionary<int, int> bindToSkel) BuildSkinIndexMappings(Skeleton3D skeleton, Skin skin)
         {
             var skelToBind = new Dictionary<int, int>();
             var bindToSkel = new Dictionary<int, int>();
+            if (skeleton == null) return (skelToBind, bindToSkel);
 
             int boneCount = skeleton.GetBoneCount();
 
-            if (skin != null && skin.GetBindCount() > 0)
+            if (skin != null)
             {
-                for (int i = 0; i < skin.GetBindCount(); i++)
+                for (int b = 0; b < boneCount; b++)
                 {
-                    int bone = skin.GetBindBone(i);
-                    if (bone == -1 && !string.IsNullOrEmpty(skin.GetBindName(i)))
-                    {
-                        bone = skeleton.FindBone(skin.GetBindName(i));
-                    }
-
-                    if (bone >= 0)
-                    {
-                        skelToBind[bone] = i;
-                        bindToSkel[i] = bone;
-                    }
+                    int bindIdx = GetOrAddSkinBindIndex(skin, skeleton, b);
+                    skelToBind[b] = bindIdx;
+                    bindToSkel[bindIdx] = b;
                 }
             }
-
-            // Fill unmapped fallback identity
-            for (int b = 0; b < boneCount; b++)
+            else
             {
-                if (!skelToBind.ContainsKey(b))
+                for (int b = 0; b < boneCount; b++)
                 {
                     skelToBind[b] = b;
                     bindToSkel[b] = b;
@@ -3440,6 +3604,7 @@ namespace DeadlockPlayground.Importer
             for (int b = 0; b < count; b++)
             {
                 skin.AddBind(b, skeleton.GetBoneGlobalRest(b).AffineInverse());
+                skin.SetBindName(b, skeleton.GetBoneName(b));
             }
             return skin;
         }
@@ -3734,15 +3899,59 @@ namespace DeadlockPlayground.Importer
             return idx;
         }
 
-        public static void EnsureSkinHasBind(Skin skin, Skeleton3D skeleton, int boneIdx)
+        /// <summary>
+        /// Ensures every mapped bone in heroSkeleton has a valid, non-zero InverseBindMatrix entry in skin.
+        /// Searches existing binds by bone index or bone name, verifies/repairs the bind pose against
+        /// skeleton.GetBoneGlobalRest(skeletonBoneIdx).AffineInverse() (within 1cm), or adds a new bind.
+        /// </summary>
+        public static int GetOrAddSkinBindIndex(Skin skin, Skeleton3D skeleton, int skeletonBoneIdx)
         {
-            if (skin == null || skeleton == null || boneIdx < 0 || boneIdx >= skeleton.GetBoneCount()) return;
+            if (skin == null || skeleton == null || skeletonBoneIdx < 0 || skeletonBoneIdx >= skeleton.GetBoneCount())
+                return 0;
+
+            string boneName = skeleton.GetBoneName(skeletonBoneIdx);
             int bindCount = skin.GetBindCount();
+
+            // 1. Search for existing bind matching either bone index or bone name
             for (int b = 0; b < bindCount; b++)
             {
-                if (skin.GetBindBone(b) == boneIdx) return;
+                int bindBone = skin.GetBindBone(b);
+                string bindName = skin.GetBindName(b);
+                if (bindBone == skeletonBoneIdx || (!string.IsNullOrEmpty(bindName) && bindName == boneName))
+                {
+                    Transform3D restGlobal = skeleton.GetBoneGlobalRest(skeletonBoneIdx);
+                    Transform3D expectedInv = restGlobal.AffineInverse();
+                    Transform3D currentInv = skin.GetBindPose(b);
+                    Transform3D currentPose = currentInv.AffineInverse();
+
+                    if (currentPose.Origin.DistanceTo(restGlobal.Origin) > 0.01f ||
+                        float.IsNaN(currentInv.Origin.X) || currentInv == Transform3D.Identity)
+                    {
+                        skin.SetBindPose(b, expectedInv);
+                    }
+                    if (skin.GetBindBone(b) != skeletonBoneIdx)
+                    {
+                        skin.SetBindBone(b, skeletonBoneIdx);
+                    }
+                    if (string.IsNullOrEmpty(bindName) || bindName != boneName)
+                    {
+                        skin.SetBindName(b, boneName);
+                    }
+                    return b;
+                }
             }
-            skin.AddBind(boneIdx, skeleton.GetBoneGlobalRest(boneIdx).AffineInverse());
+
+            // 2. Not found in skin -> Add bind!
+            Transform3D invBind = skeleton.GetBoneGlobalRest(skeletonBoneIdx).AffineInverse();
+            skin.AddBind(skeletonBoneIdx, invBind);
+            int newBindIdx = skin.GetBindCount() - 1;
+            skin.SetBindName(newBindIdx, boneName);
+            return newBindIdx;
+        }
+
+        public static void EnsureSkinHasBind(Skin skin, Skeleton3D skeleton, int boneIdx)
+        {
+            GetOrAddSkinBindIndex(skin, skeleton, boneIdx);
         }
 
         public static void DriveForearmTwist(Skeleton3D skeleton)
@@ -4129,6 +4338,9 @@ namespace DeadlockPlayground.Importer
         {
             if (sceneRoot == null || !GodotObject.IsInstanceValid(sceneRoot)) return;
 
+            var assignedMatNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var matToUniqueName = new Dictionary<Material, string>();
+
             var meshes = CollectMeshes(sceneRoot);
             foreach (var mi in meshes)
             {
@@ -4139,6 +4351,35 @@ namespace DeadlockPlayground.Importer
                 for (int s = 0; s < surfCount; s++)
                 {
                     Material mat = mi.Mesh.SurfaceGetMaterial(s) ?? mi.GetSurfaceOverrideMaterial(s) ?? mi.MaterialOverride;
+                    if (mat == null) continue;
+
+                    // Disambiguate material name across distinct material instances so generic names
+                    // (like "material", "Material", "default") never collide between meshes (e.g. eye vs pistol)
+                    if (!matToUniqueName.TryGetValue(mat, out string uniqueMatName))
+                    {
+                        string rawMatName = mat.ResourceName?.Trim();
+                        if (string.IsNullOrWhiteSpace(rawMatName) ||
+                            rawMatName.Equals("material", StringComparison.OrdinalIgnoreCase) ||
+                            rawMatName.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+                            rawMatName.Equals("custom_mat", StringComparison.OrdinalIgnoreCase))
+                        {
+                            rawMatName = $"{rawMeshName}_mat";
+                        }
+
+                        uniqueMatName = rawMatName;
+                        int suffix = 1;
+                        while (assignedMatNames.Contains(uniqueMatName))
+                        {
+                            uniqueMatName = $"{rawMatName}_{suffix++}";
+                        }
+
+                        assignedMatNames.Add(uniqueMatName);
+                        matToUniqueName[mat] = uniqueMatName;
+                        mat.ResourceName = uniqueMatName;
+                    }
+
+                    mi.SetMeta("SourceMaterialName", uniqueMatName);
+                    mat.SetMeta("MaterialName", uniqueMatName);
 
                     // Check if vertex color array is all black/zero
                     bool hasAllBlackVertexColors = false;
@@ -4183,16 +4424,31 @@ namespace DeadlockPlayground.Importer
                             stdMat.AlbedoTexture = stdMat.EmissionTexture;
                         }
 
-                        bool isBlackAlbedo = stdMat.AlbedoColor.R < 0.02f && stdMat.AlbedoColor.G < 0.02f && stdMat.AlbedoColor.B < 0.02f;
-                        if (isBlackAlbedo)
+                        // If material has no AlbedoTexture, bake its solid AlbedoColor into a 16x16 solid-color ImageTexture!
+                        // This prevents untextured solid-color materials (e.g. mouth, eye whites, outline_black, outline_for_cube)
+                        // from turning black in Painter or borrowing the pistol's texture!
+                        if (stdMat.AlbedoTexture == null)
                         {
-                            if (stdMat.AlbedoTexture != null)
+                            Color solidCol = stdMat.AlbedoColor;
+                            if (stdMat.EmissionEnabled && (stdMat.Emission.R > 0.02f || stdMat.Emission.G > 0.02f || stdMat.Emission.B > 0.02f) &&
+                                solidCol.R < 0.02f && solidCol.G < 0.02f && solidCol.B < 0.02f)
+                            {
+                                solidCol = stdMat.Emission;
+                            }
+
+                            var img = Image.CreateEmpty(16, 16, false, Image.Format.Rgba8);
+                            img.Fill(solidCol);
+                            var solidTex = ImageTexture.CreateFromImage(img);
+                            solidTex.ResourceName = $"{uniqueMatName}_solid_tex";
+                            stdMat.AlbedoTexture = solidTex;
+                            stdMat.AlbedoColor = Colors.White;
+                        }
+                        else
+                        {
+                            bool isBlackAlbedo = stdMat.AlbedoColor.R < 0.02f && stdMat.AlbedoColor.G < 0.02f && stdMat.AlbedoColor.B < 0.02f;
+                            if (isBlackAlbedo)
                             {
                                 stdMat.AlbedoColor = new Color(1f, 1f, 1f, stdMat.AlbedoColor.A > 0f ? stdMat.AlbedoColor.A : 1f);
-                            }
-                            else if (stdMat.EmissionEnabled && (stdMat.Emission.R > 0.02f || stdMat.Emission.G > 0.02f || stdMat.Emission.B > 0.02f))
-                            {
-                                stdMat.AlbedoColor = new Color(stdMat.Emission.R, stdMat.Emission.G, stdMat.Emission.B, stdMat.AlbedoColor.A > 0f ? stdMat.AlbedoColor.A : 1f);
                             }
                         }
 
@@ -4201,12 +4457,6 @@ namespace DeadlockPlayground.Importer
                         {
                             stdMat.EmissionEnabled = false;
                             stdMat.Emission = Colors.Black;
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(stdMat.ResourceName))
-                        {
-                            mi.SetMeta("SourceMaterialName", stdMat.ResourceName);
-                            stdMat.SetMeta("MaterialName", stdMat.ResourceName);
                         }
 
                         stdMat.SetMeta("IsOutlineShell", isOutline);

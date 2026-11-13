@@ -48,6 +48,8 @@ namespace DeadlockPlayground.Importer
             public int ParentIndex { get; set; } = -1;
             public Vector3 Origin { get; set; } = Vector3.Zero;
             public Vector3 AnglesDeg { get; set; } = Vector3.Zero; // [pitch, yaw, roll] in degrees
+            public System.Numerics.Quaternion ParentRot { get; set; } = System.Numerics.Quaternion.Identity;
+            public bool HasParentRot { get; set; } = false;
         }
 
         /// <summary>
@@ -93,6 +95,7 @@ namespace DeadlockPlayground.Importer
             public Dictionary<string, Transform3D> BoneLocalRestTransforms { get; } = new(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, Transform3D> BoneRestTransforms { get; } = new(StringComparer.OrdinalIgnoreCase);
             public byte[] OriginalHeroVmdlCBytes { get; set; }
+            public bool StabilizeNeckFloatingHead { get; set; } = false;
         }
 
         public class ModelExportOptions
@@ -154,7 +157,8 @@ namespace DeadlockPlayground.Importer
                 DeadlockGamePath = deadlockGamePath ?? "",
                 OriginalHeroVmdlCBytes = originalHeroVmdlCBytes,
                 StagingDir = stagingDir ?? "",
-                ResourceCompilerExe = compilerExe ?? ""
+                ResourceCompilerExe = compilerExe ?? "",
+                StabilizeNeckFloatingHead = cleanHero == "chrono"
             };
 
             var clothBoneIndices = new HashSet<int>();
@@ -262,7 +266,8 @@ namespace DeadlockPlayground.Importer
                             skeleton,
                             bundle.BoneNames.Count,
                             cappedBones,
-                            cappedWeights);
+                            cappedWeights,
+                            bundle.StabilizeNeckFloatingHead);
 
                         // Resolve authentic material (checking OriginalMaterial_s metadata, SurfaceGetMaterial, and OverrideMaterial)
                         Godot.Material origMetaMat = meshInst.HasMeta($"OriginalMaterial_{s}")
@@ -452,6 +457,33 @@ namespace DeadlockPlayground.Importer
             return bindToSkel;
         }
 
+        public static bool IsUniformColor(Image img, out Color uniformColor)
+        {
+            uniformColor = Colors.White;
+            if (img == null || img.IsEmpty()) return false;
+            int w = img.GetWidth();
+            int h = img.GetHeight();
+            if (w * h == 0) return false;
+            uniformColor = img.GetPixel(0, 0);
+            int stepX = Math.Max(1, w / 16);
+            int stepY = Math.Max(1, h / 16);
+            for (int y = 0; y < h; y += stepY)
+            {
+                for (int x = 0; x < w; x += stepX)
+                {
+                    Color px = img.GetPixel(x, y);
+                    if (Math.Abs(px.R - uniformColor.R) > 0.015f ||
+                        Math.Abs(px.G - uniformColor.G) > 0.015f ||
+                        Math.Abs(px.B - uniformColor.B) > 0.015f ||
+                        Math.Abs(px.A - uniformColor.A) > 0.015f)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
         private static byte[] ExtractTexturePngPowerOfTwo(Texture2D tex, Color tint)
         {
             if (tex == null) return null;
@@ -460,6 +492,13 @@ namespace DeadlockPlayground.Importer
 
             img = (Image)img.Duplicate();
             if (img.IsCompressed()) img.Decompress();
+
+            // If the image is a solid uniform color (or tiny placeholder like 16x16),
+            // export it at 64x64 instead of a giant 2048x2048 texture, saving ~5.4 MB per material!
+            if (IsUniformColor(img, out Color uniColor))
+            {
+                return CreateSolidColorPngBytes(64, 64, uniColor);
+            }
 
             EnsurePowerOfTwoResolution(img);
             return img.SavePngToBuffer();
@@ -554,9 +593,16 @@ namespace DeadlockPlayground.Importer
             Skeleton3D skeleton,
             int maxBoneCount,
             int[] outBones,
-            float[] outWeights)
+            float[] outWeights,
+            bool stabilizeNeckFloatingHead = false)
         {
             int fallbackRoot = 0;
+            int headBoneIdx = skeleton != null ? skeleton.FindBone("head") : -1;
+            int neckBoneIdx = skeleton != null ? skeleton.FindBone("neck_0") : -1;
+            if (neckBoneIdx < 0 && skeleton != null) neckBoneIdx = skeleton.FindBone("neck");
+            int spine3BoneIdx = skeleton != null ? skeleton.FindBone("spine_3") : -1;
+            int targetAnchorIdx = neckBoneIdx >= 0 ? neckBoneIdx : spine3BoneIdx;
+
             if (skeleton != null)
             {
                 int pelvis = skeleton.FindBone("pelvis");
@@ -599,6 +645,11 @@ namespace DeadlockPlayground.Importer
                     if (clothBoneIndices != null && clothBoneIndices.Contains(b))
                     {
                         b = FindNonClothFallbackBone(skeleton, b, clothBoneIndices);
+                    }
+
+                    if (stabilizeNeckFloatingHead && headBoneIdx >= 0 && targetAnchorIdx >= 0 && b == headBoneIdx)
+                    {
+                        b = targetAnchorIdx;
                     }
 
                     merged[b] = merged.GetValueOrDefault(b, 0f) + w;
@@ -765,11 +816,17 @@ namespace DeadlockPlayground.Importer
                         }
                     }
 
-                    // Parse authoritative bone list from decompiled .vmdl Skeleton block (or fallback to vrfBones / bundle)
-                    List<VmdlSkeletonBone> targetSkeletonBones = ParseSkeletonBonesFromVmdlText(decompiledVmdlText);
-                    if (targetSkeletonBones.Count == 0 && vrfBones != null && vrfBones.Count > 0)
+                    // Authoritative bone list: directly from vanilla vmdl_c m_modelSkeleton (vrfBones)
+                    // This guarantees bit-for-bit identical rest pose and local bone axes to vanilla,
+                    // preventing Ragdoll physics from exploding/twisting on death!
+                    List<VmdlSkeletonBone> targetSkeletonBones = null;
+                    if (vrfBones != null && vrfBones.Count > 0)
                     {
                         targetSkeletonBones = vrfBones;
+                    }
+                    else
+                    {
+                        targetSkeletonBones = ParseSkeletonBonesFromVmdlText(decompiledVmdlText);
                     }
 
                     // 2. Group custom submeshes into body vs weapon groups and write Source 2 bind-pose SMD(s)
@@ -1088,7 +1145,9 @@ namespace DeadlockPlayground.Importer
                                 Name = b.Name,
                                 ParentIndex = b.Parent?.Index ?? -1,
                                 Origin = new Vector3(b.Position.X, b.Position.Y, b.Position.Z),
-                                AnglesDeg = eulerDeg
+                                AnglesDeg = eulerDeg,
+                                ParentRot = b.Angle,
+                                HasParentRot = true
                             });
                         }
                     }
@@ -1715,11 +1774,19 @@ namespace DeadlockPlayground.Importer
             for (int i = 0; i < smdBones.Count; i++)
             {
                 var b = smdBones[i];
-                // ModelDoc Bone.angles = [pitch (Y), yaw (Z), roll (X)] in degrees.
-                // SMD skeleton rotation columns are (rotX_rad = roll, rotY_rad = pitch, rotZ_rad = yaw).
-                float rotXRad = b.AnglesDeg.Z * degToRad;
-                float rotYRad = b.AnglesDeg.X * degToRad;
-                float rotZRad = b.AnglesDeg.Y * degToRad;
+                float rotXRad, rotYRad, rotZRad;
+                if (b.HasParentRot)
+                {
+                    (rotXRad, rotYRad, rotZRad) = QuaternionToSourceSmdEuler(b.ParentRot);
+                }
+                else
+                {
+                    // ModelDoc Bone.angles = [pitch (Y), yaw (Z), roll (X)] in degrees.
+                    // SMD skeleton rotation columns are (rotX_rad = roll, rotY_rad = pitch, rotZ_rad = yaw).
+                    rotXRad = b.AnglesDeg.Z * degToRad;
+                    rotYRad = b.AnglesDeg.X * degToRad;
+                    rotZRad = b.AnglesDeg.Y * degToRad;
+                }
 
                 sb.AppendLine(string.Format(ic,
                     "{0} {1:F6} {2:F6} {3:F6} {4:F6} {5:F6} {6:F6}",
@@ -1847,6 +1914,58 @@ namespace DeadlockPlayground.Importer
 
             const float radToDeg = 180.0f / MathF.PI;
             return new Vector3(pitch * radToDeg, yaw * radToDeg, roll * radToDeg);
+        }
+
+        /// <summary>
+        /// Converts native Source 2 parent-local bone quaternion into SMD skeleton Euler angles in radians.
+        /// Uses Valve's exact MatrixAngles algorithm from Source SDK mathlib.
+        /// </summary>
+        public static (float rotX, float rotY, float rotZ) QuaternionToSourceSmdEuler(System.Numerics.Quaternion q)
+        {
+            float x2 = q.X + q.X;
+            float y2 = q.Y + q.Y;
+            float z2 = q.Z + q.Z;
+            float xx = q.X * x2;
+            float xy = q.X * y2;
+            float xz = q.X * z2;
+            float yy = q.Y * y2;
+            float yz = q.Y * z2;
+            float zz = q.Z * z2;
+            float wx = q.W * x2;
+            float wy = q.W * y2;
+            float wz = q.W * z2;
+
+            float m00 = 1.0f - (yy + zz);
+            float m01 = xy - wz;
+            float m02 = xz + wy;
+
+            float m10 = xy + wz;
+            float m11 = 1.0f - (xx + zz);
+            float m12 = yz - wx;
+
+            float m20 = xz - wy;
+            float m21 = yz + wx;
+            float m22 = 1.0f - (xx + yy);
+
+            // Valve Source SDK MatrixAngles (RadianEuler):
+            // angles.z = atan2( m10, m00 ); // yaw
+            // angles.y = atan2( -m20, sqrt(m00*m00 + m10*m10) ); // pitch
+            // angles.x = atan2( m21, m22 ); // roll
+            float xyDist = MathF.Sqrt(m00 * m00 + m10 * m10);
+            float rotX, rotY, rotZ;
+            if (xyDist > 0.001f)
+            {
+                rotX = MathF.Atan2(m21, m22);
+                rotY = MathF.Atan2(-m20, xyDist);
+                rotZ = MathF.Atan2(m10, m00);
+            }
+            else
+            {
+                rotX = 0.0f;
+                rotY = MathF.Atan2(-m20, xyDist);
+                rotZ = MathF.Atan2(-m01, m11);
+            }
+            return (rotX, rotY, rotZ);
         }
 
         /// <summary>

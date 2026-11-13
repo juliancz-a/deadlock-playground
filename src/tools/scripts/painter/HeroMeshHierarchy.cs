@@ -23,6 +23,7 @@ namespace DeadlockPlayground.Painter
         // Dirty tracking & export selection
         public bool IsDirty { get; set; } = false;
         public bool IsSelected { get; set; } = false;
+        public bool IsCustomImportedMesh { get; set; } = false;
 
         // Exact compiled color texture path for direct in-place VPK replacement
         public string OriginalColorVtexCPath { get; set; }
@@ -120,6 +121,26 @@ namespace DeadlockPlayground.Painter
 
                 bool isAcc = IsAccessoryKeyword(rawName);
                 bool isCustomMesh = mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool();
+                if (!isCustomMesh && mi.HasMeta("ParentCompositeMesh"))
+                {
+                    var parentMi = mi.GetMeta("ParentCompositeMesh").AsGodotObject() as MeshInstance3D;
+                    if (parentMi != null && parentMi.HasMeta("IsCustomImportedMesh"))
+                        isCustomMesh = parentMi.GetMeta("IsCustomImportedMesh").AsBool();
+                }
+                if (!isCustomMesh)
+                {
+                    Node curr = mi;
+                    while (curr != null && curr != heroNode)
+                    {
+                        if (curr.Name.ToString().Contains("Custom_Rigged_Character") ||
+                            (curr.HasMeta("IsCustomImportedMesh") && curr.GetMeta("IsCustomImportedMesh").AsBool()))
+                        {
+                            isCustomMesh = true;
+                            break;
+                        }
+                        curr = curr.GetParent();
+                    }
+                }
 
                 if (surfaceCount == 1)
                 {
@@ -163,7 +184,8 @@ namespace DeadlockPlayground.Painter
                         OriginalMaterial = origMat,
                         ToonMaterial = toonMat,
                         OutlineMaterial = outlineMat,
-                        PreserveOriginal = preserve
+                        PreserveOriginal = preserve,
+                        IsCustomImportedMesh = isCustomMesh
                     };
                     ExtractMaterialMetadata(info, mi, 0);
                     _submeshes.Add(info);
@@ -277,7 +299,8 @@ namespace DeadlockPlayground.Painter
                             ToonMaterial = toonMat,
                             OutlineMaterial = outlineMat,
                             PreserveOriginal = preserve,
-                            SourceAddonVpkPath = heroAddonVpkPath
+                            SourceAddonVpkPath = heroAddonVpkPath,
+                            IsCustomImportedMesh = isCustomMesh
                         };
                         ExtractMaterialMetadata(info, mi, s);
                         _submeshes.Add(info);
