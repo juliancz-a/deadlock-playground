@@ -78,6 +78,24 @@ public static class Source2MaterialHelper
         var customHeroMat = HeroMaterialManager.TryCreateCustomMaterial(heroName, package, vmatPath, meshName, addonPackage);
         if (customHeroMat != null)
         {
+            // Ensure full channel discovery is still registered on bespoke hero materials
+            if (MaterialChannelDiscovery.TryGetChannelSet(customHeroMat) == null)
+            {
+                VrfMaterial customVrfMat = null;
+                Package customPkg = addonPackage != null && FindVmatEntry(addonPackage, vmatPath) != null
+                    ? addonPackage
+                    : package;
+                PackageEntry customEntry = customPkg != null ? FindVmatEntry(customPkg, vmatPath) : null;
+                if (customEntry != null && customPkg != null)
+                {
+                    using var customStream = customPkg.GetMemoryMappedStreamIfPossible(customEntry);
+                    using var customRes = new ValveResourceFormat.Resource { FileName = vmatPath };
+                    customRes.Read(customStream, leaveOpen: true, mode: ReadMode.Deferred);
+                    customVrfMat = customRes.DataBlock as VrfMaterial;
+                }
+                var bespokeSet = MaterialChannelDiscovery.DiscoverSource2Channels(package, customVrfMat, vmatPath, customHeroMat, addonPackage);
+                MaterialChannelDiscovery.RegisterChannelSet(customHeroMat, bespokeSet);
+            }
             return customHeroMat;
         }
 
@@ -321,6 +339,17 @@ public static class Source2MaterialHelper
                 else if (matResource.FloatParams.TryGetValue("g_flSelfIllumAlbedoFactor", out float af0)) selfIllumAlbedoFactor = Mathf.Clamp(af0, 0.0f, 1.0f);
                 createdMat.SetMeta("SelfIllumAlbedoFactor", selfIllumAlbedoFactor);
             }
+        }
+
+        if (createdMat != null)
+        {
+            var discoveredChannels = MaterialChannelDiscovery.DiscoverSource2Channels(
+                package,
+                matResource,
+                vmatPath,
+                createdMat,
+                addonPackage);
+            MaterialChannelDiscovery.RegisterChannelSet(createdMat, discoveredChannels);
         }
 
         return createdMat;

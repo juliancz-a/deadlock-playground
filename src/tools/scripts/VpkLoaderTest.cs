@@ -62,6 +62,7 @@ public partial class VpkLoaderTest : Node3D
     private Package _basePackage;
     private Package _corePackage;
     private Package _addonPackage;
+    public Package AddonPackage => _addonPackage;
 
     public void EnsureVpkPathResolved()
     {

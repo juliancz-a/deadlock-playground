@@ -1173,9 +1173,7 @@ public partial class CharacterTabUI : VBoxContainer
 
     private string CleanMeshName(string raw)
     {
-        string clean = raw.TrimStart('.', '_');
-        if (string.IsNullOrEmpty(clean)) return "Mesh Part";
-        return char.ToUpperInvariant(clean[0]) + clean.Substring(1).Replace('_', ' ');
+        return HeroMeshHierarchy.FormatCleanMaterialDisplayName(raw);
     }
 
     private void PopulateSubmeshList()

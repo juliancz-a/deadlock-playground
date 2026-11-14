@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Materials;
 
 namespace DeadlockPlayground.Painter
@@ -29,6 +30,7 @@ namespace DeadlockPlayground.Painter
         public string OriginalColorVtexCPath { get; set; }
         public string OriginalSecondaryColorVtexCPath { get; set; }
         public List<string> AllColorVtexCPaths { get; set; } = new();
+        public DeadlockPlayground.Materials.MaterialChannelSet Channels { get; set; }
 
         // Original Source 2 material texture parameters
         public string OriginalNormalVtex { get; set; }
@@ -51,6 +53,7 @@ namespace DeadlockPlayground.Painter
         public string DisplayName { get; set; }
         public List<SubmeshNodeInfo> Submeshes { get; } = new();
         public bool IsExpanded { get; set; } = false;
+        public DeadlockPlayground.Materials.MaterialChannelSet Channels { get; set; }
     }
 
     public partial class HeroMeshHierarchy : Node
@@ -69,6 +72,9 @@ namespace DeadlockPlayground.Painter
 
         public bool IsPaintingModeActive { get; set; } = false;
         public Node3D HeroRoot { get; private set; }
+        public string HeroCodename { get; set; } = "";
+        public string HeroDisplayName { get; set; } = "";
+        public string HeroWipAlias { get; set; } = "";
 
         private bool _isAnySoloed = false;
         private readonly Dictionary<MeshInstance3D, bool> _preSoloVisibility = new();
@@ -84,6 +90,24 @@ namespace DeadlockPlayground.Painter
 
             HeroRoot = heroNode;
             _currentHeroName = heroNode?.Name.ToString().ToLowerInvariant() ?? string.Empty;
+            if (heroNode != null && GodotObject.IsInstanceValid(heroNode))
+            {
+                if (heroNode.HasMeta("HeroId")) HeroCodename = heroNode.GetMeta("HeroId").AsString();
+                if (heroNode.HasMeta("HeroDisplayName")) HeroDisplayName = heroNode.GetMeta("HeroDisplayName").AsString();
+                if (heroNode.HasMeta("HeroWipFolder")) HeroWipAlias = heroNode.GetMeta("HeroWipFolder").AsString();
+                if (string.IsNullOrEmpty(HeroCodename))
+                {
+                    var catEntry = DeadlockHeroCatalog.Entries.FirstOrDefault(h =>
+                        _currentHeroName.Contains(h.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(h.WipAlias) && _currentHeroName.Contains(h.WipAlias, StringComparison.OrdinalIgnoreCase)));
+                    if (catEntry != null)
+                    {
+                        HeroCodename = catEntry.InternalCodename;
+                        HeroDisplayName = catEntry.DisplayName;
+                        HeroWipAlias = catEntry.WipAlias ?? "";
+                    }
+                }
+            }
             _submeshes.Clear();
             _materialGroups.Clear();
             _preSoloVisibility.Clear();
@@ -610,6 +634,13 @@ namespace DeadlockPlayground.Painter
             toonMat.SetShaderParameter("rim_mask_shadow", 1.0f);
             global::Source2MaterialHelper.ApplyToonNprMetadata(toonMat, origMat);
 
+            var origChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(origMat);
+            if (origChannels != null)
+            {
+                DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(toonMat, origChannels);
+                DeadlockPlayground.Materials.MaterialChannelDiscovery.ApplyChannelsToMaterial(toonMat, origChannels);
+            }
+
             return (toonMat, outlineMat, false);
         }
 
@@ -776,15 +807,92 @@ namespace DeadlockPlayground.Painter
                    lower.Contains("boot");
         }
 
-        private static string CleanName(string raw)
-        {
-            if (string.IsNullOrEmpty(raw)) return "Mesh Part";
+        private static readonly HashSet<string> _knownHeroAndGenericPrefixes = BuildKnownPrefixSet();
 
-            string leaf = raw.Trim();
+        private static HashSet<string> BuildKnownPrefixSet()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "model", "mesh", "hero", "mat", "vmat", "vmdl", "chr", "skn",
+                // Core codenames, aliases & documented WIP prefixes (including 1-char typo variants like deapack)
+                "deadpack", "deapack", "deadman_danny", "deadman", "danny",
+                "chrono", "paradox", "haze", "paige", "fencer", "punkgoat",
+                "shiv", "warden", "viper", "kali", "necro", "hornet", "vindicta",
+                "ghost", "lady_geist", "geist", "tengu", "ivy", "inferno", "infernus",
+                "atlas", "abrams", "astro", "holliday", "forge", "mcginnis", "synth", "pocket",
+                "mirage", "lash", "bebop", "dynamo", "kelvin", "krill", "mo", "wraith",
+                "yamato", "viscous", "calico", "nano", "holiday", "magician", "sinclair",
+                "trapper", "wrecker", "slork", "fathom", "drifter", "doorman", "priest",
+                "frank", "victor", "vampirebat", "mina", "unicorn", "celeste", "bookworm",
+                "familiar", "skyrunner", "apollo", "venator", "rem", "silver", "graves", "swan"
+            };
+            foreach (var h in DeadlockHeroCatalog.Entries)
+            {
+                if (!string.IsNullOrWhiteSpace(h.InternalCodename)) set.Add(h.InternalCodename);
+                if (!string.IsNullOrWhiteSpace(h.WipAlias)) set.Add(h.WipAlias);
+                if (!string.IsNullOrWhiteSpace(h.DisplayName))
+                {
+                    foreach (var part in h.DisplayName.Split(new[] { ' ', '_', '-' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (part.Length >= 3) set.Add(part);
+                    }
+                }
+            }
+            return set;
+        }
+
+        private static int LevenshteinDistance(string a, string b)
+        {
+            if (string.IsNullOrEmpty(a)) return b?.Length ?? 0;
+            if (string.IsNullOrEmpty(b)) return a.Length;
+            if (Math.Abs(a.Length - b.Length) > 2) return 99;
+
+            var prev = new int[b.Length + 1];
+            var curr = new int[b.Length + 1];
+            for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+            for (int i = 1; i <= a.Length; i++)
+            {
+                curr[0] = i;
+                for (int j = 1; j <= b.Length; j++)
+                {
+                    int cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                    curr[j] = Math.Min(Math.Min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+                }
+                (prev, curr) = (curr, prev);
+            }
+            return prev[b.Length];
+        }
+
+        /// <summary>
+        /// Strips leading hero codenames, WIP aliases, 1-char Valve typo prefixes (e.g. deapack_ vs deadpack_),
+        /// and generic model_/mat_ tags while keeping the full raw string available for tooltips.
+        /// Never returns empty if the hero token is the only token present.
+        /// </summary>
+        public static string FormatCleanMaterialDisplayName(
+            string rawName,
+            string heroCodename = null,
+            string heroDisplayName = null,
+            string wipAlias = null)
+        {
+            if (string.IsNullOrWhiteSpace(rawName)) return "MESH PART";
+
+            string leaf = rawName.Trim();
             int lastSlash = Math.Max(leaf.LastIndexOf('/'), leaf.LastIndexOf('\\'));
             if (lastSlash >= 0 && lastSlash < leaf.Length - 1)
             {
                 leaf = leaf.Substring(lastSlash + 1);
+            }
+
+            while (leaf.EndsWith(".vmat_c", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vmat", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vmdl_c", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vmdl", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase))
+            {
+                int d = leaf.LastIndexOf('.');
+                if (d > 0) leaf = leaf.Substring(0, d);
+                else break;
             }
 
             int dotIndex = leaf.LastIndexOf('.');
@@ -793,28 +901,87 @@ namespace DeadlockPlayground.Painter
                 leaf = leaf.Substring(0, dotIndex);
             }
 
-            string[] prefixes = new[] { "model_", "mesh_", "hero_", "mat_" };
-            bool stripped;
-            do
+            var dynamicStems = new HashSet<string>(_knownHeroAndGenericPrefixes, StringComparer.OrdinalIgnoreCase);
+            var activeHeroStems = new List<string>();
+            void AddActiveStem(string s)
             {
-                stripped = false;
-                foreach (var p in prefixes)
+                if (string.IsNullOrWhiteSpace(s)) return;
+                dynamicStems.Add(s.Trim());
+                activeHeroStems.Add(s.Trim());
+                foreach (var p in s.Split(new[] { '_', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (leaf.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                    if (p.Length >= 3)
                     {
-                        leaf = leaf.Substring(p.Length);
-                        stripped = true;
+                        dynamicStems.Add(p);
+                        activeHeroStems.Add(p);
                     }
                 }
-            } while (stripped && leaf.Length > 0);
+            }
 
-            string clean = leaf.TrimStart('.', '_', '-').Trim();
-            if (string.IsNullOrEmpty(clean)) return "Mesh Part";
+            AddActiveStem(heroCodename);
+            AddActiveStem(heroDisplayName);
+            AddActiveStem(wipAlias);
+            AddActiveStem(_currentHeroName);
 
-            string formatted = clean.Replace('_', ' ').Replace('-', ' ').Trim();
-            if (string.IsNullOrEmpty(formatted)) return "Mesh Part";
+            bool IsStrippablePrefixToken(string tok)
+            {
+                if (string.IsNullOrEmpty(tok)) return false;
+                if (dynamicStems.Contains(tok)) return true;
 
-            return char.ToUpperInvariant(formatted[0]) + formatted.Substring(1);
+                // Check multi-token combined prefix e.g. deadman_danny_
+                if (tok.Length >= 5)
+                {
+                    foreach (var stem in activeHeroStems)
+                    {
+                        if (stem.Length >= 5 && LevenshteinDistance(tok, stem) <= 1)
+                            return true;
+                    }
+                    foreach (var known in _knownHeroAndGenericPrefixes)
+                    {
+                        if (known.Length >= 6 && LevenshteinDistance(tok, known) <= 1)
+                            return true;
+                    }
+                }
+                return false;
+            }
+
+            // First check multi-word leading prefixes like "deadman_danny_"
+            foreach (var stem in activeHeroStems.OrderByDescending(s => s.Length))
+            {
+                if (stem.Length < 4) continue;
+                string p1 = stem + "_";
+                string p2 = stem + "-";
+                if (leaf.Length > p1.Length && leaf.StartsWith(p1, StringComparison.OrdinalIgnoreCase))
+                {
+                    leaf = leaf.Substring(p1.Length);
+                    break;
+                }
+                if (leaf.Length > p2.Length && leaf.StartsWith(p2, StringComparison.OrdinalIgnoreCase))
+                {
+                    leaf = leaf.Substring(p2.Length);
+                    break;
+                }
+            }
+
+            // Strip individual leading delimiter-separated tokens while descriptive remainder exists
+            var tokens = leaf.Split(new[] { '_', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            while (tokens.Count > 1 && IsStrippablePrefixToken(tokens[0]))
+            {
+                tokens.RemoveAt(0);
+            }
+
+            string joined = string.Join(" ", tokens).Trim();
+            if (string.IsNullOrWhiteSpace(joined))
+            {
+                joined = leaf.TrimStart('.', '_', '-').Replace('_', ' ').Replace('-', ' ').Trim();
+            }
+
+            return string.IsNullOrWhiteSpace(joined) ? "MESH PART" : joined.ToUpperInvariant();
+        }
+
+        private string CleanName(string raw)
+        {
+            return FormatCleanMaterialDisplayName(raw, HeroCodename, HeroDisplayName, HeroWipAlias);
         }
 
         private static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
@@ -976,6 +1143,16 @@ namespace DeadlockPlayground.Painter
 
             if (mat.HasMeta("TextureParam_g_tNPROutlineMask")) info.OriginalNprOutlineVtex = mat.GetMeta("TextureParam_g_tNPROutlineMask").AsString();
             if (mat.HasMeta("TextureParam_g_tSelfIllumMask")) info.OriginalMaskVtex = mat.GetMeta("TextureParam_g_tSelfIllumMask").AsString();
+
+            var attachedChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(mat);
+            if (attachedChannels == null)
+            {
+                attachedChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.DiscoverCustomModelChannels(
+                    mat,
+                    !string.IsNullOrEmpty(info.OriginalVmatPath) ? info.OriginalVmatPath : info.RawName);
+                DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(mat, attachedChannels);
+            }
+            info.Channels = attachedChannels;
         }
 
         public void MarkSubmeshDirty(MeshInstance3D mesh)
@@ -1180,14 +1357,19 @@ namespace DeadlockPlayground.Painter
 
                 if (!map.TryGetValue(key, out var group))
                 {
-                    string display = CleanName(key);
+                    string display = FormatCleanMaterialDisplayName(key, HeroCodename, HeroDisplayName, HeroWipAlias);
                     group = new MaterialGroup
                     {
                         MaterialKey = key,
-                        DisplayName = display
+                        DisplayName = display,
+                        Channels = sub.Channels
                     };
                     map[key] = group;
                     _materialGroups.Add(group);
+                }
+                else if (group.Channels == null && sub.Channels != null)
+                {
+                    group.Channels = sub.Channels;
                 }
                 group.Submeshes.Add(sub);
             }

@@ -69,7 +69,9 @@ public partial class PaintTabUI : VBoxContainer
         public MaterialGroup Group;
         public VBoxContainer GroupContainer;
         public PanelContainer HeaderPanel;
+        public VBoxContainer HeaderVBox;
         public HBoxContainer HeaderRow;
+        public HBoxContainer MetaRow;
         public Button ToggleBtn;
         public Label TitleLabel;
         public Label BadgeLabel;
@@ -1361,6 +1363,12 @@ public partial class PaintTabUI : VBoxContainer
         // 2. Setup GPU Texture Painter OverlayAtlasManager on the hero
         _painter?.ResetSession();
         _layerManager?.ClearHistory();
+        var vpkLoaderPkg = GetVpkLoader();
+        if (_layerManager != null && vpkLoaderPkg != null)
+        {
+            _layerManager.ActiveVpkPackage = vpkLoaderPkg.GetOrCreateBasePackage();
+            _layerManager.ActiveAddonPackage = vpkLoaderPkg.AddonPackage;
+        }
         _layerManager?.SetupForHero(heroNode);
 
         // 3. Register submeshes and apply overlay parameters to meshes
@@ -1388,6 +1396,7 @@ public partial class PaintTabUI : VBoxContainer
         RefreshSubmeshListUI();
 
         UpdateControlsState(true);
+        NotifyUvCanvasChannelBar();
 
         if (_brushPalette != null)
         {
@@ -1970,6 +1979,14 @@ public partial class PaintTabUI : VBoxContainer
         UpdateSubmeshRowHighlights();
         _painter?.SetTargetMesh(mesh, surfaceIndex);
         UpdateCanvasResolutionLabel();
+        NotifyUvCanvasChannelBar();
+    }
+
+    private void NotifyUvCanvasChannelBar()
+    {
+        var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
+                    ?? GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+        uvCanvas?.RefreshChannelBarFromLayerManager();
     }
 
     public void UpdateSubmeshRowHighlights()
@@ -2139,6 +2156,12 @@ public partial class PaintTabUI : VBoxContainer
                     ThemeTypeVariation = "InspectorSectionPanel"
                 };
 
+                var headerVBox = new VBoxContainer
+                {
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill
+                };
+                headerVBox.AddThemeConstantOverride("separation", 3);
+
                 var headerRow = new HBoxContainer
                 {
                     SizeFlagsHorizontal = SizeFlags.ExpandFill
@@ -2149,7 +2172,7 @@ public partial class PaintTabUI : VBoxContainer
                 {
                     Text = group.IsExpanded ? "▼" : "▶",
                     Flat = true,
-                    CustomMinimumSize = new Vector2(24, 24),
+                    CustomMinimumSize = new Vector2(22, 24),
                     TooltipText = "Expand/Collapse material group",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter,
                     ThemeTypeVariation = "ToolbarButton"
@@ -2161,23 +2184,24 @@ public partial class PaintTabUI : VBoxContainer
                     SizeFlagsHorizontal = SizeFlags.ExpandFill,
                     ClipText = true,
                     TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-                    TooltipText = $"Material: {group.MaterialKey}",
+                    TooltipText = $"Material: {group.MaterialKey}\nSubmeshes: {string.Join(", ", group.Submeshes.Select(s => s.RawName))}",
                     ThemeTypeVariation = "SubheaderLabel"
                 };
 
             var badgeLabel = new Label
             {
-                Text = $"[{group.Submeshes.Count} {(group.Submeshes.Count == 1 ? "mesh" : "meshes")}]",
+                Text = $"{group.Submeshes.Count} {(group.Submeshes.Count == 1 ? "mesh" : "meshes")}",
                 ThemeTypeVariation = "MutedLabel",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter
             };
+            badgeLabel.AddThemeFontSizeOverride("font_size", 11);
 
             var paintBtn = new Button
             {
                 Text = "Paint",
-                CustomMinimumSize = new Vector2(64, 28),
+                CustomMinimumSize = new Vector2(64, 26),
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                TooltipText = $"Paint material group '{group.DisplayName}'",
+                TooltipText = $"Paint material group '{group.DisplayName}' ({group.MaterialKey})",
                 ThemeTypeVariation = "ToolbarButton"
             };
 
@@ -2199,14 +2223,46 @@ public partial class PaintTabUI : VBoxContainer
                 if (target != null)
                 {
                     _meshHierarchy.SelectTarget(target, target.SurfaceIndex);
+                    NotifyUvCanvasChannelBar();
                 }
             };
 
             headerRow.AddChild(toggleBtn);
             headerRow.AddChild(titleLabel);
-            headerRow.AddChild(badgeLabel);
             headerRow.AddChild(paintBtn);
-            headerPanel.AddChild(headerRow);
+            headerVBox.AddChild(headerRow);
+
+            // Row 2: Indented secondary metadata row (mesh count + mini channel badges C / N / R / AO / SH)
+            var metaIndent = new MarginContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            metaIndent.AddThemeConstantOverride("margin_left", 26);
+            var metaRow = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            metaRow.AddThemeConstantOverride("separation", 6);
+            metaRow.AddChild(badgeLabel);
+
+            var chSet = group.Channels ?? (group.Submeshes.Count > 0 ? group.Submeshes[0].Channels : null);
+            if (chSet != null)
+            {
+                var badgesContainer = new HBoxContainer();
+                badgesContainer.AddThemeConstantOverride("separation", 4);
+                foreach (var (ch, badge, isReal) in chSet.GetSummaryBadges())
+                {
+                    var bLbl = new Label
+                    {
+                        Text = badge,
+                        TooltipText = $"{DeadlockPlayground.Materials.MaterialChannelSet.GetDisplayLabel(ch)}: {(isReal ? chSet.GetChannel(ch)?.SourcePath : "Default fallback")}",
+                        Modulate = isReal
+                            ? new Color(0.55f, 0.90f, 1.0f, 0.95f)
+                            : new Color(0.55f, 0.58f, 0.65f, 0.45f)
+                    };
+                    bLbl.AddThemeFontSizeOverride("font_size", 10);
+                    badgesContainer.AddChild(bLbl);
+                }
+                metaRow.AddChild(badgesContainer);
+            }
+
+            metaIndent.AddChild(metaRow);
+            headerVBox.AddChild(metaIndent);
+            headerPanel.AddChild(headerVBox);
             groupContainer.AddChild(headerPanel);
 
             var childrenContainer = new VBoxContainer
@@ -2327,7 +2383,9 @@ public partial class PaintTabUI : VBoxContainer
                 Group = group,
                 GroupContainer = groupContainer,
                 HeaderPanel = headerPanel,
+                HeaderVBox = headerVBox,
                 HeaderRow = headerRow,
+                MetaRow = metaRow,
                 ToggleBtn = toggleBtn,
                 TitleLabel = titleLabel,
                 BadgeLabel = badgeLabel,

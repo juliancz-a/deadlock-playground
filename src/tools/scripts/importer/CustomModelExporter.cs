@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Painter;
 using ValvePak;
 using ValveKeyValue;
@@ -73,6 +74,9 @@ namespace DeadlockPlayground.Importer
                 public byte[] NormalPngBytes { get; set; }
                 public byte[] RoughnessPngBytes { get; set; }
                 public byte[] AmbientOcclusionPngBytes { get; set; }
+                public byte[] ShadowPngBytes { get; set; }
+                public byte[] SelfIllumPngBytes { get; set; }
+                public byte[] TintMaskPngBytes { get; set; }
                 public Color AlbedoTint { get; set; } = Colors.White;
                 public float RoughnessScalar { get; set; } = 0.6f;
                 public float MetallicScalar { get; set; } = 0.0f;
@@ -287,6 +291,9 @@ namespace DeadlockPlayground.Importer
                         byte[] normalPng = null;
                         byte[] roughPng = null;
                         byte[] aoPng = null;
+                        byte[] shadowPng = null;
+                        byte[] selfIllumPng = null;
+                        byte[] tintMaskPng = null;
                         Color albedoTint = Colors.White;
                         float roughScalar = 0.6f;
                         float metalScalar = 0.0f;
@@ -335,6 +342,46 @@ namespace DeadlockPlayground.Importer
                             roughPng = ExtractShaderTexturePngPowerOfTwo(sMat, "roughness_texture", "texture_roughness");
                             aoPng = ExtractShaderTexturePngPowerOfTwo(sMat, "ao_texture", "texture_ambient_occlusion", "g_tAmbientOcclusion");
                         }
+
+                        // Check multi-channel registry & live GPU Texture Painter edits (handles ORM-unpacked AO,
+                        // external tier-2 maps like _shadow/_ao/_rough, and live per-channel brush/imported edits)
+                        var chSet = primaryMat != null ? MaterialChannelDiscovery.TryGetChannelSet(primaryMat) : null;
+                        var lm = SkinLayerManager.Instance;
+                        SubmeshNodeInfo matchedSubInfo = lm?.MeshHierarchy?.Submeshes?.FirstOrDefault(smInfo =>
+                            smInfo != null && smInfo.Mesh == meshInst && smInfo.SurfaceIndex == s);
+
+                        byte[] ResolveMultiChannelPng(MaterialTextureChannel ch, byte[] fallbackBytes)
+                        {
+                            if (lm != null && matchedSubInfo != null && lm.HasChannelEdits(matchedSubInfo, ch))
+                            {
+                                using var baked = lm.BakeChannelImageForSubmesh(matchedSubInfo, ch);
+                                var bakedBytes = ImageToPngBytesPowerOfTwo(baked);
+                                if (bakedBytes != null && bakedBytes.Length > 0) return bakedBytes;
+                            }
+                            var entry = chSet?.GetChannel(ch);
+                            if (entry != null && !entry.IsDefaultFallback && entry.IsPresent && entry.IsEnabled)
+                            {
+                                if (entry.SourceImage != null && !entry.SourceImage.IsEmpty())
+                                {
+                                    var bytes = ImageToPngBytesPowerOfTwo(entry.SourceImage);
+                                    if (bytes != null && bytes.Length > 0) return bytes;
+                                }
+                                if (entry.Texture != null)
+                                {
+                                    var bytes = ExtractTexturePngPowerOfTwo(entry.Texture, Colors.White);
+                                    if (bytes != null && bytes.Length > 0) return bytes;
+                                }
+                            }
+                            return fallbackBytes;
+                        }
+
+                        albedoPng = ResolveMultiChannelPng(MaterialTextureChannel.Color, albedoPng);
+                        normalPng = ResolveMultiChannelPng(MaterialTextureChannel.Normal, normalPng);
+                        roughPng = ResolveMultiChannelPng(MaterialTextureChannel.Roughness, roughPng);
+                        aoPng = ResolveMultiChannelPng(MaterialTextureChannel.AmbientOcclusion, aoPng);
+                        shadowPng = ResolveMultiChannelPng(MaterialTextureChannel.Shadow, null);
+                        selfIllumPng = ResolveMultiChannelPng(MaterialTextureChannel.SelfIllum, null);
+                        tintMaskPng = ResolveMultiChannelPng(MaterialTextureChannel.TintMask, null);
 
                         // If material has no texture image, bake its solid AlbedoColor into a 64x64 PNG
                         if (albedoPng == null || albedoPng.Length == 0)
@@ -414,6 +461,9 @@ namespace DeadlockPlayground.Importer
                             NormalPngBytes = normalPng,
                             RoughnessPngBytes = roughPng,
                             AmbientOcclusionPngBytes = aoPng,
+                            ShadowPngBytes = shadowPng,
+                            SelfIllumPngBytes = selfIllumPng,
+                            TintMaskPngBytes = tintMaskPng,
                             AlbedoTint = albedoTint,
                             RoughnessScalar = roughScalar,
                             MetallicScalar = metalScalar,
@@ -482,6 +532,20 @@ namespace DeadlockPlayground.Importer
                 }
             }
             return true;
+        }
+
+        private static byte[] ImageToPngBytesPowerOfTwo(Image srcImg)
+        {
+            if (srcImg == null || srcImg.IsEmpty()) return null;
+            using var img = (Image)srcImg.Duplicate();
+            if (img.IsCompressed()) img.Decompress();
+            if (img.HasMipmaps()) img.ClearMipmaps();
+            if (IsUniformColor(img, out Color uniColor))
+            {
+                return CreateSolidColorPngBytes(64, 64, uniColor);
+            }
+            EnsurePowerOfTwoResolution(img);
+            return img.SavePngToBuffer();
         }
 
         private static byte[] ExtractTexturePngPowerOfTwo(Texture2D tex, Color tint)
@@ -2056,6 +2120,30 @@ namespace DeadlockPlayground.Importer
                     aoValueOrPath = $"{materialsFolderRel}/{aoPngFile}";
                 }
 
+                string selfIllumValueOrPath = defaultBlackMaskRel;
+                if (sub.SelfIllumPngBytes != null && sub.SelfIllumPngBytes.Length > 0)
+                {
+                    string selfIllumPngFile = $"{matName}_selfillum.png";
+                    File.WriteAllBytes(Path.Combine(contentMatDir, selfIllumPngFile), sub.SelfIllumPngBytes);
+                    selfIllumValueOrPath = $"{materialsFolderRel}/{selfIllumPngFile}";
+                }
+
+                string tintMaskValueOrPath = defaultWhiteAoRel;
+                if (sub.TintMaskPngBytes != null && sub.TintMaskPngBytes.Length > 0)
+                {
+                    string tintPngFile = $"{matName}_tintmask.png";
+                    File.WriteAllBytes(Path.Combine(contentMatDir, tintPngFile), sub.TintMaskPngBytes);
+                    tintMaskValueOrPath = $"{materialsFolderRel}/{tintPngFile}";
+                }
+
+                string shadowValueOrPath = null;
+                if (sub.ShadowPngBytes != null && sub.ShadowPngBytes.Length > 0)
+                {
+                    string shadowPngFile = $"{matName}_shadow.png";
+                    File.WriteAllBytes(Path.Combine(contentMatDir, shadowPngFile), sub.ShadowPngBytes);
+                    shadowValueOrPath = $"{materialsFolderRel}/{shadowPngFile}";
+                }
+
                 string vmatFull = Path.Combine(contentMatDir, $"{matName}.vmat");
                 string vmatContent = GenerateDeadlockPbrVmat(
                     colorPngRel,
@@ -2066,8 +2154,9 @@ namespace DeadlockPlayground.Importer
                     sub.IsTranslucent,
                     sub.IsAlphaTest,
                     sub.IsDoubleSided && !sub.IsOutlineShell,
-                    defaultBlackMaskRel,
-                    defaultWhiteAoRel);
+                    selfIllumValueOrPath,
+                    tintMaskValueOrPath,
+                    shadowValueOrPath);
                 File.WriteAllText(vmatFull, vmatContent, new UTF8Encoding(false));
                 writtenVmatPaths.Add(vmatFull);
 
@@ -2087,7 +2176,8 @@ namespace DeadlockPlayground.Importer
             bool isAlphaTest = false,
             bool renderBackfaces = false,
             string selfIllumMaskRel = null,
-            string tintMaskRel = null)
+            string tintMaskRel = null,
+            string shadowMapRel = null)
         {
             var ic = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
@@ -2138,12 +2228,16 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine(string.Format(ic, "\tTextureMetalness \"[{0:F6} {0:F6} {0:F6} 0.000000]\"", metallicScalar));
             sb.AppendLine($"\tTextureAmbientOcclusion1 \"{aoValueOrPngRel}\"");
             sb.AppendLine($"\tTextureAmbientOcclusion \"{aoValueOrPngRel}\"");
+            string nprTransmissiveRel = !string.IsNullOrEmpty(shadowMapRel) ? shadowMapRel : selfIllumMaskRel;
             if (!string.IsNullOrEmpty(selfIllumMaskRel))
             {
                 sb.AppendLine($"\tTextureSelfIllumMask1 \"{selfIllumMaskRel}\"");
                 sb.AppendLine($"\tTextureSelfIllumMask \"{selfIllumMaskRel}\"");
-                sb.AppendLine($"\tTextureNprTramsissiveColor1 \"{selfIllumMaskRel}\"");
-                sb.AppendLine($"\tTextureNprTransmissiveColor \"{selfIllumMaskRel}\"");
+            }
+            if (!string.IsNullOrEmpty(nprTransmissiveRel))
+            {
+                sb.AppendLine($"\tTextureNprTramsissiveColor1 \"{nprTransmissiveRel}\"");
+                sb.AppendLine($"\tTextureNprTransmissiveColor \"{nprTransmissiveRel}\"");
             }
             if (!string.IsNullOrEmpty(tintMaskRel))
             {

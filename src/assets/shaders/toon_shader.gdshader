@@ -61,6 +61,22 @@ uniform float pattern_amount : hint_range(0.0, 1.0, 0.05) = 0.5;
 uniform float pattern_smoothness : hint_range(0.0, 1.0, 0.05) = 0.5;
 uniform float pattern_blend : hint_range(0.0, 1.0, 0.05) = 0.2;
 
+group_uniforms Shader.MultiChannel;
+uniform sampler2D ao_texture : hint_default_white, filter_linear_mipmap;
+uniform sampler2D roughness_texture : hint_default_white, filter_linear_mipmap;
+uniform sampler2D shadow_tint_texture : source_color, hint_default_white, filter_linear_mipmap;
+uniform sampler2D metallic_texture : hint_default_black, filter_linear_mipmap;
+uniform bool has_shadow_tint_texture = false;
+uniform bool enable_color_map = true;
+uniform bool enable_ao = true;
+uniform bool enable_normal = true;
+uniform bool enable_roughness = true;
+uniform bool enable_shadow_map = true;
+uniform bool enable_emission = true;
+uniform bool normal_is_source2 = false;
+uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=Emissive, 7=Metalness
+group_uniforms;
+
 varying vec4 node_position;
 
 float fresnel(float amount, vec3 normal, vec3 view)
@@ -132,7 +148,7 @@ float npr_rim_factor(vec3 view_normal, vec3 view_dir, float world_normal_y, floa
 void fragment() {
 	vec2 uv = UV * uv1_scale.xy + uv1_offset.xy;
 	vec3 safe_albedo_col = (dot(albedo_color.rgb, vec3(1.0)) > 0.001) ? albedo_color.rgb : vec3(1.0);
-	vec4 tex_col = texture(albedo_texture, uv);
+	vec4 tex_col = enable_color_map ? texture(albedo_texture, uv) : vec4(vec3(0.85), texture(albedo_texture, uv).a);
 	vec4 albedo = vec4(tex_col.rgb * safe_albedo_col, tex_col.a * albedo_color.a);
 
 	if (alpha_scissor_threshold > 0.0) {
@@ -142,13 +158,18 @@ void fragment() {
 	}
 
 	vec4 normal_map = texture(normal_texture, uv);
+	float ao_val = enable_ao ? texture(ao_texture, uv).r : 1.0;
+	float rough_tex_val = enable_roughness ? texture(roughness_texture, uv).r : 1.0;
+	float metal_tex_val = texture(metallic_texture, uv).r;
 
-	ALBEDO = albedo.rgb;
-	NORMAL_MAP = mix(vec3(0.5, 0.5, 1.0), normal_map.rgb, normal_strength);
-	METALLIC = metallic;
-	ROUGHNESS = clamp(roughness * normal_map.a, 0.02, 1.0);
+	ALBEDO = albedo.rgb * mix(1.0, ao_val, enable_ao ? 0.35 : 0.0);
+	AO = ao_val;
+	AO_LIGHT_AFFECT = enable_ao ? 0.65 : 0.0;
+	NORMAL_MAP = enable_normal ? mix(vec3(0.5, 0.5, 1.0), normal_map.rgb, normal_strength) : vec3(0.5, 0.5, 1.0);
+	METALLIC = max(metallic, metal_tex_val);
+	ROUGHNESS = clamp(roughness * rough_tex_val * normal_map.a, 0.02, 1.0);
 
-	if (emission_energy > 0.0 && dot(emission_color.rgb, vec3(1.0)) > 1e-4) {
+	if (enable_emission && emission_energy > 0.0 && dot(emission_color.rgb, vec3(1.0)) > 1e-4) {
 		vec4 em_tex = texture(emission_texture, uv);
 		if (use_valve_npr) {
 			float illum_mask = max(em_tex.r, max(em_tex.g, em_tex.b));
@@ -167,9 +188,36 @@ void fragment() {
 	float albedo_max = max(ALBEDO.r, max(ALBEDO.g, ALBEDO.b));
 	float albedo_spec_gate = use_valve_npr ? clamp(albedo_max * 25.0, 0.0, 1.0) : 1.0;
 	SPECULAR = specular * albedo_spec_gate;
+
+	if (debug_view_channel > 0) {
+		vec3 preview_col = albedo.rgb;
+		if (debug_view_channel == 2) {
+			preview_col = vec3(ao_val);
+		} else if (debug_view_channel == 3) {
+			preview_col = enable_normal ? normal_map.rgb : vec3(0.5, 0.5, 1.0);
+		} else if (debug_view_channel == 4) {
+			preview_col = vec3(enable_roughness ? rough_tex_val : roughness);
+		} else if (debug_view_channel == 5) {
+			preview_col = has_shadow_tint_texture ? texture(shadow_tint_texture, uv).rgb : shadow_tint.rgb;
+		} else if (debug_view_channel == 6) {
+			preview_col = texture(emission_texture, uv).rgb;
+		} else if (debug_view_channel == 7) {
+			preview_col = vec3(metal_tex_val);
+		}
+		ALBEDO = vec3(0.0);
+		EMISSION = preview_col;
+		METALLIC = 0.0;
+		SPECULAR = 0.0;
+		ROUGHNESS = 1.0;
+		AO = 1.0;
+	}
 }
 
 void light() {
+	if (debug_view_channel > 0) {
+		DIFFUSE_LIGHT = vec3(0.0);
+		SPECULAR_LIGHT = vec3(0.0);
+	} else {
 	vec3 safe_norm = normalize(NORMAL);
 	vec3 safe_view = normalize(VIEW);
 	vec3 safe_light = normalize(LIGHT);
@@ -202,8 +250,12 @@ void light() {
 	// Ambient shadow floor so shaded areas retain detail, warmth and user tint:
 	vec3 cool_ambient = vec3(0.75, 0.75, 0.85);
 	vec3 base_shadow = ALBEDO * 0.35 * cool_ambient;
-	vec3 tinted_shadow = ALBEDO * shadow_tint.rgb * 1.5;
-	vec3 shadow_ambient = mix(base_shadow, tinted_shadow, shadow_tint_amount);
+	vec3 shadow_tex_rgb = (enable_shadow_map && has_shadow_tint_texture)
+		? texture(shadow_tint_texture, UV * uv1_scale.xy + uv1_offset.xy).rgb * 1.45
+		: shadow_tint.rgb * 1.5;
+	vec3 tinted_shadow = ALBEDO * shadow_tex_rgb;
+	float eff_shadow_amt = (enable_shadow_map && has_shadow_tint_texture) ? max(shadow_tint_amount, 0.75) : shadow_tint_amount;
+	vec3 shadow_ambient = mix(base_shadow, tinted_shadow, eff_shadow_amt);
 	vec3 lit_color = ALBEDO * LIGHT_COLOR;
 
 	vec3 diffuse_result = mix(shadow_ambient, lit_color, light_intensity);
@@ -249,4 +301,5 @@ void light() {
 	// 4. Color-Modulated Specular (No Blown-Out White Highlights)
 	vec3 spec_tint = mix(LIGHT_COLOR, ALBEDO, 0.3) * METALLIC + LIGHT_COLOR * (1.0 - METALLIC) * 0.2;
 	SPECULAR_LIGHT += clamp(spec_tint * toon_spec * atten, vec3(0.0), vec3(1.0));
+	}
 }

@@ -67,7 +67,7 @@ namespace DeadlockPlayground.UI
 
         private readonly record struct EdgeKey(int X1, int Y1, int X2, int Y2);
 
-        [Export] public float MinPanelWidth { get; set; } = 380f;
+        [Export] public float MinPanelWidth { get; set; } = 180f;
         [Export] public float MaxPanelWidth { get; set; } = 850f;
         [Export] public float DefaultPanelWidth { get; set; } = 500f;
 
@@ -250,19 +250,19 @@ namespace DeadlockPlayground.UI
 
         private void LinkControls()
         {
-            _btnClose = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnClose")
+            _btnClose = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/HBox/BtnClose")
                      ?? FindChild("BtnClose", true, false) as Button;
 
-            _lblTitle = GetNodeOrNull<Label>("VBoxContainer/Header/Margin/HBox/TitleLabel")
+            _lblTitle = GetNodeOrNull<Label>("VBoxContainer/Header/Margin/HeaderVBox/HBox/TitleLabel")
                      ?? FindChild("TitleLabel", true, false) as Label;
 
-            _lblResolution = GetNodeOrNull<Label>("VBoxContainer/Header/Margin/HBox/ResolutionBadge")
+            _lblResolution = GetNodeOrNull<Label>("VBoxContainer/Header/Margin/HeaderVBox/HBox/ResolutionBadge")
                           ?? FindChild("ResolutionBadge", true, false) as Label;
 
-            _btnResetZoom = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnResetZoom")
+            _btnResetZoom = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/HBox/BtnResetZoom")
                          ?? FindChild("BtnResetZoom", true, false) as Button;
 
-            _optBlendMode = GetNodeOrNull<OptionButton>("VBoxContainer/Header/Margin/HBox/OptBlendMode")
+            _optBlendMode = GetNodeOrNull<OptionButton>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/OptBlendMode")
                          ?? FindChild("OptBlendMode", true, false) as OptionButton;
             if (_optBlendMode != null)
             {
@@ -285,19 +285,19 @@ namespace DeadlockPlayground.UI
                 };
             }
 
-            _btnBaseTex = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnBaseTex")
+            _btnBaseTex = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/BtnBaseTex")
                        ?? FindChild("BtnBaseTex", true, false) as Button;
 
-            _btnMesh = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnMesh")
+            _btnMesh = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/BtnMesh")
                     ?? FindChild("BtnMesh", true, false) as Button;
 
-            _btnOutline = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnOutline")
+            _btnOutline = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/BtnOutline")
                        ?? FindChild("BtnOutline", true, false) as Button;
 
-            _btnWireOpacity = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HBox/BtnWireOpacity")
+            _btnWireOpacity = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/BtnWireOpacity")
                            ?? FindChild("BtnWireOpacity", true, false) as Button;
 
-            var hBox = GetNodeOrNull<HBoxContainer>("VBoxContainer/Header/Margin/HBox")
+            var hBox = GetNodeOrNull<HBoxContainer>("VBoxContainer/Header/Margin/HeaderVBox/HBox")
                     ?? FindChild("HBox", true, false) as HBoxContainer;
             if (hBox != null)
             {
@@ -316,6 +316,8 @@ namespace DeadlockPlayground.UI
                     hBox.MoveChild(_btnResetParticle, _btnClose.GetIndex());
                 }
             }
+
+            SetupBottomChannelBar();
 
             _viewportContainer = GetNodeOrNull<SubViewportContainer>("VBoxContainer/ViewportContainer")
                               ?? FindChild("ViewportContainer", true, false) as SubViewportContainer;
@@ -621,6 +623,10 @@ namespace DeadlockPlayground.UI
             {
                 _btnResetParticle.Visible = true;
             }
+            if (_bottomChannelBar != null)
+            {
+                _bottomChannelBar.Visible = false;
+            }
 
             if (_paintOverlayRect != null)
             {
@@ -647,6 +653,7 @@ namespace DeadlockPlayground.UI
             {
                 _btnResetParticle.Visible = false;
             }
+            RefreshChannelBarFromLayerManager();
             if (_baseTextureRect != null && _baseTextureMat != null)
             {
                 _baseTextureRect.Material = _baseTextureMat;
@@ -884,6 +891,7 @@ namespace DeadlockPlayground.UI
             {
                 _btnResetParticle.Visible = false;
             }
+            RefreshChannelBarFromLayerManager();
             UpdateResolutionLabel();
             RebuildWireframe();
             FitToView();

@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Workspace;
 
 namespace DeadlockPlayground.Painter
@@ -138,6 +139,15 @@ namespace DeadlockPlayground.Painter
                 return _standaloneBaseTexture;
             }
 
+            if (ActiveTextureChannel != MaterialTextureChannel.Color)
+            {
+                var chEntry = GetActiveChannelSet()?.GetChannel(ActiveTextureChannel);
+                if (chEntry?.Texture != null && GodotObject.IsInstanceValid(chEntry.Texture))
+                {
+                    return chEntry.Texture;
+                }
+            }
+
             if (_targetMesh != null && GodotObject.IsInstanceValid(_targetMesh))
             {
                 int sCount = _targetMesh.Mesh != null ? _targetMesh.Mesh.GetSurfaceCount() : 1;
@@ -179,7 +189,10 @@ namespace DeadlockPlayground.Painter
             Texture2D vanillaTex = GetActivePristineVanillaTexture();
             if (vanillaTex != null)
             {
-                _baseAtlasBuffer = ExtractTextureToLinearHalfBuffer(vanillaTex, w, h);
+                bool linearize = ActiveTextureChannel is MaterialTextureChannel.Color
+                    or MaterialTextureChannel.Shadow
+                    or MaterialTextureChannel.SelfIllum;
+                _baseAtlasBuffer = ExtractTextureToLinearHalfBuffer(vanillaTex, w, h, linearize);
             }
             else
             {
@@ -383,6 +396,10 @@ namespace DeadlockPlayground.Painter
             if (!string.IsNullOrEmpty(_activeMaterialKey) && _materialContexts.TryGetValue(_activeMaterialKey, out var ctx))
             {
                 ctx.HasPaintStrokes = hasPaint;
+            }
+            if (hasPaint && ActiveTextureChannel != MaterialTextureChannel.Color)
+            {
+                OnMultiChannelPaintCommitted();
             }
         }
 
@@ -2762,6 +2779,7 @@ namespace DeadlockPlayground.Painter
                             mat.SetShaderParameter("g_tColor", baseTex);
                         }
                         ApplyBasePbrToOverlay(mat, checkMat);
+                        ApplyMultiChannelOverlayUniforms(mat, mesh, checkMat, meshMatKey);
 
                         mesh.Layers |= (uint)(1 << 20);
                     }
@@ -3462,7 +3480,7 @@ namespace DeadlockPlayground.Painter
             GD.Print($"[SkinLayerManager] SetupForStandaloneTexture: '{identifier}' ({w}x{h}, {_layers.Count} layers)");
         }
 
-        private static byte[] ExtractTextureToLinearHalfBuffer(Texture2D tex, int w, int h)
+        private static byte[] ExtractTextureToLinearHalfBuffer(Texture2D tex, int w, int h, bool linearizeSrgb = true)
         {
             byte[] data = new byte[w * h * 8];
             if (tex == null) return data;
@@ -3489,9 +3507,18 @@ namespace DeadlockPlayground.Painter
                         {
                             int srcOff = i * 4;
                             int dstOff = i * 4;
-                            hDst[dstOff] = (Half)s_srgb8ToLinear[pSrc[srcOff]];
-                            hDst[dstOff + 1] = (Half)s_srgb8ToLinear[pSrc[srcOff + 1]];
-                            hDst[dstOff + 2] = (Half)s_srgb8ToLinear[pSrc[srcOff + 2]];
+                            if (linearizeSrgb)
+                            {
+                                hDst[dstOff] = (Half)s_srgb8ToLinear[pSrc[srcOff]];
+                                hDst[dstOff + 1] = (Half)s_srgb8ToLinear[pSrc[srcOff + 1]];
+                                hDst[dstOff + 2] = (Half)s_srgb8ToLinear[pSrc[srcOff + 2]];
+                            }
+                            else
+                            {
+                                hDst[dstOff] = (Half)(pSrc[srcOff] / 255.0f);
+                                hDst[dstOff + 1] = (Half)(pSrc[srcOff + 1] / 255.0f);
+                                hDst[dstOff + 2] = (Half)(pSrc[srcOff + 2] / 255.0f);
+                            }
                             hDst[dstOff + 3] = (Half)(pSrc[srcOff + 3] / 255.0f);
                         }
                     }
@@ -3510,17 +3537,28 @@ namespace DeadlockPlayground.Painter
                 _targetMesh = null;
                 _activeAtlasManager = null;
                 _activeMaterialKey = null;
+                ActiveTextureChannel = MaterialTextureChannel.Color;
                 ApplyOverlayParametersToMeshes();
                 return;
             }
 
             string targetMeshMaterialKey = GetMaterialKey(targetMesh);
-            if (!string.IsNullOrEmpty(_activeMaterialKey) && _activeMaterialKey == targetMeshMaterialKey && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
+            string currentBaseKey = StripChannelSuffix(_activeMaterialKey);
+            if (!string.IsNullOrEmpty(currentBaseKey) && currentBaseKey == targetMeshMaterialKey && _activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
             {
                 // Material is already active and loaded; update active submesh reference only
                 _targetMesh = targetMesh;
                 ApplyOverlayParametersToMeshes();
                 return;
+            }
+
+            if (ActiveTextureChannel != MaterialTextureChannel.Color)
+            {
+                SyncActiveChannelCompositeToSet();
+                SaveCurrentContextSnapshot(GetChannelContextKey(currentBaseKey, ActiveTextureChannel));
+                ActiveTextureChannel = MaterialTextureChannel.Color;
+                _activeMaterialKey = currentBaseKey;
+                ActiveChannelChanged?.Invoke(MaterialTextureChannel.Color);
             }
 
             try
@@ -6087,11 +6125,17 @@ namespace DeadlockPlayground.Painter
                                     float g = (float)h[off + 1];
                                     float b = (float)h[off + 2];
                                     float a = Mathf.Clamp((float)h[off + 3], 0.0f, 1.0f);
-                                    Color lin = new Color(r, g, b, a);
-                                    Color srgb = lin.LinearToSrgb();
-                                    h[off] = (Half)srgb.R;
-                                    h[off + 1] = (Half)srgb.G;
-                                    h[off + 2] = (Half)srgb.B;
+                                    bool convSrgb = ActiveTextureChannel is MaterialTextureChannel.Color
+                                        or MaterialTextureChannel.Shadow
+                                        or MaterialTextureChannel.SelfIllum;
+                                    if (convSrgb)
+                                    {
+                                        Color lin = new Color(r, g, b, a);
+                                        Color srgb = lin.LinearToSrgb();
+                                        h[off] = (Half)srgb.R;
+                                        h[off + 1] = (Half)srgb.G;
+                                        h[off + 2] = (Half)srgb.B;
+                                    }
                                     h[off + 3] = (Half)a;
                                 }
                             }
@@ -6146,7 +6190,7 @@ namespace DeadlockPlayground.Painter
             return ImageTexture.CreateFromImage(img);
         }
 
-        private Image BakeCompositeImageFromLayers(List<SkinLayer> layers, int width, int height)
+        private Image BakeCompositeImageFromLayers(List<SkinLayer> layers, int width, int height, bool applyLinearToSrgb = true)
         {
             if (layers == null || layers.Count == 0 || width <= 0 || height <= 0) return null;
             int bufferLen = width * height * 8;
@@ -6265,10 +6309,13 @@ namespace DeadlockPlayground.Painter
                         float g = (float)h[off + 1];
                         float b = (float)h[off + 2];
                         float a = Mathf.Clamp((float)h[off + 3], 0f, 1f);
-                        Color srgb = new Color(r, g, b, a).LinearToSrgb();
-                        h[off] = (Half)srgb.R;
-                        h[off + 1] = (Half)srgb.G;
-                        h[off + 2] = (Half)srgb.B;
+                        if (applyLinearToSrgb)
+                        {
+                            Color srgb = new Color(r, g, b, a).LinearToSrgb();
+                            h[off] = (Half)srgb.R;
+                            h[off + 1] = (Half)srgb.G;
+                            h[off + 2] = (Half)srgb.B;
+                        }
                         h[off + 3] = (Half)a;
                     }
                 }

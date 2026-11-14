@@ -14,6 +14,7 @@ using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Workspace;
 using DeadlockPlayground.Importer;
 
@@ -77,6 +78,8 @@ namespace DeadlockPlayground.Painter
         public Dictionary<string, Image> PreBakedAtlasesBySubmesh { get; set; } = new();
         public Dictionary<string, Image> PreExtractedBaseImagesBySubmesh { get; set; } = new();
         public Dictionary<string, (Vector2 pos, Vector2 size)> SubmeshAtlasRectsBySubmesh { get; set; } = new();
+        public Dictionary<(string subKey, MaterialTextureChannel channel), Image> PreBakedChannelsBySubmesh { get; set; } = new();
+        public Dictionary<(string subKey, MaterialTextureChannel channel), Image> PreExtractedChannelOriginalsBySubmesh { get; set; } = new();
         public HashSet<string> ExcludedAssetVpkPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -173,7 +176,34 @@ namespace DeadlockPlayground.Painter
             }
 
             // Pre-extract all textures, materials, and atlas rects on the Godot MAIN THREAD before entering worker thread
-            var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && s.IsDirty).ToList();
+            var exportableChannels = new[]
+            {
+                MaterialTextureChannel.AmbientOcclusion,
+                MaterialTextureChannel.Normal,
+                MaterialTextureChannel.Roughness,
+                MaterialTextureChannel.Shadow,
+                MaterialTextureChannel.SelfIllum,
+                MaterialTextureChannel.TintMask,
+                MaterialTextureChannel.Metalness,
+                MaterialTextureChannel.RimMask,
+                MaterialTextureChannel.OutlineMask
+            };
+
+            bool HasAnyChannelEdits(SubmeshNodeInfo smInfo)
+            {
+                if (smInfo == null) return false;
+                foreach (var ch in exportableChannels)
+                {
+                    if ((_layerManager != null && _layerManager.HasChannelEdits(smInfo, ch)) ||
+                        (smInfo.Channels?.GetChannel(ch)?.IsDirty ?? false))
+                    {
+                        return true;
+                    }
+                }
+                return _layerManager != null && _layerManager.HasChannelEdits(smInfo, MaterialTextureChannel.Color);
+            }
+
+            var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && (s.IsDirty || HasAnyChannelEdits(s))).ToList();
             if (candidateSubmeshes == null || candidateSubmeshes.Count == 0)
             {
                 candidateSubmeshes = config.TargetSubmeshes ?? new List<SubmeshNodeInfo>();
@@ -197,6 +227,34 @@ namespace DeadlockPlayground.Painter
                     {
                         config.PreBakedAtlasesBySubmesh[subKey] = config.PreBakedAtlas;
                         config.PreBakedAtlasesBySurface[sIdx] = config.PreBakedAtlas;
+                    }
+                }
+
+                // Pre-bake edited non-color material channels on the main thread
+                foreach (var ch in exportableChannels)
+                {
+                    bool hasEdits = (_layerManager != null && _layerManager.HasChannelEdits(submesh, ch))
+                                 || (submesh.Channels?.GetChannel(ch)?.IsDirty ?? false);
+                    if (hasEdits && !config.PreBakedChannelsBySubmesh.ContainsKey((subKey, ch)))
+                    {
+                        var chBaked = _layerManager?.BakeChannelImageForSubmesh(submesh, ch)
+                                   ?? submesh.Channels?.GetChannel(ch)?.SourceImage;
+                        if (chBaked != null && !chBaked.IsEmpty())
+                        {
+                            config.PreBakedChannelsBySubmesh[(subKey, ch)] = (Image)chBaked.Duplicate();
+                        }
+                    }
+
+                    // Also snapshot Normal/Roughness originals on main thread if either side is edited (for g_tNormalRoughness repacking)
+                    if ((ch == MaterialTextureChannel.Normal || ch == MaterialTextureChannel.Roughness) &&
+                        !config.PreExtractedChannelOriginalsBySubmesh.ContainsKey((subKey, ch)))
+                    {
+                        var origImg = submesh.Channels?.GetChannel(ch)?.SourceImage
+                                   ?? submesh.Channels?.GetChannel(ch)?.Texture?.GetImage();
+                        if (origImg != null && !origImg.IsEmpty())
+                        {
+                            config.PreExtractedChannelOriginalsBySubmesh[(subKey, ch)] = (Image)origImg.Duplicate();
+                        }
                     }
                 }
 
@@ -494,8 +552,9 @@ bool isSourceModInTargetAddons = false;
                     return result;
                 }
 
+                bool hasAnyPreBakedChannels = config.PreBakedChannelsBySubmesh.Count > 0;
                 var submeshesToExport = config.TargetSubmeshes != null && config.TargetSubmeshes.Count > 0
-                    ? config.TargetSubmeshes.Where(s => s.IsSelected && s.IsDirty).ToList()
+                    ? config.TargetSubmeshes.Where(s => s.IsSelected && (s.IsDirty || HasAnySubmeshPreBakedChannels(config, s))).ToList()
                     : new List<SubmeshNodeInfo>();
 
                 bool hasCustomModel = preExtractedCustomBundle != null && preExtractedCustomBundle.Submeshes.Count > 0;
@@ -676,6 +735,19 @@ bool isSourceModInTargetAddons = false;
                                 }
                             }
                         }
+
+                        // Stage any modified non-Color channels (AO, Normal+Roughness, Shadow, Masks) for this submesh
+                        StageEditedMultiChannelMaps(
+                            config,
+                            submesh,
+                            heroFolder,
+                            contentMaterialsDir,
+                            sourceModPackage,
+                            baseVpkPackage,
+                            deadlockPath,
+                            stagedTextures,
+                            processedHeroVtexCPaths,
+                            progress);
                     }
 
                     // =========================================================================
@@ -1824,6 +1896,201 @@ bool isSourceModInTargetAddons = false;
             }
 
             return Image.CreateFromData(w, h, false, Image.Format.Rgba8, data);
+        }
+
+        private static bool HasAnySubmeshPreBakedChannels(ModExportConfig config, SubmeshNodeInfo submesh)
+        {
+            if (config?.PreBakedChannelsBySubmesh == null || submesh == null) return false;
+            string subKey = ResolveSubmeshKey(submesh);
+            foreach (var kvp in config.PreBakedChannelsBySubmesh)
+            {
+                if (kvp.Key.subKey.Equals(subKey, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        private static void StageEditedMultiChannelMaps(
+            ModExportConfig config,
+            SubmeshNodeInfo submesh,
+            string heroFolder,
+            string contentMaterialsDir,
+            Package sourceModPackage,
+            Package baseVpkPackage,
+            string deadlockPath,
+            List<(string materialName, string pngPath, string vtexPath, string originalVtexCPath)> stagedTextures,
+            HashSet<string> processedHeroVtexCPaths,
+            IProgress<ExportProgressReport> progress)
+        {
+            if (config?.PreBakedChannelsBySubmesh == null || submesh == null) return;
+            string subKey = ResolveSubmeshKey(submesh);
+            var chSet = submesh.Channels;
+
+            string NormalizeVtexC(string p)
+            {
+                if (string.IsNullOrWhiteSpace(p)) return null;
+                string norm = p.Replace('\\', '/').TrimStart('/');
+                if (!norm.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) norm += "_c";
+                return norm;
+            }
+
+            void StageSingleVtex(string vtexCPath, Image imgToStage, string label, bool preserveOrigAlpha = false)
+            {
+                string normVtex = NormalizeVtexC(vtexCPath);
+                if (string.IsNullOrEmpty(normVtex) || imgToStage == null || imgToStage.IsEmpty()) return;
+                if (!processedHeroVtexCPaths.Add(normVtex)) return;
+
+                string baseName = Path.GetFileNameWithoutExtension(normVtex);
+                if (baseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                    baseName = baseName[..^2];
+
+                var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtex, sourceModPackage, deadlockPath) : null)
+                            ?? LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath);
+                try
+                {
+                    using Image workImg = (Image)imgToStage.Duplicate();
+                    if (workImg.IsCompressed()) workImg.Decompress();
+                    if (workImg.HasMipmaps()) workImg.ClearMipmaps();
+                    if (workImg.GetFormat() != Image.Format.Rgba8) workImg.Convert(Image.Format.Rgba8);
+
+                    int targetW = origMeta != null && origMeta.Width >= 64 ? origMeta.Width : (config.Resolution > 0 ? config.Resolution : workImg.GetWidth());
+                    int targetH = origMeta != null && origMeta.Height >= 64 ? origMeta.Height : (config.Resolution > 0 ? config.Resolution : workImg.GetHeight());
+                    if (workImg.GetWidth() != targetW || workImg.GetHeight() != targetH)
+                    {
+                        workImg.Resize(targetW, targetH, Image.Interpolation.Bilinear);
+                    }
+
+                    Image finalImg = preserveOrigAlpha && origMeta != null
+                        ? ApplyOriginalAlphaChannel(workImg, origMeta)
+                        : workImg;
+
+                    string pngFileName = $"{baseName}.png";
+                    string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
+                    if (finalImg.SavePng(fullPngPath) != Error.Ok)
+                    {
+                        progress?.Report(new ExportProgressReport(0.25f, $"[WARNING] Failed saving multi-channel PNG '{pngFileName}'.", ExportLogLevel.Warning));
+                        return;
+                    }
+
+                    string vtexFileName = $"{baseName}.vtex";
+                    string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
+                    string relPngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
+                    string outFmt = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                    VTexFlags flags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                    File.WriteAllText(fullVtexPath, GenerateSource2DmxVtex(relPngPath, outFmt, flags));
+                    stagedTextures.Add((baseName, fullPngPath, fullVtexPath, normVtex));
+                    progress?.Report(new ExportProgressReport(0.29f, $"[INFO] Staged edited {label} map -> {vtexFileName} ({normVtex})"));
+
+                    if (!ReferenceEquals(finalImg, workImg)) finalImg.Dispose();
+                }
+                finally
+                {
+                    if (origMeta != null)
+                    {
+                        origMeta.BaseRgbaImage?.Dispose();
+                        origMeta.BaseRgbaImage = null;
+                        origMeta.RawAlpha = null;
+                    }
+                }
+            }
+
+            // 1. Packed Normal + Roughness (g_tNormalRoughness) OR separate standalone Normal/Roughness
+            bool hasNormEdit = config.PreBakedChannelsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Normal), out var editedNorm);
+            bool hasRoughEdit = config.PreBakedChannelsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Roughness), out var editedRough);
+
+            if (hasNormEdit || hasRoughEdit)
+            {
+                var normEntry = chSet?.GetChannel(MaterialTextureChannel.Normal);
+                var roughEntry = chSet?.GetChannel(MaterialTextureChannel.Roughness);
+                string packedPath = normEntry?.PackedSourceVtexPath
+                                 ?? roughEntry?.PackedSourceVtexPath
+                                 ?? (submesh.OriginalNormalVtex?.Contains("normalroughness", StringComparison.OrdinalIgnoreCase) == true ? submesh.OriginalNormalVtex : null);
+
+                if (!string.IsNullOrEmpty(packedPath))
+                {
+                    Image normSrc = editedNorm ?? (config.PreExtractedChannelOriginalsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Normal), out var origN) ? origN : normEntry?.SourceImage);
+                    Image roughSrc = editedRough ?? (config.PreExtractedChannelOriginalsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Roughness), out var origR) ? origR : roughEntry?.SourceImage);
+                    using Image packedImg = MaterialChannelDiscovery.PackNormalRoughnessImage(
+                        normSrc,
+                        roughSrc,
+                        packAsBlueToAlpha: normEntry?.HasBlueToAlphaRoughness ?? true);
+                    if (packedImg != null)
+                    {
+                        StageSingleVtex(packedPath, packedImg, "Normal+Roughness", preserveOrigAlpha: false);
+                    }
+                }
+                else
+                {
+                    if (hasNormEdit)
+                    {
+                        StageSingleVtex(normEntry?.SourcePath ?? submesh.OriginalNormalVtex, editedNorm, "Normal");
+                    }
+                    if (hasRoughEdit)
+                    {
+                        string rTarget = roughEntry?.SourcePath;
+                        if (string.IsNullOrEmpty(rTarget) && submesh.OriginalTextureParams != null)
+                        {
+                            submesh.OriginalTextureParams.TryGetValue("g_tRoughness", out rTarget);
+                        }
+                        StageSingleVtex(rTarget, editedRough, "Roughness");
+                    }
+                }
+            }
+
+            // 2. AO, Shadow, SelfIllum, TintMask, Metalness, RimMask, OutlineMask
+            var standaloneChannels = new (MaterialTextureChannel ch, string label, Func<string> fallbackPath)[]
+            {
+                (MaterialTextureChannel.AmbientOcclusion, "AO", () => submesh.OriginalAoVtex),
+                (MaterialTextureChannel.Shadow, "Shadow/NPR", () =>
+                {
+                    if (submesh.OriginalTextureParams != null)
+                    {
+                        foreach (var k in new[] { "g_tNprTransmissiveColor", "TextureNprTramsissiveColor1", "TextureNprTransmissiveColor", "g_tShadowTint" })
+                        {
+                            if (submesh.OriginalTextureParams.TryGetValue(k, out var vp) && !string.IsNullOrEmpty(vp)) return vp;
+                        }
+                    }
+                    return null;
+                }),
+                (MaterialTextureChannel.SelfIllum, "Self-Illum", () =>
+                {
+                    string val = null;
+                    submesh.OriginalTextureParams?.TryGetValue("g_tSelfIllumMask", out val);
+                    return val;
+                }),
+                (MaterialTextureChannel.TintMask, "Tint Mask", () => submesh.OriginalMaskVtex),
+                (MaterialTextureChannel.Metalness, "Metalness", () =>
+                {
+                    string val = null;
+                    submesh.OriginalTextureParams?.TryGetValue("g_tMetalness", out val);
+                    return val;
+                }),
+                (MaterialTextureChannel.RimMask, "Rim Mask", () =>
+                {
+                    string val = null;
+                    submesh.OriginalTextureParams?.TryGetValue("g_tRimLightMask", out val);
+                    return val;
+                }),
+                (MaterialTextureChannel.OutlineMask, "Outline Mask", () => submesh.OriginalNprOutlineVtex)
+            };
+
+            foreach (var (ch, label, fallbackPath) in standaloneChannels)
+            {
+                if (!config.PreBakedChannelsBySubmesh.TryGetValue((subKey, ch), out var bakedImg) || bakedImg == null || bakedImg.IsEmpty())
+                    continue;
+
+                var entry = chSet?.GetChannel(ch);
+                string targetVtexC = entry?.SourcePath;
+                if (string.IsNullOrEmpty(targetVtexC) || !targetVtexC.Contains(".vtex", StringComparison.OrdinalIgnoreCase))
+                {
+                    targetVtexC = fallbackPath();
+                }
+
+                if (!string.IsNullOrEmpty(targetVtexC))
+                {
+                    StageSingleVtex(targetVtexC, bakedImg, label);
+                }
+            }
         }
 
         public static List<string> ResolveAllColorVtexCPaths(SubmeshNodeInfo submesh, string heroCodename, Package primaryVpkPackage, Package fallbackVpkPackage = null)

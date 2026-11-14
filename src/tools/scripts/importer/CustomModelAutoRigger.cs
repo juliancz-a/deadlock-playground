@@ -4132,6 +4132,11 @@ namespace DeadlockPlayground.Importer
                         if (gltfDoc.AppendFromBuffer(patchedGlb, baseDir, gltfState) == Error.Ok)
                         {
                             importedScene = gltfDoc.GenerateScene(gltfState);
+                            if (importedScene != null)
+                            {
+                                var glbManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.ParseGlbManifest(rawGlb);
+                                DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterGlbManifest(importedScene, glbManifest);
+                            }
                         }
                     }
                     catch (Exception glbEx)
@@ -4161,7 +4166,17 @@ namespace DeadlockPlayground.Importer
             var sceneRoot = importedScene as Node3D ?? new Node3D();
             if (sceneRoot != importedScene)
             {
+                var childManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetGlbManifest(importedScene);
+                if (childManifest != null)
+                {
+                    DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterGlbManifest(sceneRoot, childManifest);
+                }
                 sceneRoot.AddChild(importedScene);
+            }
+
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                sceneRoot.SetMeta("ImportedSourceBaseDir", Path.GetDirectoryName(filePath) ?? "");
             }
 
             SanitizeImportedModelMaterials(sceneRoot);
@@ -4340,6 +4355,8 @@ namespace DeadlockPlayground.Importer
 
             var assignedMatNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var matToUniqueName = new Dictionary<Material, string>();
+            var glbManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetGlbManifest(sceneRoot);
+            var externalTexturePool = CollectSiblingExternalTextures(sceneRoot);
 
             var meshes = CollectMeshes(sceneRoot);
             foreach (var mi in meshes)
@@ -4472,8 +4489,66 @@ namespace DeadlockPlayground.Importer
                             stdMat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
                         }
                     }
+
+                    if (!isOutline && DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(mat) == null)
+                    {
+                        DeadlockPlayground.Materials.GlbMaterialSlotInfo matchedSlot = null;
+                        if (glbManifest != null)
+                        {
+                            string rawMatName = mat.ResourceName ?? "";
+                            matchedSlot = glbManifest.Materials.FirstOrDefault(gm =>
+                                !string.IsNullOrEmpty(gm.MaterialName) &&
+                                (string.Equals(gm.MaterialName, rawMatName, StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(gm.MaterialName, uniqueMatName, StringComparison.OrdinalIgnoreCase)));
+                        }
+                        var discovered = DeadlockPlayground.Materials.MaterialChannelDiscovery.DiscoverCustomModelChannels(
+                            mat,
+                            uniqueMatName,
+                            matchedSlot,
+                            externalTexturePool);
+                        DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(mat, discovered);
+                    }
                 }
             }
+        }
+
+        private static List<Texture2D> CollectSiblingExternalTextures(Node3D sceneRoot)
+        {
+            var pool = new List<Texture2D>();
+            if (sceneRoot == null || !sceneRoot.HasMeta("ImportedSourceBaseDir")) return pool;
+            string baseDir = sceneRoot.GetMeta("ImportedSourceBaseDir").AsString();
+            if (string.IsNullOrEmpty(baseDir) || !Directory.Exists(baseDir)) return pool;
+
+            var searchDirs = new List<string> { baseDir };
+            string texSub = Path.Combine(baseDir, "textures");
+            if (Directory.Exists(texSub)) searchDirs.Add(texSub);
+            string texCapSub = Path.Combine(baseDir, "Textures");
+            if (Directory.Exists(texCapSub) && !string.Equals(texSub, texCapSub, StringComparison.OrdinalIgnoreCase))
+                searchDirs.Add(texCapSub);
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string dir in searchDirs)
+            {
+                try
+                {
+                    foreach (string file in Directory.EnumerateFiles(dir))
+                    {
+                        if (!seen.Add(file)) continue;
+                        string ext = Path.GetExtension(file).ToLowerInvariant();
+                        if (ext != ".png" && ext != ".tga" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp") continue;
+                        if (pool.Count >= 48) break;
+                        var img = new Image();
+                        if (img.Load(file) == Error.Ok)
+                        {
+                            var tex = ImageTexture.CreateFromImage(img);
+                            tex.ResourceName = Path.GetFileName(file);
+                            pool.Add(tex);
+                        }
+                    }
+                }
+                catch { }
+            }
+            return pool;
         }
 
         /// <summary>

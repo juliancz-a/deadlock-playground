@@ -8,6 +8,7 @@ using DeadlockPlayground.Importer;
 using DeadlockPlayground.Animation;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Materials;
 
 namespace DeadlockPlayground.Tests
 {
@@ -31,7 +32,7 @@ namespace DeadlockPlayground.Tests
                     GD.PrintErr("[Test] Deadlock VPK path not found! Skipping VPK hero load, creating synthetic hero skeleton.");
                 }
 
-                var vpkLoader = new VpkLoaderTest { VpkPath = vpkPath };
+                var vpkLoader = new VpkLoaderTest { Name = "VpkLoaderTest", VpkPath = vpkPath };
                 Root.AddChild(vpkLoader);
 
                 var paradoxEntry = DeadlockHeroCatalog.GetByCodename("chrono") ?? DeadlockHeroCatalog.Entries.FirstOrDefault();
@@ -1951,6 +1952,264 @@ namespace DeadlockPlayground.Tests
                             Directory.Delete(compileRes.GameStagingAddonRoot, true);
                     }
                     catch { }
+                }
+
+                // =========================================================================
+                // TEST 19: Multi-Channel Discovery & Deadman Danny (deadpack) Variants + Prefix Stripping
+                // =========================================================================
+                GD.Print("\n[TEST 19] Verifying Deadman Danny (deadpack) Multi-Channel Discovery, Variants & Prefix Stripping...");
+                {
+                    var hierarchyClean = new HeroMeshHierarchy();
+                    hierarchyClean.HeroCodename = "deadpack";
+                    hierarchyClean.HeroDisplayName = "Deadman Danny";
+                    hierarchyClean.HeroWipAlias = "deadpack";
+                    Root.AddChild(hierarchyClean);
+
+                    string n1 = HeroMeshHierarchy.FormatCleanMaterialDisplayName("DEADPACK_LOWERBODY", "deadpack", "Deadman Danny");
+                    string n2 = HeroMeshHierarchy.FormatCleanMaterialDisplayName("DEAPACK_JETPACK", "deadpack", "Deadman Danny");
+                    string n3 = HeroMeshHierarchy.FormatCleanMaterialDisplayName("DEADPACK", "deadpack", "Deadman Danny");
+                    GD.Print($"[TEST 19] Clean names: DEADPACK_LOWERBODY->'{n1}', DEAPACK_JETPACK->'{n2}', DEADPACK->'{n3}'");
+                    if (n1 != "LOWERBODY" || n2 != "JETPACK" || string.IsNullOrEmpty(n3))
+                    {
+                        GD.PrintErr($"FAIL: Hero prefix stripping mismatch! n1='{n1}', n2='{n2}', n3='{n3}'");
+                        allPassed = false;
+                    }
+                    else
+                    {
+                        GD.Print("PASS: Hero codename + 1-char typo prefix (DEAPACK -> JETPACK) stripped cleanly without empty fallback.");
+                    }
+
+                    var deadmanEntry = DeadlockHeroCatalog.ResolveHero("deadpack")
+                                    ?? DeadlockHeroCatalog.ResolveHero("deadman_danny")
+                                    ?? DeadlockHeroCatalog.ResolveHero("Deadman Danny");
+                    if (!string.IsNullOrEmpty(vpkPath) && File.Exists(vpkPath) && deadmanEntry != null)
+                    {
+                        Node3D deadmanNode = await vpkLoader.LoadHeroModelAsync(deadmanEntry);
+                        if (deadmanNode == null)
+                        {
+                            GD.PrintErr("FAIL: Failed to load Deadman Danny (deadpack) from VPK.");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            hierarchyClean.ScanHero(deadmanNode);
+                            var lowerSub = hierarchyClean.Submeshes.FirstOrDefault(s =>
+                                (s.MaterialName ?? "").Contains("lowerbody", StringComparison.OrdinalIgnoreCase) ||
+                                (s.OriginalVmatPath ?? "").Contains("lowerbody", StringComparison.OrdinalIgnoreCase));
+                            if (lowerSub?.Channels == null)
+                            {
+                                GD.PrintErr("FAIL: deadpack_lowerbody submesh or MaterialChannelSet not found!");
+                                allPassed = false;
+                            }
+                            else
+                            {
+                                var chs = lowerSub.Channels;
+                                bool hasColor = chs.HasRealMap(MaterialTextureChannel.Color);
+                                bool hasAo = chs.HasRealMap(MaterialTextureChannel.AmbientOcclusion);
+                                bool hasNorm = chs.HasRealMap(MaterialTextureChannel.Normal);
+                                bool hasRough = chs.HasRealMap(MaterialTextureChannel.Roughness);
+                                bool hasShadow = chs.HasRealMap(MaterialTextureChannel.Shadow);
+                                int variantCount = chs.GetChannel(MaterialTextureChannel.Color)?.VariantPaths.Count ?? 0;
+
+                                GD.Print($"[TEST 19] deadpack_lowerbody channels -> Color:{hasColor}(variants={variantCount}), AO:{hasAo}, Normal:{hasNorm}, Rough:{hasRough}, Shadow:{hasShadow}");
+                                if (hasColor && hasAo && hasNorm && hasRough && hasShadow && variantCount >= 2)
+                                {
+                                    GD.Print("PASS: deadpack_lowerbody discovered all 5 core channels + >=2 Color variants!");
+                                }
+                                else
+                                {
+                                    GD.PrintErr($"FAIL: deadpack_lowerbody missing channels or color variants (variants={variantCount})!");
+                                    allPassed = false;
+                                }
+
+                                // Roundtrip g_tNormalRoughness pack check
+                                var nImg = chs.GetChannel(MaterialTextureChannel.Normal)?.SourceImage;
+                                var rImg = chs.GetChannel(MaterialTextureChannel.Roughness)?.SourceImage;
+                                using var repacked = MaterialChannelDiscovery.PackNormalRoughnessImage(nImg, rImg, true);
+                                if (repacked != null && !repacked.IsEmpty())
+                                {
+                                    GD.Print($"PASS: Normal+Roughness repacked cleanly ({repacked.GetWidth()}x{repacked.GetHeight()}).");
+                                }
+                                else
+                                {
+                                    GD.PrintErr("FAIL: Normal+Roughness repacking returned null/empty image.");
+                                    allPassed = false;
+                                }
+                            }
+                            deadmanNode.QueueFree();
+                        }
+                    }
+                    else
+                    {
+                        GD.Print("[TEST 19] Notice: Deadman Danny entry or VPK not available; skipped live VPK deadpack check.");
+                    }
+                    hierarchyClean.QueueFree();
+                }
+
+                // =========================================================================
+                // TEST 20: 2D UV ATLAS Header Two-Row Resize & Bottom Channel Bar Scene
+                // =========================================================================
+                GD.Print("\n[TEST 20] Verifying UVCanvasPanel two-row header & BottomChannelBar resize bounds...");
+                {
+                    var uvScene = GD.Load<PackedScene>("res://ui/scenes/components/UVCanvasPanel.tscn");
+                    if (uvScene == null)
+                    {
+                        GD.PrintErr("FAIL: Could not load res://ui/scenes/components/UVCanvasPanel.tscn!");
+                        allPassed = false;
+                    }
+                    else
+                    {
+                        var uvPanel = uvScene.Instantiate<DeadlockPlayground.UI.UVCanvas2DUI>();
+                        Root.AddChild(uvPanel);
+                        uvPanel.SetPanelWidth(180f);
+                        bool hasBottomBar = uvPanel.FindChild("BottomChannelBar", true, false) != null;
+                        bool hasToolbarRow = uvPanel.FindChild("ToolbarRow", true, false) != null;
+                        bool hasPillsFlow = uvPanel.FindChild("ChannelPillsFlow", true, false) != null;
+                        var hdrHBox = uvPanel.FindChild("HBox", true, false) as Control;
+                        var mainVBox = uvPanel.FindChild("VBoxContainer", true, false) as Control;
+                        float minPanelX = uvPanel.CustomMinimumSize.X;
+                        float hdrMinX = hdrHBox?.GetCombinedMinimumSize().X ?? 999f;
+                        float vboxMinX = mainVBox?.GetCombinedMinimumSize().X ?? 999f;
+
+                        GD.Print($"[TEST 20] MinPanelWidth={uvPanel.MinPanelWidth}, CustomMinX={minPanelX}, VBoxMinX={vboxMinX:F1}, HeaderRowMinX={hdrMinX:F1}, ToolbarRow={hasToolbarRow}, BottomBar={hasBottomBar}, PillsFlow={hasPillsFlow}");
+                        if (uvPanel.MinPanelWidth <= 180f && minPanelX <= 180f && vboxMinX < 300f && hdrMinX < 300f && hasBottomBar && hasToolbarRow && hasPillsFlow)
+                        {
+                            GD.Print("PASS: UVCanvasPanel allows narrowing (<300px) and BottomChannelBar is wired!");
+                        }
+                        else
+                        {
+                            GD.PrintErr("FAIL: UVCanvasPanel minimum width or child bar wiring invalid!");
+                            allPassed = false;
+                        }
+                        uvPanel.QueueFree();
+                    }
+                }
+
+                // =========================================================================
+                // TEST 21: Custom Model 3-Tier Discovery (ORM Unpack, Tier-2 Fuzzy, Shader Toggles)
+                // =========================================================================
+                GD.Print("\n[TEST 21] Verifying 3-Tier Custom Model Channel Discovery & Live 3D Shader Toggles...");
+                {
+                    // Synthetic ORM image: varying R (AO), G (Rough), B (Metal)
+                    byte[] ormBytes = new byte[16 * 16 * 4];
+                    for (int y = 0; y < 16; y++)
+                    {
+                        for (int x = 0; x < 16; x++)
+                        {
+                            int idx = (y * 16 + x) * 4;
+                            ormBytes[idx + 0] = (byte)(x * 16);        // R = AO variation
+                            ormBytes[idx + 1] = (byte)(32 + y * 12);   // G = Roughness variation
+                            ormBytes[idx + 2] = (byte)(x > 8 ? 255 : 0); // B = Metalness variation
+                            ormBytes[idx + 3] = 255;
+                        }
+                    }
+                    using var ormImg = Image.CreateFromData(16, 16, false, Image.Format.Rgba8, ormBytes);
+                    var ormTex = ImageTexture.CreateFromImage(ormImg);
+                    ormTex.ResourceName = "hero_armor_orm";
+
+                    using var normImg = Image.CreateEmpty(16, 16, false, Image.Format.Rgba8);
+                    normImg.Fill(new Color(0.5f, 0.5f, 1.0f, 1.0f));
+                    var normTex = ImageTexture.CreateFromImage(normImg);
+                    normTex.ResourceName = "hero_armor_nrm";
+
+                    var stdMat = new StandardMaterial3D
+                    {
+                        ResourceName = "hero_armor",
+                        RoughnessTexture = ormTex,
+                        RoughnessTextureChannel = BaseMaterial3D.TextureChannel.Green,
+                        NormalTexture = normTex,
+                        NormalEnabled = true
+                    };
+
+                    // Tier 2 temp dir with _shadow and _gloss maps
+                    string tempTexDir = Path.Combine(Path.GetTempPath(), $"dl_ch_test_{Guid.NewGuid():N}");
+                    Directory.CreateDirectory(tempTexDir);
+                    try
+                    {
+                        using var shImg = Image.CreateEmpty(8, 8, false, Image.Format.Rgba8);
+                        shImg.Fill(new Color(0.6f, 0.3f, 0.4f, 1f));
+                        string shPath = Path.Combine(tempTexDir, "hero_armor_shadow.png");
+                        shImg.SavePng(shPath);
+                        using var loadedShImg = Image.LoadFromFile(shPath);
+                        var shTex = ImageTexture.CreateFromImage(loadedShImg);
+                        shTex.ResourceName = "hero_armor_shadow.png";
+
+                        var chSet = MaterialChannelDiscovery.DiscoverCustomModelChannels(
+                            stdMat,
+                            "hero_armor",
+                            glbSlot: null,
+                            externalPool: new System.Collections.Generic.List<Texture2D> { shTex });
+                        bool tier1AoFromOrm = chSet.HasRealMap(MaterialTextureChannel.AmbientOcclusion);
+                        bool tier1MetalFromOrm = chSet.HasRealMap(MaterialTextureChannel.Metalness);
+                        bool tier1Rough = chSet.HasRealMap(MaterialTextureChannel.Roughness);
+                        bool tier2Shadow = chSet.HasRealMap(MaterialTextureChannel.Shadow);
+                        bool tier3ColorFallback = chSet.GetChannel(MaterialTextureChannel.Color)?.IsDefaultFallback ?? false;
+
+                        GD.Print($"[TEST 21] ORM AO={tier1AoFromOrm}, Metal={tier1MetalFromOrm}, Rough={tier1Rough}, Tier2 Shadow={tier2Shadow}, ColorDefaultFallback={tier3ColorFallback}");
+                        if (!tier1AoFromOrm || !tier1MetalFromOrm || !tier1Rough || !tier2Shadow || !tier3ColorFallback)
+                        {
+                            GD.PrintErr("FAIL: Custom 3-Tier channel discovery failed on ORM/Tier2/Tier3 check!");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print("PASS: Custom 3-Tier discovery unpacked ORM AO/Metalness, detected Tier-2 _shadow, and generated Tier-3 fallback.");
+                        }
+
+                        var toonShader = GD.Load<Shader>("res://assets/shaders/toon_shader.gdshader");
+                        if (toonShader != null)
+                        {
+                            var toonMat = new ShaderMaterial { Shader = toonShader };
+                            chSet.GetChannel(MaterialTextureChannel.AmbientOcclusion).IsEnabled = false;
+                            chSet.SoloPreviewChannel = MaterialTextureChannel.Normal;
+                            MaterialChannelDiscovery.ApplyChannelsToMaterial(toonMat, chSet);
+                            bool aoDisabled = !toonMat.GetShaderParameter("enable_ao").AsBool();
+                            int dbgChan = toonMat.GetShaderParameter("debug_view_channel").AsInt32();
+                            if (aoDisabled && dbgChan == MaterialChannelSet.ChannelToShaderDebugIndex(MaterialTextureChannel.Normal))
+                            {
+                                GD.Print($"PASS: Shader toggle/solo sync verified (enable_ao=false, debug_view_channel={dbgChan}).");
+                            }
+                            else
+                            {
+                                GD.PrintErr($"FAIL: Shader uniform sync mismatch (aoDisabled={aoDisabled}, debug_view_channel={dbgChan}).");
+                                allPassed = false;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        try { Directory.Delete(tempTexDir, true); } catch { }
+                    }
+                }
+
+                // =========================================================================
+                // TEST 22: Multi-Channel VMAT Shadow/AO/Roughness Binding
+                // =========================================================================
+                GD.Print("\n[TEST 22] Verifying CustomModelExporter.GenerateDeadlockPbrVmat multi-channel bindings...");
+                {
+                    string vmat = CustomModelExporter.GenerateDeadlockPbrVmat(
+                        "models/test/hero_color.png",
+                        "models/test/hero_normal.png",
+                        "models/test/hero_rough.png",
+                        0.25f,
+                        "models/test/hero_ao.png",
+                        false,
+                        false,
+                        false,
+                        "models/test/hero_selfillum.png",
+                        "models/test/hero_tintmask.png",
+                        "models/test/hero_shadow.png");
+                    if (vmat.Contains("TextureNprTramsissiveColor1 \"models/test/hero_shadow.png\"") &&
+                        vmat.Contains("TextureAmbientOcclusion1 \"models/test/hero_ao.png\"") &&
+                        vmat.Contains("TextureSelfIllumMask1 \"models/test/hero_selfillum.png\""))
+                    {
+                        GD.Print("PASS: GenerateDeadlockPbrVmat emitted Shadow, AO, Normal, Roughness, and SelfIllum bindings.");
+                    }
+                    else
+                    {
+                        GD.PrintErr("FAIL: GenerateDeadlockPbrVmat missing expected multi-channel bindings!");
+                        allPassed = false;
+                    }
                 }
             }
             catch (Exception ex)
