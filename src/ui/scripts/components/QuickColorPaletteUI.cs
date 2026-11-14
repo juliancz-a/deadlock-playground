@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Painter;
 
 namespace DeadlockPlayground.UI
@@ -27,8 +28,28 @@ namespace DeadlockPlayground.UI
         [Export] private GridContainer _favoritesGrid;
 
         private MeshPainter3D _painter;
+        private SkinLayerManager _subscribedLayerManager;
         private FloatingBrushPaletteUI _brushPalette;
         private Button _btnOpenUVCanvas;
+        private MaterialTextureChannel _activeChannel = MaterialTextureChannel.Color;
+
+        private static readonly Color[] GrayscaleRampSwatches =
+        {
+            Colors.Black,
+            new Color(0.25f, 0.25f, 0.25f, 1.0f),
+            new Color(0.50f, 0.50f, 0.50f, 1.0f),
+            new Color(0.75f, 0.75f, 0.75f, 1.0f),
+            Colors.White
+        };
+
+        private static readonly Color[] NormalVectorSwatches =
+        {
+            new Color(0.502f, 0.502f, 1.0f, 1.0f), // Flat
+            new Color(0.80f, 0.502f, 0.90f, 1.0f),  // +X
+            new Color(0.20f, 0.502f, 0.90f, 1.0f),  // -X
+            new Color(0.502f, 0.80f, 0.90f, 1.0f),  // +Y
+            new Color(0.502f, 0.20f, 0.90f, 1.0f)   // -Y
+        };
 
         private readonly Button[] _recentSwatchButtons = new Button[5];
         private readonly bool[] _swatchIsHovered = new bool[5];
@@ -129,10 +150,27 @@ namespace DeadlockPlayground.UI
             _favoriteColors.Add(Color.FromHtml("#D81B60")); // Magenta
         }
 
+        private IReadOnlyList<Color> GetDisplayedSwatches()
+        {
+            if (_activeChannel == MaterialTextureChannel.Normal)
+                return NormalVectorSwatches;
+            if (_activeChannel is MaterialTextureChannel.AmbientOcclusion
+                or MaterialTextureChannel.Roughness
+                or MaterialTextureChannel.Metalness
+                or MaterialTextureChannel.TintMask
+                or MaterialTextureChannel.RimMask
+                or MaterialTextureChannel.OutlineMask)
+            {
+                return GrayscaleRampSwatches;
+            }
+            return _recentColors;
+        }
+
         private void DrawSwatch(int index)
         {
             var btn = _recentSwatchButtons[index];
-            if (btn == null || index >= _recentColors.Count) return;
+            var swatches = GetDisplayedSwatches();
+            if (btn == null || index >= swatches.Count) return;
 
             Vector2 size = btn.Size;
             if (size.X <= 2.0f || size.Y <= 2.0f)
@@ -143,7 +181,7 @@ namespace DeadlockPlayground.UI
             float radius = (MathF.Min(size.X, size.Y) * 0.5f) - 2.5f;
             if (radius <= 1.0f) return;
 
-            Color col = _recentColors[index];
+            Color col = swatches[index];
             bool isActive = IsColorSimilar(col, _activeColor);
             bool isHovered = _swatchIsHovered[index];
 
@@ -192,6 +230,11 @@ namespace DeadlockPlayground.UI
                 _painter.ColorSampled -= OnColorSampled;
                 _isPainterConnected = false;
             }
+            if (_subscribedLayerManager != null && GodotObject.IsInstanceValid(_subscribedLayerManager))
+            {
+                _subscribedLayerManager.ActiveChannelChanged -= OnActiveChannelChanged;
+                _subscribedLayerManager = null;
+            }
             if (_isBtnVisibilityConnected && _btnOpenUVCanvas != null && GodotObject.IsInstanceValid(_btnOpenUVCanvas))
             {
                 _btnOpenUVCanvas.VisibilityChanged -= UpdateBarPosition;
@@ -214,6 +257,12 @@ namespace DeadlockPlayground.UI
                 _painter.QuickColorPalette = this;
                 _isPainterConnected = true;
                 _activeColor = _painter.BrushColor;
+                if (_painter.LayerManager != null && GodotObject.IsInstanceValid(_painter.LayerManager))
+                {
+                    _subscribedLayerManager = _painter.LayerManager;
+                    _subscribedLayerManager.ActiveChannelChanged += OnActiveChannelChanged;
+                    _activeChannel = _subscribedLayerManager.ActiveTextureChannel;
+                }
                 AddRecentColor(_activeColor);
             }
 
@@ -361,26 +410,59 @@ namespace DeadlockPlayground.UI
             EmitSignal(SignalName.ColorSelected, color);
         }
 
+        private void OnActiveChannelChanged(MaterialTextureChannel ch)
+        {
+            _activeChannel = ch;
+            RefreshSwatches();
+            RefreshPopupGrids();
+        }
+
         private void OnSwatchClicked(int index)
         {
-            if (index >= 0 && index < _recentColors.Count)
+            var swatches = GetDisplayedSwatches();
+            if (index >= 0 && index < swatches.Count)
             {
-                SelectColor(_recentColors[index]);
+                Color chosen = swatches[index];
+                if (_activeChannel is MaterialTextureChannel.AmbientOcclusion
+                    or MaterialTextureChannel.Roughness
+                    or MaterialTextureChannel.Metalness
+                    or MaterialTextureChannel.Normal
+                    or MaterialTextureChannel.TintMask
+                    or MaterialTextureChannel.RimMask
+                    or MaterialTextureChannel.OutlineMask)
+                {
+                    _activeColor = chosen;
+                    if (_painter != null) _painter.BrushColor = chosen;
+                    if (_brushPalette != null) _brushPalette.SetUniversalColor(chosen, commitToRecents: false);
+                    RefreshSwatches();
+                    EmitSignal(SignalName.ColorSelected, chosen);
+                }
+                else
+                {
+                    SelectColor(chosen);
+                }
             }
         }
 
         private void RefreshSwatches()
         {
+            var swatches = GetDisplayedSwatches();
             for (int i = 0; i < 5; i++)
             {
                 var btn = _recentSwatchButtons[i];
                 if (btn == null) continue;
 
-                if (i < _recentColors.Count)
+                if (i < swatches.Count)
                 {
-                    Color col = _recentColors[i];
+                    Color col = swatches[i];
                     btn.Visible = true;
-                    btn.TooltipText = $"#{col.ToHtml(false)} (Click to select)";
+                    btn.TooltipText = _activeChannel switch
+                    {
+                        MaterialTextureChannel.Normal => $"Normal Vector #{col.ToHtml(false)} (Click to select)",
+                        MaterialTextureChannel.AmbientOcclusion or MaterialTextureChannel.Roughness or MaterialTextureChannel.Metalness
+                            => $"{MaterialChannelSet.GetDisplayLabel(_activeChannel)} {Mathf.RoundToInt(col.R * 100)}% (Click to select)",
+                        _ => $"#{col.ToHtml(false)} (Click to select)"
+                    };
                     btn.QueueRedraw();
                 }
                 else

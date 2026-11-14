@@ -11,9 +11,11 @@ public partial class SkinLayerManager : Node
     public MaterialTextureChannel ActiveTextureChannel { get; private set; } = MaterialTextureChannel.Color;
     public Package ActiveVpkPackage { get; set; }
     public Package ActiveAddonPackage { get; set; }
+    private bool _userMutedNonColorSolo = false;
 
     public event Action<MaterialTextureChannel> ActiveChannelChanged;
     public event Action<MaterialChannelSet> ChannelSetUpdated;
+    public event Action<MaterialTextureChannel> ExternalChannelMapImported;
 
     public string ActiveBaseMaterialKey => StripChannelSuffix(_activeMaterialKey);
 
@@ -22,6 +24,13 @@ public partial class SkinLayerManager : Node
         if (string.IsNullOrEmpty(key)) return key;
         int idx = key.IndexOf("::ch:", StringComparison.OrdinalIgnoreCase);
         return idx >= 0 ? key.Substring(0, idx) : key;
+    }
+
+    public static string ExtractChannelSuffix(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return string.Empty;
+        int idx = key.IndexOf("::ch:", StringComparison.OrdinalIgnoreCase);
+        return idx >= 0 ? key.Substring(idx) : string.Empty;
     }
 
     public static string GetChannelContextKey(string baseMatKey, MaterialTextureChannel channel)
@@ -41,19 +50,38 @@ public partial class SkinLayerManager : Node
 
     public MaterialChannelSet GetChannelSetForMesh(MeshInstance3D mesh, string baseMatKey = null)
     {
+        string cleanBase = !string.IsNullOrEmpty(baseMatKey) ? StripChannelSuffix(baseMatKey) : null;
+
         if (MeshHierarchy != null)
         {
             if (mesh != null)
             {
                 var sub = MeshHierarchy.FindSubmesh(mesh);
-                if (sub?.Channels != null) return sub.Channels;
+                if (sub?.Channels != null)
+                {
+                    if (string.IsNullOrEmpty(cleanBase))
+                    {
+                        return sub.Channels;
+                    }
+                    string subKey = GetMaterialKey(sub.Mesh, sub.SurfaceIndex);
+                    string targetStem = ExtractMaterialStem(cleanBase);
+                    if (string.Equals(subKey, cleanBase, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(sub.OriginalVmatPath, cleanBase, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(targetStem) &&
+                         (string.Equals(ExtractMaterialStem(subKey), targetStem, StringComparison.Ordinal) ||
+                          string.Equals(ExtractMaterialStem(sub.OriginalVmatPath), targetStem, StringComparison.Ordinal))))
+                    {
+                        return sub.Channels;
+                    }
+                }
             }
-            if (!string.IsNullOrEmpty(baseMatKey))
+            if (!string.IsNullOrEmpty(cleanBase))
             {
-                string cleanBase = StripChannelSuffix(baseMatKey);
+                string targetStem = ExtractMaterialStem(cleanBase);
                 foreach (var g in MeshHierarchy.MaterialGroups)
                 {
-                    if (string.Equals(g.MaterialKey, cleanBase, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(g.MaterialKey, cleanBase, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(targetStem) && string.Equals(ExtractMaterialStem(g.MaterialKey), targetStem, StringComparison.Ordinal)))
                     {
                         if (g.Channels != null) return g.Channels;
                         foreach (var s in g.Submeshes)
@@ -66,10 +94,24 @@ public partial class SkinLayerManager : Node
                         }
                     }
                 }
+                foreach (var s in MeshHierarchy.Submeshes)
+                {
+                    if (s?.Channels == null || s.Mesh == null) continue;
+                    string sKey = GetMaterialKey(s.Mesh, s.SurfaceIndex);
+                    if (string.Equals(sKey, cleanBase, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s.OriginalVmatPath, cleanBase, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(targetStem) &&
+                         (string.Equals(ExtractMaterialStem(sKey), targetStem, StringComparison.Ordinal) ||
+                          string.Equals(ExtractMaterialStem(s.OriginalVmatPath), targetStem, StringComparison.Ordinal))))
+                    {
+                        return s.Channels;
+                    }
+                }
             }
         }
 
-        if (mesh != null && GodotObject.IsInstanceValid(mesh))
+        if (mesh != null && GodotObject.IsInstanceValid(mesh) &&
+            (string.IsNullOrEmpty(cleanBase) || string.Equals(GetMaterialKey(mesh, 0), cleanBase, StringComparison.OrdinalIgnoreCase)))
         {
             var mat = HeroMeshHierarchy.GetAuthenticMaterial(mesh, 0)
                       ?? mesh.GetSurfaceOverrideMaterial(0)
@@ -84,13 +126,57 @@ public partial class SkinLayerManager : Node
     private void SaveCurrentContextSnapshot(string ctxKey)
     {
         if (string.IsNullOrEmpty(ctxKey) || _currentContext == null) return;
+        EnsureCpuSynced();
+        var rd = RenderingServer.GetRenderingDevice();
+        foreach (var layer in _layers)
+        {
+            if (layer == null) continue;
+            if (layer.IsBlank())
+            {
+                if (layer.LayerRid.IsValid)
+                {
+                    DetachAtlasManagerLayerRid(layer.LayerRid);
+                    if (rd != null && rd.TextureIsValid(layer.LayerRid))
+                    {
+                        rd.FreeRid(layer.LayerRid);
+                    }
+                    layer.LayerRid = new Rid();
+                }
+                layer.GpuData = null;
+                layer.CompressedGpuData = null;
+            }
+            else
+            {
+                layer.CompressGpuData();
+            }
+        }
         _currentContext.Layers = new List<SkinLayer>(_layers);
         _currentContext.ActiveLayerIndex = _activeLayerIndex;
-        _currentContext.BaseAtlasBuffer = _baseAtlasBuffer;
+        // Never pin 128 MiB base buffer in inactive channel contexts; rebuilt on demand.
+        _currentContext.BaseAtlasBuffer = null;
         _currentContext.CanvasSize = CanvasSize;
         _currentContext.UndoStack = new List<LayerPaintSnapshot>(_undoStack);
-        _currentContext.RedoStack = new List<LayerPaintSnapshot>(_redoStack);
+        while (_currentContext.UndoStack.Count > 1)
+        {
+            _currentContext.UndoStack.RemoveAt(0);
+        }
+        _currentContext.RedoStack.Clear();
         _materialContexts[ctxKey] = _currentContext;
+    }
+
+    private void DetachAtlasManagerLayerRid(Rid targetRid)
+    {
+        if (!targetRid.IsValid || _activeAtlasManager == null || !GodotObject.IsInstanceValid(_activeAtlasManager)) return;
+        var curActiveRid = _activeAtlasManager.Get("atlas_texture_rid");
+        if (curActiveRid.VariantType == Variant.Type.Rid && curActiveRid.AsRid() == targetRid)
+        {
+            _activeAtlasManager.Set("atlas_texture_rid", new Rid());
+            var resObj = _activeAtlasManager.Get("active_layer_resource");
+            if (resObj.VariantType == Variant.Type.Object && resObj.AsGodotObject() is Texture2Drd texRd)
+            {
+                texRd.TextureRdRid = new Rid();
+            }
+        }
     }
 
     /// <summary>
@@ -100,6 +186,7 @@ public partial class SkinLayerManager : Node
     public void SetActiveTextureChannel(MaterialTextureChannel channel)
     {
         if (_targetMesh == null || !GodotObject.IsInstanceValid(_targetMesh)) return;
+        if (ActiveTextureChannel == channel) return;
         string baseKey = !string.IsNullOrEmpty(_activeMaterialKey)
             ? StripChannelSuffix(_activeMaterialKey)
             : GetMaterialKey(_targetMesh);
@@ -108,17 +195,28 @@ public partial class SkinLayerManager : Node
         var chSet = GetChannelSetForMesh(_targetMesh, baseKey);
         if (chSet == null) return;
 
-        // Flush any unsaved non-color strokes OR cache color composite before switching away
-        SyncActiveChannelCompositeToSet(forceBakeColorCache: ActiveTextureChannel == MaterialTextureChannel.Color);
+        // Flush any unsaved paint strokes on the outgoing channel before switching away
+        SyncActiveChannelCompositeToSet();
 
         string prevCtxKey = GetChannelContextKey(baseKey, ActiveTextureChannel);
         SaveCurrentContextSnapshot(prevCtxKey);
 
         ActiveTextureChannel = channel;
         chSet.ActiveChannel = channel;
-        if (chSet.SoloPreviewChannel.HasValue)
+        if (channel != MaterialTextureChannel.Color)
         {
-            chSet.SoloPreviewChannel = channel;
+            if (!_userMutedNonColorSolo)
+            {
+                chSet.SoloPreviewChannel = channel;
+            }
+            else if (chSet.SoloPreviewChannel.HasValue)
+            {
+                chSet.SoloPreviewChannel = channel;
+            }
+        }
+        else
+        {
+            chSet.SoloPreviewChannel = null;
         }
 
         string nextCtxKey = GetChannelContextKey(baseKey, channel);
@@ -128,32 +226,55 @@ public partial class SkinLayerManager : Node
         int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
 
         var chEntry = chSet.GetChannel(channel);
+        chEntry?.EnsureMaterialized();
         Texture2D chBaseTex = chEntry?.Texture;
 
         if (_materialContexts.TryGetValue(nextCtxKey, out var nextCtx) && nextCtx != null && nextCtx.Layers.Count > 0)
         {
+            var rd = RenderingServer.GetRenderingDevice();
+            int bufLen = w * h * 8;
+            int nextActiveIdx = Mathf.Clamp(nextCtx.ActiveLayerIndex, 0, Math.Max(0, nextCtx.Layers.Count - 1));
+            for (int i = 0; i < nextCtx.Layers.Count; i++)
+            {
+                var layer = nextCtx.Layers[i];
+                if (layer.GpuData == null || layer.GpuData.Length != bufLen)
+                {
+                    layer.DecompressGpuData(bufLen);
+                }
+                if (rd != null && (!layer.LayerRid.IsValid || !rd.TextureIsValid(layer.LayerRid)))
+                {
+                    if (layer.GpuData != null && layer.GpuData.Length == bufLen)
+                    {
+                        layer.LayerRid = CreateLayerGpuTexture(w, h, layer.GpuData);
+                    }
+                    else if (i == nextActiveIdx || nextCtx.Layers.Count == 1)
+                    {
+                        // Active layer must always own a valid cleared GPU texture (zero CPU allocation needed).
+                        layer.LayerRid = CreateLayerGpuTexture(w, h, null);
+                        layer.IsCpuSynced = false;
+                    }
+                }
+            }
             _currentContext = nextCtx;
             _layers.Clear();
             _layers.AddRange(nextCtx.Layers);
-            _activeLayerIndex = Mathf.Clamp(nextCtx.ActiveLayerIndex, 0, Math.Max(0, _layers.Count - 1));
+            _activeLayerIndex = nextActiveIdx;
             _undoStack.Clear();
             _undoStack.AddRange(nextCtx.UndoStack);
             _redoStack.Clear();
             _redoStack.AddRange(nextCtx.RedoStack);
-            _baseAtlasBuffer = nextCtx.BaseAtlasBuffer;
-            _hasPopulatedBaseAtlasBuffer = _baseAtlasBuffer != null && _baseAtlasBuffer.Length == w * h * 8;
         }
         else
         {
             _layers.Clear();
             _undoStack.Clear();
             _redoStack.Clear();
-            _baseAtlasBuffer = null;
-            _hasPopulatedBaseAtlasBuffer = false;
 
             EnsureShadersLoaded();
             var defaultLayer = new SkinLayer();
             defaultLayer.Initialize($"{MaterialChannelSet.GetDisplayLabel(channel)} Paint 1", CanvasSize, false, _compositeShader, _dabShader, null);
+            defaultLayer.LayerRid = CreateLayerGpuTexture(w, h, null);
+            defaultLayer.IsCpuSynced = false;
             _layers.Add(defaultLayer);
             _activeLayerIndex = 0;
 
@@ -169,8 +290,7 @@ public partial class SkinLayerManager : Node
             _currentContext = nextCtx;
         }
 
-        // Update base texture layer & re-upload to active GPU atlas manager
-        _standaloneBaseTexture = chBaseTex;
+        // Update base texture layer & rebuild active channel GPU base atlas buffer (never touch _standaloneBaseTexture!)
         if (_baseLayer != null)
         {
             _baseLayer.Texture = chBaseTex as ImageTexture ?? (chBaseTex != null ? ImageTexture.CreateFromImage(chBaseTex.GetImage()) : null);
@@ -178,17 +298,12 @@ public partial class SkinLayerManager : Node
                 ? "Base Texture"
                 : $"{MaterialChannelSet.GetDisplayLabel(channel)} Map";
         }
-        if (!_hasPopulatedBaseAtlasBuffer)
-        {
-            RebuildBaseAtlasBuffer();
-        }
-        else
-        {
-            SyncBaseTextureToGpu();
-        }
+        InvalidateBaseAtlasBuffer();
+        RebuildBaseAtlasBuffer();
 
         UploadLayersToActiveAtlasManager();
         _otherLayersDirty = true;
+        UpdateActiveLayerBinding();
         RecompositeGpuLayers();
         ApplyOverlayParametersToMeshes();
         SyncChannelsToTargetMaterials(baseKey);
@@ -205,23 +320,24 @@ public partial class SkinLayerManager : Node
         var rd = RenderingServer.GetRenderingDevice();
         if (rd == null) return;
 
-        int bufferLen = Math.Max(1, CanvasSize.X) * Math.Max(1, CanvasSize.Y) * 8;
+        int w = Math.Max(1, CanvasSize.X);
+        int h = Math.Max(1, CanvasSize.Y);
+        int bufferLen = w * h * 8;
         var layerList = new Godot.Collections.Array<GodotObject>();
-        foreach (var l in _layers)
+        for (int i = 0; i < _layers.Count; i++)
         {
-            if ((!l.LayerRid.IsValid || !rd.TextureIsValid(l.LayerRid)) && l.GpuData != null && l.GpuData.Length == bufferLen)
+            var l = _layers[i];
+            if (!l.LayerRid.IsValid || !rd.TextureIsValid(l.LayerRid))
             {
-                var fmt = new RDTextureFormat
+                if (l.GpuData != null && l.GpuData.Length == bufferLen)
                 {
-                    Width = (uint)CanvasSize.X,
-                    Height = (uint)CanvasSize.Y,
-                    Format = RenderingDevice.DataFormat.R16G16B16A16Sfloat,
-                    UsageBits = RenderingDevice.TextureUsageBits.SamplingBit |
-                                RenderingDevice.TextureUsageBits.StorageBit |
-                                RenderingDevice.TextureUsageBits.CanCopyFromBit |
-                                RenderingDevice.TextureUsageBits.CanUpdateBit
-                };
-                l.LayerRid = rd.TextureCreate(fmt, new RDTextureView(), new Godot.Collections.Array<byte[]> { l.GpuData });
+                    l.LayerRid = CreateLayerGpuTexture(w, h, l.GpuData);
+                }
+                else if (i == _activeLayerIndex)
+                {
+                    l.LayerRid = CreateLayerGpuTexture(w, h, null);
+                    l.IsCpuSynced = false;
+                }
             }
             if (l.LayerRid.IsValid && rd.TextureIsValid(l.LayerRid) && l.GpuData != null && l.GpuData.Length == bufferLen && l.IsCpuSynced)
             {
@@ -236,9 +352,9 @@ public partial class SkinLayerManager : Node
             var act = _layers[_activeLayerIndex];
             _activeAtlasManager.Set("atlas_texture_rid", act.LayerRid);
             var resObj = _activeAtlasManager.Get("active_layer_resource");
-            if (resObj.VariantType == Variant.Type.Object && resObj.AsGodotObject() is Texture2Drd texRd && act.LayerRid.IsValid)
+            if (resObj.VariantType == Variant.Type.Object && resObj.AsGodotObject() is Texture2Drd texRd)
             {
-                texRd.TextureRdRid = act.LayerRid;
+                texRd.TextureRdRid = (act.LayerRid.IsValid && rd.TextureIsValid(act.LayerRid)) ? act.LayerRid : new Rid();
             }
         }
     }
@@ -249,6 +365,10 @@ public partial class SkinLayerManager : Node
         var entry = chSet?.GetChannel(channel);
         if (entry == null) return;
 
+        if (channel == ActiveTextureChannel && channel != MaterialTextureChannel.Color && HasPaintStrokes())
+        {
+            SyncActiveChannelCompositeToSet();
+        }
         entry.IsEnabled = enabled;
         SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
         ApplyOverlayParametersToMeshes();
@@ -260,6 +380,10 @@ public partial class SkinLayerManager : Node
         var chSet = GetActiveChannelSet();
         if (chSet == null) return;
 
+        if (ActiveTextureChannel != MaterialTextureChannel.Color)
+        {
+            _userMutedNonColorSolo = !solo;
+        }
         chSet.SoloPreviewChannel = solo ? ActiveTextureChannel : null;
         SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
         ApplyOverlayParametersToMeshes();
@@ -270,30 +394,25 @@ public partial class SkinLayerManager : Node
     {
         var chSet = GetActiveChannelSet();
         if (chSet == null) return false;
+        var existingColor = chSet.GetChannel(MaterialTextureChannel.Color);
+        if (existingColor != null && existingColor.ActiveVariantIndex == variantIndex && existingColor.HasValidTexture)
+            return false;
 
         if (!chSet.SwitchColorVariant(ActiveVpkPackage, ActiveAddonPackage, variantIndex))
             return false;
 
         var colorTex = chSet.GetChannel(MaterialTextureChannel.Color)?.Texture;
+        SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
+        ApplyOverlayParametersToMeshes();
+
         if (ActiveTextureChannel == MaterialTextureChannel.Color)
         {
-            _standaloneBaseTexture = colorTex;
             if (_baseLayer != null) _baseLayer.Texture = colorTex as ImageTexture;
+            InvalidateBaseAtlasBuffer();
             RebuildBaseAtlasBuffer();
             RecompositeGpuLayers();
         }
-        else if (_materialContexts.TryGetValue(GetChannelContextKey(ActiveBaseMaterialKey, MaterialTextureChannel.Color), out var colorCtx))
-        {
-            if (colorTex != null)
-            {
-                int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
-                int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
-                colorCtx.BaseAtlasBuffer = ExtractTextureToLinearHalfBuffer(colorTex, w, h);
-            }
-        }
 
-        SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
-        ApplyOverlayParametersToMeshes();
         NotifyStackChanged();
         ChannelSetUpdated?.Invoke(chSet);
         return true;
@@ -333,18 +452,23 @@ public partial class SkinLayerManager : Node
         entry.IsDefaultFallback = false;
         entry.IsDirty = true;
 
-        _standaloneBaseTexture = tex;
+        if (IsStandaloneTextureMode)
+        {
+            _standaloneBaseTexture = tex;
+        }
         if (_baseLayer != null)
         {
             _baseLayer.Texture = tex;
         }
-        RebuildBaseAtlasBuffer();
-        RecompositeGpuLayers();
         SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
         ApplyOverlayParametersToMeshes();
+        InvalidateBaseAtlasBuffer();
+        RebuildBaseAtlasBuffer();
+        RecompositeGpuLayers();
         SetActiveContextHasPaintStrokes(true);
         NotifyStackChanged();
         ChannelSetUpdated?.Invoke(chSet);
+        ExternalChannelMapImported?.Invoke(ch);
         return true;
     }
 
@@ -358,7 +482,10 @@ public partial class SkinLayerManager : Node
         if (!resetOk) return false;
 
         var entry = chSet.GetChannel(ch);
-        _standaloneBaseTexture = entry?.Texture;
+        if (IsStandaloneTextureMode)
+        {
+            _standaloneBaseTexture = entry?.Texture;
+        }
         if (_baseLayer != null)
         {
             _baseLayer.Texture = entry?.Texture as ImageTexture;
@@ -369,12 +496,13 @@ public partial class SkinLayerManager : Node
             if (l.GpuData != null) Array.Clear(l.GpuData, 0, l.GpuData.Length);
             l.IsCpuSynced = true;
         }
+        SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
+        ApplyOverlayParametersToMeshes();
         UploadLayersToActiveAtlasManager();
+        InvalidateBaseAtlasBuffer();
         RebuildBaseAtlasBuffer();
         _otherLayersDirty = true;
         RecompositeGpuLayers();
-        SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
-        ApplyOverlayParametersToMeshes();
         if (entry != null) entry.IsDirty = false;
         SetActiveContextHasPaintStrokes(false);
         NotifyStackChanged();
@@ -394,28 +522,36 @@ public partial class SkinLayerManager : Node
         var entry = chSet.GetChannel(ActiveTextureChannel);
         if (entry == null) return;
 
-        if (!hasPaint && !entry.IsDirty && !isColor) return;
+        // Never overwrite an unpainted original/variant texture with a CPU re-bake
+        if (!hasPaint) return;
 
         int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
         int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
-        bool srgb = entry.IsColorSpaceSrgb;
-        Image baked = BakeCompositeImageFromLayers(_layers, w, h, srgb);
+        // Atlas layers & _baseAtlasBuffer store sRGB-decoded linear floats; convert back to [0..1] encoded byte values cleanly.
+        Image baked = BakeCompositeImageFromLayers(_layers, w, h, applyLinearToSrgb: true);
         if (baked != null && !baked.IsEmpty())
         {
             var tex = ImageTexture.CreateFromImage(baked);
             entry.Texture = tex;
             entry.SourceImage = baked;
-            if (hasPaint) entry.IsDirty = true;
-            if (hasPaint) entry.IsDefaultFallback = false;
-            if (hasPaint) entry.IsPresent = true;
+            entry.IsDirty = true;
+            entry.IsDefaultFallback = false;
+            entry.IsPresent = true;
         }
     }
 
     private void OnMultiChannelPaintCommitted()
     {
         if (ActiveTextureChannel == MaterialTextureChannel.Color) return;
-        SyncActiveChannelCompositeToSet();
-        SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
+        // Defer expensive 4K CPU readback/bake to channel switch, SaveActiveContext, or export;
+        // live 3D strokes render at 60 FPS directly on GPU via active_paint_channel in hero_painter_overlay.gdshader.
+        var entry = GetActiveChannelSet()?.GetChannel(ActiveTextureChannel);
+        if (entry != null)
+        {
+            entry.IsDirty = true;
+            entry.IsDefaultFallback = false;
+            entry.IsPresent = true;
+        }
         ApplyOverlayParametersToMeshes();
         ChannelSetUpdated?.Invoke(GetActiveChannelSet());
     }
@@ -430,12 +566,16 @@ public partial class SkinLayerManager : Node
 
         if (MeshHierarchy != null)
         {
+            string targetStem = ExtractMaterialStem(baseMatKey);
             foreach (var sub in MeshHierarchy.Submeshes)
             {
                 if (sub?.Mesh == null || !GodotObject.IsInstanceValid(sub.Mesh)) continue;
                 string subKey = GetMaterialKey(sub.Mesh, sub.SurfaceIndex);
                 if (!string.Equals(subKey, baseMatKey, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(sub.OriginalVmatPath, baseMatKey, StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(sub.OriginalVmatPath, baseMatKey, StringComparison.OrdinalIgnoreCase) &&
+                    (string.IsNullOrEmpty(targetStem) ||
+                     (!string.Equals(ExtractMaterialStem(subKey), targetStem, StringComparison.Ordinal) &&
+                      !string.Equals(ExtractMaterialStem(sub.OriginalVmatPath), targetStem, StringComparison.Ordinal))))
                 {
                     continue;
                 }
@@ -444,6 +584,9 @@ public partial class SkinLayerManager : Node
                     MaterialChannelDiscovery.ApplyChannelsToMaterial(sub.OriginalMaterial, chSet);
                 if (sub.ToonMaterial != null)
                     MaterialChannelDiscovery.ApplyChannelsToMaterial(sub.ToonMaterial, chSet);
+                var surfMat = sub.Mesh.GetSurfaceOverrideMaterial(sub.SurfaceIndex);
+                if (surfMat != null && surfMat != sub.OriginalMaterial && surfMat != sub.ToonMaterial)
+                    MaterialChannelDiscovery.ApplyChannelsToMaterial(surfMat, chSet);
                 if (sub.Mesh.MaterialOverlay != null)
                     MaterialChannelDiscovery.ApplyChannelsToMaterial(sub.Mesh.MaterialOverlay, chSet, isPainterOverlay: true);
             }
@@ -461,17 +604,29 @@ public partial class SkinLayerManager : Node
         bool editingOtherChannel = ActiveTextureChannel != MaterialTextureChannel.Color &&
                                    string.Equals(StripChannelSuffix(_activeMaterialKey), StripChannelSuffix(baseMatKey), StringComparison.OrdinalIgnoreCase);
 
+        mat.SetShaderParameter("active_paint_channel", editingOtherChannel ? MaterialChannelSet.ChannelToShaderDebugIndex(ActiveTextureChannel) : 0);
+
         if (editingOtherChannel)
         {
             var colorTex = chSet.GetChannel(MaterialTextureChannel.Color)?.Texture ?? ExtractMeshBaseTexture(mesh);
-            mat.SetShaderParameter("use_channel_color_override", colorTex != null);
-            if (colorTex != null)
-                mat.SetShaderParameter("channel_color_override_texture", colorTex);
+            bool validColorTex = IsTextureRenderReady(colorTex);
+            mat.SetShaderParameter("use_channel_color_override", validColorTex);
+            mat.SetShaderParameter("channel_color_override_texture", validColorTex ? colorTex : null);
         }
         else
         {
             mat.SetShaderParameter("use_channel_color_override", false);
         }
+    }
+
+    public int GetContextActiveLayerIndex(string materialKey)
+    {
+        if (string.IsNullOrEmpty(materialKey)) return _activeLayerIndex;
+        if (string.Equals(_activeMaterialKey, materialKey, StringComparison.OrdinalIgnoreCase))
+            return _activeLayerIndex;
+        return _materialContexts.TryGetValue(materialKey, out var ctx) && ctx != null
+            ? ctx.ActiveLayerIndex
+            : 0;
     }
 
     public bool HasChannelEdits(SubmeshNodeInfo submesh, MaterialTextureChannel channel)
@@ -516,13 +671,12 @@ public partial class SkinLayerManager : Node
         string chKey = GetChannelContextKey(baseKey, channel);
 
         var entry = submesh.Channels?.GetChannel(channel);
-        bool srgb = entry?.IsColorSpaceSrgb ?? (channel is MaterialTextureChannel.Shadow or MaterialTextureChannel.SelfIllum);
 
         if (string.Equals(_activeMaterialKey, chKey, StringComparison.OrdinalIgnoreCase))
         {
             int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
             int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
-            var live = BakeCompositeImageFromLayers(_layers, w, h, srgb);
+            var live = BakeCompositeImageFromLayers(_layers, w, h, applyLinearToSrgb: true);
             if (live != null && !live.IsEmpty()) return live;
         }
 
@@ -532,7 +686,7 @@ public partial class SkinLayerManager : Node
             int h = ctx.CanvasSize.Y > 0 ? ctx.CanvasSize.Y : 2048;
             byte[] savedBuf = _baseAtlasBuffer;
             if (ctx.BaseAtlasBuffer != null) _baseAtlasBuffer = ctx.BaseAtlasBuffer;
-            var img = BakeCompositeImageFromLayers(ctx.Layers, w, h, srgb);
+            var img = BakeCompositeImageFromLayers(ctx.Layers, w, h, applyLinearToSrgb: true);
             _baseAtlasBuffer = savedBuf;
             if (img != null && !img.IsEmpty()) return img;
         }

@@ -755,7 +755,32 @@ bool isSourceModInTargetAddons = false;
                     // =========================================================================
                     try
                     {
-                        var existingVtexPaths = new HashSet<string>(stagedTextures.Select(t => t.originalVtexCPath), StringComparer.OrdinalIgnoreCase);
+                        var existingVtexPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var staged in stagedTextures)
+                        {
+                            if (string.IsNullOrEmpty(staged.originalVtexCPath)) continue;
+                            string normExisting = staged.originalVtexCPath.Replace('\\', '/').TrimStart('/');
+                            existingVtexPaths.Add(normExisting);
+                            if (!normExisting.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                existingVtexPaths.Add(normExisting + "_c");
+                        }
+
+                        static string ParseWorkspaceVtexKey(string rawKey, out MaterialTextureChannel? explicitCh)
+                        {
+                            explicitCh = null;
+                            string clean = (rawKey ?? "").Replace('\\', '/').TrimStart('/');
+                            if (clean.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
+                                clean = clean.Substring("particle:".Length).TrimStart('/');
+                            int chIdx = clean.IndexOf("::ch:", StringComparison.OrdinalIgnoreCase);
+                            if (chIdx >= 0)
+                            {
+                                string chStr = clean.Substring(chIdx + 5);
+                                if (Enum.TryParse<MaterialTextureChannel>(chStr, ignoreCase: true, out var parsed))
+                                    explicitCh = parsed;
+                                clean = clean.Substring(0, chIdx);
+                            }
+                            return clean;
+                        }
 
                         foreach (var asset in workspaceAssets)
                         {
@@ -767,17 +792,19 @@ bool isSourceModInTargetAddons = false;
 
                             foreach (var (vtexKey, relPath) in asset.ModifiedTextures)
                             {
-                                if (existingVtexPaths.Contains(vtexKey)) continue;
+                                string normVtex = ParseWorkspaceVtexKey(vtexKey, out var explicitChannel);
+                                if (!normVtex.Contains(".vtex", StringComparison.OrdinalIgnoreCase)) continue;
+
+                                string normVtexC = normVtex.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? normVtex : normVtex + "_c";
+                                if (existingVtexPaths.Contains(vtexKey) || existingVtexPaths.Contains(normVtex) || existingVtexPaths.Contains(normVtexC))
+                                {
+                                    continue;
+                                }
 
                                 string stagedPngFull = Path.Combine(workspaceSession.SessionDir, relPath);
                                 var inMemImg = workspaceSession.GetStagedTexture(vtexKey);
                                 if (!File.Exists(stagedPngFull) && (inMemImg == null || inMemImg.IsEmpty())) continue;
 
-                                string normVtex = vtexKey.Replace('\\', '/').TrimStart('/');
-                                if (normVtex.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    normVtex = normVtex.Substring("particle:".Length).TrimStart('/');
-                                }
                                 string assetFolder = Path.GetDirectoryName(normVtex)?.Replace('\\', '/');
                                 if (string.IsNullOrEmpty(assetFolder)) assetFolder = "materials/particle";
 
@@ -790,16 +817,58 @@ bool isSourceModInTargetAddons = false;
                                     baseName = baseName.Substring(0, baseName.Length - 2);
                                 }
 
-                                var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtex, sourceModPackage, deadlockPath) : null)
-                                            ?? (sourceModPackage != null ? LoadOriginalVtexMetadata(vtexKey, sourceModPackage, deadlockPath) : null)
-                                            ?? LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath)
-                                            ?? LoadOriginalVtexMetadata(vtexKey, baseVpkPackage, deadlockPath);
+                                var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtexC, sourceModPackage, deadlockPath) : null)
+                                            ?? (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtex, sourceModPackage, deadlockPath) : null)
+                                            ?? LoadOriginalVtexMetadata(normVtexC, baseVpkPackage, deadlockPath)
+                                            ?? LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath);
 
                                 string targetPngFileName = $"{baseName}.png";
                                 string targetPngFull = Path.Combine(assetContentDir, targetPngFileName);
                                 try
                                 {
-                                    if (File.Exists(stagedPngFull))
+                                    // Packed Normal+Roughness stored as ::ch:Normal / ::ch:Roughness in workspace
+                                    if (explicitChannel == MaterialTextureChannel.Normal || explicitChannel == MaterialTextureChannel.Roughness)
+                                    {
+                                        Image LoadWorkspaceChannelImg(MaterialTextureChannel ch)
+                                        {
+                                            string candidateKey = $"{normVtex}::ch:{ch}";
+                                            string candidateKeyC = $"{normVtexC}::ch:{ch}";
+                                            foreach (var tryKey in new[] { candidateKey, candidateKeyC })
+                                            {
+                                                if (asset.ModifiedTextures.TryGetValue(tryKey, out string chRel))
+                                                {
+                                                    string fullChPng = Path.Combine(workspaceSession.SessionDir, chRel);
+                                                    if (File.Exists(fullChPng))
+                                                    {
+                                                        var loaded = Image.LoadFromFile(fullChPng);
+                                                        if (loaded != null && !loaded.IsEmpty()) return loaded;
+                                                    }
+                                                }
+                                                var mem = workspaceSession.GetStagedTexture(tryKey);
+                                                if (mem != null && !mem.IsEmpty()) return (Image)mem.Duplicate();
+                                            }
+                                            return null;
+                                        }
+
+                                        using Image wsNorm = LoadWorkspaceChannelImg(MaterialTextureChannel.Normal);
+                                        using Image wsRough = LoadWorkspaceChannelImg(MaterialTextureChannel.Roughness);
+                                        Image normSrc = wsNorm ?? origMeta?.BaseRgbaImage;
+                                        Image roughSrc = wsRough ?? origMeta?.BaseRgbaImage;
+                                        using Image packedImg = MaterialChannelDiscovery.PackNormalRoughnessImage(normSrc, roughSrc, packAsBlueToAlpha: true);
+                                        if (packedImg != null && !packedImg.IsEmpty())
+                                        {
+                                            packedImg.SavePng(targetPngFull);
+                                        }
+                                        else if (File.Exists(stagedPngFull))
+                                        {
+                                            File.Copy(stagedPngFull, targetPngFull, true);
+                                        }
+                                        else if (inMemImg != null)
+                                        {
+                                            inMemImg.SavePng(targetPngFull);
+                                        }
+                                    }
+                                    else if (File.Exists(stagedPngFull))
                                     {
                                         if (origMeta != null && origMeta.RawAlpha != null)
                                         {
@@ -860,7 +929,7 @@ bool isSourceModInTargetAddons = false;
 
                                     string targetCompiledVtexCPath = origMeta != null && !string.IsNullOrEmpty(origMeta.VtexCPath)
                                         ? origMeta.VtexCPath
-                                        : normVtex;
+                                        : normVtexC;
                                     if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                                     {
                                         targetCompiledVtexCPath += "_c";
@@ -868,6 +937,8 @@ bool isSourceModInTargetAddons = false;
 
                                     stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
                                     existingVtexPaths.Add(vtexKey);
+                                    existingVtexPaths.Add(normVtex);
+                                    existingVtexPaths.Add(normVtexC);
                                     existingVtexPaths.Add(targetCompiledVtexCPath);
 
                                     progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {targetCompiledVtexCPath}"));

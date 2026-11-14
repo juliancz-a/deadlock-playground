@@ -42,19 +42,34 @@ uniform bool use_vertex_color = false;
 // Multi-channel interactive inspection & toggles
 uniform sampler2D roughness_texture : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D shadow_tint_texture : source_color, hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D emission_texture : source_color, hint_default_black, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D metallic_texture : hint_default_black, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D mask_preview_texture : hint_default_black, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D channel_color_override_texture : source_color, hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool use_channel_color_override = false;
 uniform bool has_roughness_texture = false;
 uniform bool has_shadow_tint_texture = false;
+uniform bool has_metallic_texture = false;
 uniform bool enable_color_map = true;
 uniform bool enable_ao = true;
 uniform bool enable_normal = true;
 uniform bool enable_roughness = true;
 uniform bool enable_shadow_map = true;
-uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow
+uniform bool enable_emission = true;
+uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=SelfIllum, 7=Metalness, 8+=Masks
+uniform int active_paint_channel = 0; // 0/1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=SelfIllum, 7=Metalness, 8+=Masks
 
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
+
+vec3 overlay_linear_to_srgb(vec3 c) {
+	vec3 clamped = clamp(c, vec3(0.0), vec3(1.0));
+	return mix(
+		12.92 * clamped,
+		1.055 * pow(clamped, vec3(1.0 / 2.4)) - 0.055,
+		step(vec3(0.0031308), clamped)
+	);
+}
 
 vec3 decode_hemi_octahedron(vec2 e) {
 	vec2 t = e * 2.0 - 1.0;
@@ -342,12 +357,13 @@ void fragment() {
 			}
 		}
 
-		if (final_alpha <= 0.0001) {
+		if (final_alpha <= 0.0001 && debug_view_channel == 0) {
 			discard;
 		}
 
 		// Mirror the base material's surface response so painted pixels light identically to unpainted ones.
 		vec2 base_uv = UV * uv1_scale.xy + uv1_offset.xy;
+		vec3 paint_encoded = overlay_linear_to_srgb(final_color);
 		float rough = roughness;
 		vec3 norm_preview = vec3(0.5, 0.5, 1.0);
 		float rough_preview = roughness;
@@ -375,35 +391,76 @@ void fragment() {
 			AO_LIGHT_AFFECT = enable_ao ? max(ao_light_affect, 0.5) : 0.0;
 		}
 
+		// Live GPU preview of non-Color painted channels while brushing (zero CPU readback stall!)
+		float base_metallic = has_metallic_texture ? texture(metallic_texture, base_uv).r : metallic;
+		float eff_metallic = base_metallic;
+		if (active_paint_channel == 2) {
+			ao_sample = mix(ao_sample, paint_encoded.r, final_alpha);
+			AO = enable_ao ? ao_sample : 1.0;
+			AO_LIGHT_AFFECT = enable_ao ? max(ao_light_affect, 0.6) : 0.0;
+		} else if (active_paint_channel == 3) {
+			norm_preview = normalize(mix(norm_preview, paint_encoded, final_alpha));
+			if (enable_normal) {
+				NORMAL_MAP = norm_preview;
+				NORMAL_MAP_DEPTH = abs(normal_scale) > 0.001 ? normal_scale : 1.0;
+			}
+		} else if (active_paint_channel == 4) {
+			rough_preview = mix(rough_preview, paint_encoded.r, final_alpha);
+			if (enable_roughness) rough = clamp(rough_preview, 0.02, 1.0);
+		} else if (active_paint_channel == 7) {
+			eff_metallic = mix(base_metallic, paint_encoded.r, final_alpha);
+		}
+
 		vec3 v_col = (use_vertex_color && length(COLOR.rgb) > 0.001) ? COLOR.rgb : vec3(1.0);
-		vec3 effective_color = (use_channel_color_override && debug_view_channel == 0)
+		vec3 base_color_map = use_channel_color_override
 			? texture(channel_color_override_texture, base_uv).rgb
-			: final_color;
+			: texture(g_tColor, base_uv).rgb;
+		vec3 effective_color = (use_channel_color_override && debug_view_channel == 0)
+			? base_color_map
+			: mix(base_color_map, final_color, (active_paint_channel <= 1) ? final_alpha : 0.0);
 		vec3 base_albedo = enable_color_map ? (effective_color * lit_weight * v_col) : vec3(0.85 * lit_weight);
-		if (enable_shadow_map && has_shadow_tint_texture) {
-			vec3 sh_tint = texture(shadow_tint_texture, base_uv).rgb;
+		vec3 sh_tint = has_shadow_tint_texture ? texture(shadow_tint_texture, base_uv).rgb : vec3(1.0);
+		if (active_paint_channel == 5) {
+			sh_tint = mix(sh_tint, final_color, final_alpha);
+			if (enable_shadow_map) {
+				base_albedo *= mix(vec3(1.0), sh_tint, 0.35);
+			}
+		} else if (enable_shadow_map && has_shadow_tint_texture) {
 			base_albedo *= mix(vec3(1.0), sh_tint, 0.25);
 		}
+		vec3 emissive_sample = enable_emission ? texture(emission_texture, base_uv).rgb : vec3(0.0);
+		if (active_paint_channel == 6) {
+			emissive_sample = mix(emissive_sample, final_color, final_alpha);
+			if (enable_emission) emit_col += final_color * final_alpha;
+		}
+
 		ALBEDO = base_albedo;
 		EMISSION = emit_col;
 		ALPHA = final_alpha;
 		ROUGHNESS = rough;
-		METALLIC = metallic;
+		METALLIC = eff_metallic;
 		SPECULAR = specular;
 
 		if (debug_view_channel > 0) {
-			vec3 dbg = base_albedo;
-			if (debug_view_channel == 1) dbg = final_color * v_col;
+			vec3 dbg = effective_color * v_col;
+			if (debug_view_channel == 1) dbg = enable_color_map ? (effective_color * v_col) : vec3(0.85);
 			else if (debug_view_channel == 2) dbg = vec3(enable_ao ? ao_sample : 1.0);
 			else if (debug_view_channel == 3) dbg = enable_normal ? norm_preview : vec3(0.5, 0.5, 1.0);
 			else if (debug_view_channel == 4) dbg = vec3(enable_roughness ? rough_preview : roughness);
-			else if (debug_view_channel == 5) dbg = has_shadow_tint_texture ? texture(shadow_tint_texture, base_uv).rgb : vec3(1.0);
+			else if (debug_view_channel == 5) dbg = enable_shadow_map ? sh_tint : vec3(1.0);
+			else if (debug_view_channel == 6) dbg = emissive_sample;
+			else if (debug_view_channel == 7) dbg = vec3(eff_metallic);
+			else if (debug_view_channel >= 8) {
+				float mask_base = texture(mask_preview_texture, base_uv).r;
+				dbg = vec3(mix(mask_base, paint_encoded.r, (active_paint_channel == debug_view_channel) ? final_alpha : 0.0));
+			}
 			ALBEDO = vec3(0.0);
-			EMISSION = dbg;
+			EMISSION = dbg * lit_weight + emit_col;
 			ALPHA = 1.0;
 			AO = 1.0;
 			SPECULAR = 0.0;
 			METALLIC = 0.0;
+			ROUGHNESS = 1.0;
 		}
 	}
 }

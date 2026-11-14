@@ -1185,7 +1185,8 @@ namespace DeadlockPlayground.Painter
         public void MarkMaterialDirty(string matKey, SkinLayerManager layerManager = null)
         {
             if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
-            string normKey = matKey.ToLowerInvariant().Trim();
+            string strippedKey = SkinLayerManager.StripChannelSuffix(matKey);
+            string normKey = strippedKey.ToLowerInvariant().Trim();
             foreach (var sm in _submeshes)
             {
                 if (sm.Mesh == null || sm.IsDirty) continue;
@@ -1205,7 +1206,8 @@ namespace DeadlockPlayground.Painter
         public void ClearMaterialDirty(string matKey, SkinLayerManager layerManager = null)
         {
             if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
-            string normKey = matKey.ToLowerInvariant().Trim();
+            string strippedKey = SkinLayerManager.StripChannelSuffix(matKey);
+            string normKey = strippedKey.ToLowerInvariant().Trim();
             foreach (var sm in _submeshes)
             {
                 if (sm.Mesh == null) continue;
@@ -1229,6 +1231,7 @@ namespace DeadlockPlayground.Painter
         public void ReconcileDirtyStates(SkinLayerManager layerManager)
         {
             if (layerManager == null || _submeshes == null) return;
+            var allChannels = (MaterialTextureChannel[])Enum.GetValues(typeof(MaterialTextureChannel));
             foreach (var sm in _submeshes)
             {
                 if (sm.Mesh == null) continue;
@@ -1236,6 +1239,16 @@ namespace DeadlockPlayground.Painter
                 if (layerManager.HasPaintStrokes(matKey))
                 {
                     sm.IsDirty = true;
+                    continue;
+                }
+
+                foreach (var ch in allChannels)
+                {
+                    if (layerManager.HasChannelEdits(sm, ch) || (sm.Channels?.GetChannel(ch)?.IsDirty ?? false))
+                    {
+                        sm.IsDirty = true;
+                        break;
+                    }
                 }
                 // Never overwrite sm.IsDirty back to false if it was already true!
             }

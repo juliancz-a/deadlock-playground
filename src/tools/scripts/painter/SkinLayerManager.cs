@@ -325,7 +325,7 @@ namespace DeadlockPlayground.Painter
         private readonly Dictionary<string, Node> _perMaterialAtlasManagers = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<MeshInstance3D, string> _meshToMaterialKey = new();
         private readonly List<string> _atlasLruKeys = new();
-        private const int MaxActiveAtlasManagers = 16;
+        private const int MaxActiveAtlasManagers = 6;
         private readonly Dictionary<string, (bool[] Mask, Rect2I Bounds)> _submeshUvMaskCache = new();
 
         private static readonly float[] s_srgb8ToLinear = new float[256];
@@ -371,12 +371,13 @@ namespace DeadlockPlayground.Painter
 
         // The atlas manager for the currently active paint target (null if no target selected).
         private Node _activeAtlasManager;
+        private bool _isStandaloneTextureMode = false;
         private Texture2D _standaloneBaseTexture;
         private ImageTexture _standaloneCompositeTexture;
         /// <summary>Returns the OverlayAtlasManager for the currently selected paint target submesh.</summary>
         public Node AtlasManager => _activeAtlasManager;
         public Node ActiveAtlasManager => _activeAtlasManager;
-        public bool IsStandaloneTextureMode => _standaloneBaseTexture != null;
+        public bool IsStandaloneTextureMode => _isStandaloneTextureMode;
 
         private Node3D _currentHero;
         public Node3D CurrentHero => _currentHero;
@@ -403,6 +404,22 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        internal static string ExtractMaterialStem(string key)
+        {
+            string baseKey = StripChannelSuffix(key);
+            if (string.IsNullOrEmpty(baseKey)) return string.Empty;
+            string norm = baseKey.Replace('\\', '/').Trim().ToLowerInvariant();
+            if (norm.StartsWith("particle:", StringComparison.Ordinal))
+            {
+                norm = norm.Substring("particle:".Length);
+            }
+            int slash = norm.LastIndexOf('/');
+            string file = slash >= 0 ? norm.Substring(slash + 1) : norm;
+            if (file.EndsWith(".vmat_c", StringComparison.Ordinal)) file = file[..^7];
+            else if (file.EndsWith(".vmat", StringComparison.Ordinal)) file = file[..^5];
+            return file;
+        }
+
         public bool HasPaintStrokes(string matKey = null)
         {
             if (string.IsNullOrEmpty(matKey)) matKey = _activeMaterialKey;
@@ -413,6 +430,25 @@ namespace DeadlockPlayground.Painter
             if (_currentContext != null && !string.IsNullOrEmpty(_activeMaterialKey) && string.Equals(matKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase))
             {
                 return _currentContext.HasPaintStrokes;
+            }
+            string stem = ExtractMaterialStem(matKey);
+            if (!string.IsNullOrEmpty(stem))
+            {
+                string reqSuffix = ExtractChannelSuffix(matKey);
+                if (_currentContext != null && string.IsNullOrEmpty(reqSuffix) && string.IsNullOrEmpty(ExtractChannelSuffix(_activeMaterialKey))
+                    && string.Equals(ExtractMaterialStem(_activeMaterialKey), stem, StringComparison.Ordinal))
+                {
+                    if (_currentContext.HasPaintStrokes) return true;
+                }
+                foreach (var kvp in _materialContexts)
+                {
+                    if (kvp.Value == null) continue;
+                    if (!string.Equals(ExtractMaterialStem(kvp.Key), stem, StringComparison.Ordinal)) continue;
+                    string ctxSuffix = ExtractChannelSuffix(kvp.Key);
+                    if (!string.IsNullOrEmpty(reqSuffix) && !string.Equals(reqSuffix, ctxSuffix, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.IsNullOrEmpty(reqSuffix) && !string.IsNullOrEmpty(ctxSuffix)) continue;
+                    if (kvp.Value.HasPaintStrokes) return true;
+                }
             }
             return false;
         }
@@ -1324,7 +1360,7 @@ namespace DeadlockPlayground.Painter
 
         public void DeleteLayerAcrossAllMaterials(int index)
         {
-            if (index < 0 || index >= _layers.Count)
+            if (index < 0)
             {
                 GD.PrintErr("[SkinLayerManager] Invalid layer index to delete across materials.");
                 return;
@@ -1362,12 +1398,32 @@ namespace DeadlockPlayground.Painter
 
                     if (ctx.Layers.Count == 0)
                     {
-                        ctx.ActiveLayerIndex = BaseTextureLayerIndex;
+                        int cDimZero = ctx.CanvasSize.X > 0 ? ctx.CanvasSize.X : 2048;
+                        int bLenZero = cDimZero * cDimZero * 8;
+                        var cleanLayer = new SkinLayer
+                        {
+                            Name = "Paint Layer 1",
+                            GpuData = new byte[bLenZero]
+                        };
+                        cleanLayer.CompressGpuData();
+                        ctx.Layers.Add(cleanLayer);
+                        ctx.ActiveLayerIndex = 0;
                     }
                     else if (ctx.ActiveLayerIndex >= ctx.Layers.Count)
                     {
                         ctx.ActiveLayerIndex = ctx.Layers.Count - 1;
                     }
+
+                    bool ctxAnyNonBlank = false;
+                    foreach (var remLayer in ctx.Layers)
+                    {
+                        if (remLayer != null && !remLayer.IsBlank())
+                        {
+                            ctxAnyNonBlank = true;
+                            break;
+                        }
+                    }
+                    ctx.HasPaintStrokes = ctxAnyNonBlank;
 
                     ctx.UndoStack.Clear();
                     ctx.RedoStack.Clear();
@@ -1376,12 +1432,20 @@ namespace DeadlockPlayground.Painter
                     int cDim = ctx.CanvasSize.X > 0 ? ctx.CanvasSize.X : 2048;
                     int bLen = cDim * cDim * 8;
                     byte[] inactiveComp = new byte[bLen];
-                    foreach (var remLayer in ctx.Layers)
+                    if (ctxAnyNonBlank)
                     {
-                        if (remLayer.IsVisible && remLayer.GpuData != null && remLayer.GpuData.Length == bLen)
+                        foreach (var remLayer in ctx.Layers)
                         {
-                            BlendLayerBuffer(inactiveComp, remLayer.GpuData, remLayer.Opacity, remLayer.BlendMode, ctx.BaseAtlasBuffer);
+                            if (remLayer.IsVisible && remLayer.GpuData != null && remLayer.GpuData.Length == bLen)
+                            {
+                                BlendLayerBuffer(inactiveComp, remLayer.GpuData, remLayer.Opacity, remLayer.BlendMode, ctx.BaseAtlasBuffer);
+                            }
                         }
+                    }
+                    else
+                    {
+                        ctx.BakedCompositeTexture = null;
+                        MeshHierarchy?.ClearMaterialDirty(ctx.MaterialKey, this);
                     }
 
                     if (atlasMgr != null && GodotObject.IsInstanceValid(atlasMgr) && rd != null)
@@ -1389,26 +1453,44 @@ namespace DeadlockPlayground.Painter
                         var fRid = atlasMgr.Get("full_composite_rid");
                         if (fRid.VariantType == Variant.Type.Rid && fRid.AsRid().IsValid && rd.TextureIsValid(fRid.AsRid()))
                         {
-                            rd.TextureUpdate(fRid.AsRid(), 0, inactiveComp);
+                            if (ctxAnyNonBlank)
+                                rd.TextureUpdate(fRid.AsRid(), 0, inactiveComp);
+                            else
+                                rd.TextureClear(fRid.AsRid(), new Color(0, 0, 0, 0), 0, 1, 0, 1);
                         }
                         var cRid = atlasMgr.Get("composite_texture_rid");
                         if (cRid.VariantType == Variant.Type.Rid && cRid.AsRid().IsValid && rd.TextureIsValid(cRid.AsRid()))
                         {
                             rd.TextureClear(cRid.AsRid(), new Color(0, 0, 0, 0), 0, 1, 0, 1);
                         }
-                        var fullRes = atlasMgr.Get("full_composite_resource");
-                        if (fullRes.VariantType == Variant.Type.Object && fullRes.AsGodotObject() is Texture2D fTex)
+                        var aRid = atlasMgr.Get("composite_above_rid");
+                        if (aRid.VariantType == Variant.Type.Rid && aRid.AsRid().IsValid && rd.TextureIsValid(aRid.AsRid()))
                         {
-                            ctx.BakedCompositeTexture = fTex;
+                            rd.TextureClear(aRid.AsRid(), new Color(0, 0, 0, 0), 0, 1, 0, 1);
+                        }
+                        if (ctxAnyNonBlank)
+                        {
+                            var fullRes = atlasMgr.Get("full_composite_resource");
+                            if (fullRes.VariantType == Variant.Type.Object && fullRes.AsGodotObject() is Texture2D fTex)
+                            {
+                                ctx.BakedCompositeTexture = fTex;
+                            }
                         }
                     }
                 }
             }
 
-            // 2. Delete for the currently active material context
-            DeleteLayer(index);
+            // 2. Delete for the currently active material context (when present at that index)
+            if (index < _layers.Count)
+            {
+                DeleteLayer(index);
+            }
 
-            // 3. Immediately refresh overlays on all character meshes in 3D viewport
+            // 3. Reconcile dirty states & refresh overlays across all character meshes in 3D viewport
+            if (MeshHierarchy != null)
+            {
+                MeshHierarchy.ReconcileDirtyStates(this);
+            }
             ApplyOverlayParametersToMeshes();
         }
 
@@ -1469,6 +1551,28 @@ namespace DeadlockPlayground.Painter
                 ApplyOverlayParametersToMeshes();
                 RecompositeGpuLayers();
                 UpdateStandaloneComposite();
+            }
+
+            bool anyNonBlankLive = false;
+            foreach (var rem in _layers)
+            {
+                if (rem != null && !rem.IsBlank())
+                {
+                    anyNonBlankLive = true;
+                    break;
+                }
+            }
+            if (_currentContext != null)
+            {
+                _currentContext.Layers = new List<SkinLayer>(_layers);
+                _currentContext.ActiveLayerIndex = _activeLayerIndex;
+                _currentContext.HasPaintStrokes = anyNonBlankLive;
+            }
+            if (!anyNonBlankLive)
+            {
+                SetActiveContextHasPaintStrokes(false);
+                var chEntry = GetActiveChannelSet()?.GetChannel(ActiveTextureChannel);
+                if (chEntry != null) chEntry.IsDirty = false;
             }
 
             if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
@@ -2253,7 +2357,8 @@ namespace DeadlockPlayground.Painter
                 snap.LayerInfos.Add(info);
             }
 
-            if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
+            bool editingBaseLayer = (targetLayerOnly == BaseTextureLayerIndex) || (!targetLayerOnly.HasValue && _activeLayerIndex == BaseTextureLayerIndex);
+            if (editingBaseLayer && _baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen)
             {
                 byte[] baseCopy = new byte[bufferLen];
                 Buffer.BlockCopy(_baseAtlasBuffer, 0, baseCopy, 0, bufferLen);
@@ -2608,6 +2713,17 @@ namespace DeadlockPlayground.Painter
         /// StandardMaterial3D bases are mirrored 1:1; Source 2 ShaderMaterial bases (source2_pbr family) use the
         /// hemi-octahedron normal / blue-channel roughness path.
         /// </summary>
+        public static bool IsTextureRenderReady(Texture2D tex)
+        {
+            if (tex == null || !GodotObject.IsInstanceValid(tex)) return false;
+            if (tex is Texture2Drd trd)
+            {
+                var rd = RenderingServer.GetRenderingDevice();
+                return trd.TextureRdRid.IsValid && rd != null && rd.TextureIsValid(trd.TextureRdRid);
+            }
+            return true;
+        }
+
         private static void ApplyBasePbrToOverlay(ShaderMaterial overlayMat, Material baseMat)
         {
             if (overlayMat == null) return;
@@ -2737,20 +2853,22 @@ namespace DeadlockPlayground.Painter
                         if (_activeAtlasManager != null && GodotObject.IsInstanceValid(_activeAtlasManager))
                         {
                             var activeRes = _activeAtlasManager.Get("active_layer_resource");
-                            if (activeRes.VariantType == Variant.Type.Object && activeRes.AsGodotObject() is Texture2D actTex)
-                            {
-                                mat.SetShaderParameter("active_layer_texture", actTex);
-                            }
+                            var actTex = (activeRes.VariantType == Variant.Type.Object && activeRes.AsGodotObject() is Texture2D at && IsTextureRenderReady(at))
+                                ? at
+                                : null;
+                            mat.SetShaderParameter("active_layer_texture", actTex);
+
                             var atlasRes = _activeAtlasManager.Get("atlas_texture_resource");
-                            if (atlasRes.VariantType == Variant.Type.Object && atlasRes.AsGodotObject() is Texture2D atlTex)
-                            {
-                                mat.SetShaderParameter("overlay_texture", atlTex);
-                            }
+                            var atlTex = (atlasRes.VariantType == Variant.Type.Object && atlasRes.AsGodotObject() is Texture2D al && IsTextureRenderReady(al))
+                                ? al
+                                : null;
+                            mat.SetShaderParameter("overlay_texture", atlTex);
+
                             var aboveRes = _activeAtlasManager.Get("composite_above_resource");
-                            if (aboveRes.VariantType == Variant.Type.Object && aboveRes.AsGodotObject() is Texture2D abvTex)
-                            {
-                                mat.SetShaderParameter("overlay_above_texture", abvTex);
-                            }
+                            var abvTex = (aboveRes.VariantType == Variant.Type.Object && aboveRes.AsGodotObject() is Texture2D ab && IsTextureRenderReady(ab))
+                                ? ab
+                                : null;
+                            mat.SetShaderParameter("overlay_above_texture", abvTex);
                         }
 
                         mat.SetShaderParameter("layer_opacity", ActiveLayer?.Opacity ?? 1.0f);
@@ -2880,13 +2998,16 @@ namespace DeadlockPlayground.Painter
 
                         if (mat != null)
                         {
-                            mat.SetShaderParameter("overlay_texture", inactiveCompositeTex);
+                            mat.SetShaderParameter("overlay_texture", IsTextureRenderReady(inactiveCompositeTex) ? inactiveCompositeTex : (Texture2D)null);
                             mat.SetShaderParameter("active_layer_texture", (Texture2D)null);
+                            mat.SetShaderParameter("overlay_above_texture", (Texture2D)null);
                             mat.SetShaderParameter("active_layer_visible", false);
                             mat.SetShaderParameter("active_layer_opacity", 0.0f);
                             mat.SetShaderParameter("layer_opacity", 1.0f);
                             mat.SetShaderParameter("blend_mode", 0);
                             mat.SetShaderParameter("is_paint_target", false);
+                            mat.SetShaderParameter("active_paint_channel", 0);
+                            mat.SetShaderParameter("use_channel_color_override", false);
                             mat.SetShaderParameter("show_selection_mask", false);
                             mat.SetShaderParameter("show_stencil_pattern", false);
 
@@ -2940,6 +3061,12 @@ namespace DeadlockPlayground.Painter
         {
             if (string.IsNullOrEmpty(_activeMaterialKey)) return;
 
+            if (ActiveTextureChannel != MaterialTextureChannel.Color && HasPaintStrokes())
+            {
+                SyncActiveChannelCompositeToSet();
+                SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
+            }
+
             if (!IsStandaloneTextureMode)
             {
                 EnsureCpuSynced();
@@ -2985,7 +3112,8 @@ namespace DeadlockPlayground.Painter
                 ctx.UndoStack.RemoveAt(0);
             }
             ctx.RedoStack.Clear();
-            ctx.BaseAtlasBuffer = _baseAtlasBuffer;
+            // Do not retain 128 MiB uncompressed base buffers on inactive contexts; rebuilt on demand.
+            ctx.BaseAtlasBuffer = null;
         }
 
         public struct MaterialContextData
@@ -3319,7 +3447,8 @@ namespace DeadlockPlayground.Painter
             if (string.IsNullOrWhiteSpace(identifier)) return;
 
             // Si ya estamos en este mismo identificador standalone y tiene capas cargadas, solo refrescar composite!
-            if (string.Equals(_activeMaterialKey, identifier, StringComparison.OrdinalIgnoreCase) &&
+            if (_isStandaloneTextureMode &&
+                string.Equals(_activeMaterialKey, identifier, StringComparison.OrdinalIgnoreCase) &&
                 _standaloneBaseTexture != null && _layers.Count > 0)
             {
                 _standaloneBaseTexture = texture ?? _standaloneBaseTexture;
@@ -3335,6 +3464,7 @@ namespace DeadlockPlayground.Painter
             }
 
             SaveActiveContext();
+            _isStandaloneTextureMode = true;
             _targetMesh = null;
             _activeAtlasManager = null;
             _activeMaterialKey = identifier;
@@ -3529,6 +3659,7 @@ namespace DeadlockPlayground.Painter
 
         public void SetPaintTargetMesh(MeshInstance3D targetMesh)
         {
+            _isStandaloneTextureMode = false;
             _standaloneBaseTexture = null;
             _standaloneCompositeTexture = null;
 
@@ -3552,22 +3683,28 @@ namespace DeadlockPlayground.Painter
                 return;
             }
 
+            bool savedChannelAndClearedActive = false;
             if (ActiveTextureChannel != MaterialTextureChannel.Color)
             {
                 SyncActiveChannelCompositeToSet();
+                SyncChannelsToTargetMaterials(currentBaseKey);
                 SaveCurrentContextSnapshot(GetChannelContextKey(currentBaseKey, ActiveTextureChannel));
                 ActiveTextureChannel = MaterialTextureChannel.Color;
-                _activeMaterialKey = currentBaseKey;
+                _activeMaterialKey = null;
+                savedChannelAndClearedActive = true;
                 ActiveChannelChanged?.Invoke(MaterialTextureChannel.Color);
             }
 
-            try
+            if (!savedChannelAndClearedActive)
             {
-                SaveActiveContext();
-            }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[SkinLayerManager] Error in SaveActiveContext: {ex.Message}");
+                try
+                {
+                    SaveActiveContext();
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[SkinLayerManager] Error in SaveActiveContext: {ex.Message}");
+                }
             }
 
             _targetMesh = targetMesh;
@@ -5192,14 +5329,26 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // Resolve native texture for the active submesh
+            // Resolve native texture for the active submesh & active texture channel
             Texture2D baseTex = null;
-            var smMat = _targetMesh.MaterialOverlay as ShaderMaterial;
-            if (smMat != null)
+            var activeChEntry = GetActiveChannelSet()?.GetChannel(ActiveTextureChannel);
+            if (activeChEntry != null)
             {
-                var gColor = smMat.GetShaderParameter("g_tColor");
-                if (gColor.VariantType == Variant.Type.Object && gColor.AsGodotObject() is Texture2D gt)
-                    baseTex = gt;
+                activeChEntry.EnsureMaterialized();
+                if (activeChEntry.HasValidTexture)
+                {
+                    baseTex = activeChEntry.Texture;
+                }
+            }
+            if (baseTex == null)
+            {
+                var smMat = _targetMesh.MaterialOverlay as ShaderMaterial;
+                if (smMat != null)
+                {
+                    var gColor = smMat.GetShaderParameter("g_tColor");
+                    if (gColor.VariantType == Variant.Type.Object && gColor.AsGodotObject() is Texture2D gt)
+                        baseTex = gt;
+                }
             }
             if (baseTex == null)
             {
@@ -6197,6 +6346,10 @@ namespace DeadlockPlayground.Painter
             byte[] comp = new byte[bufferLen];
 
             // En personajes empezamos con la textura base; en partículas empezamos transparente para permitir borrar con Eraser
+            if (!IsStandaloneTextureMode && (_baseAtlasBuffer == null || _baseAtlasBuffer.Length != bufferLen))
+            {
+                RebuildBaseAtlasBuffer();
+            }
             if (_baseAtlasBuffer != null && _baseAtlasBuffer.Length == bufferLen && !IsStandaloneTextureMode)
             {
                 Buffer.BlockCopy(_baseAtlasBuffer, 0, comp, 0, bufferLen);
@@ -6497,18 +6650,36 @@ namespace DeadlockPlayground.Painter
         {
             if (string.IsNullOrWhiteSpace(matKey)) return;
 
-            string normKey = matKey.ToLowerInvariant().Trim();
+            string normKey = matKey.ToLowerInvariant().Trim().Replace('\\', '/');
+            string targetStem = ExtractMaterialStem(normKey);
+            var rd = RenderingServer.GetRenderingDevice();
 
-            // Match exact or particle: prefix or vmat/vtex variations
+            // Match exact, particle: prefix, path-boundary variations, or exact filename stem
+            // (avoids unsafe partial substring matches like "body" matching "lowerbody")
             var matchingKeys = new List<string>();
             foreach (var key in _materialContexts.Keys)
             {
-                if (string.Equals(key, normKey, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(key, "particle:" + normKey, StringComparison.OrdinalIgnoreCase) ||
-                    key.EndsWith(normKey, StringComparison.OrdinalIgnoreCase) ||
-                    normKey.EndsWith(key, StringComparison.OrdinalIgnoreCase))
+                string normCtxKey = key.Replace('\\', '/');
+                if (string.Equals(normCtxKey, normKey, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(normCtxKey, "particle:" + normKey, StringComparison.OrdinalIgnoreCase) ||
+                    normCtxKey.EndsWith("/" + normKey, StringComparison.OrdinalIgnoreCase) ||
+                    normKey.EndsWith("/" + normCtxKey, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(targetStem) && string.Equals(ExtractMaterialStem(normCtxKey), targetStem, StringComparison.Ordinal)))
                 {
                     matchingKeys.Add(key);
+                }
+            }
+
+            static void ClearAtlasManagerCompositeRids(Node mgr, RenderingDevice rdDev)
+            {
+                if (mgr == null || !GodotObject.IsInstanceValid(mgr) || rdDev == null) return;
+                foreach (string prop in new[] { "full_composite_rid", "composite_texture_rid", "composite_above_rid" })
+                {
+                    var rv = mgr.Get(prop);
+                    if (rv.VariantType == Variant.Type.Rid && rv.AsRid().IsValid && rdDev.TextureIsValid(rv.AsRid()))
+                    {
+                        rdDev.TextureClear(rv.AsRid(), new Color(0, 0, 0, 0), 0, 1, 0, 1);
+                    }
                 }
             }
 
@@ -6529,10 +6700,27 @@ namespace DeadlockPlayground.Painter
                     int h = ctx.CanvasSize.Y > 0 ? ctx.CanvasSize.Y : 2048;
                     int bufLen = w * h * 8;
 
+                    Node atlasMgr = null;
+                    _perMaterialAtlasManagers.TryGetValue(key, out atlasMgr);
                     foreach (var l in ctx.Layers)
                     {
+                        if (atlasMgr != null && GodotObject.IsInstanceValid(atlasMgr) && l.LayerRid.IsValid)
+                        {
+                            var curActiveRid = atlasMgr.Get("atlas_texture_rid");
+                            if (curActiveRid.VariantType == Variant.Type.Rid && curActiveRid.AsRid() == l.LayerRid)
+                            {
+                                atlasMgr.Set("atlas_texture_rid", new Rid());
+                                var resObj = atlasMgr.Get("active_layer_resource");
+                                if (resObj.VariantType == Variant.Type.Object && resObj.AsGodotObject() is Texture2Drd texRd)
+                                {
+                                    texRd.TextureRdRid = new Rid();
+                                }
+                            }
+                        }
                         l.CleanUp();
                     }
+                    ClearAtlasManagerCompositeRids(atlasMgr, rd);
+
                     ctx.Layers.Clear();
                     ctx.UndoStack.Clear();
                     ctx.RedoStack.Clear();
@@ -6549,13 +6737,17 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // If active context was reset, clear live layers
+            // If active context was reset, clear live layers cleanly
             if (!string.IsNullOrEmpty(_activeMaterialKey) && (matchingKeys.Contains(_activeMaterialKey) || string.Equals(_activeMaterialKey, normKey, StringComparison.OrdinalIgnoreCase)))
             {
                 if (_currentContext != null) _currentContext.HasPaintStrokes = false;
                 MeshHierarchy?.ClearMaterialDirty(_activeMaterialKey, this);
 
-                foreach (var l in _layers) l.CleanUp();
+                foreach (var l in _layers)
+                {
+                    DetachAtlasManagerLayerRid(l.LayerRid);
+                    l.CleanUp();
+                }
                 _layers.Clear();
                 _undoStack.Clear();
                 _redoStack.Clear();
@@ -6563,6 +6755,7 @@ namespace DeadlockPlayground.Painter
                 _compositeBuffer = null;
                 _baseAtlasBuffer = null;
                 _hasPopulatedBaseAtlasBuffer = false;
+                ClearAtlasManagerCompositeRids(_activeAtlasManager, rd);
 
                 if (_standaloneBaseTexture != null)
                 {

@@ -147,6 +147,9 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("textures")]
         public Dictionary<string, string> Textures { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+        [JsonPropertyName("texture_channels")]
+        public Dictionary<string, string> TextureChannels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
         [JsonPropertyName("active_layer_index")]
         public int ActiveLayerIndex { get; set; } = 0;
 
@@ -158,6 +161,12 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("layers")]
         public List<WorkspaceLayerEntry> Layers { get; set; } = new();
+
+        [JsonPropertyName("channel_layers")]
+        public Dictionary<string, List<WorkspaceLayerEntry>> ChannelLayers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        [JsonPropertyName("channel_active_layer_indices")]
+        public Dictionary<string, int> ChannelActiveLayerIndices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class WorkspaceLayerEntry
@@ -382,14 +391,35 @@ namespace DeadlockPlayground.Workspace
         {
             try
             {
-                if (Directory.Exists(SessionDir))
-                {
-                    Directory.Delete(SessionDir, true);
-                }
                 Manifest = new WorkspaceManifest();
                 _stagedImagesInMemory.Clear();
                 HasUnsavedChanges = false;
+
+                if (Directory.Exists(SessionDir))
+                {
+                    try
+                    {
+                        Directory.Delete(SessionDir, true);
+                    }
+                    catch (Exception delEx)
+                    {
+                        GD.PrintErr($"[ModWorkspaceSession] Non-fatal directory delete lock during cleanup: {delEx.Message}");
+                        try
+                        {
+                            if (Directory.Exists(TexturesDir))
+                            {
+                                foreach (var f in Directory.GetFiles(TexturesDir))
+                                {
+                                    try { File.Delete(f); } catch { }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
                 Initialize();
+                SaveManifest();
                 OnWorkspaceChanged?.Invoke();
                 OnWorkspaceCleared?.Invoke();
             }
@@ -1279,8 +1309,11 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
         {
             if (string.IsNullOrEmpty(heroId) || !Manifest.Heroes.TryGetValue(heroId, out var hero)) return;
 
-            var asset = hero.Assets.FirstOrDefault(a => string.Equals(a.VpkPath, ownerAssetPath, StringComparison.OrdinalIgnoreCase) ||
-                                                       string.Equals(a.OwnerAssetPath, ownerAssetPath, StringComparison.OrdinalIgnoreCase));
+            var asset = !string.IsNullOrEmpty(ownerAssetPath)
+                ? hero.Assets.FirstOrDefault(a => string.Equals(a.VpkPath, ownerAssetPath, StringComparison.OrdinalIgnoreCase) ||
+                                                  string.Equals(a.OwnerAssetPath, ownerAssetPath, StringComparison.OrdinalIgnoreCase))
+                : null;
+            asset ??= hero.Assets.FirstOrDefault(a => a.Materials.Any(m => string.Equals(m.MaterialPath, materialPath, StringComparison.OrdinalIgnoreCase)));
             if (asset != null)
             {
                 var mat = asset.Materials.FirstOrDefault(m => string.Equals(m.MaterialPath, materialPath, StringComparison.OrdinalIgnoreCase));

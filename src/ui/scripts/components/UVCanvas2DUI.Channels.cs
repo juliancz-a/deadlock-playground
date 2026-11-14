@@ -87,6 +87,7 @@ namespace DeadlockPlayground.UI
                 MaterialTextureChannel.Shadow
             };
 
+            var pillGroup = new ButtonGroup { AllowUnpress = false };
             foreach (var ch in coreChannels)
             {
                 var entry = chSet?.GetChannel(ch);
@@ -125,18 +126,23 @@ namespace DeadlockPlayground.UI
                 {
                     Text = shortName + suffix,
                     ToggleMode = true,
+                    ButtonGroup = pillGroup,
                     ButtonPressed = isSelected,
                     CustomMinimumSize = new Vector2(0, 22),
-                    Disabled = chSet == null,
-                    TooltipText = entry != null
-                        ? $"{MaterialChannelSet.GetDisplayLabel(ch)}: {entry.SourcePath}\nClick to inspect & edit in 2D UV Canvas"
-                        : $"{MaterialChannelSet.GetDisplayLabel(ch)}"
+                    Disabled = chSet == null || isSelected,
+                    TooltipText = isSelected
+                        ? $"{MaterialChannelSet.GetDisplayLabel(ch)} (Currently Active)"
+                        : (entry != null
+                            ? $"{MaterialChannelSet.GetDisplayLabel(ch)}: {entry.SourcePath}\nClick to inspect & edit in 2D UV Canvas"
+                            : $"{MaterialChannelSet.GetDisplayLabel(ch)}")
                 };
                 pillBtn.AddThemeFontSizeOverride("font_size", 11);
 
                 if (isSelected)
                 {
-                    pillBtn.Modulate = new Color(1.0f, 0.88f, 0.48f, 1.0f);
+                    var gold = new Color(1.0f, 0.88f, 0.48f, 1.0f);
+                    pillBtn.Modulate = gold;
+                    pillBtn.AddThemeColorOverride("font_disabled_color", gold);
                 }
                 else if (isReal)
                 {
@@ -149,7 +155,9 @@ namespace DeadlockPlayground.UI
 
                 pillBtn.Pressed += () =>
                 {
-                    (_layerManager ?? SkinLayerManager.Instance)?.SetActiveTextureChannel(localCh);
+                    var targetLm = _layerManager ?? SkinLayerManager.Instance;
+                    if (targetLm == null || targetLm.ActiveTextureChannel == localCh) return;
+                    targetLm.SetActiveTextureChannel(localCh);
                 };
 
                 pillBox.AddChild(eyeCheck);
@@ -200,7 +208,9 @@ namespace DeadlockPlayground.UI
                     int id = _optExtraChannels.GetItemId((int)idx);
                     if (id >= 0)
                     {
-                        (_layerManager ?? SkinLayerManager.Instance)?.SetActiveTextureChannel((MaterialTextureChannel)id);
+                        var targetLm = _layerManager ?? SkinLayerManager.Instance;
+                        if (targetLm == null || targetLm.ActiveTextureChannel == (MaterialTextureChannel)id) return;
+                        targetLm.SetActiveTextureChannel((MaterialTextureChannel)id);
                     }
                 };
                 _channelPillsFlow.AddChild(_optExtraChannels);
@@ -224,6 +234,7 @@ namespace DeadlockPlayground.UI
                 _optColorVariant.Select(Mathf.Clamp(colorEntry.ActiveVariantIndex, 0, colorEntry.VariantPaths.Count - 1));
                 _optColorVariant.ItemSelected += (idx) =>
                 {
+                    if ((int)idx == colorEntry.ActiveVariantIndex) return;
                     (_layerManager ?? SkinLayerManager.Instance)?.SelectColorVariant((int)idx);
                 };
                 _channelActionsFlow.AddChild(_optColorVariant);

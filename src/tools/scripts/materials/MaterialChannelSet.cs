@@ -40,12 +40,25 @@ public sealed class ChannelMapEntry
     public string DisplayLabel { get; init; } = "";
     public string ShortBadge { get; init; } = "";
 
+    private Image _sourceImage;
+
     public ImageTexture Texture { get; set; }
     public ImageTexture OriginalTexture { get; set; }
-    public Image SourceImage { get; set; }
+    public ImageTexture InitialOriginalTexture { get; set; }
+    public Image SourceImage
+    {
+        get
+        {
+            if (_sourceImage != null) return _sourceImage;
+            EnsureMaterialized();
+            return HasValidTexture ? Texture.GetImage() : null;
+        }
+        set => _sourceImage = value;
+    }
 
     /// <summary>Original VPK path (.vtex_c), glTF image name, or disk import path.</summary>
     public string SourcePath { get; set; } = "";
+    public string InitialSourcePath { get; set; } = "";
 
     /// <summary>True when backed by an actual discovered/imported asset; false if procedural default.</summary>
     public bool IsPresent { get; set; }
@@ -65,12 +78,18 @@ public sealed class ChannelMapEntry
     /// <summary>Original .vtex_c path of the packed g_tNormalRoughness texture (for VPK re-packing).</summary>
     public string PackedSourceVtexPath { get; set; } = "";
 
+    /// <summary>Packed Source 2 g_tNormalRoughness texture retained for lazy CPU split on demand.</summary>
+    public ImageTexture PackedSourceTexture { get; set; }
+
+    internal Action<ChannelMapEntry> LazyMaterialize { get; set; }
+
     public bool HasBlueToAlphaRoughness { get; set; }
 
     /// <summary>Multiple texture variants discovered in VPK (e.g., alternate Color skins).</summary>
     public List<string> VariantPaths { get; } = new();
     public List<string> VariantLabels { get; } = new();
     public int ActiveVariantIndex { get; set; } = 0;
+    public int InitialVariantIndex { get; set; } = 0;
 
     public bool IsColorSpaceSrgb =>
         Channel == MaterialTextureChannel.Color ||
@@ -78,6 +97,15 @@ public sealed class ChannelMapEntry
         Channel == MaterialTextureChannel.SelfIllum;
 
     public bool HasValidTexture => Texture != null && GodotObject.IsInstanceValid(Texture);
+
+    public bool CanMaterialize => HasValidTexture || LazyMaterialize != null;
+
+    public bool EnsureMaterialized()
+    {
+        if (HasValidTexture) return true;
+        LazyMaterialize?.Invoke(this);
+        return HasValidTexture;
+    }
 }
 
 /// <summary>
@@ -98,7 +126,7 @@ public sealed class MaterialChannelSet
         => Channels.TryGetValue(ch, out var entry) ? entry : null;
 
     public bool HasRealMap(MaterialTextureChannel ch)
-        => Channels.TryGetValue(ch, out var entry) && entry.IsPresent && !entry.IsDefaultFallback && entry.HasValidTexture;
+        => Channels.TryGetValue(ch, out var entry) && entry.IsPresent && !entry.IsDefaultFallback && entry.CanMaterialize;
 
     public void SetChannel(MaterialTextureChannel ch, ChannelMapEntry entry)
     {
@@ -146,6 +174,8 @@ public sealed class MaterialChannelSet
         MaterialTextureChannel.SelfIllum => 6,
         MaterialTextureChannel.Metalness => 7,
         MaterialTextureChannel.TintMask => 8,
+        MaterialTextureChannel.RimMask => 9,
+        MaterialTextureChannel.OutlineMask => 10,
         _ => 0
     };
 
@@ -171,7 +201,6 @@ public sealed class MaterialChannelSet
             }
 
             var fbTex = MaterialChannelDiscovery.CreateDefaultFallbackTexture(ch, fallbackWidth, fallbackHeight);
-            var fbImg = fbTex.GetImage();
             Channels[ch] = new ChannelMapEntry
             {
                 Channel = ch,
@@ -179,8 +208,9 @@ public sealed class MaterialChannelSet
                 ShortBadge = GetShortBadge(ch),
                 Texture = fbTex,
                 OriginalTexture = fbTex,
-                SourceImage = fbImg,
+                InitialOriginalTexture = fbTex,
                 SourcePath = "(Default)",
+                InitialSourcePath = "(Default)",
                 IsPresent = false,
                 IsDefaultFallback = true,
                 IsEnabled = true,
@@ -227,17 +257,34 @@ public sealed class MaterialChannelSet
     {
         if (!Channels.TryGetValue(MaterialTextureChannel.Color, out var colorEntry)) return false;
         if (variantIndex < 0 || variantIndex >= colorEntry.VariantPaths.Count) return false;
+        if (colorEntry.ActiveVariantIndex == variantIndex && colorEntry.HasValidTexture) return false;
 
         string targetPath = colorEntry.VariantPaths[variantIndex];
         if (string.IsNullOrEmpty(targetPath)) return false;
 
-        var tex = Source2TextureLoader.GetOrLoadTexture(package, targetPath, forceOpaque: true, addonPackage: addonPackage);
+        ImageTexture tex = null;
+        if (variantIndex == colorEntry.InitialVariantIndex &&
+            colorEntry.InitialOriginalTexture != null &&
+            GodotObject.IsInstanceValid(colorEntry.InitialOriginalTexture))
+        {
+            tex = colorEntry.InitialOriginalTexture;
+        }
+        else
+        {
+            tex = Source2TextureLoader.GetOrLoadTexture(package, targetPath, forceOpaque: true, addonPackage: addonPackage);
+        }
         if (tex == null) return false;
+
+        // Preserve InitialOriginalTexture / OriginalTexture pointing to the first loaded variant so Reset can still restore it.
+        if (colorEntry.InitialOriginalTexture == null)
+        {
+            colorEntry.InitialOriginalTexture = colorEntry.OriginalTexture ?? colorEntry.Texture;
+            colorEntry.InitialSourcePath = colorEntry.SourcePath;
+        }
 
         colorEntry.ActiveVariantIndex = variantIndex;
         colorEntry.Texture = tex;
-        colorEntry.OriginalTexture = tex;
-        colorEntry.SourceImage = tex.GetImage();
+        colorEntry.SourceImage = null;
         colorEntry.SourcePath = targetPath;
         colorEntry.IsPresent = true;
         colorEntry.IsDefaultFallback = false;
@@ -248,10 +295,21 @@ public sealed class MaterialChannelSet
     public bool ResetChannelToOriginal(MaterialTextureChannel ch)
     {
         if (!Channels.TryGetValue(ch, out var entry)) return false;
-        if (entry.OriginalTexture == null || !GodotObject.IsInstanceValid(entry.OriginalTexture)) return false;
-        entry.Texture = entry.OriginalTexture;
-        entry.SourceImage = entry.OriginalTexture.GetImage();
+        var orig = (entry.InitialOriginalTexture != null && GodotObject.IsInstanceValid(entry.InitialOriginalTexture))
+            ? entry.InitialOriginalTexture
+            : entry.OriginalTexture;
+        if (orig == null || !GodotObject.IsInstanceValid(orig)) return false;
+        entry.Texture = orig;
+        entry.SourceImage = null;
         entry.IsDirty = false;
+        if (ch == MaterialTextureChannel.Color)
+        {
+            entry.ActiveVariantIndex = entry.InitialVariantIndex;
+            if (!string.IsNullOrEmpty(entry.InitialSourcePath))
+            {
+                entry.SourcePath = entry.InitialSourcePath;
+            }
+        }
         return true;
     }
 }
@@ -798,25 +856,50 @@ public static class MaterialChannelDiscovery
 
         var discoveredColorVariants = new List<string>();
 
+        static string NormalizeVtexPath(string rawPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath)) return null;
+            string norm = rawPath.Trim().Trim('"', '\'');
+            if (norm.StartsWith("resource:", StringComparison.OrdinalIgnoreCase))
+            {
+                norm = norm.Substring(9);
+            }
+            norm = norm.Replace("\\", "/").TrimStart('/');
+            if (norm.EndsWith(".vtex", StringComparison.OrdinalIgnoreCase))
+            {
+                norm += "_c";
+            }
+            return norm;
+        }
+
+        void AddColorVariantPath(string rawPath)
+        {
+            string norm = NormalizeVtexPath(rawPath);
+            if (string.IsNullOrEmpty(norm) || IsPlaceholderOrDevTexture(norm)) return;
+            if (!discoveredColorVariants.Contains(norm, StringComparer.OrdinalIgnoreCase))
+            {
+                discoveredColorVariants.Add(norm);
+            }
+        }
+
         void ConsiderParam(string key, string val)
         {
             if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(val)) return;
             string k = key.ToLowerInvariant();
-            string v = val.Replace("\\", "/").TrimStart('/');
+            string v = NormalizeVtexPath(val);
+            if (string.IsNullOrEmpty(v)) return;
 
             if (k is "g_tcolor" or "texturecolor" or "texturecolor1" or "g_tcolor0")
             {
                 if (!IsPlaceholderOrDevTexture(v))
                 {
                     if (string.IsNullOrEmpty(colorPath)) colorPath = v;
-                    if (!discoveredColorVariants.Contains(v, StringComparer.OrdinalIgnoreCase))
-                        discoveredColorVariants.Add(v);
+                    AddColorVariantPath(v);
                 }
             }
             else if (k.StartsWith("g_tcolor", StringComparison.Ordinal) || k.StartsWith("texturecolor", StringComparison.Ordinal))
             {
-                if (!IsPlaceholderOrDevTexture(v) && !discoveredColorVariants.Contains(v, StringComparer.OrdinalIgnoreCase))
-                    discoveredColorVariants.Add(v);
+                AddColorVariantPath(v);
             }
             else if (k is "g_tambientocclusion" or "g_tao" or "textureambientocclusion" or "textureambientocclusion1")
             {
@@ -906,9 +989,9 @@ public static class MaterialChannelDiscovery
                     string f = Path.GetFileName(sib).ToLowerInvariant();
                     if (f.Contains("_color") || f.Contains("g_tcolor"))
                     {
-                        if (string.IsNullOrEmpty(colorPath)) colorPath = sib;
-                        if (!discoveredColorVariants.Contains(sib, StringComparer.OrdinalIgnoreCase))
-                            discoveredColorVariants.Add(sib);
+                        string sibNorm = NormalizeVtexPath(sib);
+                        if (string.IsNullOrEmpty(colorPath)) colorPath = sibNorm;
+                        AddColorVariantPath(sibNorm);
                     }
                     else if (f.Contains("_ao_") || f.EndsWith("_ao.vtex_c") || f.Contains("ambientocclusion"))
                     {
@@ -946,15 +1029,17 @@ public static class MaterialChannelDiscovery
             }
         }
 
-        // Load primary Color (plus any variants)
+        // Load primary Color (plus any variants — variants stay lazy paths until user selects one)
         ImageTexture loadedColor = null;
         if (builtMaterial is StandardMaterial3D std && std.AlbedoTexture is ImageTexture stdImgTex)
         {
             loadedColor = stdImgTex;
         }
-        else if (builtMaterial is ShaderMaterial sm && sm.GetShaderParameter("albedo_texture").AsGodotObject() is ImageTexture smTex)
+        else if (builtMaterial is ShaderMaterial sm)
         {
-            loadedColor = smTex;
+            loadedColor = sm.GetShaderParameter("albedo_texture").AsGodotObject() as ImageTexture
+                       ?? sm.GetShaderParameter("g_tColor").AsGodotObject() as ImageTexture
+                       ?? sm.GetShaderParameter("texture_albedo").AsGodotObject() as ImageTexture;
         }
         if (loadedColor == null && !string.IsNullOrEmpty(colorPath))
         {
@@ -976,8 +1061,9 @@ public static class MaterialChannelDiscovery
                 ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Color),
                 Texture = loadedColor,
                 OriginalTexture = loadedColor,
-                SourceImage = loadedColor?.GetImage(),
+                InitialOriginalTexture = loadedColor,
                 SourcePath = colorPath,
+                InitialSourcePath = colorPath,
                 IsPresent = loadedColor != null,
                 IsDefaultFallback = loadedColor == null
             };
@@ -994,17 +1080,23 @@ public static class MaterialChannelDiscovery
             {
                 int activeIdx = cEntry.VariantPaths.FindIndex(p => string.Equals(p, colorPath, StringComparison.OrdinalIgnoreCase));
                 cEntry.ActiveVariantIndex = activeIdx >= 0 ? activeIdx : 0;
+                cEntry.InitialVariantIndex = cEntry.ActiveVariantIndex;
             }
             set.SetChannel(MaterialTextureChannel.Color, cEntry);
         }
 
-        // Ambient Occlusion
+        // Ambient Occlusion (reuse ShaderMaterial / StandardMaterial3D texture if already bound!)
         ImageTexture loadedAo = null;
         if (builtMaterial is StandardMaterial3D stdAo && stdAo.AOTexture is ImageTexture existingAo)
         {
             loadedAo = existingAo;
         }
-        else if (!string.IsNullOrEmpty(aoPath))
+        else if (builtMaterial is ShaderMaterial smAo)
+        {
+            loadedAo = smAo.GetShaderParameter("ao_texture").AsGodotObject() as ImageTexture
+                    ?? smAo.GetShaderParameter("g_tAmbientOcclusion").AsGodotObject() as ImageTexture;
+        }
+        if (loadedAo == null && !string.IsNullOrEmpty(aoPath))
         {
             loadedAo = Source2TextureLoader.GetOrLoadTexture(package, aoPath, forceOpaque: true, addonPackage: addonPackage);
         }
@@ -1017,14 +1109,15 @@ public static class MaterialChannelDiscovery
                 ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.AmbientOcclusion),
                 Texture = loadedAo,
                 OriginalTexture = loadedAo,
-                SourceImage = loadedAo.GetImage(),
+                InitialOriginalTexture = loadedAo,
                 SourcePath = aoPath,
+                InitialSourcePath = aoPath,
                 IsPresent = true,
                 IsDefaultFallback = false
             });
         }
 
-        // Normal & Roughness (split g_tNormalRoughness if present, plus standalone fallback)
+        // Normal & Roughness: attach metadata now and lazily split g_tNormalRoughness ONLY when inspected/edited/needed!
         if (!string.IsNullOrEmpty(normalRoughnessPath))
         {
             ImageTexture packedNr = null;
@@ -1046,43 +1139,67 @@ public static class MaterialChannelDiscovery
 
             if (packedNr != null)
             {
-                SplitNormalRoughnessTexture(packedNr, normalRoughnessPath, out var splitNorm, out var splitRough);
                 bool hasBlueAlpha = packedNr.HasMeta("HasBlueToAlphaRoughness") && packedNr.GetMeta("HasBlueToAlphaRoughness").AsBool();
-                if (splitNorm != null)
+                bool splitAttempted = false;
+
+                ChannelMapEntry lazyNormEntry = new()
                 {
-                    set.SetChannel(MaterialTextureChannel.Normal, new ChannelMapEntry
-                    {
-                        Channel = MaterialTextureChannel.Normal,
-                        DisplayLabel = MaterialChannelSet.GetDisplayLabel(MaterialTextureChannel.Normal),
-                        ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Normal),
-                        Texture = splitNorm,
-                        OriginalTexture = splitNorm,
-                        SourceImage = splitNorm.GetImage(),
-                        SourcePath = normalRoughnessPath,
-                        IsPresent = true,
-                        IsDefaultFallback = false,
-                        IsPackedNormalRoughness = true,
-                        PackedSourceVtexPath = normalRoughnessPath,
-                        HasBlueToAlphaRoughness = hasBlueAlpha
-                    });
-                }
-                if (splitRough != null && string.IsNullOrEmpty(standaloneRoughPath))
-                {
-                    set.SetChannel(MaterialTextureChannel.Roughness, new ChannelMapEntry
+                    Channel = MaterialTextureChannel.Normal,
+                    DisplayLabel = MaterialChannelSet.GetDisplayLabel(MaterialTextureChannel.Normal),
+                    ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Normal),
+                    SourcePath = normalRoughnessPath,
+                    InitialSourcePath = normalRoughnessPath,
+                    IsPresent = true,
+                    IsDefaultFallback = false,
+                    IsPackedNormalRoughness = true,
+                    PackedSourceVtexPath = normalRoughnessPath,
+                    PackedSourceTexture = packedNr,
+                    HasBlueToAlphaRoughness = hasBlueAlpha
+                };
+
+                ChannelMapEntry lazyRoughEntry = string.IsNullOrEmpty(standaloneRoughPath)
+                    ? new ChannelMapEntry
                     {
                         Channel = MaterialTextureChannel.Roughness,
                         DisplayLabel = MaterialChannelSet.GetDisplayLabel(MaterialTextureChannel.Roughness),
                         ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Roughness),
-                        Texture = splitRough,
-                        OriginalTexture = splitRough,
-                        SourceImage = splitRough.GetImage(),
                         SourcePath = normalRoughnessPath,
+                        InitialSourcePath = normalRoughnessPath,
                         IsPresent = true,
                         IsDefaultFallback = false,
                         IsPackedNormalRoughness = true,
                         PackedSourceVtexPath = normalRoughnessPath,
+                        PackedSourceTexture = packedNr,
                         HasBlueToAlphaRoughness = hasBlueAlpha
-                    });
+                    }
+                    : null;
+
+                void EnsurePackedSplit(ChannelMapEntry _)
+                {
+                    if (splitAttempted) return;
+                    splitAttempted = true;
+                    SplitNormalRoughnessTexture(packedNr, normalRoughnessPath, out var splitNorm, out var splitRough);
+                    if (splitNorm != null)
+                    {
+                        if (lazyNormEntry.Texture == null) lazyNormEntry.Texture = splitNorm;
+                        if (lazyNormEntry.OriginalTexture == null) lazyNormEntry.OriginalTexture = splitNorm;
+                        if (lazyNormEntry.InitialOriginalTexture == null) lazyNormEntry.InitialOriginalTexture = splitNorm;
+                    }
+                    if (splitRough != null && lazyRoughEntry != null)
+                    {
+                        if (lazyRoughEntry.Texture == null) lazyRoughEntry.Texture = splitRough;
+                        if (lazyRoughEntry.OriginalTexture == null) lazyRoughEntry.OriginalTexture = splitRough;
+                        if (lazyRoughEntry.InitialOriginalTexture == null) lazyRoughEntry.InitialOriginalTexture = splitRough;
+                    }
+                }
+
+                lazyNormEntry.LazyMaterialize = EnsurePackedSplit;
+                set.SetChannel(MaterialTextureChannel.Normal, lazyNormEntry);
+
+                if (lazyRoughEntry != null)
+                {
+                    lazyRoughEntry.LazyMaterialize = EnsurePackedSplit;
+                    set.SetChannel(MaterialTextureChannel.Roughness, lazyRoughEntry);
                 }
             }
         }
@@ -1099,8 +1216,9 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Normal),
                     Texture = nTex,
                     OriginalTexture = nTex,
-                    SourceImage = nTex.GetImage(),
+                    InitialOriginalTexture = nTex,
                     SourcePath = standaloneNormalPath,
+                    InitialSourcePath = standaloneNormalPath,
                     IsPresent = true,
                     IsDefaultFallback = false
                 });
@@ -1119,41 +1237,49 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Roughness),
                     Texture = rTex,
                     OriginalTexture = rTex,
-                    SourceImage = rTex.GetImage(),
+                    InitialOriginalTexture = rTex,
                     SourcePath = standaloneRoughPath,
+                    InitialSourcePath = standaloneRoughPath,
                     IsPresent = true,
                     IsDefaultFallback = false
                 });
             }
         }
 
-        // Shadow / NPR Transmissive
-        if (!string.IsNullOrEmpty(shadowPath))
+        // Shadow / NPR Transmissive (reuse ShaderMaterial texture if already bound!)
+        ImageTexture loadedShadow = null;
+        if (builtMaterial is ShaderMaterial smShadow)
         {
-            var shTex = Source2TextureLoader.GetOrLoadTexture(package, shadowPath, forceOpaque: true, addonPackage: addonPackage);
-            if (shTex != null)
+            loadedShadow = smShadow.GetShaderParameter("shadow_tint_texture").AsGodotObject() as ImageTexture
+                        ?? smShadow.GetShaderParameter("g_tNprTransmissiveColor").AsGodotObject() as ImageTexture;
+        }
+        if (loadedShadow == null && !string.IsNullOrEmpty(shadowPath))
+        {
+            loadedShadow = Source2TextureLoader.GetOrLoadTexture(package, shadowPath, forceOpaque: true, addonPackage: addonPackage);
+        }
+        if (loadedShadow != null)
+        {
+            set.SetChannel(MaterialTextureChannel.Shadow, new ChannelMapEntry
             {
-                set.SetChannel(MaterialTextureChannel.Shadow, new ChannelMapEntry
-                {
-                    Channel = MaterialTextureChannel.Shadow,
-                    DisplayLabel = MaterialChannelSet.GetDisplayLabel(MaterialTextureChannel.Shadow),
-                    ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Shadow),
-                    Texture = shTex,
-                    OriginalTexture = shTex,
-                    SourceImage = shTex.GetImage(),
-                    SourcePath = shadowPath,
-                    IsPresent = true,
-                    IsDefaultFallback = false
-                });
-            }
+                Channel = MaterialTextureChannel.Shadow,
+                DisplayLabel = MaterialChannelSet.GetDisplayLabel(MaterialTextureChannel.Shadow),
+                ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Shadow),
+                Texture = loadedShadow,
+                OriginalTexture = loadedShadow,
+                InitialOriginalTexture = loadedShadow,
+                SourcePath = shadowPath,
+                InitialSourcePath = shadowPath,
+                IsPresent = true,
+                IsDefaultFallback = false
+            });
         }
 
-        // Extra / Mask maps (only added if actually discovered)
-        TryAttachOptionalVtex(package, addonPackage, set, MaterialTextureChannel.SelfIllum, selfIllumPath);
-        TryAttachOptionalVtex(package, addonPackage, set, MaterialTextureChannel.TintMask, tintMaskPath);
-        TryAttachOptionalVtex(package, addonPackage, set, MaterialTextureChannel.Metalness, metalnessPath);
-        TryAttachOptionalVtex(package, addonPackage, set, MaterialTextureChannel.RimMask, rimMaskPath);
-        TryAttachOptionalVtex(package, addonPackage, set, MaterialTextureChannel.OutlineMask, outlineMaskPath);
+        // Extra / Mask maps (lazy-loaded on demand unless already bound on builtMaterial!)
+        TryAttachOptionalVtex(package, addonPackage, builtMaterial, set, MaterialTextureChannel.SelfIllum, selfIllumPath);
+        TryAttachOptionalVtex(package, addonPackage, builtMaterial, set, MaterialTextureChannel.TintMask, tintMaskPath);
+        TryAttachOptionalVtex(package, addonPackage, builtMaterial, set, MaterialTextureChannel.Metalness, metalnessPath);
+        TryAttachOptionalVtex(package, addonPackage, builtMaterial, set, MaterialTextureChannel.RimMask, rimMaskPath);
+        TryAttachOptionalVtex(package, addonPackage, builtMaterial, set, MaterialTextureChannel.OutlineMask, outlineMaskPath);
 
         int fbW = Math.Max(64, loadedColor?.GetWidth() ?? 256);
         int fbH = Math.Max(64, loadedColor?.GetHeight() ?? 256);
@@ -1164,25 +1290,56 @@ public static class MaterialChannelDiscovery
     private static void TryAttachOptionalVtex(
         Package package,
         Package addonPackage,
+        Godot.Material builtMaterial,
         MaterialChannelSet set,
         MaterialTextureChannel ch,
         string vtexPath)
     {
         if (string.IsNullOrEmpty(vtexPath)) return;
-        var tex = Source2TextureLoader.GetOrLoadTexture(package, vtexPath, forceOpaque: false, addonPackage: addonPackage);
-        if (tex == null) return;
-        set.SetChannel(ch, new ChannelMapEntry
+
+        ImageTexture preloaded = null;
+        if (builtMaterial is ShaderMaterial sm && ch == MaterialTextureChannel.SelfIllum)
+        {
+            preloaded = sm.GetShaderParameter("emission_texture").AsGodotObject() as ImageTexture
+                     ?? sm.GetShaderParameter("texture_self_illum_mask").AsGodotObject() as ImageTexture;
+        }
+        else if (builtMaterial is StandardMaterial3D std && ch == MaterialTextureChannel.SelfIllum)
+        {
+            preloaded = std.EmissionTexture as ImageTexture;
+        }
+
+        var entry = new ChannelMapEntry
         {
             Channel = ch,
             DisplayLabel = MaterialChannelSet.GetDisplayLabel(ch),
             ShortBadge = MaterialChannelSet.GetShortBadge(ch),
-            Texture = tex,
-            OriginalTexture = tex,
-            SourceImage = tex.GetImage(),
+            Texture = preloaded,
+            OriginalTexture = preloaded,
+            InitialOriginalTexture = preloaded,
             SourcePath = vtexPath,
+            InitialSourcePath = vtexPath,
             IsPresent = true,
             IsDefaultFallback = false
-        });
+        };
+
+        if (preloaded == null)
+        {
+            bool loadAttempted = false;
+            entry.LazyMaterialize = (e) =>
+            {
+                if (loadAttempted) return;
+                loadAttempted = true;
+                var tex = Source2TextureLoader.GetOrLoadTexture(package, vtexPath, forceOpaque: false, addonPackage: addonPackage);
+                if (tex != null)
+                {
+                    if (e.Texture == null) e.Texture = tex;
+                    if (e.OriginalTexture == null) e.OriginalTexture = tex;
+                    if (e.InitialOriginalTexture == null) e.InitialOriginalTexture = tex;
+                }
+            };
+        }
+
+        set.SetChannel(ch, entry);
     }
 
     private static List<string> ScanVpkDirectoryVtex(Package package, Package addonPackage, string dirNorm, string stem)
@@ -1288,8 +1445,9 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Color),
                     Texture = cTex,
                     OriginalTexture = cTex,
-                    SourceImage = cTex.GetImage(),
+                    InitialOriginalTexture = cTex,
                     SourcePath = glbSlot?.BaseColorImageName ?? cTex.ResourceName ?? "BaseColor",
+                    InitialSourcePath = glbSlot?.BaseColorImageName ?? cTex.ResourceName ?? "BaseColor",
                     IsPresent = true,
                     IsDefaultFallback = false
                 });
@@ -1308,8 +1466,9 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Normal),
                     Texture = nTex,
                     OriginalTexture = nTex,
-                    SourceImage = nTex.GetImage(),
+                    InitialOriginalTexture = nTex,
                     SourcePath = glbSlot?.NormalImageName ?? nTex.ResourceName ?? "Normal",
+                    InitialSourcePath = glbSlot?.NormalImageName ?? nTex.ResourceName ?? "Normal",
                     IsPresent = true,
                     IsDefaultFallback = false
                 });
@@ -1335,7 +1494,7 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Roughness),
                     Texture = roughExtracted,
                     OriginalTexture = roughExtracted,
-                    SourceImage = roughExtracted.GetImage(),
+                    InitialOriginalTexture = roughExtracted,
                     SourcePath = isGloss ? $"{rName} (Inverted Gloss)" : rName,
                     IsPresent = true,
                     IsDefaultFallback = false
@@ -1358,7 +1517,7 @@ public static class MaterialChannelDiscovery
                         ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Metalness),
                         Texture = metalExtracted,
                         OriginalTexture = metalExtracted,
-                        SourceImage = metalExtracted.GetImage(),
+                        InitialOriginalTexture = metalExtracted,
                         SourcePath = $"{rName} (B Channel)",
                         IsPresent = true,
                         IsDefaultFallback = false
@@ -1385,7 +1544,7 @@ public static class MaterialChannelDiscovery
                         ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.AmbientOcclusion),
                         Texture = aoUnpacked,
                         OriginalTexture = aoUnpacked,
-                        SourceImage = aoUnpacked.GetImage(),
+                        InitialOriginalTexture = aoUnpacked,
                         SourcePath = $"{rName} (ORM Red)",
                         IsPresent = true,
                         IsDefaultFallback = false
@@ -1409,7 +1568,7 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.AmbientOcclusion),
                     Texture = aoTex,
                     OriginalTexture = aoTex,
-                    SourceImage = aoTex.GetImage(),
+                    InitialOriginalTexture = aoTex,
                     SourcePath = aoName,
                     IsPresent = true,
                     IsDefaultFallback = false
@@ -1429,7 +1588,7 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.Metalness),
                     Texture = mTex,
                     OriginalTexture = mTex,
-                    SourceImage = mTex.GetImage(),
+                    InitialOriginalTexture = mTex,
                     SourcePath = rawMetalTex.ResourceName ?? "Metalness",
                     IsPresent = true,
                     IsDefaultFallback = false
@@ -1450,7 +1609,7 @@ public static class MaterialChannelDiscovery
                     ShortBadge = MaterialChannelSet.GetShortBadge(MaterialTextureChannel.SelfIllum),
                     Texture = eTex,
                     OriginalTexture = eTex,
-                    SourceImage = eTex.GetImage(),
+                    InitialOriginalTexture = eTex,
                     SourcePath = eName,
                     IsPresent = true,
                     IsDefaultFallback = false
@@ -1559,8 +1718,9 @@ public static class MaterialChannelDiscovery
         ShortBadge = MaterialChannelSet.GetShortBadge(ch),
         Texture = tex,
         OriginalTexture = tex,
-        SourceImage = tex.GetImage(),
+        InitialOriginalTexture = tex,
         SourcePath = source,
+        InitialSourcePath = source,
         IsPresent = true,
         IsDefaultFallback = false
     };
@@ -1595,12 +1755,48 @@ public static class MaterialChannelDiscovery
         var shadow = channelSet.GetChannel(MaterialTextureChannel.Shadow);
         var illum = channelSet.GetChannel(MaterialTextureChannel.SelfIllum);
         var metal = channelSet.GetChannel(MaterialTextureChannel.Metalness);
+        var tintMask = channelSet.GetChannel(MaterialTextureChannel.TintMask);
+        var rimMask = channelSet.GetChannel(MaterialTextureChannel.RimMask);
+        var outlineMask = channelSet.GetChannel(MaterialTextureChannel.OutlineMask);
 
         int debugIdx = MaterialChannelSet.ChannelToShaderDebugIndex(channelSet.SoloPreviewChannel);
+
+        // Materialize lazy channels only when the shader/solo-view actually requires the unpacked map.
+        bool isSource2PackedOverlayClean = isPainterOverlay
+            && normal?.IsDirty != true
+            && rough?.IsDirty != true
+            && normal?.PackedSourceTexture != null
+            && GodotObject.IsInstanceValid(normal.PackedSourceTexture)
+            && debugIdx != 3 && debugIdx != 4;
+
+        if (mat is ShaderMaterial smCheck)
+        {
+            string sc = smCheck.Shader?.Code ?? string.Empty;
+            bool usesPackedS2Shader = sc.Contains("g_tNormalRoughness", StringComparison.Ordinal);
+            if ((!usesPackedS2Shader && !isSource2PackedOverlayClean) || debugIdx == 3) normal?.EnsureMaterialized();
+            if ((!usesPackedS2Shader && !isSource2PackedOverlayClean) || debugIdx == 4) rough?.EnsureMaterialized();
+            if (debugIdx == 2) ao?.EnsureMaterialized();
+            if (debugIdx == 5) shadow?.EnsureMaterialized();
+            if (debugIdx == 6) illum?.EnsureMaterialized();
+            if (debugIdx == 7) metal?.EnsureMaterialized();
+            if (debugIdx == 8) tintMask?.EnsureMaterialized();
+            if (debugIdx == 9) rimMask?.EnsureMaterialized();
+            if (debugIdx == 10) outlineMask?.EnsureMaterialized();
+        }
+        else if (mat is StandardMaterial3D)
+        {
+            normal?.EnsureMaterialized();
+            rough?.EnsureMaterialized();
+            if (debugIdx == 6 || illum?.IsEnabled == true) illum?.EnsureMaterialized();
+            if (debugIdx == 7) metal?.EnsureMaterialized();
+        }
+
         bool enColor = color?.IsEnabled ?? true;
+        bool hasNormForEnable = (normal?.HasValidTexture ?? false) || (normal?.PackedSourceTexture != null && GodotObject.IsInstanceValid(normal.PackedSourceTexture));
+        bool hasRoughForEnable = (rough?.HasValidTexture ?? false) || (rough?.PackedSourceTexture != null && GodotObject.IsInstanceValid(rough.PackedSourceTexture));
         bool enAo = (ao?.IsEnabled ?? true) && (ao?.HasValidTexture ?? false);
-        bool enNormal = (normal?.IsEnabled ?? true) && (normal?.HasValidTexture ?? false);
-        bool enRough = (rough?.IsEnabled ?? true) && (rough?.HasValidTexture ?? false);
+        bool enNormal = (normal?.IsEnabled ?? true) && hasNormForEnable;
+        bool enRough = (rough?.IsEnabled ?? true) && hasRoughForEnable;
         bool enShadow = (shadow?.IsEnabled ?? true) && (shadow?.HasValidTexture ?? false) && !(shadow?.IsDefaultFallback ?? true);
         bool enIllum = (illum?.IsEnabled ?? true) && (illum?.HasValidTexture ?? false) && !(illum?.IsDefaultFallback ?? true);
 
@@ -1633,10 +1829,11 @@ public static class MaterialChannelDiscovery
                         sm.SetShaderParameter("g_tColor", color.Texture);
                     }
                 }
-                if (normal?.HasValidTexture == true || rough?.HasValidTexture == true)
+                if (normal?.IsDirty == true || rough?.IsDirty == true)
                 {
-                    if ((normal?.IsDirty == true || rough?.IsDirty == true) &&
-                        (normal?.SourceImage != null || rough?.SourceImage != null))
+                    normal?.EnsureMaterialized();
+                    rough?.EnsureMaterialized();
+                    if (normal?.SourceImage != null || rough?.SourceImage != null)
                     {
                         var packedImg = PackNormalRoughnessImage(normal?.SourceImage, rough?.SourceImage, packAsBlueToAlpha: false);
                         if (packedImg != null)
@@ -1657,14 +1854,31 @@ public static class MaterialChannelDiscovery
                 {
                     sm.SetShaderParameter("ao_texture", ao.Texture);
                 }
-                if (normal?.HasValidTexture == true)
+                if (isPainterOverlay)
                 {
-                    sm.SetShaderParameter("normal_texture", normal.Texture);
-                    sm.SetShaderParameter("normal_is_source2", false);
+                    sm.SetShaderParameter("use_ao_texture", ao?.HasValidTexture == true);
                 }
-                if (rough?.HasValidTexture == true)
+                if (isSource2PackedOverlayClean)
                 {
-                    sm.SetShaderParameter("roughness_texture", rough.Texture);
+                    sm.SetShaderParameter("normal_texture", normal.PackedSourceTexture);
+                    sm.SetShaderParameter("normal_is_source2", true);
+                    sm.SetShaderParameter("has_roughness_texture", false);
+                    if (isPainterOverlay) sm.SetShaderParameter("use_normal_map", true);
+                }
+                else
+                {
+                    bool normReady = normal?.HasValidTexture == true;
+                    if (normReady)
+                    {
+                        sm.SetShaderParameter("normal_texture", normal.Texture);
+                        sm.SetShaderParameter("normal_is_source2", false);
+                    }
+                    if (isPainterOverlay) sm.SetShaderParameter("use_normal_map", normReady);
+                    if (rough?.HasValidTexture == true)
+                    {
+                        sm.SetShaderParameter("roughness_texture", rough.Texture);
+                        sm.SetShaderParameter("has_roughness_texture", enRough);
+                    }
                 }
                 if (shadow?.HasValidTexture == true)
                 {
@@ -1679,6 +1893,23 @@ public static class MaterialChannelDiscovery
                 if (metal?.HasValidTexture == true)
                 {
                     sm.SetShaderParameter("metallic_texture", metal.Texture);
+                    if (isPainterOverlay) sm.SetShaderParameter("has_metallic_texture", true);
+                }
+                else if (isPainterOverlay)
+                {
+                    sm.SetShaderParameter("has_metallic_texture", false);
+                }
+
+                if (isPainterOverlay)
+                {
+                    var activeMaskEntry = debugIdx switch
+                    {
+                        8 => tintMask,
+                        9 => rimMask,
+                        10 => outlineMask,
+                        _ => null
+                    };
+                    sm.SetShaderParameter("mask_preview_texture", activeMaskEntry?.HasValidTexture == true ? activeMaskEntry.Texture : null);
                 }
             }
         }
