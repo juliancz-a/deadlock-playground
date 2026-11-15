@@ -3150,6 +3150,709 @@ namespace DeadlockPlayground.Tests
                         allPassed = false;
                     }
                 }
+
+                // 34. TEST 31: Landmark-Pin Auto-Rig (gordon_freeman -> priest)
+                if (priestEntry30 != null && System.IO.File.Exists(gordonPath))
+                {
+                    GD.Print("\n[TEST 31] Verifying Landmark Auto-Rig (gordon_freeman -> priest)...");
+                    var priest31 = await vpkLoader.LoadHeroModelAsync(priestEntry30);
+                    var gordon31 = CustomModelAutoRigger.LoadAndSanitize3DModelScene(gordonPath);
+                    if (priest31 != null && gordon31 != null)
+                    {
+                        if (priest31.GetParent() == null) Root.AddChild(priest31);
+                        var priestHier31 = new DeadlockPlayground.Painter.HeroMeshHierarchy();
+                        priestHier31.ScanHero(priest31);
+                        var priestSkel31 = CustomModelAutoRigger.FindSkeleton(priest31);
+                        priestSkel31?.ResetBonePoses();
+
+                        var (pMin31, pMax31, pOk31) = CustomModelAutoRigger.ComputeAuthenticHeroBounds(priest31);
+                        var (gMin31, gMax31, gOk31) = CustomModelAutoRigger.ComputePristineModelBounds(gordon31);
+                        float scale31 = (pOk31 && gOk31 && (gMax31.Y - gMin31.Y) > 0.01f)
+                            ? (pMax31.Y - Math.Max(0f, pMin31.Y)) / (gMax31.Y - gMin31.Y)
+                            : 0.025f;
+                        Vector3 heroCtr31 = (pMin31 + pMax31) * 0.5f;
+                        Vector3 gCtr31 = (gMin31 + gMax31) * 0.5f;
+                        Transform3D xf31 = Transform3D.Identity.Scaled(new Vector3(scale31, scale31, scale31)).Rotated(Vector3.Up, Mathf.Pi);
+                        xf31.Origin = new Vector3(heroCtr31.X - (-gCtr31.X * scale31), -gMin31.Y * scale31, heroCtr31.Z - (-gCtr31.Z * scale31));
+
+                        var lmMeshes = CustomModelAutoRigger.CollectMeshes(gordon31);
+                        var pins31 = CustomLandmarkWeightSolver.EstimateLandmarks(gordon31, lmMeshes);
+                        foreach (var kv in pins31) GD.Print($"  [TEST 31 PIN] {kv.Key} = {kv.Value:F3}");
+                        bool pinsOk = CustomLandmarkWeightSolver.PinNames.All(pins31.ContainsKey)
+                            && pins31["Head"].Y > pins31["Neck"].Y && pins31["Neck"].Y > pins31["Chest"].Y && pins31["Chest"].Y > pins31["Pelvis"].Y
+                            && pins31["Pelvis"].Y > pins31["KneeL"].Y && pins31["KneeL"].Y > pins31["AnkleL"].Y
+                            && pins31["KneeR"].Y > pins31["AnkleR"].Y
+                            && Math.Abs(pins31["WristL"].X - pins31["WristR"].X) > 0.05f
+                            && Math.Abs(pins31["AnkleL"].X - pins31["AnkleR"].X) > 0.02f
+                            && pins31["ShoulderL"].Y > pins31["ElbowL"].Y && pins31["ElbowL"].Y > pins31["WristL"].Y;
+                        if (!pinsOk)
+                        {
+                            GD.PrintErr("FAIL: [TEST 31] EstimateLandmarks produced anatomically invalid pins!");
+                            allPassed = false;
+                        }
+
+                        var opts31 = new CustomModelAutoRigger.RiggingOptions
+                        {
+                            Method = CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
+                            AlignedTransform = xf31,
+                            KeepFingersRigidOnHand = true,
+                            ClampLimbStretching = true,
+                            AutoCounterTwistWeights = true,
+                            KeptOriginalSubmeshNames = new System.Collections.Generic.List<string>
+                            {
+                                CustomModelAutoRigger.MakeSurfaceKeepKey("_priest", 2)
+                            }
+                        };
+                        var sw31 = System.Diagnostics.Stopwatch.StartNew();
+                        var res31 = CustomModelAutoRigger.RigAndBind(gordon31, priest31, opts31);
+                        sw31.Stop();
+                        GD.Print($"[TEST 31] Landmark RigAndBind: success={res31.Success}, submeshes={res31.CustomSubmeshes?.Count ?? 0}, verts={res31.TotalVertices}, {sw31.ElapsedMilliseconds} ms");
+                        bool sceneRestored = CustomModelAutoRigger.FindSkeleton(gordon31) == null;
+                        bool handWeightsOk = true;
+                        int handVertsCount = 0;
+                        int armVertsCount = 0;
+                        string handFailReason = "";
+                        string overrideKey31 = null;
+                        int overrideVertCount31 = 0;
+                        if (res31.Success && res31.CustomSubmeshes != null && priestSkel31 != null)
+                        {
+                            foreach (var sm in res31.CustomSubmeshes)
+                            {
+                                if (sm?.Mesh is not ArrayMesh am || am.GetSurfaceCount() == 0) continue;
+                                var arrs = am.SurfaceGetArrays(0);
+                                var smVerts = arrs[(int)Mesh.ArrayType.Vertex].As<Vector3[]>();
+                                var smBones = arrs[(int)Mesh.ArrayType.Bones].As<int[]>();
+                                var smWeights = arrs[(int)Mesh.ArrayType.Weights].As<float[]>();
+                                if (smVerts == null || smBones == null || smWeights == null) continue;
+                                if (overrideKey31 == null && sm.HasMeta("SourceMeshName") && sm.HasMeta("SourceSurfaceIndex"))
+                                {
+                                    overrideKey31 = CustomModelAutoRigger.MakeSurfaceKeepKey(sm.GetMeta("SourceMeshName").AsString(), sm.GetMeta("SourceSurfaceIndex").AsInt32());
+                                    overrideVertCount31 = smVerts.Length;
+                                }
+                                int stride = (smVerts.Length > 0 && smBones.Length >= smVerts.Length * 8) ? 8 : 4;
+                                for (int v = 0; v < smVerts.Length; v++)
+                                {
+                                    int domBone = -1;
+                                    float maxW = -1f;
+                                    for (int k = 0; k < stride; k++)
+                                    {
+                                        float w = smWeights[v * stride + k];
+                                        if (w > maxW)
+                                        {
+                                            maxW = w;
+                                            int bi = smBones[v * stride + k];
+                                            string bName = (sm.Skin != null && bi >= 0 && bi < sm.Skin.GetBindCount()) ? sm.Skin.GetBindName(bi).ToString() : "";
+                                            domBone = priestSkel31.FindBone(bName);
+                                        }
+                                    }
+                                    string domName = domBone >= 0 ? priestSkel31.GetBoneName(domBone) : "";
+                                    bool isHand = domName == "hand_L" || domName == "hand_R";
+                                    bool isArm = isHand || domName == "arm_lower_L" || domName == "arm_lower_R" || domName == "arm_upper_L" || domName == "arm_upper_R";
+                                    if (isHand) handVertsCount++;
+                                    if (isArm) armVertsCount++;
+                                    for (int k = 0; k < stride; k++)
+                                    {
+                                        float w = smWeights[v * stride + k];
+                                        if (w <= 0.001f) continue;
+                                        int bi = smBones[v * stride + k];
+                                        string bName = (sm.Skin != null && bi >= 0 && bi < sm.Skin.GetBindCount()) ? sm.Skin.GetBindName(bi).ToString() : "";
+                                        if (isHand && (bName.StartsWith("spine_") || bName == "pelvis" || bName.StartsWith("leg_") || bName.StartsWith("ankle_") || bName.StartsWith("clavicle_")))
+                                        {
+                                            handWeightsOk = false;
+                                            handFailReason = $"{sm.Name} v{v} (hand={domName}) bled {w:F3} onto {bName}";
+                                            break;
+                                        }
+                                        if (isArm && (bName == "pelvis" || bName.StartsWith("leg_") || bName.StartsWith("ankle_")))
+                                        {
+                                            handWeightsOk = false;
+                                            handFailReason = $"{sm.Name} v{v} (arm={domName}) bled {w:F3} onto {bName}";
+                                            break;
+                                        }
+                                    }
+                                    if (!handWeightsOk) break;
+                                }
+                                if (!handWeightsOk) break;
+                            }
+                            if (handVertsCount == 0 || armVertsCount == 0)
+                            {
+                                handWeightsOk = false;
+                                handFailReason = $"Insufficient arm/hand verts bound (hand={handVertsCount}, arm={armVertsCount})";
+                            }
+                        }
+
+                        bool overrideOk = false;
+                        string overrideFailReason = "no override surface found";
+                        if (res31.Success && sceneRestored && handWeightsOk && overrideKey31 != null && overrideVertCount31 > 1)
+                        {
+                            var ov31 = new CustomModelAutoRigger.SkinWeightOverride
+                            {
+                                VertexCount = overrideVertCount31,
+                                BonePalette = new[] { "head", "pelvis" },
+                                PaletteIndices = new int[overrideVertCount31 * 4],
+                                Weights = new float[overrideVertCount31 * 4]
+                            };
+                            ov31.PaletteIndices[0] = 0;
+                            ov31.Weights[0] = 1.0f;
+                            for (int v = 1; v < overrideVertCount31; v++)
+                            {
+                                ov31.PaletteIndices[v * 4 + 0] = 1;
+                                ov31.Weights[v * 4 + 0] = 1.0f;
+                            }
+                            opts31.CustomSkinWeightOverrides = new System.Collections.Generic.Dictionary<string, CustomModelAutoRigger.SkinWeightOverride>
+                            {
+                                [overrideKey31] = ov31
+                            };
+                            var res31Ov = CustomModelAutoRigger.RigAndBind(gordon31, priest31, opts31);
+                            if (res31Ov.Success && res31Ov.CustomSubmeshes != null)
+                            {
+                                foreach (var sm in res31Ov.CustomSubmeshes)
+                                {
+                                    if (sm == null || !sm.HasMeta("SourceMeshName") || !sm.HasMeta("SourceSurfaceIndex")) continue;
+                                    string smKey = CustomModelAutoRigger.MakeSurfaceKeepKey(sm.GetMeta("SourceMeshName").AsString(), sm.GetMeta("SourceSurfaceIndex").AsInt32());
+                                    if (smKey != overrideKey31 || sm.Mesh is not ArrayMesh am || am.GetSurfaceCount() == 0) continue;
+                                    var arrs = am.SurfaceGetArrays(0);
+                                    var smBones = arrs[(int)Mesh.ArrayType.Bones].As<int[]>();
+                                    var smWeights = arrs[(int)Mesh.ArrayType.Weights].As<float[]>();
+                                    int stride = smBones.Length >= overrideVertCount31 * 8 ? 8 : 4;
+                                    int bi0 = smBones[0];
+                                    int biLast = smBones[(overrideVertCount31 - 1) * stride];
+                                    string bn0 = (sm.Skin != null && bi0 >= 0 && bi0 < sm.Skin.GetBindCount()) ? sm.Skin.GetBindName(bi0).ToString() : "";
+                                    string bnLast = (sm.Skin != null && biLast >= 0 && biLast < sm.Skin.GetBindCount()) ? sm.Skin.GetBindName(biLast).ToString() : "";
+                                    float w0 = smWeights[0];
+                                    float wLast = smWeights[(overrideVertCount31 - 1) * stride];
+                                    overrideOk = bn0 == "head" && w0 >= 0.999f && bnLast == "pelvis" && wLast >= 0.999f;
+                                    if (!overrideOk)
+                                        overrideFailReason = $"v0=({bn0}:{w0:F3}), vLast=({bnLast}:{wLast:F3})";
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                overrideFailReason = res31Ov.ErrorMessage ?? "RigAndBind override pass failed";
+                            }
+                        }
+
+                        if (!res31.Success || res31.CustomSubmeshes == null || res31.CustomSubmeshes.Count == 0 || res31.TotalVertices <= 0)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 31] Landmark RigAndBind failed: {res31.ErrorMessage}");
+                            allPassed = false;
+                        }
+                        else if (!sceneRestored)
+                        {
+                            GD.PrintErr("FAIL: [TEST 31] Synthetic skeleton was not removed from the imported scene afterwards!");
+                            allPassed = false;
+                        }
+                        else if (!handWeightsOk)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 31] Hand/arm weight isolation failed: {handFailReason}");
+                            allPassed = false;
+                        }
+                        else if (!overrideOk)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 31] CustomSkinWeightOverrides persistence failed: {overrideFailReason}");
+                            allPassed = false;
+                        }
+                        else if (pinsOk)
+                        {
+                            GD.Print($"PASS: [TEST 31] Landmark Auto-Rig estimated valid pins, isolated hand/arm weights (handVerts={handVertsCount}, armVerts={armVertsCount}), persisted CustomSkinWeightOverrides ({overrideKey31}), and restored scene.");
+                        }
+
+                        // 35. TEST 32: Bug #4 Partial Composite Surface Keep + Weight Paint Undo/Redo, Per-Bone Reset & Wireframe Overlay
+                        GD.Print("\n[TEST 32] Verifying Partial Composite Surface Keep Persistence, Weight Undo/Redo, Per-Bone Reset, & Wireframe Overlay...");
+                        priestHier31.ScanHero(priest31);
+
+                        bool surf0Hidden = false;
+                        bool surf1Hidden = false;
+                        bool surf2Visible = false;
+                        foreach (var child in priest31.FindChildren("*", "MeshInstance3D", true, false))
+                        {
+                            if (child is not MeshInstance3D smi) continue;
+                            if (!smi.HasMeta("ParentCompositeMesh") || !smi.HasMeta("SurfaceIndex")) continue;
+                            string pName = smi.GetMeta("ParentCompositeMesh").AsString();
+                            if (!pName.Contains("priest", StringComparison.OrdinalIgnoreCase)) continue;
+                            int sIdx = smi.GetMeta("SurfaceIndex").AsInt32();
+                            bool userHidden = smi.HasMeta("UserHiddenByCustomModel") && smi.GetMeta("UserHiddenByCustomModel").AsBool();
+                            if (sIdx == 0) surf0Hidden = !smi.Visible && userHidden;
+                            else if (sIdx == 1) surf1Hidden = !smi.Visible && userHidden;
+                            else if (sIdx == 2) surf2Visible = smi.Visible && !userHidden;
+                        }
+
+                        bool hiddenExcludedFromHier = !priestHier31.Submeshes.Any(sm =>
+                            sm?.Mesh != null && sm.Mesh.HasMeta("ParentCompositeMesh") && sm.Mesh.HasMeta("SurfaceIndex") &&
+                            sm.Mesh.Name.ToString().Contains("priest", StringComparison.OrdinalIgnoreCase) &&
+                            (sm.Mesh.GetMeta("SurfaceIndex").AsInt32() == 0 || sm.Mesh.GetMeta("SurfaceIndex").AsInt32() == 1));
+                        bool keptRegisteredInHier = priestHier31.Submeshes.Any(sm =>
+                            sm?.Mesh != null && sm.Mesh.HasMeta("ParentCompositeMesh") && sm.Mesh.HasMeta("SurfaceIndex") &&
+                            sm.Mesh.Name.ToString().Contains("priest", StringComparison.OrdinalIgnoreCase) &&
+                            sm.Mesh.GetMeta("SurfaceIndex").AsInt32() == 2);
+
+                        if (!surf0Hidden || !surf1Hidden || !surf2Visible || !hiddenExcludedFromHier || !keptRegisteredInHier)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 32] Partial composite keep mismatch after ScanHero: s0Hidden={surf0Hidden}, s1Hidden={surf1Hidden}, s2Visible={surf2Visible}, excluded={hiddenExcludedFromHier}, keptReg={keptRegisteredInHier}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print("PASS: [TEST 32a] ScanHero preserved _priest kept surface #2 (shotgun) and excluded replaced surfaces #0/#1 & materials.");
+                        }
+
+                        var opts32 = new CustomModelAutoRigger.RiggingOptions
+                        {
+                            Method = CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
+                            AlignedTransform = xf31,
+                            KeepFingersRigidOnHand = true,
+                            ClampLimbStretching = true,
+                            AutoCounterTwistWeights = true
+                        };
+                        var res32 = CustomModelAutoRigger.RigAndBind(gordon31, priest31, opts32);
+                        var surfs32 = res32.Success && res32.ContainerNode != null
+                            ? CustomWeightPaintEditor.CaptureSurfaces(res32.ContainerNode)
+                            : new System.Collections.Generic.List<CustomWeightPaintEditor.SurfaceState>();
+
+                        bool wpOk = false;
+                        string wpFail = "no paint surfaces captured";
+                        if (surfs32.Count > 0 && priestSkel31 != null)
+                        {
+                            var skin32 = surfs32[0].MeshInstance?.Skin;
+                            if (skin32 != null)
+                            {
+                                var baseOv32 = CustomWeightPaintEditor.ExportOverrides(surfs32, priestSkel31, skin32);
+                                int ResolveB(string bName)
+                                {
+                                    int sb = priestSkel31.FindBone(bName);
+                                    for (int bi = 0; bi < skin32.GetBindCount(); bi++)
+                                    {
+                                        if (sb >= 0 && skin32.GetBindBone(bi) == sb) return bi;
+                                        if (bName.Equals(skin32.GetBindName(bi), StringComparison.Ordinal)) return bi;
+                                    }
+                                    return -1;
+                                }
+                                float ReadVertBoneWeight(CustomWeightPaintEditor.SurfaceState s, int v, int bi)
+                                {
+                                    float sum = 0f;
+                                    int o = v * 4;
+                                    for (int k = 0; k < 4; k++) if (s.SkinBones[o + k] == bi) sum += s.Weights[o + k];
+                                    return sum;
+                                }
+
+                                int biHead = ResolveB("head");
+                                int biHandL = ResolveB("hand_L");
+                                int biPelvis = ResolveB("pelvis");
+                                CustomWeightPaintEditor.UpdatePosedVertices(surfs32, priestSkel31, skin32);
+
+                                // Pick a head vertex cleanly away from hand_L and a genuine hand_L vertex across all body surfaces
+                                CustomWeightPaintEditor.SurfaceState sHead = surfs32[0], sHand = surfs32[0];
+                                int vHead = -1, vHand = -1;
+                                foreach (var s in surfs32)
+                                {
+                                    for (int v = 0; v < s.RestVerts.Length; v++)
+                                    {
+                                        if (vHand < 0 && ReadVertBoneWeight(s, v, biHandL) > 0.5f)
+                                        {
+                                            sHand = s;
+                                            vHand = v;
+                                        }
+                                        if (vHead < 0 && ReadVertBoneWeight(s, v, biHead) < 0.05f && ReadVertBoneWeight(s, v, biHandL) < 0.01f && s.PosedVerts[v].Y > 1.2f)
+                                        {
+                                            sHead = s;
+                                            vHead = v;
+                                        }
+                                    }
+                                }
+                                if (vHead < 0) { sHead = surfs32[0]; vHead = 0; }
+                                if (vHand < 0) { sHand = surfs32[0]; vHand = Math.Min(1, surfs32[0].RestVerts.Length - 1); }
+
+                                float baseHandW_atHand = ReadVertBoneWeight(sHand, vHand, biHandL);
+                                float baseHeadW_atHead = ReadVertBoneWeight(sHead, vHead, biHead);
+
+                                // Paint #1: change hand_L -> Subtract at vHand, Paint #2: change head -> SetOne at vHead
+                                CustomWeightPaintEditor.ApplyBrush(surfs32, sHand.PosedVerts[vHand], CustomWeightPaintEditor.BrushMode.Subtract, 0.12f, 0.90f, biHandL, biPelvis, false, -1, -1);
+                                float afterHandPaint_handW = ReadVertBoneWeight(sHand, vHand, biHandL);
+                                var snapBeforeHead = CustomWeightPaintEditor.CaptureHistoryEntry(surfs32, "Before Head");
+
+                                CustomWeightPaintEditor.ApplyBrush(surfs32, sHead.PosedVerts[vHead], CustomWeightPaintEditor.BrushMode.SetOne, 0.08f, 1.0f, biHead, biPelvis, false, -1, -1);
+                                var snapAfterHead = CustomWeightPaintEditor.CaptureHistoryEntry(surfs32, "After Head");
+                                float afterHeadPaint_headW = ReadVertBoneWeight(sHead, vHead, biHead);
+                                bool diffDetected = CustomWeightPaintEditor.HasSurfaceWeightDifference(snapBeforeHead, surfs32);
+
+                                // Undo head edit -> restores head weight while keeping hand_L edit
+                                bool undoOk = CustomWeightPaintEditor.RestoreHistoryEntry(surfs32, snapBeforeHead);
+                                float afterUndo_headW = ReadVertBoneWeight(sHead, vHead, biHead);
+                                float afterUndo_handW = ReadVertBoneWeight(sHand, vHand, biHandL);
+
+                                // Redo head edit -> restores SetOne head edit
+                                bool redoOk = CustomWeightPaintEditor.RestoreHistoryEntry(surfs32, snapAfterHead);
+                                float afterRedo_headW = ReadVertBoneWeight(sHead, vHead, biHead);
+
+                                // Per-bone surgical reset on hand_L -> restores vHand back to procedural baseline WITHOUT touching vHead!
+                                bool boneResetChanged = CustomWeightPaintEditor.ResetBoneToBaseline(surfs32, baseOv32, priestSkel31, skin32, "hand_L", false);
+                                float afterBoneReset_handW = ReadVertBoneWeight(sHand, vHand, biHandL);
+                                float afterBoneReset_headW = ReadVertBoneWeight(sHead, vHead, biHead);
+
+                                wpOk = diffDetected && undoOk && redoOk && boneResetChanged
+                                    && afterHandPaint_handW < baseHandW_atHand - 0.1f
+                                    && afterHeadPaint_headW > 0.9f
+                                    && MathF.Abs(afterUndo_headW - baseHeadW_atHead) < 1e-4f
+                                    && MathF.Abs(afterUndo_handW - afterHandPaint_handW) < 1e-4f
+                                    && afterRedo_headW > 0.9f
+                                    && MathF.Abs(afterBoneReset_handW - baseHandW_atHand) < 0.01f
+                                    && afterBoneReset_headW > 0.9f;
+
+                                if (!wpOk)
+                                    wpFail = $"diff={diffDetected}, undo={undoOk}, redo={redoOk}, reset={boneResetChanged}, hand=({baseHandW_atHand:F3}->{afterHandPaint_handW:F3}->{afterBoneReset_handW:F3}), head=({baseHeadW_atHead:F3}->{afterHeadPaint_headW:F3}->undo:{afterUndo_headW:F3}->redo:{afterRedo_headW:F3}->postReset:{afterBoneReset_headW:F3})";
+                            }
+                        }
+
+                        if (!wpOk)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 32b] Weight Paint Undo/Redo + Per-Bone Reset failed: {wpFail}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print("PASS: [TEST 32b] Weight Paint Undo/Redo and surgical Per-Bone Reset preserved unrelated bone edits.");
+                        }
+
+                        // Wireframe overlay + Layer 21 check
+                        var clayMat32 = CustomWeightPaintEditor.CreateWireframeClayMaterial();
+                        var wireMat32 = CustomWeightPaintEditor.CreateWireframeLineMaterial(Colors.White);
+                        CustomWeightPaintEditor.SyncContainerShadingAndWireframes(res32.ContainerNode, showWireframe: true, wireOnlyClay: false, heatmapActive: false, clayMat32, wireMat32, surfs32);
+                        var wireOverlays32 = new System.Collections.Generic.List<MeshInstance3D>();
+                        foreach (var c in res32.ContainerNode.FindChildren("*", "MeshInstance3D", true, false))
+                        {
+                            if (c is MeshInstance3D wmi && wmi.HasMeta("IsWireframeOverlay") && wmi.GetMeta("IsWireframeOverlay").AsBool())
+                                wireOverlays32.Add(wmi);
+                        }
+                        bool wireLayerOk = wireOverlays32.Count > 0 && wireOverlays32.All(w => w.Visible && w.Mesh != null && w.Mesh.GetSurfaceCount() > 0 && (w.Layers & (1u << 20)) == 0 && w.Layers == 1u);
+                        if (!wireLayerOk)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 32c] Wireframe overlay generation/layer isolation failed (count={wireOverlays32.Count}).");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print($"PASS: [TEST 32c] SyncContainerShadingAndWireframes generated {wireOverlays32.Count} skinned Lines overlay(s) isolated on Layer 1 (Visual Layer 21 clear).");
+                        }
+
+                        // 36. TEST 33: Phase 4 Checks (Kept Composite/Standalone Weapons in .vmdl, .dpp Workspace Round-Trip, X-Ray & Mirror/Smooth)
+                        GD.Print("\n[TEST 33] Verifying Kept Composite/Standalone Weapons .vmdl Export, .dpp Persistence, X-Ray, Mirror & Smooth...");
+
+                        // 33a: Export bundle & patched .vmdl keeping composite _priest surfaces #2/#3/#4 (shotgun, crossbow, stake) + standalone weapons
+                        var opts33 = new CustomModelAutoRigger.RiggingOptions
+                        {
+                            Method = CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
+                            AlignedTransform = xf31,
+                            LandmarkPins = pins31,
+                            KeepFingersRigidOnHand = true,
+                            ClampLimbStretching = true,
+                            AutoCounterTwistWeights = true,
+                            KeptOriginalSubmeshNames = new System.Collections.Generic.List<string>
+                            {
+                                CustomModelAutoRigger.MakeSurfaceKeepKey("_priest", 2),
+                                CustomModelAutoRigger.MakeSurfaceKeepKey("_priest", 3),
+                                CustomModelAutoRigger.MakeSurfaceKeepKey("_priest", 4),
+                                "_primary_weapon_only",
+                                "_primary_weapon_drum_only"
+                            },
+                            CustomSkinWeightOverrides = res32.Success ? CustomWeightPaintEditor.ExportOverrides(surfs32, priestSkel31, surfs32.FirstOrDefault()?.MeshInstance?.Skin) : null
+                        };
+                        var res33 = CustomModelAutoRigger.RigAndBind(gordon31, priest31, opts33);
+                        priestHier31.ScanHero(priest31);
+
+                        var customMeshes33 = priestHier31.Submeshes
+                            .Where(s => s?.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) && s.IsCustomImportedMesh && s.Mesh.Visible)
+                            .Select(s => s.Mesh).Distinct().ToList();
+                        var keptComposite33 = priestHier31.Submeshes
+                            .Where(s => s?.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) && !s.IsCustomImportedMesh && s.Mesh.Visible && s.Mesh.HasMeta("ParentCompositeMesh"))
+                            .Select(s => s.Mesh).ToList();
+                        var keptStandalone33 = priestHier31.Submeshes
+                            .Where(s => s?.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) && !s.IsCustomImportedMesh && s.Mesh.Visible && !s.Mesh.HasMeta("ParentCompositeMesh"))
+                            .Select(s => !string.IsNullOrEmpty(s.RawName) ? s.RawName : s.Mesh.Name.ToString()).ToList();
+
+                        var bundle33 = CustomModelExporter.BuildExportBundle(
+                            customMeshes33,
+                            priestSkel31,
+                            "priest",
+                            heroModelVpkPath: priestEntry30.VmdlRelativePath);
+                        CustomModelExporter.AddPreservedVanillaMeshes(bundle33, keptComposite33, keptStandalone33, priestSkel31);
+
+                        string vmdlRel33 = priestEntry30.VmdlRelativePath.Replace('\\', '/');
+                        if (!vmdlRel33.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) vmdlRel33 += "_c";
+                        var (decompiledVmdl33, subfiles33, vrfBones33) = CustomModelExporter.DecompileVanillaHeroVmdl(bundle33, vmdlRel33, "models/heroes_wip/priest", false);
+                        var availLeafs33 = new System.Collections.Generic.HashSet<string>(
+                            subfiles33.Keys.Select(System.IO.Path.GetFileName),
+                            StringComparer.OrdinalIgnoreCase);
+
+                        var renderMeshes33 = new System.Collections.Generic.List<(string, string)>
+                        {
+                            ("priest", "models/heroes_wip/priest/priest_body_custom.smd"),
+                            ("priest_kept_props", "models/heroes_wip/priest/priest_kept_props.smd")
+                        };
+                        var matNames33 = bundle33.Submeshes.Select(s => CustomModelExporter.SanitizeMaterialName(s.MaterialName)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        string patchedVmdl33 = CustomModelExporter.GeneratePatchedVmdl(
+                            decompiledVmdl33,
+                            bundle33,
+                            "models/heroes_wip/priest",
+                            "materials/models/heroes_wip/priest",
+                            renderMeshes33,
+                            matNames33,
+                            availLeafs33,
+                            includeAnimGraph2Nodes: true);
+
+                        string tmpKeptSmd33 = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dl_test33_kept_{Guid.NewGuid():N}.smd");
+                        string keptSmdText33 = "";
+                        try
+                        {
+                            if (bundle33.PreservedVanillaSubmeshes.Count > 0)
+                            {
+                                CustomModelExporter.WriteSourceSpaceSmd(tmpKeptSmd33, bundle33, bundle33.PreservedVanillaSubmeshes, vrfBones33);
+                                keptSmdText33 = System.IO.File.ReadAllText(tmpKeptSmd33);
+                            }
+                        }
+                        finally
+                        {
+                            if (System.IO.File.Exists(tmpKeptSmd33)) System.IO.File.Delete(tmpKeptSmd33);
+                        }
+
+                        bool keptCompositeOk33 = bundle33.PreservedVanillaSubmeshes.Count == keptComposite33.Count && bundle33.PreservedVanillaSubmeshes.Count > 0
+                            && bundle33.PreservedVanillaSubmeshes.All(k => !string.IsNullOrEmpty(k.PreserveVanillaVmatPath) && k.PreserveVanillaVmatPath.Contains('/'));
+                        bool keptVmatRemapOk33 = patchedVmdl33.Contains("priest_kept_props", StringComparison.OrdinalIgnoreCase)
+                            && patchedVmdl33.Contains("primary_weapon_only", StringComparison.OrdinalIgnoreCase)
+                            && patchedVmdl33.Contains("to = \"models/heroes_wip/priest/materials/priest_shotgun.vmat\"", StringComparison.OrdinalIgnoreCase)
+                            && patchedVmdl33.Contains("to = \"models/heroes_wip/priest/materials/priest_gun_crossbow.vmat\"", StringComparison.OrdinalIgnoreCase)
+                            && patchedVmdl33.Contains("to = \"models/heroes_wip/priest/materials/priest_stake.vmat\"", StringComparison.OrdinalIgnoreCase)
+                            && !patchedVmdl33.Contains("priest_lowerbody.vmat", StringComparison.OrdinalIgnoreCase)
+                            && !patchedVmdl33.Contains("priest_upperbody.vmat", StringComparison.OrdinalIgnoreCase);
+                        bool keptSmdOk33 = keptSmdText33.Contains("priest_shotgun", StringComparison.OrdinalIgnoreCase)
+                            && keptSmdText33.Contains("priest_gun_crossbow", StringComparison.OrdinalIgnoreCase)
+                            && keptSmdText33.Contains("priest_stake", StringComparison.OrdinalIgnoreCase);
+
+                        // Also test live compilation with resourcecompiler.exe if available to verify external material references survive compile
+                        bool compiledKeptMatOk33 = true;
+                        string compiledKeptMatDetail33 = "skipped (no compiler)";
+                        var pm33 = new GamePathManager();
+                        string compilerExe33 = pm33.ResolveResourceCompilerExe();
+                        if (!string.IsNullOrEmpty(compilerExe33) && System.IO.File.Exists(compilerExe33))
+                        {
+                            string tmpCompileVpk33 = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dl_test33_compile_{Guid.NewGuid():N}.vpk");
+                            try
+                            {
+                                bundle33.ResourceCompilerExe = compilerExe33;
+                                bundle33.OutputVpkPath = tmpCompileVpk33;
+                                var compileRes33 = await CustomModelExporter.ExportAndCompileCustomModelAsync(bundle33);
+                                if (!compileRes33.Success || !System.IO.File.Exists(tmpCompileVpk33))
+                                {
+                                    compiledKeptMatOk33 = false;
+                                    compiledKeptMatDetail33 = $"compile failed: {compileRes33.ErrorMessage}";
+                                }
+                                else
+                                {
+                                    using var outPkg33 = new ValvePak.Package();
+                                    outPkg33.Read(tmpCompileVpk33);
+                                    var vmdlEntry33 = outPkg33.FindEntry("models/heroes_wip/priest/priest.vmdl_c");
+                                    var extRefs33 = new System.Collections.Generic.List<string>();
+                                    if (vmdlEntry33 != null)
+                                    {
+                                        outPkg33.ReadEntry(vmdlEntry33, out byte[] vmdlBytes33);
+                                        using var r33 = new ValveResourceFormat.Resource { FileName = "models/heroes_wip/priest/priest.vmdl_c" };
+                                        using var ms33 = new System.IO.MemoryStream(vmdlBytes33);
+                                        r33.Read(ms33);
+                                        if (r33.ExternalReferences != null)
+                                        {
+                                            foreach (var er in r33.ExternalReferences.ResourceRefInfoList)
+                                                extRefs33.Add(er.Name);
+                                        }
+                                    }
+                                    var allPkgPaths33 = outPkg33.Entries.Values.SelectMany(l => l).Select(e => e.GetFullPath()).ToList();
+                                    GD.Print($"[TEST 33a] Compiled VPK entries ({allPkgPaths33.Count}): {string.Join(", ", allPkgPaths33)}");
+                                    GD.Print($"[TEST 33a] Compiled priest.vmdl_c ExternalReferences ({extRefs33.Count}): {string.Join(", ", extRefs33)}");
+                                    compiledKeptMatOk33 = extRefs33.Any(x => x.Contains("models/heroes_wip/priest/materials/priest_shotgun.vmat", StringComparison.OrdinalIgnoreCase))
+                                        && extRefs33.Any(x => x.Contains("models/heroes_wip/priest/materials/priest_gun_crossbow.vmat", StringComparison.OrdinalIgnoreCase))
+                                        && extRefs33.Any(x => x.Contains("models/heroes_wip/priest/materials/priest_stake.vmat", StringComparison.OrdinalIgnoreCase))
+                                        && !extRefs33.Any(x => x.Contains("models/heroes_wip/priest/materials/priest_lower", StringComparison.OrdinalIgnoreCase))
+                                        && !extRefs33.Any(x => x.Contains("models/heroes_wip/priest/materials/priest_upper", StringComparison.OrdinalIgnoreCase));
+                                    compiledKeptMatDetail33 = $"extRefs={extRefs33.Count}";
+                                }
+                            }
+                            finally
+                            {
+                                if (System.IO.File.Exists(tmpCompileVpk33)) System.IO.File.Delete(tmpCompileVpk33);
+                            }
+                        }
+
+                        if (!res33.Success || !keptCompositeOk33 || !keptVmatRemapOk33 || !keptSmdOk33 || !compiledKeptMatOk33)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 33a] Kept composite/standalone weapon export failed: res33={res33.Success}, keptCount={bundle33.PreservedVanillaSubmeshes.Count}/{keptComposite33.Count}, fullPaths={string.Join("|", bundle33.PreservedVanillaSubmeshes.Select(k => k.PreserveVanillaVmatPath))}, vmdlRemap={keptVmatRemapOk33}, smd={keptSmdOk33}, compiled={compiledKeptMatOk33} ({compiledKeptMatDetail33})");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print($"PASS: [TEST 33a] Kept {bundle33.PreservedVanillaSubmeshes.Count} composite weapon surface(s) + standalone weapons emitted into priest_kept_props.smd & full vanilla .vmat remaps ({compiledKeptMatDetail33}).");
+                        }
+
+                        // 33b: Workspace tracking & .dpp Package/Unpack round-trip
+                        var ws33 = DeadlockPlayground.Workspace.ModWorkspaceSession.Instance;
+                        string tmpDpp33 = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dl_test33_{Guid.NewGuid():N}.dpp");
+                        bool dppRoundTripOk = false;
+                        string dppFail33 = "";
+                        try
+                        {
+                            ws33.StageCustomModel("priest", "Venator", gordonPath, opts33);
+                            int countAfterStage = ws33.GetTotalModifiedCount();
+                            bool stagedPresent = ws33.Manifest.Heroes.TryGetValue("priest", out var stagedH) && stagedH?.CustomModel != null;
+                            bool packed = ws33.PackageProject(tmpDpp33);
+                            ws33.DiscardCustomModel("priest");
+                            bool clearedOk = !ws33.Manifest.Heroes.ContainsKey("priest") || ws33.Manifest.Heroes["priest"].CustomModel == null;
+                            bool unpacked = ws33.UnpackProject(tmpDpp33);
+                            bool restoredPresent = ws33.Manifest.Heroes.TryGetValue("priest", out var restoredH) && restoredH?.CustomModel != null;
+                            string diskRestored = restoredPresent ? ws33.ResolveCustomModelDiskPath(restoredH.CustomModel) : null;
+                            var restoredOpts = restoredPresent ? restoredH.CustomModel.ToRiggingOptions() : null;
+                            dppRoundTripOk = stagedPresent && countAfterStage >= 1 && packed && clearedOk && unpacked && restoredPresent
+                                && !string.IsNullOrEmpty(diskRestored) && System.IO.File.Exists(diskRestored)
+                                && restoredOpts != null
+                                && restoredOpts.Method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig
+                                && restoredOpts.LandmarkPins != null && restoredOpts.LandmarkPins.Count == 16
+                                && restoredOpts.CustomSkinWeightOverrides != null && restoredOpts.CustomSkinWeightOverrides.Count > 0
+                                && restoredOpts.KeptOriginalSubmeshNames != null && restoredOpts.KeptOriginalSubmeshNames.Count == 5;
+                            if (!dppRoundTripOk)
+                                dppFail33 = $"staged={stagedPresent}, cnt={countAfterStage}, pack={packed}, clear={clearedOk}, unpack={unpacked}, rest={restoredPresent}, file={diskRestored}, pins={restoredOpts?.LandmarkPins?.Count ?? -1}, ov={restoredOpts?.CustomSkinWeightOverrides?.Count ?? -1}, kept={restoredOpts?.KeptOriginalSubmeshNames?.Count ?? -1}";
+                        }
+                        finally
+                        {
+                            ws33.DiscardCustomModel("priest");
+                            if (System.IO.File.Exists(tmpDpp33)) System.IO.File.Delete(tmpDpp33);
+                        }
+                        if (!dppRoundTripOk)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 33b] .dpp workspace persistence round-trip failed: {dppFail33}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print("PASS: [TEST 33b] Workspace tracked custom model swap and .dpp pack/unpack restored bundled .glb, 16 pins, weight overrides & kept weapons.");
+                        }
+
+                        // 33c: X-Ray Wireframe Layer 21 isolation + MirrorWeightsSide (L -> R) + SmoothBoneBoundary
+                        var xrayMat33 = CustomWeightPaintEditor.CreateWireframeLineMaterial(new Color(0.32f, 0.82f, 0.98f, 0.52f), 0.0004f, xRayNoDepth: true);
+                        CustomWeightPaintEditor.SyncContainerShadingAndWireframes(
+                            res33.ContainerNode,
+                            showWireframe: false,
+                            wireOnlyClay: false,
+                            heatmapActive: false,
+                            clayMat32,
+                            xrayMat33,
+                            surfs32,
+                            xRayMode: true);
+                        var xrayOverlays33 = new System.Collections.Generic.List<MeshInstance3D>();
+                        foreach (var c in res33.ContainerNode.FindChildren("*", "MeshInstance3D", true, false))
+                        {
+                            if (c is MeshInstance3D wmi && wmi.HasMeta("IsWireframeOverlay") && wmi.GetMeta("IsWireframeOverlay").AsBool())
+                                xrayOverlays33.Add(wmi);
+                        }
+                        bool xrayOk33 = xrayOverlays33.Count > 0 && xrayOverlays33.All(w => w.Visible && w.Layers == 1u && (w.Layers & (1u << 20)) == 0);
+
+                        var surfs33 = CustomWeightPaintEditor.CaptureSurfaces(res33.ContainerNode);
+                        bool mirrorSmoothOk33 = false;
+                        if (surfs33.Count > 0 && priestSkel31 != null)
+                        {
+                            var skin33 = surfs33[0].MeshInstance?.Skin;
+                            if (skin33 != null)
+                            {
+                                int ResolveB33(string bName)
+                                {
+                                    int sb = priestSkel31.FindBone(bName);
+                                    for (int bi = 0; bi < skin33.GetBindCount(); bi++)
+                                    {
+                                        if (sb >= 0 && skin33.GetBindBone(bi) == sb) return bi;
+                                        if (bName.Equals(skin33.GetBindName(bi), StringComparison.Ordinal)) return bi;
+                                    }
+                                    return -1;
+                                }
+                                float ReadVertW33(CustomWeightPaintEditor.SurfaceState s, int v, int bi)
+                                {
+                                    float sum = 0f;
+                                    int o = v * 4;
+                                    for (int k = 0; k < 4; k++) if (s.SkinBones[o + k] == bi) sum += s.Weights[o + k];
+                                    return sum;
+                                }
+
+                                int biHandL33 = ResolveB33("hand_L");
+                                int biHandR33 = ResolveB33("hand_R");
+                                int biPelvis33 = ResolveB33("pelvis");
+                                float pelvisX33 = priestSkel31.GetBoneGlobalRest(priestSkel31.FindBone("pelvis")).Origin.X;
+
+                                // Paint an asymmetric SetOne dab onto left shoulder/arm onto hand_L, then mirror L -> R
+                                CustomWeightPaintEditor.UpdatePosedVertices(surfs33, priestSkel31, skin33);
+                                var leftSurf = surfs33[0];
+                                int leftIdx = -1;
+                                for (int v = 0; v < leftSurf.RestVerts.Length; v++)
+                                {
+                                    if (leftSurf.RestVerts[v].X > pelvisX33 + 0.08f && ReadVertW33(leftSurf, v, biHandL33) < 0.05f)
+                                    {
+                                        leftIdx = v;
+                                        break;
+                                    }
+                                }
+                                if (leftIdx >= 0)
+                                {
+                                    CustomWeightPaintEditor.ApplyBrush(surfs33, leftSurf.PosedVerts[leftIdx], CustomWeightPaintEditor.BrushMode.SetOne, 0.05f, 1.0f, biHandL33, biPelvis33, false, -1, -1);
+                                    bool mirrored = CustomWeightPaintEditor.MirrorWeightsSide(surfs33, priestSkel31, skin33, pelvisX33, leftToRight: true);
+                                    bool smoothed = CustomWeightPaintEditor.SmoothBoneBoundary(surfs33, biHandL33, biHandR33, iterations: 2);
+
+                                    Vector3 targetRight = new Vector3(2f * pelvisX33 - leftSurf.RestVerts[leftIdx].X, leftSurf.RestVerts[leftIdx].Y, leftSurf.RestVerts[leftIdx].Z);
+                                    int bestR = -1; float bestD2 = float.MaxValue;
+                                    for (int v = 0; v < leftSurf.RestVerts.Length; v++)
+                                    {
+                                        float d2 = (leftSurf.RestVerts[v] - targetRight).LengthSquared();
+                                        if (d2 < bestD2) { bestD2 = d2; bestR = v; }
+                                    }
+                                    float rHandRW = bestR >= 0 ? ReadVertW33(leftSurf, bestR, biHandR33) : 0f;
+                                    float rSumW = 0f;
+                                    if (bestR >= 0)
+                                        for (int k = 0; k < 4; k++) rSumW += leftSurf.Weights[bestR * 4 + k];
+                                    mirrorSmoothOk33 = mirrored && smoothed && rHandRW > 0.25f && MathF.Abs(rSumW - 1.0f) < 1e-3f;
+                                }
+                            }
+                        }
+
+                        if (!xrayOk33 || !mirrorSmoothOk33)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 33c] X-Ray / Mirror / Smooth check failed: xray={xrayOk33} ({xrayOverlays33.Count}), mirrorSmooth={mirrorSmoothOk33}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print($"PASS: [TEST 33c] X-Ray enabled {xrayOverlays33.Count} Layer-1-isolated wireframe overlay(s), MirrorWeightsSide(L->R) & SmoothBoneBoundary verified.");
+                        }
+
+                        // 33d: Verify Bug 2 regression guard — ScanHero + CleanupGeneratedSubmeshes keeps SurfaceKept_0/1 hidden and weapons visible
+                        var origPriestMesh33 = priest31.FindChild("_priest", true, false) as MeshInstance3D;
+                        if (origPriestMesh33 == null)
+                            origPriestMesh33 = priest31.FindChild("priest", true, false) as MeshInstance3D;
+                        bool surf0HiddenAfterScan = priestHier31.Submeshes.All(s => !(s.OriginalVmatPath ?? "").Contains("priest_lower", StringComparison.OrdinalIgnoreCase));
+                        priestHier31.CleanupGeneratedSubmeshes();
+                        bool hiddenSurfMatApplied = origPriestMesh33 != null && origPriestMesh33.Mesh != null
+                            && origPriestMesh33.GetSurfaceOverrideMaterial(0) is StandardMaterial3D hiddenOverride33
+                            && hiddenOverride33.AlbedoColor.A < 0.01f
+                            && origPriestMesh33.GetSurfaceOverrideMaterial(2) is not StandardMaterial3D { AlbedoColor.A: < 0.01f };
+                        priestHier31.ScanHero(priest31);
+                        if (!surf0HiddenAfterScan || !hiddenSurfMatApplied)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 33d] Replaced hero surface visibility guard failed: surf0HiddenAfterScan={surf0HiddenAfterScan}, hiddenSurfMatApplied={hiddenSurfMatApplied}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print("PASS: [TEST 33d] Replaced composite body surfaces stay hidden after ScanHero & CleanupGeneratedSubmeshes while kept weapons stay visible.");
+                        }
+                    }
+                    else
+                    {
+                        GD.PrintErr("FAIL: [TEST 31] Could not load priest or gordon_freeman_half-life_1.glb");
+                        allPassed = false;
+                    }
+                    gordon31?.QueueFree();
+                }
             }
             catch (Exception ex)
             {

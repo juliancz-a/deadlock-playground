@@ -542,10 +542,15 @@ public partial class ExportModDialog : CanvasLayer
             return hbox;
         }
 
+        bool hasCustomImportedModel = _allSubmeshes.Any(s =>
+            s.IsCustomImportedMesh ||
+            (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
+             s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool()));
+
         void AddSubmeshRow(SubmeshNodeInfo submesh, bool isPreChecked)
         {
             submesh.IsSelected = isPreChecked;
-            if (isPreChecked)
+            if (isPreChecked && !hasCustomImportedModel)
             {
                 submesh.IsDirty = true;
             }
@@ -554,7 +559,7 @@ public partial class ExportModDialog : CanvasLayer
                              submesh.Mesh.HasMeta("IsOutlineShell") && submesh.Mesh.GetMeta("IsOutlineShell").AsBool();
             string outlineTag = isOutline ? " [OUTLINE SHELL]" : "";
 
-            string statusText = isPreChecked ? (submesh.IsDirty ? "[SELECTED]" : "[MODIFIED]") : "[UNMODIFIED]";
+            string statusText = isPreChecked ? ((hasCustomImportedModel && !submesh.IsCustomImportedMesh && !submesh.IsDirty) ? "[KEPT PROP]" : (submesh.IsDirty ? "[SELECTED]" : "[MODIFIED]")) : "[UNMODIFIED]";
             string fileBadge = !string.IsNullOrEmpty(submesh.OriginalVmatPath) ? Path.GetFileName(submesh.OriginalVmatPath) : null;
 
             AddChecklistRow($"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]{outlineTag}", isPreChecked, statusText, fileBadge, out var chk, out var lblStatusBadge);
@@ -564,8 +569,9 @@ public partial class ExportModDialog : CanvasLayer
                 submesh.IsSelected = pressed;
                 if (pressed)
                 {
-                    submesh.IsDirty = true;
-                    lblStatusBadge.Text = "[SELECTED]";
+                    if (!hasCustomImportedModel)
+                        submesh.IsDirty = true;
+                    lblStatusBadge.Text = (hasCustomImportedModel && !submesh.IsCustomImportedMesh && !submesh.IsDirty) ? "[KEPT PROP]" : "[SELECTED]";
                     lblStatusBadge.ThemeTypeVariation = "BadgeLabelSuccess";
                 }
                 else
@@ -579,9 +585,6 @@ public partial class ExportModDialog : CanvasLayer
         }
 
         AddSectionHeader("Hero Model Submeshes");
-        bool hasCustomImportedModel = _allSubmeshes.Any(s =>
-            s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
-            s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool());
         var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
         bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0 || animationEntries.Count > 0;
 
@@ -828,13 +831,18 @@ public partial class ExportModDialog : CanvasLayer
     private void OnConfirmPressed()
     {
         var selectedSubmeshes = new List<SubmeshNodeInfo>();
+        bool hasCustomImported = _allSubmeshes.Any(s =>
+            s.IsCustomImportedMesh ||
+            (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
+             s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool()));
         foreach (var kvp in _submeshCheckboxes)
         {
             var sm = kvp.Value;
             sm.IsSelected = kvp.Key.ButtonPressed;
             if (sm.IsSelected)
             {
-                sm.IsDirty = true;
+                if (!hasCustomImported)
+                    sm.IsDirty = true;
                 selectedSubmeshes.Add(sm);
             }
         }

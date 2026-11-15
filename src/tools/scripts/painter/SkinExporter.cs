@@ -203,6 +203,19 @@ namespace DeadlockPlayground.Painter
                 return _layerManager != null && _layerManager.HasChannelEdits(smInfo, MaterialTextureChannel.Color);
             }
 
+            var actuallyPaintedNonCustomKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (config.TargetSubmeshes != null)
+            {
+                foreach (var sm in config.TargetSubmeshes)
+                {
+                    if (sm?.Mesh == null || sm.IsCustomImportedMesh) continue;
+                    string matKeySm = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
+                    bool hasActualPaint = (_layerManager != null && _layerManager.HasPaintStrokes(matKeySm)) || HasAnyChannelEdits(sm);
+                    if (hasActualPaint)
+                        actuallyPaintedNonCustomKeys.Add(ResolveSubmeshKey(sm));
+                }
+            }
+
             var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && (s.IsDirty || HasAnyChannelEdits(s))).ToList();
             if (candidateSubmeshes == null || candidateSubmeshes.Count == 0)
             {
@@ -386,6 +399,26 @@ namespace DeadlockPlayground.Painter
                     compilerExe: config.ResourceCompilerPath,
                     deadlockGamePath: config.DeadlockGamePath
                 );
+
+                // Register kept visible vanilla props & split composite surfaces (e.g. shotgun, crossbow, stake)
+                if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
+                {
+                    bool anySelectedFlag = config.TargetSubmeshes.Any(s => s.IsSelected);
+                    var keptCompositeMeshes = new List<MeshInstance3D>();
+                    var keptStandaloneNames = new List<string>();
+                    foreach (var sm in config.TargetSubmeshes)
+                    {
+                        if (sm?.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh) || sm.IsCustomImportedMesh || !sm.Mesh.Visible)
+                            continue;
+                        if (anySelectedFlag && !sm.IsSelected)
+                            continue;
+                        if (sm.Mesh.HasMeta("ParentCompositeMesh"))
+                            keptCompositeMeshes.Add(sm.Mesh);
+                        else
+                            keptStandaloneNames.Add(!string.IsNullOrEmpty(sm.RawName) ? sm.RawName : sm.Mesh.Name.ToString());
+                    }
+                    CustomModelExporter.AddPreservedVanillaMeshes(preExtractedCustomBundle, keptCompositeMeshes, keptStandaloneNames, skeleton);
+                }
 
                 // If the user actually painted on a specific custom submesh in the 3D painter, merge the baked paint strokes
                 // directly into preExtractedCustomBundle.Submeshes so CustomModelExporter compiles the painted texture.
@@ -571,9 +604,12 @@ bool isSourceModInTargetAddons = false;
                 else if (hasCustomModel)
                 {
                     // Custom imported meshes are compiled with their own .vmat_c and .vtex_c in Step 2.5 (CustomModelExporter).
-                    // Exclude IsCustomImportedMesh from Step A so we never emit duplicate unreferenced <mat>_color.vtex_c files!
+                    // Kept vanilla weapons use vanilla .vmat remaps directly unless the user actually painted them in 3D,
+                    // preventing spurious .vtex_c overrides on unpainted props.
                     submeshesToExport = submeshesToExport
-                        .Where(s => s.IsDirty && !s.IsCustomImportedMesh)
+                        .Where(s => !s.IsCustomImportedMesh &&
+                                    (actuallyPaintedNonCustomKeys.Contains(ResolveSubmeshKey(s)) ||
+                                     (_layerManager == null && s.IsDirty)))
                         .ToList();
                 }
 

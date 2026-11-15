@@ -497,16 +497,18 @@ public partial class CharacterTabUI : VBoxContainer
             var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
             if (activeHero != null)
             {
+                RegisterCustomModelInWorkspace(filePath, _lastImportedOptions);
+
+                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+                hierarchy?.ScanHero(activeHero);
+
                 ClearSubmeshes(clearHeroNode: false);
                 CollectSubmeshesRecursive(activeHero);
                 PopulateSubmeshList();
 
                 var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
-                // Invalidate cached hero so switching to Paint tab reloads it smoothly without freezing CharacterTabUI
-                paintTab?.ClearHero();
-
-                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
-                hierarchy?.ScanHero(activeHero);
+                // Invalidate cached hero so switching to Paint tab reloads it smoothly while preserving split composite submeshes
+                paintTab?.InvalidateHeroCache();
 
                 var shadingTab = GetTree()?.Root?.FindChild("ShadingTab", true, false) as ShadingTabUI
                               ?? GetTree()?.Root?.FindChild("ShadingTabUI", true, false) as ShadingTabUI;
@@ -586,15 +588,17 @@ public partial class CharacterTabUI : VBoxContainer
             var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
             if (activeHero != null)
             {
+                RegisterCustomModelInWorkspace(_lastImportedFilePath, _lastImportedOptions);
+
+                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+                hierarchy?.ScanHero(activeHero);
+
                 ClearSubmeshes(clearHeroNode: false);
                 CollectSubmeshesRecursive(activeHero);
                 PopulateSubmeshList();
 
                 var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
-                paintTab?.ClearHero();
-
-                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
-                hierarchy?.ScanHero(activeHero);
+                paintTab?.InvalidateHeroCache();
 
                 var shadingTab = GetTree()?.Root?.FindChild("ShadingTab", true, false) as ShadingTabUI
                               ?? GetTree()?.Root?.FindChild("ShadingTabUI", true, false) as ShadingTabUI;
@@ -616,11 +620,99 @@ public partial class CharacterTabUI : VBoxContainer
         };
     }
 
+    private void RegisterCustomModelInWorkspace(string modelFilePath, DeadlockPlayground.Importer.CustomModelAutoRigger.RiggingOptions options)
+    {
+        if (string.IsNullOrEmpty(modelFilePath) || options == null) return;
+        string heroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename;
+        if (string.IsNullOrEmpty(heroId))
+            heroId = _currentHeroNode?.Name.ToString().Replace("Hero_", "").ToLowerInvariant();
+        if (string.IsNullOrEmpty(heroId)) return;
+
+        string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
+        DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.StageCustomModel(heroId, displayName, modelFilePath, options);
+    }
+
+    public bool RestoreCustomModelFromWorkspace(Node3D heroNode, string heroId)
+    {
+        if (heroNode == null || string.IsNullOrEmpty(heroId)) return false;
+        var session = DeadlockPlayground.Workspace.ModWorkspaceSession.Instance;
+        if (session?.Manifest?.Heroes == null ||
+            !session.Manifest.Heroes.TryGetValue(heroId, out var heroEntry) ||
+            heroEntry?.CustomModel == null)
+            return false;
+
+        string modelDiskPath = session.ResolveCustomModelDiskPath(heroEntry.CustomModel);
+        if (string.IsNullOrEmpty(modelDiskPath) || !File.Exists(modelDiskPath))
+        {
+            GD.PrintErr($"[CharacterTabUI] Saved custom model file missing in workspace: '{heroEntry.CustomModel.RelativeModelPath}'.");
+            return false;
+        }
+
+        var sceneRoot = DeadlockPlayground.Importer.CustomModelAutoRigger.LoadAndSanitize3DModelScene(modelDiskPath);
+        if (sceneRoot == null)
+        {
+            GD.PrintErr($"[CharacterTabUI] Failed to parse saved custom model '{modelDiskPath}'.");
+            return false;
+        }
+
+        var options = heroEntry.CustomModel.ToRiggingOptions();
+        options.IsPreviewOnly = false;
+
+        var res = DeadlockPlayground.Importer.CustomModelAutoRigger.RigAndBind(sceneRoot, heroNode, options);
+        if (!res.Success)
+        {
+            sceneRoot.QueueFree();
+            GD.PrintErr($"[CharacterTabUI] Failed to re-bind saved custom model: {res.ErrorMessage}");
+            return false;
+        }
+
+        _currentHeroNode = heroNode;
+        _lastImportedOptions = options;
+        _lastImportedFilePath = modelDiskPath;
+        _lastImportedScene = sceneRoot;
+        _hasCustomModelApplied = true;
+        UpdateContextualButtonsVisibility();
+
+        var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+        hierarchy?.ScanHero(heroNode);
+
+        ClearSubmeshes(clearHeroNode: false);
+        CollectSubmeshesRecursive(heroNode);
+        PopulateSubmeshList();
+
+        var paintTab = GetTree()?.Root?.FindChild("PaintTab", true, false) as PaintTabUI;
+        paintTab?.InvalidateHeroCache();
+
+        var shadingTab = GetTree()?.Root?.FindChild("ShadingTab", true, false) as ShadingTabUI
+                      ?? GetTree()?.Root?.FindChild("ShadingTabUI", true, false) as ShadingTabUI;
+        shadingTab?.SetHero(heroNode);
+
+        var skeleton = DeadlockPlayground.Importer.CustomModelAutoRigger.FindSkeleton(heroNode);
+        if (skeleton != null)
+        {
+            var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                         ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+            playerTab?.SetSkeleton(skeleton);
+
+            var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as DeadlockPlayground.UI.AnimationStudioDock;
+            animDock?.SetSkeleton(skeleton);
+        }
+
+        GD.Print($"[CharacterTabUI] Restored custom 3D model swap for '{heroId}' from workspace/project.");
+        return true;
+    }
+
+    public void ResetCustomModel() => OnResetCustomModelPressed();
+
     private void OnResetCustomModelPressed()
     {
         var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
         if (activeHero != null)
         {
+            string heroId = _vpkLoader?.LastLoadedHeroEntry?.InternalCodename
+                         ?? activeHero.Name.ToString().Replace("Hero_", "").ToLowerInvariant();
+            DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.DiscardCustomModel(heroId);
+
             CustomModelAutoRigger.RemoveCustomModelAndRestoreHero(activeHero);
             _hasCustomModelApplied = false;
             _lastImportedOptions = null;

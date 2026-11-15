@@ -85,6 +85,11 @@ namespace DeadlockPlayground.Importer
                 public bool IsAlphaTest { get; set; }
                 public bool IsDoubleSided { get; set; }
                 public bool IsUnlit { get; set; }
+                /// <summary>
+                /// Non-empty for preserved vanilla split surfaces kept alongside a custom model:
+                /// remaps this surface's material directly to the vanilla .vmat without compiling new .vmat/.vtex assets.
+                /// </summary>
+                public string PreserveVanillaVmatPath { get; set; } = "";
             }
 
             public string HeroCodename { get; set; } = "hero";
@@ -94,6 +99,17 @@ namespace DeadlockPlayground.Importer
             public string OutputVpkPath { get; set; } = "";
             public string ResourceCompilerExe { get; set; } = "";
             public List<SubmeshData> Submeshes { get; } = new();
+            /// <summary>
+            /// Preserved visible vanilla split/composite surfaces (e.g. priest_shotgun, priest_gun_crossbow, priest_stake)
+            /// exported into a separate kept-props SMD using vanilla .vmat remaps.
+            /// </summary>
+            public List<SubmeshData> PreservedVanillaSubmeshes { get; } = new();
+            /// <summary>
+            /// Explicit set of standalone vanilla RenderMesh / .dmx names (trimmed of leading '_') chosen to remain visible.
+            /// When HasExplicitKeptVanillaFilter is true, only these standalone .dmx files are preserved.
+            /// </summary>
+            public HashSet<string> AllowedKeptVanillaDmxNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+            public bool HasExplicitKeptVanillaFilter { get; set; } = false;
             public List<string> BoneNames { get; } = new();
             public Dictionary<string, string> BoneHierarchy { get; } = new(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, Transform3D> BoneLocalRestTransforms { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -488,6 +504,129 @@ namespace DeadlockPlayground.Importer
             }
 
             return bundle;
+        }
+
+        /// <summary>
+        /// Registers kept visible vanilla props onto an existing export bundle on the main thread:
+        /// - Standalone vanilla submeshes go into AllowedKeptVanillaDmxNames (preserved natively as .dmx RenderMeshFiles).
+        /// - Split composite vanilla surfaces (e.g. Venator's shotgun/crossbow/stake split out of priest.dmx) are
+        ///   extracted into PreservedVanillaSubmeshes so they compile into {hero}_kept_props.smd pointing directly to
+        ///   their authentic vanilla .vmat without generating duplicate .vmat/.vtex files.
+        /// </summary>
+        public static void AddPreservedVanillaMeshes(
+            CustomModelExportBundle bundle,
+            IEnumerable<MeshInstance3D> keptCompositeMeshes,
+            IEnumerable<string> keptStandaloneNames,
+            Skeleton3D skeleton)
+        {
+            if (bundle == null) return;
+            bundle.HasExplicitKeptVanillaFilter = true;
+
+            if (keptStandaloneNames != null)
+            {
+                foreach (var rawName in keptStandaloneNames)
+                {
+                    if (string.IsNullOrWhiteSpace(rawName)) continue;
+                    string norm = rawName.Trim();
+                    string noLead = norm.TrimStart('_');
+                    bundle.AllowedKeptVanillaDmxNames.Add(norm);
+                    if (!string.IsNullOrEmpty(noLead))
+                        bundle.AllowedKeptVanillaDmxNames.Add(noLead);
+                }
+            }
+
+            if (keptCompositeMeshes == null) return;
+
+            var emptyClothSet = new HashSet<int>();
+            foreach (var meshInst in keptCompositeMeshes)
+            {
+                if (meshInst == null || !GodotObject.IsInstanceValid(meshInst) || meshInst.Mesh == null || !meshInst.Visible)
+                    continue;
+
+                Mesh mesh = meshInst.Mesh;
+                int surfCount = mesh.GetSurfaceCount();
+                Dictionary<int, int> bindToSkelMap = BuildSkinBindToSkeletonMap(skeleton, meshInst.Skin);
+
+                for (int s = 0; s < surfCount; s++)
+                {
+                    var arrays = mesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
+                    var vVar = arrays[(int)Mesh.ArrayType.Vertex];
+                    if (vVar.VariantType == Variant.Type.Nil) continue;
+                    Vector3[] rawVerts = vVar.AsVector3Array();
+                    if (rawVerts == null || rawVerts.Length == 0) continue;
+
+                    int vCount = rawVerts.Length;
+                    Vector3[] rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal && arrays[(int)Mesh.ArrayType.Normal].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.Normal].AsVector3Array()
+                        : null;
+                    Vector2[] rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV && arrays[(int)Mesh.ArrayType.TexUV].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.TexUV].AsVector2Array()
+                        : null;
+                    int[] rawIndices = arrays.Count > (int)Mesh.ArrayType.Index && arrays[(int)Mesh.ArrayType.Index].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.Index].AsInt32Array()
+                        : null;
+
+                    if (rawNorms == null || rawNorms.Length != vCount)
+                    {
+                        rawNorms = new Vector3[vCount];
+                        Array.Fill(rawNorms, Vector3.Up);
+                    }
+                    if (rawUvs == null || rawUvs.Length != vCount)
+                        rawUvs = new Vector2[vCount];
+                    if (rawIndices == null || rawIndices.Length == 0)
+                    {
+                        rawIndices = new int[vCount];
+                        for (int k = 0; k < vCount; k++) rawIndices[k] = k;
+                    }
+
+                    int[] rawBones = arrays.Count > (int)Mesh.ArrayType.Bones && arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.Bones].AsInt32Array()
+                        : null;
+                    float[] rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights && arrays[(int)Mesh.ArrayType.Weights].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array()
+                        : null;
+
+                    int[] cappedBones = new int[vCount * 4];
+                    float[] cappedWeights = new float[vCount * 4];
+                    NormalizeAndCapWeights(
+                        vCount,
+                        rawBones,
+                        rawWeights,
+                        bindToSkelMap,
+                        emptyClothSet,
+                        skeleton,
+                        bundle.BoneNames.Count,
+                        cappedBones,
+                        cappedWeights,
+                        stabilizeNeckFloatingHead: false);
+
+                    string fullVmatPath = HeroMeshHierarchy.ResolveAuthenticVmatFullPath(meshInst, s);
+                    string origVmatPath = !string.IsNullOrEmpty(fullVmatPath)
+                        ? fullVmatPath
+                        : (meshInst.HasMeta("OriginalVmatPath") ? meshInst.GetMeta("OriginalVmatPath").AsString() : "");
+                    origVmatPath = (origVmatPath ?? "").Replace('\\', '/').TrimStart('/');
+                    if (origVmatPath.EndsWith(".vmat_c", StringComparison.OrdinalIgnoreCase))
+                        origVmatPath = origVmatPath[..^2];
+
+                    string matName = !string.IsNullOrEmpty(origVmatPath)
+                        ? SanitizeMaterialName(Path.GetFileNameWithoutExtension(origVmatPath))
+                        : SanitizeMaterialName(meshInst.Name.ToString());
+
+                    bundle.PreservedVanillaSubmeshes.Add(new CustomModelExportBundle.SubmeshData
+                    {
+                        SubmeshName = surfCount > 1 ? $"{meshInst.Name}_s{s}" : meshInst.Name.ToString(),
+                        MaterialName = matName,
+                        PreserveVanillaVmatPath = origVmatPath,
+                        Vertices = rawVerts,
+                        Normals = rawNorms,
+                        UVs = rawUvs,
+                        Indices = rawIndices,
+                        BoneIndices = cappedBones,
+                        BoneWeights = cappedWeights
+                    });
+                }
+            }
         }
 
         private static Dictionary<int, int> BuildSkinBindToSkeletonMap(Skeleton3D skeleton, Skin skin)
@@ -892,21 +1031,25 @@ namespace DeadlockPlayground.Importer
                     progress?.Report(new ExportProgressReport(0.30f, $"[INFO] Extracting authentic ModelDoc template from vanilla '{vmdlRel}_c' via ValveResourceFormat..."));
                     var (decompiledVmdlText, extractedSubfiles, vrfBones) = DecompileVanillaHeroVmdl(bundle, vmdlRel + "_c", modelFolderRel, reconstructSoftbody: false);
 
-                    // Write physics hull/mesh .dmx subfiles, cloth proxies (when enabled), and non-replaced weapon .dmx subfiles into contentModelDir
+                    // Write physics hull/mesh .dmx subfiles, cloth proxies (when enabled), and non-replaced weapon/prop .dmx subfiles into contentModelDir
                     var writtenSubfileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     bool customReplacesWeapon = bundle.Submeshes.Any(sm => IsWeaponReplacementSubmesh(sm));
+                    var allowedStandaloneDmxLeafs = ResolveAllowedStandaloneDmxLeafs(decompiledVmdlText, bundle, customReplacesWeapon);
 
                     foreach (var (subFileName, subBytes) in extractedSubfiles)
                     {
                         if (subBytes == null || subBytes.Length == 0) continue;
                         string leafName = Path.GetFileName(subFileName);
                         string lowerLeaf = leafName.ToLowerInvariant();
+                        string stem = Path.GetFileNameWithoutExtension(leafName).TrimStart('_');
 
                         bool isPhysicsShape = lowerLeaf.Contains("hull") || lowerLeaf.Contains("phys");
                         bool isClothProxy = lowerLeaf.Contains("cloth_proxy");
-                        bool isWeaponDmx = !customReplacesWeapon &&
-                                           (lowerLeaf.Contains("gun") || lowerLeaf.Contains("weapon")) &&
-                                           !lowerLeaf.Contains("_lod");
+                        bool isWeaponDmx = !lowerLeaf.Contains("_lod") && (
+                            allowedStandaloneDmxLeafs.Contains(leafName) ||
+                            (bundle.HasExplicitKeptVanillaFilter
+                                ? (bundle.AllowedKeptVanillaDmxNames.Contains(stem) || bundle.AllowedKeptVanillaDmxNames.Contains(Path.GetFileNameWithoutExtension(leafName)))
+                                : (!customReplacesWeapon && (lowerLeaf.Contains("gun") || lowerLeaf.Contains("weapon")))));
 
                         if (isPhysicsShape || isClothProxy || isWeaponDmx)
                         {
@@ -946,6 +1089,16 @@ namespace DeadlockPlayground.Importer
                     {
                         (primaryBodyMeshName, smdRelPath)
                     };
+
+                    if (bundle.PreservedVanillaSubmeshes.Count > 0)
+                    {
+                        string keptSmdFileName = $"{modelBaseName}_kept_props.smd";
+                        string keptSmdFullPath = Path.Combine(contentModelDir, keptSmdFileName);
+                        string keptSmdRelPath = $"{modelFolderRel}/{keptSmdFileName}";
+                        progress?.Report(new ExportProgressReport(0.41f, $"[INFO] Writing preserved vanilla props SMD '{keptSmdFileName}' ({bundle.PreservedVanillaSubmeshes.Count} surface(s))..."));
+                        WriteSourceSpaceSmd(keptSmdFullPath, bundle, bundle.PreservedVanillaSubmeshes, targetSkeletonBones);
+                        customRenderMeshes.Add(($"{modelBaseName}_kept_props", keptSmdRelPath));
+                    }
 
                     // 3. Write custom materials (.vmat) and power-of-2 textures (.png + .vtex) into contentMatDir
                     progress?.Report(new ExportProgressReport(0.45f, $"[INFO] Generating custom materials and textures in '{materialsFolderRel}'..."));
@@ -1299,6 +1452,41 @@ namespace DeadlockPlayground.Importer
                             catch { /* Ignore optional subfile extract error */ }
                         }
                     }
+
+                    // Resolve any PreservedVanillaSubmeshes whose PreserveVanillaVmatPath lacks a VPK directory
+                    if (basePackage != null && bundle?.PreservedVanillaSubmeshes != null)
+                    {
+                        foreach (var keptSub in bundle.PreservedVanillaSubmeshes)
+                        {
+                            if (keptSub == null) continue;
+                            string cur = (keptSub.PreserveVanillaVmatPath ?? "").Replace('\\', '/').TrimStart('/');
+                            if (cur.Contains('/')) continue;
+
+                            string stem = !string.IsNullOrEmpty(cur)
+                                ? Path.GetFileNameWithoutExtension(cur)
+                                : SanitizeMaterialName(keptSub.MaterialName);
+                            if (string.IsNullOrEmpty(stem)) continue;
+
+                            string[] candidates =
+                            {
+                                $"{modelFolderRel.TrimEnd('/')}/materials/{stem}.vmat_c",
+                                $"materials/{modelFolderRel.TrimEnd('/')}/{stem}.vmat_c",
+                                $"materials/models/heroes_wip/{bundle.HeroCodename}/{stem}.vmat_c",
+                                $"models/heroes_wip/{bundle.HeroCodename}/materials/{stem}.vmat_c",
+                                $"models/heroes_staging/{bundle.HeroCodename}/materials/{stem}.vmat_c"
+                            };
+
+                            foreach (string cand in candidates)
+                            {
+                                string normCand = cand.Replace('\\', '/').TrimStart('/');
+                                if (basePackage.FindEntry(normCand) != null)
+                                {
+                                    keptSub.PreserveVanillaVmatPath = normCand[..^2]; // strip "_c" -> ".vmat"
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -1508,6 +1696,50 @@ namespace DeadlockPlayground.Importer
                    name.Contains("bow") || name.Contains("katana");
         }
 
+        private static HashSet<string> ResolveAllowedStandaloneDmxLeafs(
+            string decompiledVmdlText,
+            CustomModelExportBundle bundle,
+            bool customReplacesWeapon)
+        {
+            var leafSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(decompiledVmdlText)) return leafSet;
+
+            var blocks = ParseRootNodeChildrenBlocks(decompiledVmdlText);
+            string origRenderMeshBlock = blocks.FirstOrDefault(b => b.ClassName == "RenderMeshList").BlockText;
+            if (string.IsNullOrEmpty(origRenderMeshBlock)) return leafSet;
+
+            int chIdx = IndexOfChildrenArrayOutsideQuotes(origRenderMeshBlock);
+            int ob = chIdx >= 0 ? origRenderMeshBlock.IndexOf('[', chIdx) : -1;
+            int cb = ob >= 0 ? FindMatchingBracket(origRenderMeshBlock, ob, '[', ']') : -1;
+            if (cb <= ob) return leafSet;
+
+            foreach (var rmObj in SplitTopLevelKvObjects(origRenderMeshBlock.Substring(ob + 1, cb - ob - 1)))
+            {
+                string rmName = ExtractKvStringProperty(rmObj, "name");
+                string rmFile = ExtractKvStringProperty(rmObj, "filename");
+                if (string.IsNullOrEmpty(rmName) || string.IsNullOrEmpty(rmFile)) continue;
+                string leaf = Path.GetFileName(rmFile);
+                string stem = Path.GetFileNameWithoutExtension(leaf).TrimStart('_');
+                string cleanRm = rmName.TrimStart('_');
+                if (rmName.Contains("_lod", StringComparison.OrdinalIgnoreCase) ||
+                    leaf.Contains("_lod", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                bool keep = bundle.HasExplicitKeptVanillaFilter
+                    ? (bundle.AllowedKeptVanillaDmxNames.Contains(rmName) ||
+                       bundle.AllowedKeptVanillaDmxNames.Contains(cleanRm) ||
+                       bundle.AllowedKeptVanillaDmxNames.Contains(stem) ||
+                       bundle.AllowedKeptVanillaDmxNames.Contains(Path.GetFileNameWithoutExtension(leaf)))
+                    : (!customReplacesWeapon &&
+                       (rmName.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                        rmName.Contains("weapon", StringComparison.OrdinalIgnoreCase)));
+
+                if (keep)
+                    leafSet.Add(leaf);
+            }
+            return leafSet;
+        }
+
         /// <summary>
         /// Generates the patched ModelDoc .vmdl file by preserving 100% of the vanilla hero's
         /// AttachmentList, NmSkeletonList, AnimGraph2List, AnimConstraintList, WeightListList,
@@ -1526,8 +1758,9 @@ namespace DeadlockPlayground.Importer
         {
             string hero = string.IsNullOrEmpty(bundle.HeroCodename) ? "hero" : bundle.HeroCodename.ToLowerInvariant();
             var blocks = ParseRootNodeChildrenBlocks(decompiledVmdlText);
+            bool customReplacesWeapon = bundle.Submeshes.Any(sm => IsWeaponReplacementSubmesh(sm));
 
-            // Detect preserved weapon RenderMeshFile entries from the vanilla RenderMeshList whose .dmx we extracted
+            // Detect preserved weapon/prop RenderMeshFile entries from the vanilla RenderMeshList whose .dmx we extracted
             var preservedWeaponEntries = new List<(string Name, string Filename)>();
             string origRenderMeshBlock = blocks.FirstOrDefault(b => b.ClassName == "RenderMeshList").BlockText;
             if (!string.IsNullOrEmpty(origRenderMeshBlock) && availableSubfileNames != null)
@@ -1546,9 +1779,23 @@ namespace DeadlockPlayground.Importer
                             if (!string.IsNullOrEmpty(rmName) && !string.IsNullOrEmpty(rmFile))
                             {
                                 string leaf = Path.GetFileName(rmFile);
-                                if (availableSubfileNames.Contains(leaf) &&
-                                    (rmName.Contains("gun", StringComparison.OrdinalIgnoreCase) || rmName.Contains("weapon", StringComparison.OrdinalIgnoreCase)) &&
-                                    !rmName.Contains("_lod", StringComparison.OrdinalIgnoreCase))
+                                string stem = Path.GetFileNameWithoutExtension(leaf).TrimStart('_');
+                                string cleanRm = rmName.TrimStart('_');
+                                if (!availableSubfileNames.Contains(leaf) ||
+                                    rmName.Contains("_lod", StringComparison.OrdinalIgnoreCase) ||
+                                    leaf.Contains("_lod", StringComparison.OrdinalIgnoreCase))
+                                    continue;
+
+                                bool keep = bundle.HasExplicitKeptVanillaFilter
+                                    ? (bundle.AllowedKeptVanillaDmxNames.Contains(rmName) ||
+                                       bundle.AllowedKeptVanillaDmxNames.Contains(cleanRm) ||
+                                       bundle.AllowedKeptVanillaDmxNames.Contains(stem) ||
+                                       bundle.AllowedKeptVanillaDmxNames.Contains(Path.GetFileNameWithoutExtension(leaf)))
+                                    : (!customReplacesWeapon &&
+                                       (rmName.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                                        rmName.Contains("weapon", StringComparison.OrdinalIgnoreCase)));
+
+                                if (keep)
                                 {
                                     preservedWeaponEntries.Add((rmName, rmFile));
                                 }
@@ -1598,7 +1845,7 @@ namespace DeadlockPlayground.Importer
             }
             rmSb.Append("\t\t\t\t]\r\n\t\t\t}");
 
-            // Build MaterialGroupList block mapping custom materials
+            // Build MaterialGroupList block mapping custom materials + kept vanilla prop material paths
             var mgSb = new StringBuilder();
             mgSb.AppendLine("\t\t\t{");
             mgSb.AppendLine("\t\t\t\t_class = \"MaterialGroupList\"");
@@ -1608,12 +1855,32 @@ namespace DeadlockPlayground.Importer
             mgSb.AppendLine("\t\t\t\t\t\t_class = \"DefaultMaterialGroup\"");
             mgSb.AppendLine("\t\t\t\t\t\tremaps = ");
             mgSb.AppendLine("\t\t\t\t\t\t[");
+            var emittedFromMats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var matName in customMaterialNames.Distinct(StringComparer.OrdinalIgnoreCase))
             {
+                emittedFromMats.Add(matName);
                 mgSb.AppendLine("\t\t\t\t\t\t\t{");
                 mgSb.AppendLine($"\t\t\t\t\t\t\t\tfrom = \"{matName}.vmat\"");
                 mgSb.AppendLine($"\t\t\t\t\t\t\t\tto = \"{materialsFolderRel}/{matName}.vmat\"");
                 mgSb.AppendLine("\t\t\t\t\t\t\t},");
+            }
+            if (bundle.PreservedVanillaSubmeshes != null)
+            {
+                foreach (var keptSub in bundle.PreservedVanillaSubmeshes)
+                {
+                    if (string.IsNullOrEmpty(keptSub?.PreserveVanillaVmatPath)) continue;
+                    string fromMat = SanitizeMaterialName(keptSub.MaterialName);
+                    if (!emittedFromMats.Add(fromMat)) continue;
+                    string toVmat = keptSub.PreserveVanillaVmatPath.Replace('\\', '/').TrimStart('/');
+                    if (toVmat.EndsWith(".vmat_c", StringComparison.OrdinalIgnoreCase))
+                        toVmat = toVmat[..^2];
+                    if (!toVmat.EndsWith(".vmat", StringComparison.OrdinalIgnoreCase))
+                        toVmat += ".vmat";
+                    mgSb.AppendLine("\t\t\t\t\t\t\t{");
+                    mgSb.AppendLine($"\t\t\t\t\t\t\t\tfrom = \"{fromMat}.vmat\"");
+                    mgSb.AppendLine($"\t\t\t\t\t\t\t\tto = \"{toVmat}\"");
+                    mgSb.AppendLine("\t\t\t\t\t\t\t},");
+                }
             }
             mgSb.AppendLine("\t\t\t\t\t\t]");
             mgSb.AppendLine("\t\t\t\t\t\tuse_global_default = false");

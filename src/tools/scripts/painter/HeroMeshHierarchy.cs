@@ -171,6 +171,11 @@ namespace DeadlockPlayground.Painter
                     string matPath = ResolveSurfaceMaterialName(mi, 0);
                     string cleanMat = !string.IsNullOrEmpty(matPath) ? Path.GetFileNameWithoutExtension(matPath) : "";
                     mi.SetMeta("OriginalVmatPath", matPath ?? "");
+                    string fullVmatPath = ResolveAuthenticVmatFullPath(mi, 0);
+                    if (!string.IsNullOrEmpty(fullVmatPath))
+                    {
+                        mi.SetMeta("FullVmatPath", fullVmatPath);
+                    }
 
                     Material origMat = GetAuthenticMaterial(mi, 0);
                     if (origMat != null)
@@ -276,6 +281,10 @@ namespace DeadlockPlayground.Painter
                         }
                         newMesh.LightmapSizeHint = mi.Mesh.LightmapSizeHint != Vector2I.Zero ? mi.Mesh.LightmapSizeHint : new Vector2I(256, 256);
 
+                        bool hasSurfKeptMeta = mi.HasMeta($"SurfaceKept_{s}");
+                        bool isSurfKept = !hasSurfKeptMeta || mi.GetMeta($"SurfaceKept_{s}").AsBool();
+                        bool surfVisible = isCompositeVisible && isSurfKept;
+
                         var newMi = new MeshInstance3D
                         {
                             Name = $"{mi.Name}_surf_{s}_{display.Replace(" ", "_").Replace("(", "").Replace(")", "")}",
@@ -284,10 +293,21 @@ namespace DeadlockPlayground.Painter
                             Skeleton = mi.Skeleton,
                             Transform = mi.Transform,
                             Layers = mi.Layers,
-                            Visible = isCompositeVisible
+                            Visible = surfVisible
                         };
+                        newMi.SetMeta("SurfaceIndex", s);
+                        newMi.SetMeta("UserVisibility", surfVisible);
                         newMi.SetMeta("OriginalVmatPath", matName ?? "");
+                        string fullSurfVmatPath = ResolveAuthenticVmatFullPath(mi, s);
+                        if (!string.IsNullOrEmpty(fullSurfVmatPath))
+                        {
+                            newMi.SetMeta("FullVmatPath", fullSurfVmatPath);
+                        }
                         newMi.SetMeta("ParentCompositeMesh", mi);
+                        if (hasSurfKeptMeta && !isSurfKept)
+                        {
+                            newMi.SetMeta("UserHiddenByCustomModel", true);
+                        }
                         if (origMat != null)
                         {
                             newMi.SetMeta("OriginalMaterial_0", origMat);
@@ -300,6 +320,12 @@ namespace DeadlockPlayground.Painter
                         mi.GetParent()?.AddChild(newMi);
                         _generatedSubmeshNodes.Add(newMi);
                         genArray.Add(newMi);
+
+                        if (hasSurfKeptMeta && !isSurfKept)
+                        {
+                            _preSoloVisibility[newMi] = false;
+                            continue;
+                        }
 
                         bool isOutlineShell = (mi.HasMeta("IsOutlineShell") && mi.GetMeta("IsOutlineShell").AsBool()) ||
                                               (origMat != null && origMat.HasMeta("IsOutlineShell") && origMat.GetMeta("IsOutlineShell").AsBool());
@@ -989,6 +1015,32 @@ namespace DeadlockPlayground.Painter
             return FormatCleanMaterialDisplayName(raw, HeroCodename, HeroDisplayName, HeroWipAlias);
         }
 
+        public static string ResolveAuthenticVmatFullPath(MeshInstance3D mi, int s)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi)) return null;
+            var mat = GetAuthenticMaterial(mi, s);
+            if (mat != null)
+            {
+                if (mat.HasMeta("OriginalVmatPath"))
+                {
+                    string metaVmat = mat.GetMeta("OriginalVmatPath").AsString();
+                    if (!string.IsNullOrWhiteSpace(metaVmat) && (metaVmat.Contains('/') || metaVmat.Contains('\\')))
+                        return metaVmat.Replace('\\', '/').TrimStart('/');
+                }
+                if (!string.IsNullOrWhiteSpace(mat.ResourceName) && (mat.ResourceName.Contains('/') || mat.ResourceName.Contains('\\')))
+                    return mat.ResourceName.Replace('\\', '/').TrimStart('/');
+                if (!string.IsNullOrWhiteSpace(mat.ResourcePath) && (mat.ResourcePath.Contains('/') || mat.ResourcePath.Contains('\\')) && !mat.ResourcePath.StartsWith("res://", StringComparison.OrdinalIgnoreCase))
+                    return mat.ResourcePath.Replace('\\', '/').TrimStart('/');
+            }
+            if (mi.HasMeta("FullVmatPath"))
+            {
+                string fullMeta = mi.GetMeta("FullVmatPath").AsString();
+                if (!string.IsNullOrWhiteSpace(fullMeta))
+                    return fullMeta.Replace('\\', '/').TrimStart('/');
+            }
+            return null;
+        }
+
         public static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
         {
             if (mi == null) return null;
@@ -1525,6 +1577,7 @@ namespace DeadlockPlayground.Painter
                 if (node != null && GodotObject.IsInstanceValid(node))
                 {
                     node.Visible = false;
+                    node.GetParent()?.RemoveChild(node);
                     node.QueueFree();
                 }
             }
@@ -1537,6 +1590,31 @@ namespace DeadlockPlayground.Painter
                     bool hiddenByCustom = orig.HasMeta("UserHiddenByCustomModel") && orig.GetMeta("UserHiddenByCustomModel").AsBool();
                     bool userVis = !orig.HasMeta("UserVisibility") || orig.GetMeta("UserVisibility").AsBool();
                     orig.Visible = !hiddenByCustom && userVis;
+                    if (orig.Visible && orig.Mesh != null)
+                    {
+                        int surfCount = orig.Mesh.GetSurfaceCount();
+                        bool anyHiddenSurf = false;
+                        for (int s = 0; s < surfCount; s++)
+                        {
+                            if (orig.HasMeta($"SurfaceKept_{s}") && !orig.GetMeta($"SurfaceKept_{s}").AsBool())
+                            {
+                                anyHiddenSurf = true;
+                                break;
+                            }
+                        }
+                        if (anyHiddenSurf)
+                        {
+                            var hiddenMat = DeadlockPlayground.Importer.CustomModelAutoRigger.CreateHiddenSurfaceMaterial();
+                            for (int s = 0; s < surfCount; s++)
+                            {
+                                bool isKept = !orig.HasMeta($"SurfaceKept_{s}") || orig.GetMeta($"SurfaceKept_{s}").AsBool();
+                                if (!isKept)
+                                {
+                                    orig.SetSurfaceOverrideMaterial(s, hiddenMat);
+                                }
+                            }
+                        }
+                    }
                     if (orig.HasMeta("IsHiddenComposite"))
                     {
                         orig.RemoveMeta("IsHiddenComposite");

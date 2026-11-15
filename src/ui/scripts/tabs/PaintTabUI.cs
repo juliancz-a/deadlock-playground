@@ -1072,6 +1072,14 @@ public partial class PaintTabUI : VBoxContainer
                         var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
                         charTab?.LoadParticleDirectly(targetPath, ownerHeroId: targetHero);
                     }
+                    else if (manifest?.Heroes != null &&
+                             manifest.Heroes.TryGetValue(targetHero, out var restoredHeroEntry) &&
+                             restoredHeroEntry?.CustomModel != null &&
+                             vpkLoader.CurrentHeroNode != null)
+                    {
+                        var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
+                        charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, targetHero);
+                    }
                 }
             }
 
@@ -2313,7 +2321,11 @@ public partial class PaintTabUI : VBoxContainer
         }
     }
 
-    public void ClearHero()
+    public void ClearHero() => ClearHeroInternal(preserveMeshHierarchy: false);
+
+    public void InvalidateHeroCache() => ClearHeroInternal(preserveMeshHierarchy: true);
+
+    private void ClearHeroInternal(bool preserveMeshHierarchy)
     {
         FlushActiveChangesToWorkspace(true);
         _currentHero = null;
@@ -2345,7 +2357,10 @@ public partial class PaintTabUI : VBoxContainer
         _painter?.SetTargetMesh(null);
         _layerManager?.ClearHistory();
         _layerManager?.CleanupHeroAtlas();
-        _meshHierarchy?.ScanHero(null);
+        if (!preserveMeshHierarchy)
+        {
+            _meshHierarchy?.ScanHero(null);
+        }
         _decalStamper?.HidePreview();
 
         UpdateControlsState(false);
@@ -4091,7 +4106,8 @@ public partial class PaintTabUI : VBoxContainer
                 {
                     defaultVis = parent.HasMeta("UserVisibility") ? parent.GetMeta("UserVisibility").AsBool() : parent.Visible;
                 }
-                mi.Visible = mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : defaultVis;
+                bool hiddenByCustom = mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool();
+                mi.Visible = !hiddenByCustom && (mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : defaultVis);
             }
             else if (mi.HasMeta("IsHiddenComposite"))
             {
@@ -4106,15 +4122,17 @@ public partial class PaintTabUI : VBoxContainer
                     {
                         if (sub != null && GodotObject.IsInstanceValid(sub))
                         {
-                            sub.Visible = sub.HasMeta("UserVisibility") ? sub.GetMeta("UserVisibility").AsBool() : compositeUserVis;
+                            bool subHiddenByCustom = sub.HasMeta("UserHiddenByCustomModel") && sub.GetMeta("UserHiddenByCustomModel").AsBool();
+                            sub.Visible = !subHiddenByCustom && (sub.HasMeta("UserVisibility") ? sub.GetMeta("UserVisibility").AsBool() : compositeUserVis);
                         }
                     }
                 }
             }
             else
             {
+                bool hiddenByCustom = mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool();
                 bool userVis = mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : mi.Visible;
-                mi.Visible = userVis;
+                mi.Visible = !hiddenByCustom && userVis;
             }
         }
 

@@ -502,6 +502,8 @@ public partial class ShadingTabUI : VBoxContainer
             int surfaceCount = mi.Mesh.GetSurfaceCount();
             for (int i = 0; i < surfaceCount; i++)
             {
+                if (mi.HasMeta($"SurfaceKept_{i}") && !mi.GetMeta($"SurfaceKept_{i}").AsBool())
+                    continue;
                 Material origMat = HeroMeshHierarchy.GetAuthenticMaterial(mi, i);
                 string matPath = origMat?.ResourceName?.ToLowerInvariant() ?? "";
                 if (string.IsNullOrEmpty(matPath) && mi.HasMeta("SourceMaterialName"))

@@ -355,6 +355,104 @@ namespace DeadlockPlayground.UI
                 cardVBox.AddChild(heroHeader);
                 cardVBox.AddChild(new HSeparator());
 
+                // 0. Custom 3D Model Replacement
+                if (hero.CustomModel != null)
+                {
+                    cardVBox.AddChild(new Label { Text = "• Custom 3D Model Swap", ThemeTypeVariation = "HeaderLabel" });
+
+                    var cmBox = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+                    cmBox.AddThemeConstantOverride("separation", 10);
+                    cmBox.AddChild(new Control { CustomMinimumSize = new Vector2(16, 0) });
+
+                    var cmBadge = new Label
+                    {
+                        Text = "[3D MODEL]",
+                        ThemeTypeVariation = "BadgeLabelInfo",
+                        SizeFlagsVertical = SizeFlags.ShrinkCenter
+                    };
+                    cmBox.AddChild(cmBadge);
+
+                    int pinCount = hero.CustomModel.LandmarkPins?.Count ?? 0;
+                    int weightOverrideCount = hero.CustomModel.CustomSkinWeightOverrides?.Count ?? 0;
+                    string cmDetails = $"{hero.CustomModel.OriginalFileName} ({pinCount} pins, {weightOverrideCount} painted weight surf.)";
+                    var cmLbl = new Label
+                    {
+                        Text = cmDetails,
+                        SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                        ClipText = true,
+                        TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                        TooltipText = hero.CustomModel.RelativeModelPath,
+                        ThemeTypeVariation = "BodyLabel"
+                    };
+                    cmBox.AddChild(cmLbl);
+
+                    bool isCustomActive = isCurrentActiveHero &&
+                                          vpkLoader?.CurrentHeroNode?.FindChild("Custom_Rigged_Character", true, false) != null;
+                    if (isCustomActive)
+                    {
+                        cmBox.AddChild(new Label
+                        {
+                            Text = "[Active Replacement]",
+                            ThemeTypeVariation = "BadgeLabelSuccess",
+                            SizeFlagsVertical = SizeFlags.ShrinkCenter
+                        });
+                    }
+                    else
+                    {
+                        var applyCmBtn = new Button
+                        {
+                            Text = "Apply Model",
+                            CustomMinimumSize = new Vector2(120, 28),
+                            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                            ThemeTypeVariation = "ToolbarButton"
+                        };
+                        string localCmHero = hero.HeroId;
+                        applyCmBtn.Pressed += async () =>
+                        {
+                            CloseModal();
+                            var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
+                            if (vpkLoader != null)
+                            {
+                                string cur = vpkLoader.LastLoadedHeroEntry?.InternalCodename ?? "";
+                                if (!string.Equals(cur, localCmHero, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var catEntry = DeadlockPlayground.Catalog.DeadlockHeroCatalog.GetByCodename(localCmHero)
+                                                ?? DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(localCmHero);
+                                    if (catEntry != null) await vpkLoader.LoadHeroModelAsync(catEntry);
+                                    else await vpkLoader.LoadHeroAsync(localCmHero, localCmHero);
+                                }
+                                if (vpkLoader.CurrentHeroNode != null)
+                                    charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, localCmHero);
+                            }
+                        };
+                        cmBox.AddChild(applyCmBtn);
+                    }
+
+                    var cmTrashBtn = new Button
+                    {
+                        Text = "🗑",
+                        CustomMinimumSize = new Vector2(26, 24),
+                        TooltipText = "Discard custom 3D model replacement",
+                        SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                        Flat = true,
+                        Modulate = new Color(0.9f, 0.45f, 0.45f)
+                    };
+                    string delCmHero = hero.HeroId;
+                    cmTrashBtn.Pressed += () =>
+                    {
+                        ModWorkspaceSession.Instance.DiscardCustomModel(delCmHero);
+                        if (isCurrentActiveHero)
+                        {
+                            var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
+                            charTab?.ResetCustomModel();
+                        }
+                        RefreshList();
+                    };
+                    cmBox.AddChild(cmTrashBtn);
+
+                    cardVBox.AddChild(cmBox);
+                }
+
                 // Group assets into Character Model, Extra Models, VFX
                 var charModels = hero.Assets.Where(a => a.Category == "CharacterModel").ToList();
                 var extraModels = hero.Assets.Where(a => a.Category == "ExtraModel").ToList();

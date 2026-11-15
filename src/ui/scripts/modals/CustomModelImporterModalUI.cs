@@ -66,6 +66,14 @@ namespace DeadlockPlayground.UI
         private Button _btnToggleGhost;
         private HSlider _sliderGhostOpacity;
         private Button _btnToggleBones;
+        private Button _btnToggleXRay;
+        private bool _isXRayMode = false;
+        private OptionButton _optViewportShading;
+        private CustomWeightPaintEditor.ViewportShadingMode _viewportShadingMode = CustomWeightPaintEditor.ViewportShadingMode.Textured;
+        private Material _wireLineMaterialDark;
+        private Material _wireLineMaterialBright;
+        private Material _wireLineMaterialXRay;
+        private Material _wireClayMaterial;
         private OptionButton _optTestAnim;
         private Button _btnAnimPlayPause;
         private HSlider _sliderAnimTimeline;
@@ -74,7 +82,9 @@ namespace DeadlockPlayground.UI
         private OptionButton _optAnimSpeed;
 
         // Tab 1: Align & Scale
+        private TabContainer _rightTabs;
         private Label _lblGeometryStats;
+        private Label _lblPoseCalHint;
         private SpinBox _spinScale;
         private HSlider _sliderScale;
         private SpinBox _spinPosX, _spinPosY, _spinPosZ;
@@ -83,6 +93,7 @@ namespace DeadlockPlayground.UI
         private Button _btnFlipYaw;
         private Button _btnSnapFeet;
         private Button _btnResetTransform;
+        private Control _boxPoseCalibration;
         private OptionButton _optPosePreset;
         private Button _btnAutoCalibratePose;
         private Button _btnResetPoseCal;
@@ -96,6 +107,8 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderLegSpread;
         private Label _lblLegSpreadVal;
         private VBoxContainer _boxAutoSnapOptions;
+        private Control _boxAutoSnapCard;
+        private Control _boxDeformGuardsCard;
         private bool _isUpdatingPoseSliders = false;
         private Control _boxRigidBone;
         private OptionButton _optRigidBone;
@@ -106,6 +119,9 @@ namespace DeadlockPlayground.UI
         private Label _lblRiggingMethodDesc;
         private Control _boxKnnParameters;
         private Control _boxPreRiggedMapping;
+        private Control _boxLandmarkModeSwitchRow;
+        private Button _btnLandmarkStepPins;
+        private Button _btnLandmarkStepPaint;
         private VBoxContainer _boxBoneMappingContainer;
         private Label _lblMappingSummary;
         private LineEdit _txtBoneSearch;
@@ -247,6 +263,39 @@ namespace DeadlockPlayground.UI
         {
             ThemeManager.ThemeChanged -= OnThemeChanged;
             base._ExitTree();
+        }
+
+        public override void _Input(InputEvent @event)
+        {
+            if (@event is InputEventKey key && key.Pressed && !key.Echo && IsWeightPaintActive())
+            {
+                if (key.CtrlPressed && key.Keycode == Key.Z)
+                {
+                    if (key.ShiftPressed) OnWeightRedoPressed();
+                    else OnWeightUndoPressed();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (key.CtrlPressed && key.Keycode == Key.Y)
+                {
+                    OnWeightRedoPressed();
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (!key.CtrlPressed && key.Keycode == Key.Bracketleft && _sliderPaintRadius != null)
+                {
+                    _sliderPaintRadius.Value = Math.Max(_sliderPaintRadius.MinValue, _sliderPaintRadius.Value - 0.01);
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+                if (!key.CtrlPressed && key.Keycode == Key.Bracketright && _sliderPaintRadius != null)
+                {
+                    _sliderPaintRadius.Value = Math.Min(_sliderPaintRadius.MaxValue, _sliderPaintRadius.Value + 0.01);
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+            }
+            base._Input(@event);
         }
 
         private void OnThemeChanged(ThemeProfile _)
@@ -597,12 +646,7 @@ namespace DeadlockPlayground.UI
                 TooltipText = "Toggle Reference Hero Ghost Mannequin"
             };
             SetButtonIcon(_btnToggleGhost, "res://assets/at-icons/eye.svg", 22);
-            _btnToggleGhost.Toggled += (t) =>
-            {
-                _showGhost = t;
-                UpdatePreviewHeroKeepAndGhostMaterials();
-                SetButtonIcon(_btnToggleGhost, t ? "res://assets/at-icons/eye.svg" : "res://assets/at-icons/eye_closed.svg", 22);
-            };
+            _btnToggleGhost.Toggled += (t) => SetHeroGhostEnabled(t);
             tbRow1.AddChild(_btnToggleGhost);
 
             _sliderGhostOpacity = new HSlider
@@ -643,6 +687,42 @@ namespace DeadlockPlayground.UI
                 if (t) RedrawBoneWireframe();
             };
             tbRow1.AddChild(_btnToggleBones);
+
+            _optViewportShading = new OptionButton
+            {
+                CustomMinimumSize = new Vector2(138, 34),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                TooltipText = "Blender-style viewport mesh shading: Textured, Solid + Wireframe overlay, or Wireframe cage."
+            };
+            ConfigureOptionButton(_optViewportShading, 138);
+            _optViewportShading.AddItem("View: Textured", (int)CustomWeightPaintEditor.ViewportShadingMode.Textured);
+            _optViewportShading.AddItem("View: Solid + Wire", (int)CustomWeightPaintEditor.ViewportShadingMode.SolidWire);
+            _optViewportShading.AddItem("View: Wireframe", (int)CustomWeightPaintEditor.ViewportShadingMode.Wireframe);
+            _optViewportShading.Select(0);
+            _optViewportShading.ItemSelected += (idx) =>
+            {
+                _viewportShadingMode = (CustomWeightPaintEditor.ViewportShadingMode)_optViewportShading.GetItemId((int)idx);
+                RefreshViewportShadingAndWireframes();
+            };
+            tbRow1.AddChild(_optViewportShading);
+
+            _btnToggleXRay = new Button
+            {
+                Text = "X-Ray",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(68, 34),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                TooltipText = "See-through translucent mesh + X-Ray wireframe so you can inspect internal bones, pins, and back-side vertices."
+            };
+            SetButtonIcon(_btnToggleXRay, "res://assets/at-icons/eye.svg", 16);
+            _btnToggleXRay.Toggled += (t) =>
+            {
+                _isXRayMode = t;
+                if (IsWeightPaintActive()) RefreshWeightPaintHeatmap();
+                else RefreshViewportShadingAndWireframes();
+            };
+            tbRow1.AddChild(_btnToggleXRay);
 
             tbRow1.AddChild(new VSeparator());
 
@@ -887,17 +967,18 @@ namespace DeadlockPlayground.UI
             };
             bodySplit.AddChild(rightPanel);
 
-            var tabs = new TabContainer
+            _rightTabs = new TabContainer
             {
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 SizeFlagsVertical = Control.SizeFlags.ExpandFill,
                 ClipTabs = true
             };
-            rightPanel.AddChild(tabs);
+            rightPanel.AddChild(_rightTabs);
 
-            tabs.AddChild(BuildTab1AlignAndScale());
-            tabs.AddChild(BuildTab2RiggingAndBones());
-            tabs.AddChild(BuildTab3SubmeshesAndMaterials());
+            _rightTabs.AddChild(BuildTab1AlignAndScale());
+            _rightTabs.AddChild(BuildTab2RiggingAndBones());
+            _rightTabs.AddChild(BuildTab3SubmeshesAndMaterials());
+            _rightTabs.TabChanged += OnRightTabChanged;
 
             // --- 3. BOTTOM FOOTER BAR ---
             var footerHBox = new HBoxContainer
@@ -1043,6 +1124,9 @@ namespace DeadlockPlayground.UI
                 // Forward input to SubViewport for Gizmo3D
                 _subViewport.PushInput(@event);
 
+                if (HandleWeightPaintInput(@event)) return;
+                if (HandlePinInput(@event)) return;
+
                 if (_previewGizmo != null && (_previewGizmo.Editing || _previewGizmo.Hovering))
                 {
                     if (@event is InputEventMouseButton mbPressed && mbPressed.Pressed)
@@ -1169,6 +1253,51 @@ namespace DeadlockPlayground.UI
 
         #region Tab 1: Align & Scale
 
+        private (PanelContainer Card, VBoxContainer Body) CreateInspectorCard(string sectionTitle, string subtitle = null)
+        {
+            var card = new PanelContainer
+            {
+                ThemeTypeVariation = "SubPanelContainer",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            var pad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            pad.AddThemeConstantOverride("margin_left", 10);
+            pad.AddThemeConstantOverride("margin_top", 8);
+            pad.AddThemeConstantOverride("margin_right", 10);
+            pad.AddThemeConstantOverride("margin_bottom", 10);
+            card.AddChild(pad);
+
+            var body = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            body.AddThemeConstantOverride("separation", 8);
+            pad.AddChild(body);
+
+            if (!string.IsNullOrEmpty(sectionTitle))
+            {
+                var lblHeader = new Label
+                {
+                    Text = sectionTitle,
+                    AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                lblHeader.AddThemeFontSizeOverride("font_size", 14);
+                _accentLabels.Add(lblHeader);
+                body.AddChild(lblHeader);
+            }
+            if (!string.IsNullOrEmpty(subtitle))
+            {
+                var lblSub = new Label
+                {
+                    Text = subtitle,
+                    AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                lblSub.AddThemeFontSizeOverride("font_size", 11);
+                _secondaryLabels.Add(lblSub);
+                body.AddChild(lblSub);
+            }
+            return (card, body);
+        }
+
         private Control BuildTab1AlignAndScale()
         {
             var scroll = new ScrollContainer
@@ -1180,9 +1309,9 @@ namespace DeadlockPlayground.UI
             };
 
             var margin = new MarginContainer();
-            margin.AddThemeConstantOverride("margin_left", 12);
-            margin.AddThemeConstantOverride("margin_top", 12);
-            margin.AddThemeConstantOverride("margin_right", 12);
+            margin.AddThemeConstantOverride("margin_left", 10);
+            margin.AddThemeConstantOverride("margin_top", 10);
+            margin.AddThemeConstantOverride("margin_right", 10);
             margin.AddThemeConstantOverride("margin_bottom", 12);
             margin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
             scroll.AddChild(margin);
@@ -1191,13 +1320,17 @@ namespace DeadlockPlayground.UI
             vBox.AddThemeConstantOverride("separation", 10);
             margin.AddChild(vBox);
 
+            // Card A: Placement & Scale
+            var (transformCard, tBody) = CreateInspectorCard("Placement & Scale");
+            vBox.AddChild(transformCard);
+
             _lblGeometryStats = new Label
             {
                 Text = "Geometry: 0 vertices | 0 triangles",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
             _secondaryLabels.Add(_lblGeometryStats);
-            vBox.AddChild(_lblGeometryStats);
+            tBody.AddChild(_lblGeometryStats);
 
             // Quick Auto-Fit Buttons (wrapping HFlowContainer prevents panel width overflow)
             var fitHBox = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -1253,12 +1386,11 @@ namespace DeadlockPlayground.UI
             _btnResetTransform.Pressed += ResetTransform;
             fitHBox.AddChild(_btnResetTransform);
 
-            vBox.AddChild(fitHBox);
-            vBox.AddChild(new HSeparator());
+            tBody.AddChild(fitHBox);
 
             // Uniform Scale
             var lblScale = new Label { Text = "Uniform Scale Factor:" };
-            vBox.AddChild(lblScale);
+            tBody.AddChild(lblScale);
 
             var scaleHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             _spinScale = new SpinBox
@@ -1297,11 +1429,11 @@ namespace DeadlockPlayground.UI
                 ApplyTransformToPreviewModel();
             };
             scaleHBox.AddChild(_sliderScale);
-            vBox.AddChild(scaleHBox);
+            tBody.AddChild(scaleHBox);
 
             // Position Offset (X, Y, Z meters)
             var lblPos = new Label { Text = "Position Offset (X, Y, Z meters):" };
-            vBox.AddChild(lblPos);
+            tBody.AddChild(lblPos);
 
             var posHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             _spinPosX = CreateCoordSpinBox(-50.0, 50.0, 0.01, "X");
@@ -1310,7 +1442,7 @@ namespace DeadlockPlayground.UI
             posHBox.AddChild(_spinPosX);
             posHBox.AddChild(_spinPosY);
             posHBox.AddChild(_spinPosZ);
-            vBox.AddChild(posHBox);
+            tBody.AddChild(posHBox);
 
             _spinPosX.ValueChanged += (_) => ApplyTransformToPreviewModel();
             _spinPosY.ValueChanged += (_) => ApplyTransformToPreviewModel();
@@ -1318,7 +1450,7 @@ namespace DeadlockPlayground.UI
 
             // Rotation (Pitch, Yaw, Roll degrees)
             var lblRot = new Label { Text = "Rotation (Pitch, Yaw, Roll degrees):" };
-            vBox.AddChild(lblRot);
+            tBody.AddChild(lblRot);
 
             var rotHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             _spinRotPitch = CreateCoordSpinBox(-180.0, 180.0, 1.0, "Pitch");
@@ -1327,27 +1459,26 @@ namespace DeadlockPlayground.UI
             rotHBox.AddChild(_spinRotPitch);
             rotHBox.AddChild(_spinRotYaw);
             rotHBox.AddChild(_spinRotRoll);
-            vBox.AddChild(rotHBox);
+            tBody.AddChild(rotHBox);
 
             _spinRotPitch.ValueChanged += (_) => ApplyTransformToPreviewModel();
             _spinRotYaw.ValueChanged += (_) => ApplyTransformToPreviewModel();
             _spinRotRoll.ValueChanged += (_) => ApplyTransformToPreviewModel();
 
-            vBox.AddChild(new HSeparator());
-
-            // Source Pose Preset
-            var lblPreset = new Label { Text = "Source Mesh Pose Preset:" };
-            vBox.AddChild(lblPreset);
+            // Card B: Legacy KNN Reference Pose Calibration (hidden unless KNN Fallback is selected)
+            var (poseCard, poseBody) = CreateInspectorCard("Reference Pose Calibration (KNN Fallback)");
+            poseCard.Visible = false;
+            _boxPoseCalibration = poseCard;
+            vBox.AddChild(poseCard);
 
             _optPosePreset = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             ConfigureOptionButton(_optPosePreset);
             _optPosePreset.AddItem("Match Hero Bind Pose (A-Pose)", (int)CustomModelAutoRigger.PosePreset.MatchHeroBindPose);
-            _optPosePreset.AddItem("T-Pose (Horizontal Arms -> Auto-Conform to Hero)", (int)CustomModelAutoRigger.PosePreset.TPose);
-            _optPosePreset.AddItem("A-Pose (Custom Arm Pitch Angle)", (int)CustomModelAutoRigger.PosePreset.APoseCustomAngle);
-            _optPosePreset.AddItem("Rigid Attachment to Single Bone (Hat / Weapon / Prop)", (int)CustomModelAutoRigger.PosePreset.RigidSingleBone);
+            _optPosePreset.AddItem("T-Pose (Horizontal Arms)", (int)CustomModelAutoRigger.PosePreset.TPose);
+            _optPosePreset.AddItem("A-Pose (Custom Limb Sliders)", (int)CustomModelAutoRigger.PosePreset.APoseCustomAngle);
             _optPosePreset.Select(0);
             _optPosePreset.ItemSelected += OnPosePresetChanged;
-            vBox.AddChild(_optPosePreset);
+            poseBody.AddChild(_optPosePreset);
 
             var calBtnHBox = new HBoxContainer();
             calBtnHBox.AddThemeConstantOverride("separation", 6);
@@ -1355,7 +1486,7 @@ namespace DeadlockPlayground.UI
             {
                 Text = "Auto-Fit Reference Pose",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                TooltipText = "Automatically match the Deadlock hero's arms, elbows, and legs to your unrigged model's pose (no manual finger/bone posing needed)."
+                TooltipText = "Automatically match the Deadlock hero's arms, elbows, and legs to your unrigged model's pose."
             };
             SetButtonIcon(_btnAutoCalibratePose, "res://assets/at-icons/sparkles.svg", 20, StatusTone.Success);
             _btnAutoCalibratePose.Pressed += () => AutoCalibratePoseFromMesh(triggerRigUpdate: true);
@@ -1368,16 +1499,16 @@ namespace DeadlockPlayground.UI
             };
             _btnResetPoseCal.Pressed += ResetPoseCalibration;
             calBtnHBox.AddChild(_btnResetPoseCal);
-            vBox.AddChild(calBtnHBox);
+            poseBody.AddChild(calBtnHBox);
 
-            var lblPoseCalHint = new Label
+            _lblPoseCalHint = new Label
             {
-                Text = "For unrigged characters (arms down, A-pose, or T-pose), use Auto-Fit Reference Pose or adjust the 4 macro limb sliders below so the cyan hero ghost matches your model.",
+                Text = "Adjust these reference sliders so the cyan hero ghost matches your unrigged mesh's rest pose.",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
-            lblPoseCalHint.AddThemeFontSizeOverride("font_size", 11);
-            _secondaryLabels.Add(lblPoseCalHint);
-            vBox.AddChild(lblPoseCalHint);
+            _lblPoseCalHint.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(_lblPoseCalHint);
+            poseBody.AddChild(_lblPoseCalHint);
 
             // Custom Pose Calibration Sliders Box
             _boxCustomArmAngle = new VBoxContainer { Visible = false };
@@ -1442,43 +1573,9 @@ namespace DeadlockPlayground.UI
                 OnCalibrationSliderChanged();
             };
             _boxCustomArmAngle.AddChild(_sliderArmAngle);
-            vBox.AddChild(_boxCustomArmAngle);
+            poseBody.AddChild(_boxCustomArmAngle);
 
-            // Rigid Bone Box
-            _boxRigidBone = new VBoxContainer { Visible = false };
-            var lblRigid = new Label { Text = "Target Hero Attachment Bone:" };
-            _boxRigidBone.AddChild(lblRigid);
-
-            _optRigidBone = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            ConfigureOptionButton(_optRigidBone);
-            _boxRigidBone.AddChild(_optRigidBone);
-            vBox.AddChild(_boxRigidBone);
-
-            vBox.AddChild(new HSeparator());
-
-            // Auto-Snap Full-Body Segment Registrations & Weight Stabilization
-            var limbVBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            limbVBox.AddThemeConstantOverride("separation", 8);
-
-            var lblAlignHeader = new Label { Text = "Alignment & Weight Stabilization Options:" };
-            _primaryLabels.Add(lblAlignHeader);
-            limbVBox.AddChild(lblAlignHeader);
-
-            _boxAutoSnapOptions = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
-            _boxAutoSnapOptions.AddThemeConstantOverride("separation", 8);
-            limbVBox.AddChild(_boxAutoSnapOptions);
-
-            _lblAutoSnapModeHint = new Label
-            {
-                Text = "Auto-Snap options pose a Pre-Rigged armature before remapping bone rotations.",
-                AutowrapMode = TextServer.AutowrapMode.WordSmart,
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-            };
-            _lblAutoSnapModeHint.AddThemeFontSizeOverride("font_size", 12);
-            _secondaryLabels.Add(_lblAutoSnapModeHint);
-            _boxAutoSnapOptions.AddChild(_lblAutoSnapModeHint);
-
-            CheckBox AddDescribedCheckBox(string title, string description, string tooltip, bool defaultChecked, VBoxContainer targetContainer = null)
+            CheckBox AddDescribedCheckBox(string title, string description, string tooltip, bool defaultChecked, VBoxContainer targetContainer)
             {
                 var itemVBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
                 itemVBox.AddThemeConstantOverride("separation", 2);
@@ -1502,61 +1599,85 @@ namespace DeadlockPlayground.UI
                     AutowrapMode = TextServer.AutowrapMode.WordSmart,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
                 };
-                lblDesc.AddThemeFontSizeOverride("font_size", 12);
+                lblDesc.AddThemeFontSizeOverride("font_size", 11);
                 _secondaryLabels.Add(lblDesc);
                 descMargin.AddChild(lblDesc);
                 itemVBox.AddChild(descMargin);
 
-                (targetContainer ?? limbVBox).AddChild(itemVBox);
+                targetContainer.AddChild(itemVBox);
                 return chk;
             }
 
+            // Card C: Hero Limb Conforming (Auto-Snap)
+            var (snapCard, snapBody) = CreateInspectorCard("Hero Limb Conforming (Auto-Snap)");
+            snapCard.Visible = false;
+            _boxAutoSnapCard = snapCard;
+            _boxAutoSnapOptions = snapBody;
+            vBox.AddChild(snapCard);
+
+            _lblAutoSnapModeHint = new Label
+            {
+                Text = "Rotates limbs, legs, and head to match Deadlock's bind pose before animation playback.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            _lblAutoSnapModeHint.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(_lblAutoSnapModeHint);
+            snapBody.AddChild(_lblAutoSnapModeHint);
+
             _chkAutoAlignArms = AddDescribedCheckBox(
-                "Auto-Snap Arms & Wrists to Hero Skeleton",
-                "Aligns your model's shoulders, elbows, and wrists to the hero's rest pose so hands line up with weapons.",
-                "Aligns source arm segments (shoulder, elbow, wrist) to Deadlock hero rest pivots in Hero Space. Prevents wrist breaking and aligns weapon to palm.",
+                "Auto-Snap Arms & Wrists",
+                "Aligns shoulders, elbows, and wrists to the hero's weapon stance.",
+                "Aligns arm segments to Deadlock hero rest pivots in Hero Space. Prevents wrist breaking and aligns weapon grips.",
                 true,
-                _boxAutoSnapOptions);
+                snapBody);
 
             _chkAutoAlignLegs = AddDescribedCheckBox(
-                "Auto-Snap Legs & Feet to Hero Skeleton",
-                "Aligns thighs, knees, and ankles to the hero's athletic stance while keeping feet flat on the floor.",
-                "Aligns source leg segments (thigh, calf, ankle) to Deadlock hero athletic stance in Hero Space, keeping soles flat on the floor (Y >= 0).",
+                "Auto-Snap Legs & Feet",
+                "Aligns thighs, knees, and ankles to the hero's stance while keeping soles on the floor (Y >= 0).",
+                "Aligns leg segments to Deadlock hero athletic stance in Hero Space while keeping soles flat on floor.",
                 true,
-                _boxAutoSnapOptions);
+                snapBody);
 
             _chkAutoAlignHead = AddDescribedCheckBox(
-                "Auto-Snap Torso, Neck & Head to Hero Skeleton",
-                "Aligns the spine, neck, and head to the hero's neck pivot with tilt limits so the head stays upright.",
-                "Aligns source neck and head to Deadlock hero cervical pivot in Hero Space with clamped tilt angle, keeping head upright.",
+                "Auto-Snap Torso, Neck & Head",
+                "Aligns spine, neck, and head to the hero's cervical pivot with tilt clamping.",
+                "Aligns neck and head to Deadlock hero cervical pivot with clamped tilt angle.",
                 true,
-                _boxAutoSnapOptions);
+                snapBody);
+
+            // Card D: Animation Deformation Guards
+            var (guardCard, guardBody) = CreateInspectorCard("Animation Deformation Guards");
+            _boxDeformGuardsCard = guardCard;
+            vBox.AddChild(guardCard);
 
             _chkClampLimbStretching = AddDescribedCheckBox(
-                "Clamp Limb Bone Stretching in Animations",
-                "Limits animation bone translation on shoulders, elbows, wrists, and knees to 1.5 cm so arms don't pull apart during melee or movement.",
-                "Clamps animated limb bone translation displacement (shoulders, elbows, wrists, knees) to 1.5 cm maximum, preserving 100% rotational arcs while preventing melee swings from stretching arms apart.",
-                true);
+                "Clamp Limb Stretching (1.5 cm max)",
+                "Prevents melee/movement animations from pulling elbows, wrists, and knees apart.",
+                "Clamps animated limb bone translation displacement to 1.5 cm max while preserving 100% of joint rotation.",
+                true,
+                guardBody);
 
             _chkStabilizeNeckFloatingHead = AddDescribedCheckBox(
-                "Stabilize Neck Against Floating-Head Stretch",
-                "Locks neck and head vertices onto the neck pivot so heroes with floating-head rigs (like Paradox) don't stretch the neck on jump or zipline animations.",
-                "Binds head and neck vertices to the cervical pivot (neck_0) so floating-head heroes (like Paradox/Chrono) don't pull or stretch the neck during jumping or zipline animations in-game.",
-                _heroCodename == "chrono");
+                "Stabilize Neck (Floating-Head Heroes)",
+                "Anchors head & neck to collar pivot for heroes with separated heads (e.g. Paradox).",
+                "Binds head and neck vertices to the cervical pivot so floating-head heroes don't stretch the neck during jumps.",
+                _heroCodename == "chrono",
+                guardBody);
 
             _chkAutoCounterTwistWeights = AddDescribedCheckBox(
                 "Auto Counter-Twist Thigh & Shoulder Weights",
-                "Blends upper-thigh and upper-arm weights onto Deadlock's procedural *_TWIST bones, smooths hip seams, and cleans stray knee/elbow bleed. Uncheck only if using custom Blender twist weights.",
-                "Automatically distributes proximal thigh and upper-arm weights onto Deadlock's procedural *_TWIST / *_TWIST1 bones, softens rigid 1-bone hip seams for LBS volume preservation, and prunes stray ankle/hand bleeds above the knee/elbow.",
-                true);
+                "Distributes proximal twist weights onto *_TWIST bones and cleans seam bleed. Uncheck only for custom Blender twist weights.",
+                "Distributes proximal thigh/upper-arm weights onto procedural *_TWIST bones and prunes stray knee/elbow bleed.",
+                true,
+                guardBody);
 
             _chkKeepFingersRigid = AddDescribedCheckBox(
                 "Lock Fingers Rigid to Hand (Low-Poly / Mitten Hands)",
-                "Moves finger weights onto hand_L/hand_R so fingerless or solid-palm characters (like HL1 Gordon Freeman) do not twist or tear when Deadlock hero animations curl fingers.",
-                "Collapses individual finger phalanx weights onto hand_L/hand_R. Recommended for fingerless low-poly models and stylized hands.",
-                false);
-
-            vBox.AddChild(limbVBox);
+                "Collapses finger weights onto hand_L/hand_R so fingerless meshes don't tear when curling fingers.",
+                "Collapses individual finger weights onto hand_L/hand_R. Recommended for low-poly and stylized hands.",
+                false,
+                guardBody);
 
             return scroll;
         }
@@ -1590,9 +1711,9 @@ namespace DeadlockPlayground.UI
             };
 
             var margin = new MarginContainer();
-            margin.AddThemeConstantOverride("margin_left", 12);
-            margin.AddThemeConstantOverride("margin_top", 12);
-            margin.AddThemeConstantOverride("margin_right", 12);
+            margin.AddThemeConstantOverride("margin_left", 10);
+            margin.AddThemeConstantOverride("margin_top", 10);
+            margin.AddThemeConstantOverride("margin_right", 10);
             margin.AddThemeConstantOverride("margin_bottom", 12);
             margin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
             scroll.AddChild(margin);
@@ -1601,51 +1722,130 @@ namespace DeadlockPlayground.UI
             vBox.AddThemeConstantOverride("separation", 10);
             margin.AddChild(vBox);
 
+            // Card 1: Model Detection & Rigging Workflow Selector
+            var (methodCard, methodBody) = CreateInspectorCard("Rigging Workflow");
+            vBox.AddChild(methodCard);
+
             _lblRigStatusBadge = new Label
             {
                 Text = "Analyzing Model Rig Status...",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
-            SetRigBadgeStatus("Analyzing Model Rig Status...", StatusTone.Warning);
-            vBox.AddChild(_lblRigStatusBadge);
-
-            vBox.AddChild(new HSeparator());
-
-            // Rigging Method Selector
-            var lblMethod = new Label { Text = "Rigging Method:" };
-            vBox.AddChild(lblMethod);
+            SetRigBadgeStatus("Analyzing Model Rig Status...", StatusTone.Info);
+            methodBody.AddChild(_lblRigStatusBadge);
 
             _optRiggingMethod = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             ConfigureOptionButton(_optRiggingMethod);
-            _optRiggingMethod.AddItem("Option B: Map Existing Skeleton Bones (Pre-Rigged Remap)", (int)CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap);
-            _optRiggingMethod.AddItem("Option C: Auto-Transfer Weights from Hero (Unrigged KNN)", (int)CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection);
-            _optRiggingMethod.AddItem("Option A: Rigid Attachment to Single Bone (Hat / Weapon / Prop)", (int)CustomModelAutoRigger.RiggingMethod.RigidSingleBone);
-            _optRiggingMethod.Select(0);
+            PopulateRiggingMethodOptions(hasRig: true);
             _optRiggingMethod.ItemSelected += OnRiggingMethodChanged;
-            vBox.AddChild(_optRiggingMethod);
+            methodBody.AddChild(_optRiggingMethod);
 
             _lblRiggingMethodDesc = new Label
             {
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            _lblRiggingMethodDesc.AddThemeConstantOverride("font_size", 12);
+            _lblRiggingMethodDesc.AddThemeFontSizeOverride("font_size", 11);
             _secondaryLabels.Add(_lblRiggingMethodDesc);
-            vBox.AddChild(_lblRiggingMethodDesc);
+            methodBody.AddChild(_lblRiggingMethodDesc);
 
-            vBox.AddChild(new HSeparator());
+            // Segmented Step Switcher for Landmark Auto-Rig (Step 1: Pins | Step 2: Paint Weights)
+            var stepRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            stepRow.AddThemeConstantOverride("separation", 6);
+            _boxLandmarkModeSwitchRow = stepRow;
 
-            // KNN Parameters Box
-            _boxKnnParameters = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            _boxKnnParameters.AddThemeConstantOverride("separation", 8);
+            _btnLandmarkStepPins = new Button
+            {
+                Text = "1. Place Joint Pins",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = true,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 34),
+                TooltipText = "Position the 16 joint pins in the 3D viewport to fit your mesh."
+            };
+            SetButtonIcon(_btnLandmarkStepPins, "res://assets/at-icons/bone.svg", 18);
 
-            var lblTransferTitle = new Label { Text = "Unrigged Skinning / Weight Transfer Parameters:", AutowrapMode = TextServer.AutowrapMode.WordSmart };
-            _boxKnnParameters.AddChild(lblTransferTitle);
+            _btnLandmarkStepPaint = new Button
+            {
+                Text = "2. Paint Bone Weights",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 34),
+                TooltipText = "Switch to interactive 3D Weight Paint & Heatmap mode to refine hands, shoulders, and creases."
+            };
+            SetButtonIcon(_btnLandmarkStepPaint, "res://assets/at-icons/brush.svg", 18);
+
+            _btnLandmarkStepPins.Pressed += () => SetLandmarkWorkspaceStep(paintStep: false);
+            _btnLandmarkStepPaint.Pressed += () => SetLandmarkWorkspaceStep(paintStep: true);
+            stepRow.AddChild(_btnLandmarkStepPins);
+            stepRow.AddChild(_btnLandmarkStepPaint);
+            vBox.AddChild(stepRow);
+
+            _boxLandmarkPins = BuildLandmarkPinPanel();
+            vBox.AddChild(_boxLandmarkPins);
+
+            _boxWeightPaintSection = BuildWeightPaintPanel();
+            vBox.AddChild(_boxWeightPaintSection);
+
+            // Rigid Attachment Card (moved into Tab 2 where bone targeting belongs)
+            var (rigidCard, rigidBody) = CreateInspectorCard("Rigid Bone Attachment", "Attaches the entire model rigidly to a single Deadlock hero bone.");
+            rigidCard.Visible = false;
+            _boxRigidBone = rigidCard;
+
+            _optRigidBone = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optRigidBone);
+            _optRigidBone.ItemSelected += (_) => TriggerRealtimeRigUpdate();
+            rigidBody.AddChild(_optRigidBone);
+
+            var quickBoneFlow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            quickBoneFlow.AddThemeConstantOverride("h_separation", 6);
+            quickBoneFlow.AddThemeConstantOverride("v_separation", 6);
+            void AddQuickBoneChip(string label, params string[] candidates)
+            {
+                var chip = new Button
+                {
+                    Text = label,
+                    ThemeTypeVariation = "ToolbarButton",
+                    CustomMinimumSize = new Vector2(72, 28)
+                };
+                chip.Pressed += () =>
+                {
+                    if (_optRigidBone == null) return;
+                    foreach (string c in candidates)
+                    {
+                        for (int i = 0; i < _optRigidBone.ItemCount; i++)
+                        {
+                            string txt = _optRigidBone.GetItemText(i).Replace("★ ", "");
+                            if (txt.Equals(c, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _optRigidBone.Select(i);
+                                TriggerRealtimeRigUpdate();
+                                return;
+                            }
+                        }
+                    }
+                };
+                quickBoneFlow.AddChild(chip);
+            }
+            AddQuickBoneChip("Head", "head");
+            AddQuickBoneChip("Chest", "spine_3", "spine_2");
+            AddQuickBoneChip("Hand R", "hand_R", "weapon_hand_R");
+            AddQuickBoneChip("Hand L", "hand_L", "weapon_hand_L");
+            rigidBody.AddChild(quickBoneFlow);
+            vBox.AddChild(rigidCard);
+
+            // Legacy KNN Fallback Card
+            var (knnCard, knnBody) = CreateInspectorCard("Legacy KNN Weight Transfer Parameters", "Fallback proximity transfer for non-humanoids. Adjust Reference Pose in Tab 1.");
+            knnCard.Visible = false;
+            _boxKnnParameters = knnCard;
 
             // KNN Search Radius
             var lblKnn = new Label { Text = "KNN Donor Search Radius (meters):" };
             _secondaryLabels.Add(lblKnn);
-            _boxKnnParameters.AddChild(lblKnn);
+            knnBody.AddChild(lblKnn);
 
             var knnHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             _spinKnnRadius = new SpinBox
@@ -1682,12 +1882,12 @@ namespace DeadlockPlayground.UI
                 }
             };
             knnHBox.AddChild(_sliderKnnRadius);
-            _boxKnnParameters.AddChild(knnHBox);
+            knnBody.AddChild(knnHBox);
 
             // Laplacian Smoothing Iterations
             var lblLap = new Label { Text = "Laplacian Smoothing Iterations (0..5):" };
             _secondaryLabels.Add(lblLap);
-            _boxKnnParameters.AddChild(lblLap);
+            knnBody.AddChild(lblLap);
 
             _spinLaplacian = new SpinBox
             {
@@ -1696,7 +1896,7 @@ namespace DeadlockPlayground.UI
                 Step = 1,
                 Value = 3
             };
-            _boxKnnParameters.AddChild(_spinLaplacian);
+            knnBody.AddChild(_spinLaplacian);
 
             _chkExcludeClothHair = new CheckBox
             {
@@ -1705,9 +1905,9 @@ namespace DeadlockPlayground.UI
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            _boxKnnParameters.AddChild(_chkExcludeClothHair);
+            knnBody.AddChild(_chkExcludeClothHair);
 
-            vBox.AddChild(_boxKnnParameters);
+            vBox.AddChild(knnCard);
 
             // Pre-Rigged Mapping Box (Categorized Collapsible Accordions inside single outer ScrollContainer)
             _boxPreRiggedMapping = new VBoxContainer
@@ -1808,43 +2008,140 @@ namespace DeadlockPlayground.UI
             return scroll;
         }
 
+        private void PopulateRiggingMethodOptions(bool hasRig)
+        {
+            if (_optRiggingMethod == null) return;
+            _optRiggingMethod.Clear();
+            if (hasRig)
+            {
+                _optRiggingMethod.AddItem("Skeleton Bone Remap (Recommended — Preserves Rig)", (int)CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap);
+                _optRiggingMethod.AddItem("Landmark Auto-Rig (Rebuild Rig from 16 Pins)", (int)CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig);
+                _optRiggingMethod.AddItem("Rigid Bone Attachment (Props / Hats / Weapons)", (int)CustomModelAutoRigger.RiggingMethod.RigidSingleBone);
+                _optRiggingMethod.AddItem("Legacy: Surface Weight Transfer (KNN Fallback)", (int)CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection);
+            }
+            else
+            {
+                _optRiggingMethod.AddItem("Landmark Auto-Rig (Recommended — 16 Joint Pins)", (int)CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig);
+                _optRiggingMethod.AddItem("Rigid Bone Attachment (Props / Hats / Weapons)", (int)CustomModelAutoRigger.RiggingMethod.RigidSingleBone);
+                _optRiggingMethod.AddItem("Legacy: Surface Weight Transfer (KNN Fallback)", (int)CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection);
+            }
+            _optRiggingMethod.Select(0);
+        }
+
+        private void SetLandmarkWorkspaceStep(bool paintStep)
+        {
+            if (_btnLandmarkStepPins != null) _btnLandmarkStepPins.SetPressedNoSignal(!paintStep);
+            if (_btnLandmarkStepPaint != null) _btnLandmarkStepPaint.SetPressedNoSignal(paintStep);
+            if (_btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed != paintStep)
+            {
+                _btnWeightPaintMode.ButtonPressed = paintStep;
+            }
+            else
+            {
+                OnWeightPaintModeToggled(paintStep);
+            }
+            UpdateRiggingMethodPanelVisibility();
+        }
+
+        private void UpdateRiggingMethodPanelVisibility()
+        {
+            var method = _optRiggingMethod != null && _optRiggingMethod.Selected >= 0
+                ? (CustomModelAutoRigger.RiggingMethod)_optRiggingMethod.GetItemId(_optRiggingMethod.Selected)
+                : CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig;
+
+            bool isLandmark = method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig;
+            bool isPreRigged = method == CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap;
+            bool isKnn = method == CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection;
+            bool isRigid = method == CustomModelAutoRigger.RiggingMethod.RigidSingleBone;
+            bool paintStep = _btnWeightPaintMode?.ButtonPressed ?? false;
+
+            if (_boxLandmarkModeSwitchRow != null) _boxLandmarkModeSwitchRow.Visible = isLandmark;
+            if (_boxLandmarkPins != null) _boxLandmarkPins.Visible = isLandmark && !paintStep;
+            if (_boxWeightPaintSection != null) _boxWeightPaintSection.Visible = isPreRigged || (isLandmark && paintStep);
+            if (_btnWeightPaintMode != null) _btnWeightPaintMode.Visible = isPreRigged;
+            if (_boxKnnParameters != null) _boxKnnParameters.Visible = isKnn;
+            if (_boxPreRiggedMapping != null) _boxPreRiggedMapping.Visible = isPreRigged;
+            if (_boxRigidBone != null) _boxRigidBone.Visible = isRigid;
+            if (_boxPoseCalibration != null) _boxPoseCalibration.Visible = isKnn;
+            if (_boxAutoSnapCard != null) _boxAutoSnapCard.Visible = isLandmark || isPreRigged;
+            if (_boxAutoSnapOptions != null) _boxAutoSnapOptions.Visible = isLandmark || isPreRigged;
+            if (_boxDeformGuardsCard != null) _boxDeformGuardsCard.Visible = !isRigid;
+        }
+
         private void OnRiggingMethodChanged(long index)
         {
             var method = _optRiggingMethod.Selected >= 0
                 ? (CustomModelAutoRigger.RiggingMethod)_optRiggingMethod.GetItemId(_optRiggingMethod.Selected)
-                : CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection;
+                : CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig;
 
-            _boxKnnParameters.Visible = (method == CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection);
-            _boxPreRiggedMapping.Visible = (method == CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap);
+            bool isKnn = method == CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection;
+            bool isPreRigged = method == CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap ||
+                               method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig;
+
+            if (!isPreRigged && _btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
+            {
+                _btnWeightPaintMode.ButtonPressed = false;
+            }
+            if (_btnLandmarkStepPins != null) _btnLandmarkStepPins.SetPressedNoSignal(!(_btnWeightPaintMode?.ButtonPressed ?? false));
+            if (_btnLandmarkStepPaint != null) _btnLandmarkStepPaint.SetPressedNoSignal(_btnWeightPaintMode?.ButtonPressed ?? false);
+
+            UpdateRiggingMethodPanelVisibility();
+
+            if (_optPosePreset != null) _optPosePreset.Disabled = !isKnn;
+            if (_btnAutoCalibratePose != null) _btnAutoCalibratePose.Disabled = !isKnn;
+            if (_btnResetPoseCal != null) _btnResetPoseCal.Disabled = !isKnn;
+            if (_boxCustomArmAngle != null && !isKnn) _boxCustomArmAngle.Visible = false;
+            if (_lblPoseCalHint != null)
+            {
+                _lblPoseCalHint.Text = isKnn
+                    ? "Adjust these reference sliders so the cyan hero ghost matches your unrigged mesh's rest pose."
+                    : "Adjusts reference hero pose for KNN transfer.";
+            }
+
+            if (_cachedSourceSkeleton == null || _cachedSourceSkeleton.GetBoneCount() == 0)
+            {
+                SetRigBadgeStatus(method switch
+                {
+                    CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig => "Static Mesh — Landmark Auto-Rig Active (16 Pins)",
+                    CustomModelAutoRigger.RiggingMethod.RigidSingleBone => "Static Mesh — Rigid Bone Attachment",
+                    _ => "Static Mesh — Legacy KNN Transfer Fallback"
+                }, method == CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection ? StatusTone.Warning : StatusTone.Info);
+            }
 
             if (_lblRiggingMethodDesc != null)
             {
                 _lblRiggingMethodDesc.Text = method switch
                 {
+                    CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig =>
+                        "Builds a real humanoid rig inside your mesh from 16 draggable pins, computes clean surface weights, and snaps limb proportions to Deadlock.",
                     CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap =>
-                        "Maps your model's existing skeleton bones directly to matching Deadlock hero bones, preserving authored vertex weights. Use Tab 1 'Auto-Snap' checkboxes to match arm/leg/head rest angles.",
+                        "Maps your model's existing bones to Deadlock's skeleton while preserving authored vertex weights. Use Tab 1 Auto-Snap to match stance.",
                     CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection =>
-                        "Generates new skin weights for an unrigged mesh by projecting weights from the nearest clean Deadlock hero surface vertices (with anatomical capsule fallback and Laplacian smoothing). Match your mesh's arm angle in Tab 1 -> 'Source Mesh Pose Preset'.",
+                        "Fallback for non-humanoid meshes: projects vertex weights directly from nearby hero surface donors. Configure reference pose in Tab 1.",
                     CustomModelAutoRigger.RiggingMethod.RigidSingleBone =>
-                        "Attaches the entire imported mesh rigidly to one selected hero bone (ideal for standalone hats, props, or single-piece weapons) with zero skeletal deformation.",
+                        "Attaches the entire model rigidly to a single hero bone with zero skeletal deformation (ideal for hats, masks, or standalone props).",
                     _ => ""
                 };
             }
 
-            bool isPreRigged = method == CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap;
-            if (_boxAutoSnapOptions != null) _boxAutoSnapOptions.Visible = isPreRigged;
             if (_lblAutoSnapModeHint != null)
             {
                 _lblAutoSnapModeHint.Text = method switch
                 {
+                    CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig =>
+                        "Rotates the pin-built skeleton's arms, legs, and head to match Deadlock's bind pose before animation playback.",
                     CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap =>
-                        "Pre-Rigged Remap active: Auto-Snap rotates your armature's rest limbs to match Deadlock's bind pose before transferring animation.",
-                    CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection =>
-                        "Unrigged KNN active: Auto-Snap checkboxes apply only to Pre-Rigged armatures and have no effect here. Adjust 'Source Mesh Pose Preset' above (T-Pose / A-Pose slider) to match your mesh's arm pitch instead.",
-                    CustomModelAutoRigger.RiggingMethod.RigidSingleBone =>
-                        "Rigid Attachment active: Auto-Snap limb checkboxes are inactive in single-bone mode.",
+                        "Rotates your armature's rest limbs to match Deadlock's bind pose before transferring animation.",
                     _ => ""
                 };
+            }
+            if (method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig)
+            {
+                EnsureLandmarkPins(false);
+            }
+            if (_previewWorldRoot != null && GodotObject.IsInstanceValid(_previewWorldRoot))
+            {
+                ApplyLandmarkPreviewState();
             }
         }
 
@@ -2027,9 +2324,27 @@ namespace DeadlockPlayground.UI
             if (initialOptions != null)
             {
                 RestoreRiggingOptions(initialOptions);
+                SetHeroGhostEnabled(_showGhost);
             }
             else
             {
+                _customSkinOverrides.Clear();
+                _baselineSkinOverrides.Clear();
+                _weightUndoStack.Clear();
+                _weightRedoStack.Clear();
+                _pendingStrokeSnapshot = null;
+                _strokeDirty = false;
+                _paintSurfaces.Clear();
+                _viewportShadingMode = CustomWeightPaintEditor.ViewportShadingMode.Textured;
+                _optViewportShading?.Select(0);
+                UpdatePaintOverrideLabel();
+                UpdateWeightHistoryUI();
+
+                if (_cachedSourceSkeleton == null || _cachedSourceSkeleton.GetBoneCount() == 0)
+                {
+                    SetHeroGhostEnabled(false);
+                    if (_rightTabs != null) _rightTabs.CurrentTab = 1;
+                }
                 // 7. CRITICAL REQUIREMENT 3: Automatic First-Frame World-Space Auto-Fit Height & Camera Frame!
                 AutoFitToHero();
             }
@@ -2113,6 +2428,23 @@ namespace DeadlockPlayground.UI
             if (_chkClampLimbStretching != null) _chkClampLimbStretching.ButtonPressed = options.ClampLimbStretching;
             if (_chkStabilizeNeckFloatingHead != null) _chkStabilizeNeckFloatingHead.ButtonPressed = options.StabilizeNeckFloatingHead;
             if (_chkAutoCounterTwistWeights != null) _chkAutoCounterTwistWeights.ButtonPressed = options.AutoCounterTwistWeights;
+
+            if (options.LandmarkPins != null && options.LandmarkPins.Count > 0)
+            {
+                _landmarkPins = new Dictionary<string, Vector3>(options.LandmarkPins);
+            }
+            _customSkinOverrides.Clear();
+            _baselineSkinOverrides.Clear();
+            _weightUndoStack.Clear();
+            _weightRedoStack.Clear();
+            _pendingStrokeSnapshot = null;
+            _strokeDirty = false;
+            if (options.CustomSkinWeightOverrides != null)
+            {
+                foreach (var (k, v) in options.CustomSkinWeightOverrides) _customSkinOverrides[k] = v;
+            }
+            UpdatePaintOverrideLabel();
+            UpdateWeightHistoryUI();
 
             // 3. Restore Rigging Method
             for (int i = 0; i < _optRiggingMethod.ItemCount; i++)
@@ -3516,7 +3848,8 @@ namespace DeadlockPlayground.UI
 
             if (sourceSkeleton != null && sourceSkeleton.GetBoneCount() > 0)
             {
-                SetRigBadgeStatus($"Pre-Rigged Skeleton ({sourceSkeleton.GetBoneCount()} bones) | Option B Recommended", StatusTone.Success);
+                PopulateRiggingMethodOptions(hasRig: true);
+                SetRigBadgeStatus($"Pre-Rigged Armature ({sourceSkeleton.GetBoneCount()} bones) — Skeleton Remap Ready", StatusTone.Success);
 
                 for (int i = 0; i < _optRiggingMethod.ItemCount; i++)
                 {
@@ -3682,12 +4015,13 @@ namespace DeadlockPlayground.UI
             }
             else
             {
-                SetRigBadgeStatus("Unrigged Static Mesh (Option C: Sanitized KNN Donor Cloud)", StatusTone.Warning);
+                PopulateRiggingMethodOptions(hasRig: false);
+                SetRigBadgeStatus("Static Mesh — Landmark Auto-Rig Active (16 Pins)", StatusTone.Info);
                 if (_chkKeepFingersRigid != null) _chkKeepFingersRigid.ButtonPressed = true;
 
                 for (int i = 0; i < _optRiggingMethod.ItemCount; i++)
                 {
-                    if (_optRiggingMethod.GetItemId(i) == (int)CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection)
+                    if (_optRiggingMethod.GetItemId(i) == (int)CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig)
                     {
                         _optRiggingMethod.Select(i);
                         OnRiggingMethodChanged(i);
@@ -3697,7 +4031,7 @@ namespace DeadlockPlayground.UI
 
                 var lblInfo = new Label
                 {
-                    Text = "Vertex weights will be transferred automatically from Deadlock's donor cloud using CPU Linear Blend Skinning and Laplacian smoothing.",
+                    Text = "This model has no skeleton. Use Landmark Auto-Rig pins above to rig it, or choose Rigid Attachment / KNN Fallback.",
                     AutowrapMode = TextServer.AutowrapMode.WordSmart
                 };
                 _secondaryLabels.Add(lblInfo);
@@ -4265,7 +4599,6 @@ namespace DeadlockPlayground.UI
                 {
                     SelectPosePresetById((int)CustomModelAutoRigger.PosePreset.APoseCustomAngle);
                     if (_boxCustomArmAngle != null) _boxCustomArmAngle.Visible = true;
-                    if (_boxRigidBone != null) _boxRigidBone.Visible = false;
                 }
             }
             finally
@@ -4289,7 +4622,6 @@ namespace DeadlockPlayground.UI
                 if (_sliderLegSpread != null) { _sliderLegSpread.Value = 0; if (_lblLegSpreadVal != null) _lblLegSpreadVal.Text = "0°"; }
                 SelectPosePresetById((int)CustomModelAutoRigger.PosePreset.MatchHeroBindPose);
                 if (_boxCustomArmAngle != null) _boxCustomArmAngle.Visible = false;
-                if (_boxRigidBone != null) _boxRigidBone.Visible = false;
             }
             finally
             {
@@ -4314,8 +4646,1192 @@ namespace DeadlockPlayground.UI
             }
         }
 
+        #region Landmark Auto-Rig Pin Editor & Weight Paint
+
+        // Pins are stored in imported-model space; visuals are mapped through the current aligned transform.
+        private Dictionary<string, Vector3> _landmarkPins = new();
+        private readonly Dictionary<string, MeshInstance3D> _pinSpheres = new();
+        private MeshInstance3D _pinSkeletonLines;
+        private Control _boxLandmarkPins;
+        private Label _lblActivePinBadge;
+        private CheckBox _chkMirrorPins;
+        private CheckBox _chkShowPins;
+        private string _draggingPin;
+        private string _selectedPin;
+        private string _hoveredPin;
+
+        // Interactive Bone Weight Paint state
+        private Control _boxWeightPaintSection;
+        private VBoxContainer _boxWeightPaintControls;
+        private Button _btnWeightPaintMode;
+        private OptionButton _optPaintBone;
+        private OptionButton _optPaintMode;
+        private HSlider _sliderPaintRadius;
+        private Label _lblPaintRadiusVal;
+        private HSlider _sliderPaintStrength;
+        private Label _lblPaintStrengthVal;
+        private CheckBox _chkPaintMirror;
+        private CheckBox _chkPaintWireframe;
+        private Button _btnPaintUndo;
+        private Button _btnPaintRedo;
+        private Button _btnResetBoneWeights;
+        private Label _lblPaintHistoryStatus;
+        private Label _lblPaintStatus;
+        private readonly Dictionary<string, CustomModelAutoRigger.SkinWeightOverride> _customSkinOverrides = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, CustomModelAutoRigger.SkinWeightOverride> _baselineSkinOverrides = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<CustomWeightPaintEditor.WeightHistoryEntry> _weightUndoStack = new();
+        private readonly List<CustomWeightPaintEditor.WeightHistoryEntry> _weightRedoStack = new();
+        private CustomWeightPaintEditor.WeightHistoryEntry _pendingStrokeSnapshot;
+        private bool _strokeDirty = false;
+        private List<CustomWeightPaintEditor.SurfaceState> _paintSurfaces = new();
+        private StandardMaterial3D _weightHeatmapMaterial;
+        private MeshInstance3D _paintBrushRing;
+        private bool _isPaintingWeights = false;
+
+        private static readonly (string A, string B)[] PinConnections =
+        {
+            ("Pelvis", "Chest"), ("Chest", "Neck"), ("Neck", "Head"),
+            ("Neck", "ShoulderL"), ("ShoulderL", "ElbowL"), ("ElbowL", "WristL"),
+            ("Neck", "ShoulderR"), ("ShoulderR", "ElbowR"), ("ElbowR", "WristR"),
+            ("Pelvis", "HipL"), ("HipL", "KneeL"), ("KneeL", "AnkleL"),
+            ("Pelvis", "HipR"), ("HipR", "KneeR"), ("KneeR", "AnkleR")
+        };
+
+        private bool IsLandmarkMethod()
+        {
+            return _optRiggingMethod != null && _optRiggingMethod.Selected >= 0 &&
+                   (CustomModelAutoRigger.RiggingMethod)_optRiggingMethod.GetItemId(_optRiggingMethod.Selected) == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig;
+        }
+
+        private bool IsKnnMethod()
+        {
+            return _optRiggingMethod != null && _optRiggingMethod.Selected >= 0 &&
+                   (CustomModelAutoRigger.RiggingMethod)_optRiggingMethod.GetItemId(_optRiggingMethod.Selected) == CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection;
+        }
+
+        private bool IsTab2Active() => _rightTabs != null && _rightTabs.CurrentTab == 1;
+        private bool IsBindPoseView() => _optTestAnim == null || _optTestAnim.Selected <= 0;
+        private bool IsWeightPaintActive() => IsTab2Active() && (_btnWeightPaintMode?.ButtonPressed ?? false);
+        private bool IsPinEditActive() => IsLandmarkMethod() && IsTab2Active() && IsBindPoseView() && !IsWeightPaintActive();
+
+        private void SetHeroGhostEnabled(bool enabled)
+        {
+            _showGhost = enabled;
+            if (_btnToggleGhost != null && _btnToggleGhost.ButtonPressed != enabled)
+            {
+                _btnToggleGhost.SetPressedNoSignal(enabled);
+                SetButtonIcon(_btnToggleGhost, enabled ? "res://assets/at-icons/eye.svg" : "res://assets/at-icons/eye_closed.svg", 22);
+            }
+            UpdatePreviewHeroKeepAndGhostMaterials();
+        }
+
+        private void OnRightTabChanged(long tabIdx)
+        {
+            if (tabIdx != 1 && _btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
+            {
+                _btnWeightPaintMode.ButtonPressed = false;
+            }
+            _draggingPin = null;
+            _hoveredPin = null;
+            ApplyLandmarkPreviewState();
+        }
+
+        private static string FormatPinDisplayName(string pin)
+        {
+            if (string.IsNullOrEmpty(pin)) return "";
+            if (pin.EndsWith("L") && pin != "Pelvis") return pin.Substring(0, pin.Length - 1) + " L";
+            if (pin.EndsWith("R")) return pin.Substring(0, pin.Length - 1) + " R";
+            return pin;
+        }
+
+        private static string LandmarkPinToDeadlockBone(string pin)
+        {
+            return pin switch
+            {
+                "Head" => "head",
+                "Neck" => "neck_0",
+                "Chest" => "spine_2",
+                "Pelvis" => "pelvis",
+                "ShoulderL" => "arm_upper_L",
+                "ShoulderR" => "arm_upper_R",
+                "ElbowL" => "arm_lower_L",
+                "ElbowR" => "arm_lower_R",
+                "WristL" => "hand_L",
+                "WristR" => "hand_R",
+                "HipL" => "leg_upper_L",
+                "HipR" => "leg_upper_R",
+                "KneeL" => "leg_lower_L",
+                "KneeR" => "leg_lower_R",
+                "AnkleL" => "ankle_L",
+                "AnkleR" => "ankle_R",
+                _ => pin
+            };
+        }
+
+        private void UpdateActivePinBadge()
+        {
+            if (_lblActivePinBadge == null) return;
+            string active = _draggingPin ?? _hoveredPin ?? _selectedPin;
+            if (string.IsNullOrEmpty(active))
+            {
+                _lblActivePinBadge.Text = "Active Pin: None (hover or drag a pin in the 3D viewport)";
+                return;
+            }
+            string mirror = CustomLandmarkWeightSolver.MirrorName(active);
+            bool mirrored = mirror != null && (_chkMirrorPins?.ButtonPressed ?? true);
+            string b1 = LandmarkPinToDeadlockBone(active);
+            if (mirrored)
+            {
+                string b2 = LandmarkPinToDeadlockBone(mirror);
+                _lblActivePinBadge.Text = $"Editing: {FormatPinDisplayName(active)}  <->  Mirror: {FormatPinDisplayName(mirror)}   ({b1} / {b2})";
+            }
+            else
+            {
+                _lblActivePinBadge.Text = $"Editing: {FormatPinDisplayName(active)}   (Maps to: {b1})";
+            }
+        }
+
+        private Control BuildLandmarkPinPanel()
+        {
+            var (card, box) = CreateInspectorCard(
+                "Step 1: Place Joint Pins (16 Joints)",
+                "Drag the colored pins in the 3D viewport onto your model's joints (orbit camera for depth). Switch to Step 2 or Tab 1/3 to inspect the applied rig.");
+            card.Visible = false;
+
+            var badgePanel = new PanelContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, ThemeTypeVariation = "SubPanelContainer" };
+            var badgePad = new MarginContainer();
+            badgePad.AddThemeConstantOverride("margin_left", 8);
+            badgePad.AddThemeConstantOverride("margin_right", 8);
+            badgePad.AddThemeConstantOverride("margin_top", 6);
+            badgePad.AddThemeConstantOverride("margin_bottom", 6);
+            _lblActivePinBadge = new Label
+            {
+                Text = "Active Pin: None (hover or drag a pin in the 3D viewport)",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            _lblActivePinBadge.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.AccentPrimary)));
+            badgePad.AddChild(_lblActivePinBadge);
+            badgePanel.AddChild(badgePad);
+            box.AddChild(badgePanel);
+
+            _chkMirrorPins = new CheckBox { Text = "Mirror Left <-> Right pins", ButtonPressed = true, TooltipText = "Moving a left pin moves its right counterpart symmetrically (and vice versa)." };
+            _chkMirrorPins.Toggled += _ => { UpdateActivePinBadge(); RefreshPinVisuals(); };
+            box.AddChild(_chkMirrorPins);
+
+            _chkShowPins = new CheckBox { Text = "Show pins and joint skeleton", ButtonPressed = true };
+            _chkShowPins.Toggled += _ => { RefreshPinVisuals(); };
+            box.AddChild(_chkShowPins);
+
+            var ghostHint = new Label
+            {
+                Text = "Tip: Toggle Hero Ghost on the viewport toolbar when comparing silhouettes.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            ghostHint.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(ghostHint);
+            box.AddChild(ghostHint);
+
+            var btn = new Button { Text = "Auto-Place Pins (Reset)", TooltipText = "Re-estimates all 16 joints from your mesh geometry." };
+            btn.Pressed += () =>
+            {
+                _selectedPin = null; _hoveredPin = null; _draggingPin = null;
+                EnsureLandmarkPins(true);
+                UpdateActivePinBadge();
+                RefreshPinVisuals();
+                TriggerRealtimeRigUpdate();
+            };
+            box.AddChild(btn);
+            return card;
+        }
+
+        private Control BuildWeightPaintPanel()
+        {
+            var (card, box) = CreateInspectorCard(
+                "Bone Weight Editor",
+                "Refine hands, shoulders, and joint creases with an interactive 3D weight brush.");
+            card.Visible = false;
+
+            _btnWeightPaintMode = new Button
+            {
+                Text = "Paint Bone Weights (Heatmap)",
+                ToggleMode = true,
+                ButtonPressed = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Switch viewport into interactive 3D weight paint mode with a heat-map overlay (Works in Bind Pose or any Test Animation)."
+            };
+            _btnWeightPaintMode.Toggled += t => OnWeightPaintModeToggled(t);
+            box.AddChild(_btnWeightPaintMode);
+
+            _boxWeightPaintControls = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            _boxWeightPaintControls.AddThemeConstantOverride("separation", 7);
+            box.AddChild(_boxWeightPaintControls);
+
+            var legendLbl = new Label
+            {
+                Text = "Heatmap: 0.0 Blue • 0.25 Cyan • 0.5 Green • 0.75 Yellow • 1.0 Red",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            legendLbl.AddThemeFontSizeOverride("font_size", 11);
+            _accentLabels.Add(legendLbl);
+            _boxWeightPaintControls.AddChild(legendLbl);
+
+            var paintHint = new Label
+            {
+                Text = "LMB Paint • RMB/MMB Orbit & Pan • [ / ] Radius • Ctrl+Z Undo • Ctrl+Y Redo",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            paintHint.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(paintHint);
+            _boxWeightPaintControls.AddChild(paintHint);
+
+            _chkPaintWireframe = new CheckBox
+            {
+                Text = "Show Wireframe Overlay",
+                ButtonPressed = true,
+                TooltipText = "Draws crisp Blender-style topology edges over the heat-map while painting."
+            };
+            _chkPaintWireframe.Toggled += _ =>
+            {
+                RefreshViewportShadingAndWireframes();
+                RefreshWeightPaintHeatmap();
+            };
+            _boxWeightPaintControls.AddChild(_chkPaintWireframe);
+
+            var boneRow = new HBoxContainer();
+            boneRow.AddChild(new Label { Text = "Bone:", CustomMinimumSize = new Vector2(56, 0) });
+            _optPaintBone = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optPaintBone);
+            _optPaintBone.ItemSelected += _ =>
+            {
+                UpdateResetBoneButtonLabel();
+                RefreshWeightPaintHeatmap();
+            };
+            boneRow.AddChild(_optPaintBone);
+            _boxWeightPaintControls.AddChild(boneRow);
+
+            var modeRow = new HBoxContainer();
+            modeRow.AddChild(new Label { Text = "Brush:", CustomMinimumSize = new Vector2(56, 0) });
+            _optPaintMode = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optPaintMode);
+            _optPaintMode.AddItem("Add (+)", (int)CustomWeightPaintEditor.BrushMode.Add);
+            _optPaintMode.AddItem("Subtract (-)", (int)CustomWeightPaintEditor.BrushMode.Subtract);
+            _optPaintMode.AddItem("Smooth", (int)CustomWeightPaintEditor.BrushMode.Smooth);
+            _optPaintMode.AddItem("Set 1.0 (Solid)", (int)CustomWeightPaintEditor.BrushMode.SetOne);
+            _optPaintMode.Select(0);
+            modeRow.AddChild(_optPaintMode);
+            _boxWeightPaintControls.AddChild(modeRow);
+
+            var radRow = new HBoxContainer();
+            radRow.AddChild(new Label { Text = "Radius:", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+            _lblPaintRadiusVal = new Label { Text = "0.08m" };
+            radRow.AddChild(_lblPaintRadiusVal);
+            _boxWeightPaintControls.AddChild(radRow);
+            _sliderPaintRadius = new HSlider { MinValue = 0.02, MaxValue = 0.60, Step = 0.01, Value = 0.08 };
+            _sliderPaintRadius.ValueChanged += v => _lblPaintRadiusVal.Text = $"{v:0.00}m";
+            _boxWeightPaintControls.AddChild(_sliderPaintRadius);
+
+            var strRow = new HBoxContainer();
+            strRow.AddChild(new Label { Text = "Strength:", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+            _lblPaintStrengthVal = new Label { Text = "0.35" };
+            strRow.AddChild(_lblPaintStrengthVal);
+            _boxWeightPaintControls.AddChild(strRow);
+            _sliderPaintStrength = new HSlider { MinValue = 0.05, MaxValue = 1.0, Step = 0.05, Value = 0.35 };
+            _sliderPaintStrength.ValueChanged += v => _lblPaintStrengthVal.Text = $"{v:0.00}";
+            _boxWeightPaintControls.AddChild(_sliderPaintStrength);
+
+            _chkPaintMirror = new CheckBox { Text = "Mirror L <-> R Brush", ButtonPressed = true };
+            _chkPaintMirror.Toggled += _ =>
+            {
+                UpdateResetBoneButtonLabel();
+                RefreshWeightPaintHeatmap();
+            };
+            _boxWeightPaintControls.AddChild(_chkPaintMirror);
+
+            var historyRow = new HBoxContainer();
+            historyRow.AddThemeConstantOverride("separation", 6);
+            _btnPaintUndo = new Button
+            {
+                Text = "Undo",
+                ThemeTypeVariation = "ToolbarButton",
+                Disabled = true,
+                CustomMinimumSize = new Vector2(82, 30),
+                TooltipText = "Undo last brushstroke or weight reset (Ctrl+Z)"
+            };
+            SetButtonIcon(_btnPaintUndo, "res://assets/at-icons/undo.svg", 16);
+            _btnPaintUndo.Pressed += OnWeightUndoPressed;
+            historyRow.AddChild(_btnPaintUndo);
+
+            _btnPaintRedo = new Button
+            {
+                Text = "Redo",
+                ThemeTypeVariation = "ToolbarButton",
+                Disabled = true,
+                CustomMinimumSize = new Vector2(82, 30),
+                TooltipText = "Redo weight adjustment (Ctrl+Y / Ctrl+Shift+Z)"
+            };
+            SetButtonIcon(_btnPaintRedo, "res://assets/at-icons/redo.svg", 16);
+            _btnPaintRedo.Pressed += OnWeightRedoPressed;
+            historyRow.AddChild(_btnPaintRedo);
+
+            _lblPaintHistoryStatus = new Label
+            {
+                Text = "Undo: 0 | Redo: 0",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            _lblPaintHistoryStatus.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(_lblPaintHistoryStatus);
+            historyRow.AddChild(_lblPaintHistoryStatus);
+            _boxWeightPaintControls.AddChild(historyRow);
+
+            _lblPaintStatus = new Label { Text = "Using procedural solver weights (no manual brush edits).", AutowrapMode = TextServer.AutowrapMode.WordSmart };
+            _lblPaintStatus.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(_lblPaintStatus);
+            _boxWeightPaintControls.AddChild(_lblPaintStatus);
+
+            var toolsRow = new HBoxContainer();
+            toolsRow.AddThemeConstantOverride("separation", 6);
+            var btnSmoothBoundary = new Button
+            {
+                Text = "Smooth Seam",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Softens the selected bone's weight falloff edge without disturbing interior weights (Ctrl+Z to undo)."
+            };
+            btnSmoothBoundary.Pressed += OnSmoothBoundaryWeightsPressed;
+            toolsRow.AddChild(btnSmoothBoundary);
+
+            var btnMirrorL2R = new Button
+            {
+                Text = "Mirror L -> R",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Mirrors all painted/auto weights from the Left side to the Right side across center X."
+            };
+            btnMirrorL2R.Pressed += () => OnMirrorSideWeightsPressed(leftToRight: true);
+            toolsRow.AddChild(btnMirrorL2R);
+
+            var btnMirrorR2L = new Button
+            {
+                Text = "Mirror R -> L",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Mirrors all painted/auto weights from the Right side to the Left side across center X."
+            };
+            btnMirrorR2L.Pressed += () => OnMirrorSideWeightsPressed(leftToRight: false);
+            toolsRow.AddChild(btnMirrorR2L);
+            _boxWeightPaintControls.AddChild(toolsRow);
+
+            var poseChipsRow = new HBoxContainer();
+            poseChipsRow.AddThemeConstantOverride("separation", 6);
+            var lblPoseChips = new Label { Text = "Quick Pose:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            lblPoseChips.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(lblPoseChips);
+            poseChipsRow.AddChild(lblPoseChips);
+
+            var btnPoseBind = new Button { Text = "Bind", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Return to Bind Pose (Rest)" };
+            btnPoseBind.Pressed += () =>
+            {
+                if (_optTestAnim != null && _optTestAnim.ItemCount > 0)
+                {
+                    _optTestAnim.Select(0);
+                    OnTestAnimSelected(0);
+                    if (_btnAnimPlayPause != null) _btnAnimPlayPause.ButtonPressed = false;
+                }
+            };
+            poseChipsRow.AddChild(btnPoseBind);
+
+            var btnPoseNext = new Button { Text = "Cycle Anim", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Cycle through hero animations to check deformation while painting" };
+            btnPoseNext.Pressed += () =>
+            {
+                if (_optTestAnim != null && _optTestAnim.ItemCount > 1)
+                {
+                    int next = _optTestAnim.Selected + 1;
+                    if (next >= _optTestAnim.ItemCount || next <= 0) next = 1;
+                    _optTestAnim.Select(next);
+                    OnTestAnimSelected(next);
+                }
+            };
+            poseChipsRow.AddChild(btnPoseNext);
+
+            var btnPosePlay = new Button { Text = "Play / Pause", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Toggle test animation playback" };
+            btnPosePlay.Pressed += () =>
+            {
+                if (_btnAnimPlayPause != null) _btnAnimPlayPause.ButtonPressed = !_btnAnimPlayPause.ButtonPressed;
+            };
+            poseChipsRow.AddChild(btnPosePlay);
+            _boxWeightPaintControls.AddChild(poseChipsRow);
+
+            var resetRow = new HBoxContainer();
+            resetRow.AddThemeConstantOverride("separation", 6);
+
+            _btnResetBoneWeights = new Button
+            {
+                Text = "Reset Bone",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Resets ONLY the currently selected bone (plus its L/R mirror if enabled) back to procedural weights while keeping edits on other bones."
+            };
+            _btnResetBoneWeights.Pressed += OnResetSelectedBoneWeightsPressed;
+            resetRow.AddChild(_btnResetBoneWeights);
+
+            var btnResetWeights = new Button
+            {
+                Text = "Reset All",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Resets all surfaces back to clean procedural solver weights."
+            };
+            btnResetWeights.Pressed += OnResetAllWeightsPressed;
+            resetRow.AddChild(btnResetWeights);
+            _boxWeightPaintControls.AddChild(resetRow);
+
+            return card;
+        }
+
+        private void UpdatePaintOverrideLabel()
+        {
+            if (_lblPaintStatus == null) return;
+            _lblPaintStatus.Text = _customSkinOverrides.Count > 0
+                ? $"Custom weight edits active on {_customSkinOverrides.Count} surface(s)."
+                : "Using procedural solver weights (no manual brush edits).";
+        }
+
+        private void EnsureLandmarkPins(bool force)
+        {
+            if (!force && _landmarkPins.Count >= CustomLandmarkWeightSolver.PinNames.Length) return;
+            if (_liveImportedScene == null || !GodotObject.IsInstanceValid(_liveImportedScene)) return;
+            var selected = new HashSet<string>(GetSelectedImportedSubmeshNames(), StringComparer.OrdinalIgnoreCase);
+            var meshes = CustomModelAutoRigger.CollectMeshes(_liveImportedScene)
+                .Where(m => selected.Count == 0 || selected.Contains(m.Name.ToString())).ToList();
+            var est = CustomLandmarkWeightSolver.EstimateLandmarks(_liveImportedScene, meshes);
+            if (est.Count > 0) _landmarkPins = est;
+        }
+
+        private Color PinColor(string name)
+        {
+            if (name == "Head") return new Color(0.2f, 0.9f, 1f);
+            if (name.EndsWith("L") && name != "Pelvis") return new Color(0.3f, 0.5f, 1f);
+            if (name.EndsWith("R")) return new Color(1f, 0.55f, 0.15f);
+            return new Color(1f, 0.85f, 0.2f);
+        }
+
+        private void RefreshPinVisuals()
+        {
+            bool show = IsPinEditActive() && (_chkShowPins?.ButtonPressed ?? true) &&
+                        _landmarkPins.Count >= CustomLandmarkWeightSolver.PinNames.Length &&
+                        _previewWorldRoot != null && GodotObject.IsInstanceValid(_previewWorldRoot);
+
+            foreach (var kv in _pinSpheres)
+                if (GodotObject.IsInstanceValid(kv.Value)) kv.Value.Visible = show;
+            if (_pinSkeletonLines != null && GodotObject.IsInstanceValid(_pinSkeletonLines)) _pinSkeletonLines.Visible = show;
+            if (!show) return;
+
+            string active = _draggingPin ?? _hoveredPin ?? _selectedPin;
+            string mirrorActive = (active != null && (_chkMirrorPins?.ButtonPressed ?? true))
+                ? CustomLandmarkWeightSolver.MirrorName(active)
+                : null;
+
+            Transform3D xf = BuildCurrentAlignedTransform();
+            foreach (var name in CustomLandmarkWeightSolver.PinNames)
+            {
+                if (!_pinSpheres.TryGetValue(name, out var sphere) || !GodotObject.IsInstanceValid(sphere))
+                {
+                    var mat = new StandardMaterial3D
+                    {
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                        AlbedoColor = PinColor(name),
+                        NoDepthTest = true,
+                        RenderPriority = 100
+                    };
+                    sphere = new MeshInstance3D
+                    {
+                        Name = "LandmarkPin_" + name,
+                        Mesh = new SphereMesh { Radius = 0.025f, Height = 0.05f, RadialSegments = 12, Rings = 6, Material = mat },
+                        Layers = 1u // never Visual Layer 21 (CameraBrush)
+                    };
+                    _previewWorldRoot.AddChild(sphere);
+                    _pinSpheres[name] = sphere;
+                }
+                bool isLit = name == active || (mirrorActive != null && name == mirrorActive);
+                float s = isLit ? 1.55f : 1f;
+                sphere.Scale = new Vector3(s, s, s);
+                sphere.Position = xf * _landmarkPins[name];
+                sphere.Visible = true;
+            }
+
+            if (_pinSkeletonLines == null || !GodotObject.IsInstanceValid(_pinSkeletonLines))
+            {
+                _pinSkeletonLines = new MeshInstance3D
+                {
+                    Name = "LandmarkPinSkeleton",
+                    Mesh = new ImmediateMesh(),
+                    Layers = 1u,
+                    MaterialOverride = new StandardMaterial3D
+                    {
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                        VertexColorUseAsAlbedo = true,
+                        NoDepthTest = true,
+                        RenderPriority = 99
+                    }
+                };
+                _previewWorldRoot.AddChild(_pinSkeletonLines);
+            }
+            var im = (ImmediateMesh)_pinSkeletonLines.Mesh;
+            im.ClearSurfaces();
+            im.SurfaceBegin(Mesh.PrimitiveType.Lines);
+            foreach (var (a, b) in PinConnections)
+            {
+                im.SurfaceSetColor(PinColor(b)); im.SurfaceAddVertex(xf * _landmarkPins[a]);
+                im.SurfaceSetColor(PinColor(b)); im.SurfaceAddVertex(xf * _landmarkPins[b]);
+            }
+            im.SurfaceEnd();
+        }
+
+        private string PickPinUnderCursor(Vector2 pos)
+        {
+            if (_previewCamera == null) return null;
+            Transform3D xf = BuildCurrentAlignedTransform();
+            string best = null; float bestD = 22f;
+            foreach (var name in CustomLandmarkWeightSolver.PinNames)
+            {
+                Vector3 w = xf * _landmarkPins[name];
+                if (_previewCamera.IsPositionBehind(w)) continue;
+                float d = _previewCamera.UnprojectPosition(w).DistanceTo(pos);
+                if (d < bestD) { bestD = d; best = name; }
+            }
+            return best;
+        }
+
+        private bool HandlePinInput(InputEvent @event)
+        {
+            if (!IsPinEditActive() || !(_chkShowPins?.ButtonPressed ?? true) ||
+                _landmarkPins.Count < CustomLandmarkWeightSolver.PinNames.Length || _previewCamera == null)
+                return false;
+
+            if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+            {
+                if (mb.Pressed && !mb.ShiftPressed)
+                {
+                    string best = PickPinUnderCursor(mb.Position);
+                    if (best != null)
+                    {
+                        _draggingPin = best;
+                        _selectedPin = best;
+                        _hoveredPin = best;
+                        _isOrbiting = false; _isPanning = false;
+                        UpdateActivePinBadge();
+                        RefreshPinVisuals();
+                        GetViewport().SetInputAsHandled();
+                        return true;
+                    }
+                }
+                else if (!mb.Pressed && _draggingPin != null)
+                {
+                    _draggingPin = null;
+                    UpdateActivePinBadge();
+                    ScheduleDebouncedLiveRigUpdate();
+                    GetViewport().SetInputAsHandled();
+                    return true;
+                }
+            }
+            else if (@event is InputEventMouseMotion mm)
+            {
+                if (_draggingPin != null)
+                {
+                    Transform3D xf = BuildCurrentAlignedTransform();
+                    Vector3 worldPin = xf * _landmarkPins[_draggingPin];
+                    Vector3 origin = _previewCamera.ProjectRayOrigin(mm.Position);
+                    Vector3 dir = _previewCamera.ProjectRayNormal(mm.Position);
+                    Vector3 normal = -_previewCamera.GlobalTransform.Basis.Z;
+                    float denom = dir.Dot(normal);
+                    if (Mathf.Abs(denom) > 1e-4f)
+                    {
+                        float t = (worldPin - origin).Dot(normal) / denom;
+                        Vector3 hit = origin + dir * t;
+                        Vector3 local = xf.AffineInverse() * hit;
+                        _landmarkPins[_draggingPin] = local;
+
+                        string mirror = CustomLandmarkWeightSolver.MirrorName(_draggingPin);
+                        if (mirror != null && (_chkMirrorPins?.ButtonPressed ?? true))
+                        {
+                            float cx = _landmarkPins["Pelvis"].X;
+                            _landmarkPins[mirror] = new Vector3(2f * cx - local.X, local.Y, local.Z);
+                        }
+                        UpdateActivePinBadge();
+                        RefreshPinVisuals();
+                    }
+                    GetViewport().SetInputAsHandled();
+                    return true;
+                }
+                else if (!_isOrbiting && !_isPanning)
+                {
+                    string hover = PickPinUnderCursor(mm.Position);
+                    if (hover != _hoveredPin)
+                    {
+                        _hoveredPin = hover;
+                        UpdateActivePinBadge();
+                        RefreshPinVisuals();
+                    }
+                }
+            }
+            return false;
+        }
+
+        private void OnWeightPaintModeToggled(bool enabled)
+        {
+            if (_btnLandmarkStepPins != null) _btnLandmarkStepPins.SetPressedNoSignal(!enabled);
+            if (_btnLandmarkStepPaint != null) _btnLandmarkStepPaint.SetPressedNoSignal(enabled);
+            if (_boxWeightPaintControls != null) _boxWeightPaintControls.Visible = enabled;
+            UpdateRiggingMethodPanelVisibility();
+
+            if (enabled)
+            {
+                if (_previewRiggedContainer == null || !GodotObject.IsInstanceValid(_previewRiggedContainer))
+                {
+                    ExecuteLiveRigUpdate();
+                }
+                else
+                {
+                    EnterWeightPaintSurfaces();
+                }
+            }
+            else
+            {
+                _isPaintingWeights = false;
+                _pendingStrokeSnapshot = null;
+                _strokeDirty = false;
+                if (_paintBrushRing != null && GodotObject.IsInstanceValid(_paintBrushRing)) _paintBrushRing.Visible = false;
+                foreach (var s in _paintSurfaces)
+                    CustomWeightPaintEditor.RefreshSurfaceHeatmap(s, -1, -1, false, null);
+                _paintSurfaces.Clear();
+            }
+            ApplyLandmarkPreviewState();
+        }
+
+        private void PopulatePaintBoneDropdown()
+        {
+            if (_optPaintBone == null || _previewHeroSkeleton == null) return;
+            string prev = _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "hand_L";
+            _optPaintBone.Clear();
+            int selIdx = 0;
+            foreach (string bName in CustomLandmarkWeightSolver.DeadlockBoneNames)
+            {
+                int sb = _previewHeroSkeleton.FindBone(bName);
+                if (sb < 0) continue;
+                int itemIdx = _optPaintBone.ItemCount;
+                _optPaintBone.AddItem(bName, sb);
+                if (bName.Equals(prev, StringComparison.OrdinalIgnoreCase)) selIdx = itemIdx;
+            }
+            if (_optPaintBone.ItemCount > 0) _optPaintBone.Select(selIdx);
+            UpdateResetBoneButtonLabel();
+        }
+
+        private void UpdateResetBoneButtonLabel()
+        {
+            if (_btnResetBoneWeights == null) return;
+            string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0
+                ? _optPaintBone.GetItemText(_optPaintBone.Selected)
+                : "hand_L";
+            bool hasMirror = (_chkPaintMirror?.ButtonPressed ?? true) && CustomWeightPaintEditor.MirrorBoneName(boneName) != null;
+            _btnResetBoneWeights.Text = hasMirror ? $"Reset {boneName} (+Mir)" : $"Reset {boneName}";
+        }
+
+        private void UpdateWeightHistoryUI()
+        {
+            if (_btnPaintUndo != null) _btnPaintUndo.Disabled = _weightUndoStack.Count == 0;
+            if (_btnPaintRedo != null) _btnPaintRedo.Disabled = _weightRedoStack.Count == 0;
+            if (_lblPaintHistoryStatus != null)
+            {
+                _lblPaintHistoryStatus.Text = $"Undo: {_weightUndoStack.Count} | Redo: {_weightRedoStack.Count}";
+            }
+        }
+
+        private void PushWeightUndoSnapshot(CustomWeightPaintEditor.WeightHistoryEntry snapshot)
+        {
+            if (snapshot == null) return;
+            _weightUndoStack.Add(snapshot);
+            if (_weightUndoStack.Count > 40) _weightUndoStack.RemoveAt(0);
+            _weightRedoStack.Clear();
+            UpdateWeightHistoryUI();
+        }
+
+        private void CommitPaintSurfaceOverrides()
+        {
+            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            var exported = CustomWeightPaintEditor.ExportOverrides(_paintSurfaces, _previewHeroSkeleton, skin);
+            foreach (var (k, v) in exported) _customSkinOverrides[k] = v;
+            UpdatePaintOverrideLabel();
+        }
+
+        private bool EnsureBaselineOverrides()
+        {
+            if (_baselineSkinOverrides.Count > 0) return true;
+
+            if (_customSkinOverrides.Count == 0 && _paintSurfaces.Count > 0 && _previewHeroSkeleton != null)
+            {
+                var skin = _paintSurfaces[0].MeshInstance?.Skin;
+                var baseExp = CustomWeightPaintEditor.ExportOverrides(_paintSurfaces, _previewHeroSkeleton, skin);
+                foreach (var (k, v) in baseExp) _baselineSkinOverrides[k] = v;
+                return _baselineSkinOverrides.Count > 0;
+            }
+
+            if (_liveImportedScene == null || _previewHeroClone == null || _previewHeroSkeleton == null)
+                return false;
+
+            var baselineOpts = GatherRiggingOptions();
+            baselineOpts.CustomSkinWeightOverrides = null;
+            baselineOpts.AlignedTransform = BuildCurrentAlignedTransform();
+            baselineOpts.IsPreviewOnly = true;
+
+            var tempModel = (Node3D)_liveImportedScene.Duplicate();
+            _previewModelRoot?.AddChild(tempModel);
+            tempModel.Transform = Transform3D.Identity;
+            tempModel.Visible = false;
+
+            var res = CustomModelAutoRigger.RigAndBind(tempModel, _previewHeroClone, baselineOpts);
+            if (res.Success && res.ContainerNode != null && GodotObject.IsInstanceValid(res.ContainerNode))
+            {
+                var tmpSurfaces = CustomWeightPaintEditor.CaptureSurfaces(res.ContainerNode);
+                var tmpSkin = tmpSurfaces.Count > 0 ? tmpSurfaces[0].MeshInstance?.Skin : null;
+                if (tmpSkin != null)
+                {
+                    var exported = CustomWeightPaintEditor.ExportOverrides(tmpSurfaces, _previewHeroSkeleton, tmpSkin);
+                    foreach (var (k, v) in exported) _baselineSkinOverrides[k] = v;
+                }
+            }
+            if (res.ContainerNode != null && GodotObject.IsInstanceValid(res.ContainerNode))
+            {
+                res.ContainerNode.GetParent()?.RemoveChild(res.ContainerNode);
+                res.ContainerNode.QueueFree();
+            }
+            if (GodotObject.IsInstanceValid(tempModel))
+            {
+                tempModel.GetParent()?.RemoveChild(tempModel);
+                tempModel.QueueFree();
+            }
+            return _baselineSkinOverrides.Count > 0;
+        }
+
+        private void OnWeightUndoPressed()
+        {
+            if (!IsWeightPaintActive() || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null || _weightUndoStack.Count == 0)
+                return;
+            int idx = _weightUndoStack.Count - 1;
+            var entry = _weightUndoStack[idx];
+            _weightUndoStack.RemoveAt(idx);
+
+            var redoSnap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, entry.Label);
+            if (CustomWeightPaintEditor.RestoreHistoryEntry(_paintSurfaces, entry))
+            {
+                _weightRedoStack.Add(redoSnap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Undid weight edit: {entry.Label}", StatusTone.Info);
+            }
+            UpdateWeightHistoryUI();
+        }
+
+        private void OnWeightRedoPressed()
+        {
+            if (!IsWeightPaintActive() || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null || _weightRedoStack.Count == 0)
+                return;
+            int idx = _weightRedoStack.Count - 1;
+            var entry = _weightRedoStack[idx];
+            _weightRedoStack.RemoveAt(idx);
+
+            var undoSnap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, entry.Label);
+            if (CustomWeightPaintEditor.RestoreHistoryEntry(_paintSurfaces, entry))
+            {
+                _weightUndoStack.Add(undoSnap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Redid weight edit: {entry.Label}", StatusTone.Info);
+            }
+            UpdateWeightHistoryUI();
+        }
+
+        private void OnSmoothBoundaryWeightsPressed()
+        {
+            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return;
+
+            string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0
+                ? _optPaintBone.GetItemText(_optPaintBone.Selected)
+                : "hand_L";
+            int tgtBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, boneName);
+            if (tgtBi < 0) return;
+
+            string mirName = (_chkPaintMirror?.ButtonPressed ?? true) ? CustomWeightPaintEditor.MirrorBoneName(boneName) : null;
+            int mirBi = mirName != null ? ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, mirName) : -1;
+
+            var snap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, $"Smooth {boneName}");
+            if (CustomWeightPaintEditor.SmoothBoneBoundary(_paintSurfaces, tgtBi, mirBi, iterations: 2))
+            {
+                PushWeightUndoSnapshot(snap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Smoothed '{boneName}' boundary weights (Ctrl+Z to undo).", StatusTone.Success);
+            }
+            else
+            {
+                SetBottomStatus($"No adjustable boundary vertices found for '{boneName}'.", StatusTone.Info);
+            }
+        }
+
+        private void OnMirrorSideWeightsPressed(bool leftToRight)
+        {
+            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return;
+
+            int pelvisIdx = _previewHeroSkeleton.FindBone("pelvis");
+            float centerX = pelvisIdx >= 0 ? _previewHeroSkeleton.GetBoneGlobalRest(pelvisIdx).Origin.X : 0f;
+
+            string label = leftToRight ? "Mirror L -> R" : "Mirror R -> L";
+            var snap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, label);
+            if (CustomWeightPaintEditor.MirrorWeightsSide(_paintSurfaces, _previewHeroSkeleton, skin, centerX, leftToRight))
+            {
+                PushWeightUndoSnapshot(snap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Mirrored weights ({label}) across pelvis X={centerX:0.00} (Ctrl+Z to undo).", StatusTone.Success);
+            }
+            else
+            {
+                SetBottomStatus("Weights are already symmetric across the midline.", StatusTone.Info);
+            }
+        }
+
+        private void OnResetSelectedBoneWeightsPressed()
+        {
+            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null || !EnsureBaselineOverrides()) return;
+
+            string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0
+                ? _optPaintBone.GetItemText(_optPaintBone.Selected)
+                : "hand_L";
+            bool includeMirror = _chkPaintMirror?.ButtonPressed ?? true;
+
+            var snap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, $"Reset {boneName}");
+            if (CustomWeightPaintEditor.ResetBoneToBaseline(_paintSurfaces, _baselineSkinOverrides, _previewHeroSkeleton, skin, boneName, includeMirror))
+            {
+                PushWeightUndoSnapshot(snap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Reset '{boneName}' weights back to procedural baseline.", StatusTone.Success);
+            }
+            else
+            {
+                SetBottomStatus($"'{boneName}' already matches procedural baseline weights.", StatusTone.Info);
+            }
+        }
+
+        private void OnResetAllWeightsPressed()
+        {
+            if (IsWeightPaintActive() && _paintSurfaces.Count > 0 && _previewHeroSkeleton != null && EnsureBaselineOverrides())
+            {
+                var skin = _paintSurfaces[0].MeshInstance?.Skin;
+                var snap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, "Reset All");
+                if (CustomWeightPaintEditor.ResetAllToBaseline(_paintSurfaces, _baselineSkinOverrides, _previewHeroSkeleton, skin))
+                {
+                    PushWeightUndoSnapshot(snap);
+                    _customSkinOverrides.Clear();
+                    UpdatePaintOverrideLabel();
+                    RefreshWeightPaintHeatmap();
+                    SetBottomStatus("All painted weights reset to procedural baseline (Ctrl+Z to undo).", StatusTone.Info);
+                    return;
+                }
+            }
+
+            _customSkinOverrides.Clear();
+            _baselineSkinOverrides.Clear();
+            _weightUndoStack.Clear();
+            _weightRedoStack.Clear();
+            UpdateWeightHistoryUI();
+            UpdatePaintOverrideLabel();
+            ExecuteLiveRigUpdate();
+        }
+
+        private void EnterWeightPaintSurfaces()
+        {
+            if (_previewRiggedContainer == null || !GodotObject.IsInstanceValid(_previewRiggedContainer)) return;
+            _paintSurfaces = CustomWeightPaintEditor.CaptureSurfaces(_previewRiggedContainer);
+            if (_customSkinOverrides.Count == 0 && _baselineSkinOverrides.Count == 0 && _paintSurfaces.Count > 0 && _previewHeroSkeleton != null)
+            {
+                var skin = _paintSurfaces[0].MeshInstance?.Skin;
+                var baseExp = CustomWeightPaintEditor.ExportOverrides(_paintSurfaces, _previewHeroSkeleton, skin);
+                foreach (var (k, v) in baseExp) _baselineSkinOverrides[k] = v;
+            }
+            PopulatePaintBoneDropdown();
+            UpdateWeightHistoryUI();
+            RefreshWeightPaintHeatmap();
+        }
+
+        private void RefreshViewportShadingAndWireframes()
+        {
+            bool paintActive = IsWeightPaintActive();
+            bool paintWire = _chkPaintWireframe?.ButtonPressed ?? true;
+            bool showWire = _viewportShadingMode != CustomWeightPaintEditor.ViewportShadingMode.Textured || _isXRayMode || (paintActive && paintWire);
+            bool wireOnlyClay = _viewportShadingMode == CustomWeightPaintEditor.ViewportShadingMode.Wireframe;
+
+            _wireLineMaterialDark ??= CustomWeightPaintEditor.CreateWireframeLineMaterial(new Color(0.08f, 0.12f, 0.16f, 0.85f));
+            _wireLineMaterialBright ??= CustomWeightPaintEditor.CreateWireframeLineMaterial(new Color(0.55f, 0.85f, 0.95f, 0.95f));
+            _wireLineMaterialXRay ??= CustomWeightPaintEditor.CreateWireframeLineMaterial(new Color(0.32f, 0.82f, 0.98f, 0.52f), normalBias: 0.0004f, xRayNoDepth: true);
+            _wireClayMaterial ??= CustomWeightPaintEditor.CreateWireframeClayMaterial();
+
+            Material lineMat = _isXRayMode
+                ? _wireLineMaterialXRay
+                : (wireOnlyClay ? _wireLineMaterialBright : _wireLineMaterialDark);
+
+            if (_previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer))
+            {
+                CustomWeightPaintEditor.SyncContainerShadingAndWireframes(
+                    _previewRiggedContainer,
+                    showWire,
+                    wireOnlyClay,
+                    paintActive,
+                    _wireClayMaterial,
+                    lineMat,
+                    _paintSurfaces,
+                    _isXRayMode);
+            }
+
+            if (_previewModelRoot != null && GodotObject.IsInstanceValid(_previewModelRoot))
+            {
+                CustomWeightPaintEditor.SyncContainerShadingAndWireframes(
+                    _previewModelRoot,
+                    showWire,
+                    wireOnlyClay,
+                    false,
+                    _wireClayMaterial,
+                    lineMat,
+                    null,
+                    _isXRayMode);
+            }
+        }
+
+        private int ResolveSkinBindIndexByBoneName(Skin skin, Skeleton3D skel, string boneName)
+        {
+            if (skin == null || skel == null || string.IsNullOrEmpty(boneName)) return -1;
+            int targetB = skel.FindBone(boneName);
+            for (int bi = 0; bi < skin.GetBindCount(); bi++)
+            {
+                if (targetB >= 0 && skin.GetBindBone(bi) == targetB) return bi;
+                if (boneName.Equals(skin.GetBindName(bi), StringComparison.Ordinal)) return bi;
+            }
+            return -1;
+        }
+
+        private void RefreshWeightPaintHeatmap()
+        {
+            if (!IsWeightPaintActive() || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return;
+
+            RefreshViewportShadingAndWireframes();
+
+            _weightHeatmapMaterial ??= new StandardMaterial3D
+            {
+                VertexColorUseAsAlbedo = true,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.PerPixel,
+                Roughness = 0.85f
+            };
+            _weightHeatmapMaterial.Transparency = _isXRayMode ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled;
+            _weightHeatmapMaterial.DepthDrawMode = _isXRayMode ? BaseMaterial3D.DepthDrawModeEnum.Disabled : BaseMaterial3D.DepthDrawModeEnum.OpaqueOnly;
+            _weightHeatmapMaterial.AlbedoColor = _isXRayMode ? new Color(1f, 1f, 1f, 0.45f) : Colors.White;
+
+            string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "hand_L";
+            int tgtBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, boneName);
+            string mirName = (_chkPaintMirror?.ButtonPressed ?? true) ? CustomWeightPaintEditor.MirrorBoneName(boneName) : null;
+            int mirBi = mirName != null ? ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, mirName) : -1;
+
+            foreach (var s in _paintSurfaces)
+                CustomWeightPaintEditor.RefreshSurfaceHeatmap(s, tgtBi, mirBi, true, _weightHeatmapMaterial);
+        }
+
+        private void UpdateBrushRingVisual(Vector3 hitPt, Vector3 normal, float radius, bool visible)
+        {
+            if (_paintBrushRing == null || !GodotObject.IsInstanceValid(_paintBrushRing))
+            {
+                _paintBrushRing = new MeshInstance3D
+                {
+                    Name = "WeightPaintBrushRing",
+                    Mesh = new ImmediateMesh(),
+                    Layers = 1u,
+                    MaterialOverride = new StandardMaterial3D
+                    {
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                        AlbedoColor = new Color(1f, 0.9f, 0.25f),
+                        NoDepthTest = true,
+                        RenderPriority = 110
+                    }
+                };
+                _previewWorldRoot?.AddChild(_paintBrushRing);
+            }
+            _paintBrushRing.Visible = visible;
+            if (!visible) return;
+
+            Vector3 n = normal.LengthSquared() > 1e-6f ? normal.Normalized() : Vector3.Up;
+            Vector3 t1 = (MathF.Abs(n.Y) < 0.9f ? n.Cross(Vector3.Up) : n.Cross(Vector3.Right)).Normalized();
+            Vector3 t2 = n.Cross(t1).Normalized();
+            Vector3 c = hitPt + n * 0.004f;
+            var im = (ImmediateMesh)_paintBrushRing.Mesh;
+            im.ClearSurfaces();
+            im.SurfaceBegin(Mesh.PrimitiveType.LineStrip);
+            const int segs = 28;
+            for (int i = 0; i <= segs; i++)
+            {
+                float ang = i * (Mathf.Tau / segs);
+                im.SurfaceAddVertex(c + (t1 * Mathf.Cos(ang) + t2 * Mathf.Sin(ang)) * radius);
+            }
+            im.SurfaceEnd();
+        }
+
+        private bool HandleWeightPaintInput(InputEvent @event)
+        {
+            if (!IsWeightPaintActive() || _previewCamera == null || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null)
+                return false;
+
+            if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+            {
+                if (mb.Pressed && !mb.ShiftPressed)
+                {
+                    var skin = _paintSurfaces[0].MeshInstance?.Skin;
+                    CustomWeightPaintEditor.UpdatePosedVertices(_paintSurfaces, _previewHeroSkeleton, skin);
+                    Vector3 orig = _previewCamera.ProjectRayOrigin(mb.Position);
+                    Vector3 dir = _previewCamera.ProjectRayNormal(mb.Position);
+                    if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out _, out var hitPt, out var hitNorm))
+                    {
+                        string boneLabel = _optPaintBone != null && _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "weight";
+                        _pendingStrokeSnapshot = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, $"Brush ({boneLabel})");
+                        _strokeDirty = false;
+                        _isPaintingWeights = true;
+                        _isOrbiting = false; _isPanning = false;
+                        _strokeDirty |= ApplyBrushAtHit(hitPt, hitNorm);
+                        GetViewport().SetInputAsHandled();
+                        return true;
+                    }
+                }
+                else if (!mb.Pressed && _isPaintingWeights)
+                {
+                    _isPaintingWeights = false;
+                    if (_strokeDirty && _pendingStrokeSnapshot != null &&
+                        CustomWeightPaintEditor.HasSurfaceWeightDifference(_pendingStrokeSnapshot, _paintSurfaces))
+                    {
+                        PushWeightUndoSnapshot(_pendingStrokeSnapshot);
+                    }
+                    _pendingStrokeSnapshot = null;
+                    _strokeDirty = false;
+                    CommitPaintSurfaceOverrides();
+                    GetViewport().SetInputAsHandled();
+                    return true;
+                }
+            }
+            else if (@event is InputEventMouseMotion mm && !_isOrbiting && !_isPanning)
+            {
+                var skin = _paintSurfaces[0].MeshInstance?.Skin;
+                CustomWeightPaintEditor.UpdatePosedVertices(_paintSurfaces, _previewHeroSkeleton, skin);
+                Vector3 orig = _previewCamera.ProjectRayOrigin(mm.Position);
+                Vector3 dir = _previewCamera.ProjectRayNormal(mm.Position);
+                if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out _, out var hitPt, out var hitNorm))
+                {
+                    float r = (float)(_sliderPaintRadius?.Value ?? 0.08);
+                    UpdateBrushRingVisual(hitPt, hitNorm, r, true);
+                    if (_isPaintingWeights)
+                    {
+                        _strokeDirty |= ApplyBrushAtHit(hitPt, hitNorm);
+                        GetViewport().SetInputAsHandled();
+                        return true;
+                    }
+                }
+                else
+                {
+                    UpdateBrushRingVisual(Vector3.Zero, Vector3.Up, 0.05f, false);
+                }
+            }
+            return false;
+        }
+
+        private bool ApplyBrushAtHit(Vector3 hitPt, Vector3 hitNorm)
+        {
+            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return false;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return false;
+
+            string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "hand_L";
+            int tgtBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, boneName);
+            int pIdx = _previewHeroSkeleton.FindBone(boneName);
+            int parentB = pIdx >= 0 ? _previewHeroSkeleton.GetBoneParent(pIdx) : -1;
+            string parentName = parentB >= 0 ? _previewHeroSkeleton.GetBoneName(parentB) : "pelvis";
+            int fbBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, parentName);
+            if (fbBi < 0) fbBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, "pelvis");
+
+            bool mirror = _chkPaintMirror?.ButtonPressed ?? true;
+            string mirName = mirror ? CustomWeightPaintEditor.MirrorBoneName(boneName) : null;
+            int mirBi = mirName != null ? ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, mirName) : -1;
+            string mirFbName = CustomWeightPaintEditor.MirrorBoneName(parentName);
+            int mirFbBi = mirFbName != null ? ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, mirFbName) : fbBi;
+
+            var mode = _optPaintMode != null && _optPaintMode.Selected >= 0
+                ? (CustomWeightPaintEditor.BrushMode)_optPaintMode.GetItemId(_optPaintMode.Selected)
+                : CustomWeightPaintEditor.BrushMode.Add;
+            float r = (float)(_sliderPaintRadius?.Value ?? 0.08);
+            float strength = (float)(_sliderPaintStrength?.Value ?? 0.35);
+
+            UpdateBrushRingVisual(hitPt, hitNorm, r, true);
+            if (CustomWeightPaintEditor.ApplyBrush(_paintSurfaces, hitPt, mode, r, strength, tgtBi, fbBi, mirror, mirBi, mirFbBi))
+            {
+                foreach (var s in _paintSurfaces)
+                    CustomWeightPaintEditor.RefreshSurfaceHeatmap(s, tgtBi, mirBi, true, _weightHeatmapMaterial);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Applies Landmark/Weight-Paint viewport visibility: static unskinned model + pins ONLY on Tab 2 Bind Pose,
+        /// leaving the snapped rigged model active on Tab 1/3 or during animations. Respects user's Hero Ghost toggle.
+        /// </summary>
+        private void ApplyLandmarkPreviewState()
+        {
+            bool pinEdit = IsPinEditActive();
+            bool paintMode = IsWeightPaintActive();
+
+            if (_previewModelRoot != null && GodotObject.IsInstanceValid(_previewModelRoot))
+            {
+                bool riggedValid = _previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer);
+                if (pinEdit)
+                {
+                    if (riggedValid) _previewRiggedContainer.Visible = false;
+                    _previewModelRoot.Transform = BuildCurrentAlignedTransform();
+                    if (_previewModelInstance != null && GodotObject.IsInstanceValid(_previewModelInstance))
+                    {
+                        var selected = new HashSet<string>(GetSelectedImportedSubmeshNames(), StringComparer.OrdinalIgnoreCase);
+                        foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
+                            mi.Visible = selected.Count == 0 || selected.Contains(mi.Name.ToString());
+                    }
+                    _previewModelRoot.Visible = true;
+                }
+                else if (riggedValid)
+                {
+                    _previewRiggedContainer.Visible = true;
+                    _previewModelRoot.Visible = false;
+                    if (paintMode && _paintSurfaces.Count == 0) EnterWeightPaintSurfaces();
+                }
+            }
+
+            if (!paintMode && _paintBrushRing != null && GodotObject.IsInstanceValid(_paintBrushRing))
+                _paintBrushRing.Visible = false;
+
+            RefreshViewportShadingAndWireframes();
+            RefreshPinVisuals();
+        }
+
+        #endregion
+
         private void OnCalibrationSliderChanged()
         {
+            if (!IsKnnMethod()) return;
             // During active slider dragging in Bind Pose, show the static unskinned imported model
             // and hide the previously rigged mesh so only the Deadlock cyan ghost moves around it.
             bool inBindPose = _optTestAnim == null || _optTestAnim.Selected <= 0;
@@ -4399,9 +5915,9 @@ namespace DeadlockPlayground.UI
 
         private void OnPosePresetChanged(long index)
         {
+            if (!IsKnnMethod()) return;
             var preset = _optPosePreset.Selected >= 0 ? (CustomModelAutoRigger.PosePreset)_optPosePreset.GetItemId(_optPosePreset.Selected) : CustomModelAutoRigger.PosePreset.TPose;
             _boxCustomArmAngle.Visible = preset == CustomModelAutoRigger.PosePreset.APoseCustomAngle;
-            _boxRigidBone.Visible = preset == CustomModelAutoRigger.PosePreset.RigidSingleBone;
             ApplyCalibrationPoseToGhostSkeleton();
             TriggerRealtimeRigUpdate();
         }
@@ -4413,6 +5929,7 @@ namespace DeadlockPlayground.UI
         private void OnTestAnimSelected(long index)
         {
             if (_previewHeroSkeleton == null) return;
+            Callable.From(ApplyLandmarkPreviewState).CallDeferred();
 
             if (index == 0) // Bind Pose (Rest)
             {
@@ -4581,7 +6098,13 @@ namespace DeadlockPlayground.UI
                 AutoCounterTwistWeights = _chkAutoCounterTwistWeights?.ButtonPressed ?? true,
                 RootPosition = new Vector3((float)_spinPosX.Value, (float)_spinPosY.Value, (float)_spinPosZ.Value),
                 RootRotationDeg = new Vector3((float)_spinRotPitch.Value, (float)_spinRotYaw.Value, (float)_spinRotRoll.Value),
-                RootScale = (float)_spinScale.Value
+                RootScale = (float)_spinScale.Value,
+                LandmarkPins = (method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig && _landmarkPins.Count >= CustomLandmarkWeightSolver.PinNames.Length)
+                    ? new Dictionary<string, Vector3>(_landmarkPins)
+                    : null,
+                CustomSkinWeightOverrides = _customSkinOverrides.Count > 0
+                    ? new Dictionary<string, CustomModelAutoRigger.SkinWeightOverride>(_customSkinOverrides, StringComparer.OrdinalIgnoreCase)
+                    : null
             };
         }
 
@@ -4737,6 +6260,9 @@ namespace DeadlockPlayground.UI
                 }
 
                 UpdateGizmoTargetTransform();
+                _paintSurfaces.Clear();
+                if (_customSkinOverrides.Count == 0) _baselineSkinOverrides.Clear();
+                ApplyLandmarkPreviewState();
             }
             else
             {

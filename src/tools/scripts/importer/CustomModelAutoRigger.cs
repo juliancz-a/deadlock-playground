@@ -13,7 +13,8 @@ namespace DeadlockPlayground.Importer
         {
             KnnSurfaceProjection = 0,    // Case A: Transfer weights from hero body (DEFAULT & RECOMMENDED)
             PreRiggedSkeletonRemap = 1,  // Case B: Remap existing bones
-            RigidSingleBone = 2          // Case C: Rigid attachment to single bone
+            RigidSingleBone = 2,         // Case C: Rigid attachment to single bone
+            LandmarkAutoRig = 3          // Case D: Landmark-pin auto-rig (synthetic humanoid skeleton + geodesic weights)
         }
 
         public enum PosePreset
@@ -28,6 +29,14 @@ namespace DeadlockPlayground.Importer
         {
             FullReplacement,
             PartialAccessory
+        }
+
+        public sealed class SkinWeightOverride
+        {
+            public int VertexCount { get; set; }
+            public string[] BonePalette { get; set; } = Array.Empty<string>();
+            public int[] PaletteIndices { get; set; } = Array.Empty<int>(); // VertexCount * 4
+            public float[] Weights { get; set; } = Array.Empty<float>();      // VertexCount * 4
         }
 
         public class RiggingOptions
@@ -77,6 +86,10 @@ namespace DeadlockPlayground.Importer
             public Vector3 RootPosition { get; set; } = Vector3.Zero;
             public Vector3 RootRotationDeg { get; set; } = Vector3.Zero;
             public float RootScale { get; set; } = 1.0f;
+            /// <summary>16 landmark pins (see CustomLandmarkWeightSolver.PinNames) in imported-scene space. Null = auto-estimate.</summary>
+            public Dictionary<string, Vector3> LandmarkPins { get; set; } = null;
+            /// <summary>Optional user-painted per-surface weight overrides keyed by MakeSurfaceKeepKey(meshName, surfaceIdx).</summary>
+            public Dictionary<string, SkinWeightOverride> CustomSkinWeightOverrides { get; set; } = null;
         }
 
         public class FingerPhalanxSegment
@@ -923,7 +936,20 @@ namespace DeadlockPlayground.Importer
                 {
                     result = RigRigidBoneModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
                 }
-                else if (options.Method == RiggingMethod.PreRiggedSkeletonRemap && hasImportedRig)
+                else if (options.Method == RiggingMethod.LandmarkAutoRig && !hasImportedRig)
+                {
+                    var synth = CustomLandmarkWeightSolver.BuildSyntheticRig(importedScene, importedMeshes, heroSkeleton, options);
+                    try
+                    {
+                        GD.Print($"[CustomModelAutoRigger] Landmark Auto-Rig: synthetic skeleton with {synth.Skeleton.GetBoneCount()} bones, {synth.VertexCount} vertices weighted.");
+                        result = RigPreRiggedModel(importedScene, importedMeshes, synth.Skeleton, heroNode, heroSkeleton, customSkin, options);
+                    }
+                    finally
+                    {
+                        synth.Restore();
+                    }
+                }
+                else if ((options.Method == RiggingMethod.PreRiggedSkeletonRemap || options.Method == RiggingMethod.LandmarkAutoRig) && hasImportedRig)
                 {
                     result = RigPreRiggedModel(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
                 }
@@ -1215,6 +1241,8 @@ namespace DeadlockPlayground.Importer
 
                     newMi.Layers &= ~(uint)(1 << 20); // Clear bit 20 (CameraBrush isolation)
                     newMi.SetMeta("IsCustomImportedMesh", true);
+                    newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
+                    newMi.SetMeta("SourceSurfaceIndex", s);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
                     ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
                     if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
@@ -1432,98 +1460,143 @@ namespace DeadlockPlayground.Importer
                             }
                         }
 
+                        SkinWeightOverride surfaceOverride = null;
+                        bool hasSurfaceOverride = options.CustomSkinWeightOverrides != null &&
+                            options.CustomSkinWeightOverrides.TryGetValue(MakeSurfaceKeepKey(srcMi.Name.ToString(), s), out surfaceOverride) &&
+                            surfaceOverride != null &&
+                            surfaceOverride.VertexCount == vCount &&
+                            surfaceOverride.PaletteIndices != null && surfaceOverride.PaletteIndices.Length >= vCount * 4 &&
+                            surfaceOverride.Weights != null && surfaceOverride.Weights.Length >= vCount * 4;
+
+                        int[] ovPaletteToTgt = null;
+                        if (hasSurfaceOverride && surfaceOverride.BonePalette != null)
+                        {
+                            ovPaletteToTgt = new int[surfaceOverride.BonePalette.Length];
+                            for (int p = 0; p < surfaceOverride.BonePalette.Length; p++)
+                            {
+                                int tb = targetSkeleton.FindBone(surfaceOverride.BonePalette[p]);
+                                ovPaletteToTgt[p] = tb >= 0 ? tb : 0;
+                            }
+                        }
+
                         System.Threading.Tasks.Parallel.For(0, vCount, v =>
                         {
                             Vector3 vHero = baseHeroVerts[v];
                             Vector3 nHero = baseHeroNorms[v];
 
-                            Span<int> localAccumBones = stackalloc int[8];
-                            Span<float> localAccumWeights = stackalloc float[8];
-                            int accumCount = 0;
-
-                            for (int k = 0; k < srcStride; k++)
-                            {
-                                int rawBoneVal = rawBones != null && rawBones.Length > (v * srcStride + k) ? rawBones[v * srcStride + k] : 0;
-                                float w = rawWeights != null && rawWeights.Length > (v * srcStride + k) ? rawWeights[v * srcStride + k] : (k == 0 ? 1f : 0f);
-
-                                if (w <= 0.0001f) continue;
-
-                                int srcBone = (srcBindToSkel != null && rawBoneVal >= 0 && rawBoneVal < srcBindToSkel.Length)
-                                    ? srcBindToSkel[rawBoneVal]
-                                    : Math.Clamp(rawBoneVal, 0, Math.Max(0, srcBoneCount - 1));
-                                int tgtBone = (srcBone >= 0 && srcBone < srcBoneToResolvedTgt.Length) ? srcBoneToResolvedTgt[srcBone] : 0;
-
-                                int found = -1;
-                                for (int a = 0; a < accumCount; a++)
-                                {
-                                    if (localAccumBones[a] == tgtBone) { found = a; break; }
-                                }
-                                if (found != -1)
-                                {
-                                    localAccumWeights[found] += w;
-                                }
-                                else if (accumCount < 8)
-                                {
-                                    localAccumBones[accumCount] = tgtBone;
-                                    localAccumWeights[accumCount] = w;
-                                    accumCount++;
-                                }
-                            }
-
-                            // Extract top 4 influences in descending order
                             Span<int> topBones = stackalloc int[4];
                             Span<float> topWeights = stackalloc float[4];
 
-                            for (int top = 0; top < 4; top++)
+                            if (hasSurfaceOverride)
                             {
-                                int bestIdx = -1;
-                                float maxVal = 0f;
-                                for (int a = 0; a < accumCount; a++)
+                                int baseOff = v * 4;
+                                float sumOv = 0f;
+                                for (int k = 0; k < 4; k++)
                                 {
-                                    if (localAccumWeights[a] > maxVal)
-                                    {
-                                        maxVal = localAccumWeights[a];
-                                        bestIdx = a;
-                                    }
+                                    int pIdx = surfaceOverride.PaletteIndices[baseOff + k];
+                                    int tb = (ovPaletteToTgt != null && pIdx >= 0 && pIdx < ovPaletteToTgt.Length) ? ovPaletteToTgt[pIdx] : 0;
+                                    float w = Math.Max(0f, surfaceOverride.Weights[baseOff + k]);
+                                    topBones[k] = tb;
+                                    topWeights[k] = w;
+                                    sumOv += w;
                                 }
-                                if (bestIdx != -1 && maxVal > 0.0001f)
+                                if (sumOv > 0.0001f)
                                 {
-                                    topBones[top] = localAccumBones[bestIdx];
-                                    topWeights[top] = maxVal;
-                                    localAccumWeights[bestIdx] = -1f; // mark used
+                                    for (int k = 0; k < 4; k++) topWeights[k] /= sumOv;
                                 }
                                 else
                                 {
-                                    topBones[top] = 0;
-                                    topWeights[top] = 0f;
+                                    topBones[0] = 0; topWeights[0] = 1f;
                                 }
-                            }
-
-                            float sumW = topWeights[0] + topWeights[1] + topWeights[2] + topWeights[3];
-                            if (sumW > 0.0001f)
-                            {
-                                topWeights[0] /= sumW;
-                                topWeights[1] /= sumW;
-                                topWeights[2] /= sumW;
-                                topWeights[3] /= sumW;
                             }
                             else
                             {
-                                topBones[0] = 0;
-                                topWeights[0] = 1.0f;
-                            }
+                                Span<int> localAccumBones = stackalloc int[8];
+                                Span<float> localAccumWeights = stackalloc float[8];
+                                int accumCount = 0;
 
-                            // Axial Wrist Twist Gradient Blending
-                            if (ApplyWristTwistBlending(vHero, topBones, topWeights, leftArm, rightArm, tgtTwistL, tgtTwistR))
-                            {
-                                wristMask[v] = true;
-                                System.Threading.Interlocked.Increment(ref wristCount);
-                            }
+                                for (int k = 0; k < srcStride; k++)
+                                {
+                                    int rawBoneVal = rawBones != null && rawBones.Length > (v * srcStride + k) ? rawBones[v * srcStride + k] : 0;
+                                    float w = rawWeights != null && rawWeights.Length > (v * srcStride + k) ? rawWeights[v * srcStride + k] : (k == 0 ? 1f : 0f);
 
-                            // Stabilize neck weights against floating-head stretch (e.g. Paradox/Chrono)
-                            if (options.StabilizeNeckFloatingHead)
-                            {
-                                StabilizeNeckFloatingHeadVertex(topBones, topWeights, headBonePre, neckBonePre, spine3BonePre, spine2BonePre, vHero.Y);
+                                    if (w <= 0.0001f) continue;
+
+                                    int srcBone = (srcBindToSkel != null && rawBoneVal >= 0 && rawBoneVal < srcBindToSkel.Length)
+                                        ? srcBindToSkel[rawBoneVal]
+                                        : Math.Clamp(rawBoneVal, 0, Math.Max(0, srcBoneCount - 1));
+                                    int tgtBone = (srcBone >= 0 && srcBone < srcBoneToResolvedTgt.Length) ? srcBoneToResolvedTgt[srcBone] : 0;
+
+                                    int found = -1;
+                                    for (int a = 0; a < accumCount; a++)
+                                    {
+                                        if (localAccumBones[a] == tgtBone) { found = a; break; }
+                                    }
+                                    if (found != -1)
+                                    {
+                                        localAccumWeights[found] += w;
+                                    }
+                                    else if (accumCount < 8)
+                                    {
+                                        localAccumBones[accumCount] = tgtBone;
+                                        localAccumWeights[accumCount] = w;
+                                        accumCount++;
+                                    }
+                                }
+
+                                // Extract top 4 influences in descending order
+                                for (int top = 0; top < 4; top++)
+                                {
+                                    int bestIdx = -1;
+                                    float maxVal = 0f;
+                                    for (int a = 0; a < accumCount; a++)
+                                    {
+                                        if (localAccumWeights[a] > maxVal)
+                                        {
+                                            maxVal = localAccumWeights[a];
+                                            bestIdx = a;
+                                        }
+                                    }
+                                    if (bestIdx != -1 && maxVal > 0.0001f)
+                                    {
+                                        topBones[top] = localAccumBones[bestIdx];
+                                        topWeights[top] = maxVal;
+                                        localAccumWeights[bestIdx] = -1f; // mark used
+                                    }
+                                    else
+                                    {
+                                        topBones[top] = 0;
+                                        topWeights[top] = 0f;
+                                    }
+                                }
+
+                                float sumW = topWeights[0] + topWeights[1] + topWeights[2] + topWeights[3];
+                                if (sumW > 0.0001f)
+                                {
+                                    topWeights[0] /= sumW;
+                                    topWeights[1] /= sumW;
+                                    topWeights[2] /= sumW;
+                                    topWeights[3] /= sumW;
+                                }
+                                else
+                                {
+                                    topBones[0] = 0;
+                                    topWeights[0] = 1.0f;
+                                }
+
+                                // Axial Wrist Twist Gradient Blending (for already-posed source rigs; LandmarkAutoRig transforms vertices first)
+                                if (options.Method != RiggingMethod.LandmarkAutoRig &&
+                                    ApplyWristTwistBlending(vHero, topBones, topWeights, leftArm, rightArm, tgtTwistL, tgtTwistR))
+                                {
+                                    wristMask[v] = true;
+                                    System.Threading.Interlocked.Increment(ref wristCount);
+                                }
+
+                                // Stabilize neck weights against floating-head stretch (e.g. Paradox/Chrono)
+                                if (options.StabilizeNeckFloatingHead)
+                                {
+                                    StabilizeNeckFloatingHeadVertex(topBones, topWeights, headBonePre, neckBonePre, spine3BonePre, spine2BonePre, vHero.Y);
+                                }
                             }
 
                             // Assign Skeleton3D bone indices & weights (remapped to Skin bind indices after post-passes)
@@ -1582,12 +1655,12 @@ namespace DeadlockPlayground.Importer
                             alignedNorms[v] = blendedNorm.LengthSquared() > 0.0001f ? blendedNorm.Normalized() : nHero;
                         });
 
-                        if (wristCount > 0 && rawIndices != null && rawIndices.Length > 0)
+                        if (!hasSurfaceOverride && wristCount > 0 && rawIndices != null && rawIndices.Length > 0)
                         {
                             SmoothWeightsLaplacian(rawIndices, vCount, skelBoneIndices, outWeights, 2, alignedVerts, wristMask);
                         }
 
-                        if (options.AutoCounterTwistWeights)
+                        if (!hasSurfaceOverride && options.AutoCounterTwistWeights)
                         {
                             AdjustLimbTwistAndHipWeights(targetSkeleton, vCount, skelBoneIndices, outWeights, alignedVerts, rawIndices, limbTwistProfile);
                         }
@@ -1640,6 +1713,8 @@ namespace DeadlockPlayground.Importer
 
                     newMi.Layers &= ~(uint)(1 << 20);
                     newMi.SetMeta("IsCustomImportedMesh", true);
+                    newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
+                    newMi.SetMeta("SourceSurfaceIndex", s);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
                     ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
                     if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
@@ -1769,6 +1844,8 @@ namespace DeadlockPlayground.Importer
 
                     newMi.Layers &= ~(uint)(1 << 20);
                     newMi.SetMeta("IsCustomImportedMesh", true);
+                    newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
+                    newMi.SetMeta("SourceSurfaceIndex", s);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
                     ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
 
@@ -4888,6 +4965,8 @@ namespace DeadlockPlayground.Importer
                             int sIdx = subMi.HasMeta("SurfaceIndex") ? subMi.GetMeta("SurfaceIndex").AsInt32() : gIdx;
                             bool keepSub = !forceHiddenByReplacement &&
                                            IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, sIdx, subMi.Name.ToString());
+                            mi.SetMeta($"SurfaceKept_{sIdx}", keepSub);
+                            subMi.SetMeta("SurfaceIndex", sIdx);
                             subMi.Visible = keepSub;
                             subMi.SetMeta("UserVisibility", keepSub);
                             if (keepSub)
@@ -5057,6 +5136,8 @@ namespace DeadlockPlayground.Importer
         {
             if (node is MeshInstance3D mi && mi.Mesh != null)
             {
+                if (mi.HasMeta("IsWireframeOverlay") && mi.GetMeta("IsWireframeOverlay").AsBool())
+                    return;
                 list.Add(mi);
             }
             foreach (Node child in node.GetChildren())
@@ -5073,9 +5154,9 @@ namespace DeadlockPlayground.Importer
         }
 
         public static Vector3[] GetVector3Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<Vector3[]>() : null;
-        private static Vector2[] GetVector2Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<Vector2[]>() : null;
-        private static int[] GetInt32Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<int[]>() : null;
-        private static float[] GetFloat32Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<float[]>() : null;
+        public static Vector2[] GetVector2Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<Vector2[]>() : null;
+        public static int[] GetInt32Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<int[]>() : null;
+        public static float[] GetFloat32Array(Variant v) => v.VariantType != Variant.Type.Nil ? v.As<float[]>() : null;
 
         /// <summary>
         /// Computes exact relative Transform3D of a descendant node relative to a given ancestor root.
@@ -5656,6 +5737,15 @@ namespace DeadlockPlayground.Importer
                 if (mi.HasMeta("UserVisibility")) mi.SetMeta("UserVisibility", true);
                 if (mi.HasMeta("UserHiddenByCustomModel")) mi.RemoveMeta("UserHiddenByCustomModel");
                 if (mi.HasMeta("IsHiddenComposite")) mi.RemoveMeta("IsHiddenComposite");
+                int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
+                for (int s = 0; s < surfCount; s++)
+                {
+                    if (mi.HasMeta($"SurfaceKept_{s}")) mi.RemoveMeta($"SurfaceKept_{s}");
+                    Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
+                    if (origMat != null) mi.SetSurfaceOverrideMaterial(s, origMat);
+                    else if (mi.GetSurfaceOverrideMaterial(s) != null && mi.GetSurfaceOverrideMaterial(s).HasMeta("IsHiddenSurfaceMaterial"))
+                        mi.SetSurfaceOverrideMaterial(s, null);
+                }
             }
 
             // 3. Re-scan hero hierarchy
