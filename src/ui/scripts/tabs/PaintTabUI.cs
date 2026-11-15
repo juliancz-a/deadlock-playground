@@ -1454,22 +1454,8 @@ public partial class PaintTabUI : VBoxContainer
         btn.ExpandIcon = true;
         btn.IconAlignment = HorizontalAlignment.Center;
         btn.CustomMinimumSize = new Vector2(30, 30);
+        btn.ThemeTypeVariation = "IconButton";
         btn.AddThemeConstantOverride("icon_max_width", iconSize);
-
-        // Theme default Button padding (12px L/R) shrinks 30px icon buttons down to 6px; tighten to 4px.
-        foreach (string state in new[] { "normal", "hover", "pressed", "disabled" })
-        {
-            var sb = btn.GetThemeStylebox(state, "Button");
-            if (sb is StyleBoxFlat flat)
-            {
-                var copy = (StyleBoxFlat)flat.Duplicate();
-                copy.ContentMarginLeft = 4;
-                copy.ContentMarginRight = 4;
-                copy.ContentMarginTop = 4;
-                copy.ContentMarginBottom = 4;
-                btn.AddThemeStyleboxOverride(state, copy);
-            }
-        }
     }
 
     private static readonly MaterialTextureChannel[] s_workspaceChannels =
@@ -4100,11 +4086,12 @@ public partial class PaintTabUI : VBoxContainer
             if (mi.HasMeta("ParentCompositeMesh"))
             {
                 var parent = mi.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                bool defaultVis = true;
                 if (parent != null && GodotObject.IsInstanceValid(parent))
                 {
-                    bool parentVis = parent.HasMeta("UserVisibility") ? parent.GetMeta("UserVisibility").AsBool() : parent.Visible;
-                    mi.Visible = parentVis;
+                    defaultVis = parent.HasMeta("UserVisibility") ? parent.GetMeta("UserVisibility").AsBool() : parent.Visible;
                 }
+                mi.Visible = mi.HasMeta("UserVisibility") ? mi.GetMeta("UserVisibility").AsBool() : defaultVis;
             }
             else if (mi.HasMeta("IsHiddenComposite"))
             {
@@ -4119,7 +4106,7 @@ public partial class PaintTabUI : VBoxContainer
                     {
                         if (sub != null && GodotObject.IsInstanceValid(sub))
                         {
-                            sub.Visible = compositeUserVis;
+                            sub.Visible = sub.HasMeta("UserVisibility") ? sub.GetMeta("UserVisibility").AsBool() : compositeUserVis;
                         }
                     }
                 }

@@ -1893,9 +1893,9 @@ public static class MaterialChannelDiscovery
                 if (metal?.HasValidTexture == true)
                 {
                     sm.SetShaderParameter("metallic_texture", metal.Texture);
-                    if (isPainterOverlay) sm.SetShaderParameter("has_metallic_texture", true);
+                    sm.SetShaderParameter("has_metallic_texture", true);
                 }
-                else if (isPainterOverlay)
+                else
                 {
                     sm.SetShaderParameter("has_metallic_texture", false);
                 }

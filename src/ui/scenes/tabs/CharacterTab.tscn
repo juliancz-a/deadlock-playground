@@ -45,26 +45,25 @@ text = "Import Custom 3D Model (.glb / .fbx)"
 autowrap_mode = 2
 tooltip_text = "Import external 3D character or accessory (.glb / .fbx), align in 3D Fitting Room, auto-rig to Deadlock hero skeleton, and export as mod"
 
-[node name="CustomModelActionsRow" type="HFlowContainer" parent="HeroSelectGroup" unique_id=739281099]
+[node name="CustomModelActionsRow" type="VBoxContainer" parent="HeroSelectGroup" unique_id=739281099]
 visible = false
 layout_mode = 2
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 8
+theme_override_constants/separation = 6
 
 [node name="BtnEditCustomModel" type="Button" parent="HeroSelectGroup/CustomModelActionsRow" unique_id=739281100]
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 size_flags_horizontal = 3
 text = " Edit Imported Model "
-clip_text = true
+autowrap_mode = 2
 tooltip_text = "Re-open 3D Fitting Room to adjust weapon rotation, scale, bone mappings, or submeshes"
 
 [node name="BtnResetCustomModel" type="Button" parent="HeroSelectGroup/CustomModelActionsRow" unique_id=739281101]
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 size_flags_horizontal = 3
 text = " Reset to Original Hero "
-clip_text = true
+autowrap_mode = 2
 tooltip_text = "Remove custom imported model and restore all authentic Deadlock hero meshes and visibility"
 
 [node name="PrimaryActionButtons" type="HBoxContainer" parent="HeroSelectGroup" unique_id=739281041]

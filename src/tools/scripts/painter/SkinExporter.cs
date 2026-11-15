@@ -1239,8 +1239,11 @@ bool isSourceModInTargetAddons = false;
                         }
 
                         // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al siguiente slot pakXX libre!
-                        if (string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath ?? ""), StringComparison.OrdinalIgnoreCase) &&
-                            !string.IsNullOrEmpty(shiftedOriginalModDestinationPath) && File.Exists(config.SourceModVpkPath))
+                        if (!string.IsNullOrWhiteSpace(finalVpkPath) &&
+                            !string.IsNullOrWhiteSpace(config.SourceModVpkPath) &&
+                            !string.IsNullOrEmpty(shiftedOriginalModDestinationPath) &&
+                            File.Exists(config.SourceModVpkPath) &&
+                            string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath), StringComparison.OrdinalIgnoreCase))
                         {
                             if (File.Exists(shiftedOriginalModDestinationPath))
                             {

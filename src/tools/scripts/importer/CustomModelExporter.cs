@@ -328,7 +328,10 @@ namespace DeadlockPlayground.Importer
                             isAlphaTest = stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
                                           stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaHash;
                             isDoubleSided = !isOutlineShell && stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled;
-                            isUnlit = isOutlineShell || stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded;
+                            // Do not force F_SELF_ILLUM on regular character/prop meshes just because the source glTF
+                            // used KHR_materials_unlit (ShadingMode=Unshaded); Deadlock pbr.vfx should still shade and
+                            // shadow-receive them unless they are inverted-hull ink outline shells or carry a SelfIllum mask.
+                            isUnlit = isOutlineShell;
 
                             albedoPng = ExtractTexturePngPowerOfTwo(albedoTex, albedoTint);
                             normalPng = ExtractTexturePngPowerOfTwo(stdMat.NormalTexture, Colors.White);
@@ -380,7 +383,12 @@ namespace DeadlockPlayground.Importer
                         roughPng = ResolveMultiChannelPng(MaterialTextureChannel.Roughness, roughPng);
                         aoPng = ResolveMultiChannelPng(MaterialTextureChannel.AmbientOcclusion, aoPng);
                         shadowPng = ResolveMultiChannelPng(MaterialTextureChannel.Shadow, null);
-                        selfIllumPng = ResolveMultiChannelPng(MaterialTextureChannel.SelfIllum, null);
+                        bool hasPaintedSelfIllum = lm != null && matchedSubInfo != null &&
+                                                   lm.HasChannelEdits(matchedSubInfo, MaterialTextureChannel.SelfIllum);
+                        bool allowExtractedSelfIllum = hasPaintedSelfIllum || stdMat == null || stdMat.EmissionEnabled;
+                        selfIllumPng = allowExtractedSelfIllum
+                            ? ResolveMultiChannelPng(MaterialTextureChannel.SelfIllum, null)
+                            : null;
                         tintMaskPng = ResolveMultiChannelPng(MaterialTextureChannel.TintMask, null);
 
                         // If material has no texture image, bake its solid AlbedoColor into a 64x64 PNG
@@ -557,11 +565,38 @@ namespace DeadlockPlayground.Importer
             img = (Image)img.Duplicate();
             if (img.IsCompressed()) img.Decompress();
 
+            bool applyTint = MathF.Abs(tint.R - 1.0f) > 0.004f ||
+                             MathF.Abs(tint.G - 1.0f) > 0.004f ||
+                             MathF.Abs(tint.B - 1.0f) > 0.004f ||
+                             MathF.Abs(tint.A - 1.0f) > 0.004f;
+
             // If the image is a solid uniform color (or tiny placeholder like 16x16),
             // export it at 64x64 instead of a giant 2048x2048 texture, saving ~5.4 MB per material!
             if (IsUniformColor(img, out Color uniColor))
             {
+                if (applyTint)
+                {
+                    uniColor = new Color(uniColor.R * tint.R, uniColor.G * tint.G, uniColor.B * tint.B, uniColor.A * tint.A);
+                }
                 return CreateSolidColorPngBytes(64, 64, uniColor);
+            }
+
+            if (applyTint)
+            {
+                if (img.GetFormat() != Image.Format.Rgba8)
+                {
+                    img.Convert(Image.Format.Rgba8);
+                }
+                int w = img.GetWidth();
+                int h = img.GetHeight();
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        Color p = img.GetPixel(x, y);
+                        img.SetPixel(x, y, new Color(p.R * tint.R, p.G * tint.G, p.B * tint.B, p.A * tint.A));
+                    }
+                }
             }
 
             EnsurePowerOfTwoResolution(img);
@@ -902,6 +937,10 @@ namespace DeadlockPlayground.Importer
 
                     progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing Source 2 bind-pose SMD '{smdFileName}' ({bundle.Submeshes.Count} surface(s))..."));
                     WriteSourceSpaceSmd(smdFullPath, bundle, bundle.Submeshes, targetSkeletonBones);
+
+                    string animBindFileName = $"{modelBaseName}_anim_bind.smd";
+                    string animBindFullPath = Path.Combine(contentModelDir, animBindFileName);
+                    WriteRestBindAnimationSmd(animBindFullPath, bundle, targetSkeletonBones);
 
                     var customRenderMeshes = new List<(string MeshName, string SmdRelativePath)>
                     {
@@ -1616,14 +1655,55 @@ namespace DeadlockPlayground.Importer
                 outSb.AppendLine("\t\t[");
 
                 bool wroteMaterialGroup = false;
+                bool wroteAnimationList = false;
                 bool hasNmSkeletonList = blocks.Any(b => b.ClassName == "NmSkeletonList");
                 bool hasAnimGraph2List = blocks.Any(b => b.ClassName == "AnimGraph2List");
 
+                // Single lightweight 1-frame rest AnimFile keeps ModelBoneFlags.Animation intact in compiled .vmdl_c
+                // without shipping external sequence files in the VPK.
+                string vmdlNorm = string.IsNullOrEmpty(bundle.HeroModelVpkPath)
+                    ? $"{hero}.vmdl"
+                    : bundle.HeroModelVpkPath.Replace('\\', '/');
+                if (vmdlNorm.EndsWith(".vmdl_c", StringComparison.OrdinalIgnoreCase)) vmdlNorm = vmdlNorm[..^2];
+                string animModelBase = Path.GetFileNameWithoutExtension(vmdlNorm);
+                if (string.IsNullOrEmpty(animModelBase)) animModelBase = hero;
+                string animListBlock =
+                    "\t\t\t{\r\n" +
+                    "\t\t\t\t_class = \"AnimationList\"\r\n" +
+                    "\t\t\t\tchildren = \r\n" +
+                    "\t\t\t\t[\r\n" +
+                    "\t\t\t\t\t{\r\n" +
+                    "\t\t\t\t\t\t_class = \"AnimFile\"\r\n" +
+                    "\t\t\t\t\t\tname = \"bind_idle_ref\"\r\n" +
+                    $"\t\t\t\t\t\tsource_filename = \"{modelFolderRel}/{animModelBase}_anim_bind.smd\"\r\n" +
+                    "\t\t\t\t\t\tactivity_name = \"\"\r\n" +
+                    "\t\t\t\t\t\tactivity_weight = 1\r\n" +
+                    "\t\t\t\t\t\tweight_list_name = \"\"\r\n" +
+                    "\t\t\t\t\t\tfade_in_time = 0.0\r\n" +
+                    "\t\t\t\t\t\tfade_out_time = 0.0\r\n" +
+                    "\t\t\t\t\t\tlooping = false\r\n" +
+                    "\t\t\t\t\t\tdelta = false\r\n" +
+                    "\t\t\t\t\t\tworldSpace = false\r\n" +
+                    "\t\t\t\t\t\thidden = false\r\n" +
+                    "\t\t\t\t\t\tanim_markup_ordered = false\r\n" +
+                    "\t\t\t\t\t\tdisable_compression = false\r\n" +
+                    "\t\t\t\t\t\tanimgraph_additive = false\r\n" +
+                    "\t\t\t\t\t\tstart_frame = -1\r\n" +
+                    "\t\t\t\t\t\tend_frame = -1\r\n" +
+                    "\t\t\t\t\t\tframerate = -1.0\r\n" +
+                    "\t\t\t\t\t\treverse = false\r\n" +
+                    "\t\t\t\t\t},\r\n" +
+                    "\t\t\t\t]\r\n" +
+                    "\t\t\t}";
+
                 foreach (var (cls, blockText) in blocks)
                 {
-                    // Strip legacy AnimGraph 1 AnimationList; softbody/cloth blocks are omitted natively when ModelExtract.ReconstructSoftbody == false
                     if (cls == "AnimationList")
+                    {
+                        outSb.AppendLine(animListBlock + ",");
+                        wroteAnimationList = true;
                         continue;
+                    }
 
                     if (!includeAnimGraph2Nodes && (cls == "NmSkeletonList" || cls == "AnimGraph2List"))
                         continue;
@@ -1665,6 +1745,11 @@ namespace DeadlockPlayground.Importer
                 if (!wroteMaterialGroup)
                 {
                     outSb.AppendLine(mgSb.ToString() + ",");
+                }
+
+                if (!wroteAnimationList)
+                {
+                    outSb.AppendLine(animListBlock + ",");
                 }
 
                 if (includeAnimGraph2Nodes && !hasNmSkeletonList)
@@ -1750,20 +1835,10 @@ namespace DeadlockPlayground.Importer
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Writes a Source 2 bind-pose SMD file whose nodes & skeleton time 0 match the decompiled
-        /// .vmdl's _class = "Skeleton" block 1:1, and whose vertex positions/normals are transformed
-        /// via the exact inverse of VRF's SourceToGltfRotation (-0.5, -0.5, -0.5, 0.5) & InchesToMeters (0.0254).
-        /// </summary>
-        public static void WriteSourceSpaceSmd(
-            string outputSmdPath,
+        private static List<VmdlSkeletonBone> ResolveSmdSkeletonBones(
             CustomModelExportBundle bundle,
-            List<CustomModelExportBundle.SubmeshData> submeshesToWrite = null,
-            List<VmdlSkeletonBone> vmdlSkeletonBones = null)
+            List<VmdlSkeletonBone> vmdlSkeletonBones)
         {
-            submeshesToWrite ??= bundle.Submeshes;
-
-            // Build authoritative bone list for SMD nodes & skeleton time 0
             List<VmdlSkeletonBone> smdBones;
             if (vmdlSkeletonBones != null && vmdlSkeletonBones.Count > 0)
             {
@@ -1808,36 +1883,11 @@ namespace DeadlockPlayground.Importer
                 smdBones.Add(new VmdlSkeletonBone { Index = 0, Name = "root_motion", ParentIndex = -1 });
             }
 
-            var smdBoneNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < smdBones.Count; i++)
-            {
-                smdBoneNameToIndex[smdBones[i].Name] = i;
-            }
+            return smdBones;
+        }
 
-            int pelvisSmdIdx = smdBoneNameToIndex.TryGetValue("pelvis", out int pSmd) ? pSmd : 0;
-
-            // Map each bundle.BoneNames index -> smdBones index (walking up parent hierarchy if helper/cloth bone)
-            int[] godotBoneToSmdBone = new int[Math.Max(1, bundle.BoneNames.Count)];
-            for (int b = 0; b < bundle.BoneNames.Count; b++)
-            {
-                string bName = bundle.BoneNames[b];
-                int resolved = -1;
-                string curr = bName;
-                int guard = 0;
-                while (!string.IsNullOrEmpty(curr) && guard++ < 64)
-                {
-                    if (!IsClothBoneName(curr) && smdBoneNameToIndex.TryGetValue(curr, out int idx))
-                    {
-                        resolved = idx;
-                        break;
-                    }
-                    if (!bundle.BoneHierarchy.TryGetValue(curr, out curr))
-                        break;
-                }
-                godotBoneToSmdBone[b] = resolved >= 0 ? resolved : pelvisSmdIdx;
-            }
-
-            var sb = new StringBuilder(1024 * 1024);
+        private static void AppendSmdHeaderAndSkeleton(StringBuilder sb, List<VmdlSkeletonBone> smdBones)
+        {
             var ic = CultureInfo.InvariantCulture;
             const float degToRad = MathF.PI / 180.0f;
 
@@ -1874,6 +1924,73 @@ namespace DeadlockPlayground.Importer
                     i, b.Origin.X, b.Origin.Y, b.Origin.Z, rotXRad, rotYRad, rotZRad));
             }
             sb.AppendLine("end");
+        }
+
+        /// <summary>
+        /// Writes a minimal 1-frame rest animation SMD referencing the hero skeleton so ModelDoc
+        /// preserves ModelBoneFlags.Animation across all bones during headless compilation.
+        /// </summary>
+        public static void WriteRestBindAnimationSmd(
+            string outputSmdPath,
+            CustomModelExportBundle bundle,
+            List<VmdlSkeletonBone> vmdlSkeletonBones = null)
+        {
+            var smdBones = ResolveSmdSkeletonBones(bundle, vmdlSkeletonBones);
+            var sb = new StringBuilder(16 * 1024);
+            AppendSmdHeaderAndSkeleton(sb, smdBones);
+            sb.AppendLine("triangles");
+            sb.AppendLine("end");
+            File.WriteAllText(outputSmdPath, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        /// <summary>
+        /// Writes a Source 2 bind-pose SMD file whose nodes & skeleton time 0 match the decompiled
+        /// .vmdl's _class = "Skeleton" block 1:1, and whose vertex positions/normals are transformed
+        /// via the exact inverse of VRF's SourceToGltfRotation (-0.5, -0.5, -0.5, 0.5) & InchesToMeters (0.0254).
+        /// </summary>
+        public static void WriteSourceSpaceSmd(
+            string outputSmdPath,
+            CustomModelExportBundle bundle,
+            List<CustomModelExportBundle.SubmeshData> submeshesToWrite = null,
+            List<VmdlSkeletonBone> vmdlSkeletonBones = null)
+        {
+            submeshesToWrite ??= bundle.Submeshes;
+
+            // Build authoritative bone list for SMD nodes & skeleton time 0
+            List<VmdlSkeletonBone> smdBones = ResolveSmdSkeletonBones(bundle, vmdlSkeletonBones);
+
+            var smdBoneNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < smdBones.Count; i++)
+            {
+                smdBoneNameToIndex[smdBones[i].Name] = i;
+            }
+
+            int pelvisSmdIdx = smdBoneNameToIndex.TryGetValue("pelvis", out int pSmd) ? pSmd : 0;
+
+            // Map each bundle.BoneNames index -> smdBones index (walking up parent hierarchy if helper/cloth bone)
+            int[] godotBoneToSmdBone = new int[Math.Max(1, bundle.BoneNames.Count)];
+            for (int b = 0; b < bundle.BoneNames.Count; b++)
+            {
+                string bName = bundle.BoneNames[b];
+                int resolved = -1;
+                string curr = bName;
+                int guard = 0;
+                while (!string.IsNullOrEmpty(curr) && guard++ < 64)
+                {
+                    if (!IsClothBoneName(curr) && smdBoneNameToIndex.TryGetValue(curr, out int idx))
+                    {
+                        resolved = idx;
+                        break;
+                    }
+                    if (!bundle.BoneHierarchy.TryGetValue(curr, out curr))
+                        break;
+                }
+                godotBoneToSmdBone[b] = resolved >= 0 ? resolved : pelvisSmdIdx;
+            }
+
+            var sb = new StringBuilder(1024 * 1024);
+            var ic = CultureInfo.InvariantCulture;
+            AppendSmdHeaderAndSkeleton(sb, smdBones);
 
             sb.AppendLine("triangles");
             var mergedSmdWeights = new Dictionary<int, float>(4);
@@ -2082,6 +2199,10 @@ namespace DeadlockPlayground.Importer
             string defaultBlackMaskRel = $"{materialsFolderRel}/{defaultBlackMaskFile}";
             File.WriteAllBytes(Path.Combine(contentMatDir, defaultBlackMaskFile), CreateSolidColorPngBytes(64, 64, new Color(0.0f, 0.0f, 0.0f, 1.0f)));
 
+            string defaultNprTransFile = "default_npr_transmissive.png";
+            string defaultNprTransRel = $"{materialsFolderRel}/{defaultNprTransFile}";
+            File.WriteAllBytes(Path.Combine(contentMatDir, defaultNprTransFile), CreateSolidColorPngBytes(64, 64, new Color(0.42f, 0.42f, 0.46f, 1.0f)));
+
             foreach (var sub in bundle.Submeshes)
             {
                 string matName = SanitizeMaterialName(sub.MaterialName);
@@ -2120,23 +2241,31 @@ namespace DeadlockPlayground.Importer
                     aoValueOrPath = $"{materialsFolderRel}/{aoPngFile}";
                 }
 
+                bool hasCustomSelfIllum = sub.SelfIllumPngBytes != null && sub.SelfIllumPngBytes.Length > 0;
                 string selfIllumValueOrPath = defaultBlackMaskRel;
-                if (sub.SelfIllumPngBytes != null && sub.SelfIllumPngBytes.Length > 0)
+                if (hasCustomSelfIllum)
                 {
                     string selfIllumPngFile = $"{matName}_selfillum.png";
                     File.WriteAllBytes(Path.Combine(contentMatDir, selfIllumPngFile), sub.SelfIllumPngBytes);
                     selfIllumValueOrPath = $"{materialsFolderRel}/{selfIllumPngFile}";
                 }
 
-                string tintMaskValueOrPath = defaultWhiteAoRel;
-                if (sub.TintMaskPngBytes != null && sub.TintMaskPngBytes.Length > 0)
+                // Unlit / outline-shell materials require uniform self-illumination so map shadows do not crush flat-shaded anime or ink colors.
+                if (sub.IsOutlineShell || sub.IsUnlit)
+                {
+                    selfIllumValueOrPath = defaultWhiteAoRel;
+                }
+
+                bool hasCustomTintMask = sub.TintMaskPngBytes != null && sub.TintMaskPngBytes.Length > 0;
+                string tintMaskValueOrPath = defaultBlackMaskRel;
+                if (hasCustomTintMask)
                 {
                     string tintPngFile = $"{matName}_tintmask.png";
                     File.WriteAllBytes(Path.Combine(contentMatDir, tintPngFile), sub.TintMaskPngBytes);
                     tintMaskValueOrPath = $"{materialsFolderRel}/{tintPngFile}";
                 }
 
-                string shadowValueOrPath = null;
+                string shadowValueOrPath = defaultNprTransRel;
                 if (sub.ShadowPngBytes != null && sub.ShadowPngBytes.Length > 0)
                 {
                     string shadowPngFile = $"{matName}_shadow.png";
@@ -2156,7 +2285,12 @@ namespace DeadlockPlayground.Importer
                     sub.IsDoubleSided && !sub.IsOutlineShell,
                     selfIllumValueOrPath,
                     tintMaskValueOrPath,
-                    shadowValueOrPath);
+                    shadowValueOrPath,
+                    sub.IsUnlit,
+                    sub.IsOutlineShell,
+                    hasCustomSelfIllum,
+                    hasCustomTintMask,
+                    defaultBlackMaskRel);
                 File.WriteAllText(vmatFull, vmatContent, new UTF8Encoding(false));
                 writtenVmatPaths.Add(vmatFull);
 
@@ -2177,7 +2311,12 @@ namespace DeadlockPlayground.Importer
             bool renderBackfaces = false,
             string selfIllumMaskRel = null,
             string tintMaskRel = null,
-            string shadowMapRel = null)
+            string shadowMapRel = null,
+            bool isUnlit = false,
+            bool isOutlineShell = false,
+            bool hasCustomSelfIllum = false,
+            bool hasCustomTintMask = false,
+            string blackMaskRel = null)
         {
             var ic = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
@@ -2189,6 +2328,20 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine();
             sb.AppendLine("\t//---- Rendering & NPR Lighting ----");
             sb.AppendLine("\tF_USE_NPR_LIGHTING 1");
+            sb.AppendLine("\tF_USE_STATUS_EFFECTS_PROXY 1");
+            sb.AppendLine("\tF_WRITE_DEPTH_BEFORE_ALPHA_BLENDING 1");
+            if (isOutlineShell)
+            {
+                sb.AppendLine("\tF_DISABLE_NPR_OUTLINE 1");
+            }
+            else if (!isTranslucent)
+            {
+                sb.AppendLine("\tF_SOLID_COLOR_OUTLINE 1");
+            }
+            if (isOutlineShell || isUnlit || hasCustomSelfIllum)
+            {
+                sb.AppendLine("\tF_SELF_ILLUM 1");
+            }
             if (renderBackfaces)
             {
                 sb.AppendLine("\tF_RENDER_BACKFACES 1");
@@ -2211,7 +2364,7 @@ namespace DeadlockPlayground.Importer
                 sb.AppendLine();
             }
             sb.AppendLine("\t//---- Color ----");
-            sb.AppendLine("\tg_flModelTintAmount \"1.000\"");
+            sb.AppendLine(hasCustomTintMask ? "\tg_flModelTintAmount \"1.000\"" : "\tg_flModelTintAmount \"0.000\"");
             sb.AppendLine("\tg_vColorTint \"[1.000000 1.000000 1.000000 0.000000]\"");
             sb.AppendLine("\tg_vColorTint1 \"[1.000000 1.000000 1.000000 0.000000]\"");
             sb.AppendLine($"\tTextureColor1 \"{colorTexturePngRel}\"");
@@ -2228,25 +2381,58 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine(string.Format(ic, "\tTextureMetalness \"[{0:F6} {0:F6} {0:F6} 0.000000]\"", metallicScalar));
             sb.AppendLine($"\tTextureAmbientOcclusion1 \"{aoValueOrPngRel}\"");
             sb.AppendLine($"\tTextureAmbientOcclusion \"{aoValueOrPngRel}\"");
-            string nprTransmissiveRel = !string.IsNullOrEmpty(shadowMapRel) ? shadowMapRel : selfIllumMaskRel;
+            if (isOutlineShell || isUnlit || hasCustomSelfIllum)
+            {
+                sb.AppendLine("\t//---- Self Illum / Unlit ----");
+                sb.AppendLine("\tg_flSelfIllumAlbedoFactor1 \"1.000\"");
+                sb.AppendLine("\tg_flSelfIllumAlbedoFactor \"1.000\"");
+                // Keep unlit albedo at 0.85 so anime/unlit skin does not clip under Deadlock's HDR bloom,
+                // while explicit emissive masks and ink outline shells use 1.0.
+                string siScale = (isUnlit && !isOutlineShell) ? "0.850" : "1.000";
+                sb.AppendLine($"\tg_flSelfIllumScale1 \"{siScale}\"");
+                sb.AppendLine($"\tg_flSelfIllumScale \"{siScale}\"");
+            }
             if (!string.IsNullOrEmpty(selfIllumMaskRel))
             {
                 sb.AppendLine($"\tTextureSelfIllumMask1 \"{selfIllumMaskRel}\"");
                 sb.AppendLine($"\tTextureSelfIllumMask \"{selfIllumMaskRel}\"");
             }
-            if (!string.IsNullOrEmpty(nprTransmissiveRel))
+            // Never route selfIllumMaskRel into NPR transmissive shadow color!
+            if (!string.IsNullOrEmpty(shadowMapRel))
             {
-                sb.AppendLine($"\tTextureNprTramsissiveColor1 \"{nprTransmissiveRel}\"");
-                sb.AppendLine($"\tTextureNprTransmissiveColor \"{nprTransmissiveRel}\"");
+                sb.AppendLine($"\tTextureNprTramsissiveColor1 \"{shadowMapRel}\"");
+                sb.AppendLine($"\tTextureNprTransmissiveColor \"{shadowMapRel}\"");
             }
-            if (!string.IsNullOrEmpty(tintMaskRel))
+            string effectiveTintMask = hasCustomTintMask && !string.IsNullOrEmpty(tintMaskRel)
+                ? tintMaskRel
+                : blackMaskRel;
+            string effectiveRimMask = (isOutlineShell || isUnlit || !hasCustomTintMask)
+                ? blackMaskRel
+                : tintMaskRel;
+            if (!string.IsNullOrEmpty(effectiveTintMask))
             {
-                sb.AppendLine($"\tTextureTintMask1 \"{tintMaskRel}\"");
-                sb.AppendLine($"\tTextureTintMask \"{tintMaskRel}\"");
-                sb.AppendLine($"\tTextureRimLightMask1 \"{tintMaskRel}\"");
-                sb.AppendLine($"\tTextureTintMaskRimLightMask \"{tintMaskRel}\"");
-                sb.AppendLine($"\tTextureNprOutlineMask1 \"{tintMaskRel}\"");
-                sb.AppendLine($"\tTextureNprOutlineMask \"{tintMaskRel}\"");
+                sb.AppendLine($"\tTextureTintMask1 \"{effectiveTintMask}\"");
+                sb.AppendLine($"\tTextureTintMask \"{effectiveTintMask}\"");
+            }
+            else
+            {
+                sb.AppendLine("\tTextureTintMask1 \"[0.000000 0.000000 0.000000 0.000000]\"");
+                sb.AppendLine("\tTextureTintMask \"[0.000000 0.000000 0.000000 0.000000]\"");
+            }
+            if (!string.IsNullOrEmpty(effectiveRimMask))
+            {
+                sb.AppendLine($"\tTextureRimLightMask1 \"{effectiveRimMask}\"");
+                sb.AppendLine($"\tTextureTintMaskRimLightMask \"{effectiveRimMask}\"");
+            }
+            else
+            {
+                sb.AppendLine("\tTextureRimLightMask1 \"[0.000000 0.000000 0.000000 0.000000]\"");
+                sb.AppendLine("\tTextureTintMaskRimLightMask \"[0.000000 0.000000 0.000000 0.000000]\"");
+            }
+            if (!string.IsNullOrEmpty(blackMaskRel))
+            {
+                sb.AppendLine($"\tTextureNprOutlineMask1 \"{blackMaskRel}\"");
+                sb.AppendLine($"\tTextureNprOutlineMask \"{blackMaskRel}\"");
             }
             sb.AppendLine("}");
             return sb.ToString();

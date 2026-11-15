@@ -176,7 +176,7 @@ public partial class HeroCardUI : PanelContainer
             };
 
             _lblTag.Text = tagText;
-            _lblTag.Modulate = tagColor;
+            PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, tagColor);
         }
     }
 

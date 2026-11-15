@@ -146,7 +146,8 @@ public partial class ExportPanelUI : PanelContainer
     {
         if (btn == null) return;
         btn.ButtonPressed = active;
-        btn.Modulate = active ? new Color(1.1f, 1.0f, 0.7f) : new Color(0.8f, 0.8f, 0.8f);
+        btn.Modulate = Colors.White;
+        btn.ThemeTypeVariation = active ? "PrimaryActionButton" : "";
     }
 
     public Vector2I CalculateTargetResolution()

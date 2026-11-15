@@ -149,7 +149,7 @@ namespace DeadlockPlayground.UI
             // Close button
             _btnClose = new Button
             {
-                Text = "âœ•",
+                Text = "✕",
                 CustomMinimumSize = new Vector2(30, 28),
                 Flat = true,
                 TooltipText = "Close (Esc)"

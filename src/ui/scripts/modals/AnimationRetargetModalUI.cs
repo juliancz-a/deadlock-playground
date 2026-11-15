@@ -133,7 +133,7 @@ namespace DeadlockPlayground.UI
             // Populate File & Clip Info
             if (_lblFileInfo != null)
             {
-                _lblFileInfo.Text = $"{_loadResult.FileName}  â€¢  Source Skeleton: {_loadResult.SourceSkeleton.GetBoneCount()} bones  â€¢  {_loadResult.Animations.Count} clip(s)";
+                _lblFileInfo.Text = $"{_loadResult.FileName}  •  Source Skeleton: {_loadResult.SourceSkeleton.GetBoneCount()} bones  •  {_loadResult.Animations.Count} clip(s)";
             }
 
             if (_lblPoseStatus != null)
@@ -303,7 +303,7 @@ namespace DeadlockPlayground.UI
             };
             var crossIcon = GD.Load<Texture2D>("res://assets/at-icons/cross.svg");
             if (crossIcon != null) _btnClose.Icon = crossIcon;
-            else _btnClose.Text = "âœ•";
+            else _btnClose.Text = "✕";
             _btnClose.Pressed += Close;
             headerHBox.AddChild(_btnClose);
 
@@ -472,7 +472,7 @@ namespace DeadlockPlayground.UI
             };
             _optSourcePoseMode.AddItem("Auto-Detect (Geometry Vector Match)", 0);
             _optSourcePoseMode.AddItem("Strict T-Pose (Mixamo / Mesh2Motion Default)", 1);
-            _optSourcePoseMode.AddItem("A-Pose (30Â° / 45Â° Arms)", 2);
+            _optSourcePoseMode.AddItem("A-Pose (30° / 45° Arms)", 2);
             _optSourcePoseMode.AddItem("Use Frame 0 as Reference Pose", 3);
             _optSourcePoseMode.Select(0);
             poseVBox.AddChild(_optSourcePoseMode);
@@ -536,12 +536,12 @@ namespace DeadlockPlayground.UI
                 Value = 0.0,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                TooltipText = "Manual arm pitch artistic tweak (-60Â° to +60Â°). Defaults to 0Â°: computed dynamically from geometry."
+                TooltipText = "Manual arm pitch artistic tweak (-60° to +60°). Defaults to 0°: computed dynamically from geometry."
             };
             _sliderArmPitch.ValueChanged += (double _) => UpdateArmPitchLabel();
             armBox.AddChild(_sliderArmPitch);
 
-            _lblArmPitchVal = new Label { CustomMinimumSize = new Vector2(45, 0), Text = "0Â°" };
+            _lblArmPitchVal = new Label { CustomMinimumSize = new Vector2(45, 0), Text = "0°" };
             armBox.AddChild(_lblArmPitchVal);
             calibGrid.AddChild(armBox);
 
@@ -559,12 +559,12 @@ namespace DeadlockPlayground.UI
                 Value = 0.0,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                TooltipText = "Adjusts outward arm clearance angle (-20Â° to +20Â°). Expands outward to prevent arms sinking into bulky jackets (e.g. Holliday) or armor."
+                TooltipText = "Adjusts outward arm clearance angle (-20° to +20°). Expands outward to prevent arms sinking into bulky jackets (e.g. Holliday) or armor."
             };
             _sliderArmClearance.ValueChanged += (double _) => UpdateArmClearanceLabel();
             clearBox.AddChild(_sliderArmClearance);
 
-            _lblArmClearanceVal = new Label { CustomMinimumSize = new Vector2(45, 0), Text = "0Â°" };
+            _lblArmClearanceVal = new Label { CustomMinimumSize = new Vector2(45, 0), Text = "0°" };
             clearBox.AddChild(_lblArmClearanceVal);
             calibGrid.AddChild(clearBox);
 
@@ -582,12 +582,12 @@ namespace DeadlockPlayground.UI
                 Value = 0.0,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                TooltipText = "Adjusts forward/backward torso spine pitch angle (-30Â° to +30Â°)."
+                TooltipText = "Adjusts forward/backward torso spine pitch angle (-30° to +30°)."
             };
             _sliderSpinePitch.ValueChanged += (double _) => UpdateSpinePitchLabel();
             spineBox.AddChild(_sliderSpinePitch);
 
-            _lblSpinePitchVal = new Label { CustomMinimumSize = new Vector2(40, 0), Text = "0Â°" };
+            _lblSpinePitchVal = new Label { CustomMinimumSize = new Vector2(40, 0), Text = "0°" };
             spineBox.AddChild(_lblSpinePitchVal);
             calibGrid.AddChild(spineBox);
 
@@ -965,7 +965,7 @@ namespace DeadlockPlayground.UI
             if (_sliderArmPitch != null && _lblArmPitchVal != null)
             {
                 double v = _sliderArmPitch.Value;
-                _lblArmPitchVal.Text = $"{(v >= 0 ? "+" : "")}{v:F0}Â°";
+                _lblArmPitchVal.Text = $"{(v >= 0 ? "+" : "")}{v:F0}°";
             }
         }
 
@@ -974,7 +974,7 @@ namespace DeadlockPlayground.UI
             if (_sliderArmClearance != null && _lblArmClearanceVal != null)
             {
                 double v = _sliderArmClearance.Value;
-                _lblArmClearanceVal.Text = $"{(v > 0 ? "+" : "")}{v:F0}Â°";
+                _lblArmClearanceVal.Text = $"{(v > 0 ? "+" : "")}{v:F0}°";
             }
         }
 
@@ -983,7 +983,7 @@ namespace DeadlockPlayground.UI
             if (_sliderSpinePitch != null && _lblSpinePitchVal != null)
             {
                 double v = _sliderSpinePitch.Value;
-                _lblSpinePitchVal.Text = $"{(v >= 0 ? "+" : "")}{v:F0}Â°";
+                _lblSpinePitchVal.Text = $"{(v >= 0 ? "+" : "")}{v:F0}°";
             }
         }
 
@@ -1079,7 +1079,7 @@ namespace DeadlockPlayground.UI
                 // Arrow
                 var lblArrow = new Label
                 {
-                    Text = "â†",
+                    Text = "←",
                     CustomMinimumSize = new Vector2(16, 0)
                 };
                 lblArrow.AddThemeColorOverride("font_color", new Color(0.6f, 0.65f, 0.75f, 0.7f));
@@ -1176,7 +1176,7 @@ namespace DeadlockPlayground.UI
 
                 var secLbl = new Label
                 {
-                    Text = $"â”€â”€ Additional / Hero-Specific Bones ({heroSpecificBones.Count}) â”€â”€",
+                    Text = $"── Additional / Hero-Specific Bones ({heroSpecificBones.Count}) ──",
                     SizeFlagsVertical = SizeFlags.ShrinkCenter
                 };
                 secLbl.AddThemeColorOverride("font_color", new Color(0.70f, 0.55f, 0.95f, 1f));
@@ -1223,7 +1223,7 @@ namespace DeadlockPlayground.UI
 
                     var lblArrow = new Label
                     {
-                        Text = "â†",
+                        Text = "←",
                         CustomMinimumSize = new Vector2(16, 0)
                     };
                     lblArrow.AddThemeColorOverride("font_color", new Color(0.6f, 0.65f, 0.75f, 0.7f));

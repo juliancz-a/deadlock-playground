@@ -466,6 +466,31 @@ public partial class ThemeManager : Node
         return ThemeProfile.ComputeRelativeLuminance(bg) > 0.45;
     }
 
+    /// <summary>
+    /// Returns the higher-contrast foreground color (dark slate or near-white) for any background fill
+    /// by comparing actual WCAG contrast ratios (cross-over around relative luminance ~0.18).
+    /// </summary>
+    public static Color GetContrastTextColor(Color bg)
+    {
+        var darkInk = new Color(0.08f, 0.08f, 0.09f, 1f);
+        var lightInk = new Color(0.97f, 0.97f, 0.98f, 1f);
+        return ThemeProfile.ComputeContrastRatio(darkInk, bg) >= ThemeProfile.ComputeContrastRatio(lightInk, bg)
+            ? darkInk
+            : lightInk;
+    }
+
+    /// <summary>
+    /// Computes an icon pixel size scaled consistently with the active theme's body typography size.
+    /// </summary>
+    public static int GetScaledIconSize(int basePx = 20)
+    {
+        var t = _currentProfile?.Typography;
+        if (t == null) return Math.Clamp(basePx + 2, 18, 28);
+        int effectiveBody = Math.Clamp(t.BodyFontSize + t.GlobalFontScaleOffset, 12, 28);
+        int delta = Math.Max(0, effectiveBody - 13);
+        return Math.Clamp(basePx + (delta / 2), basePx, 30);
+    }
+
     private void ApplyProfileToGodotTheme(Godot.Theme theme, ThemeProfile profile, bool isModalTheme)
     {
         var p = profile.Palette;
@@ -495,16 +520,10 @@ public partial class ThemeManager : Node
         Color shadowColor = isLightBg ? new Color(0f, 0f, 0f, 0.10f) : new Color(0f, 0f, 0f, 0.45f);
         Color iconDisabledCol = new Color(textSecondary.R, textSecondary.G, textSecondary.B, 0.65f);
 
-        // Contrast-aware text on AccentPrimary fill
-        Color onAccentPrimary = ThemeProfile.ComputeRelativeLuminance(accentPrimary) > 0.45
-            ? new Color(0.10f, 0.10f, 0.11f, 1f)
-            : new Color(0.97f, 0.97f, 0.98f, 1f);
-        Color onAccentSecondary = ThemeProfile.ComputeRelativeLuminance(accentSecondary) > 0.45
-            ? new Color(0.10f, 0.10f, 0.11f, 1f)
-            : new Color(0.97f, 0.97f, 0.98f, 1f);
-        Color onDanger = ThemeProfile.ComputeRelativeLuminance(semDanger) > 0.45
-            ? new Color(0.10f, 0.10f, 0.11f, 1f)
-            : new Color(0.98f, 0.98f, 0.98f, 1f);
+        // Contrast-aware text on saturated accent / semantic button fills
+        Color onAccentPrimary = GetContrastTextColor(accentPrimary);
+        Color onAccentSecondary = GetContrastTextColor(accentSecondary);
+        Color onDanger = GetContrastTextColor(semDanger);
 
         Font headingFont = ResolveFont(t.HeadingFont);
         Font bodyFont = ResolveFont(t.BodyFont);
@@ -601,11 +620,13 @@ public partial class ThemeManager : Node
             theme.SetColor("font_hover_color", typeName, fgHover);
             theme.SetColor("font_focus_color", typeName, fgHover);
             theme.SetColor("font_pressed_color", typeName, fgPressed);
+            theme.SetColor("font_hover_pressed_color", typeName, fgPressed);
             theme.SetColor("font_disabled_color", typeName, fgDisabled);
             theme.SetColor("icon_normal_color", typeName, fg);
             theme.SetColor("icon_hover_color", typeName, fgHover);
             theme.SetColor("icon_focus_color", typeName, fgHover);
             theme.SetColor("icon_pressed_color", typeName, fgPressed);
+            theme.SetColor("icon_hover_pressed_color", typeName, fgPressed);
             theme.SetColor("icon_disabled_color", typeName, iconDisabledCol);
             theme.SetConstant("outline_size", typeName, t.FontOutlineStrength);
             theme.SetColor("font_outline_color", typeName, outlineColor);

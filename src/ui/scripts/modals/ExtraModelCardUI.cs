@@ -77,12 +77,14 @@ public partial class ExtraModelCardUI : PanelContainer
             if (entry.IsMainHeroModel)
             {
                 _lblTag.Text = isActiveModel ? "Main Model (ACTIVE)" : "Main Model";
-                _lblTag.Modulate = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.40f, 0.75f, 1.0f, 1.0f);
+                Color tagColor = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.40f, 0.75f, 1.0f, 1.0f);
+                PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, tagColor);
             }
             else
             {
                 _lblTag.Text = isActiveModel ? "Extra Model (ACTIVE)" : "Ability / Extra Model";
-                _lblTag.Modulate = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.95f, 0.85f, 0.35f, 1.0f);
+                Color tagColor = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.95f, 0.85f, 0.35f, 1.0f);
+                PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, tagColor);
             }
 
             if (isActiveModel)

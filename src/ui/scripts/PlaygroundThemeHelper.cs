@@ -201,6 +201,61 @@ public static class PlaygroundThemeHelper
     }
 
     /// <summary>
+    /// Styles a card badge pill (<see cref="PanelContainer"/> + <see cref="Label"/>) so it remains
+    /// crisp and high-contrast in both Light and Dark/Night themes.
+    /// </summary>
+    public static void ApplyCardBadgeStyle(PanelContainer badgePanel, Label badgeLabel, Color accentColor)
+    {
+        bool isLight = ThemeManager.IsLightTheme();
+        Color pillBg;
+        Color borderCol;
+        Color textCol;
+
+        if (isLight)
+        {
+            Color lightBase = new Color(0.95f, 0.96f, 0.98f, 0.95f);
+            pillBg = lightBase.Lerp(new Color(accentColor.R, accentColor.G, accentColor.B, 0.95f), 0.16f);
+            float lum = accentColor.Luminance;
+            float darken = lum > 0.55f ? 0.42f : (lum > 0.35f ? 0.55f : 0.72f);
+            textCol = new Color(accentColor.R * darken, accentColor.G * darken, accentColor.B * darken, 1.0f);
+            borderCol = new Color(textCol.R, textCol.G, textCol.B, 0.35f);
+        }
+        else
+        {
+            pillBg = new Color(0.05f, 0.06f, 0.08f, 0.85f);
+            borderCol = new Color(accentColor.R, accentColor.G, accentColor.B, 0.45f);
+            textCol = accentColor;
+        }
+
+        if (badgePanel != null)
+        {
+            badgePanel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+            {
+                BgColor = pillBg,
+                CornerRadiusTopLeft = 4,
+                CornerRadiusTopRight = 4,
+                CornerRadiusBottomLeft = 4,
+                CornerRadiusBottomRight = 4,
+                BorderWidthLeft = 1,
+                BorderWidthRight = 1,
+                BorderWidthTop = 1,
+                BorderWidthBottom = 1,
+                BorderColor = borderCol,
+                ContentMarginLeft = 6,
+                ContentMarginRight = 6,
+                ContentMarginTop = 2,
+                ContentMarginBottom = 2
+            });
+        }
+
+        if (badgeLabel != null)
+        {
+            badgeLabel.Modulate = Colors.White;
+            badgeLabel.AddThemeColorOverride("font_color", textCol);
+        }
+    }
+
+    /// <summary>
     /// Styles a label with Colus header typography in Deadlock Parchment.
     /// </summary>
     public static void MakeHeaderLabel(Label label)

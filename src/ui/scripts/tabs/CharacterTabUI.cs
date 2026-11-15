@@ -1135,13 +1135,32 @@ public partial class CharacterTabUI : VBoxContainer
                 return;
             }
 
-            // Skip internal split surfaces created by HeroMeshHierarchy so only high-level submeshes appear
-            if (mi.HasMeta("ParentCompositeMesh") || lowerName.Contains("_surf_"))
+            // If this composite mesh has been split into individual per-surface meshes by HeroMeshHierarchy,
+            // expose those split surface meshes directly instead of a single monolithic composite toggle.
+            if (mi.HasMeta("IsHiddenComposite") && mi.HasMeta("GeneratedSubmeshes"))
             {
-                return;
+                var gen = mi.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                if (gen != null && gen.Count > 0 && gen.Any(g => g != null && GodotObject.IsInstanceValid(g)))
+                {
+                    foreach (Node child in node.GetChildren())
+                    {
+                        CollectSubmeshesRecursive(child);
+                    }
+                    return;
+                }
             }
 
             {
+                string semanticSource = rawName;
+                if (mi.HasMeta("ParentCompositeMesh"))
+                {
+                    string matName = DeadlockPlayground.Painter.HeroMeshHierarchy.ResolveSurfaceMaterialName(mi, 0);
+                    if (!string.IsNullOrEmpty(matName))
+                    {
+                        semanticSource = matName;
+                    }
+                }
+                string semanticLower = semanticSource.ToLowerInvariant();
                 bool isAcc = lowerName.Contains("acc") ||
                              lowerName.Contains("prop") ||
                              lowerName.Contains("weapon") ||
@@ -1151,9 +1170,14 @@ public partial class CharacterTabUI : VBoxContainer
                              lowerName.Contains("glass") ||
                              lowerName.Contains("mask") ||
                              lowerName.Contains("cape") ||
-                             lowerName.Contains("coat");
+                             lowerName.Contains("coat") ||
+                             semanticLower.Contains("shotgun") ||
+                             semanticLower.Contains("weapon") ||
+                             semanticLower.Contains("gun") ||
+                             semanticLower.Contains("stake") ||
+                             semanticLower.Contains("crossbow");
 
-                string displayName = CleanMeshName(rawName);
+                string displayName = CleanMeshName(semanticSource);
 
                 _submeshes.Add(new SubmeshItem
                 {

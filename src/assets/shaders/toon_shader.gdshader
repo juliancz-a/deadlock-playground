@@ -66,6 +66,7 @@ uniform sampler2D ao_texture : hint_default_white, filter_linear_mipmap;
 uniform sampler2D roughness_texture : hint_default_white, filter_linear_mipmap;
 uniform sampler2D shadow_tint_texture : source_color, hint_default_white, filter_linear_mipmap;
 uniform sampler2D metallic_texture : hint_default_black, filter_linear_mipmap;
+uniform bool has_metallic_texture = false;
 uniform bool has_shadow_tint_texture = false;
 uniform bool enable_color_map = true;
 uniform bool enable_ao = true;
@@ -161,12 +162,15 @@ void fragment() {
 	float ao_val = enable_ao ? texture(ao_texture, uv).r : 1.0;
 	float rough_tex_val = enable_roughness ? texture(roughness_texture, uv).r : 1.0;
 	float metal_tex_val = texture(metallic_texture, uv).r;
+	// In glTF 2.0 / PBR, metallic scalar is a multiplier for metallic_texture, never a floor.
+	// Also cap METALLIC at 0.5 in stylized Toon shading so Godot Forward+ does not zero out DIFFUSE_LIGHT (1.0 - METALLIC).
+	float effective_metallic = has_metallic_texture ? (metallic * metal_tex_val) : metallic;
 
 	ALBEDO = albedo.rgb * mix(1.0, ao_val, enable_ao ? 0.35 : 0.0);
 	AO = ao_val;
 	AO_LIGHT_AFFECT = enable_ao ? 0.65 : 0.0;
 	NORMAL_MAP = enable_normal ? mix(vec3(0.5, 0.5, 1.0), normal_map.rgb, normal_strength) : vec3(0.5, 0.5, 1.0);
-	METALLIC = max(metallic, metal_tex_val);
+	METALLIC = clamp(effective_metallic * 0.5, 0.0, 0.5);
 	ROUGHNESS = clamp(roughness * rough_tex_val * normal_map.a, 0.02, 1.0);
 
 	if (enable_emission && emission_energy > 0.0 && dot(emission_color.rgb, vec3(1.0)) > 1e-4) {

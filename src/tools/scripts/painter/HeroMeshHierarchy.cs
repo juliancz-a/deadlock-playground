@@ -599,6 +599,11 @@ namespace DeadlockPlayground.Painter
                     toonMat.SetShaderParameter("normal_strength", stdMat.NormalEnabled ? 1.0f : 0.0f);
                 }
                 toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                toonMat.SetShaderParameter("has_metallic_texture", stdMat.MetallicTexture != null);
+                if (stdMat.MetallicTexture != null)
+                {
+                    toonMat.SetShaderParameter("metallic_texture", stdMat.MetallicTexture);
+                }
                 toonMat.SetShaderParameter("roughness", stdMat.Roughness > 0.01f ? stdMat.Roughness : 0.65f);
                 toonMat.SetShaderParameter("specular", stdMat.Metallic > 0.5f ? 0.45f : 0.30f);
                 toonMat.SetShaderParameter("uv1_scale", stdMat.Uv1Scale);
@@ -984,7 +989,7 @@ namespace DeadlockPlayground.Painter
             return FormatCleanMaterialDisplayName(raw, HeroCodename, HeroDisplayName, HeroWipAlias);
         }
 
-        private static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
+        public static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
         {
             if (mi == null) return null;
             var mat = GetAuthenticMaterial(mi, s);
@@ -1519,6 +1524,7 @@ namespace DeadlockPlayground.Painter
             {
                 if (node != null && GodotObject.IsInstanceValid(node))
                 {
+                    node.Visible = false;
                     node.QueueFree();
                 }
             }
@@ -1528,7 +1534,9 @@ namespace DeadlockPlayground.Painter
             {
                 if (orig != null && GodotObject.IsInstanceValid(orig))
                 {
-                    orig.Visible = true;
+                    bool hiddenByCustom = orig.HasMeta("UserHiddenByCustomModel") && orig.GetMeta("UserHiddenByCustomModel").AsBool();
+                    bool userVis = !orig.HasMeta("UserVisibility") || orig.GetMeta("UserVisibility").AsBool();
+                    orig.Visible = !hiddenByCustom && userVis;
                     if (orig.HasMeta("IsHiddenComposite"))
                     {
                         orig.RemoveMeta("IsHiddenComposite");

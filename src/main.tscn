@@ -767,6 +767,7 @@ offset_top = 56.0
 offset_bottom = 440.0
 
 [node name="QuickActionsStrip" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=420354827]
+modulate = Color(1, 1, 1, 0.78)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0

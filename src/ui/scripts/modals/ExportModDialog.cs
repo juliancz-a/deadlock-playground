@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DeadlockPlayground.Painter;
+using DeadlockPlayground.Theming;
 using DeadlockPlayground.Workspace;
 
 public partial class ExportModDialog : CanvasLayer
@@ -48,15 +49,81 @@ public partial class ExportModDialog : CanvasLayer
     private CheckBox _chkPrioritizeNewMod;
     private CheckBox _chkOverwriteOriginalMod;
     private VBoxContainer _modMergeOptionsBox;
+    private ColorRect _backdrop;
+    private PanelContainer _dialogPanel;
+    private bool _isCompilerFound;
+    private string _targetVpkStatusKind = "success";
 
     public override void _Ready()
     {
         FindNodes();
         ConnectEvents();
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        ApplyThemeStyling();
+    }
+
+    public override void _ExitTree()
+    {
+        ThemeManager.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged(ThemeProfile _)
+    {
+        if (GodotObject.IsInstanceValid(this))
+        {
+            ApplyThemeStyling();
+        }
+    }
+
+    private void ApplyThemeStyling()
+    {
+        if (_backdrop != null && GodotObject.IsInstanceValid(_backdrop))
+        {
+            _backdrop.Color = ThemeManager.GetModalBackdropColor();
+        }
+
+        if (_dialogPanel != null && GodotObject.IsInstanceValid(_dialogPanel))
+        {
+            var modalTheme = ThemeManager.Instance?.GetModalTheme();
+            if (modalTheme != null)
+            {
+                _dialogPanel.Theme = modalTheme;
+            }
+            _dialogPanel.ThemeTypeVariation = "ModalPanel";
+        }
+
+        ApplyCompilerStatusColor();
+        ApplyTargetVpkStatusColor();
+    }
+
+    private void ApplyCompilerStatusColor()
+    {
+        if (_lblCompilerStatus == null || !GodotObject.IsInstanceValid(_lblCompilerStatus)) return;
+        _lblCompilerStatus.Modulate = Colors.White;
+        _lblCompilerStatus.ThemeTypeVariation = _isCompilerFound ? "BadgeLabelSuccess" : "BadgeLabelWarning";
+        _lblCompilerStatus.AddThemeColorOverride("font_color", ThemeManager.GetColor(_isCompilerFound
+            ? nameof(ThemePaletteData.SemanticSuccess)
+            : nameof(ThemePaletteData.SemanticWarning)));
+    }
+
+    private void ApplyTargetVpkStatusColor()
+    {
+        if (_lblTargetVpkInfo == null || !GodotObject.IsInstanceValid(_lblTargetVpkInfo)) return;
+        _lblTargetVpkInfo.Modulate = Colors.White;
+        (string variation, string token) = _targetVpkStatusKind switch
+        {
+            "danger" => ("BadgeLabelDanger", nameof(ThemePaletteData.SemanticDanger)),
+            "warning" => ("BadgeLabelWarning", nameof(ThemePaletteData.SemanticWarning)),
+            _ => ("BadgeLabelSuccess", nameof(ThemePaletteData.SemanticSuccess))
+        };
+        _lblTargetVpkInfo.ThemeTypeVariation = variation;
+        _lblTargetVpkInfo.AddThemeColorOverride("font_color", ThemeManager.GetColor(token));
     }
 
     private void FindNodes()
     {
+        _backdrop ??= GetNodeOrNull<ColorRect>("Backdrop");
+        _dialogPanel ??= GetNodeOrNull<PanelContainer>("DialogPanel");
         _txtModName ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName/TxtModName")
                      ?? FindChild("TxtModName", true, false) as LineEdit;
         _lblHero ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/HBoxHero/LblHeroValue");
@@ -350,6 +417,7 @@ public partial class ExportModDialog : CanvasLayer
         if (_chkCustomFolder != null) _chkCustomFolder.ButtonPressed = false;
         UpdateInstallModeUI();
         UpdateTargetVpkInfo();
+        ApplyThemeStyling();
 
         Visible = true;
     }
@@ -360,14 +428,15 @@ public partial class ExportModDialog : CanvasLayer
 
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path.Trim()))
         {
+            _isCompilerFound = true;
             _lblCompilerStatus.Text = $"✓ Found compiler: {Path.GetFileName(path.Trim())}";
-            _lblCompilerStatus.Modulate = new Color(0.4f, 0.95f, 0.5f);
         }
         else
         {
+            _isCompilerFound = false;
             _lblCompilerStatus.Text = "⚠ resourcecompiler.exe not found! Please browse to the executable file.";
-            _lblCompilerStatus.Modulate = new Color(1.0f, 0.65f, 0.4f);
         }
+        ApplyCompilerStatusColor();
     }
 
     private static string AutoDeriveCsdkRoot(string compilerExePath)
@@ -727,17 +796,17 @@ public partial class ExportModDialog : CanvasLayer
             if (hasSourceModInAddons && _chkOverwriteOriginalMod?.ButtonPressed == true)
             {
                 _lblTargetVpkInfo.Text = $"Will overwrite original mod in-place: {srcFileName} (in game/citadel/addons)";
-                _lblTargetVpkInfo.Modulate = new Color(1.0f, 0.78f, 0.35f);
+                _targetVpkStatusKind = "warning";
             }
             else if (hasSourceModInAddons && _chkPrioritizeNewMod?.ButtonPressed != false)
             {
                 _lblTargetVpkInfo.Text = $"Will take priority slot '{srcFileName}' & shift original mod to '{nextVpk}' (both kept!)";
-                _lblTargetVpkInfo.Modulate = new Color(0.4f, 0.95f, 0.6f);
+                _targetVpkStatusKind = "success";
             }
             else
             {
                 _lblTargetVpkInfo.Text = $"Will be installed as: {nextVpk} (in game/citadel/addons)";
-                _lblTargetVpkInfo.Modulate = new Color(0.4f, 0.9f, 0.5f);
+                _targetVpkStatusKind = "success";
             }
         }
         else
@@ -751,8 +820,9 @@ public partial class ExportModDialog : CanvasLayer
             string folder = _txtCustomFolder?.Text.Trim();
             if (string.IsNullOrEmpty(folder)) folder = "Custom Folder";
             _lblTargetVpkInfo.Text = $"Will be exported as: {modName}.vpk (in {folder})";
-            _lblTargetVpkInfo.Modulate = new Color(0.9f, 0.8f, 0.4f);
+            _targetVpkStatusKind = "warning";
         }
+        ApplyTargetVpkStatusColor();
     }
 
     private void OnConfirmPressed()
@@ -780,7 +850,8 @@ public partial class ExportModDialog : CanvasLayer
             if (_lblTargetVpkInfo != null)
             {
                 _lblTargetVpkInfo.Text = "⚠ No modified assets or submeshes selected! Please check at least one item.";
-                _lblTargetVpkInfo.Modulate = Colors.Salmon;
+                _targetVpkStatusKind = "danger";
+                ApplyTargetVpkStatusColor();
             }
             return;
         }

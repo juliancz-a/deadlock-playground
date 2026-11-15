@@ -250,7 +250,7 @@ namespace DeadlockPlayground.UI
         public override void _Ready()
         {
             ZIndex = 5;
-            AddThemeStyleboxOverride("panel", DockPanelStyle);
+            ThemeTypeVariation = "CardPanel";
             BindSceneNodes();
             ConnectSignals();
 
@@ -664,10 +664,10 @@ namespace DeadlockPlayground.UI
                         if (!string.IsNullOrEmpty(status))
                         {
                             _lblTransformMode.TooltipText = "Modal Transform Active:\n" +
-                                "â€¢ X: Lock Time Axis\n" +
-                                "â€¢ Y: Lock Value Axis\n" +
-                                "â€¢ Enter / Left Click: Confirm Transform\n" +
-                                "â€¢ Escape / Right Click: Cancel Transform";
+                                "• X: Lock Time Axis\n" +
+                                "• Y: Lock Value Axis\n" +
+                                "• Enter / Left Click: Confirm Transform\n" +
+                                "• Escape / Right Click: Cancel Transform";
                         }
                     }
                 };
@@ -843,10 +843,6 @@ namespace DeadlockPlayground.UI
             _menuQuickTools.Flat = false;
             _menuQuickTools.ExpandIcon = true;
             _menuQuickTools.AddThemeConstantOverride("icon_max_width", 16);
-            _menuQuickTools.AddThemeStyleboxOverride("normal", MenuBtnNormal);
-            _menuQuickTools.AddThemeStyleboxOverride("hover", MenuBtnHover);
-            _menuQuickTools.AddThemeStyleboxOverride("pressed", MenuBtnPressed);
-            _menuQuickTools.AddThemeStyleboxOverride("focus", MenuBtnHover);
 
             var popup = _menuQuickTools.GetPopup();
             popup.Clear();
@@ -1005,10 +1001,6 @@ namespace DeadlockPlayground.UI
         {
             if (_menuKeyActions == null) return;
             _menuKeyActions.Flat = false;
-            _menuKeyActions.AddThemeStyleboxOverride("normal", MenuBtnNormal);
-            _menuKeyActions.AddThemeStyleboxOverride("hover", MenuBtnHover);
-            _menuKeyActions.AddThemeStyleboxOverride("pressed", MenuBtnPressed);
-            _menuKeyActions.AddThemeStyleboxOverride("focus", MenuBtnHover);
 
             var popup = _menuKeyActions.GetPopup();
             popup.Clear();
@@ -1934,9 +1926,9 @@ namespace DeadlockPlayground.UI
             if (_sliderBoneRotY != null) _sliderBoneRotY.SetValueNoSignal(degY);
             if (_sliderBoneRotZ != null) _sliderBoneRotZ.SetValueNoSignal(degZ);
 
-            if (_lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {degX:F1}Â°";
-            if (_lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {degY:F1}Â°";
-            if (_lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {degZ:F1}Â°";
+            if (_lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {degX:F1}°";
+            if (_lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {degY:F1}°";
+            if (_lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {degZ:F1}°";
 
             _isUpdatingBoneSliders = false;
         }
@@ -1952,9 +1944,9 @@ namespace DeadlockPlayground.UI
             float degY = (float)(_sliderBoneRotY?.Value ?? 0);
             float degZ = (float)(_sliderBoneRotZ?.Value ?? 0);
 
-            if (axis == 0 && _lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {val:F1}Â°";
-            if (axis == 1 && _lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {val:F1}Â°";
-            if (axis == 2 && _lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {val:F1}Â°";
+            if (axis == 0 && _lblBoneRotX != null) _lblBoneRotX.Text = $"Rot X: {val:F1}°";
+            if (axis == 1 && _lblBoneRotY != null) _lblBoneRotY.Text = $"Rot Y: {val:F1}°";
+            if (axis == 2 && _lblBoneRotZ != null) _lblBoneRotZ.Text = $"Rot Z: {val:F1}°";
 
             Vector3 eulerRad = new(Mathf.DegToRad(degX), Mathf.DegToRad(degY), Mathf.DegToRad(degZ));
             Quaternion newRot = Quaternion.FromEuler(eulerRad).Normalized();

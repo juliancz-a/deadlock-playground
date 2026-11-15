@@ -65,7 +65,7 @@ public partial class ModCardUI : PanelContainer
                 _lblHero.Text = "Default Source 2 Assets";
                 _lblFilename.Text = "pak01_dir.vpk";
                 _lblTag.Text = "OFFICIAL";
-                _lblTag.Modulate = cyanAccent;
+                PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, cyanAccent);
                 ApplyCardIcon("res://assets/at-icons/checkmark.svg", cyanAccent);
             }
             else if (mod != null)
@@ -77,7 +77,7 @@ public partial class ModCardUI : PanelContainer
                 _lblHero.Text = typeLabel;
                 _lblFilename.Text = mod.FileName;
                 _lblTag.Text = badgeLabel;
-                _lblTag.Modulate = accentColor;
+                PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, accentColor);
                 ApplyCardIcon(iconPath, accentColor);
             }
         }

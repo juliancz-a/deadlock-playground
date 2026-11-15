@@ -1268,15 +1268,15 @@ namespace DeadlockPlayground.Tests
                         bool hasHitboxes = vmdlContent.Contains("HitboxSetList");
                         bool hasGameData = vmdlContent.Contains("GameDataList") && vmdlContent.Contains("CitadelCameraSettings_t");
                         bool hasBodyGroups = vmdlContent.Contains("BodyGroupList");
-                        bool hasNoAnimInclude = !vmdlContent.Contains("AnimIncludeModel") && !vmdlContent.Contains("_class = \"AnimationList\"");
+                        bool hasAnimRestList = !vmdlContent.Contains("AnimIncludeModel") && vmdlContent.Contains("_class = \"AnimationList\"") && vmdlContent.Contains("_anim_bind.smd");
 
-                        if (hasBodySmd && hasNmSkeleton && hasAnimGraph2 && hasAttachments && hasHitboxes && hasGameData && hasBodyGroups && hasNoAnimInclude)
+                        if (hasBodySmd && hasNmSkeleton && hasAnimGraph2 && hasAttachments && hasHitboxes && hasGameData && hasBodyGroups && hasAnimRestList)
                         {
-                            GD.Print("PASS: Decompile-and-Patch .vmdl contains NmSkeletonList, AnimGraph2List, AttachmentList (standing_pivot, crouching_pivot, gunaim_00, far_00), BodyGroupList, HitboxSetList, and GameDataList!");
+                            GD.Print("PASS: Decompile-and-Patch .vmdl contains NmSkeletonList, AnimGraph2List, rest AnimationList, AttachmentList (standing_pivot, crouching_pivot, gunaim_00, far_00), BodyGroupList, HitboxSetList, and GameDataList!");
                         }
                         else
                         {
-                            GD.PrintErr($"FAIL: .vmdl validation failed! smd={hasBodySmd}, nmSkel={hasNmSkeleton}, ag2={hasAnimGraph2}, attach={hasAttachments}, hitbox={hasHitboxes}, gameData={hasGameData}, bodyGroups={hasBodyGroups}, noLegacyAnim={hasNoAnimInclude}");
+                            GD.PrintErr($"FAIL: .vmdl validation failed! smd={hasBodySmd}, nmSkel={hasNmSkeleton}, ag2={hasAnimGraph2}, attach={hasAttachments}, hitbox={hasHitboxes}, gameData={hasGameData}, bodyGroups={hasBodyGroups}, restAnimList={hasAnimRestList}");
                             allPassed = false;
                         }
                     }
@@ -1380,14 +1380,17 @@ namespace DeadlockPlayground.Tests
 
                                 bool compiledHasStandingPivot = reExtractedVmdl.Contains("standing_pivot") && reExtractedVmdl.Contains("gunaim_00");
                                 bool compiledHasAg2 = reExtractedVmdl.Contains("chrono.vnmskel") && reExtractedVmdl.Contains("hero.vnmgraph+chrono.vnmgraph");
+                                var compiledModelBlock = compiledRes.DataBlock as ValveResourceFormat.ResourceTypes.Model;
+                                var compiledLegBone = compiledModelBlock?.Skeleton?.Bones?.FirstOrDefault(b => b.Name == "leg_upper_L");
+                                bool compiledHasAnimBoneFlags = compiledLegBone != null && compiledLegBone.Flags.ToString().Contains("Animation");
 
-                                if (compiledHasStandingPivot && compiledHasAg2)
+                                if (compiledHasStandingPivot && compiledHasAg2 && compiledHasAnimBoneFlags)
                                 {
-                                    GD.Print($"PASS: End-to-end CSDK13 VPK verified ({allVpkPaths.Count} files < 65, all {uniqueMatNames.Count} custom .vmat_c/.vtex_c present with self-contained AO/Normal/Mask textures, and compiled chrono.vmdl_c contains standing_pivot, gunaim_00, chrono.vnmskel, and AnimGraph2 references)!");
+                                    GD.Print($"PASS: End-to-end CSDK13 VPK verified ({allVpkPaths.Count} files < 65, all 15 custom .vmat_c/.vtex_c present, compiled chrono.vmdl_c has leg_upper_L Flags={compiledLegBone.Flags}, standing_pivot, gunaim_00, chrono.vnmskel, and AnimGraph2 references)!");
                                 }
                                 else
                                 {
-                                    GD.PrintErr($"FAIL: Compiled chrono.vmdl_c missing camera attachments ({compiledHasStandingPivot}) or AnimGraph2 refs ({compiledHasAg2})!");
+                                    GD.PrintErr($"FAIL: Compiled VMDL check failed! standingPivot={compiledHasStandingPivot}, ag2={compiledHasAg2}, legAnimFlags={compiledHasAnimBoneFlags} ({compiledLegBone?.Flags})");
                                     allPassed = false;
                                 }
                             }
@@ -1955,6 +1958,73 @@ namespace DeadlockPlayground.Tests
                 }
 
                 // =========================================================================
+                // TEST 26: DeadlockAnimLoader Masked Partial Sequence (jump_landing*) Decode
+                // =========================================================================
+                GD.Print("\n[TEST 26] Verifying DeadlockAnimLoader masked partial SequenceAnimations ('jump_landing*') preserve legs across all frames...");
+                {
+                    var animPlayer = heroNode.FindChild("AnimationPlayer", true, false) as AnimationPlayer;
+                    if (animPlayer == null)
+                    {
+                        animPlayer = new AnimationPlayer { Name = "VerificationAnimPlayer" };
+                        heroNode.AddChild(animPlayer);
+                    }
+
+                    int legLowerIdx = heroSkeleton.FindBone("leg_lower_L");
+                    int legUpperIdx = heroSkeleton.FindBone("leg_upper_L");
+                    Quaternion legUpperRestRot = legUpperIdx >= 0 ? heroSkeleton.GetBoneRest(legUpperIdx).Basis.GetRotationQuaternion() : Quaternion.Identity;
+
+                    foreach (var seqName in new[] { "jump_landing", "jump_landing_crouch", "jump_landing_not_shooting" })
+                    {
+                        var landingSeq = vpkLoader.CurrentHeroAnimations?.FirstOrDefault(a =>
+                            a.CleanName.Equals(seqName, StringComparison.OrdinalIgnoreCase));
+                        if (landingSeq == null)
+                        {
+                            GD.PrintErr($"FAIL: Chrono '{seqName}' not found in CurrentHeroAnimations!");
+                            allPassed = false;
+                            continue;
+                        }
+
+                        var decodedLanding = vpkLoader.DecodeAnimation(landingSeq, heroSkeleton, animPlayer, inPlace: true, targetAnimName: $"{seqName}_verify");
+                        int legUpperPosTrack = -1, legLowerPosTrack = -1, legUpperRotTrack = -1, pelvisPosTrack = -1;
+                        if (decodedLanding != null)
+                        {
+                            for (int t = 0; t < decodedLanding.GetTrackCount(); t++)
+                            {
+                                string p = decodedLanding.TrackGetPath(t).ToString();
+                                var tt = decodedLanding.TrackGetType(t);
+                                if (tt == Godot.Animation.TrackType.Position3D && p.EndsWith(":leg_upper_L")) legUpperPosTrack = t;
+                                else if (tt == Godot.Animation.TrackType.Position3D && p.EndsWith(":leg_lower_L")) legLowerPosTrack = t;
+                                else if (tt == Godot.Animation.TrackType.Rotation3D && p.EndsWith(":leg_upper_L")) legUpperRotTrack = t;
+                                else if (tt == Godot.Animation.TrackType.Position3D && p.EndsWith(":pelvis")) pelvisPosTrack = t;
+                            }
+                        }
+
+                        float midTime = decodedLanding != null ? Math.Min(0.25f, (float)decodedLanding.Length * 0.4f) : 0.25f;
+                        Vector3 legPos0 = legUpperPosTrack >= 0 ? decodedLanding.PositionTrackInterpolate(legUpperPosTrack, 0f) : Vector3.Zero;
+                        Vector3 legPosMid = legUpperPosTrack >= 0 ? decodedLanding.PositionTrackInterpolate(legUpperPosTrack, midTime) : Vector3.Zero;
+                        Vector3 kneePosMid = legLowerPosTrack >= 0 ? decodedLanding.PositionTrackInterpolate(legLowerPosTrack, midTime) : Vector3.Zero;
+                        Vector3 pelvPos0 = pelvisPosTrack >= 0 ? decodedLanding.PositionTrackInterpolate(pelvisPosTrack, 0f) : Vector3.Zero;
+                        Quaternion legRotMid = legUpperRotTrack >= 0 ? decodedLanding.RotationTrackInterpolate(legUpperRotTrack, midTime) : Quaternion.Identity;
+                        float legRotAngleDeg = legUpperRestRot.AngleTo(legRotMid) * 180f / Mathf.Pi;
+
+                        if (decodedLanding != null &&
+                            legPos0.Length() > 0.1f &&
+                            legPosMid.Length() > 0.1f &&
+                            kneePosMid.Length() > 0.3f &&
+                            pelvPos0.Y > 0.4f &&
+                            legRotAngleDeg < 90f)
+                        {
+                            GD.Print($"PASS: Chrono '{seqName}' preserved leg_upper_L@mid={legPosMid} (rotDiff={legRotAngleDeg:F1}deg), knee@mid={kneePosMid} (len={kneePosMid.Length():F3}m), pelvis@0.Y={pelvPos0.Y:F3}m.");
+                        }
+                        else
+                        {
+                            GD.PrintErr($"FAIL: Chrono '{seqName}' leg/pelvis glitched! leg0={legPos0}, legMid={legPosMid}, kneeMid={kneePosMid}, pelv0={pelvPos0}, rotDiff={legRotAngleDeg:F1}deg");
+                            allPassed = false;
+                        }
+                    }
+                }
+
+                // =========================================================================
                 // TEST 19: Multi-Channel Discovery & Deadman Danny (deadpack) Variants + Prefix Stripping
                 // =========================================================================
                 GD.Print("\n[TEST 19] Verifying Deadman Danny (deadpack) Multi-Channel Discovery, Variants & Prefix Stripping...");
@@ -2208,6 +2278,875 @@ namespace DeadlockPlayground.Tests
                     else
                     {
                         GD.PrintErr("FAIL: GenerateDeadlockPbrVmat missing expected multi-channel bindings!");
+                        allPassed = false;
+                    }
+                }
+
+                // =========================================================================
+                // TEST 23: Deadlock VMAT Combos, Outline/Unlit SelfIllum, Tint Isolation & NPR Transmissive
+                // =========================================================================
+                GD.Print("\n[TEST 23] Verifying Deadlock VMAT combos (NPR transmissive, tint mask isolation, outline/unlit self-illum)...");
+                {
+                    string vmatLitDefault = CustomModelExporter.GenerateDeadlockPbrVmat(
+                        "models/test/color.png",
+                        "models/test/normal.png",
+                        "0.500",
+                        0.0f,
+                        "1.000",
+                        blackMaskRel: "models/test/default_black_mask.png",
+                        shadowMapRel: "models/test/default_npr_transmissive.png");
+                    bool litOk = vmatLitDefault.Contains("F_USE_STATUS_EFFECTS_PROXY 1") &&
+                                 vmatLitDefault.Contains("F_WRITE_DEPTH_BEFORE_ALPHA_BLENDING 1") &&
+                                 vmatLitDefault.Contains("F_SOLID_COLOR_OUTLINE 1") &&
+                                 vmatLitDefault.Contains("g_flModelTintAmount \"0.000\"") &&
+                                 vmatLitDefault.Contains("TextureTintMask1 \"models/test/default_black_mask.png\"") &&
+                                 vmatLitDefault.Contains("TextureRimLightMask1 \"models/test/default_black_mask.png\"") &&
+                                 vmatLitDefault.Contains("TextureNprOutlineMask1 \"models/test/default_black_mask.png\"") &&
+                                 vmatLitDefault.Contains("TextureNprTramsissiveColor1 \"models/test/default_npr_transmissive.png\"");
+
+                    string vmatOutline = CustomModelExporter.GenerateDeadlockPbrVmat(
+                        "models/test/outline_color.png",
+                        "models/test/normal.png",
+                        "0.900",
+                        0.0f,
+                        "1.000",
+                        isOutlineShell: true,
+                        selfIllumMaskRel: "models/test/default_white_ao.png",
+                        blackMaskRel: "models/test/default_black_mask.png",
+                        shadowMapRel: "models/test/default_npr_transmissive.png");
+                    bool outlineOk = vmatOutline.Contains("F_DISABLE_NPR_OUTLINE 1") &&
+                                     vmatOutline.Contains("F_SELF_ILLUM 1") &&
+                                     vmatOutline.Contains("g_flSelfIllumAlbedoFactor1 \"1.000\"") &&
+                                     vmatOutline.Contains("TextureSelfIllumMask1 \"models/test/default_white_ao.png\"") &&
+                                     vmatOutline.Contains("TextureNprTramsissiveColor1 \"models/test/default_npr_transmissive.png\"");
+
+                    string vmatUnlit = CustomModelExporter.GenerateDeadlockPbrVmat(
+                        "models/test/unlit_color.png",
+                        "models/test/normal.png",
+                        "0.800",
+                        0.0f,
+                        "1.000",
+                        isUnlit: true,
+                        selfIllumMaskRel: "models/test/default_white_ao.png",
+                        blackMaskRel: "models/test/default_black_mask.png",
+                        shadowMapRel: "models/test/default_npr_transmissive.png");
+                    bool unlitOk = vmatUnlit.Contains("F_SELF_ILLUM 1") &&
+                                   vmatUnlit.Contains("g_flSelfIllumAlbedoFactor1 \"1.000\"") &&
+                                   vmatUnlit.Contains("g_flSelfIllumScale1 \"0.850\"") &&
+                                   vmatUnlit.Contains("TextureSelfIllumMask1 \"models/test/default_white_ao.png\"");
+
+                    if (litOk && outlineOk && unlitOk)
+                    {
+                        GD.Print("PASS: GenerateDeadlockPbrVmat emitted valid Deadlock combos, outline/unlit self-illum, black tint/rim/outline isolation, and non-black NPR transmissive default.");
+                    }
+                    else
+                    {
+                        GD.PrintErr($"FAIL: VMAT regression check failed (litOk={litOk}, outlineOk={outlineOk}, unlitOk={unlitOk}).");
+                        allPassed = false;
+                    }
+                }
+
+                // =========================================================================
+                // TEST 24: WriteRestBindAnimationSmd + GeneratePatchedVmdl AnimationList Preservation
+                // =========================================================================
+                GD.Print("\n[TEST 24] Verifying WriteRestBindAnimationSmd & GeneratePatchedVmdl AnimationList preservation...");
+                {
+                    string tempVmdlDir = Path.Combine(ProjectSettings.GlobalizePath("user://"), "vmdl_animlist_test");
+                    try
+                    {
+                        Directory.CreateDirectory(tempVmdlDir);
+                        var animListBundle = new CustomModelExporter.CustomModelExportBundle
+                        {
+                            HeroCodename = "chrono",
+                            HeroModelVpkPath = "models/heroes_staging/chrono/chrono.vmdl_c"
+                        };
+                        var (origVmdl, _, vrfBones) = CustomModelExporter.DecompileVanillaHeroVmdl(animListBundle, animListBundle.HeroModelVpkPath, "models/heroes_staging/chrono", false);
+                        string animSmdPath = Path.Combine(tempVmdlDir, "chrono_anim_bind.smd");
+                        CustomModelExporter.WriteRestBindAnimationSmd(animSmdPath, animListBundle, vrfBones);
+                        string animSmdText = File.Exists(animSmdPath) ? File.ReadAllText(animSmdPath) : "";
+
+                        string patchedVmdl = CustomModelExporter.GeneratePatchedVmdl(
+                            origVmdl,
+                            animListBundle,
+                            "models/heroes_staging/chrono",
+                            "models/heroes_staging/chrono/materials",
+                            new System.Collections.Generic.List<(string MeshName, string SmdRelativePath)> { ("chrono_body", "models/heroes_staging/chrono/chrono_body.smd") },
+                            new System.Collections.Generic.List<string> { "models/heroes_staging/chrono/materials/chrono_body.vmat" },
+                            new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                            includeAnimGraph2Nodes: true);
+
+                        bool smdOk = animSmdText.Contains("version 1") && animSmdText.Contains("skeleton") && animSmdText.Contains("leg_upper_L");
+                        bool vmdlOk = patchedVmdl.Contains("_class = \"AnimationList\"") &&
+                                      patchedVmdl.Contains("_class = \"AnimFile\"") &&
+                                      patchedVmdl.Contains("chrono_anim_bind.smd");
+
+                        if (smdOk && vmdlOk)
+                        {
+                            GD.Print($"PASS: Rest animation SMD ({vrfBones.Count} bones) and patched VMDL AnimationList generated cleanly.");
+                        }
+                        else
+                        {
+                            GD.PrintErr($"FAIL: AnimationList VMDL/SMD check failed (smdOk={smdOk}, vmdlOk={vmdlOk}).");
+                            allPassed = false;
+                        }
+                    }
+                    finally
+                    {
+                        try { Directory.Delete(tempVmdlDir, true); } catch { }
+                    }
+                }
+
+                // =========================================================================
+                // TEST 25: CustomModelAutoRigger.TryUpdateSocketSkinBindPose O(1) Precision
+                // =========================================================================
+                GD.Print("\n[TEST 25] Verifying TryUpdateSocketSkinBindPose O(1) GPU skin bind matrix math...");
+                {
+                    Transform3D boneRest = new Transform3D(Basis.FromEuler(new Vector3(0.2f, -0.5f, 0.3f)), new Vector3(0.35f, 1.1f, -0.15f));
+                    Vector3 pivot = new Vector3(0.32f, 1.05f, -0.18f);
+                    Vector3 pos0 = new Vector3(0.02f, -0.01f, 0.05f);
+                    Vector3 rot0 = new Vector3(15f, -30f, 10f);
+                    float scale0 = 0.85f;
+                    Vector3 pos1 = new Vector3(-0.04f, 0.06f, 0.02f);
+                    Vector3 rot1 = new Vector3(82f, 45f, -20f);
+                    float scale1 = 1.25f;
+
+                    Transform3D bakedHero = CustomModelAutoRigger.ComputeSocketHeroMatrix(boneRest, pivot, pos0, rot0, scale0);
+                    Transform3D expectedHero = CustomModelAutoRigger.ComputeSocketHeroMatrix(boneRest, pivot, pos1, rot1, scale1);
+
+                    var testSkin = new Skin();
+                    testSkin.AddBind(0, boneRest.AffineInverse());
+                    var testMi = new MeshInstance3D { Skin = testSkin };
+                    testMi.SetMeta("IsSocketProp", true);
+                    testMi.SetMeta("SocketBoneRest", boneRest);
+                    testMi.SetMeta("SocketPivot", pivot);
+                    testMi.SetMeta("SocketBakedInv", bakedHero.AffineInverse());
+
+                    bool updated = CustomModelAutoRigger.TryUpdateSocketSkinBindPose(testMi, pos1, rot1, scale1);
+                    Vector3 sampleBase = new Vector3(0.12f, -0.08f, 0.44f);
+                    Vector3 bakedVert = bakedHero * sampleBase;
+                    Vector3 gpuSkinnedRest = boneRest * (testSkin.GetBindPose(0) * bakedVert);
+                    Vector3 expectedVert = expectedHero * sampleBase;
+                    float err = gpuSkinnedRest.DistanceTo(expectedVert);
+
+                    if (updated && err < 0.0002f)
+                    {
+                        GD.Print($"PASS: O(1) TryUpdateSocketSkinBindPose matches full vertex rebuild within {err:E2}m.");
+                    }
+                    else
+                    {
+                        GD.PrintErr($"FAIL: TryUpdateSocketSkinBindPose mismatch (updated={updated}, err={err:F6}m).");
+                        allPassed = false;
+                    }
+                    testMi.Free();
+                }
+
+                // =========================================================================
+                // TEST 27: Sasha GLB Export Material Shadow/SelfIllum Isolation
+                // =========================================================================
+                GD.Print("\n[TEST 27] Verifying Sasha unlit NPR GLB surfaces do not export as fullbright F_SELF_ILLUM...");
+                {
+                    string sashaGlbPath = ProjectSettings.GlobalizePath("res://../scratch_out/models/sasha_-_cyberpunk_edgerunners.glb");
+                    if (File.Exists(sashaGlbPath))
+                    {
+                        var sashaVerifyScene = CustomModelAutoRigger.LoadAndSanitize3DModelScene(sashaGlbPath);
+                        var sashaVerifyMeshes = CustomModelAutoRigger.CollectMeshes(sashaVerifyScene);
+                        var sashaVerifySkel = CustomModelAutoRigger.FindSkeleton(sashaVerifyScene);
+                        var sashaVerifyBundle = CustomModelExporter.BuildExportBundle(sashaVerifyMeshes, sashaVerifySkel, "chrono");
+                        int badUnlitCount = sashaVerifyBundle.Submeshes.Count(s => !s.IsOutlineShell && (s.IsUnlit || s.SelfIllumPngBytes != null));
+                        int outlineShellCount = sashaVerifyBundle.Submeshes.Count(s => s.IsOutlineShell && s.IsUnlit);
+
+                        if (sashaVerifyBundle.Submeshes.Count > 0 && badUnlitCount == 0 && outlineShellCount > 0)
+                        {
+                            GD.Print($"PASS: Sasha export bundle has 0 fullbright non-outline surfaces and {outlineShellCount} unlit outline shell(s) out of {sashaVerifyBundle.Submeshes.Count} total surfaces.");
+                        }
+                        else
+                        {
+                            GD.PrintErr($"FAIL: Sasha export bundle fullbright check failed (submeshes={sashaVerifyBundle.Submeshes.Count}, badUnlitCount={badUnlitCount}, outlineShellCount={outlineShellCount}).");
+                            allPassed = false;
+                        }
+                        sashaVerifyScene?.Free();
+                    }
+                    else
+                    {
+                        GD.Print($"SKIP: Sasha GLB not found at {sashaGlbPath}.");
+                    }
+                }
+
+                // =========================================================================
+                // TEST 28: Automatic Limb Counter-Twist & Hip-Seam Weight Adjustment
+                // =========================================================================
+                GD.Print("\n[TEST 28] Verifying automatic thigh/shoulder counter-twist weights & distal bleed cleanup (Pre-Rigged + KNN)...");
+                {
+                    Skeleton3D previewSkel = CustomModelAutoRigger.FindSkeleton(previewHeroClone);
+                    var twistProfile = CustomModelAutoRigger.BuildLimbTwistProfile(previewSkel);
+
+                    var twistMethods = new[]
+                    {
+                        CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap,
+                        CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection
+                    };
+
+                    string[] requiredThighTwistBones =
+                    {
+                        "leg_upper_L_TWIST",
+                        "leg_upper_L_TWIST1",
+                        "leg_upper_R_TWIST",
+                        "leg_upper_R_TWIST1"
+                    };
+
+                    foreach (var method in twistMethods)
+                    {
+                        CustomModelAutoRigger.RemoveCustomModelAndRestoreHero(previewHeroClone);
+                        var twistOpts = new CustomModelAutoRigger.RiggingOptions
+                        {
+                            Method = method,
+                            AutoCounterTwistWeights = true,
+                            AlignedTransform = new Transform3D(Basis.FromScale(new Vector3(autoFitScale, autoFitScale, autoFitScale)), Vector3.Zero)
+                        };
+
+                        var rigRes = CustomModelAutoRigger.RigAndBind(sashaScene, previewHeroClone, twistOpts);
+                        if (!rigRes.Success || rigRes.CustomSubmeshes.Count == 0)
+                        {
+                            GD.PrintErr($"FAIL: [{method}] AutoCounterTwistWeights rig failed: {rigRes.ErrorMessage}");
+                            allPassed = false;
+                            continue;
+                        }
+
+                        var boneVertCounts = new System.Collections.Generic.Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                        var boneWeightSums = new System.Collections.Generic.Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+                        int badWeightSumCount = 0;
+                        int strayDistalBleedCount = 0;
+                        int crossLegBleedCount = 0;
+                        int highThighPelvisCount = 0;
+                        int legIdxPelvis = previewSkel.FindBone("pelvis");
+
+                        foreach (var mi in rigRes.CustomSubmeshes)
+                        {
+                            if (mi?.Mesh == null || mi.Skin == null) continue;
+                            Skin skin = mi.Skin;
+                            int bindCount = skin.GetBindCount();
+                            int[] bindToSkel = new int[bindCount];
+                            for (int bi = 0; bi < bindCount; bi++)
+                            {
+                                int sb = skin.GetBindBone(bi);
+                                if (sb < 0 && !string.IsNullOrEmpty(skin.GetBindName(bi)))
+                                    sb = previewSkel.FindBone(skin.GetBindName(bi));
+                                bindToSkel[bi] = sb;
+                            }
+
+                            for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+                            {
+                                var arrays = mi.Mesh.SurfaceGetArrays(s);
+                                if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Weights) continue;
+                                var verts = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                                var bones = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                                var weights = arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                                if (verts == null || bones == null || weights == null) continue;
+
+                                for (int v = 0; v < verts.Length; v++)
+                                {
+                                    float sum = 0f;
+                                    int baseIdx = v * 4;
+                                    for (int k = 0; k < 4; k++)
+                                    {
+                                        float w = weights[baseIdx + k];
+                                        if (w <= 0.0001f) continue;
+                                        sum += w;
+
+                                        int bi = bones[baseIdx + k];
+                                        int sb = (bi >= 0 && bi < bindToSkel.Length) ? bindToSkel[bi] : -1;
+                                        if (sb >= 0)
+                                        {
+                                            string bName = previewSkel.GetBoneName(sb);
+                                            boneVertCounts[bName] = (boneVertCounts.TryGetValue(bName, out int curVc) ? curVc : 0) + 1;
+                                            boneWeightSums[bName] = (boneWeightSums.TryGetValue(bName, out float curWs) ? curWs : 0f) + w;
+                                        }
+                                    }
+
+                                    if (Mathf.Abs(sum - 1.0f) > 0.01f)
+                                        badWeightSumCount++;
+
+                                    foreach (var chain in twistProfile.Chains)
+                                    {
+                                        if (chain.DistalBone < 0 || chain.LowerLen <= 0.05f) continue;
+                                        float upperW = 0f, lowerW = 0f, distalW = 0f, pelvisW = 0f;
+                                        for (int k = 0; k < 4; k++)
+                                        {
+                                            float w = weights[baseIdx + k];
+                                            if (w <= 0.0001f) continue;
+                                            int bi = bones[baseIdx + k];
+                                            int sb = (bi >= 0 && bi < bindToSkel.Length) ? bindToSkel[bi] : -1;
+                                            if (sb == chain.UpperBone || sb == chain.TwistFullBone || sb == chain.TwistHalfBone) upperW += w;
+                                            else if (sb == chain.LowerBone) lowerW += w;
+                                            else if (sb == chain.DistalBone) distalW += w;
+                                            else if (sb == legIdxPelvis) pelvisW += w;
+                                        }
+
+                                        if (distalW > 0.0001f && distalW < 0.25f && (upperW + lowerW) >= 0.30f)
+                                        {
+                                            float tLower = (verts[v] - chain.LowerOrigin).Dot(chain.LowerDir) / chain.LowerLen;
+                                            if (tLower < 0.55f) strayDistalBleedCount++;
+                                        }
+
+                                        if (chain.IsLeg && chain.UpperLen > 0.05f)
+                                        {
+                                            Vector3 relU = verts[v] - chain.UpperOrigin;
+                                            float projU = relU.Dot(chain.UpperDir);
+                                            float tUpper = projU / chain.UpperLen;
+                                            float rPerp = (relU - chain.UpperDir * projU).Length();
+
+                                            if (tUpper >= 0.20f && tUpper <= 0.45f && rPerp <= 0.28f && upperW >= 0.25f && pelvisW > 0.15f)
+                                                highThighPelvisCount++;
+
+                                            if (tUpper >= 0.03f && tUpper <= 1.05f && rPerp <= 0.16f && upperW >= 0.20f)
+                                            {
+                                                foreach (var other in twistProfile.Chains)
+                                                {
+                                                    if (!other.IsLeg || other.UpperBone == chain.UpperBone) continue;
+                                                    float oppW = 0f;
+                                                    for (int k = 0; k < 4; k++)
+                                                    {
+                                                        float w = weights[baseIdx + k];
+                                                        if (w <= 0.0001f) continue;
+                                                        int bi = bones[baseIdx + k];
+                                                        int sb = (bi >= 0 && bi < bindToSkel.Length) ? bindToSkel[bi] : -1;
+                                                        if (sb == other.UpperBone || sb == other.TwistFullBone || sb == other.TwistHalfBone || sb == other.LowerBone)
+                                                            oppW += w;
+                                                    }
+                                                    if (oppW > 0.005f && oppW < 0.22f && upperW >= oppW * 2.5f)
+                                                        crossLegBleedCount++;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        bool methodPassed = badWeightSumCount == 0 && strayDistalBleedCount == 0 && crossLegBleedCount == 0 && highThighPelvisCount == 0;
+                        foreach (string reqBone in requiredThighTwistBones)
+                        {
+                            int vc = boneVertCounts.TryGetValue(reqBone, out int vcVal) ? vcVal : 0;
+                            float ws = boneWeightSums.TryGetValue(reqBone, out float wsVal) ? wsVal : 0f;
+                            GD.Print($"  [{method}] {reqBone}: {vc} verts, totalW={ws:F1}");
+                            if (vc < 100 || ws < 50f)
+                            {
+                                GD.PrintErr($"FAIL: [{method}] Insufficient counter-twist weights on '{reqBone}' (verts={vc}, totalW={ws:F1}).");
+                                methodPassed = false;
+                            }
+                        }
+
+                        // Verify export bundle preserves counter-twist bone weights intact
+                        var twistExportBundle = CustomModelExporter.BuildExportBundle(rigRes.CustomSubmeshes, previewSkel, "chrono");
+                        int exportedRT = 0, exportedRT1 = 0;
+                        int idxRT = twistExportBundle.BoneNames.FindIndex(n => n.Equals("leg_upper_R_TWIST", StringComparison.OrdinalIgnoreCase));
+                        int idxRT1 = twistExportBundle.BoneNames.FindIndex(n => n.Equals("leg_upper_R_TWIST1", StringComparison.OrdinalIgnoreCase));
+                        foreach (var sub in twistExportBundle.Submeshes)
+                        {
+                            if (sub.BoneIndices == null || sub.BoneWeights == null) continue;
+                            for (int i = 0; i < sub.BoneIndices.Length; i++)
+                            {
+                                if (sub.BoneWeights[i] <= 0.0001f) continue;
+                                if (sub.BoneIndices[i] == idxRT) exportedRT++;
+                                else if (sub.BoneIndices[i] == idxRT1) exportedRT1++;
+                            }
+                        }
+
+                        if (exportedRT < 100 || exportedRT1 < 100)
+                        {
+                            GD.PrintErr($"FAIL: [{method}] CustomModelExporter dropped thigh twist weights (RT={exportedRT}, RT1={exportedRT1}).");
+                            methodPassed = false;
+                        }
+
+                        if (badWeightSumCount > 0 || strayDistalBleedCount > 0 || crossLegBleedCount > 0 || highThighPelvisCount > 0)
+                        {
+                            GD.PrintErr($"FAIL: [{method}] badWeightSums={badWeightSumCount}, strayDistalBleeds={strayDistalBleedCount}, crossLegBleed={crossLegBleedCount}, highThighPelvis={highThighPelvisCount}.");
+                            methodPassed = false;
+                        }
+
+                        if (methodPassed)
+                        {
+                            GD.Print($"PASS: [{method}] Counter-twist redistribution & export preservation verified (exportedRT={exportedRT}, exportedRT1={exportedRT1}, strayBleeds=0, crossLegBleed=0, highThighPelvis=0).");
+                        }
+                        else
+                        {
+                            allPassed = false;
+                        }
+                    }
+                }
+
+                // 29. Verify Unrigged KNN Weight Transfer on Venator (priest) (8-bone stride, non-body props, and clamping delta diagnostics)
+                GD.Print("\n[TEST 29] Inspecting Venator (priest) donor meshes, 8-bone skinning stride & unrigged KNN weighting...");
+                var priestEntry = DeadlockHeroCatalog.GetByCodename("priest");
+                if (priestEntry != null)
+                {
+                    Node3D priestNode = await vpkLoader.LoadHeroModelAsync(priestEntry);
+                    if (priestNode != null)
+                    {
+                        if (priestNode.GetParent() == null) Root.AddChild(priestNode);
+                        var priestSkel = CustomModelAutoRigger.FindSkeleton(priestNode);
+                        var priestMeshes = CustomModelAutoRigger.CollectOriginalHeroMeshes(priestNode);
+                        GD.Print($"[TEST 29] Priest meshes ({priestMeshes.Count}), Skel bones={priestSkel?.GetBoneCount() ?? 0}:");
+                        int maxStride = 4;
+                        foreach (var pm in priestMeshes)
+                        {
+                            int vc = 0, bc = 0;
+                            if (pm.Mesh != null && pm.Mesh.GetSurfaceCount() > 0)
+                            {
+                                var arr = pm.Mesh.SurfaceGetArrays(0);
+                                var vArr = arr[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                                var bArr = arr.Count > (int)Mesh.ArrayType.Bones ? arr[(int)Mesh.ArrayType.Bones].AsInt32Array() : null;
+                                vc = vArr?.Length ?? 0;
+                                bc = bArr?.Length ?? 0;
+                            }
+                            int st = vc > 0 ? bc / vc : 0;
+                            if (st > maxStride) maxStride = st;
+                            GD.Print($"  mesh='{pm.Name}' verts={vc} boneInts={bc} stride={st} skinBinds={pm.Skin?.GetBindCount() ?? 0}");
+                        }
+
+                        Vector3 GetRestPos(string boneName)
+                        {
+                            int idx = priestSkel.FindBone(boneName);
+                            return idx >= 0 ? priestSkel.GetBoneGlobalRest(idx).Origin : Vector3.Zero;
+                        }
+                        Vector3 pPelvis = GetRestPos("pelvis");
+                        Vector3 pSpine3 = GetRestPos("spine_3");
+                        Vector3 pHead = GetRestPos("head");
+                        Vector3 pShL = GetRestPos("arm_upper_L");
+                        Vector3 pShR = GetRestPos("arm_upper_R");
+                        Vector3 pElL = GetRestPos("arm_lower_L");
+                        Vector3 pElR = GetRestPos("arm_lower_R");
+                        Vector3 pHandL = GetRestPos("hand_L");
+                        Vector3 pHandR = GetRestPos("hand_R");
+                        Vector3 pHipL = GetRestPos("leg_upper_L");
+                        Vector3 pAnkleL = GetRestPos("ankle_L");
+                        Vector3 pHipR = GetRestPos("leg_upper_R");
+                        Vector3 pAnkleR = GetRestPos("ankle_R");
+                        GD.Print($"[TEST 29] Priest rest skeleton landmarks: pelvis={pPelvis}, spine_3={pSpine3}, head={pHead}, arm_upper_L={pShL}, hand_L={pHandL}, hip_L={pHipL}, ankle_L={pAnkleL}");
+
+                        // Build a synthetic unrigged T-pose humanoid probe mesh scaled to priest's skeleton landmarks,
+                        // matching PoseHeroArmsForPreset(TPose = +45° coronal lift around each shoulder).
+                        var probeVerts = new System.Collections.Generic.List<Vector3>();
+                        var probeLabels = new System.Collections.Generic.List<string>();
+                        for (int i = 0; i <= 6; i++)
+                        {
+                            float t = i / 6f;
+                            probeVerts.Add(pPelvis.Lerp(pSpine3, t) + new Vector3(0f, 0f, 0.05f));
+                            probeLabels.Add("torso");
+                        }
+                        probeVerts.Add(pHead + new Vector3(0f, 0.05f, 0f));
+                        probeLabels.Add("head");
+
+                        Vector3 axisL = (pElL - pShL).Cross(Vector3.Up).Normalized();
+                        Vector3 axisR = (pElR - pShR).Cross(Vector3.Up).Normalized();
+                        Quaternion qLiftL = new Quaternion(axisL, Mathf.DegToRad(45f));
+                        Quaternion qLiftR = new Quaternion(axisR, Mathf.DegToRad(45f));
+                        Vector3 tElL = pShL + qLiftL * (pElL - pShL);
+                        Vector3 tHandL = pShL + qLiftL * (pHandL - pShL);
+                        Vector3 tElR = pShR + qLiftR * (pElR - pShR);
+                        Vector3 tHandR = pShR + qLiftR * (pHandR - pShR);
+                        foreach (float u in new[] { 0.3f, 0.7f, 1.0f })
+                        {
+                            probeVerts.Add(pShL.Lerp(tElL, u)); probeLabels.Add("arm_L");
+                            probeVerts.Add(pShR.Lerp(tElR, u)); probeLabels.Add("arm_R");
+                        }
+                        foreach (float u in new[] { 0.5f, 1.0f })
+                        {
+                            probeVerts.Add(tElL.Lerp(tHandL, u)); probeLabels.Add("arm_L");
+                            probeVerts.Add(tElR.Lerp(tHandR, u)); probeLabels.Add("arm_R");
+                        }
+                        for (int i = 0; i <= 5; i++)
+                        {
+                            float t = i / 5f;
+                            probeVerts.Add(pAnkleL.Lerp(pHipL, t)); probeLabels.Add("leg_L");
+                            probeVerts.Add(pAnkleR.Lerp(pHipR, t)); probeLabels.Add("leg_R");
+                        }
+
+                        var probeArr = new Godot.Collections.Array();
+                        probeArr.Resize((int)Mesh.ArrayType.Max);
+                        probeArr[(int)Mesh.ArrayType.Vertex] = probeVerts.ToArray();
+                        var probeNorms = new Vector3[probeVerts.Count];
+                        Array.Fill(probeNorms, Vector3.Forward);
+                        probeArr[(int)Mesh.ArrayType.Normal] = probeNorms;
+                        var probeIdxs = new int[probeVerts.Count * 3];
+                        for (int i = 0; i < probeVerts.Count; i++) { probeIdxs[i * 3] = i; probeIdxs[i * 3 + 1] = i; probeIdxs[i * 3 + 2] = i; }
+                        probeArr[(int)Mesh.ArrayType.Index] = probeIdxs;
+
+                        var probeMesh = new ArrayMesh();
+                        probeMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, probeArr);
+                        var probeScene = new Node3D { Name = "ProbeUnriggedScene" };
+                        var probeMi = new MeshInstance3D { Name = "ProbeHumanoid", Mesh = probeMesh };
+                        probeScene.AddChild(probeMi);
+
+                        int InspectKnnRun(CustomModelAutoRigger.PosePreset preset, float customAngleDeg, bool checkArms)
+                        {
+                            var opts = new CustomModelAutoRigger.RiggingOptions
+                            {
+                                Mode = CustomModelAutoRigger.ReplaceMode.FullReplacement,
+                                Preset = preset,
+                                CustomArmAngleDeg = customAngleDeg,
+                                Method = CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection,
+                                AlignedTransform = Transform3D.Identity,
+                                SmoothingIterations = 0,
+                                SearchRadius = 0.20f,
+                                KNearest = 5,
+                                ExcludeClothHairBones = true,
+                                StabilizeNeckFloatingHead = false,
+                                AutoCounterTwistWeights = true,
+                                IsPreviewOnly = true
+                            };
+
+                            var knnRes = CustomModelAutoRigger.RigAndBind(probeScene, priestNode, opts);
+                            if (!knnRes.Success || knnRes.CustomSubmeshes.Count == 0)
+                            {
+                                GD.PrintErr($"FAIL: [TEST 29] KNN RigAndBind ({preset}) on priest failed: {knnRes.ErrorMessage}");
+                                return 999;
+                            }
+
+                            var outMi = knnRes.CustomSubmeshes[0];
+                            var outArr = outMi.Mesh.SurfaceGetArrays(0);
+                            var outBones = outArr[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                            var outWeights = outArr[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                            var outSkin = outMi.Skin;
+
+                            int mismatches = 0;
+                            for (int v = 0; v < probeVerts.Count; v++)
+                            {
+                                string domBone = "";
+                                float domW = -1f;
+                                for (int k = 0; k < 4; k++)
+                                {
+                                    float w = outWeights[v * 4 + k];
+                                    if (w > domW)
+                                    {
+                                        domW = w;
+                                        int bindIdx = outBones[v * 4 + k];
+                                        int skIdx = (outSkin != null && bindIdx >= 0 && bindIdx < outSkin.GetBindCount()) ? outSkin.GetBindBone(bindIdx) : bindIdx;
+                                        domBone = (skIdx >= 0 && skIdx < priestSkel.GetBoneCount()) ? priestSkel.GetBoneName(skIdx) : $"#{skIdx}";
+                                    }
+                                }
+                                string lbl = probeLabels[v];
+                                string dbLow = domBone.ToLowerInvariant();
+                                bool forbidden = dbLow.Contains("root") || dbLow.Contains("stake") || dbLow.Contains("weapon") ||
+                                                 dbLow.Contains("gun") || dbLow.Contains("coat") || dbLow.Contains("sash");
+                                bool torsoHeadOk = (lbl == "torso" && (dbLow.Contains("spine") || dbLow.Contains("pelvis") || dbLow.Contains("clav"))) ||
+                                                   (lbl == "head" && (dbLow.Contains("head") || dbLow.Contains("neck")));
+                                bool legOk = (lbl == "leg_L" && !dbLow.EndsWith("_r") && (dbLow.Contains("leg") || dbLow.Contains("ankle") || dbLow.Contains("ball") || dbLow.Contains("pelvis"))) ||
+                                             (lbl == "leg_R" && !dbLow.EndsWith("_l") && (dbLow.Contains("leg") || dbLow.Contains("ankle") || dbLow.Contains("ball") || dbLow.Contains("pelvis")));
+                                bool armOk = !checkArms ||
+                                             (lbl == "arm_L" && !dbLow.EndsWith("_r") && (dbLow.Contains("arm") || dbLow.Contains("hand") || dbLow.Contains("clav"))) ||
+                                             (lbl == "arm_R" && !dbLow.EndsWith("_l") && (dbLow.Contains("arm") || dbLow.Contains("hand") || dbLow.Contains("clav")));
+                                bool mismatch = forbidden ||
+                                                ((lbl == "torso" || lbl == "head") && !torsoHeadOk) ||
+                                                ((lbl == "leg_L" || lbl == "leg_R") && !legOk) ||
+                                                ((lbl == "arm_L" || lbl == "arm_R") && !armOk);
+                                if (mismatch) mismatches++;
+                                GD.Print($"  [{preset}] probe[{v:00}] ({lbl,-5} {probeVerts[v].X:+0.00;-0.00},{probeVerts[v].Y:0.00}) -> {domBone} ({domW:0.00}){(mismatch ? " [MISMATCH]" : "")}");
+                            }
+                            return mismatches;
+                        }
+
+                        // Pass 1: MatchHeroBindPose verifies torso/head/legs cleanly & zero accessory/weaponHand/sash bleed anywhere
+                        int m1 = InspectKnnRun(CustomModelAutoRigger.PosePreset.MatchHeroBindPose, 0f, checkArms: false);
+                        // Pass 2: TPose (+45 deg coronal lift) verifies PoseHeroArmsForPreset, BakeInversePose & all 30 probe vertices including arms
+                        int m2 = InspectKnnRun(CustomModelAutoRigger.PosePreset.TPose, 0f, checkArms: true);
+                        if (m1 > 0 || m2 > 0)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 29] Detected probe mismatches on priest (MatchHero={m1}, TPose={m2}, maxStride={maxStride})!");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print($"PASS: [TEST 29] Zero accessory/weaponHand/sash bindings in MatchHeroBindPose, and all {probeVerts.Count} probe vertices bound cleanly in TPose(+45°) on priest (maxStride={maxStride}).");
+                        }
+
+                        // Verify ClampLimbBoneTranslations leaves procedural/neck/head/clavicle/twist/weapon bones untouched during animation
+                        var priestAp = priestNode.FindChildren("*", "AnimationPlayer", true, false).OfType<AnimationPlayer>().FirstOrDefault();
+                        if (priestAp != null)
+                        {
+                            var animList = priestAp.GetAnimationList();
+                            GD.Print($"[TEST 29] Priest animations count={animList.Length}");
+                            foreach (var aName in new[] { "crouch", "run" })
+                            {
+                                string foundAnim = animList.FirstOrDefault(a => a.ToLowerInvariant().Contains(aName) && !a.ToLowerInvariant().Contains("additive"));
+                                if (foundAnim != null)
+                                {
+                                    priestAp.Play(foundAnim);
+                                    priestAp.Seek(0.15, true);
+                                    int neckIdx = priestSkel.FindBone("neck_0");
+                                    Vector3 neckBefore = neckIdx >= 0 ? priestSkel.GetBonePosePosition(neckIdx) : Vector3.Zero;
+                                    CustomModelAutoRigger.UpdateCustomModelRuntimePosing(priestSkel, true);
+                                    if (neckIdx >= 0)
+                                    {
+                                        float neckShift = priestSkel.GetBonePosePosition(neckIdx).DistanceTo(neckBefore);
+                                        if (neckShift > 0.001f)
+                                        {
+                                            GD.PrintErr($"FAIL: [TEST 29] ClampLimbBoneTranslations altered neck_0 on '{foundAnim}' by {neckShift:F4}m!");
+                                            allPassed = false;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        probeScene.QueueFree();
+                        priestNode.QueueFree();
+                    }
+                }
+
+                // 33. TEST 30: Auto-Calibrating Unrigged Pose Calibration + Regional Corridor KNN + Individual Composite Surface Keep (Gordon Freeman -> priest)
+                string gordonPath = System.IO.Path.GetFullPath(@"..\scratch_out\models\gordon_freeman_half-life_1.glb");
+                if (!System.IO.File.Exists(gordonPath))
+                    gordonPath = System.IO.Path.GetFullPath(@"scratch_out\models\gordon_freeman_half-life_1.glb");
+
+                var priestEntry30 = DeadlockHeroCatalog.GetByCodename("priest");
+                if (priestEntry30 != null && System.IO.File.Exists(gordonPath))
+                {
+                    GD.Print("\n[TEST 30] Verifying Auto-Calibrated Unrigged KNN + Rigid Finger Lock + Individual Composite Surface Keep (gordon_freeman -> priest)...");
+                    var priestLive = await vpkLoader.LoadHeroModelAsync(priestEntry30);
+                    var gordonScene = CustomModelAutoRigger.LoadAndSanitize3DModelScene(gordonPath);
+                    if (priestLive != null && gordonScene != null)
+                    {
+                        if (priestLive.GetParent() == null) Root.AddChild(priestLive);
+                        var priestHierarchy = new DeadlockPlayground.Painter.HeroMeshHierarchy();
+                        priestHierarchy.ScanHero(priestLive);
+                        var priestSkel = CustomModelAutoRigger.FindSkeleton(priestLive);
+                        priestSkel?.ResetBonePoses();
+
+                        var (pMin, pMax, pOk) = CustomModelAutoRigger.ComputeAuthenticHeroBounds(priestLive);
+                        var (gMin, gMax, gOk) = CustomModelAutoRigger.ComputePristineModelBounds(gordonScene);
+                        float scale = (pOk && gOk && (gMax.Y - gMin.Y) > 0.01f)
+                            ? (pMax.Y - Math.Max(0f, pMin.Y)) / (gMax.Y - gMin.Y)
+                            : 0.025f;
+                        Vector3 heroCtr = (pMin + pMax) * 0.5f;
+                        Vector3 gCtr = (gMin + gMax) * 0.5f;
+                        Transform3D alignedXf = Transform3D.Identity
+                            .Scaled(new Vector3(scale, scale, scale))
+                            .Rotated(Vector3.Up, Mathf.Pi);
+                        alignedXf.Origin = new Vector3(heroCtr.X - (-gCtr.X * scale), -gMin.Y * scale, heroCtr.Z - (-gCtr.Z * scale));
+
+                        var cal = CustomModelAutoRigger.AutoEstimateUnriggedPoseCalibration(gordonScene, priestSkel, alignedXf);
+                        GD.Print($"[TEST 30] AutoEstimateUnriggedPoseCalibration: ArmAngle={cal.ArmAngleDeg:F1}°, ArmFwd={cal.ArmForwardDeg:F1}°, ElbowStraight={cal.ElbowStraightenPct:F0}%, LegSpread={cal.LegSpreadDeg:F1}°, ArmSamples={cal.DetectedArmSamples}, LegSamples={cal.DetectedLegSamples}");
+
+                        if (cal.DetectedArmSamples < 15 || cal.DetectedLegSamples < 15 || cal.ArmAngleDeg >= -2f)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 30] Auto-calibration did not detect Gordon's arms-down pose on priest!");
+                            allPassed = false;
+                        }
+
+                        var gordonOpts = new CustomModelAutoRigger.RiggingOptions
+                        {
+                            Method = CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection,
+                            Preset = CustomModelAutoRigger.PosePreset.APoseCustomAngle,
+                            CustomArmAngleDeg = cal.ArmAngleDeg,
+                            CustomArmForwardDeg = cal.ArmForwardDeg,
+                            CustomElbowStraightenPct = cal.ElbowStraightenPct,
+                            CustomLegSpreadDeg = cal.LegSpreadDeg,
+                            AlignedTransform = alignedXf,
+                            KeepFingersRigidOnHand = true,
+                            ClampLimbStretching = true,
+                            AutoCounterTwistWeights = true,
+                            KeptOriginalSubmeshNames = new System.Collections.Generic.List<string>
+                            {
+                                CustomModelAutoRigger.MakeSurfaceKeepKey("_priest", 2) // priest_shotgun only!
+                            }
+                        };
+
+                        var rigRes = CustomModelAutoRigger.RigAndBind(gordonScene, priestLive, gordonOpts);
+                        if (!rigRes.Success || rigRes.CustomSubmeshes.Count == 0)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 30] Gordon RigAndBind failed: {rigRes.ErrorMessage}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            // Verify individual surface keep: _priest_surf_2* visible, other split surfaces hidden!
+                            var allPriestMeshes = priestLive.FindChildren("*", "MeshInstance3D", true, false).OfType<MeshInstance3D>().ToList();
+                            var surf0 = allPriestMeshes.FirstOrDefault(m => m.Name.ToString().StartsWith("_priest_surf_0", StringComparison.OrdinalIgnoreCase));
+                            var surf2 = allPriestMeshes.FirstOrDefault(m => m.Name.ToString().StartsWith("_priest_surf_2", StringComparison.OrdinalIgnoreCase));
+                            var surf3 = allPriestMeshes.FirstOrDefault(m => m.Name.ToString().StartsWith("_priest_surf_3", StringComparison.OrdinalIgnoreCase));
+                            var surf4 = allPriestMeshes.FirstOrDefault(m => m.Name.ToString().StartsWith("_priest_surf_4", StringComparison.OrdinalIgnoreCase));
+                            if (surf2 == null || !surf2.Visible || (surf0 != null && surf0.Visible) || (surf3 != null && surf3.Visible) || (surf4 != null && surf4.Visible))
+                            {
+                                GD.PrintErr($"FAIL: [TEST 30] Individual surface keep failed! surf0={surf0?.Name}:{surf0?.Visible}, surf2={surf2?.Name}:{surf2?.Visible}, surf3={surf3?.Name}:{surf3?.Visible}, surf4={surf4?.Name}:{surf4?.Visible}");
+                                allPassed = false;
+                            }
+                            else
+                            {
+                                GD.Print($"PASS: [TEST 30] Kept {surf2.Name} (priest_shotgun) active individually while hiding _priest_surf_0/_1/_3/_4.");
+                            }
+
+                            // Verify arm vs trenchcoat isolation & zero finger splits on Gordon Freeman using Priest's actual height landmarks
+                            int shLIdx = priestSkel.FindBone("arm_upper_L");
+                            int handLIdx = priestSkel.FindBone("hand_L");
+                            int pelvisIdx = priestSkel.FindBone("pelvis");
+                            float shX = shLIdx >= 0 ? MathF.Abs(priestSkel.GetBoneGlobalRest(shLIdx).Origin.X) : 0.29f;
+                            float shY = shLIdx >= 0 ? priestSkel.GetBoneGlobalRest(shLIdx).Origin.Y : 2.08f;
+                            float pelvY = pelvisIdx >= 0 ? priestSkel.GetBoneGlobalRest(pelvisIdx).Origin.Y : 1.50f;
+                            float handY = handLIdx >= 0 ? priestSkel.GetBoneGlobalRest(handLIdx).Origin.Y : 1.50f;
+
+                            int badArmCoatVerts = 0;
+                            int fingerBoundVerts = 0;
+                            int checkedArmVerts = 0;
+                            int checkedLegVerts = 0;
+                            int badLegArmVerts = 0;
+
+                            foreach (var cm in rigRes.CustomSubmeshes)
+                            {
+                                var skin = cm.Skin;
+                                for (int s = 0; s < cm.Mesh.GetSurfaceCount(); s++)
+                                {
+                                    var arrays = cm.Mesh.SurfaceGetArrays(s);
+                                    var verts = arrays[(int)Mesh.ArrayType.Vertex].As<Vector3[]>();
+                                    var bones = arrays[(int)Mesh.ArrayType.Bones].As<int[]>();
+                                    var weights = arrays[(int)Mesh.ArrayType.Weights].As<float[]>();
+                                    int stride = bones.Length / Math.Max(1, verts.Length);
+
+                                    var posedGlobals = new Transform3D[priestSkel.GetBoneCount()];
+                                    var restGlobals = new Transform3D[priestSkel.GetBoneCount()];
+                                    for (int b = 0; b < priestSkel.GetBoneCount(); b++) restGlobals[b] = priestSkel.GetBoneGlobalRest(b);
+                                    var bk = CustomModelAutoRigger.BackupSkeletonLocalRotations(priestSkel);
+                                    priestSkel.ResetBonePoses();
+                                    CustomModelAutoRigger.PoseHeroSkeletonForOptions(priestSkel, gordonOpts);
+                                    for (int b = 0; b < priestSkel.GetBoneCount(); b++) posedGlobals[b] = priestSkel.GetBoneGlobalPose(b);
+                                    CustomModelAutoRigger.RestoreSkeletonLocalRotations(priestSkel, bk);
+
+                                    for (int v = 0; v < verts.Length; v++)
+                                    {
+                                        int domBind = bones[v * stride];
+                                        int domSkel = domBind;
+                                        if (skin != null && domBind >= 0 && domBind < skin.GetBindCount())
+                                        {
+                                            int sb = skin.GetBindBone(domBind);
+                                            if (sb >= 0) domSkel = sb;
+                                        }
+                                        string domName = (domSkel >= 0 && domSkel < priestSkel.GetBoneCount()) ? priestSkel.GetBoneName(domSkel).ToLowerInvariant() : "";
+
+                                        for (int k = 0; k < stride; k++)
+                                        {
+                                            if (weights[v * stride + k] <= 0.01f) continue;
+                                            int kb = bones[v * stride + k];
+                                            if (skin != null && kb >= 0 && kb < skin.GetBindCount() && skin.GetBindBone(kb) >= 0) kb = skin.GetBindBone(kb);
+                                            string kName = (kb >= 0 && kb < priestSkel.GetBoneCount()) ? priestSkel.GetBoneName(kb).ToLowerInvariant() : "";
+                                            if (kName.Contains("finger")) { fingerBoundVerts++; break; }
+                                        }
+
+                                        Vector3 posedP = Vector3.Zero;
+                                        for (int k = 0; k < stride; k++)
+                                        {
+                                            float w = weights[v * stride + k];
+                                            if (w <= 0.0001f) continue;
+                                            int kb = bones[v * stride + k];
+                                            if (skin != null && kb >= 0 && kb < skin.GetBindCount() && skin.GetBindBone(kb) >= 0) kb = skin.GetBindBone(kb);
+                                            Transform3D m = (kb >= 0 && kb < posedGlobals.Length) ? (posedGlobals[kb] * restGlobals[kb].AffineInverse()) : Transform3D.Identity;
+                                            posedP += w * (m * verts[v]);
+                                        }
+
+                                        // Check outer arm/forearm/hand silhouette (outside torso/shoulder width at arm height)
+                                        if (MathF.Abs(posedP.X) > shX + 0.04f && posedP.Y >= handY - 0.15f && posedP.Y <= shY + 0.05f)
+                                        {
+                                            checkedArmVerts++;
+                                            if (domName.Contains("pelvis") || domName.Contains("leg") || domName.Contains("ankle") || domName.Contains("spine"))
+                                            {
+                                                badArmCoatVerts++;
+                                                GD.Print($"  [TEST 30 BLEED] mesh={cm.Name} posed={posedP:F3} rest={verts[v]:F3} dom={domName} (w0={weights[v * stride]:F2})");
+                                            }
+                                        }
+                                        // Check legs strictly below pelvis
+                                        else if (posedP.Y < pelvY - 0.18f && MathF.Abs(posedP.X) < shX)
+                                        {
+                                            checkedLegVerts++;
+                                            if (domName.Contains("arm") || domName.Contains("hand"))
+                                            {
+                                                badLegArmVerts++;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            GD.Print($"[TEST 30] Gordon verts check: ArmVerts={checkedArmVerts} (coatBleed={badArmCoatVerts}), LegVerts={checkedLegVerts} (armBleed={badLegArmVerts}), FingerSplitVerts={fingerBoundVerts}");
+                            if (checkedArmVerts == 0 || badArmCoatVerts > 0 || fingerBoundVerts > 0 || badLegArmVerts > 0)
+                            {
+                                GD.PrintErr($"FAIL: [TEST 30] Weight isolation failed on Gordon Freeman!");
+                                allPassed = false;
+                            }
+                            else
+                            {
+                                GD.Print("PASS: [TEST 30] Gordon Freeman calibrated cleanly with zero coat-to-arm bleed, zero arm-to-leg bleed, and solid locked hands!");
+                            }
+                        }
+
+                        priestLive.QueueFree();
+
+                        // Also verify elbow-straighten detection AFTER priestLive is freed (vpkLoader swaps active hero model instance)
+                        var chronoEntry30 = DeadlockHeroCatalog.GetByCodename("chrono");
+                        if (chronoEntry30 != null)
+                        {
+                            var chronoLive = await vpkLoader.LoadHeroModelAsync(chronoEntry30);
+                            var chronoSkel30 = chronoLive != null ? CustomModelAutoRigger.FindSkeleton(chronoLive) : null;
+                            if (chronoLive != null && chronoSkel30 != null)
+                            {
+                                chronoSkel30.ResetBonePoses();
+                                var (cMin, cMax, cOk) = CustomModelAutoRigger.ComputeAuthenticHeroBounds(chronoLive);
+                                float cScale = (cOk && gOk && (gMax.Y - gMin.Y) > 0.01f)
+                                    ? (cMax.Y - Math.Max(0f, cMin.Y)) / (gMax.Y - gMin.Y)
+                                    : scale;
+                                Vector3 cCtr = (cMin + cMax) * 0.5f;
+                                Transform3D alignedXfChrono = Transform3D.Identity
+                                    .Scaled(new Vector3(cScale, cScale, cScale))
+                                    .Rotated(Vector3.Up, Mathf.Pi);
+                                alignedXfChrono.Origin = new Vector3(cCtr.X - (-gCtr.X * cScale), -gMin.Y * cScale, cCtr.Z - (-gCtr.Z * cScale));
+
+                                int cShL = chronoSkel30.FindBone("arm_upper_L"), cElL = chronoSkel30.FindBone("arm_lower_L"), cHdL = chronoSkel30.FindBone("hand_L");
+                                Vector3 cSh = chronoSkel30.GetBoneGlobalRest(cShL).Origin, cEl = chronoSkel30.GetBoneGlobalRest(cElL).Origin, cWr = chronoSkel30.GetBoneGlobalRest(cHdL).Origin;
+                                float cBendDeg = Mathf.RadToDeg(MathF.Acos(Mathf.Clamp((cEl - cSh).Normalized().Dot((cWr - cEl).Normalized()), -1f, 1f)));
+                                GD.Print($"[TEST 30] chrono armL rest: sh={cSh:F3}, el={cEl:F3}, wr={cWr:F3}, bend={cBendDeg:F1}°");
+
+                                var calChrono = CustomModelAutoRigger.AutoEstimateUnriggedPoseCalibration(gordonScene, chronoSkel30, alignedXfChrono);
+                                GD.Print($"[TEST 30] AutoEstimate Gordon on chrono: ArmAngle={calChrono.ArmAngleDeg:F1}°, ArmFwd={calChrono.ArmForwardDeg:F1}°, ElbowStraight={calChrono.ElbowStraightenPct:F0}%, ArmSamples={calChrono.DetectedArmSamples}");
+                                if (calChrono.DetectedArmSamples < 15)
+                                {
+                                    GD.PrintErr("FAIL: [TEST 30] Expected DetectedArmSamples >= 15 when fitting Gordon onto chrono!");
+                                    allPassed = false;
+                                }
+
+                                // Verify straight-arm elbow straightening detection (synthetic straight-arm mesh against chrono's 17.3° bent elbow)
+                                var straightScene = new Node3D { Name = "StraightArmProbe" };
+                                var straightMi = new MeshInstance3D();
+                                var straightSt = new SurfaceTool();
+                                straightSt.Begin(Mesh.PrimitiveType.Triangles);
+                                void AddProbeVerts(Vector3 a, Vector3 b, int steps)
+                                {
+                                    for (int i = 0; i <= steps; i++)
+                                    {
+                                        Vector3 c = a.Lerp(b, (float)i / steps);
+                                        straightSt.AddVertex(c);
+                                        straightSt.AddVertex(c + new Vector3(0.01f, 0f, 0.01f));
+                                        straightSt.AddVertex(c + new Vector3(-0.01f, 0f, -0.01f));
+                                    }
+                                }
+                                Vector3 cShR = chronoSkel30.GetBoneGlobalRest(chronoSkel30.FindBone("arm_upper_R")).Origin;
+                                AddProbeVerts(cSh, cSh + new Vector3(0.14f, -0.64f, 0f), 10);
+                                AddProbeVerts(cShR, cShR + new Vector3(-0.14f, -0.64f, 0f), 10);
+                                straightMi.Mesh = straightSt.Commit();
+                                straightScene.AddChild(straightMi);
+                                var calStraight = CustomModelAutoRigger.AutoEstimateUnriggedPoseCalibration(straightScene, chronoSkel30, Transform3D.Identity);
+                                GD.Print($"[TEST 30] AutoEstimate straight-arm probe on chrono: ArmAngle={calStraight.ArmAngleDeg:F1}°, ArmFwd={calStraight.ArmForwardDeg:F1}°, ElbowStraight={calStraight.ElbowStraightenPct:F0}%");
+                                straightScene.QueueFree();
+                                if (calStraight.ElbowStraightenPct < 60f)
+                                {
+                                    GD.PrintErr("FAIL: [TEST 30] Expected ElbowStraightenPct >= 60% when fitting a straight-arm mesh onto bent-elbow chrono!");
+                                    allPassed = false;
+                                }
+                            }
+                            chronoLive?.QueueFree();
+                        }
+
+                        gordonScene.QueueFree();
+                    }
+                    else
+                    {
+                        GD.PrintErr("FAIL: [TEST 30] Could not load priest or gordon_freeman_half-life_1.glb");
                         allPassed = false;
                     }
                 }

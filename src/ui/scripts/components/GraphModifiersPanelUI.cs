@@ -56,18 +56,8 @@ namespace DeadlockPlayground.UI
 
         private void BuildUI()
         {
-            // Panel styling
-            var style = new StyleBoxFlat
-            {
-                BgColor = new Color(0.12f, 0.13f, 0.16f, 0.98f),
-                BorderWidthLeft = 1,
-                BorderColor = new Color(0.22f, 0.25f, 0.30f, 0.8f),
-                ContentMarginLeft = 8,
-                ContentMarginTop = 6,
-                ContentMarginRight = 8,
-                ContentMarginBottom = 6
-            };
-            AddThemeStyleboxOverride("panel", style);
+            // Panel styling (inherits active theme CardPanel)
+            ThemeTypeVariation = "CardPanel";
 
             var rootVBox = new VBoxContainer
             {
@@ -125,7 +115,7 @@ namespace DeadlockPlayground.UI
 
             _btnAddModifier = new MenuButton
             {
-                Text = "Add Modifier â–¼",
+                Text = "Add Modifier ▼",
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 Flat = false
             };
@@ -134,7 +124,7 @@ namespace DeadlockPlayground.UI
 
             _btnDeleteModifiers = new MenuButton
             {
-                Text = "Delete â–¼",
+                Text = "Delete ▼",
                 SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
                 Flat = false
             };
@@ -325,26 +315,9 @@ namespace DeadlockPlayground.UI
         {
             var card = new PanelContainer
             {
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ThemeTypeVariation = "InspectorSectionPanel"
             };
-            var cardStyle = new StyleBoxFlat
-            {
-                BgColor = new Color(0.16f, 0.17f, 0.20f, 0.95f),
-                BorderWidthLeft = 1,
-                BorderWidthTop = 1,
-                BorderWidthRight = 1,
-                BorderWidthBottom = 1,
-                BorderColor = mod.IsMuted ? new Color(0.3f, 0.3f, 0.3f, 0.5f) : new Color(0.35f, 0.45f, 0.60f, 0.8f),
-                CornerRadiusBottomLeft = 4,
-                CornerRadiusBottomRight = 4,
-                CornerRadiusTopLeft = 4,
-                CornerRadiusTopRight = 4,
-                ContentMarginLeft = 6,
-                ContentMarginTop = 6,
-                ContentMarginRight = 6,
-                ContentMarginBottom = 6
-            };
-            card.AddThemeStyleboxOverride("panel", cardStyle);
 
             var vbox = new VBoxContainer
             {
@@ -364,7 +337,7 @@ namespace DeadlockPlayground.UI
             // Reorder Up
             var btnUp = new Button
             {
-                Text = "â–²",
+                Text = "▲",
                 CustomMinimumSize = new Vector2(20, 20),
                 Disabled = index == 0 || mod.RequiresFirst
             };
@@ -378,7 +351,7 @@ namespace DeadlockPlayground.UI
             // Reorder Down
             var btnDown = new Button
             {
-                Text = "â–¼",
+                Text = "▼",
                 CustomMinimumSize = new Vector2(20, 20),
                 Disabled = index == _activeCurve.Modifiers.Count - 1 || mod.RequiresFirst
             };
@@ -418,11 +391,12 @@ namespace DeadlockPlayground.UI
             // Delete Button [X]
             var btnDelete = new Button
             {
-                Text = "âœ•",
-                CustomMinimumSize = new Vector2(22, 20),
-                TooltipText = "Delete Modifier"
+                Text = "X",
+                CustomMinimumSize = new Vector2(26, 26),
+                TooltipText = "Delete Modifier",
+                ThemeTypeVariation = "IconButton"
             };
-            btnDelete.AddThemeColorOverride("font_color", new Color(1f, 0.4f, 0.4f));
+            btnDelete.AddThemeColorOverride("font_color", DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.SemanticDanger)));
             btnDelete.Pressed += () =>
             {
                 _canvas?.RemoveModifier(_activeCurve, mod);
@@ -661,7 +635,7 @@ namespace DeadlockPlayground.UI
                         spinMax.ValueChanged += (v) => { pt.Max = (float)v; _canvas?.NotifyModifiersChanged(); };
                         ptRow.AddChild(spinMax);
 
-                        var btnDelPt = new Button { Text = "âœ•", CustomMinimumSize = new Vector2(20, 20) };
+                        var btnDelPt = new Button { Text = "✕", CustomMinimumSize = new Vector2(20, 20) };
                         btnDelPt.Pressed += () =>
                         {
                             env.ControlPoints.RemoveAt(ptIdx);

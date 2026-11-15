@@ -97,7 +97,7 @@ public partial class CameraControlPadUI : PanelContainer
         _btnModeToggle = new Button
         {
             Text = "Pan",
-            CustomMinimumSize = new Vector2(88, 26),
+            CustomMinimumSize = new Vector2(94, 28),
             SizeFlagsHorizontal = Control.SizeFlags.Fill,
             TooltipText = "Click to toggle between Pan and Orbit mode",
             ThemeTypeVariation = "ToolbarButton"
@@ -108,7 +108,7 @@ public partial class CameraControlPadUI : PanelContainer
         // WASD Keyboard Movement Block Toggle Button
         _btnBlockWasd = new Button
         {
-            CustomMinimumSize = new Vector2(88, 26),
+            CustomMinimumSize = new Vector2(94, 28),
             SizeFlagsHorizontal = Control.SizeFlags.Fill,
             ThemeTypeVariation = "ToolbarButton"
         };
@@ -138,23 +138,70 @@ public partial class CameraControlPadUI : PanelContainer
         var btn = new Button
         {
             Text = icon,
-            CustomMinimumSize = new Vector2(28, 28),
+            CustomMinimumSize = new Vector2(30, 30),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             TooltipText = tooltip,
             FocusMode = Control.FocusModeEnum.None,
-            ThemeTypeVariation = "ToolbarButton"
+            ThemeTypeVariation = "IconButton"
         };
         return btn;
     }
 
     private void ApplyCustomStyling()
     {
-        // Completely transparent backdrop
+        // Completely transparent backdrop & subtle overlay translucency
         AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
+        Modulate = new Color(1.0f, 1.0f, 1.0f, 0.78f);
 
+        RefreshThemeStyles();
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
+    }
+
+    public override void _ExitTree()
+    {
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
+        base._ExitTree();
+    }
+
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
+    {
+        RefreshThemeStyles();
+    }
+
+    private void RefreshThemeStyles()
+    {
         if (_btnCenter != null)
         {
-            _btnCenter.ThemeTypeVariation = "PrimaryActionButton";
+            Color accent = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary));
+            var centerStyle = new StyleBoxFlat
+            {
+                BgColor = accent,
+                BorderColor = accent.Lightened(0.15f),
+                BorderWidthLeft = 1,
+                BorderWidthRight = 1,
+                BorderWidthTop = 1,
+                BorderWidthBottom = 1,
+                CornerRadiusTopLeft = 4,
+                CornerRadiusTopRight = 4,
+                CornerRadiusBottomLeft = 4,
+                CornerRadiusBottomRight = 4,
+                ContentMarginLeft = 4,
+                ContentMarginRight = 4,
+                ContentMarginTop = 4,
+                ContentMarginBottom = 4
+            };
+            _btnCenter.ThemeTypeVariation = "IconButton";
+            _btnCenter.AddThemeStyleboxOverride("normal", centerStyle);
+            _btnCenter.AddThemeStyleboxOverride("hover", centerStyle);
+            _btnCenter.AddThemeStyleboxOverride("pressed", centerStyle);
+            _btnCenter.AddThemeColorOverride("font_color", Colors.White);
+            _btnCenter.AddThemeColorOverride("font_hover_color", Colors.White);
+            _btnCenter.AddThemeColorOverride("font_pressed_color", Colors.White);
         }
+
+        UpdateModeButtonAppearance();
+        UpdateWasdButtonAppearance();
     }
 
     public void ToggleMode()
@@ -169,7 +216,22 @@ public partial class CameraControlPadUI : PanelContainer
 
         bool isPan = _currentMode == ControlMode.Pan;
         _btnModeToggle.Text = isPan ? "Pan" : "Orbit";
-        _btnModeToggle.ThemeTypeVariation = isPan ? "ToolbarButton" : "PrimaryActionButton";
+        _btnModeToggle.ThemeTypeVariation = "ToolbarButton";
+
+        if (isPan)
+        {
+            _btnModeToggle.RemoveThemeStyleboxOverride("normal");
+            _btnModeToggle.RemoveThemeStyleboxOverride("hover");
+            _btnModeToggle.RemoveThemeStyleboxOverride("pressed");
+            _btnModeToggle.RemoveThemeColorOverride("font_color");
+            _btnModeToggle.RemoveThemeColorOverride("font_hover_color");
+            _btnModeToggle.RemoveThemeColorOverride("font_pressed_color");
+        }
+        else
+        {
+            Color accent = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary));
+            ApplyConsistentPillOverride(_btnModeToggle, accent);
+        }
     }
 
     public void ToggleWasdBlock()
@@ -183,10 +245,52 @@ public partial class CameraControlPadUI : PanelContainer
         if (_btnBlockWasd == null) return;
         bool blocked = OrbitCamera.IsKeyboardMovementBlocked;
         _btnBlockWasd.Text = blocked ? "WASD: OFF" : "WASD: ON";
-        _btnBlockWasd.ThemeTypeVariation = blocked ? "DangerButton" : "ToolbarButton";
+        _btnBlockWasd.ThemeTypeVariation = "ToolbarButton";
         _btnBlockWasd.TooltipText = blocked
             ? "WASD Camera Movement: BLOCKED (Click to unblock). WASD keys will not move the 3D camera."
             : "WASD Camera Movement: ACTIVE (Click to block). Viewport camera can be panned with WASD.";
+
+        if (!blocked)
+        {
+            _btnBlockWasd.RemoveThemeStyleboxOverride("normal");
+            _btnBlockWasd.RemoveThemeStyleboxOverride("hover");
+            _btnBlockWasd.RemoveThemeStyleboxOverride("pressed");
+            _btnBlockWasd.RemoveThemeColorOverride("font_color");
+            _btnBlockWasd.RemoveThemeColorOverride("font_hover_color");
+            _btnBlockWasd.RemoveThemeColorOverride("font_pressed_color");
+        }
+        else
+        {
+            Color danger = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.SemanticDanger));
+            ApplyConsistentPillOverride(_btnBlockWasd, danger);
+        }
+    }
+
+    private static void ApplyConsistentPillOverride(Button btn, Color bg)
+    {
+        var style = new StyleBoxFlat
+        {
+            BgColor = bg,
+            BorderColor = bg.Lightened(0.15f),
+            BorderWidthLeft = 1,
+            BorderWidthRight = 1,
+            BorderWidthTop = 1,
+            BorderWidthBottom = 1,
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4,
+            CornerRadiusBottomRight = 4,
+            ContentMarginLeft = 8,
+            ContentMarginRight = 8,
+            ContentMarginTop = 4,
+            ContentMarginBottom = 4
+        };
+        btn.AddThemeStyleboxOverride("normal", style);
+        btn.AddThemeStyleboxOverride("hover", style);
+        btn.AddThemeStyleboxOverride("pressed", style);
+        btn.AddThemeColorOverride("font_color", Colors.White);
+        btn.AddThemeColorOverride("font_hover_color", Colors.White);
+        btn.AddThemeColorOverride("font_pressed_color", Colors.White);
     }
 
     private void OnDirectionClicked(int dirX, int dirY)

@@ -243,6 +243,37 @@ public partial class ThemeSystemVerificationTest : SceneTree
             manager.ApplyPreset(ThemeProfile.PresetLight, saveAsActive: false);
             var (cardNormal, _, _) = PlaygroundThemeHelper.CreateCardStateStyles();
             Assert(cardNormal.BgColor.Luminance > 0.45f, $"Light Mode card BgColor should be light/greyish (luminance > 0.45), got {cardNormal.BgColor} (lum={cardNormal.BgColor.Luminance:F2}).");
+
+            // Verify Light Mode card badge pill contrast
+            var testBadgePanel = new PanelContainer();
+            var testBadgeLabel = new Label { Text = "STANDARD" };
+            PlaygroundThemeHelper.ApplyCardBadgeStyle(testBadgePanel, testBadgeLabel, new Color(0.40f, 0.75f, 1.0f, 1.0f));
+            var badgeBgStyle = testBadgePanel.GetThemeStylebox("panel") as StyleBoxFlat;
+            Assert(badgeBgStyle != null && badgeBgStyle.BgColor.Luminance > 0.70f, "Light Mode card badge pill should have a bright background.");
+            Assert(testBadgeLabel.GetThemeColor("font_color").Luminance < 0.45f, "Light Mode card badge text should be dark/saturated for contrast.");
+            testBadgePanel.QueueFree();
+            testBadgeLabel.QueueFree();
+
+            // Verify ExportPanel, PaintModExportPanel, DopeSheetView, ClipAndPoseView theme bindings
+            var exportPanelScene = GD.Load<PackedScene>("res://ui/scenes/ExportPanel.tscn");
+            var paintExportScene = GD.Load<PackedScene>("res://ui/scenes/components/PaintModExportPanel.tscn");
+            var dopeScene = GD.Load<PackedScene>("res://scenes/ui/animation/DopeSheetView.tscn");
+            var clipScene = GD.Load<PackedScene>("res://scenes/ui/animation/ClipAndPoseView.tscn");
+            var exportPanelNode = exportPanelScene.Instantiate<PanelContainer>();
+            var paintExportNode = paintExportScene.Instantiate<PanelContainer>();
+            var dopeNode = dopeScene.Instantiate<Control>();
+            var clipNode = clipScene.Instantiate<Control>();
+            Assert(exportPanelNode.ThemeTypeVariation == "CardPanel", "ExportPanel should use CardPanel.");
+            Assert(paintExportNode.ThemeTypeVariation == "CardPanel", "PaintModExportPanel should use CardPanel.");
+            var boneHeader = dopeNode.FindChild("BoneHeaderPanel", true, false) as PanelContainer;
+            Assert(boneHeader != null && boneHeader.ThemeTypeVariation == "InspectorSectionPanel", "DopeSheet BoneHeaderPanel should use InspectorSectionPanel.");
+            var quickSub = clipNode.FindChild("LblSubtitle", true, false) as Label;
+            Assert(quickSub != null && quickSub.ThemeTypeVariation == "MutedLabel", "ClipAndPoseView QuickAssistants LblSubtitle should use MutedLabel.");
+            exportPanelNode.QueueFree();
+            paintExportNode.QueueFree();
+            dopeNode.QueueFree();
+            clipNode.QueueFree();
+
             manager.ApplyPreset(ThemeProfile.PresetDefault, saveAsActive: false);
 
             bonesNode.QueueFree();

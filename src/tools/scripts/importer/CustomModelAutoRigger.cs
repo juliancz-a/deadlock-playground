@@ -35,6 +35,9 @@ namespace DeadlockPlayground.Importer
             public RiggingMethod Method { get; set; } = RiggingMethod.KnnSurfaceProjection;
             public PosePreset Preset { get; set; } = PosePreset.MatchHeroBindPose;
             public float CustomArmAngleDeg { get; set; } = 0f;
+            public float CustomArmForwardDeg { get; set; } = 0f;
+            public float CustomElbowStraightenPct { get; set; } = 0f;
+            public float CustomLegSpreadDeg { get; set; } = 0f;
             public string RigidBoneName { get; set; } = "head";
             public ReplaceMode Mode { get; set; } = ReplaceMode.FullReplacement;
             public List<string> IncludedImportedSubmeshNames { get; set; } = new();
@@ -68,6 +71,7 @@ namespace DeadlockPlayground.Importer
             public bool KeepFingersRigidOnHand { get; set; } = false;
             public bool ClampLimbStretching { get; set; } = true;
             public bool StabilizeNeckFloatingHead { get; set; } = true;
+            public bool AutoCounterTwistWeights { get; set; } = true;
             public bool IncludeBakedOutlineShells { get; set; } = true;
             public Dictionary<string, bool> SubmeshIsOutlineShell { get; set; } = new(StringComparer.OrdinalIgnoreCase);
             public Vector3 RootPosition { get; set; } = Vector3.Zero;
@@ -341,6 +345,7 @@ namespace DeadlockPlayground.Importer
             public Vector3 PosedPosition;
             public int[] BoneIndices; // 4 indices into Skeleton3D
             public float[] BoneWeights; // 4 normalized weights
+            public byte Region; // 0=Unassigned, 1=TorsoHead, 2=ArmL, 3=ArmR, 4=LegL, 5=LegR
         }
 
         public struct BoneCapsuleSegment
@@ -350,6 +355,494 @@ namespace DeadlockPlayground.Importer
             public Vector3 StartPos;
             public Vector3 EndPos;
             public float Radius;
+        }
+
+        public struct UnriggedPoseCalibration
+        {
+            public float ArmAngleDeg;
+            public float ArmForwardDeg;
+            public float ElbowStraightenPct;
+            public float LegSpreadDeg;
+            public int DetectedArmSamples;
+            public int DetectedLegSamples;
+        }
+
+        private enum AnatomicalRegion : byte
+        {
+            Unassigned = 0,
+            TorsoHead = 1,
+            ArmL = 2,
+            ArmR = 3,
+            LegL = 4,
+            LegR = 5
+        }
+
+        private static AnatomicalRegion ClassifyBoneRegion(string boneName)
+        {
+            if (string.IsNullOrEmpty(boneName)) return AnatomicalRegion.TorsoHead;
+            string n = boneName.ToLowerInvariant();
+            bool isL = n.EndsWith("_l") || n.Contains("_l_");
+            bool isR = n.EndsWith("_r") || n.Contains("_r_");
+
+            if (n.Contains("arm_") || n.Contains("hand") || n.Contains("finger") || n.Contains("clavicle"))
+            {
+                if (isL) return AnatomicalRegion.ArmL;
+                if (isR) return AnatomicalRegion.ArmR;
+            }
+            if (n.Contains("leg_") || n.Contains("ankle") || n.Contains("toe") || n.Contains("foot") || n.Contains("knee"))
+            {
+                if (isL) return AnatomicalRegion.LegL;
+                if (isR) return AnatomicalRegion.LegR;
+            }
+            return AnatomicalRegion.TorsoHead;
+        }
+
+        private static AnatomicalRegion[] BuildBoneRegionLookup(Skeleton3D skeleton)
+        {
+            if (skeleton == null) return Array.Empty<AnatomicalRegion>();
+            int count = skeleton.GetBoneCount();
+            var lookup = new AnatomicalRegion[count];
+            for (int b = 0; b < count; b++)
+            {
+                lookup[b] = ClassifyBoneRegion(skeleton.GetBoneName(b));
+            }
+            return lookup;
+        }
+
+        private static AnatomicalRegion[] BuildCapsuleRegionLookup(List<BoneCapsuleSegment> capsules, AnatomicalRegion[] boneRegions)
+        {
+            if (capsules == null || capsules.Count == 0) return Array.Empty<AnatomicalRegion>();
+            var lookup = new AnatomicalRegion[capsules.Count];
+            for (int i = 0; i < capsules.Count; i++)
+            {
+                int bIdx = capsules[i].BoneIndex;
+                lookup[i] = (bIdx >= 0 && bIdx < boneRegions.Length) ? boneRegions[bIdx] : ClassifyBoneRegion(capsules[i].BoneName);
+            }
+            return lookup;
+        }
+
+        /// <summary>
+        /// Collapses individual finger phalanx donor weights onto hand_L / hand_R so low-poly
+        /// or fingerless unrigged meshes (e.g. solid mitten hands) do not tear when fingers curl.
+        /// </summary>
+        private static void CollapseDonorFingerWeights(List<DonorVertex> donors, Skeleton3D heroSkeleton)
+        {
+            if (donors == null || heroSkeleton == null) return;
+            int handL = FindBoneAny(heroSkeleton, "hand_L", "wrist_L");
+            int handR = FindBoneAny(heroSkeleton, "hand_R", "wrist_R");
+            int boneCount = heroSkeleton.GetBoneCount();
+            if (boneCount <= 0 || (handL < 0 && handR < 0)) return;
+
+            int[] remap = new int[boneCount];
+            bool anyRemap = false;
+            for (int b = 0; b < boneCount; b++)
+            {
+                remap[b] = b;
+                string bn = heroSkeleton.GetBoneName(b).ToLowerInvariant();
+                if (bn.Contains("finger") || bn.Contains("thumb") || bn.Contains("index") || bn.Contains("middle") || bn.Contains("ring") || bn.Contains("pinky"))
+                {
+                    if ((bn.EndsWith("_l") || bn.Contains("_l_")) && handL >= 0) { remap[b] = handL; anyRemap = true; }
+                    else if ((bn.EndsWith("_r") || bn.Contains("_r_")) && handR >= 0) { remap[b] = handR; anyRemap = true; }
+                }
+            }
+            if (!anyRemap) return;
+
+            Span<int> mergedB = stackalloc int[4];
+            Span<float> mergedW = stackalloc float[4];
+
+            for (int d = 0; d < donors.Count; d++)
+            {
+                var dv = donors[d];
+                if (dv.BoneIndices == null || dv.BoneWeights == null) continue;
+                bool touched = false;
+                for (int i = 0; i < 4; i++)
+                {
+                    int b = dv.BoneIndices[i];
+                    if (b >= 0 && b < boneCount && remap[b] != b && dv.BoneWeights[i] > 0f)
+                    {
+                        touched = true;
+                        break;
+                    }
+                }
+                if (!touched) continue;
+
+                mergedB.Clear();
+                mergedW.Clear();
+                int mCount = 0;
+                for (int i = 0; i < 4; i++)
+                {
+                    float w = dv.BoneWeights[i];
+                    if (w <= 0f) continue;
+                    int b = dv.BoneIndices[i];
+                    int targetB = (b >= 0 && b < boneCount) ? remap[b] : b;
+                    int existing = -1;
+                    for (int m = 0; m < mCount; m++)
+                    {
+                        if (mergedB[m] == targetB) { existing = m; break; }
+                    }
+                    if (existing >= 0) mergedW[existing] += w;
+                    else if (mCount < 4) { mergedB[mCount] = targetB; mergedW[mCount] = w; mCount++; }
+                }
+                float sum = 0f;
+                for (int m = 0; m < mCount; m++) sum += mergedW[m];
+                for (int i = 0; i < 4; i++)
+                {
+                    dv.BoneIndices[i] = i < mCount ? mergedB[i] : 0;
+                    dv.BoneWeights[i] = (i < mCount && sum > 1e-6f) ? mergedW[i] / sum : 0f;
+                }
+                donors[d] = dv;
+            }
+        }
+
+        private static void ApplyWorldRotationToBone(Skeleton3D skeleton, int boneIdx, Quaternion worldRot)
+        {
+            if (skeleton == null || boneIdx < 0) return;
+            int parentIdx = skeleton.GetBoneParent(boneIdx);
+            Basis parentGlobalBasis = parentIdx >= 0 ? skeleton.GetBoneGlobalPose(parentIdx).Basis.Orthonormalized() : Basis.Identity;
+            Basis currGlobalBasis = skeleton.GetBoneGlobalPose(boneIdx).Basis.Orthonormalized();
+            Basis desiredGlobalBasis = (new Basis(worldRot) * currGlobalBasis).Orthonormalized();
+            Basis desiredLocalBasis = (parentGlobalBasis.Inverse() * desiredGlobalBasis).Orthonormalized();
+            skeleton.SetBonePoseRotation(boneIdx, desiredLocalBasis.GetRotationQuaternion());
+        }
+
+        /// <summary>
+        /// Poses the reference Deadlock hero skeleton to match the active unrigged calibration parameters
+        /// (coronal arm raise/drop, sagittal forward pitch, elbow straightening, and leg stance spread).
+        /// Used both for live ghost preview feedback and for generating pose-matched donor weights.
+        /// </summary>
+        public static bool PoseHeroSkeletonForOptions(Skeleton3D skeleton, RiggingOptions options)
+        {
+            if (skeleton == null || !GodotObject.IsInstanceValid(skeleton) || options == null) return false;
+
+            bool useTPose = options.Preset == PosePreset.TPose;
+            bool hasCustomCalibration = options.Preset == PosePreset.APoseCustomAngle ||
+                                        MathF.Abs(options.CustomArmAngleDeg) > 0.25f ||
+                                        MathF.Abs(options.CustomArmForwardDeg) > 0.25f ||
+                                        options.CustomElbowStraightenPct > 0.5f ||
+                                        MathF.Abs(options.CustomLegSpreadDeg) > 0.25f;
+
+            if (!useTPose && !hasCustomCalibration) return false;
+
+            float armAngleDeg = useTPose ? 45f : options.CustomArmAngleDeg;
+            float armForwardDeg = useTPose ? 0f : options.CustomArmForwardDeg;
+            float elbowStraightenPct = useTPose ? 0f : options.CustomElbowStraightenPct;
+            float legSpreadDeg = useTPose ? 0f : options.CustomLegSpreadDeg;
+
+            int armUpperL = FindBoneAny(skeleton, "arm_upper_L", "upperarm_L", "upper_arm_L", "Bip01_L_UpperArm");
+            int armLowerL = FindBoneAny(skeleton, "arm_lower_L", "forearm_L", "lower_arm_L", "Bip01_L_Forearm");
+            int handL = FindBoneAny(skeleton, "hand_L", "wrist_L");
+            int armUpperR = FindBoneAny(skeleton, "arm_upper_R", "upperarm_R", "upper_arm_R", "Bip01_R_UpperArm");
+            int armLowerR = FindBoneAny(skeleton, "arm_lower_R", "forearm_R", "lower_arm_R", "Bip01_R_Forearm");
+            int handR = FindBoneAny(skeleton, "hand_R", "wrist_R");
+            int legUpperL = FindBoneAny(skeleton, "leg_upper_L", "thigh_L", "Bip01_L_Thigh");
+            int legUpperR = FindBoneAny(skeleton, "leg_upper_R", "thigh_R", "Bip01_R_Thigh");
+
+            // Determine skeleton facing & left/right sign from actual rest landmarks
+            float latSign = 1f;
+            if (armUpperL >= 0 && armUpperR >= 0)
+            {
+                float dx = skeleton.GetBoneGlobalRest(armUpperL).Origin.X - skeleton.GetBoneGlobalRest(armUpperR).Origin.X;
+                if (MathF.Abs(dx) > 0.01f) latSign = MathF.Sign(dx);
+            }
+            Vector3 forwardDir = Vector3.Back; // +Z forward in Godot glTF hero rigs
+            int ankleL = FindBoneAny(skeleton, "ankle_L", "foot_L");
+            int toeL = FindBoneAny(skeleton, "toe_L", "ball_L");
+            if (ankleL >= 0 && toeL >= 0)
+            {
+                float dz = skeleton.GetBoneGlobalRest(toeL).Origin.Z - skeleton.GetBoneGlobalRest(ankleL).Origin.Z;
+                if (MathF.Abs(dz) > 0.01f) forwardDir = new Vector3(0f, 0f, MathF.Sign(dz));
+            }
+            Vector3 sagittalAxis = Vector3.Down.Cross(forwardDir).Normalized();
+
+            void PoseUpperLimb(int upperIdx, bool isLeft, float coronalDeg, float fwdDeg)
+            {
+                if (upperIdx < 0) return;
+                if (MathF.Abs(coronalDeg) < 0.05f && MathF.Abs(fwdDeg) < 0.05f) return;
+                Vector3 outwardDir = new Vector3(latSign * (isLeft ? 1f : -1f), 0f, 0f);
+                Vector3 coronalAxis = Vector3.Down.Cross(outwardDir).Normalized();
+                Quaternion qCoronal = new Quaternion(coronalAxis, Mathf.DegToRad(coronalDeg));
+                Quaternion qFwd = new Quaternion(sagittalAxis, Mathf.DegToRad(fwdDeg));
+                ApplyWorldRotationToBone(skeleton, upperIdx, qFwd * qCoronal);
+            }
+
+            void StraightenElbow(int upperIdx, int lowerIdx, int handIdx, float pct)
+            {
+                if (upperIdx < 0 || lowerIdx < 0 || handIdx < 0 || pct <= 0.1f) return;
+                float t = Mathf.Clamp(pct / 100f, 0f, 1f);
+                Vector3 pUpper = skeleton.GetBoneGlobalPose(upperIdx).Origin;
+                Vector3 pLower = skeleton.GetBoneGlobalPose(lowerIdx).Origin;
+                Vector3 pHand = skeleton.GetBoneGlobalPose(handIdx).Origin;
+                Vector3 vUpper = (pLower - pUpper).Normalized();
+                Vector3 vLower = (pHand - pLower).Normalized();
+                if (vUpper.LengthSquared() < 1e-4f || vLower.LengthSquared() < 1e-4f) return;
+                if (vUpper.Dot(vLower) < 0.9995f)
+                {
+                    Quaternion qAlign = new Quaternion(vLower, vUpper);
+                    Quaternion qStep = Quaternion.Identity.Slerp(qAlign, t);
+                    ApplyWorldRotationToBone(skeleton, lowerIdx, qStep);
+                }
+            }
+
+            // 1. Pose shoulders (coronal raise/drop + sagittal pitch)
+            PoseUpperLimb(armUpperL, true, armAngleDeg, armForwardDeg);
+            PoseUpperLimb(armUpperR, false, armAngleDeg, armForwardDeg);
+
+            // 2. Pose legs (coronal stance spread)
+            PoseUpperLimb(legUpperL, true, legSpreadDeg, 0f);
+            PoseUpperLimb(legUpperR, false, legSpreadDeg, 0f);
+            skeleton.ForceUpdateAllBoneTransforms();
+
+            // 3. Straighten elbows after upper arm is posed
+            StraightenElbow(armUpperL, armLowerL, handL, elbowStraightenPct);
+            StraightenElbow(armUpperR, armLowerR, handR, elbowStraightenPct);
+            skeleton.ForceUpdateAllBoneTransforms();
+            return true;
+        }
+
+        /// <summary>
+        /// Geometrically analyzes an aligned unrigged mesh against the Deadlock hero's rest skeleton
+        /// and estimates macro limb pose adjustments (ArmAngleDeg, ArmForwardDeg, ElbowStraightenPct, LegSpreadDeg)
+        /// without requiring manual bone-by-bone posing.
+        /// </summary>
+        public static UnriggedPoseCalibration AutoEstimateUnriggedPoseCalibration(
+            Node3D importedScene,
+            Skeleton3D heroSkeleton,
+            Transform3D alignedTransform,
+            List<string> includedSubmeshNames = null)
+        {
+            var cal = new UnriggedPoseCalibration();
+            if (importedScene == null || heroSkeleton == null) return cal;
+
+            int pelvisIdx = FindBoneAny(heroSkeleton, "pelvis", "hips");
+            int armUpperL = FindBoneAny(heroSkeleton, "arm_upper_L", "upperarm_L", "upper_arm_L", "Bip01_L_UpperArm");
+            int armLowerL = FindBoneAny(heroSkeleton, "arm_lower_L", "forearm_L", "lower_arm_L", "Bip01_L_Forearm");
+            int handL = FindBoneAny(heroSkeleton, "hand_L", "wrist_L");
+            int armUpperR = FindBoneAny(heroSkeleton, "arm_upper_R", "upperarm_R", "upper_arm_R", "Bip01_R_UpperArm");
+            int armLowerR = FindBoneAny(heroSkeleton, "arm_lower_R", "forearm_R", "lower_arm_R", "Bip01_R_Forearm");
+            int handR = FindBoneAny(heroSkeleton, "hand_R", "wrist_R");
+            int legUpperL = FindBoneAny(heroSkeleton, "leg_upper_L", "thigh_L", "Bip01_L_Thigh");
+            int ankleL = FindBoneAny(heroSkeleton, "ankle_L", "foot_L");
+            int legUpperR = FindBoneAny(heroSkeleton, "leg_upper_R", "thigh_R", "Bip01_R_Thigh");
+            int ankleR = FindBoneAny(heroSkeleton, "ankle_R", "foot_R");
+
+            if (pelvisIdx < 0 || armUpperL < 0 || armUpperR < 0 || armLowerL < 0 || armLowerR < 0 || handL < 0 || handR < 0)
+                return cal;
+
+            Vector3 pelvisPos = heroSkeleton.GetBoneGlobalRest(pelvisIdx).Origin;
+            Vector3 shL = heroSkeleton.GetBoneGlobalRest(armUpperL).Origin;
+            Vector3 elL = heroSkeleton.GetBoneGlobalRest(armLowerL).Origin;
+            Vector3 wrL = heroSkeleton.GetBoneGlobalRest(handL).Origin;
+            Vector3 shR = heroSkeleton.GetBoneGlobalRest(armUpperR).Origin;
+            Vector3 elR = heroSkeleton.GetBoneGlobalRest(armLowerR).Origin;
+            Vector3 wrR = heroSkeleton.GetBoneGlobalRest(handR).Origin;
+
+            float latSign = MathF.Abs(shL.X - shR.X) > 0.01f ? MathF.Sign(shL.X - shR.X) : 1f;
+            float shHalfW = MathF.Max(MathF.Abs(shL.X - pelvisPos.X), MathF.Abs(shR.X - pelvisPos.X));
+            float shMidY = (shL.Y + shR.Y) * 0.5f;
+            float armLenL = shL.DistanceTo(elL) + elL.DistanceTo(wrL);
+            float armLenR = shR.DistanceTo(elR) + elR.DistanceTo(wrR);
+            float avgArmLen = (armLenL + armLenR) * 0.5f;
+
+            var allMeshes = CollectMeshes(importedScene);
+            var targetMeshes = (includedSubmeshNames != null && includedSubmeshNames.Count > 0)
+                ? allMeshes.Where(m => includedSubmeshNames.Contains(m.Name.ToString())).ToList()
+                : allMeshes;
+            if (targetMeshes.Count == 0) targetMeshes = allMeshes;
+
+            var worldVerts = new List<Vector3>(2048);
+            foreach (var mi in targetMeshes)
+            {
+                if (mi?.Mesh == null) continue;
+                Transform3D xf = alignedTransform * ComputeTransformRelativeToRoot(mi, importedScene);
+                for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+                {
+                    var arrays = mi.Mesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count == 0) continue;
+                    var raw = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (raw == null) continue;
+                    for (int i = 0; i < raw.Length; i++) worldVerts.Add(xf * raw[i]);
+                }
+            }
+            if (worldVerts.Count < 20) return cal;
+
+            Vector3 fwdDir = Vector3.Back;
+            if (ankleL >= 0)
+            {
+                int toeL = FindBoneAny(heroSkeleton, "toe_L", "ball_L");
+                if (toeL >= 0)
+                {
+                    float dz = heroSkeleton.GetBoneGlobalRest(toeL).Origin.Z - heroSkeleton.GetBoneGlobalRest(ankleL).Origin.Z;
+                    if (MathF.Abs(dz) > 0.01f) fwdDir = new Vector3(0f, 0f, MathF.Sign(dz));
+                }
+            }
+            float fwdSign = fwdDir.Z >= 0f ? 1f : -1f;
+
+            // 1. Estimate coronal arm angle + straightness + forward sweep across Left & Right sides
+            float sumArmAngle = 0f;
+            float sumElbowStraight = 0f;
+            int armSides = 0;
+            var armDistVecs = new List<(bool isLeft, Vector3 vec)>();
+
+            void AnalyzeArmSide(bool isLeft, Vector3 sh, Vector3 el, Vector3 wr, float armLen)
+            {
+                float sideMul = latSign * (isLeft ? 1f : -1f);
+                var distalPts = new List<Vector3>();
+                var allArmPts = new List<Vector3>();
+
+                for (int i = 0; i < worldVerts.Count; i++)
+                {
+                    Vector3 v = worldVerts[i];
+                    float lat = (v.X - pelvisPos.X) * sideMul;
+                    // Strictly outside torso/thigh core width, or clearly raised above shoulder crease
+                    float minLat = v.Y > sh.Y - 0.06f ? shHalfW * 0.72f : shHalfW * 0.90f;
+                    if (lat < minLat) continue;
+                    if (v.Y > sh.Y + armLen * 0.85f || v.Y < sh.Y - armLen * 1.15f) continue;
+                    float dist = v.DistanceTo(sh);
+                    if (dist < 0.04f || dist > armLen * 1.18f) continue;
+
+                    allArmPts.Add(v);
+                    if (dist > armLen * 0.56f && dist <= armLen * 1.10f) distalPts.Add(v);
+                }
+
+                cal.DetectedArmSamples += allArmPts.Count;
+                if (allArmPts.Count < 4) return;
+
+                Vector3 distCentroid = Vector3.Zero;
+                var distSrc = distalPts.Count >= 3 ? distalPts : allArmPts;
+                foreach (var p in distSrc) distCentroid += p;
+                distCentroid /= distSrc.Count;
+
+                Vector3 impFullDir = distCentroid - sh;
+                if (impFullDir.LengthSquared() < 1e-4f) return;
+
+                // Coronal angle from downward -Y toward outward side
+                float impLat = (impFullDir.X) * sideMul;
+                float impDown = -impFullDir.Y;
+                float impCoronalRad = MathF.Atan2(impLat, impDown);
+
+                Vector3 heroFullDir = wr - sh;
+                float heroLat = heroFullDir.X * sideMul;
+                float heroDown = -heroFullDir.Y;
+                float heroCoronalRad = MathF.Atan2(heroLat, heroDown);
+
+                sumArmAngle += Mathf.Clamp(Mathf.RadToDeg(impCoronalRad - heroCoronalRad), -60f, 75f);
+
+                // Elbow straightness: collect upper-arm samples along the shoulder->wrist corridor and compare bend vs hero rest
+                Vector3 armAxis = impFullDir.Normalized();
+                var upperPts = new List<Vector3>();
+                float maxRadial = armLen * 0.30f;
+                for (int i = 0; i < allArmPts.Count; i++)
+                {
+                    Vector3 rel = allArmPts[i] - sh;
+                    float proj = rel.Dot(armAxis);
+                    if (proj < armLen * 0.20f || proj > armLen * 0.56f) continue;
+                    float radial = (rel - armAxis * proj).Length();
+                    if (radial <= maxRadial) upperPts.Add(allArmPts[i]);
+                }
+
+                Vector3 hU = (el - sh).Normalized();
+                Vector3 hL = (wr - el).Normalized();
+                float heroBendRad = MathF.Acos(Mathf.Clamp(hU.Dot(hL), -1f, 1f));
+                if (heroBendRad > 0.20f && upperPts.Count >= 2 && distalPts.Count >= 2)
+                {
+                    Vector3 upCentroid = Vector3.Zero;
+                    foreach (var p in upperPts) upCentroid += p;
+                    upCentroid /= upperPts.Count;
+                    Vector3 iU = (upCentroid - sh).Normalized();
+                    Vector3 iL = (distCentroid - upCentroid).Normalized();
+                    float impBendRad = MathF.Acos(Mathf.Clamp(iU.Dot(iL), -1f, 1f));
+                    float straightPct = Mathf.Clamp((1f - impBendRad / heroBendRad) * 100f, 0f, 100f);
+                    sumElbowStraight += straightPct;
+                }
+
+                armSides++;
+                armDistVecs.Add((isLeft, impFullDir));
+            }
+
+            AnalyzeArmSide(true, shL, elL, wrL, armLenL);
+            AnalyzeArmSide(false, shR, elR, wrR, armLenR);
+
+            if (armSides > 0)
+            {
+                cal.ArmAngleDeg = MathF.Round(sumArmAngle / armSides, 1);
+                cal.ElbowStraightenPct = MathF.Round(sumElbowStraight / armSides, 0);
+
+                // Evaluate sagittal forward pitch AFTER coronal + elbow straightening on a cloned/temporary pose
+                // so forward sweep accounts accurately for the straightened elbow reach.
+                Dictionary<int, Quaternion> backup = BackupSkeletonLocalRotations(heroSkeleton);
+                var tmpOpt = new RiggingOptions
+                {
+                    Preset = PosePreset.APoseCustomAngle,
+                    CustomArmAngleDeg = cal.ArmAngleDeg,
+                    CustomArmForwardDeg = 0f,
+                    CustomElbowStraightenPct = cal.ElbowStraightenPct,
+                    CustomLegSpreadDeg = 0f
+                };
+                heroSkeleton.ResetBonePoses();
+                PoseHeroSkeletonForOptions(heroSkeleton, tmpOpt);
+
+                float sumFwd = 0f;
+                int fwdCount = 0;
+                foreach (var (isL, impVec) in armDistVecs)
+                {
+                    int uIdx = isL ? armUpperL : armUpperR;
+                    int hIdx = isL ? handL : handR;
+                    Vector3 posedVec = heroSkeleton.GetBoneGlobalPose(hIdx).Origin - heroSkeleton.GetBoneGlobalPose(uIdx).Origin;
+                    // Project in YZ sagittal plane (using radial magnitude in XY as "down-out" lever so horizontal arms work too)
+                    float impSagVert = MathF.Max(0.05f, MathF.Sqrt(impVec.X * impVec.X + impVec.Y * impVec.Y));
+                    float impPitch = MathF.Atan2(impVec.Z * fwdSign, impSagVert);
+                    float posedSagVert = MathF.Max(0.05f, MathF.Sqrt(posedVec.X * posedVec.X + posedVec.Y * posedVec.Y));
+                    float posedPitch = MathF.Atan2(posedVec.Z * fwdSign, posedSagVert);
+                    sumFwd += Mathf.Clamp(Mathf.RadToDeg(impPitch - posedPitch), -45f, 45f);
+                    fwdCount++;
+                }
+                if (fwdCount > 0) cal.ArmForwardDeg = MathF.Round(sumFwd / fwdCount, 1);
+
+                RestoreSkeletonLocalRotations(heroSkeleton, backup);
+            }
+
+            // 2. Estimate leg stance spread
+            if (legUpperL >= 0 && ankleL >= 0 && legUpperR >= 0 && ankleR >= 0)
+            {
+                Vector3 hipL = heroSkeleton.GetBoneGlobalRest(legUpperL).Origin;
+                Vector3 ankL = heroSkeleton.GetBoneGlobalRest(ankleL).Origin;
+                Vector3 hipR = heroSkeleton.GetBoneGlobalRest(legUpperR).Origin;
+                Vector3 ankR = heroSkeleton.GetBoneGlobalRest(ankleR).Origin;
+
+                float sumLeg = 0f;
+                int legSides = 0;
+
+                void AnalyzeLegSide(bool isLeft, Vector3 hip, Vector3 ank)
+                {
+                    float sideMul = latSign * (isLeft ? 1f : -1f);
+                    float maxLegLat = MathF.Max(MathF.Abs(ank.X - pelvisPos.X) + 0.14f, shHalfW * 0.86f);
+                    Vector3 legSum = Vector3.Zero;
+                    int count = 0;
+                    for (int i = 0; i < worldVerts.Count; i++)
+                    {
+                        Vector3 v = worldVerts[i];
+                        float latFromCenter = (v.X - pelvisPos.X) * sideMul;
+                        if (latFromCenter < 0.015f || latFromCenter > maxLegLat) continue;
+                        if (v.Y > hip.Y - 0.14f || v.Y < ank.Y - 0.05f) continue;
+                        legSum += (v - hip);
+                        count++;
+                    }
+                    cal.DetectedLegSamples += count;
+                    if (count < 4) return;
+                    Vector3 impLeg = legSum / count;
+                    Vector3 heroLeg = ank - hip;
+                    float impAng = MathF.Atan2(impLeg.X * sideMul, -impLeg.Y);
+                    float heroAng = MathF.Atan2(heroLeg.X * sideMul, -heroLeg.Y);
+                    sumLeg += Mathf.Clamp(Mathf.RadToDeg(impAng - heroAng), -25f, 35f);
+                    legSides++;
+                }
+
+                AnalyzeLegSide(true, hipL, ankL);
+                AnalyzeLegSide(false, hipR, ankR);
+                if (legSides > 0) cal.LegSpreadDeg = MathF.Round(sumLeg / legSides, 1);
+            }
+
+            return cal;
         }
 
         /// <summary>
@@ -476,11 +969,9 @@ namespace DeadlockPlayground.Importer
             // 1. Build skin bind lookup: maps Skeleton3D bone index -> Skin bind index
             var (skeletonToBindMap, bindToSkeletonMap) = BuildSkinIndexMappings(heroSkeleton, heroSkin);
 
-            // 2. Pose hero skeleton if T-Pose or custom arm angle requested, to create pose-matched donor cloud
+            // 2. Pose hero skeleton if T-Pose or unrigged calibration requested, to create pose-matched donor cloud
             Dictionary<int, Quaternion> originalLocalRotations = BackupSkeletonLocalRotations(heroSkeleton);
             heroSkeleton.ResetBonePoses(); // Force 100% symmetrical bind pose before arm adjustments!
-
-            bool isPoseMatched = options.Preset == PosePreset.TPose || options.Preset == PosePreset.APoseCustomAngle;
 
             Transform3D[] posedGlobalBoneTransforms = new Transform3D[heroSkeleton.GetBoneCount()];
             Transform3D[] restGlobalBoneTransforms = new Transform3D[heroSkeleton.GetBoneCount()];
@@ -490,10 +981,7 @@ namespace DeadlockPlayground.Importer
                 restGlobalBoneTransforms[b] = heroSkeleton.GetBoneGlobalRest(b);
             }
 
-            if (isPoseMatched)
-            {
-                PoseHeroArmsForPreset(heroSkeleton, options.Preset, options.CustomArmAngleDeg);
-            }
+            bool isPoseMatched = PoseHeroSkeletonForOptions(heroSkeleton, options);
 
             for (int b = 0; b < heroSkeleton.GetBoneCount(); b++)
             {
@@ -512,6 +1000,25 @@ namespace DeadlockPlayground.Importer
                 return result;
             }
 
+            if (options.KeepFingersRigidOnHand)
+            {
+                CollapseDonorFingerWeights(donorCloud, heroSkeleton);
+            }
+
+            // Build anatomical region tags on all donor vertices to prevent coat skirts / torso from
+            // contaminating hanging arms or thighs in tight proximity.
+            var boneRegions = BuildBoneRegionLookup(heroSkeleton);
+            for (int d = 0; d < donorCloud.Count; d++)
+            {
+                var dv = donorCloud[d];
+                if (dv.BoneIndices != null && dv.BoneIndices.Length > 0 && boneRegions.Length > 0)
+                {
+                    int b0 = dv.BoneIndices[0];
+                    dv.Region = (byte)((b0 >= 0 && b0 < boneRegions.Length) ? boneRegions[b0] : AnatomicalRegion.TorsoHead);
+                    donorCloud[d] = dv;
+                }
+            }
+
             GD.Print($"[CustomModelAutoRigger] Built donor vertex cloud in {swDonor.ElapsedMilliseconds} ms: {donorCloud.Count} posed donor vertices.");
 
             // 4. Build Spatial Hash Grid for fast KNN querying
@@ -520,9 +1027,10 @@ namespace DeadlockPlayground.Importer
             var spatialGrid = BuildSpatialHashGrid(donorCloud, cellSize);
             swGrid.Stop();
 
-            // 5. Build core anatomical capsule segments for fallback
+            // 5. Build core anatomical capsule segments for fallback & regional corridor isolation
             var swCap = System.Diagnostics.Stopwatch.StartNew();
             var capsuleSegments = BuildCapsuleSegments(heroSkeleton, posedGlobalBoneTransforms);
+            var capsuleRegions = BuildCapsuleRegionLookup(capsuleSegments, boneRegions);
             swCap.Stop();
             GD.Print($"[CustomModelAutoRigger] Grid={swGrid.ElapsedMilliseconds} ms, Capsules={swCap.ElapsedMilliseconds} ms ({capsuleSegments.Count} segments).");
 
@@ -536,7 +1044,11 @@ namespace DeadlockPlayground.Importer
             long totalKnnMs = 0, totalLapMs = 0, totalBakeMs = 0, totalMeshMs = 0;
 
             var socketFrames = ComputeSocketGroupFrames(importedMeshes, importedScene, options, heroNode, heroSkeleton);
+            LimbTwistProfile limbTwistProfile = options.AutoCounterTwistWeights
+                ? BuildLimbTwistProfile(heroSkeleton, restGlobalBoneTransforms)
+                : null;
 
+            Skeleton3D srcFallbackSkel = FindSkeleton(importedScene);
             foreach (var srcMi in importedMeshes)
             {
                 var srcMesh = srcMi.Mesh;
@@ -554,6 +1066,8 @@ namespace DeadlockPlayground.Importer
                     var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
                     var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
                     var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
 
                     if (rawVerts == null || rawVerts.Length == 0) continue;
 
@@ -561,22 +1075,8 @@ namespace DeadlockPlayground.Importer
                     totalVerts += vCount;
                     totalTris += (rawIndices != null) ? rawIndices.Length / 3 : vCount / 3;
 
-                    // Transform vertices and normals into the posed Hero space
-                    Vector3[] alignedVerts = new Vector3[vCount];
-                    Vector3[] alignedNorms = rawNorms != null && rawNorms.Length == vCount ? new Vector3[vCount] : new Vector3[vCount];
-
-                    for (int v = 0; v < vCount; v++)
-                    {
-                        alignedVerts[v] = toHeroSpace * rawVerts[v];
-                        if (rawNorms != null && rawNorms.Length == vCount)
-                        {
-                            alignedNorms[v] = (toHeroSpace.Basis * rawNorms[v]).Normalized();
-                        }
-                        else
-                        {
-                            alignedNorms[v] = Vector3.Up;
-                        }
-                    }
+                    // Transform vertices and normals into the posed Hero space (evaluating skin rest pose when skinned)
+                    EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, srcFallbackSkel, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] alignedVerts, out Vector3[] alignedNorms);
 
                     // Check if this submesh is designated as a rigid socket attachment (e.g. weapon / prop attached to hand_R)
                     string socketBoneName = null;
@@ -589,87 +1089,24 @@ namespace DeadlockPlayground.Importer
                     Skin propSkin = null;
 
                     var swKnnStep = System.Diagnostics.Stopwatch.StartNew();
+                    SocketBakeMeta? socketMeta = null;
                     if (isSocketProp)
                     {
-                        int tgtBone = heroSkeleton.FindBone(socketBoneName);
-                        if (tgtBone == -1) tgtBone = FindBoneAny(heroSkeleton, "weapon_hand_R", "weapon_hand_L", "hand_R", "hand_L", "head");
-                        if (tgtBone == -1) tgtBone = 0;
-
-                        propSkin = new Skin();
-                        propSkin.AddBind(tgtBone, heroSkeleton.GetBoneGlobalRest(tgtBone).AffineInverse());
-
-                        bool snapToBone = options.SubmeshSnapToSocket != null &&
-                                          options.SubmeshSnapToSocket.TryGetValue(srcMi.Name.ToString(), out bool snap) && snap;
-
-                        Vector3 userPosOffset = options.SubmeshSocketOffsetPos != null &&
-                                                options.SubmeshSocketOffsetPos.TryGetValue(srcMi.Name.ToString(), out var uPos) ? uPos : Vector3.Zero;
-                        Vector3 userRotOffset = options.SubmeshSocketOffsetRot != null &&
-                                                options.SubmeshSocketOffsetRot.TryGetValue(srcMi.Name.ToString(), out var uRot) ? uRot : Vector3.Zero;
-                        float userScale = options.SubmeshSocketScale != null &&
-                                          options.SubmeshSocketScale.TryGetValue(srcMi.Name.ToString(), out float uScale) && uScale > 0.001f ? uScale : 1.0f;
-
-                        Basis rotBasis = Basis.FromEuler(new Vector3(
-                            Mathf.DegToRad(userRotOffset.X),
-                            Mathf.DegToRad(userRotOffset.Y),
-                            Mathf.DegToRad(userRotOffset.Z)
-                        ), EulerOrder.Yxz);
-
-                        Transform3D boneRest = tgtBone >= 0 ? heroSkeleton.GetBoneGlobalRest(tgtBone) : Transform3D.Identity;
-                        Vector3 fallbackOrigin = boneRest.Origin;
-
-                        SocketFrame frame = default;
-                        bool hasFrame = socketFrames != null && socketFrames.TryGetValue(socketBoneName, out frame);
-
-                        Vector3 socketPos = hasFrame ? frame.SocketCenter : fallbackOrigin;
-                        Vector3 centerPoint = hasFrame ? frame.Center : Vector3.Zero;
-                        Basis pcaBasis = hasFrame ? frame.PcaBasis : Basis.Identity;
-                        Basis targetOrient = hasFrame ? frame.TargetOrientation : Basis.Identity;
-
-                        if (snapToBone && vCount > 0)
-                        {
-                            for (int v = 0; v < vCount; v++)
-                            {
-                                Vector3 rel = (toHeroSpace * rawVerts[v]) - centerPoint;
-                                Vector3 localAligned = pcaBasis * rel;
-                                Vector3 oriented = targetOrient * (localAligned * userScale);
-                                alignedVerts[v] = socketPos + (boneRest.Basis * userPosOffset) + ((boneRest.Basis * rotBasis) * oriented);
-
-                                Vector3 heroSpaceNorm = (rawNorms != null && rawNorms.Length == vCount)
-                                    ? (toHeroSpace.Basis * rawNorms[v]).Normalized()
-                                    : Vector3.Up;
-                                Vector3 localNorm = pcaBasis * heroSpaceNorm;
-                                alignedNorms[v] = ((boneRest.Basis * rotBasis) * (targetOrient * localNorm)).Normalized();
-                            }
-                        }
-                        else
-                        {
-                            for (int v = 0; v < vCount; v++)
-                            {
-                                Vector3 rel = toHeroSpace * rawVerts[v];
-                                rel = (boneRest.Basis * rotBasis) * (rel * userScale);
-                                alignedVerts[v] = rel + (boneRest.Basis * userPosOffset);
-                                if (rawNorms != null && rawNorms.Length == vCount)
-                                {
-                                    alignedNorms[v] = ((boneRest.Basis * rotBasis) * (toHeroSpace.Basis * rawNorms[v])).Normalized();
-                                }
-                                else
-                                {
-                                    alignedNorms[v] = Vector3.Up;
-                                }
-                            }
-                        }
-
-                        for (int v = 0; v < vCount; v++)
-                        {
-                            boneIndices[v * 4 + 0] = 0; // Bind 0 in propSkin
-                            boneWeights[v * 4 + 0] = 1.0f;
-                            boneIndices[v * 4 + 1] = 0;
-                            boneWeights[v * 4 + 1] = 0f;
-                            boneIndices[v * 4 + 2] = 0;
-                            boneWeights[v * 4 + 2] = 0f;
-                            boneIndices[v * 4 + 3] = 0;
-                            boneWeights[v * 4 + 3] = 0f;
-                        }
+                        var baked = BakeSocketPropSurface(
+                            heroSkeleton,
+                            socketBoneName,
+                            srcMi.Name.ToString(),
+                            options,
+                            socketFrames,
+                            rawVerts,
+                            rawNorms,
+                            alignedVerts,
+                            alignedNorms,
+                            boneIndices,
+                            boneWeights,
+                            toHeroSpace);
+                        propSkin = baked.PropSkin;
+                        socketMeta = baked.Meta;
                     }
                     else
                     {
@@ -680,6 +1117,7 @@ namespace DeadlockPlayground.Importer
                                 spatialGrid,
                                 donorCloud,
                                 capsuleSegments,
+                                capsuleRegions,
                                 options.KNearest,
                                 options.SearchRadius,
                                 cellSize,
@@ -703,7 +1141,7 @@ namespace DeadlockPlayground.Importer
                     // Stabilize neck weights against floating-head stretch (e.g. Paradox/Chrono)
                     if (!isSocketProp && options.StabilizeNeckFloatingHead)
                     {
-                        StabilizeNeckFloatingHeadWeights(heroSkeleton, vCount, boneIndices, boneWeights);
+                        StabilizeNeckFloatingHeadWeights(heroSkeleton, vCount, boneIndices, boneWeights, alignedVerts);
                     }
 
                     // Bake T-Pose vertices & normals back into Deadlock's native Rest / Bind Pose
@@ -722,6 +1160,13 @@ namespace DeadlockPlayground.Importer
                     }
                     swBakeStep.Stop();
                     totalBakeMs += swBakeStep.ElapsedMilliseconds;
+
+                    // Redistribute proximal limb weights onto procedural counter-twist bones (*_TWIST / *_TWIST1),
+                    // soften sharp 1-bone hip seams, and prune stray distal ankle/hand bleeds in hero rest space.
+                    if (!isSocketProp && options.AutoCounterTwistWeights)
+                    {
+                        AdjustLimbTwistAndHipWeights(heroSkeleton, vCount, boneIndices, boneWeights, restVerts, rawIndices, limbTwistProfile);
+                    }
 
                     // Remap bone indices from Skeleton3D indices to Skin bind indices
                     int[] skinBoneIndices = new int[vCount * 4];
@@ -772,6 +1217,7 @@ namespace DeadlockPlayground.Importer
                     newMi.SetMeta("IsCustomImportedMesh", true);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
                     ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
+                    if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
 
                     containerNode.AddChild(newMi);
                     newMi.Skeleton = newMi.GetPathTo(heroSkeleton);
@@ -851,8 +1297,39 @@ namespace DeadlockPlayground.Importer
             {
                 Vector3 PsPelvis = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcPelvis).Origin;
                 Vector3 PtPelvis = targetSkeleton.GetBoneGlobalRest(pelvisBone).Origin;
-                pelvisOffset = (PtPelvis - PsPelvis) * 0.5f;
+                Vector3 rawPelvisDelta = (PtPelvis - PsPelvis) * 0.5f;
+                if (rawPelvisDelta.Length() > 0.45f)
+                    rawPelvisDelta = rawPelvisDelta.Normalized() * 0.45f;
+                pelvisOffset = rawPelvisDelta;
             }
+
+            // Precompute thread-safe managed lookups BEFORE entering Parallel.For (eliminates CowData race crashes on Skeleton3D)
+            int srcBoneCount = sourceSkeleton.GetBoneCount();
+            int[] srcBoneToResolvedTgt = new int[srcBoneCount];
+            for (int sb = 0; sb < srcBoneCount; sb++)
+            {
+                srcBoneToResolvedTgt[sb] = ResolveTargetBoneWithAncestorFallback(sb, sourceSkeleton, sourceToTargetBoneMap, targetSkeleton, options.KeepFingersRigidOnHand);
+            }
+
+            int tgtBoneCount = targetSkeleton.GetBoneCount();
+            // 0 = none, 1 = leftArm, 2 = rightArm, 3 = leftLeg, 4 = rightLeg, 5 = headSeg, 6 = pelvis
+            byte[] tgtSegmentKind = new byte[tgtBoneCount];
+            for (int tb = 0; tb < tgtBoneCount; tb++)
+            {
+                if (leftArm != null && leftArm.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 1;
+                else if (rightArm != null && rightArm.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 2;
+                else if (leftLeg != null && leftLeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 3;
+                else if (rightLeg != null && rightLeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 4;
+                else if (headSeg != null && headSeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 5;
+                else if (tb == pelvisBone) tgtSegmentKind[tb] = 6;
+            }
+
+            int headBonePre = targetSkeleton.FindBone("head");
+            int neckBonePre = targetSkeleton.FindBone("neck_0");
+            if (neckBonePre < 0) neckBonePre = targetSkeleton.FindBone("neck");
+            int spine3BonePre = targetSkeleton.FindBone("spine_3");
+            if (spine3BonePre < 0) spine3BonePre = targetSkeleton.FindBone("spine_2");
+            int spine2BonePre = targetSkeleton.FindBone("spine_2");
 
             int tgtTwistL = FindBoneAny(targetSkeleton, "arm_lower_L_TWIST", "arm_lower_twist_L", "arm_lower_l_twist");
             if (tgtTwistL == -1) tgtTwistL = EnsureForearmTwistBone(targetSkeleton, isLeft: true);
@@ -864,6 +1341,10 @@ namespace DeadlockPlayground.Importer
                 EnsureSkinHasBind(heroSkin, targetSkeleton, tgtTwistL);
                 EnsureSkinHasBind(heroSkin, targetSkeleton, tgtTwistR);
             }
+
+            LimbTwistProfile limbTwistProfile = options.AutoCounterTwistWeights
+                ? BuildLimbTwistProfile(targetSkeleton)
+                : null;
 
             int totalVerts = 0;
             int totalTris = 0;
@@ -908,114 +1389,69 @@ namespace DeadlockPlayground.Importer
                                         !string.IsNullOrEmpty(socketBoneName);
 
 
-                    int[] skinBoneIndices = new int[vCount * 4];
+                    int[] skelBoneIndices = new int[vCount * 4];
                     float[] outWeights = new float[vCount * 4];
                     Skin propSkin = null;
+                    SocketBakeMeta? socketMeta = null;
 
                     if (isSocketProp)
                     {
-                        int tgtBone = targetSkeleton.FindBone(socketBoneName);
-                        if (tgtBone == -1) tgtBone = FindBoneAny(targetSkeleton, "weapon_hand_R", "weapon_hand_L", "hand_R", "hand_L", "head");
-                        if (tgtBone == -1) tgtBone = 0;
+                        // Evaluate accurate rest-pose geometry in Hero space before optional socket offsets
+                        EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] sockVerts, out Vector3[] sockNorms);
 
-                        propSkin = new Skin();
-                        propSkin.AddBind(tgtBone, targetSkeleton.GetBoneGlobalRest(tgtBone).AffineInverse());
-
-                        bool snapToBone = options.SubmeshSnapToSocket != null &&
-                                          options.SubmeshSnapToSocket.TryGetValue(srcMi.Name.ToString(), out bool snap) && snap;
-
-                        Vector3 userPosOffset = options.SubmeshSocketOffsetPos != null &&
-                                                options.SubmeshSocketOffsetPos.TryGetValue(srcMi.Name.ToString(), out var uPos) ? uPos : Vector3.Zero;
-                        Vector3 userRotOffset = options.SubmeshSocketOffsetRot != null &&
-                                                options.SubmeshSocketOffsetRot.TryGetValue(srcMi.Name.ToString(), out var uRot) ? uRot : Vector3.Zero;
-                        float userScale = options.SubmeshSocketScale != null &&
-                                          options.SubmeshSocketScale.TryGetValue(srcMi.Name.ToString(), out float uScale) && uScale > 0.001f ? uScale : 1.0f;
-
-                        Basis rotBasis = Basis.FromEuler(new Vector3(
-                            Mathf.DegToRad(userRotOffset.X),
-                            Mathf.DegToRad(userRotOffset.Y),
-                            Mathf.DegToRad(userRotOffset.Z)
-                        ), EulerOrder.Yxz);
-
-                        Transform3D boneRest = tgtBone >= 0 ? targetSkeleton.GetBoneGlobalRest(tgtBone) : Transform3D.Identity;
-                        Vector3 fallbackOrigin = boneRest.Origin;
-
-                        SocketFrame frame = default;
-                        bool hasFrame = socketFrames != null && socketFrames.TryGetValue(socketBoneName, out frame);
-
-                        Vector3 socketPos = hasFrame ? frame.SocketCenter : fallbackOrigin;
-                        Vector3 centerPoint = hasFrame ? frame.Center : Vector3.Zero;
-                        Basis pcaBasis = hasFrame ? frame.PcaBasis : Basis.Identity;
-                        Basis targetOrient = hasFrame ? frame.TargetOrientation : Basis.Identity;
-
-                        if (snapToBone && vCount > 0)
-                        {
-                            for (int v = 0; v < vCount; v++)
-                            {
-                                Vector3 rel = (toHeroSpace * rawVerts[v]) - centerPoint;
-                                Vector3 localAligned = pcaBasis * rel;
-                                Vector3 oriented = targetOrient * (localAligned * userScale);
-                                alignedVerts[v] = socketPos + (boneRest.Basis * userPosOffset) + ((boneRest.Basis * rotBasis) * oriented);
-
-                                Vector3 heroSpaceNorm = (rawNorms != null && rawNorms.Length == vCount)
-                                    ? (toHeroSpace.Basis * rawNorms[v]).Normalized()
-                                    : Vector3.Up;
-                                Vector3 localNorm = pcaBasis * heroSpaceNorm;
-                                alignedNorms[v] = ((boneRest.Basis * rotBasis) * (targetOrient * localNorm)).Normalized();
-                            }
-                        }
-                        else
-                        {
-                            for (int v = 0; v < vCount; v++)
-                            {
-                                Vector3 rel = toHeroSpace * rawVerts[v];
-                                rel = (boneRest.Basis * rotBasis) * (rel * userScale);
-                                alignedVerts[v] = rel + (boneRest.Basis * userPosOffset);
-                                if (rawNorms != null && rawNorms.Length == vCount)
-                                {
-                                    alignedNorms[v] = ((boneRest.Basis * rotBasis) * (toHeroSpace.Basis * rawNorms[v])).Normalized();
-                                }
-                                else
-                                {
-                                    alignedNorms[v] = Vector3.Up;
-                                }
-                            }
-                        }
-
-                        for (int v = 0; v < vCount; v++)
-                        {
-                            skinBoneIndices[v * 4 + 0] = 0; // Bind 0 in propSkin
-                            outWeights[v * 4 + 0] = 1.0f;
-                            skinBoneIndices[v * 4 + 1] = 0;
-                            outWeights[v * 4 + 1] = 0f;
-                            skinBoneIndices[v * 4 + 2] = 0;
-                            outWeights[v * 4 + 2] = 0f;
-                            skinBoneIndices[v * 4 + 3] = 0;
-                            outWeights[v * 4 + 3] = 0f;
-                        }
+                        var baked = BakeSocketPropSurface(
+                            targetSkeleton,
+                            socketBoneName,
+                            srcMi.Name.ToString(),
+                            options,
+                            socketFrames,
+                            sockVerts,
+                            sockNorms,
+                            alignedVerts,
+                            alignedNorms,
+                            skelBoneIndices,
+                            outWeights,
+                            localToHeroSpace: null,
+                            hasInputNormals: rawNorms != null && rawNorms.Length == vCount);
+                        propSkin = baked.PropSkin;
+                        socketMeta = baked.Meta;
                     }
                     else
                     {
+                        EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] baseHeroVerts, out Vector3[] baseHeroNorms);
+
+                        int srcStride = (rawBones != null && rawWeights != null && vCount > 0 && rawBones.Length >= vCount * 8 && rawWeights.Length >= vCount * 8) ? 8 : 4;
+                        int[] srcBindToSkel = null;
+                        if (srcMi.Skin != null && srcMi.Skin.GetBindCount() > 0)
+                        {
+                            int sbCount = srcMi.Skin.GetBindCount();
+                            srcBindToSkel = new int[sbCount];
+                            for (int bi = 0; bi < sbCount; bi++)
+                            {
+                                srcBindToSkel[bi] = ResolveSkinBindBone(srcMi.Skin, bi, sourceSkeleton);
+                            }
+                        }
+
                         System.Threading.Tasks.Parallel.For(0, vCount, v =>
                         {
-                            Vector3 rawV = rawVerts[v];
-                            Vector3 vHero = toHeroSpace * rawV;
-                            Vector3 nHero = (rawNorms != null && rawNorms.Length == vCount)
-                                ? (toHeroSpace.Basis * rawNorms[v]).Normalized()
-                                : Vector3.Up;
+                            Vector3 vHero = baseHeroVerts[v];
+                            Vector3 nHero = baseHeroNorms[v];
 
-                            Span<int> localAccumBones = stackalloc int[4];
-                            Span<float> localAccumWeights = stackalloc float[4];
+                            Span<int> localAccumBones = stackalloc int[8];
+                            Span<float> localAccumWeights = stackalloc float[8];
                             int accumCount = 0;
 
-                            for (int k = 0; k < 4; k++)
+                            for (int k = 0; k < srcStride; k++)
                             {
-                                int srcBone = rawBones != null && rawBones.Length > (v * 4 + k) ? rawBones[v * 4 + k] : 0;
-                                float w = rawWeights != null && rawWeights.Length > (v * 4 + k) ? rawWeights[v * 4 + k] : (k == 0 ? 1f : 0f);
+                                int rawBoneVal = rawBones != null && rawBones.Length > (v * srcStride + k) ? rawBones[v * srcStride + k] : 0;
+                                float w = rawWeights != null && rawWeights.Length > (v * srcStride + k) ? rawWeights[v * srcStride + k] : (k == 0 ? 1f : 0f);
 
                                 if (w <= 0.0001f) continue;
 
-                                int tgtBone = ResolveTargetBoneWithAncestorFallback(srcBone, sourceSkeleton, sourceToTargetBoneMap, targetSkeleton, options.KeepFingersRigidOnHand);
+                                int srcBone = (srcBindToSkel != null && rawBoneVal >= 0 && rawBoneVal < srcBindToSkel.Length)
+                                    ? srcBindToSkel[rawBoneVal]
+                                    : Math.Clamp(rawBoneVal, 0, Math.Max(0, srcBoneCount - 1));
+                                int tgtBone = (srcBone >= 0 && srcBone < srcBoneToResolvedTgt.Length) ? srcBoneToResolvedTgt[srcBone] : 0;
 
                                 int found = -1;
                                 for (int a = 0; a < accumCount; a++)
@@ -1026,7 +1462,7 @@ namespace DeadlockPlayground.Importer
                                 {
                                     localAccumWeights[found] += w;
                                 }
-                                else if (accumCount < 4)
+                                else if (accumCount < 8)
                                 {
                                     localAccumBones[accumCount] = tgtBone;
                                     localAccumWeights[accumCount] = w;
@@ -1034,7 +1470,7 @@ namespace DeadlockPlayground.Importer
                                 }
                             }
 
-                            // Extract top influences in descending order
+                            // Extract top 4 influences in descending order
                             Span<int> topBones = stackalloc int[4];
                             Span<float> topWeights = stackalloc float[4];
 
@@ -1085,23 +1521,15 @@ namespace DeadlockPlayground.Importer
                             }
 
                             // Stabilize neck weights against floating-head stretch (e.g. Paradox/Chrono)
-                            if (!isSocketProp && options.StabilizeNeckFloatingHead)
+                            if (options.StabilizeNeckFloatingHead)
                             {
-                                int headBone = targetSkeleton.FindBone("head");
-                                int neckBone = targetSkeleton.FindBone("neck_0");
-                                if (neckBone < 0) neckBone = targetSkeleton.FindBone("neck");
-                                int spine3Bone = targetSkeleton.FindBone("spine_3");
-                                if (spine3Bone < 0) spine3Bone = targetSkeleton.FindBone("spine_2");
-                                int spine2Bone = targetSkeleton.FindBone("spine_2");
-
-                                StabilizeNeckFloatingHeadVertex(topBones, topWeights, headBone, neckBone, spine3Bone, spine2Bone, vHero.Y);
+                                StabilizeNeckFloatingHeadVertex(topBones, topWeights, headBonePre, neckBonePre, spine3BonePre, spine2BonePre, vHero.Y);
                             }
 
-                            // Assign Skin bone indices & weights
+                            // Assign Skeleton3D bone indices & weights (remapped to Skin bind indices after post-passes)
                             for (int k = 0; k < 4; k++)
                             {
-                                int skelBone = topBones[k];
-                                skinBoneIndices[v * 4 + k] = skeletonToBindMap.TryGetValue(skelBone, out int bindIdx) ? bindIdx : 0;
+                                skelBoneIndices[v * 4 + k] = topBones[k];
                                 outWeights[v * 4 + k] = topWeights[k];
                             }
 
@@ -1114,39 +1542,36 @@ namespace DeadlockPlayground.Importer
                                 float w = topWeights[k];
                                 if (w <= 0.0001f) continue;
                                 int tgtBone = topBones[k];
+                                byte segKind = (tgtBone >= 0 && tgtBone < tgtSegmentKind.Length) ? tgtSegmentKind[tgtBone] : (byte)0;
 
                                 Vector3 tPos;
                                 Quaternion tRot;
 
-                                if (leftArm != null && leftArm.AppliesTo(tgtBone, targetSkeleton))
+                                switch (segKind)
                                 {
-                                    (tPos, tRot) = leftArm.Evaluate(tgtBone, targetSkeleton, vHero);
-                                }
-                                else if (rightArm != null && rightArm.AppliesTo(tgtBone, targetSkeleton))
-                                {
-                                    (tPos, tRot) = rightArm.Evaluate(tgtBone, targetSkeleton, vHero);
-                                }
-                                else if (leftLeg != null && leftLeg.AppliesTo(tgtBone, targetSkeleton))
-                                {
-                                    (tPos, tRot) = leftLeg.Evaluate(tgtBone, targetSkeleton, vHero);
-                                }
-                                else if (rightLeg != null && rightLeg.AppliesTo(tgtBone, targetSkeleton))
-                                {
-                                    (tPos, tRot) = rightLeg.Evaluate(tgtBone, targetSkeleton, vHero);
-                                }
-                                else if (headSeg != null && headSeg.AppliesTo(tgtBone, targetSkeleton))
-                                {
-                                    (tPos, tRot) = headSeg.Evaluate(tgtBone, targetSkeleton, vHero);
-                                }
-                                else if (tgtBone == pelvisBone)
-                                {
-                                    tPos = vHero + pelvisOffset;
-                                    tRot = Quaternion.Identity;
-                                }
-                                else
-                                {
-                                    tPos = vHero;
-                                    tRot = Quaternion.Identity;
+                                    case 1:
+                                        (tPos, tRot) = leftArm.Evaluate(tgtBone, null, vHero);
+                                        break;
+                                    case 2:
+                                        (tPos, tRot) = rightArm.Evaluate(tgtBone, null, vHero);
+                                        break;
+                                    case 3:
+                                        (tPos, tRot) = leftLeg.Evaluate(tgtBone, null, vHero);
+                                        break;
+                                    case 4:
+                                        (tPos, tRot) = rightLeg.Evaluate(tgtBone, null, vHero);
+                                        break;
+                                    case 5:
+                                        (tPos, tRot) = headSeg.Evaluate(tgtBone, null, vHero);
+                                        break;
+                                    case 6:
+                                        tPos = vHero + pelvisOffset;
+                                        tRot = Quaternion.Identity;
+                                        break;
+                                    default:
+                                        tPos = vHero;
+                                        tRot = Quaternion.Identity;
+                                        break;
                                 }
 
                                 blendedPos += w * tPos;
@@ -1159,7 +1584,28 @@ namespace DeadlockPlayground.Importer
 
                         if (wristCount > 0 && rawIndices != null && rawIndices.Length > 0)
                         {
-                            SmoothWeightsLaplacian(rawIndices, vCount, skinBoneIndices, outWeights, 2, alignedVerts, wristMask);
+                            SmoothWeightsLaplacian(rawIndices, vCount, skelBoneIndices, outWeights, 2, alignedVerts, wristMask);
+                        }
+
+                        if (options.AutoCounterTwistWeights)
+                        {
+                            AdjustLimbTwistAndHipWeights(targetSkeleton, vCount, skelBoneIndices, outWeights, alignedVerts, rawIndices, limbTwistProfile);
+                        }
+                    }
+
+                    int[] skinBoneIndices;
+                    if (isSocketProp)
+                    {
+                        // BakeSocketPropSurface writes Skin bind indices directly for its dedicated propSkin.
+                        skinBoneIndices = skelBoneIndices;
+                    }
+                    else
+                    {
+                        skinBoneIndices = new int[vCount * 4];
+                        for (int i = 0; i < vCount * 4; i++)
+                        {
+                            int skelBone = skelBoneIndices[i];
+                            skinBoneIndices[i] = skeletonToBindMap.TryGetValue(skelBone, out int bindIdx) ? bindIdx : 0;
                         }
                     }
 
@@ -1196,6 +1642,7 @@ namespace DeadlockPlayground.Importer
                     newMi.SetMeta("IsCustomImportedMesh", true);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
                     ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
+                    if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
 
                     containerNode.AddChild(newMi);
                     newMi.Skeleton = newMi.GetPathTo(targetSkeleton);
@@ -1250,13 +1697,11 @@ namespace DeadlockPlayground.Importer
             int totalVerts = 0;
             int totalTris = 0;
 
+            Skeleton3D hybridFallbackSkel = FindSkeleton(importedScene);
             foreach (var srcMi in importedMeshes)
             {
                 var srcMesh = srcMi.Mesh;
                 if (srcMesh == null || srcMesh.GetSurfaceCount() == 0) continue;
-
-                // Deterministic mesh transform relative to imported root (Works without being inside scene tree!)
-                Transform3D toHeroSpace = options.AlignedTransform * ComputeTransformRelativeToRoot(srcMi, importedScene);
 
                 for (int s = 0; s < srcMesh.GetSurfaceCount(); s++)
                 {
@@ -1267,6 +1712,8 @@ namespace DeadlockPlayground.Importer
                     var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
                     var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
                     var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
 
                     if (rawVerts == null || rawVerts.Length == 0) continue;
 
@@ -1274,21 +1721,7 @@ namespace DeadlockPlayground.Importer
                     totalVerts += vCount;
                     totalTris += (rawIndices != null) ? rawIndices.Length / 3 : vCount / 3;
 
-                    Vector3[] alignedVerts = new Vector3[vCount];
-                    Vector3[] alignedNorms = new Vector3[vCount];
-
-                    for (int v = 0; v < vCount; v++)
-                    {
-                        alignedVerts[v] = toHeroSpace * rawVerts[v];
-                        if (rawNorms != null && rawNorms.Length == vCount)
-                        {
-                            alignedNorms[v] = (toHeroSpace.Basis * rawNorms[v]).Normalized();
-                        }
-                        else
-                        {
-                            alignedNorms[v] = Vector3.Up;
-                        }
-                    }
+                    EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, hybridFallbackSkel, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] alignedVerts, out Vector3[] alignedNorms);
 
                     int[] boneIndices = new int[vCount * 4];
                     float[] boneWeights = new float[vCount * 4];
@@ -1573,6 +2006,7 @@ namespace DeadlockPlayground.Importer
             var socketVerts = new Dictionary<string, List<Vector3>>();
             var socketReplacements = new Dictionary<string, string>();
 
+            Skeleton3D sockFallbackSkel = FindSkeleton(importedScene);
             foreach (var mi in meshes)
             {
                 if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) continue;
@@ -1584,8 +2018,6 @@ namespace DeadlockPlayground.Importer
                 {
                     socketReplacements[socket] = rep;
                 }
-
-                Transform3D toHero = options.AlignedTransform * ComputeTransformRelativeToRoot(mi, importedScene);
 
                 if (!socketVerts.TryGetValue(socket, out var vList))
                 {
@@ -1599,10 +2031,13 @@ namespace DeadlockPlayground.Importer
                     if (arrays == null || arrays.Count == 0) continue;
                     var verts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     if (verts == null || verts.Length == 0) continue;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
 
-                    for (int v = 0; v < verts.Length; v++)
+                    EvaluateMeshSurfaceInTargetSpace(mi, importedScene, options.AlignedTransform, sockFallbackSkel, verts, null, rawBones, rawWeights, out var xformVerts, out _);
+                    for (int v = 0; v < xformVerts.Length; v++)
                     {
-                        vList.Add(toHero * verts[v]);
+                        vList.Add(xformVerts[v]);
                     }
                 }
             }
@@ -1829,6 +2264,11 @@ namespace DeadlockPlayground.Importer
             int srcHand = FindSourceBoneForTarget(sourceToTargetMap, tgtHand);
 
             if (srcUpper == -1 || srcLower == -1 || srcHand == -1) return null;
+            if (srcUpper == srcLower || srcLower == srcHand || srcUpper == srcHand)
+            {
+                GD.PushWarning($"[CustomModelAutoRigger] Skipping Auto-Snap Arm Registration for '{upperName}': source bones collapsed/duplicated.");
+                return null;
+            }
 
             Vector3 As = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcUpper).Origin;
             Vector3 Bs = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcLower).Origin;
@@ -1840,11 +2280,11 @@ namespace DeadlockPlayground.Importer
 
             float Ls1 = (Bs - As).Length();
             float Lt1 = (Bt - At).Length();
-            if (Ls1 < 0.001f || Lt1 < 0.001f) return null;
+            if (Ls1 < 0.02f || Lt1 < 0.02f) return null;
 
             float Ls2 = (Cs - Bs).Length();
             float Lt2 = (Ct - Bt).Length();
-            if (Ls2 < 0.001f || Lt2 < 0.001f) return null;
+            if (Ls2 < 0.02f || Lt2 < 0.02f) return null;
 
             Vector3 uS1 = (Bs - As) / Ls1;
             Vector3 uT1 = (Bt - At) / Lt1;
@@ -1855,6 +2295,13 @@ namespace DeadlockPlayground.Importer
             Vector3 uT2 = (Ct - Bt) / Lt2;
             Quaternion R2 = ShortestArc(uS2, uT2);
             float sigma2 = Mathf.Clamp(Lt2 / Ls2, 0.75f, 1.35f);
+
+            float maxArmAngleDeg = Mathf.RadToDeg(Mathf.Max(R1.GetAngle(), R2.GetAngle()));
+            if (maxArmAngleDeg > 115f)
+            {
+                GD.PushWarning($"[CustomModelAutoRigger] Skipping Auto-Snap Arm Registration for '{upperName}': extreme angle mismatch ({maxArmAngleDeg:F1}° > 115°), likely mismatched axis or side.");
+                return null;
+            }
 
             GD.Print($"[CustomModelAutoRigger] Auto-Snap Arm Registration for '{upperName}': Upper L_src={Ls1:F3}m, L_tgt={Lt1:F3}m, sigma={sigma1:F2}; Forearm L_src={Ls2:F3}m, L_tgt={Lt2:F3}m, sigma={sigma2:F2}");
 
@@ -2051,6 +2498,11 @@ namespace DeadlockPlayground.Importer
             int srcAnkle = FindSourceBoneForTarget(sourceToTargetMap, tgtAnkle);
 
             if (srcThigh == -1 || srcCalf == -1 || srcAnkle == -1) return null;
+            if (srcThigh == srcCalf || srcCalf == srcAnkle || srcThigh == srcAnkle)
+            {
+                GD.PushWarning($"[CustomModelAutoRigger] Skipping Auto-Snap Leg Registration for '{thighName}': source bones collapsed/duplicated.");
+                return null;
+            }
 
             Vector3 As = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcThigh).Origin;
             Vector3 Bs = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcCalf).Origin;
@@ -2062,11 +2514,11 @@ namespace DeadlockPlayground.Importer
 
             float Ls1 = (Bs - As).Length();
             float Lt1 = (Bt - At).Length();
-            if (Ls1 < 0.001f || Lt1 < 0.001f) return null;
+            if (Ls1 < 0.02f || Lt1 < 0.02f) return null;
 
             float Ls2 = (Cs - Bs).Length();
             float Lt2 = (Ct - Bt).Length();
-            if (Ls2 < 0.001f || Lt2 < 0.001f) return null;
+            if (Ls2 < 0.02f || Lt2 < 0.02f) return null;
 
             Vector3 uS1 = (Bs - As) / Ls1;
             Vector3 uT1 = (Bt - At) / Lt1;
@@ -2077,6 +2529,13 @@ namespace DeadlockPlayground.Importer
             Vector3 uT2 = (Ct - Bt) / Lt2;
             Quaternion R2 = ShortestArc(uS2, uT2);
             float sigma2 = Mathf.Clamp(Lt2 / Ls2, 0.75f, 1.35f);
+
+            float maxLegAngleDeg = Mathf.RadToDeg(Mathf.Max(R1.GetAngle(), R2.GetAngle()));
+            if (maxLegAngleDeg > 115f)
+            {
+                GD.PushWarning($"[CustomModelAutoRigger] Skipping Auto-Snap Leg Registration for '{thighName}': extreme angle mismatch ({maxLegAngleDeg:F1}° > 115°), likely mismatched axis or side.");
+                return null;
+            }
 
             GD.Print($"[CustomModelAutoRigger] Auto-Snap Leg Registration for '{thighName}': Thigh L_src={Ls1:F3}m, L_tgt={Lt1:F3}m, sigma={sigma1:F2}; Calf L_src={Ls2:F3}m, L_tgt={Lt2:F3}m, sigma={sigma2:F2}");
 
@@ -2167,29 +2626,66 @@ namespace DeadlockPlayground.Importer
             };
         }
 
+        private static bool IsAlwaysExcludedNonBodyBone(string lowerBoneName)
+        {
+            return lowerBoneName.Contains("weapon") || lowerBoneName.Contains("gun") ||
+                   lowerBoneName.Contains("iktarget") || lowerBoneName.Contains("_ik") || lowerBoneName.StartsWith("ik_") ||
+                   lowerBoneName.Contains("pivot") || lowerBoneName.Contains("follow") || lowerBoneName.Contains("muzzle") ||
+                   lowerBoneName.Contains("_fx") || lowerBoneName.EndsWith("fx") ||
+                   lowerBoneName.Contains("root") || lowerBoneName.Contains("world") ||
+                   lowerBoneName.Contains("attach") || lowerBoneName.Contains("camera") ||
+                   lowerBoneName.Contains("prop") || lowerBoneName.Contains("stake") ||
+                   lowerBoneName.Contains("cigar") || lowerBoneName.Contains("drum");
+        }
+
+        private static bool IsExcludedClothOrAccessoryBone(string lowerBoneName)
+        {
+            return IsAlwaysExcludedNonBodyBone(lowerBoneName) ||
+                   lowerBoneName.Contains("cloth") || lowerBoneName.Contains("cape") ||
+                   lowerBoneName.Contains("skirt") || lowerBoneName.Contains("hair") ||
+                   lowerBoneName.Contains("coat") || lowerBoneName.Contains("dress") ||
+                   lowerBoneName.Contains("tassel") || lowerBoneName.Contains("ponytail") ||
+                   lowerBoneName.Contains("ribbon") || lowerBoneName.Contains("sash") ||
+                   lowerBoneName.Contains("belt") || lowerBoneName.Contains("holster") ||
+                   lowerBoneName.Contains("scabbard") || lowerBoneName.Contains("cloak") ||
+                   lowerBoneName.Contains("scarf") || lowerBoneName.Contains("apron") ||
+                   lowerBoneName.Contains("strap") || lowerBoneName.Contains("flap") ||
+                   lowerBoneName.Contains("chain") || lowerBoneName.Contains("rope") ||
+                   lowerBoneName.Contains("shoulder_armor");
+        }
+
+        private static void PoseArmUpperBoneCoronal(Skeleton3D skeleton, int upperIdx, int lowerIdx, bool isLeft, float angleRad)
+        {
+            if (upperIdx < 0) return;
+            Vector3 worldLiftAxis = isLeft ? Vector3.Back : Vector3.Forward;
+            if (lowerIdx >= 0)
+            {
+                Vector3 armDir = skeleton.GetBoneGlobalRest(lowerIdx).Origin - skeleton.GetBoneGlobalRest(upperIdx).Origin;
+                Vector3 cross = armDir.Cross(Vector3.Up);
+                if (cross.LengthSquared() > 1e-6f)
+                {
+                    worldLiftAxis = cross.Normalized();
+                }
+            }
+
+            Basis boneRestBasis = skeleton.GetBoneGlobalRest(upperIdx).Basis;
+            Vector3 localAxis = (boneRestBasis.Inverse() * worldLiftAxis).Normalized();
+            Quaternion qDelta = new Quaternion(localAxis, angleRad);
+            skeleton.SetBonePoseRotation(upperIdx, qDelta * skeleton.GetBonePoseRotation(upperIdx));
+        }
+
         private static void PoseHeroArmsForPreset(Skeleton3D skeleton, PosePreset preset, float customAngleDeg)
         {
             float targetAngleDeg = preset == PosePreset.TPose ? 45f : customAngleDeg;
+            float angleRad = Mathf.DegToRad(targetAngleDeg);
 
-            // Pose upper arms up towards horizontal
             int armUpperL = FindBoneAny(skeleton, "arm_upper_L", "arm_upper_l", "upperarm_l", "leftarm");
+            int armLowerL = FindBoneAny(skeleton, "arm_lower_L", "arm_lower_l", "forearm_l", "leftforearm");
             int armUpperR = FindBoneAny(skeleton, "arm_upper_R", "arm_upper_r", "upperarm_r", "rightarm");
+            int armLowerR = FindBoneAny(skeleton, "arm_lower_R", "arm_lower_r", "forearm_r", "rightforearm");
 
-            if (armUpperL != -1)
-            {
-                // In Deadlock, positive Z rotation on arm_upper_L raises the arm up
-                float radL = Mathf.DegToRad(targetAngleDeg);
-                Quaternion rotL = new Quaternion(Vector3.Forward, radL);
-                skeleton.SetBonePoseRotation(armUpperL, skeleton.GetBonePoseRotation(armUpperL) * rotL);
-            }
-
-            if (armUpperR != -1)
-            {
-                // Opposite Z rotation on arm_upper_R raises the right arm up
-                float radR = Mathf.DegToRad(-targetAngleDeg);
-                Quaternion rotR = new Quaternion(Vector3.Forward, radR);
-                skeleton.SetBonePoseRotation(armUpperR, skeleton.GetBonePoseRotation(armUpperR) * rotR);
-            }
+            PoseArmUpperBoneCoronal(skeleton, armUpperL, armLowerL, isLeft: true, angleRad);
+            PoseArmUpperBoneCoronal(skeleton, armUpperR, armLowerR, isLeft: false, angleRad);
 
             skeleton.ForceUpdateAllBoneTransforms();
         }
@@ -2202,8 +2698,9 @@ namespace DeadlockPlayground.Importer
             Dictionary<int, int> bindToSkeletonMap,
             RiggingOptions options)
         {
-            var result = new List<DonorVertex>(1500);
+            var result = new List<DonorVertex>(3500);
             var meshes = CollectOriginalHeroMeshes(heroNode);
+            Skin fallbackHeroSkin = FindSkin(heroNode);
 
             int boneCount = Math.Min(restGlobal.Length, posedGlobal.Length);
             Transform3D[] skinMatrices = new Transform3D[boneCount];
@@ -2212,8 +2709,11 @@ namespace DeadlockPlayground.Importer
                 skinMatrices[b] = posedGlobal[b] * restGlobal[b].AffineInverse();
             }
 
-            float subGridSize = 0.095f; // 9.5 cm on-the-fly subsampling
-            var seenCells = new HashSet<Vector3I>(1000);
+            float subGridSize = 0.045f; // 4.5 cm subsampling for dense limb coverage without spatial holes
+            var seenCells = new HashSet<Vector3I>(3500);
+            bool excludeClothHair = options?.ExcludeClothHairBones ?? true;
+            Span<int> topBones = stackalloc int[4];
+            Span<float> topWeights = stackalloc float[4];
 
             foreach (var mi in meshes)
             {
@@ -2221,16 +2721,31 @@ namespace DeadlockPlayground.Importer
                 if (mi.HasMeta("IsCustomImportedMesh")) continue;
 
                 string rawName = mi.Name.ToString().ToLowerInvariant();
-                if (rawName.Contains("weapon") || rawName.Contains("gun") || rawName.Contains("cloth") || rawName.Contains("cape"))
+                if (rawName.Contains("weapon") || rawName.Contains("gun") || rawName.Contains("cloth") ||
+                    rawName.Contains("cape") || rawName.Contains("stake") || rawName.Contains("drum") ||
+                    rawName.Contains("cigar") || rawName.Contains("holster") || rawName.Contains("prop") ||
+                    rawName.Contains("_ui_") || rawName.Contains("_lod"))
                 {
-                    // Skip weapon and cloth props from donor cloud
+                    // Skip weapon, prop, cloth, UI-head swap, and LOD meshes from donor cloud
                     continue;
                 }
 
                 Transform3D meshToHero = ComputeTransformRelativeToRoot(mi, heroNode);
+                Skin meshSkin = mi.Skin ?? fallbackHeroSkin;
 
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
+                    Material surfMat = mi.GetActiveMaterial(s) ?? mi.Mesh.SurfaceGetMaterial(s);
+                    string matLabel = ((surfMat?.ResourceName ?? "") + " " + (surfMat?.ResourcePath ?? "")).ToLowerInvariant();
+                    if (matLabel.Contains("weapon") || matLabel.Contains("gun") || matLabel.Contains("shotgun") ||
+                        matLabel.Contains("crossbow") || matLabel.Contains("stake") || matLabel.Contains("cigar") ||
+                        matLabel.Contains("drum") || matLabel.Contains("holster") || matLabel.Contains("prop") ||
+                        matLabel.Contains("sword") || matLabel.Contains("knife") || matLabel.Contains("rifle") ||
+                        matLabel.Contains("pistol"))
+                    {
+                        continue;
+                    }
+
                     var arrays = mi.Mesh.SurfaceGetArrays(s);
                     if (arrays == null || arrays.Count == 0) continue;
 
@@ -2238,16 +2753,78 @@ namespace DeadlockPlayground.Importer
                     var bones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
                     var weights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
 
-                    if (verts == null || bones == null || weights == null) continue;
+                    if (verts == null || bones == null || weights == null || verts.Length == 0) continue;
+
+                    int stride = (bones.Length >= verts.Length * 8 && weights.Length >= verts.Length * 8) ? 8 : 4;
+                    if (bones.Length < verts.Length * stride || weights.Length < verts.Length * stride) continue;
 
                     for (int v = 0; v < verts.Length; v++)
                     {
-                        int rawBind = bones[v * 4 + 0];
-                        int skelBone = bindToSkeletonMap.TryGetValue(rawBind, out int sb) ? sb : rawBind;
-                        bool isHandOrFinger = false;
-                        if (skelBone >= 0 && skelBone < skeleton.GetBoneCount())
+                        topBones.Clear();
+                        topWeights.Clear();
+
+                        int baseOff = v * stride;
+                        for (int k = 0; k < stride; k++)
                         {
-                            string bName = skeleton.GetBoneName(skelBone).ToLowerInvariant();
+                            float bw = weights[baseOff + k];
+                            if (bw <= 0.0001f) continue;
+
+                            int rb = bones[baseOff + k];
+                            int sk = meshSkin != null
+                                ? ResolveSkinBindBone(meshSkin, rb, skeleton)
+                                : (bindToSkeletonMap.TryGetValue(rb, out int sVal) ? sVal : rb);
+
+                            if (sk < 0 || sk >= skeleton.GetBoneCount()) continue;
+
+                            string bName = skeleton.GetBoneName(sk).ToLowerInvariant();
+                            if (excludeClothHair ? IsExcludedClothOrAccessoryBone(bName) : IsAlwaysExcludedNonBodyBone(bName))
+                            {
+                                continue;
+                            }
+
+                            // Merge duplicate bone entries or insert into sorted top-4 slots
+                            bool merged = false;
+                            for (int t = 0; t < 4; t++)
+                            {
+                                if (topWeights[t] > 0f && topBones[t] == sk)
+                                {
+                                    topWeights[t] += bw;
+                                    merged = true;
+                                    break;
+                                }
+                            }
+                            if (merged) continue;
+
+                            int minSlot = 0;
+                            for (int t = 1; t < 4; t++)
+                            {
+                                if (topWeights[t] < topWeights[minSlot]) minSlot = t;
+                            }
+                            if (bw > topWeights[minSlot])
+                            {
+                                topBones[minSlot] = sk;
+                                topWeights[minSlot] = bw;
+                            }
+                        }
+
+                        float sum = topWeights[0] + topWeights[1] + topWeights[2] + topWeights[3];
+                        if (sum <= 0.0001f) continue;
+
+                        int primarySkelBone = topBones[0];
+                        float bestW = topWeights[0];
+                        for (int t = 1; t < 4; t++)
+                        {
+                            if (topWeights[t] > bestW)
+                            {
+                                bestW = topWeights[t];
+                                primarySkelBone = topBones[t];
+                            }
+                        }
+
+                        bool isHandOrFinger = false;
+                        if (primarySkelBone >= 0 && primarySkelBone < skeleton.GetBoneCount())
+                        {
+                            string bName = skeleton.GetBoneName(primarySkelBone).ToLowerInvariant();
                             isHandOrFinger = bName.Contains("hand") || bName.Contains("finger") || bName.Contains("thumb") ||
                                              bName.Contains("wrist") || bName.Contains("index") || bName.Contains("pinky") || bName.Contains("ring");
                         }
@@ -2263,48 +2840,20 @@ namespace DeadlockPlayground.Importer
 
                         int[] bIndices = new int[4];
                         float[] bWeights = new float[4];
-
-                        for (int k = 0; k < 4; k++)
+                        for (int t = 0; t < 4; t++)
                         {
-                            int rb = bones[v * 4 + k];
-                            int sk = bindToSkeletonMap.TryGetValue(rb, out int sVal) ? sVal : rb;
-                            bIndices[k] = sk;
-                            bWeights[k] = weights[v * 4 + k];
-                        }
-
-                        if (options != null && options.ExcludeClothHairBones)
-                        {
-                            for (int k = 0; k < 4; k++)
-                            {
-                                if (bWeights[k] > 0.001f && bIndices[k] >= 0 && bIndices[k] < skeleton.GetBoneCount())
-                                {
-                                    string bName = skeleton.GetBoneName(bIndices[k]).ToLowerInvariant();
-                                    if (bName.Contains("cloth") || bName.Contains("cape") || bName.Contains("skirt") ||
-                                        bName.Contains("hair") || bName.Contains("coat") || bName.Contains("dress") ||
-                                        bName.Contains("tassel") || bName.Contains("ponytail") || bName.Contains("ribbon") ||
-                                        bName.Contains("root") || bName.Contains("weapon") || bName.Contains("gun") ||
-                                        bName.Contains("world") || bName.Contains("scene root") || bName.Contains("attach"))
-                                    {
-                                        bWeights[k] = 0f;
-                                    }
-                                }
-                            }
-                            float sum = bWeights[0] + bWeights[1] + bWeights[2] + bWeights[3];
-                            if (sum <= 0.0001f)
-                            {
-                                continue;
-                            }
-                            for (int k = 0; k < 4; k++) bWeights[k] /= sum;
+                            bIndices[t] = topBones[t];
+                            bWeights[t] = topWeights[t] / sum;
                         }
 
                         // Compute deformed position via CPU LBS using precomputed skinMatrices
                         Vector3 posedPos = Vector3.Zero;
-                        for (int k = 0; k < 4; k++)
+                        for (int t = 0; t < 4; t++)
                         {
-                            float w = bWeights[k];
+                            float w = bWeights[t];
                             if (w <= 0.0001f) continue;
 
-                            int b = bIndices[k];
+                            int b = bIndices[t];
                             if (b >= 0 && b < boneCount)
                             {
                                 posedPos += w * (skinMatrices[b] * restLocal);
@@ -2379,11 +2928,69 @@ namespace DeadlockPlayground.Importer
             return grid;
         }
 
+        private static float QueryPointToSegDistSq(Vector3 p, Vector3 a, Vector3 b)
+        {
+            Vector3 ab = b - a;
+            float lenSq = ab.LengthSquared();
+            if (lenSq < 1e-8f) return p.DistanceSquaredTo(a);
+            float t = Mathf.Clamp((p - a).Dot(ab) / lenSq, 0f, 1f);
+            return p.DistanceSquaredTo(a + ab * t);
+        }
+
+        private static AnatomicalRegion InferStrictLimbRegion(Vector3 queryPoint, List<BoneCapsuleSegment> capsules, AnatomicalRegion[] capsuleRegions)
+        {
+            if (capsules == null || capsules.Count == 0 || capsuleRegions == null || capsuleRegions.Length < capsules.Count)
+                return AnatomicalRegion.Unassigned;
+
+            float minTorsoSq = float.MaxValue;
+            float minArmLSq = float.MaxValue;
+            float minArmRSq = float.MaxValue;
+            float minLegLSq = float.MaxValue;
+            float minLegRSq = float.MaxValue;
+
+            for (int c = 0; c < capsules.Count; c++)
+            {
+                var cap = capsules[c];
+                float dSq = QueryPointToSegDistSq(queryPoint, cap.StartPos, cap.EndPos);
+                switch (capsuleRegions[c])
+                {
+                    case AnatomicalRegion.TorsoHead: if (dSq < minTorsoSq) minTorsoSq = dSq; break;
+                    case AnatomicalRegion.ArmL:      if (dSq < minArmLSq)  minArmLSq = dSq;  break;
+                    case AnatomicalRegion.ArmR:      if (dSq < minArmRSq)  minArmRSq = dSq;  break;
+                    case AnatomicalRegion.LegL:      if (dSq < minLegLSq)  minLegLSq = dSq;  break;
+                    case AnatomicalRegion.LegR:      if (dSq < minLegRSq)  minLegRSq = dSq;  break;
+                }
+            }
+
+            float minTorso = minTorsoSq < float.MaxValue ? MathF.Sqrt(minTorsoSq) : float.MaxValue;
+            float minArmL  = minArmLSq  < float.MaxValue ? MathF.Sqrt(minArmLSq)  : float.MaxValue;
+            float minArmR  = minArmRSq  < float.MaxValue ? MathF.Sqrt(minArmRSq)  : float.MaxValue;
+            float minLegL  = minLegLSq  < float.MaxValue ? MathF.Sqrt(minLegLSq)  : float.MaxValue;
+            float minLegR  = minLegRSq  < float.MaxValue ? MathF.Sqrt(minLegRSq)  : float.MaxValue;
+
+            // Require clear limb proximity (< 30cm) and a 3cm safety lead over competing regions so
+            // shoulder/hip junction vertices continue to blend freely while hanging forearms and bulky
+            // gauntlets stay isolated from adjacent trenchcoats or thigh surfaces.
+            const float margin = 0.03f;
+            const float maxClearDist = 0.30f;
+            if (minArmL < maxClearDist && minArmL + margin < minTorso && minArmL + margin < minLegL && minArmL + margin < minArmR)
+                return AnatomicalRegion.ArmL;
+            if (minArmR < maxClearDist && minArmR + margin < minTorso && minArmR + margin < minLegR && minArmR + margin < minArmL)
+                return AnatomicalRegion.ArmR;
+            if (minLegL < maxClearDist && minLegL + margin < minTorso && minLegL + margin < minArmL && minLegL + margin < minLegR)
+                return AnatomicalRegion.LegL;
+            if (minLegR < maxClearDist && minLegR + margin < minTorso && minLegR + margin < minArmR && minLegR + margin < minLegL)
+                return AnatomicalRegion.LegR;
+
+            return AnatomicalRegion.Unassigned;
+        }
+
         private static void QueryWeightsWithCapsuleFallback(
             Vector3 queryPoint,
             Dictionary<Vector3I, List<int>> grid,
             List<DonorVertex> donors,
             List<BoneCapsuleSegment> capsules,
+            AnatomicalRegion[] capsuleRegions,
             int kNearest,
             float searchRadius,
             float cellSize,
@@ -2392,6 +2999,7 @@ namespace DeadlockPlayground.Importer
             int outOffset)
         {
             float r = searchRadius;
+            AnatomicalRegion strictRegion = InferStrictLimbRegion(queryPoint, capsules, capsuleRegions);
 
             Vector3I centerCell = new Vector3I(
                 Mathf.FloorToInt(queryPoint.X / cellSize),
@@ -2413,7 +3021,11 @@ namespace DeadlockPlayground.Importer
                 for (int li = 0; li < listCount; li++)
                 {
                     int dIdx = centerList[li];
-                    var dPos = donors[dIdx].PosedPosition;
+                    var donor = donors[dIdx];
+                    if (strictRegion != AnatomicalRegion.Unassigned && donor.Region != 0 && donor.Region != (byte)strictRegion)
+                        continue;
+
+                    var dPos = donor.PosedPosition;
                     if (queryPoint.X > 0.02f && dPos.X < -0.02f) continue;
                     if (queryPoint.X < -0.02f && dPos.X > 0.02f) continue;
 
@@ -2466,7 +3078,11 @@ namespace DeadlockPlayground.Importer
                                 for (int li = 0; li < listCount; li++)
                                 {
                                     int dIdx = list[li];
-                                    var dPos = donors[dIdx].PosedPosition;
+                                    var donor = donors[dIdx];
+                                    if (strictRegion != AnatomicalRegion.Unassigned && donor.Region != 0 && donor.Region != (byte)strictRegion)
+                                        continue;
+
+                                    var dPos = donor.PosedPosition;
                                     if (queryPoint.X > 0.02f && dPos.X < -0.02f) continue;
                                     if (queryPoint.X < -0.02f && dPos.X > 0.02f) continue;
 
@@ -2540,9 +3156,22 @@ namespace DeadlockPlayground.Importer
             {
                 float blendAlpha = Mathf.Clamp((closestDist - 0.08f) / 0.15f, 0f, 1f);
                 int capCount = capsules.Count;
+                bool hasStrictCapsules = false;
+                if (strictRegion != AnatomicalRegion.Unassigned && capsuleRegions != null && capsuleRegions.Length >= capCount)
+                {
+                    for (int ci = 0; ci < capCount; ci++)
+                    {
+                        if (capsuleRegions[ci] == strictRegion)
+                        {
+                            hasStrictCapsules = true;
+                            break;
+                        }
+                    }
+                }
                 for (int ci = 0; ci < capCount; ci++)
                 {
                     var seg = capsules[ci];
+                    if (hasStrictCapsules && capsuleRegions[ci] != strictRegion) continue;
                     if (queryPoint.X > 0.02f && (seg.BoneName.EndsWith("_r") || seg.BoneName.Contains("_r_") || seg.BoneName.Contains("right"))) continue;
                     if (queryPoint.X < -0.02f && (seg.BoneName.EndsWith("_l") || seg.BoneName.Contains("_l_") || seg.BoneName.Contains("left"))) continue;
 
@@ -2617,13 +3246,17 @@ namespace DeadlockPlayground.Importer
             for (int b = 0; b < boneCount; b++)
             {
                 string bName = skeleton.GetBoneName(b).ToLowerInvariant();
+                if (IsExcludedClothOrAccessoryBone(bName) || bName.Contains("twist"))
+                {
+                    continue;
+                }
 
                 // Filter to core anatomical bones only (reduces from 270 bones to ~16, eliminating millions of distance checks)
                 bool isCoreAnatomical = bName.Contains("pelvis") || bName.Contains("spine") || bName.Contains("chest") ||
                                        bName.Contains("neck") || bName.Contains("head") ||
-                                       bName.Contains("arm_upper") || bName.Contains("arm_lower") || bName.Contains("hand") ||
+                                       bName.Contains("arm_upper") || bName.Contains("arm_lower") || bName == "hand_l" || bName == "hand_r" ||
                                        bName.Contains("leg_upper") || bName.Contains("leg_lower") || bName.Contains("ankle") ||
-                                       bName.Contains("thigh") || bName.Contains("calf") || bName.Contains("foot");
+                                       bName.Contains("thigh") || bName.Contains("calf") || bName == "foot_l" || bName == "foot_r";
 
                 if (!isCoreAnatomical) continue;
 
@@ -3047,10 +3680,7 @@ namespace DeadlockPlayground.Importer
                 else if (uCount < 6) { uBones[uCount] = neckBone; uWeights[uCount] = neckAdd; uCount++; }
             }
 
-            // Sort top 4 influences descending by weight and normalize to exactly 1.00000
-            float totalW = 0f;
-            for (int u = 0; u < uCount; u++) totalW += uWeights[u];
-
+            // Sort top 4 influences descending by weight and normalize kept 4 to sum to 1.00000
             for (int k = 0; k < 4; k++)
             {
                 int best = -1;
@@ -3066,7 +3696,7 @@ namespace DeadlockPlayground.Importer
                 if (best != -1 && maxW > 0.0001f)
                 {
                     bones[k] = uBones[best];
-                    weights[k] = totalW > 0.0001f ? (maxW / totalW) : maxW;
+                    weights[k] = maxW;
                     uWeights[best] = -1f;
                 }
                 else
@@ -3074,6 +3704,21 @@ namespace DeadlockPlayground.Importer
                     bones[k] = 0;
                     weights[k] = 0f;
                 }
+            }
+
+            float keptSum = weights[0] + weights[1] + weights[2] + weights[3];
+            if (keptSum > 0.0001f)
+            {
+                float invKept = 1.0f / keptSum;
+                weights[0] *= invKept;
+                weights[1] *= invKept;
+                weights[2] *= invKept;
+                weights[3] *= invKept;
+            }
+            else if (spine3Bone >= 0)
+            {
+                bones[0] = spine3Bone;
+                weights[0] = 1.0f;
             }
         }
 
@@ -3105,6 +3750,610 @@ namespace DeadlockPlayground.Importer
                     spine3Bone,
                     spine2Bone,
                     y);
+            }
+        }
+
+        /// <summary>
+        /// Rest-pose limb segment and procedural counter-twist bone descriptors for a hero skeleton.
+        /// </summary>
+        public sealed class LimbTwistChain
+        {
+            public string Label { get; init; }
+            public bool IsLeg { get; init; }
+            public int UpperBone { get; init; }
+            public int TwistFullBone { get; init; }
+            public int TwistHalfBone { get; init; }
+            public int LowerBone { get; init; }
+            public int DistalBone { get; init; }
+            public Vector3 UpperOrigin { get; init; }
+            public Vector3 LowerOrigin { get; init; }
+            public Vector3 DistalOrigin { get; init; }
+            public Vector3 UpperDir { get; init; }
+            public float UpperLen { get; init; }
+            public Vector3 LowerDir { get; init; }
+            public float LowerLen { get; init; }
+            public float MaxRadius { get; init; }
+        }
+
+        /// <summary>
+        /// Resolved thigh and upper-arm counter-twist chains on a Deadlock hero skeleton.
+        /// </summary>
+        public sealed class LimbTwistProfile
+        {
+            public int PelvisBone { get; init; }
+            public LimbTwistChain[] Chains { get; init; } = Array.Empty<LimbTwistChain>();
+        }
+
+        private readonly struct LimbTwistChainSpec
+        {
+            public LimbTwistChainSpec(string label, bool isLeg, string[] upper, string[] twistFull, string[] twistHalf, string[] lower, string[] distal)
+            {
+                Label = label;
+                IsLeg = isLeg;
+                Upper = upper;
+                TwistFull = twistFull;
+                TwistHalf = twistHalf;
+                Lower = lower;
+                Distal = distal;
+            }
+
+            public string Label { get; }
+            public bool IsLeg { get; }
+            public string[] Upper { get; }
+            public string[] TwistFull { get; }
+            public string[] TwistHalf { get; }
+            public string[] Lower { get; }
+            public string[] Distal { get; }
+        }
+
+        private static readonly LimbTwistChainSpec[] DefaultLimbTwistSpecs =
+        {
+            new(
+                "LeftThigh",
+                true,
+                new[] { "leg_upper_L", "leg_upper_l", "thigh_L", "thigh_l" },
+                new[] { "leg_upper_L_TWIST", "leg_upper_l_twist", "leg_upper_twist_L" },
+                new[] { "leg_upper_L_TWIST1", "leg_upper_l_twist1", "leg_upper_twist1_L" },
+                new[] { "leg_lower_L", "leg_lower_l", "calf_L", "knee_L" },
+                new[] { "ankle_L", "ankle_l", "foot_L", "foot_l" }),
+            new(
+                "RightThigh",
+                true,
+                new[] { "leg_upper_R", "leg_upper_r", "thigh_R", "thigh_r" },
+                new[] { "leg_upper_R_TWIST", "leg_upper_r_twist", "leg_upper_twist_R" },
+                new[] { "leg_upper_R_TWIST1", "leg_upper_r_twist1", "leg_upper_twist1_R" },
+                new[] { "leg_lower_R", "leg_lower_r", "calf_R", "knee_R" },
+                new[] { "ankle_R", "ankle_r", "foot_R", "foot_r" }),
+            new(
+                "LeftUpperArm",
+                false,
+                new[] { "arm_upper_L", "arm_upper_l", "upperarm_l", "leftarm" },
+                new[] { "arm_upper_L_TWIST", "arm_upper_l_twist", "arm_upper_twist_L" },
+                new[] { "arm_upper_L_TWIST1", "arm_upper_l_twist1", "arm_upper_twist1_L" },
+                new[] { "arm_lower_L", "arm_lower_l", "forearm_l" },
+                new[] { "hand_L", "hand_l", "wrist_l" }),
+            new(
+                "RightUpperArm",
+                false,
+                new[] { "arm_upper_R", "arm_upper_r", "upperarm_r", "rightarm" },
+                new[] { "arm_upper_R_TWIST", "arm_upper_r_twist", "arm_upper_twist_R" },
+                new[] { "arm_upper_R_TWIST1", "arm_upper_r_twist1", "arm_upper_twist1_R" },
+                new[] { "arm_lower_R", "arm_lower_r", "forearm_r" },
+                new[] { "hand_R", "hand_r", "wrist_r" })
+        };
+
+        /// <summary>
+        /// Resolves upper-limb joints and existing procedural *_TWIST / *_TWIST1 bones on the hero skeleton.
+        /// Works generically across any Deadlock hero skeleton without hardcoded bone indices.
+        /// </summary>
+        public static LimbTwistProfile BuildLimbTwistProfile(Skeleton3D skeleton, Transform3D[] restGlobalTransforms = null)
+        {
+            if (skeleton == null) return new LimbTwistProfile();
+
+            int pelvisBone = FindBoneAny(skeleton, "pelvis", "hips", "bip01_pelvis");
+            var chains = new List<LimbTwistChain>(DefaultLimbTwistSpecs.Length);
+
+            Vector3 GetBoneOrigin(int boneIdx)
+            {
+                if (restGlobalTransforms != null && boneIdx >= 0 && boneIdx < restGlobalTransforms.Length)
+                    return restGlobalTransforms[boneIdx].Origin;
+                return skeleton.GetBoneGlobalRest(boneIdx).Origin;
+            }
+
+            foreach (var spec in DefaultLimbTwistSpecs)
+            {
+                int upper = FindBoneAny(skeleton, spec.Upper);
+                int lower = FindBoneAny(skeleton, spec.Lower);
+                if (upper < 0 || lower < 0) continue;
+
+                int distal = FindBoneAny(skeleton, spec.Distal);
+                int twistFull = FindBoneAny(skeleton, spec.TwistFull);
+                int twistHalf = FindBoneAny(skeleton, spec.TwistHalf);
+
+                Vector3 pUpper = GetBoneOrigin(upper);
+                Vector3 pLower = GetBoneOrigin(lower);
+                Vector3 pDistal = distal >= 0 ? GetBoneOrigin(distal) : pLower;
+
+                Vector3 upperVec = pLower - pUpper;
+                float upperLen = upperVec.Length();
+                if (upperLen < 0.05f) continue;
+
+                Vector3 lowerVec = pDistal - pLower;
+                float lowerLen = lowerVec.Length();
+
+                chains.Add(new LimbTwistChain
+                {
+                    Label = spec.Label,
+                    IsLeg = spec.IsLeg,
+                    UpperBone = upper,
+                    TwistFullBone = twistFull,
+                    TwistHalfBone = twistHalf,
+                    LowerBone = lower,
+                    DistalBone = distal,
+                    UpperOrigin = pUpper,
+                    LowerOrigin = pLower,
+                    DistalOrigin = pDistal,
+                    UpperDir = upperVec / upperLen,
+                    UpperLen = upperLen,
+                    LowerDir = lowerLen > 0.05f ? lowerVec / lowerLen : upperVec / upperLen,
+                    LowerLen = lowerLen,
+                    MaxRadius = spec.IsLeg ? MathF.Max(0.28f, upperLen * 0.95f) : MathF.Max(0.20f, upperLen * 0.85f)
+                });
+            }
+
+            return new LimbTwistProfile
+            {
+                PelvisBone = pelvisBone,
+                Chains = chains.ToArray()
+            };
+        }
+
+        private static float SmoothStep01(float edge0, float edge1, float x)
+        {
+            if (edge1 <= edge0) return x >= edge1 ? 1.0f : 0.0f;
+            float u = Mathf.Clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+            return u * u * (3.0f - 2.0f * u);
+        }
+
+        /// <summary>
+        /// Automatically redistributes proximal thigh and upper-arm weights onto existing Source 2
+        /// counter-twist bones (*_TWIST / *_TWIST1), softens razor-sharp 1-bone hip seams for LBS volume
+        /// preservation, and prunes stray distal ankle/hand bleeds above the knee/elbow.
+        /// Operates strictly in Skeleton3D bone index space using hero rest-pose vertex coordinates.
+        /// </summary>
+        public static void AdjustLimbTwistAndHipWeights(
+            Skeleton3D skeleton,
+            int vCount,
+            int[] boneIndices,
+            float[] boneWeights,
+            Vector3[] heroRestVerts,
+            int[] triangleIndices = null,
+            LimbTwistProfile profile = null)
+        {
+            if (skeleton == null || boneIndices == null || boneWeights == null || heroRestVerts == null || vCount <= 0)
+                return;
+
+            profile ??= BuildLimbTwistProfile(skeleton);
+            if (profile.Chains == null || profile.Chains.Length == 0)
+                return;
+
+            bool[] creaseSeamMask = new bool[vCount];
+            int seamCount = 0;
+
+            System.Threading.Tasks.Parallel.For(0, vCount, v =>
+            {
+                int baseIdx = v * 4;
+                if (AdjustSingleVertexLimbWeights(
+                    heroRestVerts[v],
+                    boneIndices.AsSpan(baseIdx, 4),
+                    boneWeights.AsSpan(baseIdx, 4),
+                    profile))
+                {
+                    creaseSeamMask[v] = true;
+                    System.Threading.Interlocked.Increment(ref seamCount);
+                }
+            });
+
+            // Feather hip & shoulder crease seams across neighboring triangles and weld coincident UV/outline vertices
+            if (seamCount > 0 && triangleIndices != null && triangleIndices.Length >= 3)
+            {
+                SmoothWeightsLaplacian(triangleIndices, vCount, boneIndices, boneWeights, 2, heroRestVerts, creaseSeamMask);
+
+                // Re-enforce cross-leg bleed & distal thigh pelvis caps on smoothed crease vertices
+                // so Laplacian neighbor averaging across the crotch/hip seam does not re-introduce minor opposite-leg
+                // weights or drag pelvis weight down below the hip crease.
+                System.Threading.Tasks.Parallel.For(0, vCount, v =>
+                {
+                    if (!creaseSeamMask[v]) return;
+                    int baseIdx = v * 4;
+                    PostSmoothLegCleanup(
+                        heroRestVerts[v],
+                        boneIndices.AsSpan(baseIdx, 4),
+                        boneWeights.AsSpan(baseIdx, 4),
+                        profile);
+                });
+            }
+        }
+
+        private static bool CleanupLegPelvisAndCrossBleed(
+            LimbTwistProfile profile,
+            in LimbTwistChain chain,
+            float tUpper,
+            float rPerp,
+            Span<int> uBones,
+            Span<float> uWeights,
+            ref int uCount,
+            ref float upperW,
+            int absorbBoneOverride = -1)
+        {
+            bool changed = false;
+            int absorbBone = absorbBoneOverride >= 0 ? absorbBoneOverride : chain.UpperBone;
+
+            if (profile.PelvisBone >= 0 && rPerp <= 0.32f)
+            {
+                float pelvisW = GetLimbWeight(uBones, uWeights, uCount, profile.PelvisBone);
+                float maxPelvis = 0.42f * (1.0f - SmoothStep01(-0.02f, 0.14f, tUpper));
+                if (tUpper >= 0.00f && tUpper <= 0.50f && (upperW + pelvisW) >= 0.40f && upperW >= 0.08f && pelvisW > maxPelvis)
+                {
+                    float cappedPelvis = maxPelvis > 0.005f ? maxPelvis : 0f;
+                    float excess = pelvisW - cappedPelvis;
+                    SubtractLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone);
+                    if (cappedPelvis > 0f)
+                        AccumulateLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone, cappedPelvis);
+                    if (absorbBoneOverride >= 0)
+                        AccumulateLimbWeight(uBones, uWeights, ref uCount, absorbBone, excess);
+                    upperW += excess;
+                    changed = true;
+                }
+                else if (absorbBoneOverride < 0 && tUpper >= -0.10f && tUpper <= 0.05f && upperW >= 0.45f && pelvisW < 0.24f)
+                {
+                    float uHip = 1.0f - SmoothStep01(-0.10f, 0.05f, tUpper);
+                    float uRad = 1.0f - SmoothStep01(0.14f, 0.32f, rPerp);
+                    float desiredPelvis = 0.24f * uHip * (0.4f + 0.6f * uRad);
+                    float transfer = MathF.Min(MathF.Max(0f, desiredPelvis - pelvisW), upperW * 0.40f);
+                    if (transfer > 0.005f)
+                    {
+                        AccumulateLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone, transfer);
+                        upperW -= transfer;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (tUpper >= 0.01f && tUpper <= 1.05f && rPerp <= 0.18f && upperW >= 0.18f)
+            {
+                for (int ci = 0; ci < profile.Chains.Length; ci++)
+                {
+                    var other = profile.Chains[ci];
+                    if (!other.IsLeg || other.UpperBone == chain.UpperBone)
+                        continue;
+
+                    float oppW = GetLimbWeight(uBones, uWeights, uCount, other.UpperBone)
+                               + GetLimbWeight(uBones, uWeights, uCount, other.TwistFullBone)
+                               + GetLimbWeight(uBones, uWeights, uCount, other.TwistHalfBone)
+                               + GetLimbWeight(uBones, uWeights, uCount, other.LowerBone);
+
+                    if (oppW > 0.001f && oppW < 0.24f && upperW >= oppW * 2.2f)
+                    {
+                        SubtractLimbWeight(uBones, uWeights, ref uCount, other.UpperBone);
+                        SubtractLimbWeight(uBones, uWeights, ref uCount, other.TwistFullBone);
+                        SubtractLimbWeight(uBones, uWeights, ref uCount, other.TwistHalfBone);
+                        SubtractLimbWeight(uBones, uWeights, ref uCount, other.LowerBone);
+                        if (absorbBoneOverride >= 0)
+                            AccumulateLimbWeight(uBones, uWeights, ref uCount, absorbBone, oppW);
+                        upperW += oppW;
+                        changed = true;
+                    }
+                }
+            }
+
+            return changed;
+        }
+
+        private static void PostSmoothLegCleanup(
+            Vector3 vPos,
+            Span<int> bones,
+            Span<float> weights,
+            LimbTwistProfile profile)
+        {
+            Span<int> uBones = stackalloc int[12];
+            Span<float> uWeights = stackalloc float[12];
+            int uCount = 0;
+            for (int k = 0; k < 4; k++)
+            {
+                if (weights[k] > 0.0001f)
+                    AccumulateLimbWeight(uBones, uWeights, ref uCount, bones[k], weights[k]);
+            }
+            if (uCount == 0) return;
+
+            bool touched = false;
+            for (int c = 0; c < profile.Chains.Length; c++)
+            {
+                var chain = profile.Chains[c];
+                if (!chain.IsLeg || chain.UpperLen <= 0.05f) continue;
+
+                float wUpper = GetLimbWeight(uBones, uWeights, uCount, chain.UpperBone);
+                float wFull = GetLimbWeight(uBones, uWeights, uCount, chain.TwistFullBone);
+                float wHalf = GetLimbWeight(uBones, uWeights, uCount, chain.TwistHalfBone);
+                float upperW = wUpper + wFull + wHalf;
+                if (upperW <= 0.02f) continue;
+
+                Vector3 relU = vPos - chain.UpperOrigin;
+                float projU = relU.Dot(chain.UpperDir);
+                float tUpper = projU / chain.UpperLen;
+                float rPerp = (relU - chain.UpperDir * projU).Length();
+                if (tUpper < 0.00f || tUpper > 1.05f || rPerp > chain.MaxRadius) continue;
+
+                int dominantUpper = chain.UpperBone;
+                float bestU = wUpper;
+                if (wHalf > bestU && chain.TwistHalfBone >= 0) { bestU = wHalf; dominantUpper = chain.TwistHalfBone; }
+                if (wFull > bestU && chain.TwistFullBone >= 0) { bestU = wFull; dominantUpper = chain.TwistFullBone; }
+
+                if (CleanupLegPelvisAndCrossBleed(profile, in chain, tUpper, rPerp, uBones, uWeights, ref uCount, ref upperW, dominantUpper))
+                    touched = true;
+            }
+
+            if (touched)
+                WriteTop4NormalizedWeights(uBones, uWeights, uCount, bones, weights);
+        }
+
+        private static bool AdjustSingleVertexLimbWeights(
+            Vector3 vPos,
+            Span<int> bones,
+            Span<float> weights,
+            LimbTwistProfile profile)
+        {
+            Span<int> uBones = stackalloc int[12];
+            Span<float> uWeights = stackalloc float[12];
+            int uCount = 0;
+
+            for (int k = 0; k < 4; k++)
+            {
+                float w = weights[k];
+                if (w <= 0.0001f) continue;
+                AccumulateLimbWeight(uBones, uWeights, ref uCount, bones[k], w);
+            }
+
+            if (uCount == 0) return false;
+
+            bool touched = false;
+            bool inCreaseSeam = false;
+
+            foreach (var chain in profile.Chains)
+            {
+                // 1. Project vertex onto this limb's upper segment (hip->knee or shoulder->elbow)
+                Vector3 dUpper = vPos - chain.UpperOrigin;
+                float projUpper = dUpper.Dot(chain.UpperDir);
+                float tUpper = projUpper / chain.UpperLen;
+                float rPerp = (dUpper - chain.UpperDir * projUpper).Length();
+
+                // 2. Gather existing weights belonging to this upper chain, lower bone, and distal bone
+                float upperW = 0f;
+                float lowerW = 0f;
+                float distalW = 0f;
+                for (int i = 0; i < uCount; i++)
+                {
+                    int b = uBones[i];
+                    if (b == chain.UpperBone ||
+                        (chain.TwistFullBone >= 0 && b == chain.TwistFullBone) ||
+                        (chain.TwistHalfBone >= 0 && b == chain.TwistHalfBone))
+                    {
+                        upperW += uWeights[i];
+                    }
+                    else if (b == chain.LowerBone)
+                    {
+                        lowerW += uWeights[i];
+                    }
+                    else if (chain.DistalBone >= 0 && b == chain.DistalBone)
+                    {
+                        distalW += uWeights[i];
+                    }
+                }
+
+                // 3. Prune stray distal ankle/hand bleeds appearing on the thigh, knee, or upper forearm
+                if (distalW > 0.0001f && distalW < 0.25f && chain.DistalBone >= 0 && chain.LowerLen > 0.05f && (upperW + lowerW) >= 0.30f)
+                {
+                    float tLower = (vPos - chain.LowerOrigin).Dot(chain.LowerDir) / chain.LowerLen;
+                    if (tLower < 0.55f)
+                    {
+                        SubtractLimbWeight(uBones, uWeights, ref uCount, chain.DistalBone);
+                        int receiver = (tLower < 0.15f && upperW >= lowerW) ? chain.UpperBone : chain.LowerBone;
+                        AccumulateLimbWeight(uBones, uWeights, ref uCount, receiver, distalW);
+                        if (receiver == chain.UpperBone) upperW += distalW;
+                        else lowerW += distalW;
+                        touched = true;
+                    }
+                }
+
+                // Skip twist / hip-seam reallocation if vertex has minimal upper-limb weight or sits outside this limb cylinder
+                if (upperW <= 0.02f || tUpper < -0.20f || tUpper > 1.15f || rPerp > chain.MaxRadius)
+                    continue;
+
+                // 4. Leg hip-seam pelvis balancing & cross-leg bleed cleanup:
+                //    - Cap excess Rigify/Mixamo pelvis bleed down the thigh (which collapses volume in Linear Blend Skinning under deep hip flexion)
+                //    - Soften razor-sharp 1-bone hip sockets right at the crease (tUpper in [-0.10, +0.05])
+                //    - Prune minor opposite-leg bleed on inner thighs (evaluated AFTER pelvis cap so raised upperW qualifies)
+                if (chain.IsLeg)
+                {
+                    if (CleanupLegPelvisAndCrossBleed(profile, in chain, tUpper, rPerp, uBones, uWeights, ref uCount, ref upperW))
+                        touched = true;
+
+                    // 4b. Center knee crease envelope closer to Deadlock's native joint pivot (tUpper ~ 0.98)
+                    //     so shin vertices below the knee don't hold heavy upper-thigh weight and fold inward.
+                    if (chain.LowerBone >= 0 && tUpper >= 0.90f && tUpper <= 1.12f)
+                    {
+                        float kneeLowerW = lowerW;
+                        float totalKnee = upperW + kneeLowerW;
+                        if (kneeLowerW > 0.005f && totalKnee >= 0.65f)
+                        {
+                            float desiredUpperFrac = 1.0f - SmoothStep01(0.90f, 1.06f, tUpper);
+                            float targetU = totalKnee * desiredUpperFrac;
+                            float blendedU = upperW * 0.35f + targetU * 0.65f;
+                            float blendedL = totalKnee - blendedU;
+                            if (MathF.Abs(blendedU - upperW) > 0.01f)
+                            {
+                                SubtractLimbWeight(uBones, uWeights, ref uCount, chain.LowerBone);
+                                if (blendedL > 0.005f)
+                                {
+                                    AccumulateLimbWeight(uBones, uWeights, ref uCount, chain.LowerBone, blendedL);
+                                    upperW = blendedU;
+                                    lowerW = blendedL;
+                                }
+                                else
+                                {
+                                    upperW = totalKnee;
+                                    lowerW = 0f;
+                                }
+                                touched = true;
+                            }
+                        }
+                    }
+                }
+
+                // Flag proximal hip / shoulder / knee crease vertices for targeted triangle-seam feathering
+                if ((tUpper >= -0.10f && tUpper <= (chain.IsLeg ? 0.12f : 0.20f)) ||
+                    (chain.IsLeg && tUpper >= 0.90f && tUpper <= 1.10f))
+                {
+                    inCreaseSeam = true;
+                }
+
+                // 5. Redistribute upper-limb weight onto procedural *_TWIST (-1.0) and *_TWIST1 (-0.5) bones
+                bool hasTwistFull = chain.TwistFullBone >= 0;
+                bool hasTwistHalf = chain.TwistHalfBone >= 0;
+                if (!hasTwistFull && !hasTwistHalf)
+                    continue;
+
+                SubtractLimbWeight(uBones, uWeights, ref uCount, chain.UpperBone);
+                if (hasTwistFull) SubtractLimbWeight(uBones, uWeights, ref uCount, chain.TwistFullBone);
+                if (hasTwistHalf) SubtractLimbWeight(uBones, uWeights, ref uCount, chain.TwistHalfBone);
+
+                float fFull, fHalf, fUpper;
+                if (hasTwistFull && hasTwistHalf)
+                {
+                    // Smooth partition of unity along tUpper in [0, 1] matching Deadlock hero thighs:
+                    // 0.00..0.14: ~100% TWIST (-1.0) -> ~0.52: ~95% TWIST1 (-0.5) -> >=0.92: 100% UpperBone (0.0)
+                    fFull = 1.0f - SmoothStep01(0.14f, 0.52f, tUpper);
+                    fUpper = SmoothStep01(0.52f, 0.92f, tUpper);
+                    fHalf = MathF.Max(0f, 1.0f - fFull - fUpper);
+                }
+                else if (hasTwistFull)
+                {
+                    fFull = (1.0f - SmoothStep01(0.08f, 0.75f, tUpper)) * 0.90f;
+                    fHalf = 0f;
+                    fUpper = 1.0f - fFull;
+                }
+                else
+                {
+                    fFull = 0f;
+                    fHalf = (1.0f - SmoothStep01(0.15f, 0.75f, tUpper)) * 0.90f;
+                    fUpper = 1.0f - fHalf;
+                }
+
+                if (hasTwistFull && fFull * upperW > 0.005f)
+                    AccumulateLimbWeight(uBones, uWeights, ref uCount, chain.TwistFullBone, upperW * fFull);
+                if (hasTwistHalf && fHalf * upperW > 0.005f)
+                    AccumulateLimbWeight(uBones, uWeights, ref uCount, chain.TwistHalfBone, upperW * fHalf);
+                if (fUpper * upperW > 0.005f)
+                    AccumulateLimbWeight(uBones, uWeights, ref uCount, chain.UpperBone, upperW * fUpper);
+                else if ((!hasTwistFull || fFull * upperW <= 0.005f) && (!hasTwistHalf || fHalf * upperW <= 0.005f))
+                    AccumulateLimbWeight(uBones, uWeights, ref uCount, chain.UpperBone, upperW);
+
+                touched = true;
+            }
+
+            if (touched)
+            {
+                WriteTop4NormalizedWeights(uBones, uWeights, uCount, bones, weights);
+            }
+
+            return inCreaseSeam;
+        }
+
+        private static void AccumulateLimbWeight(Span<int> uBones, Span<float> uWeights, ref int uCount, int bone, float weight)
+        {
+            if (weight <= 0.0001f || bone < 0) return;
+            for (int i = 0; i < uCount; i++)
+            {
+                if (uBones[i] == bone)
+                {
+                    uWeights[i] += weight;
+                    return;
+                }
+            }
+            if (uCount < uBones.Length)
+            {
+                uBones[uCount] = bone;
+                uWeights[uCount] = weight;
+                uCount++;
+            }
+        }
+
+        private static float GetLimbWeight(Span<int> uBones, Span<float> uWeights, int uCount, int bone)
+        {
+            for (int i = 0; i < uCount; i++)
+            {
+                if (uBones[i] == bone) return uWeights[i];
+            }
+            return 0f;
+        }
+
+        private static void SubtractLimbWeight(Span<int> uBones, Span<float> uWeights, ref int uCount, int bone)
+        {
+            for (int i = 0; i < uCount; i++)
+            {
+                if (uBones[i] == bone)
+                {
+                    uWeights[i] = 0f;
+                    return;
+                }
+            }
+        }
+
+        private static void WriteTop4NormalizedWeights(
+            Span<int> uBones,
+            Span<float> uWeights,
+            int uCount,
+            Span<int> outBones,
+            Span<float> outWeights)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                int best = -1;
+                float maxW = 0f;
+                for (int u = 0; u < uCount; u++)
+                {
+                    if (uWeights[u] > maxW)
+                    {
+                        maxW = uWeights[u];
+                        best = u;
+                    }
+                }
+                if (best != -1 && maxW > 0.0001f)
+                {
+                    outBones[k] = uBones[best];
+                    outWeights[k] = maxW;
+                    uWeights[best] = -1f;
+                }
+                else
+                {
+                    outBones[k] = 0;
+                    outWeights[k] = 0f;
+                }
+            }
+
+            float keptSum = outWeights[0] + outWeights[1] + outWeights[2] + outWeights[3];
+            if (keptSum > 0.0001f)
+            {
+                float invKept = 1.0f / keptSum;
+                for (int k = 0; k < 4; k++)
+                {
+                    outWeights[k] *= invKept;
+                }
+            }
+            else
+            {
+                outBones[0] = 0;
+                outWeights[0] = 1.0f;
             }
         }
 
@@ -3301,71 +4550,147 @@ namespace DeadlockPlayground.Importer
             Dictionary<string, string> userCustomRemap = null)
         {
             var map = new Dictionary<int, int>();
+            var usedTargets = new HashSet<int>();
 
             // 1. Apply user custom overrides if supplied
             if (userCustomRemap != null && userCustomRemap.Count > 0)
             {
                 foreach (var (tName, sName) in userCustomRemap)
                 {
+                    if (string.IsNullOrWhiteSpace(sName) || string.IsNullOrWhiteSpace(tName)) continue;
                     int tIdx = targetSkeleton.FindBone(tName);
                     int sIdx = sourceSkeleton.FindBone(sName);
-                    if (tIdx != -1 && sIdx != -1)
+                    if (tIdx != -1 && sIdx != -1 && !map.ContainsKey(sIdx))
                     {
                         map[sIdx] = tIdx;
+                        usedTargets.Add(tIdx);
                     }
                 }
             }
 
-            for (int sIdx = 0; sIdx < sourceSkeleton.GetBoneCount(); sIdx++)
+            // 2. Fallback via HumanoidBoneMapper.AutoMap for any unmapped targets ONLY when no explicit user map was supplied,
+            //    or for unmapped source bones matching unused secondary/twist slots cleanly.
+            if (userCustomRemap == null || userCustomRemap.Count == 0)
+            {
+                var autoMapped = HumanoidBoneMapper.AutoMap(sourceSkeleton, targetSkeleton);
+                foreach (var (tName, sName) in autoMapped)
+                {
+                    if (string.IsNullOrWhiteSpace(sName)) continue;
+                    int tIdx = targetSkeleton.FindBone(tName);
+                    int sIdx = sourceSkeleton.FindBone(sName);
+                    if (tIdx != -1 && sIdx != -1 && !map.ContainsKey(sIdx) && !usedTargets.Contains(tIdx))
+                    {
+                        map[sIdx] = tIdx;
+                        usedTargets.Add(tIdx);
+                    }
+                }
+            }
+
+            int srcCount = sourceSkeleton.GetBoneCount();
+            string[] srcRawNames = new string[srcCount];
+            string[] srcCleanExact = new string[srcCount];
+            string[] srcCleanNoGltf = new string[srcCount];
+            bool[] srcIsSecondary = new bool[srcCount];
+            for (int sIdx = 0; sIdx < srcCount; sIdx++)
+            {
+                string raw = sourceSkeleton.GetBoneName(sIdx);
+                srcRawNames[sIdx] = raw;
+                srcCleanExact[sIdx] = HumanoidBoneMapper.CleanBoneName(raw, stripTrailingGltfIndex: false);
+                srcCleanNoGltf[sIdx] = HumanoidBoneMapper.CleanBoneName(raw, stripTrailingGltfIndex: true);
+                srcIsSecondary[sIdx] = HumanoidBoneMapper.IsSecondaryOrHelperBone(raw, allowTwist: false);
+            }
+
+            // Precompute definition target bone indices and cleaned aliases ONCE (eliminates O(B * D) C++ FindBone lookups)
+            var defs = HumanoidBoneMapper.Definitions;
+            int[] defTargetIndices = new int[defs.Count];
+            string[][] defCleanAliases = new string[defs.Count][];
+            string[] defCanonicalLower = new string[defs.Count];
+            bool[] defRespectClear = new bool[defs.Count];
+            for (int d = 0; d < defs.Count; d++)
+            {
+                var def = defs[d];
+                defRespectClear[d] = userCustomRemap != null && userCustomRemap.ContainsKey(def.CanonicalName);
+                string tgtResolved = HumanoidBoneMapper.ResolveTargetBone(targetSkeleton, def);
+                defTargetIndices[d] = !string.IsNullOrEmpty(tgtResolved) ? targetSkeleton.FindBone(tgtResolved) : -1;
+                defCanonicalLower[d] = def.CanonicalName.ToLowerInvariant();
+                if (defTargetIndices[d] != -1 && !defRespectClear[d])
+                {
+                    var aliases = new string[def.SourceAliases.Length];
+                    for (int a = 0; a < aliases.Length; a++)
+                        aliases[a] = HumanoidBoneMapper.CleanBoneName(def.SourceAliases[a], stripTrailingGltfIndex: false);
+                    defCleanAliases[d] = aliases;
+                }
+            }
+
+            for (int sIdx = 0; sIdx < srcCount; sIdx++)
             {
                 if (map.ContainsKey(sIdx)) continue;
-                string sName = sourceSkeleton.GetBoneName(sIdx).ToLowerInvariant();
+                if (srcIsSecondary[sIdx]) continue;
+                string rawName = srcRawNames[sIdx];
 
-                // Check exact name match first
-                int exact = targetSkeleton.FindBone(sourceSkeleton.GetBoneName(sIdx));
-                if (exact != -1)
+                // Check exact name match first (when target bone is not already taken)
+                int exact = targetSkeleton.FindBone(rawName);
+                if (exact != -1 && !usedTargets.Contains(exact))
                 {
                     map[sIdx] = exact;
+                    usedTargets.Add(exact);
                     continue;
                 }
 
-                // Match against HumanoidBoneMapper definitions
-                foreach (var def in HumanoidBoneMapper.Definitions)
+                // Match against HumanoidBoneMapper definitions using precomputed cleaned names (never colliding used targets)
+                string cleanExact = srcCleanExact[sIdx];
+                string cleanNoGltf = srcCleanNoGltf[sIdx];
+                bool hasLateralTag = cleanNoGltf.EndsWith("_l") || cleanNoGltf.EndsWith("_r") || cleanNoGltf.Contains("_l_") || cleanNoGltf.Contains("_r_") || cleanNoGltf.Contains("left") || cleanNoGltf.Contains("right");
+                bool disallowRight = (cleanNoGltf.EndsWith("_r") || cleanNoGltf.Contains("_r_") || cleanNoGltf.Contains("right")) && !cleanNoGltf.Contains("left");
+                bool disallowLeft = (cleanNoGltf.EndsWith("_l") || cleanNoGltf.Contains("_l_") || cleanNoGltf.Contains("left")) && !cleanNoGltf.Contains("right");
+                bool hasForehead = cleanNoGltf.Contains("forehead");
+
+                for (int d = 0; d < defs.Count; d++)
                 {
+                    int tIdx = defTargetIndices[d];
+                    if (tIdx == -1 || usedTargets.Contains(tIdx) || defRespectClear[d]) continue;
+                    var def = defs[d];
+
                     bool isCentral = def.Group == HumanoidBoneMapper.BoneGroup.Pelvis || def.Group == HumanoidBoneMapper.BoneGroup.Spine || def.Group == HumanoidBoneMapper.BoneGroup.Head || def.Group == HumanoidBoneMapper.BoneGroup.Root;
-                    bool hasLateralTag = sName.EndsWith("_l") || sName.EndsWith("_r") || sName.Contains("_l_") || sName.Contains("_r_") || sName.Contains(".l") || sName.Contains(".r") || sName.Contains("left") || sName.Contains("right");
                     if (isCentral && hasLateralTag) continue;
-                    if (def.CanonicalName == "head" && sName.Contains("forehead")) continue;
+                    if (def.CanonicalName == "head" && hasForehead) continue;
 
-                    bool sourceMatch = def.SourceAliases.Any(alias =>
-                    {
-                        string cAlias = alias.ToLowerInvariant();
-                        return sName == cAlias || sName.StartsWith(cAlias + "_") || sName.EndsWith("_" + cAlias) || sName.Contains("_" + cAlias + "_");
-                    }) || sName.Equals(def.CanonicalName, StringComparison.OrdinalIgnoreCase);
+                    bool isLeft = def.Group == HumanoidBoneMapper.BoneGroup.LeftArm || def.Group == HumanoidBoneMapper.BoneGroup.LeftLeg || def.Group == HumanoidBoneMapper.BoneGroup.LeftHandFingers;
+                    bool isRight = def.Group == HumanoidBoneMapper.BoneGroup.RightArm || def.Group == HumanoidBoneMapper.BoneGroup.RightLeg || def.Group == HumanoidBoneMapper.BoneGroup.RightHandFingers;
+                    if (isLeft && disallowRight) continue;
+                    if (isRight && disallowLeft) continue;
 
-                    if (sourceMatch)
+                    bool sourceMatch = cleanNoGltf == defCanonicalLower[d];
+                    if (!sourceMatch)
                     {
-                        foreach (var tAlias in def.TargetAliases)
+                        string[] cAliases = defCleanAliases[d];
+                        for (int a = 0; a < cAliases.Length; a++)
                         {
-                            int tIdx = targetSkeleton.FindBone(tAlias);
-                            if (tIdx != -1)
+                            string cAlias = cAliases[a];
+                            if (cleanExact == cAlias || cleanNoGltf == cAlias ||
+                                cleanNoGltf.StartsWith(cAlias + "_") || cleanNoGltf.EndsWith("_" + cAlias) || cleanNoGltf.Contains("_" + cAlias + "_"))
                             {
-                                map[sIdx] = tIdx;
+                                sourceMatch = true;
                                 break;
                             }
                         }
+                    }
 
-                        if (map.ContainsKey(sIdx)) break;
+                    if (sourceMatch)
+                    {
+                        map[sIdx] = tIdx;
+                        usedTargets.Add(tIdx);
+                        break;
                     }
                 }
             }
 
             // Check for Deadlock Forearm Twist Bones (arm_lower_L_TWIST, arm_lower_R_TWIST, etc.)
-            for (int sIdx = 0; sIdx < sourceSkeleton.GetBoneCount(); sIdx++)
+            for (int sIdx = 0; sIdx < srcCount; sIdx++)
             {
                 if (map.ContainsKey(sIdx)) continue;
-                string sName = sourceSkeleton.GetBoneName(sIdx);
-                string clean = HumanoidBoneMapper.CleanBoneName(sName);
+                string sName = srcRawNames[sIdx];
+                string clean = srcCleanNoGltf[sIdx];
 
                 if (clean.Contains("forearm") && (clean.EndsWith("_001") || clean.EndsWith(".001") || clean.Contains("twist")))
                 {
@@ -3386,20 +4711,19 @@ namespace DeadlockPlayground.Importer
             }
 
             // Collapse unmapped .001 twist bones into their mapped parent limb bone
-            for (int sIdx = 0; sIdx < sourceSkeleton.GetBoneCount(); sIdx++)
+            for (int sIdx = 0; sIdx < srcCount; sIdx++)
             {
                 if (map.ContainsKey(sIdx)) continue;
-                string sName = sourceSkeleton.GetBoneName(sIdx);
-                string clean = HumanoidBoneMapper.CleanBoneName(sName);
+                string clean = srcCleanNoGltf[sIdx];
 
                 if (clean.EndsWith("_001") || clean.EndsWith(".001") || clean.Contains("twist"))
                 {
                     string baseName = clean.Replace("_001", "").Replace(".001", "").Replace("twist", "");
-                    for (int otherIdx = 0; otherIdx < sourceSkeleton.GetBoneCount(); otherIdx++)
+                    for (int otherIdx = 0; otherIdx < srcCount; otherIdx++)
                     {
                         if (map.TryGetValue(otherIdx, out int tgtMapped))
                         {
-                            string otherClean = HumanoidBoneMapper.CleanBoneName(sourceSkeleton.GetBoneName(otherIdx));
+                            string otherClean = srcCleanNoGltf[otherIdx];
                             if (otherClean == baseName || otherClean.StartsWith(baseName + "_") || baseName.StartsWith(otherClean))
                             {
                                 map[sIdx] = tgtMapped;
@@ -3475,6 +4799,40 @@ namespace DeadlockPlayground.Importer
             return resolved;
         }
 
+        public const string SurfaceKeepSeparator = "::surf::";
+
+        public static string MakeSurfaceKeepKey(string meshName, int surfaceIndex)
+            => $"{meshName}{SurfaceKeepSeparator}{surfaceIndex}";
+
+        public static bool IsOriginalSurfaceKept(IEnumerable<string> keptNames, string meshName, int surfaceIndex, string generatedSubName = null)
+        {
+            if (keptNames == null) return false;
+            string surfKey = MakeSurfaceKeepKey(meshName, surfaceIndex);
+            foreach (var entry in keptNames)
+            {
+                if (string.IsNullOrEmpty(entry)) continue;
+                if (string.Equals(entry, meshName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(entry, surfKey, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(generatedSubName) && string.Equals(entry, generatedSubName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public static StandardMaterial3D CreateHiddenSurfaceMaterial()
+        {
+            return new StandardMaterial3D
+            {
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                AlbedoColor = new Color(0f, 0f, 0f, 0f),
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                NoDepthTest = false,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded
+            };
+        }
+
         private static void ApplyReplacementMode(Node3D heroNode, List<MeshInstance3D> customMeshes, RiggingOptions options)
         {
             // In preview mode inside modal, NEVER hide ghost reference mannequin meshes!
@@ -3487,7 +4845,7 @@ namespace DeadlockPlayground.Importer
                 if (mi.HasMeta("IsCustomImportedMesh")) continue;
 
                 string rawName = mi.Name.ToString();
-                bool keep = options.KeptOriginalSubmeshNames != null && options.KeptOriginalSubmeshNames.Contains(rawName);
+                bool forceHiddenByReplacement = false;
 
                 // If explicitly replaced by a custom submesh (e.g. custom gun replacing hero gun), force hidden
                 if (options.SubmeshReplacementMap != null)
@@ -3497,7 +4855,7 @@ namespace DeadlockPlayground.Importer
                         if (string.IsNullOrEmpty(repTarget) || repTarget == "[ None ]") continue;
                         if (rawName.Equals(repTarget, StringComparison.OrdinalIgnoreCase))
                         {
-                            keep = false;
+                            forceHiddenByReplacement = true;
                             break;
                         }
                         // If replacing primary gun model (e.g. _CHRONO_GUN_MODEL), also hide corresponding hip/holstered version (_CHRONO_GUN_ON_HIP)
@@ -3507,23 +4865,102 @@ namespace DeadlockPlayground.Importer
                         {
                             if (rawLower.Contains("hip") || rawLower.Contains("holster") || rawLower.Contains("back") || rawLower.Contains("sheath"))
                             {
-                                keep = false;
+                                forceHiddenByReplacement = true;
                                 break;
                             }
                         }
                     }
                 }
 
-                // Both FullReplacement and PartialAccessory modes respect explicitly kept meshes (e.g. Paradox's gun)
-                mi.Visible = keep;
-                mi.SetMeta("UserVisibility", keep);
-                if (keep)
+                int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
+
+                if (mi.HasMeta("GeneratedSubmeshes"))
                 {
-                    mi.RemoveMeta("UserHiddenByCustomModel");
+                    // Composite mesh has already been split into per-surface MeshInstance3D siblings (_surf_s)
+                    // Keep the composite container hidden to avoid double rendering, and toggle each split surface individually.
+                    mi.Visible = false;
+                    bool anySubKept = false;
+                    var genArr = mi.GetMeta("GeneratedSubmeshes").AsGodotArray();
+                    for (int gIdx = 0; gIdx < genArr.Count; gIdx++)
+                    {
+                        if (genArr[gIdx].AsGodotObject() is MeshInstance3D subMi && GodotObject.IsInstanceValid(subMi))
+                        {
+                            int sIdx = subMi.HasMeta("SurfaceIndex") ? subMi.GetMeta("SurfaceIndex").AsInt32() : gIdx;
+                            bool keepSub = !forceHiddenByReplacement &&
+                                           IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, sIdx, subMi.Name.ToString());
+                            subMi.Visible = keepSub;
+                            subMi.SetMeta("UserVisibility", keepSub);
+                            if (keepSub)
+                            {
+                                subMi.RemoveMeta("UserHiddenByCustomModel");
+                                anySubKept = true;
+                            }
+                            else
+                            {
+                                subMi.SetMeta("UserHiddenByCustomModel", true);
+                            }
+                        }
+                    }
+                    mi.SetMeta("UserVisibility", anySubKept);
+                    if (anySubKept) mi.RemoveMeta("UserHiddenByCustomModel");
+                    else mi.SetMeta("UserHiddenByCustomModel", true);
+                }
+                else if (surfCount > 1)
+                {
+                    bool anyKept = false;
+                    bool allKept = true;
+                    for (int s = 0; s < surfCount; s++)
+                    {
+                        bool keepSurf = !forceHiddenByReplacement &&
+                                        IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, s);
+                        if (keepSurf) anyKept = true;
+                        else allKept = false;
+                    }
+
+                    mi.Visible = anyKept;
+                    mi.SetMeta("UserVisibility", anyKept);
+                    if (anyKept && !allKept)
+                    {
+                        var hiddenMat = CreateHiddenSurfaceMaterial();
+                        for (int s = 0; s < surfCount; s++)
+                        {
+                            bool keepSurf = !forceHiddenByReplacement &&
+                                            IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, s);
+                            mi.SetMeta($"SurfaceKept_{s}", keepSurf);
+                            if (keepSurf)
+                            {
+                                Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
+                                mi.SetSurfaceOverrideMaterial(s, origMat);
+                            }
+                            else
+                            {
+                                mi.SetSurfaceOverrideMaterial(s, hiddenMat);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (int s = 0; s < surfCount; s++)
+                        {
+                            mi.SetMeta($"SurfaceKept_{s}", anyKept);
+                            if (allKept)
+                            {
+                                Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
+                                mi.SetSurfaceOverrideMaterial(s, origMat);
+                            }
+                        }
+                    }
+
+                    if (anyKept) mi.RemoveMeta("UserHiddenByCustomModel");
+                    else mi.SetMeta("UserHiddenByCustomModel", true);
                 }
                 else
                 {
-                    mi.SetMeta("UserHiddenByCustomModel", true);
+                    bool keep = !forceHiddenByReplacement && IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, 0);
+                    mi.Visible = keep;
+                    mi.SetMeta("UserVisibility", keep);
+                    if (keep) mi.RemoveMeta("UserHiddenByCustomModel");
+                    else mi.SetMeta("UserHiddenByCustomModel", true);
                 }
             }
 
@@ -3555,7 +4992,7 @@ namespace DeadlockPlayground.Importer
             return -1;
         }
 
-        private static Dictionary<int, Quaternion> BackupSkeletonLocalRotations(Skeleton3D skeleton)
+        public static Dictionary<int, Quaternion> BackupSkeletonLocalRotations(Skeleton3D skeleton)
         {
             var dict = new Dictionary<int, Quaternion>();
             for (int b = 0; b < skeleton.GetBoneCount(); b++)
@@ -3565,7 +5002,7 @@ namespace DeadlockPlayground.Importer
             return dict;
         }
 
-        private static void RestoreSkeletonLocalRotations(Skeleton3D skeleton, Dictionary<int, Quaternion> backup)
+        public static void RestoreSkeletonLocalRotations(Skeleton3D skeleton, Dictionary<int, Quaternion> backup)
         {
             foreach (var (b, rot) in backup)
             {
@@ -3746,7 +5183,138 @@ namespace DeadlockPlayground.Importer
         }
 
         /// <summary>
-        /// Computes pristine model vertex bounding box relative to its own root node (at scale 1.0, offset 0).
+        /// Resolves a Godot Skin bind slot index into the corresponding Skeleton3D bone index.
+        /// Falls back safely when Skin.GetBindBone returns -1 (name-bound skins).
+        /// </summary>
+        private static int ResolveSkinBindBone(Skin skin, int bindIdx, Skeleton3D skel)
+        {
+            if (skel == null) return 0;
+            int boneCount = skel.GetBoneCount();
+            if (boneCount <= 0) return 0;
+            if (skin == null || bindIdx < 0 || bindIdx >= skin.GetBindCount())
+            {
+                return Math.Clamp(bindIdx, 0, boneCount - 1);
+            }
+
+            int mapped = skin.GetBindBone(bindIdx);
+            if (mapped >= 0 && mapped < boneCount) return mapped;
+
+            string bName = skin.GetBindName(bindIdx);
+            if (!string.IsNullOrEmpty(bName))
+            {
+                int found = skel.FindBone(bName);
+                if (found >= 0) return found;
+            }
+            return Math.Clamp(bindIdx, 0, boneCount - 1);
+        }
+
+        /// <summary>
+        /// Evaluates rest-pose vertices and normals for a MeshInstance3D surface into root/hero space.
+        /// Accurately applies Godot Skin Inverse Bind Poses * Skeleton3D GlobalRest * SkeletonRelTransform
+        /// when the mesh is skinned, avoiding double-rotation/collapse on glTFs whose Skeleton3D carries an up-axis correction.
+        /// </summary>
+        private static void EvaluateMeshSurfaceInTargetSpace(
+            MeshInstance3D mi,
+            Node3D sourceRoot,
+            Transform3D prefixTransform,
+            Skeleton3D fallbackSkeleton,
+            Vector3[] rawVerts,
+            Vector3[] rawNorms,
+            int[] rawBones,
+            float[] rawWeights,
+            out Vector3[] outVerts,
+            out Vector3[] outNorms)
+        {
+            int vCount = rawVerts.Length;
+            outVerts = new Vector3[vCount];
+            outNorms = new Vector3[vCount];
+
+            Transform3D fallbackXform = prefixTransform * ComputeTransformRelativeToRoot(mi, sourceRoot);
+
+            Skeleton3D skel = null;
+            if (!string.IsNullOrEmpty(mi.Skeleton.ToString()))
+            {
+                skel = mi.GetNodeOrNull<Skeleton3D>(mi.Skeleton);
+            }
+            if (skel == null && mi.GetParent() is Skeleton3D parentSkel) skel = parentSkel;
+            if (skel == null) skel = fallbackSkeleton;
+
+            int stride = (rawBones != null && rawWeights != null && vCount > 0 && rawBones.Length >= vCount * 8 && rawWeights.Length >= vCount * 8) ? 8 : 4;
+            bool useSkinning = skel != null && mi.Skin != null && mi.Skin.GetBindCount() > 0 &&
+                               rawBones != null && rawWeights != null &&
+                               rawBones.Length >= vCount * stride && rawWeights.Length >= vCount * stride;
+
+            if (!useSkinning)
+            {
+                for (int v = 0; v < vCount; v++)
+                {
+                    outVerts[v] = fallbackXform * rawVerts[v];
+                    outNorms[v] = (rawNorms != null && rawNorms.Length == vCount)
+                        ? (fallbackXform.Basis * rawNorms[v]).Normalized()
+                        : Vector3.Up;
+                }
+                return;
+            }
+
+            Transform3D skelToHero = prefixTransform * ComputeTransformRelativeToRoot(skel, sourceRoot);
+            int bindCount = mi.Skin.GetBindCount();
+            int skelBoneCount = skel.GetBoneCount();
+            var bindToHero = new Transform3D[bindCount];
+            for (int bi = 0; bi < bindCount; bi++)
+            {
+                int boneIdx = ResolveSkinBindBone(mi.Skin, bi, skel);
+                Transform3D gRest = (boneIdx >= 0 && boneIdx < skelBoneCount) ? skel.GetBoneGlobalRest(boneIdx) : Transform3D.Identity;
+                bindToHero[bi] = skelToHero * gRest * mi.Skin.GetBindPose(bi);
+            }
+
+            Vector3[] vertsOut = outVerts;
+            Vector3[] normsOut = outNorms;
+            bool hasNorms = rawNorms != null && rawNorms.Length == vCount;
+
+            Action<int> evalVertex = v =>
+            {
+                Vector3 rv = rawVerts[v];
+                Vector3 rn = hasNorms ? rawNorms[v] : Vector3.Up;
+                Vector3 accPos = Vector3.Zero;
+                Vector3 accNorm = Vector3.Zero;
+                float totalW = 0f;
+
+                int baseOff = v * stride;
+                for (int k = 0; k < stride; k++)
+                {
+                    float w = rawWeights[baseOff + k];
+                    if (w <= 0.0001f) continue;
+                    int bi = rawBones[baseOff + k];
+                    if (bi < 0 || bi >= bindCount) continue;
+
+                    Transform3D bt = bindToHero[bi];
+                    accPos += (bt * rv) * w;
+                    accNorm += (bt.Basis * rn) * w;
+                    totalW += w;
+                }
+
+                if (totalW > 0.0001f)
+                {
+                    float invW = 1.0f / totalW;
+                    vertsOut[v] = accPos * invW;
+                    normsOut[v] = accNorm.LengthSquared() > 0.00001f ? accNorm.Normalized() : Vector3.Up;
+                }
+                else
+                {
+                    vertsOut[v] = fallbackXform * rv;
+                    normsOut[v] = hasNorms ? (fallbackXform.Basis * rn).Normalized() : Vector3.Up;
+                }
+            };
+
+            if (vCount >= 512)
+                System.Threading.Tasks.Parallel.For(0, vCount, evalVertex);
+            else
+                for (int v = 0; v < vCount; v++) evalVertex(v);
+        }
+
+        /// <summary>
+        /// Computes pristine model vertex bounding box relative to its own root node (at scale 1.0, offset 0),
+        /// accurately evaluating skinning bind transforms when present.
         /// Immune to current viewport slider or container transforms!
         /// </summary>
         public static (Vector3 Min, Vector3 Max, bool Valid) ComputePristineModelBounds(Node3D root)
@@ -3755,25 +5323,27 @@ namespace DeadlockPlayground.Importer
             Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
             bool found = false;
 
+            Skeleton3D fallbackSkel = FindSkeleton(root);
             var meshes = CollectMeshes(root);
             foreach (var mi in meshes)
             {
                 if (mi.Mesh == null) continue;
-                Transform3D relT = ComputeTransformRelativeToRoot(mi, root);
 
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
                     var arrays = mi.Mesh.SurfaceGetArrays(s);
                     if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
-                    var vVar = arrays[(int)Mesh.ArrayType.Vertex];
-                    if (vVar.VariantType == Variant.Type.Nil) continue;
-                    var verts = vVar.As<Vector3[]>();
-                    if (verts == null || verts.Length == 0) continue;
+                    var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (rawVerts == null || rawVerts.Length == 0) continue;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+
+                    EvaluateMeshSurfaceInTargetSpace(mi, root, Transform3D.Identity, fallbackSkel, rawVerts, null, rawBones, rawWeights, out var verts, out _);
 
                     found = true;
                     for (int i = 0; i < verts.Length; i++)
                     {
-                        Vector3 w = relT * verts[i];
+                        Vector3 w = verts[i];
                         if (w.X < min.X) min.X = w.X;
                         if (w.Y < min.Y) min.Y = w.Y;
                         if (w.Z < min.Z) min.Z = w.Z;
@@ -3790,7 +5360,7 @@ namespace DeadlockPlayground.Importer
 
         /// <summary>
         /// Computes authentic Deadlock hero vertex bounding box relative to hero root.
-        /// Strictly filters out gizmo meshes, handles, and accessories.
+        /// Strictly filters out gizmo meshes, handles, accessories, and translucent smoke/FX plumes.
         /// </summary>
         public static (Vector3 Min, Vector3 Max, bool Valid) ComputeAuthenticHeroBounds(Node3D root)
         {
@@ -3811,27 +5381,33 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
+            Skeleton3D fallbackSkel = FindSkeleton(root);
             foreach (var mi in meshes)
             {
                 if (mi.Mesh == null) continue;
                 string lowerName = mi.Name.ToString().ToLowerInvariant();
                 bool isWeaponOrProp = lowerName.Contains("gun") || lowerName.Contains("weapon");
 
-                Transform3D relT = ComputeTransformRelativeToRoot(mi, root);
-
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
+                    Material surfMat = mi.GetActiveMaterial(s) ?? mi.Mesh.SurfaceGetMaterial(s);
+                    string matIdent = ((surfMat?.ResourceName ?? "") + " " + (surfMat?.ResourcePath ?? "")).ToLowerInvariant();
+                    if (matIdent.Contains("headsmoke") || matIdent.Contains("_smoke") || matIdent.Contains("vfx"))
+                        continue;
+
                     var arrays = mi.Mesh.SurfaceGetArrays(s);
                     if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
-                    var vVar = arrays[(int)Mesh.ArrayType.Vertex];
-                    if (vVar.VariantType == Variant.Type.Nil) continue;
-                    var verts = vVar.As<Vector3[]>();
-                    if (verts == null || verts.Length == 0) continue;
+                    var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (rawVerts == null || rawVerts.Length == 0) continue;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+
+                    EvaluateMeshSurfaceInTargetSpace(mi, root, Transform3D.Identity, fallbackSkel, rawVerts, null, rawBones, rawWeights, out var verts, out _);
 
                     found = true;
                     for (int i = 0; i < verts.Length; i++)
                     {
-                        Vector3 w = relT * verts[i];
+                        Vector3 w = verts[i];
                         if (w.X < min.X) min.X = w.X;
                         if (w.Z < min.Z) min.Z = w.Z;
                         if (w.X > max.X) max.X = w.X;
@@ -3887,13 +5463,9 @@ namespace DeadlockPlayground.Importer
                 skeleton.SetBoneParent(idx, lowerIdx);
                 skeleton.SetBoneRest(idx, twistRest);
             }
-            else
+            else if (skeleton.GetBoneParent(idx) != lowerIdx)
             {
-                if (skeleton.GetBoneParent(idx) != lowerIdx)
-                {
-                    skeleton.SetBoneParent(idx, lowerIdx);
-                }
-                skeleton.SetBoneRest(idx, twistRest);
+                skeleton.SetBoneParent(idx, lowerIdx);
             }
 
             return idx;
@@ -4015,22 +5587,23 @@ namespace DeadlockPlayground.Importer
             for (int b = 0; b < count; b++)
             {
                 string name = skeleton.GetBoneName(b).ToLowerInvariant();
-                if (name.Contains("pelvis") || name.Contains("root") || name.Contains("weapon") || 
-                    name.Contains("prop") || name.Contains("camera"))
+                // Skip procedural/IK/twist/cloth/cervical/shoulder bones whose authored or constraint-driven translations exceed 1.5 cm legitimately
+                if (IsExcludedClothOrAccessoryBone(name) ||
+                    name.Contains("pelvis") || name.Contains("twist") ||
+                    name.Contains("neck") || name.Contains("head") ||
+                    name.Contains("clavicle") || name.Contains("finger"))
                 {
                     continue;
                 }
 
-                bool isAnatomical = name.Contains("clavicle") || name.Contains("arm_upper") || 
-                                   name.Contains("arm_lower") || name.Contains("hand") || 
-                                   name.Contains("finger") || name.Contains("leg_upper") || 
-                                   name.Contains("leg_lower") || name.Contains("ankle") || 
-                                   name.Contains("ball") || name.Contains("thigh") || 
-                                   name.Contains("shin") || name.Contains("calf") || 
-                                   name.Contains("foot") || name.Contains("neck") || 
-                                   name.Contains("head");
+                bool isAnatomicalLimb = name.Contains("arm_upper") || name.Contains("arm_lower") ||
+                                       name == "hand_l" || name == "hand_r" ||
+                                       name.Contains("leg_upper") || name.Contains("leg_lower") ||
+                                       name.Contains("ankle") || name.Contains("ball") ||
+                                       name.Contains("thigh") || name.Contains("shin") ||
+                                       name.Contains("calf") || name == "foot_l" || name == "foot_r";
 
-                if (!isAnatomical) continue;
+                if (!isAnatomicalLimb) continue;
 
                 Vector3 restOrigin = skeleton.GetBoneRest(b).Origin;
                 Vector3 curOrigin = skeleton.GetBonePosePosition(b);
@@ -4625,6 +6198,157 @@ namespace DeadlockPlayground.Importer
                     stdMat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
                 }
             }
+        }
+
+        private readonly struct SocketBakeMeta
+        {
+            public readonly Transform3D BoneRest;
+            public readonly Vector3 Pivot;
+            public readonly Transform3D BakedInv;
+
+            public SocketBakeMeta(Transform3D boneRest, Vector3 pivot, Transform3D bakedInv)
+            {
+                BoneRest = boneRest;
+                Pivot = pivot;
+                BakedInv = bakedInv;
+            }
+        }
+
+        private readonly struct SocketBakeOutput
+        {
+            public readonly Skin PropSkin;
+            public readonly SocketBakeMeta Meta;
+
+            public SocketBakeOutput(Skin propSkin, SocketBakeMeta meta)
+            {
+                PropSkin = propSkin;
+                Meta = meta;
+            }
+        }
+
+        public static Transform3D ComputeSocketHeroMatrix(Transform3D boneRest, Vector3 pivot, Vector3 userPosOffset, Vector3 userRotOffset, float userScale)
+        {
+            float safeScale = userScale > 0.001f ? userScale : 1.0f;
+            Basis rotBasis = Basis.FromEuler(new Vector3(
+                Mathf.DegToRad(userRotOffset.X),
+                Mathf.DegToRad(userRotOffset.Y),
+                Mathf.DegToRad(userRotOffset.Z)
+            ), EulerOrder.Yxz);
+
+            Basis scaledBasis = (boneRest.Basis * rotBasis) * Basis.FromScale(new Vector3(safeScale, safeScale, safeScale));
+            Vector3 origin = pivot + (boneRest.Basis * userPosOffset);
+            return new Transform3D(scaledBasis, origin);
+        }
+
+        private static SocketBakeOutput BakeSocketPropSurface(
+            Skeleton3D targetSkeleton,
+            string socketBoneName,
+            string meshKey,
+            RiggingOptions options,
+            Dictionary<string, SocketFrame> socketFrames,
+            Vector3[] inputVerts,
+            Vector3[] inputNorms,
+            Vector3[] alignedVerts,
+            Vector3[] alignedNorms,
+            int[] boneIndices,
+            float[] boneWeights,
+            Transform3D? localToHeroSpace,
+            bool? hasInputNormals = null)
+        {
+            int tgtBone = targetSkeleton.FindBone(socketBoneName);
+            if (tgtBone == -1) tgtBone = FindBoneAny(targetSkeleton, "weapon_hand_R", "weapon_hand_L", "hand_R", "hand_L", "head");
+            if (tgtBone == -1) tgtBone = 0;
+
+            Transform3D boneRest = tgtBone >= 0 ? targetSkeleton.GetBoneGlobalRest(tgtBone) : Transform3D.Identity;
+            var propSkin = new Skin();
+            propSkin.AddBind(tgtBone, boneRest.AffineInverse());
+
+            bool snapToBone = options.SubmeshSnapToSocket != null &&
+                              options.SubmeshSnapToSocket.TryGetValue(meshKey, out bool snap) && snap;
+            Vector3 userPosOffset = options.SubmeshSocketOffsetPos != null &&
+                                    options.SubmeshSocketOffsetPos.TryGetValue(meshKey, out var uPos) ? uPos : Vector3.Zero;
+            Vector3 userRotOffset = options.SubmeshSocketOffsetRot != null &&
+                                    options.SubmeshSocketOffsetRot.TryGetValue(meshKey, out var uRot) ? uRot : Vector3.Zero;
+            float userScale = options.SubmeshSocketScale != null &&
+                              options.SubmeshSocketScale.TryGetValue(meshKey, out float uScale) && uScale > 0.001f ? uScale : 1.0f;
+
+            SocketFrame frame = default;
+            bool hasFrame = socketFrames != null && socketFrames.TryGetValue(socketBoneName, out frame);
+
+            Vector3 socketPos = hasFrame ? frame.SocketCenter : boneRest.Origin;
+            Vector3 centerPoint = hasFrame ? frame.Center : Vector3.Zero;
+            Basis pcaBasis = hasFrame ? frame.PcaBasis : Basis.Identity;
+            Basis targetOrient = hasFrame ? frame.TargetOrientation : Basis.Identity;
+
+            Vector3 pivot = snapToBone ? socketPos : Vector3.Zero;
+            Transform3D bakedHeroMatrix = ComputeSocketHeroMatrix(boneRest, pivot, userPosOffset, userRotOffset, userScale);
+
+            int vCount = alignedVerts.Length;
+            bool useNorms = hasInputNormals ?? (inputNorms != null && inputNorms.Length == vCount);
+
+            for (int v = 0; v < vCount; v++)
+            {
+                Vector3 heroVert = localToHeroSpace.HasValue ? (localToHeroSpace.Value * inputVerts[v]) : inputVerts[v];
+                Vector3 baseVert = snapToBone
+                    ? targetOrient * (pcaBasis * (heroVert - centerPoint))
+                    : heroVert;
+                alignedVerts[v] = bakedHeroMatrix * baseVert;
+
+                if (useNorms && inputNorms != null && v < inputNorms.Length)
+                {
+                    Vector3 heroNorm = localToHeroSpace.HasValue ? (localToHeroSpace.Value.Basis * inputNorms[v]).Normalized() : inputNorms[v];
+                    Vector3 baseNorm = snapToBone ? (targetOrient * (pcaBasis * heroNorm)) : heroNorm;
+                    alignedNorms[v] = (bakedHeroMatrix.Basis * baseNorm).Normalized();
+                }
+                else
+                {
+                    alignedNorms[v] = Vector3.Up;
+                }
+
+                boneIndices[v * 4 + 0] = 0; // Bind 0 in propSkin
+                boneWeights[v * 4 + 0] = 1.0f;
+                boneIndices[v * 4 + 1] = 0;
+                boneWeights[v * 4 + 1] = 0f;
+                boneIndices[v * 4 + 2] = 0;
+                boneWeights[v * 4 + 2] = 0f;
+                boneIndices[v * 4 + 3] = 0;
+                boneWeights[v * 4 + 3] = 0f;
+            }
+
+            var meta = new SocketBakeMeta(boneRest, pivot, bakedHeroMatrix.AffineInverse());
+            return new SocketBakeOutput(propSkin, meta);
+        }
+
+        private static void ApplySocketMetadata(MeshInstance3D newMi, string meshKey, SocketBakeMeta meta)
+        {
+            if (newMi == null) return;
+            newMi.SetMeta("IsSocketProp", true);
+            newMi.SetMeta("SocketMeshKey", meshKey);
+            newMi.SetMeta("SocketBoneRest", meta.BoneRest);
+            newMi.SetMeta("SocketPivot", meta.Pivot);
+            newMi.SetMeta("SocketBakedInv", meta.BakedInv);
+        }
+
+        /// <summary>
+        /// Updates a rigged socket prop's Skin bind pose in O(1) when socket Pos/Rot/Scale offsets change,
+        /// avoiding vertex buffer rebuilds and full KNN/bind passes while matching animated playback identically.
+        /// </summary>
+        public static bool TryUpdateSocketSkinBindPose(MeshInstance3D mi, Vector3 userPosOffset, Vector3 userRotOffset, float userScale)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi) || mi.Skin == null || mi.Skin.GetBindCount() <= 0)
+                return false;
+            if (!mi.HasMeta("IsSocketProp") || !mi.GetMeta("IsSocketProp").AsBool())
+                return false;
+            if (!mi.HasMeta("SocketBoneRest") || !mi.HasMeta("SocketPivot") || !mi.HasMeta("SocketBakedInv"))
+                return false;
+
+            Transform3D boneRest = mi.GetMeta("SocketBoneRest").AsTransform3D();
+            Vector3 pivot = mi.GetMeta("SocketPivot").AsVector3();
+            Transform3D bakedInv = mi.GetMeta("SocketBakedInv").AsTransform3D();
+
+            Transform3D liveHeroMatrix = ComputeSocketHeroMatrix(boneRest, pivot, userPosOffset, userRotOffset, userScale);
+            mi.Skin.SetBindPose(0, boneRest.AffineInverse() * liveHeroMatrix * bakedInv);
+            return true;
         }
 
         #endregion

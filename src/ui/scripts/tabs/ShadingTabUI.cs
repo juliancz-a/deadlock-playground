@@ -572,6 +572,11 @@ public partial class ShadingTabUI : VBoxContainer
                     }
 
                     toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                    toonMat.SetShaderParameter("has_metallic_texture", stdMat.MetallicTexture != null);
+                    if (stdMat.MetallicTexture != null)
+                    {
+                        toonMat.SetShaderParameter("metallic_texture", stdMat.MetallicTexture);
+                    }
                     toonMat.SetShaderParameter("roughness", stdMat.Roughness > 0.01f ? stdMat.Roughness : 0.65f);
                     float spec = stdMat.Metallic > 0.5f ? 0.45f : 0.30f;
                     toonMat.SetShaderParameter("specular", spec);
@@ -592,6 +597,15 @@ public partial class ShadingTabUI : VBoxContainer
                             toonMat.SetShaderParameter("emission_texture", stdMat.EmissionTexture);
                         }
                     }
+                }
+
+                global::Source2MaterialHelper.ApplyToonNprMetadata(toonMat, origMat);
+                var origChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(origMat)
+                    ?? (origMat != null ? DeadlockPlayground.Materials.MaterialChannelDiscovery.DiscoverCustomModelChannels(origMat, meshNameLower) : null);
+                if (origChannels != null)
+                {
+                    DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(toonMat, origChannels);
+                    DeadlockPlayground.Materials.MaterialChannelDiscovery.ApplyChannelsToMaterial(toonMat, origChannels);
                 }
 
                 _characterSurfaces.Add(new SurfaceRecord
