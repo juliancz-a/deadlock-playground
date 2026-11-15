@@ -352,7 +352,7 @@ namespace DeadlockPlayground.Importer
                             albedoPng = ExtractTexturePngPowerOfTwo(albedoTex, albedoTint);
                             normalPng = ExtractTexturePngPowerOfTwo(stdMat.NormalTexture, Colors.White);
                             roughPng = ExtractTexturePngPowerOfTwo(stdMat.RoughnessTexture, Colors.White);
-                            aoPng = ExtractTexturePngPowerOfTwo(stdMat.AOEnabled ? stdMat.AOTexture : null, Colors.White);
+                            aoPng = ExtractTexturePngPowerOfTwo(stdMat.AOTexture, Colors.White);
                         }
                         else if (primaryMat is ShaderMaterial sMat)
                         {
@@ -395,6 +395,17 @@ namespace DeadlockPlayground.Importer
                         }
 
                         albedoPng = ResolveMultiChannelPng(MaterialTextureChannel.Color, albedoPng);
+                        if (lm != null && matchedSubInfo != null && !isTranslucent && !isAlphaTest)
+                        {
+                            string subMatKey = !string.IsNullOrEmpty(matchedSubInfo.OriginalVmatPath)
+                                ? matchedSubInfo.OriginalVmatPath.ToLowerInvariant().Trim()
+                                : lm.GetMaterialKey(matchedSubInfo.Mesh, matchedSubInfo.SurfaceIndex);
+                            if (lm.HasEditedAlphaForMaterial(subMatKey) ||
+                                (string.Equals(lm.ActiveBaseMaterialKey, subMatKey, StringComparison.OrdinalIgnoreCase) && lm.EnableAlphaTransparency))
+                            {
+                                isAlphaTest = true;
+                            }
+                        }
                         normalPng = ResolveMultiChannelPng(MaterialTextureChannel.Normal, normalPng);
                         roughPng = ResolveMultiChannelPng(MaterialTextureChannel.Roughness, roughPng);
                         aoPng = ResolveMultiChannelPng(MaterialTextureChannel.AmbientOcclusion, aoPng);
@@ -1072,8 +1083,19 @@ namespace DeadlockPlayground.Importer
                         targetSkeletonBones = ParseSkeletonBonesFromVmdlText(decompiledVmdlText);
                     }
 
-                    // 2. Group custom submeshes into body vs weapon groups and write Source 2 bind-pose SMD(s)
+                    // 2. Group custom submeshes into body vs accessory groups and write Source 2 bind-pose SMD(s)
                     string primaryBodyMeshName = DetectPrimaryBodyGroupMeshName(decompiledVmdlText, modelBaseName);
+                    bool primaryBodyKeptInVanillaDmx = writtenSubfileNames.Any(leaf =>
+                    {
+                        string stem = Path.GetFileNameWithoutExtension(leaf).TrimStart('_');
+                        return stem.Equals(primaryBodyMeshName.TrimStart('_'), StringComparison.OrdinalIgnoreCase) &&
+                               (bundle.AllowedKeptVanillaDmxNames.Contains(primaryBodyMeshName) ||
+                                bundle.AllowedKeptVanillaDmxNames.Contains(stem));
+                    });
+                    string customSmdMeshName = primaryBodyKeptInVanillaDmx
+                        ? $"{modelBaseName}_custom_accessories"
+                        : primaryBodyMeshName;
+
                     string smdFileName = $"{modelBaseName}_body_custom.smd";
                     string smdFullPath = Path.Combine(contentModelDir, smdFileName);
                     string smdRelPath = $"{modelFolderRel}/{smdFileName}";
@@ -1087,7 +1109,7 @@ namespace DeadlockPlayground.Importer
 
                     var customRenderMeshes = new List<(string MeshName, string SmdRelativePath)>
                     {
-                        (primaryBodyMeshName, smdRelPath)
+                        (customSmdMeshName, smdRelPath)
                     };
 
                     if (bundle.PreservedVanillaSubmeshes.Count > 0)

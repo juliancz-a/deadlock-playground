@@ -44,6 +44,27 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("custom_model")]
         public WorkspaceCustomModelEntry CustomModel { get; set; } = null;
+
+        [JsonPropertyName("accessories")]
+        public List<WorkspaceAccessoryEntry> Accessories { get; set; } = new();
+    }
+
+    public class WorkspaceAccessoryEntry
+    {
+        [JsonPropertyName("slot_id")]
+        public string SlotId { get; set; } = "";
+
+        [JsonPropertyName("display_name")]
+        public string DisplayName { get; set; } = "";
+
+        [JsonPropertyName("intent")]
+        public int Intent { get; set; }
+
+        [JsonPropertyName("visible")]
+        public bool Visible { get; set; } = true;
+
+        [JsonPropertyName("model_config")]
+        public WorkspaceCustomModelEntry ModelConfig { get; set; }
     }
 
     public class WorkspaceSkinWeightOverrideEntry
@@ -61,6 +82,15 @@ namespace DeadlockPlayground.Workspace
         public float[] Weights { get; set; } = Array.Empty<float>();
     }
 
+    public class WorkspaceHeroSculptEntry
+    {
+        [JsonPropertyName("vertex_indices")]
+        public int[] VertexIndices { get; set; } = Array.Empty<int>();
+
+        [JsonPropertyName("deltas_xyz")]
+        public float[] DeltasXyz { get; set; } = Array.Empty<float>();
+    }
+
     public class WorkspaceCustomModelEntry
     {
         [JsonPropertyName("relative_model_path")]
@@ -68,6 +98,18 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("original_file_name")]
         public string OriginalFileName { get; set; } = "";
+
+        [JsonPropertyName("slot_id")]
+        public string SlotId { get; set; } = "";
+
+        [JsonPropertyName("accessory_name")]
+        public string AccessoryName { get; set; } = "";
+
+        [JsonPropertyName("intent")]
+        public int Intent { get; set; }
+
+        [JsonPropertyName("explicit_replaced_targets")]
+        public List<string> ExplicitReplacedTargets { get; set; } = new();
 
         [JsonPropertyName("method")]
         public int Method { get; set; }
@@ -138,6 +180,33 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("root_scale")]
         public float RootScale { get; set; } = 1.0f;
 
+        [JsonPropertyName("root_scale_xyz")]
+        public float[] RootScaleXyz { get; set; } = new float[] { 1f, 1f, 1f };
+
+        [JsonPropertyName("orig_deform_enabled")]
+        public bool OriginalMeshDeformEnabled { get; set; } = false;
+
+        [JsonPropertyName("orig_deform_target")]
+        public string OriginalMeshDeformTargetFilter { get; set; } = "hair";
+
+        [JsonPropertyName("orig_deform_bone")]
+        public string OriginalMeshDeformBoneName { get; set; } = "head";
+
+        [JsonPropertyName("orig_deform_mode")]
+        public int OriginalMeshDeformMode { get; set; } = 0;
+
+        [JsonPropertyName("orig_deform_strength")]
+        public float OriginalMeshDeformStrength { get; set; } = 0.55f;
+
+        [JsonPropertyName("orig_deform_radius")]
+        public float OriginalMeshDeformRadius { get; set; } = 0.24f;
+
+        [JsonPropertyName("orig_deform_height_offset")]
+        public float OriginalMeshDeformHeightOffset { get; set; } = 0.06f;
+
+        [JsonPropertyName("orig_deform_sculpts")]
+        public Dictionary<string, WorkspaceHeroSculptEntry> OriginalMeshDeformSculpts { get; set; } = new();
+
         [JsonPropertyName("aligned_transform")]
         public float[] AlignedTransformFloats { get; set; }
 
@@ -188,6 +257,10 @@ namespace DeadlockPlayground.Workspace
             {
                 RelativeModelPath = relativeModelPath ?? "",
                 OriginalFileName = originalFileName ?? "",
+                SlotId = o.SlotId ?? "",
+                AccessoryName = o.AccessoryName ?? "",
+                Intent = (int)o.Intent,
+                ExplicitReplacedTargets = o.ExplicitReplacedTargets != null ? new List<string>(o.ExplicitReplacedTargets) : new(),
                 Method = (int)o.Method,
                 Preset = (int)o.Preset,
                 Mode = (int)o.Mode,
@@ -211,6 +284,14 @@ namespace DeadlockPlayground.Workspace
                 RootPosition = new[] { o.RootPosition.X, o.RootPosition.Y, o.RootPosition.Z },
                 RootRotationDeg = new[] { o.RootRotationDeg.X, o.RootRotationDeg.Y, o.RootRotationDeg.Z },
                 RootScale = o.RootScale,
+                RootScaleXyz = new[] { o.RootScaleXYZ.X, o.RootScaleXYZ.Y, o.RootScaleXYZ.Z },
+                OriginalMeshDeformEnabled = o.OriginalMeshDeformEnabled,
+                OriginalMeshDeformTargetFilter = o.OriginalMeshDeformTargetFilter ?? "hair",
+                OriginalMeshDeformBoneName = o.OriginalMeshDeformBoneName ?? "head",
+                OriginalMeshDeformMode = (int)o.OriginalMeshDeformMode,
+                OriginalMeshDeformStrength = o.OriginalMeshDeformStrength,
+                OriginalMeshDeformRadius = o.OriginalMeshDeformRadius,
+                OriginalMeshDeformHeightOffset = o.OriginalMeshDeformHeightOffset,
                 AlignedTransformFloats = new[]
                 {
                     t.Basis.X.X, t.Basis.X.Y, t.Basis.X.Z,
@@ -259,6 +340,29 @@ namespace DeadlockPlayground.Workspace
                     };
                 }
             }
+            if (o.OriginalMeshDeformSculpts != null && o.OriginalMeshDeformSculpts.Count > 0)
+            {
+                foreach (var kv in o.OriginalMeshDeformSculpts)
+                {
+                    if (kv.Value == null || kv.Value.Count == 0) continue;
+                    var idxArr = new int[kv.Value.Count];
+                    var deltaArr = new float[kv.Value.Count * 3];
+                    int k = 0;
+                    foreach (var vkv in kv.Value)
+                    {
+                        idxArr[k] = vkv.Key;
+                        deltaArr[k * 3 + 0] = vkv.Value.X;
+                        deltaArr[k * 3 + 1] = vkv.Value.Y;
+                        deltaArr[k * 3 + 2] = vkv.Value.Z;
+                        k++;
+                    }
+                    entry.OriginalMeshDeformSculpts[kv.Key] = new WorkspaceHeroSculptEntry
+                    {
+                        VertexIndices = idxArr,
+                        DeltasXyz = deltaArr
+                    };
+                }
+            }
             return entry;
         }
 
@@ -266,6 +370,10 @@ namespace DeadlockPlayground.Workspace
         {
             var o = new DeadlockPlayground.Importer.CustomModelAutoRigger.RiggingOptions
             {
+                SlotId = SlotId ?? "",
+                AccessoryName = AccessoryName ?? "",
+                Intent = (DeadlockPlayground.Importer.CustomModelAutoRigger.AccessoryIntent)Intent,
+                ExplicitReplacedTargets = ExplicitReplacedTargets != null ? new List<string>(ExplicitReplacedTargets) : new(),
                 Method = (DeadlockPlayground.Importer.CustomModelAutoRigger.RiggingMethod)Method,
                 Preset = (DeadlockPlayground.Importer.CustomModelAutoRigger.PosePreset)Preset,
                 Mode = (DeadlockPlayground.Importer.CustomModelAutoRigger.ReplaceMode)Mode,
@@ -287,6 +395,19 @@ namespace DeadlockPlayground.Workspace
                 AutoCounterTwistWeights = AutoCounterTwistWeights,
                 IncludeBakedOutlineShells = IncludeBakedOutlineShells,
                 RootScale = RootScale > 0f ? RootScale : 1.0f,
+                RootScaleXYZ = (RootScaleXyz != null && RootScaleXyz.Length == 3)
+                    ? new Vector3(
+                        RootScaleXyz[0] > 0.0001f ? RootScaleXyz[0] : 1f,
+                        RootScaleXyz[1] > 0.0001f ? RootScaleXyz[1] : 1f,
+                        RootScaleXyz[2] > 0.0001f ? RootScaleXyz[2] : 1f)
+                    : Vector3.One,
+                OriginalMeshDeformEnabled = OriginalMeshDeformEnabled,
+                OriginalMeshDeformTargetFilter = string.IsNullOrWhiteSpace(OriginalMeshDeformTargetFilter) ? "hair" : OriginalMeshDeformTargetFilter,
+                OriginalMeshDeformBoneName = string.IsNullOrWhiteSpace(OriginalMeshDeformBoneName) ? "head" : OriginalMeshDeformBoneName,
+                OriginalMeshDeformMode = (DeadlockPlayground.Importer.CustomModelAutoRigger.HeroDeformMode)OriginalMeshDeformMode,
+                OriginalMeshDeformStrength = OriginalMeshDeformStrength,
+                OriginalMeshDeformRadius = OriginalMeshDeformRadius > 0.01f ? OriginalMeshDeformRadius : 0.24f,
+                OriginalMeshDeformHeightOffset = OriginalMeshDeformHeightOffset,
                 IncludedImportedSubmeshNames = IncludedImportedSubmeshNames != null ? new List<string>(IncludedImportedSubmeshNames) : new(),
                 KeptOriginalSubmeshNames = KeptOriginalSubmeshNames != null ? new List<string>(KeptOriginalSubmeshNames) : new(),
                 SubmeshAttachmentSockets = SubmeshAttachmentSockets != null ? new Dictionary<string, string>(SubmeshAttachmentSockets) : new(),
@@ -342,6 +463,25 @@ namespace DeadlockPlayground.Workspace
                         PaletteIndices = kv.Value.PaletteIndices != null ? (int[])kv.Value.PaletteIndices.Clone() : Array.Empty<int>(),
                         Weights = kv.Value.Weights != null ? (float[])kv.Value.Weights.Clone() : Array.Empty<float>()
                     };
+                }
+            }
+            if (OriginalMeshDeformSculpts != null && OriginalMeshDeformSculpts.Count > 0)
+            {
+                o.OriginalMeshDeformSculpts ??= new Dictionary<string, Dictionary<int, Vector3>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in OriginalMeshDeformSculpts)
+                {
+                    if (kv.Value?.VertexIndices == null || kv.Value.DeltasXyz == null) continue;
+                    int count = Math.Min(kv.Value.VertexIndices.Length, kv.Value.DeltasXyz.Length / 3);
+                    if (count <= 0) continue;
+                    var map = new Dictionary<int, Vector3>(count);
+                    for (int k = 0; k < count; k++)
+                    {
+                        map[kv.Value.VertexIndices[k]] = new Vector3(
+                            kv.Value.DeltasXyz[k * 3 + 0],
+                            kv.Value.DeltasXyz[k * 3 + 1],
+                            kv.Value.DeltasXyz[k * 3 + 2]);
+                    }
+                    o.OriginalMeshDeformSculpts[kv.Key] = map;
                 }
             }
             return o;
@@ -1659,7 +1799,7 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 }
             }
 
-            if (hero.Assets.Count == 0 && hero.CustomModel == null)
+            if (hero.Assets.Count == 0 && hero.CustomModel == null && (hero.Accessories == null || hero.Accessories.Count == 0))
             {
                 Manifest.Heroes.Remove(heroId);
             }
@@ -1721,7 +1861,7 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 hero.Assets.Remove(asset);
             }
 
-            if (hero.Assets.Count == 0 && hero.CustomModel == null)
+            if (hero.Assets.Count == 0 && hero.CustomModel == null && (hero.Accessories == null || hero.Accessories.Count == 0))
             {
                 Manifest.Heroes.Remove(heroId);
             }
@@ -1772,6 +1912,7 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 }
 
                 heroEntry.CustomModel = WorkspaceCustomModelEntry.FromRiggingOptions(relPath, cleanLeaf, options);
+                heroEntry.CustomModel.SlotId = "";
                 Manifest.LastActiveHeroId = heroId;
                 Manifest.LastActiveAssetType = "CustomModel";
                 Manifest.LastActiveAssetPath = relPath;
@@ -1787,23 +1928,191 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
             }
         }
 
-        public void DiscardCustomModel(string heroId)
+        public void StageAccessory(
+            string heroId,
+            string heroDisplayName,
+            string slotId,
+            string accessoryDisplayName,
+            string sourceModelFilePath,
+            DeadlockPlayground.Importer.CustomModelAutoRigger.RiggingOptions options)
         {
-            if (string.IsNullOrEmpty(heroId)) return;
-            if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry?.CustomModel == null)
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(slotId) ||
+                string.IsNullOrEmpty(sourceModelFilePath) || !File.Exists(sourceModelFilePath))
                 return;
 
             try
             {
-                string diskPath = ResolveCustomModelDiskPath(heroEntry.CustomModel);
-                heroEntry.CustomModel = null;
+                if (string.IsNullOrEmpty(CustomModelsDir))
+                    CustomModelsDir = Path.Combine(SessionDir, "custom_models");
+                string accDir = Path.Combine(CustomModelsDir, "accessories", slotId);
+                Directory.CreateDirectory(accDir);
 
-                if (!string.IsNullOrEmpty(diskPath) && File.Exists(diskPath))
+                string safeHero = heroId.Replace('/', '_').Replace('\\', '_').Trim('_');
+                string origFileName = Path.GetFileName(sourceModelFilePath);
+                string stagedFileName = $"{safeHero}_{origFileName}";
+                string destDiskPath = Path.Combine(accDir, stagedFileName);
+                string relPath = Path.Combine("custom_models", "accessories", slotId, stagedFileName).Replace('\\', '/');
+
+                if (!string.Equals(Path.GetFullPath(sourceModelFilePath), Path.GetFullPath(destDiskPath), StringComparison.OrdinalIgnoreCase))
                 {
-                    try { File.Delete(diskPath); } catch { }
+                    File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
                 }
 
-                if (heroEntry.Assets.Count == 0)
+                if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry == null)
+                {
+                    heroEntry = new WorkspaceHeroEntry
+                    {
+                        HeroId = heroId,
+                        DisplayName = !string.IsNullOrEmpty(heroDisplayName) ? heroDisplayName : heroId
+                    };
+                    Manifest.Heroes[heroId] = heroEntry;
+                }
+
+                heroEntry.Accessories ??= new List<WorkspaceAccessoryEntry>();
+                var modelCfg = WorkspaceCustomModelEntry.FromRiggingOptions(relPath, origFileName, options);
+                modelCfg.SlotId = slotId;
+                modelCfg.AccessoryName = accessoryDisplayName ?? Path.GetFileNameWithoutExtension(origFileName);
+
+                var existing = heroEntry.Accessories.FirstOrDefault(a => string.Equals(a.SlotId, slotId, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    existing.DisplayName = modelCfg.AccessoryName;
+                    existing.Intent = (int)(options?.Intent ?? DeadlockPlayground.Importer.CustomModelAutoRigger.AccessoryIntent.AddAccessory);
+                    existing.ModelConfig = modelCfg;
+                }
+                else
+                {
+                    heroEntry.Accessories.Add(new WorkspaceAccessoryEntry
+                    {
+                        SlotId = slotId,
+                        DisplayName = modelCfg.AccessoryName,
+                        Intent = (int)(options?.Intent ?? DeadlockPlayground.Importer.CustomModelAutoRigger.AccessoryIntent.AddAccessory),
+                        Visible = true,
+                        ModelConfig = modelCfg
+                    });
+                }
+
+                Manifest.LastActiveHeroId = heroId;
+                Manifest.LastActiveAssetType = "Accessory";
+                Manifest.LastActiveAssetPath = relPath;
+
+                SaveManifest();
+                HasUnsavedChanges = true;
+                OnWorkspaceChanged?.Invoke();
+                GD.Print($"[ModWorkspaceSession] Staged accessory '{slotId}' ({modelCfg.AccessoryName}) for '{heroId}': {relPath}");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ModWorkspaceSession] Failed to stage accessory '{slotId}': {ex.Message}");
+            }
+        }
+
+        public void DiscardAccessory(string heroId, string slotId)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(slotId)) return;
+            if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry?.Accessories == null)
+                return;
+
+            try
+            {
+                var target = heroEntry.Accessories.FirstOrDefault(a => string.Equals(a.SlotId, slotId, StringComparison.OrdinalIgnoreCase));
+                if (target != null)
+                {
+                    string diskPath = ResolveCustomModelDiskPath(target.ModelConfig);
+                    heroEntry.Accessories.Remove(target);
+
+                    if (!string.IsNullOrEmpty(diskPath) && File.Exists(diskPath))
+                    {
+                        try { File.Delete(diskPath); } catch { }
+                    }
+                    string accSlotDir = Path.GetDirectoryName(diskPath);
+                    if (!string.IsNullOrEmpty(accSlotDir) && Directory.Exists(accSlotDir) && Directory.GetFiles(accSlotDir).Length == 0)
+                    {
+                        try { Directory.Delete(accSlotDir, false); } catch { }
+                    }
+                }
+
+                if (heroEntry.Assets.Count == 0 && heroEntry.CustomModel == null && heroEntry.Accessories.Count == 0)
+                {
+                    Manifest.Heroes.Remove(heroId);
+                }
+
+                SaveManifest();
+                HasUnsavedChanges = true;
+                OnWorkspaceChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ModWorkspaceSession] Failed to discard accessory '{slotId}': {ex.Message}");
+            }
+        }
+
+        public void RenameAccessorySlot(string heroId, string slotId, string newName)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(slotId) || string.IsNullOrWhiteSpace(newName))
+                return;
+            if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry?.Accessories == null)
+                return;
+
+            var acc = heroEntry.Accessories.FirstOrDefault(a => string.Equals(a.SlotId, slotId, StringComparison.OrdinalIgnoreCase));
+            if (acc == null) return;
+
+            string trimmed = newName.Trim();
+            acc.DisplayName = trimmed;
+            if (acc.ModelConfig != null)
+            {
+                acc.ModelConfig.AccessoryName = trimmed;
+            }
+            SaveManifest();
+            HasUnsavedChanges = true;
+            OnWorkspaceChanged?.Invoke();
+        }
+
+        public void SetAccessoryVisibility(string heroId, string slotId, bool visible)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(slotId)) return;
+            if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry?.Accessories == null) return;
+            var target = heroEntry.Accessories.FirstOrDefault(a => string.Equals(a.SlotId, slotId, StringComparison.OrdinalIgnoreCase));
+            if (target == null || target.Visible == visible) return;
+            target.Visible = visible;
+            SaveManifest();
+            HasUnsavedChanges = true;
+            OnWorkspaceChanged?.Invoke();
+        }
+
+        public void DiscardCustomModel(string heroId, bool includeAccessories = true)
+        {
+            if (string.IsNullOrEmpty(heroId)) return;
+            if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry == null)
+                return;
+
+            try
+            {
+                if (heroEntry.CustomModel != null)
+                {
+                    string diskPath = ResolveCustomModelDiskPath(heroEntry.CustomModel);
+                    heroEntry.CustomModel = null;
+
+                    if (!string.IsNullOrEmpty(diskPath) && File.Exists(diskPath))
+                    {
+                        try { File.Delete(diskPath); } catch { }
+                    }
+                }
+
+                if (includeAccessories && heroEntry.Accessories != null && heroEntry.Accessories.Count > 0)
+                {
+                    foreach (var acc in heroEntry.Accessories.ToList())
+                    {
+                        string accDisk = ResolveCustomModelDiskPath(acc?.ModelConfig);
+                        if (!string.IsNullOrEmpty(accDisk) && File.Exists(accDisk))
+                        {
+                            try { File.Delete(accDisk); } catch { }
+                        }
+                    }
+                    heroEntry.Accessories.Clear();
+                }
+
+                if (heroEntry.Assets.Count == 0 && heroEntry.CustomModel == null && (heroEntry.Accessories == null || heroEntry.Accessories.Count == 0))
                 {
                     Manifest.Heroes.Remove(heroId);
                 }
@@ -1833,6 +2142,11 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 if (hero.CustomModel != null)
                 {
                     count++;
+                }
+
+                if (hero.Accessories != null)
+                {
+                    count += hero.Accessories.Count;
                 }
 
                 foreach (var asset in hero.Assets)

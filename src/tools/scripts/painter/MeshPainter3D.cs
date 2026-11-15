@@ -1977,7 +1977,21 @@ namespace DeadlockPlayground.Painter
                 {
                     _isMouseDown = true;
                     _strokeInProgress = true;
+                    if (_layerManager != null && _layerManager.IsBaseTextureActive)
+                    {
+                        _layerManager.GetBaseTextureResource();
+                    }
                     _layerManager?.RecordGpuUndoSnapshot();
+                    if (_layerManager != null && _layerManager.IsBaseTextureActive)
+                    {
+                        _layerManager.HasBaseTextureEdits = true;
+                        if (ToolMode == BrushToolMode.Erase)
+                        {
+                            _layerManager.HasBaseAlphaEdits = true;
+                            _layerManager.EnableAlphaTransparency = true;
+                        }
+                        _layerManager.ApplyOverlayParametersToMeshes();
+                    }
                     if (_layerManager?.ActiveLayer != null)
                     {
                         _layerManager.ActiveLayer.IsCpuSynced = false;

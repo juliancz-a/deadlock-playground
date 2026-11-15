@@ -81,6 +81,9 @@ namespace DeadlockPlayground.Painter
         public Dictionary<(string subKey, MaterialTextureChannel channel), Image> PreBakedChannelsBySubmesh { get; set; } = new();
         public Dictionary<(string subKey, MaterialTextureChannel channel), Image> PreExtractedChannelOriginalsBySubmesh { get; set; } = new();
         public HashSet<string> ExcludedAssetVpkPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool PreserveBaseAlpha { get; set; } = true;
+        public HashSet<string> SubmeshesWithEditedAlpha { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> SubmeshesWithEditedBaseTexture { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class SkinExportResult
@@ -222,11 +225,26 @@ namespace DeadlockPlayground.Painter
                 candidateSubmeshes = config.TargetSubmeshes ?? new List<SubmeshNodeInfo>();
             }
 
+            if (_layerManager != null)
+            {
+                config.PreserveBaseAlpha = _layerManager.PreserveBaseAlpha;
+            }
+
             foreach (var submesh in candidateSubmeshes)
             {
                 if (submesh == null) continue;
                 int sIdx = submesh.SurfaceIndex;
                 string subKey = ResolveSubmeshKey(submesh);
+                string matKeySub = submesh.Mesh != null ? (_layerManager?.GetMaterialKey(submesh.Mesh, sIdx) ?? submesh.OriginalVmatPath) : submesh.OriginalVmatPath;
+
+                if (_layerManager != null && _layerManager.HasEditedAlphaForMaterial(matKeySub))
+                {
+                    config.SubmeshesWithEditedAlpha.Add(subKey);
+                }
+                if (_layerManager != null && _layerManager.HasEditedBaseTextureForMaterial(matKeySub))
+                {
+                    config.SubmeshesWithEditedBaseTexture.Add(subKey);
+                }
 
                 if (!config.PreBakedAtlasesBySubmesh.ContainsKey(subKey))
                 {
@@ -273,39 +291,48 @@ namespace DeadlockPlayground.Painter
 
                 if (!config.PreExtractedBaseImagesBySubmesh.ContainsKey(subKey) && submesh.Mesh != null)
                 {
-                    var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
-                           ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
-                           ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
-                           ?? submesh.Mesh.MaterialOverride;
-
-                    if (mat != null)
+                    if (config.SubmeshesWithEditedBaseTexture.Contains(subKey) && _layerManager != null)
                     {
-                        var baseTex = SkinLayerManager.ExtractBaseTexture(mat);
-                        if (baseTex != null)
+                        var editedBaseImg = _layerManager.ExportBaseTextureToImage(matKeySub);
+                        if (editedBaseImg != null && !editedBaseImg.IsEmpty())
                         {
-                            var bImg = baseTex.GetImage();
-                            if (bImg != null && !bImg.IsEmpty())
+                            config.PreExtractedBaseImagesBySubmesh[subKey] = editedBaseImg;
+                            config.PreExtractedBaseImages[sIdx] = editedBaseImg;
+                        }
+                    }
+
+                    if (!config.PreExtractedBaseImagesBySubmesh.ContainsKey(subKey))
+                    {
+                        var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
+                               ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
+                               ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
+                               ?? submesh.Mesh.MaterialOverride;
+
+                        if (mat != null)
+                        {
+                            var baseTex = SkinLayerManager.ExtractBaseTexture(mat);
+                            if (baseTex != null)
                             {
-                                if (bImg.IsCompressed()) bImg.Decompress();
-                                var dup = (Image)bImg.Duplicate();
-                                if (dup.HasMipmaps()) dup.ClearMipmaps();
-                                if (dup.GetFormat() != Image.Format.Rgba8) dup.Convert(Image.Format.Rgba8);
-                                byte[] bData = dup.GetData();
-                                if (bData != null)
+                                var bImg = baseTex.GetImage();
+                                if (bImg != null && !bImg.IsEmpty())
                                 {
-                                    int expectedBytes = dup.GetWidth() * dup.GetHeight() * 4;
-                                    if (bData.Length > expectedBytes)
+                                    if (bImg.IsCompressed()) bImg.Decompress();
+                                    var dup = (Image)bImg.Duplicate();
+                                    if (dup.HasMipmaps()) dup.ClearMipmaps();
+                                    if (dup.GetFormat() != Image.Format.Rgba8) dup.Convert(Image.Format.Rgba8);
+                                    byte[] bData = dup.GetData();
+                                    if (bData != null)
                                     {
-                                        Array.Resize(ref bData, expectedBytes);
+                                        int expectedBytes = dup.GetWidth() * dup.GetHeight() * 4;
+                                        if (bData.Length > expectedBytes)
+                                        {
+                                            Array.Resize(ref bData, expectedBytes);
+                                            dup = Image.CreateFromData(dup.GetWidth(), dup.GetHeight(), false, Image.Format.Rgba8, bData);
+                                        }
                                     }
-                                    for (int pIdx = 3; pIdx < expectedBytes; pIdx += 4)
-                                    {
-                                        bData[pIdx] = 255;
-                                    }
-                                    dup = Image.CreateFromData(dup.GetWidth(), dup.GetHeight(), false, Image.Format.Rgba8, bData);
+                                    config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
+                                    config.PreExtractedBaseImages[sIdx] = dup;
                                 }
-                                config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
-                                config.PreExtractedBaseImages[sIdx] = dup;
                             }
                         }
                     }
@@ -343,6 +370,8 @@ namespace DeadlockPlayground.Painter
                             while (curr != null)
                             {
                                 if (curr.Name.ToString().Contains("Custom_Rigged_Character") ||
+                                    curr.Name.ToString().StartsWith("Custom_Accessory_", StringComparison.Ordinal) ||
+                                    curr.Name.ToString() == "Custom_Rigid_Accessory" ||
                                     (curr.HasMeta("IsCustomImportedMesh") && curr.GetMeta("IsCustomImportedMesh").AsBool()))
                                 {
                                     sm.IsCustomImportedMesh = true;
@@ -401,21 +430,74 @@ namespace DeadlockPlayground.Painter
                 );
 
                 // Register kept visible vanilla props & split composite surfaces (e.g. shotgun, crossbow, stake)
+                // Optimization: if ALL surfaces of a composite hero mesh are kept & unpainted (e.g. "Add Hat Only" mod),
+                // keep the original standalone .dmx file untouched rather than decomposing vanilla body geometry to SMD.
                 if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
                 {
                     bool anySelectedFlag = config.TargetSubmeshes.Any(s => s.IsSelected);
                     var keptCompositeMeshes = new List<MeshInstance3D>();
                     var keptStandaloneNames = new List<string>();
+                    var fullyKeptParents = new HashSet<MeshInstance3D>();
+
+                    var byParent = config.TargetSubmeshes
+                        .Where(sm => sm?.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && !sm.IsCustomImportedMesh && sm.Mesh.HasMeta("ParentCompositeMesh"))
+                        .GroupBy(sm => sm.Mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>())
+                        .Where(g => g.Key != null && GodotObject.IsInstanceValid(g.Key));
+
+                    foreach (var grp in byParent)
+                    {
+                        var parentMi = grp.Key;
+                        int totalSurfs = parentMi.Mesh?.GetSurfaceCount() ?? 0;
+                        if (totalSurfs <= 0) continue;
+
+                        bool allSurfsKept = true;
+                        for (int s = 0; s < totalSurfs; s++)
+                        {
+                            if (parentMi.HasMeta($"SurfaceKept_{s}") && !parentMi.GetMeta($"SurfaceKept_{s}").AsBool())
+                            {
+                                allSurfsKept = false;
+                                break;
+                            }
+                        }
+                        if (!allSurfsKept) continue;
+
+                        bool isParentDeformed = parentMi.HasMeta("IsDeformedOriginalMesh") && parentMi.GetMeta("IsDeformedOriginalMesh").AsBool();
+                        bool allSelectedAndVisible = grp.Count() >= totalSurfs && grp.All(sm =>
+                            sm.Mesh.Visible &&
+                            (!anySelectedFlag || sm.IsSelected) &&
+                            (_layerManager == null || !_layerManager.HasPaintStrokes(_layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName)) &&
+                            !sm.IsDirty &&
+                            !(sm.Mesh.HasMeta("IsDeformedOriginalMesh") && sm.Mesh.GetMeta("IsDeformedOriginalMesh").AsBool()));
+
+                        if (allSelectedAndVisible && !isParentDeformed)
+                        {
+                            fullyKeptParents.Add(parentMi);
+                            keptStandaloneNames.Add(parentMi.Name.ToString());
+                        }
+                    }
+
                     foreach (var sm in config.TargetSubmeshes)
                     {
                         if (sm?.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh) || sm.IsCustomImportedMesh || !sm.Mesh.Visible)
                             continue;
                         if (anySelectedFlag && !sm.IsSelected)
                             continue;
+                        bool isDeformed = sm.Mesh.HasMeta("IsDeformedOriginalMesh") && sm.Mesh.GetMeta("IsDeformedOriginalMesh").AsBool();
                         if (sm.Mesh.HasMeta("ParentCompositeMesh"))
+                        {
+                            var pMi = sm.Mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                            if (pMi != null && fullyKeptParents.Contains(pMi))
+                                continue;
                             keptCompositeMeshes.Add(sm.Mesh);
+                        }
+                        else if (isDeformed)
+                        {
+                            keptCompositeMeshes.Add(sm.Mesh);
+                        }
                         else
+                        {
                             keptStandaloneNames.Add(!string.IsNullOrEmpty(sm.RawName) ? sm.RawName : sm.Mesh.Name.ToString());
+                        }
                     }
                     CustomModelExporter.AddPreservedVanillaMeshes(preExtractedCustomBundle, keptCompositeMeshes, keptStandaloneNames, skeleton);
                 }
@@ -1721,7 +1803,13 @@ bool isSourceModInTargetAddons = false;
             }
 
             Image baseImg = null;
-            if (origMeta?.BaseRgbaImage != null && !origMeta.BaseRgbaImage.IsEmpty())
+            bool hasEditedBase = config.SubmeshesWithEditedBaseTexture != null && config.SubmeshesWithEditedBaseTexture.Contains(subKey);
+            bool hasEditedAlpha = config.SubmeshesWithEditedAlpha != null && config.SubmeshesWithEditedAlpha.Contains(subKey);
+            if (hasEditedBase && config.PreExtractedBaseImagesBySubmesh.TryGetValue(subKey, out var editedSubBase) && editedSubBase != null && !editedSubBase.IsEmpty())
+            {
+                baseImg = editedSubBase;
+            }
+            else if (origMeta?.BaseRgbaImage != null && !origMeta.BaseRgbaImage.IsEmpty())
             {
                 baseImg = origMeta.BaseRgbaImage;
             }
@@ -1852,13 +1940,38 @@ bool isSourceModInTargetAddons = false;
                 if (paintData != null && baseData != null && paintData.Length >= expectedBytes && baseData.Length >= expectedBytes)
                 {
                     bool sameRes = (origMeta != null && origMeta.Width == exportWidth && origMeta.Height == exportHeight && origMeta.RawAlpha != null && origMeta.RawAlpha.Length == pixelCount);
+                    bool preserveOrigVtexAlpha = config.PreserveBaseAlpha && !hasEditedAlpha;
 
                     for (int i = 0; i < pixelCount; i++)
                     {
                         int idx = i * 4;
                         if (idx + 3 >= paintData.Length || idx + 3 >= baseData.Length) break;
 
+                        byte origBaseA = baseData[idx + 3];
+                        if (preserveOrigVtexAlpha && origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
+                        {
+                            if (sameRes && i < origMeta.RawAlpha.Length)
+                            {
+                                origBaseA = origMeta.RawAlpha[i];
+                            }
+                            else if (origMeta.Width > 0 && origMeta.Height > 0)
+                            {
+                                int srcX = Mathf.Clamp(Mathf.FloorToInt((i % exportWidth) * (float)origMeta.Width / exportWidth), 0, origMeta.Width - 1);
+                                int srcY = Mathf.Clamp(Mathf.FloorToInt((i / exportWidth) * (float)origMeta.Height / exportHeight), 0, origMeta.Height - 1);
+                                int srcIdx = srcY * origMeta.Width + srcX;
+                                if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
+                                {
+                                    origBaseA = origMeta.RawAlpha[srcIdx];
+                                }
+                            }
+                        }
+
                         float pA = paintData[idx + 3] / 255.0f;
+                        if (config.PreserveBaseAlpha)
+                        {
+                            pA = Mathf.Min(pA, origBaseA / 255.0f);
+                        }
+
                         if (pA <= 0.001f)
                         {
                             paintData[idx] = baseData[idx];
@@ -1880,26 +1993,18 @@ bool isSourceModInTargetAddons = false;
                             paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
                         }
 
-                        if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
+                        if (preserveOrigVtexAlpha)
                         {
-                            if (sameRes && i < origMeta.RawAlpha.Length)
-                            {
-                                paintData[idx + 3] = origMeta.RawAlpha[i];
-                            }
-                            else if (origMeta.Width > 0 && origMeta.Height > 0)
-                            {
-                                int srcX = Mathf.Clamp(Mathf.FloorToInt((i % exportWidth) * (float)origMeta.Width / exportWidth), 0, origMeta.Width - 1);
-                                int srcY = Mathf.Clamp(Mathf.FloorToInt((i / exportWidth) * (float)origMeta.Height / exportHeight), 0, origMeta.Height - 1);
-                                int srcIdx = srcY * origMeta.Width + srcX;
-                                if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
-                                {
-                                    paintData[idx + 3] = origMeta.RawAlpha[srcIdx];
-                                }
-                            }
+                            paintData[idx + 3] = origBaseA;
+                        }
+                        else if (config.PreserveBaseAlpha && hasEditedAlpha)
+                        {
+                            paintData[idx + 3] = baseData[idx + 3];
                         }
                         else
                         {
-                            paintData[idx + 3] = baseData[idx + 3];
+                            // Unconstrained alpha mode or edited base alpha
+                            paintData[idx + 3] = (byte)Mathf.Clamp(Mathf.Max((int)paintData[idx + 3], (int)baseData[idx + 3]), 0, 255);
                         }
                     }
 
@@ -2614,11 +2719,11 @@ bool isSourceModInTargetAddons = false;
                                                 byte b = (byte)(c & 0xFF);
                                                 byte g = (byte)((c >> 8) & 0xFF);
                                                 byte r = (byte)((c >> 16) & 0xFF);
-                                                d32[dstIdx] = (uint)(r | (g << 8) | (b << 16) | 0xFF000000u);
+                                                d32[dstIdx] = (uint)(r | (g << 8) | (b << 16) | ((uint)a << 24));
                                             }
                                             else
                                             {
-                                                d32[dstIdx] = c | 0xFF000000u;
+                                                d32[dstIdx] = c;
                                             }
                                         }
                                     }
@@ -2691,6 +2796,25 @@ bool isSourceModInTargetAddons = false;
             sb.AppendLine("{");
             sb.AppendLine("\tshader = \"pbr.vfx\"");
             sb.AppendLine("\tF_SPECULAR = 1");
+            bool needsAlphaTest = false;
+            if (submesh?.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh))
+            {
+                var matCheck = submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex);
+                if (matCheck is StandardMaterial3D stdM && stdM.Transparency != BaseMaterial3D.TransparencyEnum.Disabled)
+                {
+                    needsAlphaTest = true;
+                }
+                else if (matCheck is ShaderMaterial shM)
+                {
+                    var enCutout = shM.GetShaderParameter("enable_alpha_cutout");
+                    if (enCutout.VariantType == Variant.Type.Bool && enCutout.AsBool()) needsAlphaTest = true;
+                }
+            }
+            if (needsAlphaTest)
+            {
+                sb.AppendLine("\tF_ALPHA_TEST = 1");
+                sb.AppendLine("\tg_flAlphaTestReference = 0.500000");
+            }
             sb.AppendLine($"\tg_tColor = resource:\"{texPath}\"");
 
             if (!string.IsNullOrEmpty(normalVtex))

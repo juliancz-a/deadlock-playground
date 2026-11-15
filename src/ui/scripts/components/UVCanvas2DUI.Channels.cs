@@ -92,8 +92,16 @@ namespace DeadlockPlayground.UI
             {
                 var entry = chSet?.GetChannel(ch);
                 bool isReal = entry != null && entry.IsPresent && !entry.IsDefaultFallback;
-                bool isEnabled = entry?.IsEnabled ?? true;
+                bool isDirty = entry != null && entry.IsDirty;
                 bool isSelected = ch == activeChannel;
+
+                // Hide non-Color channel buttons (AO, Normal, Roughness, Shadow) when this material has no map for them
+                if (ch != MaterialTextureChannel.Color && !isReal && !isDirty && !isSelected)
+                {
+                    continue;
+                }
+
+                bool isEnabled = entry?.IsEnabled ?? true;
 
                 var pillBox = new HBoxContainer();
                 pillBox.AddThemeConstantOverride("separation", 2);
@@ -120,7 +128,7 @@ namespace DeadlockPlayground.UI
                     MaterialTextureChannel.Shadow => "SHADOW",
                     _ => ch.ToString().ToUpperInvariant()
                 };
-                string suffix = (entry != null && entry.IsDefaultFallback) ? " (Def)" : "";
+                string suffix = (entry != null && entry.IsDefaultFallback && !isDirty) ? " (Def)" : "";
 
                 var pillBtn = new Button
                 {
@@ -179,7 +187,8 @@ namespace DeadlockPlayground.UI
             {
                 foreach (var ex in extras)
                 {
-                    if (chSet.Channels.ContainsKey(ex))
+                    if (chSet.Channels.TryGetValue(ex, out var exEntry) && exEntry != null &&
+                        ((exEntry.IsPresent && !exEntry.IsDefaultFallback) || exEntry.IsDirty || ex == activeChannel))
                     {
                         _extraChannelMapIds.Add(ex);
                     }

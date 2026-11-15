@@ -286,9 +286,11 @@ public partial class ColorAdjustmentModalUI : PanelContainer
             return;
         }
 
-        if (_activeLayer.IsLocked && !_layerManager.IsBaseTextureActive)
+        if (_activeLayer.IsLocked)
         {
-            StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{_activeLayer.Name}' because it is locked.");
+            StudioUIManager.Instance?.ShowToast(_layerManager.IsBaseTextureActive
+                ? "Base Texture is locked. Click the lock icon on BASE TEXTURE to unlock it first."
+                : $"Cannot adjust layer '{_activeLayer.Name}' because it is locked.");
             return;
         }
 

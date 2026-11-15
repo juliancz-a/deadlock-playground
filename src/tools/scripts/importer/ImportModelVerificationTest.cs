@@ -3853,6 +3853,134 @@ namespace DeadlockPlayground.Tests
                     }
                     gordon31?.QueueFree();
                 }
+
+                // -----------------------------------------------------------------
+                // TEST 32: Painter PreserveBaseAlpha (Clip to Base Alpha) & Unlockable Base Texture Alpha Erase
+                // -----------------------------------------------------------------
+                GD.Print("\n--- [TEST 32] Painter PreserveBaseAlpha & Base Texture Alpha Erase Verification ---");
+                {
+                    int texW = 64;
+                    int texH = 64;
+                    var baseImg = Image.CreateEmpty(texW, texH, false, Image.Format.Rgba8);
+                    for (int y = 0; y < texH; y++)
+                    {
+                        for (int x = 0; x < texW; x++)
+                        {
+                            // Left half (x < 32): Transparent (A = 0); Right half (x >= 32): Opaque Blue (A = 255)
+                            if (x < 32)
+                                baseImg.SetPixel(x, y, new Color(0f, 0f, 0f, 0f));
+                            else
+                                baseImg.SetPixel(x, y, new Color(0.1f, 0.4f, 0.9f, 1.0f));
+                        }
+                    }
+
+                    var baseTex = ImageTexture.CreateFromImage(baseImg);
+                    var testHeroRoot = new Node3D { Name = "Hero_AlphaTest" };
+                    var testMeshInst = new MeshInstance3D { Name = "alpha_test_mesh" };
+                    var quadMesh = new QuadMesh { Size = Vector2.One };
+                    var stdMat = new StandardMaterial3D
+                    {
+                        ResourceName = "alpha_test_mat",
+                        AlbedoTexture = baseTex,
+                        Transparency = BaseMaterial3D.TransparencyEnum.AlphaScissor
+                    };
+                    quadMesh.Material = stdMat;
+                    testMeshInst.Mesh = quadMesh;
+                    testHeroRoot.AddChild(testMeshInst);
+                    Root.AddChild(testHeroRoot);
+
+                    var testHierarchy32 = new DeadlockPlayground.Painter.HeroMeshHierarchy();
+                    Root.AddChild(testHierarchy32);
+                    testHierarchy32.ScanHero(testHeroRoot);
+
+                    var layerMgr = new DeadlockPlayground.Painter.SkinLayerManager();
+                    Root.AddChild(layerMgr);
+                    layerMgr.MeshHierarchy = testHierarchy32;
+                    layerMgr.SetupForHero(testHeroRoot);
+                    layerMgr.RegisterSubmesh(testMeshInst);
+                    layerMgr.SetPaintTargetMesh(testMeshInst);
+                    layerMgr.RebuildBaseAtlasBuffer();
+
+                    // 1. Verify PreserveBaseAlpha is true by default and Base Texture is locked by default
+                    if (!layerMgr.PreserveBaseAlpha || !layerMgr.IsBaseTextureLocked)
+                    {
+                        GD.PrintErr($"FAIL: [TEST 32] Expected PreserveBaseAlpha=true ({layerMgr.PreserveBaseAlpha}) and IsBaseTextureLocked=true ({layerMgr.IsBaseTextureLocked}) by default.");
+                        allPassed = false;
+                    }
+
+                    // 2. Apply full-canvas recolor on Paint Layer 1 with PreserveBaseAlpha = true
+                    layerMgr.SelectLayer(0);
+                    layerMgr.FillActiveLayer2D(new Color(0.95f, 0.2f, 0.1f, 1.0f));
+
+                    var subInfo = testHierarchy32.Submeshes.FirstOrDefault();
+                    using var bakedRecolor = layerMgr.BakeCompositeImageForSubmesh(subInfo);
+                    if (bakedRecolor == null || bakedRecolor.IsEmpty())
+                    {
+                        GD.PrintErr("FAIL: [TEST 32] BakeCompositeImageForSubmesh returned null/empty image.");
+                        allPassed = false;
+                    }
+                    else
+                    {
+                        Color transPx = bakedRecolor.GetPixel(8, 32);
+                        Color opaqPx = bakedRecolor.GetPixel(48, 32);
+                        if (transPx.A8 != 0)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 32] Transparent pixel (8,32) was filled! Expected A8 == 0, got A8 == {transPx.A8} (RGBA={transPx})");
+                            allPassed = false;
+                        }
+                        else if (opaqPx.A8 != 255 || opaqPx.R < 0.7f)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 32] Opaque pixel (48,32) did not receive recolor or lost alpha! Got A8 == {opaqPx.A8}, R == {opaqPx.R:F2}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print($"PASS: [TEST 32.1] Full-canvas recolor with PreserveBaseAlpha=true preserved A8=0 on transparent pixels and recolored opaque pixels (R={opaqPx.R:F2}, A8={opaqPx.A8}).");
+                        }
+                    }
+
+                    // 3. Unlock Base Texture and erase opaque pixels at (48, 32) to A = 0
+                    layerMgr.SetBaseTextureLocked(false);
+                    layerMgr.SelectBaseTexture();
+                    layerMgr.PaintDab2D(new Vector2(48, 32), Colors.White, sizePx: 14.0f, hardness: 1.0f, flow: 1.0f, isErase: true);
+
+                    using var bakedErased = layerMgr.BakeCompositeImageForSubmesh(subInfo);
+                    if (bakedErased == null || bakedErased.IsEmpty())
+                    {
+                        GD.PrintErr("FAIL: [TEST 32] BakeCompositeImageForSubmesh after Base Texture erase returned null.");
+                        allPassed = false;
+                    }
+                    else
+                    {
+                        Color erasedPx = bakedErased.GetPixel(48, 32);
+                        if (erasedPx.A8 != 0)
+                        {
+                            GD.PrintErr($"FAIL: [TEST 32] Erasing unlocked Base Texture at (48,32) did not persist A8 == 0! Got A8 == {erasedPx.A8}");
+                            allPassed = false;
+                        }
+                        else
+                        {
+                            GD.Print("PASS: [TEST 32.2] Unlocking Base Texture and erasing pixels to A=0 persisted new transparency (A8=0) into final baked export image.");
+                        }
+                    }
+
+                    // 4. Reset Base Texture back to vanilla and verify (48, 32) is opaque again
+                    layerMgr.ResetBaseTexture();
+                    using var bakedReset = layerMgr.BakeCompositeImageForSubmesh(subInfo);
+                    if (bakedReset != null && bakedReset.GetPixel(48, 32).A8 == 255)
+                    {
+                        GD.Print("PASS: [TEST 32.3] ResetBaseTexture restored pristine original alpha (A8=255) at (48,32).");
+                    }
+                    else
+                    {
+                        GD.PrintErr("FAIL: [TEST 32.3] ResetBaseTexture did not restore original alpha at (48,32).");
+                        allPassed = false;
+                    }
+
+                    layerMgr.QueueFree();
+                    testHierarchy32.QueueFree();
+                    testHeroRoot.QueueFree();
+                }
             }
             catch (Exception ex)
             {

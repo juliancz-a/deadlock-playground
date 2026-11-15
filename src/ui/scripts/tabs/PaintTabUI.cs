@@ -130,13 +130,15 @@ public partial class PaintTabUI : VBoxContainer
 
     private Button _btnAddLayer;
     private Button _btnDeleteLayer;
-    private Button _btnAlphaLock;
     private Button _btnMoveUp;
     private Button _btnMoveDown;
     private VBoxContainer _layersListContainer;
     private OptionButton _optLayerBlend;
     private HSlider _sliderLayerOpacity;
     private Label _lblLayerOpacity;
+    private CheckBox _chkPreserveBaseAlpha;
+    private FileDialog _importBaseTexDialog;
+    private FileDialog _exportSingleBaseTexDialog;
     private ConfirmationDialog _renameLayerDialog;
     private LineEdit _renameLayerInput;
     public static bool IsRenameDialogOpen { get; private set; }
@@ -321,7 +323,6 @@ public partial class PaintTabUI : VBoxContainer
         // Layers
         _btnAddLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnAddLayer");
         _btnDeleteLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnDeleteLayer");
-        _btnAlphaLock = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnAlphaLock");
         _btnMoveUp = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnMoveUp");
         _btnMoveDown = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnMoveDown");
         _layersListContainer = GetNodeOrNull<VBoxContainer>("LayersCard/VBox/ScrollContainer/LayersListContainer");
@@ -331,19 +332,31 @@ public partial class PaintTabUI : VBoxContainer
 
         _iconAlphaLock ??= GD.Load<Texture2D>("res://assets/at-icons/checkerboard.svg");
         _iconLock ??= GD.Load<Texture2D>("res://assets/at-icons/lock.svg");
-        ConfigureLayerIconButton(_btnAlphaLock, _iconAlphaLock, 17);
-        ConfigureLayerIconButton(_btnMoveUp, _btnMoveUp?.Icon, 18);
-        ConfigureLayerIconButton(_btnMoveDown, _btnMoveDown?.Icon, 18);
-        if (_btnAlphaLock != null)
+        _iconUnlock ??= GD.Load<Texture2D>("res://assets/at-icons/unlock.svg");
+        ConfigureLayerIconButton(_btnMoveUp, _btnMoveUp?.Icon, 20);
+        ConfigureLayerIconButton(_btnMoveDown, _btnMoveDown?.Icon, 20);
+
+        var layersCardVBox = GetNodeOrNull<VBoxContainer>("LayersCard/VBox");
+        if (layersCardVBox != null)
         {
-            _btnAlphaLock.Toggled += (locked) =>
+            _chkPreserveBaseAlpha = new CheckBox
             {
-                if (_layerManager?.ActiveLayer != null && !_layerManager.IsBaseTextureActive)
-                {
-                    _layerManager.ActiveLayer.IsAlphaLocked = locked;
-                    StudioUIManager.Instance?.ShowToast(locked ? "Alpha Locked" : "Alpha Unlocked");
-                }
+                Name = "ChkPreserveBaseAlpha",
+                Text = "Clip Paint Layers to Base Alpha",
+                ButtonPressed = _layerManager?.PreserveBaseAlpha ?? true,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                TooltipText = "When enabled (default), paint layers and bucket fills clip to the Base Texture's Alpha channel so transparent cutouts and packed masks are never filled with solid color."
             };
+            _chkPreserveBaseAlpha.Toggled += (pressed) =>
+            {
+                _layerManager?.SetPreserveBaseAlpha(pressed);
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                uvCanvas?.QueueCanvasRedraw();
+                StudioUIManager.Instance?.ShowToast(pressed
+                    ? "Clip to Base Alpha Enabled (Transparency Preserved)"
+                    : "Clip to Base Alpha Disabled (Unconstrained Alpha)");
+            };
+            layersCardVBox.AddChild(_chkPreserveBaseAlpha);
         }
 
         // Export
@@ -515,6 +528,8 @@ public partial class PaintTabUI : VBoxContainer
             || (_exportFileDialog != null && _exportFileDialog.Visible)
             || (_exportActiveLayerDialog != null && _exportActiveLayerDialog.Visible)
             || (_importImageDialog != null && _importImageDialog.Visible)
+            || (_importBaseTexDialog != null && _importBaseTexDialog.Visible)
+            || (_exportSingleBaseTexDialog != null && _exportSingleBaseTexDialog.Visible)
             || (_confirmResetWorkspaceDialog != null && _confirmResetWorkspaceDialog.Visible)
             || (_renameLayerDialog != null && _renameLayerDialog.Visible)
             || (_modDialogInstance != null && _modDialogInstance.Visible)
@@ -763,9 +778,11 @@ public partial class PaintTabUI : VBoxContainer
             StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is hidden.");
             return;
         }
-        if (layer.IsLocked && !_layerManager.IsBaseTextureActive)
+        if (layer.IsLocked)
         {
-            StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is locked.");
+            StudioUIManager.Instance?.ShowToast(_layerManager.IsBaseTextureActive
+                ? "Base Texture is locked. Click the lock icon on BASE TEXTURE to unlock it first."
+                : $"Cannot apply filter to '{layer.Name}' because it is locked.");
             return;
         }
 
@@ -849,9 +866,11 @@ public partial class PaintTabUI : VBoxContainer
             StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is hidden.");
             return;
         }
-        if (layer.IsLocked && !_layerManager.IsBaseTextureActive)
+        if (layer.IsLocked)
         {
-            StudioUIManager.Instance?.ShowToast($"Cannot apply filter to '{layer.Name}' because it is locked.");
+            StudioUIManager.Instance?.ShowToast(_layerManager.IsBaseTextureActive
+                ? "Base Texture is locked. Click the lock icon on BASE TEXTURE to unlock it first."
+                : $"Cannot apply filter to '{layer.Name}' because it is locked.");
             return;
         }
 
@@ -926,9 +945,11 @@ public partial class PaintTabUI : VBoxContainer
             StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{layer.Name}' because it is hidden.");
             return;
         }
-        if (layer.IsLocked && !_layerManager.IsBaseTextureActive)
+        if (layer.IsLocked)
         {
-            StudioUIManager.Instance?.ShowToast($"Cannot adjust layer '{layer.Name}' because it is locked.");
+            StudioUIManager.Instance?.ShowToast(_layerManager.IsBaseTextureActive
+                ? "Base Texture is locked. Click the lock icon on BASE TEXTURE to unlock it first."
+                : $"Cannot adjust layer '{layer.Name}' because it is locked.");
             return;
         }
 
@@ -1994,7 +2015,9 @@ public partial class PaintTabUI : VBoxContainer
                         }
 
                         bool isActiveTarget = string.Equals(_layerManager.ActiveMaterialKey, chCtxKey, StringComparison.OrdinalIgnoreCase);
-                        int activeIdx = Math.Clamp(savedActiveIdx, 0, Math.Max(0, restoredLayers.Count - 1));
+                        int activeIdx = savedActiveIdx == SkinLayerManager.BaseTextureLayerIndex
+                            ? SkinLayerManager.BaseTextureLayerIndex
+                            : Math.Clamp(savedActiveIdx, 0, Math.Max(0, restoredLayers.Count - 1));
                         _layerManager.RestoreMaterialContext(chCtxKey, new Vector2I(w, h), restoredLayers, activeIdx, isActiveTarget);
                         _flushedMaterialKeys.Add(chCtxKey);
 
@@ -2013,7 +2036,14 @@ public partial class PaintTabUI : VBoxContainer
                         string mk = _layerManager.GetMaterialKey(sub.Mesh, sub.SurfaceIndex);
                         if (!string.IsNullOrEmpty(mk) && syncedMatKeys.Add(mk))
                         {
-                            _layerManager.SyncChannelsToTargetMaterials(mk);
+                            try
+                            {
+                                _layerManager.SyncChannelsToTargetMaterials(mk);
+                            }
+                            catch (Exception syncEx)
+                            {
+                                GD.PrintErr($"[PaintTabUI] Non-fatal channel sync skipped for '{mk}': {syncEx.Message}");
+                            }
                         }
                     }
                 }
@@ -2231,7 +2261,7 @@ public partial class PaintTabUI : VBoxContainer
             if (l != null && !l.IsBlank()) { anyNonBlank = true; break; }
         }
 
-        if (!anyNonBlank)
+        if (!anyNonBlank && !_layerManager.HasEditedBaseTextureForMaterial(matKey) && !_layerManager.HasEditedAlphaForMaterial(matKey))
         {
             string baseMatKey = SkinLayerManager.StripChannelSuffix(matKey);
             StripWorkspaceChannelTag(matKey, out var parsedCh);
@@ -2909,9 +2939,9 @@ public partial class PaintTabUI : VBoxContainer
 
         if (_currentHero != null && GodotObject.IsInstanceValid(_currentHero))
         {
-            ShowAllMeshesRecursive(_currentHero);
+            RestoreCharacterTabMeshVisibility(_currentHero);
         }
-        _meshHierarchy?.ShowAll();
+        _meshHierarchy?.SyncPreSoloFromVisibility();
 
         //Exit standalone particle texture mode and restore active character material in 2D Canvas & LayerManager
         var uvCanvas = GetTree()?.Root?.FindChild("UVCanvas2D", true, false) as UVCanvas2DUI
@@ -3556,6 +3586,8 @@ public partial class PaintTabUI : VBoxContainer
     {
         if (_layersListContainer == null || _layerManager == null) return;
 
+        _chkPreserveBaseAlpha?.SetPressedNoSignal(_layerManager.PreserveBaseAlpha);
+
         foreach (Node child in _layersListContainer.GetChildren())
         {
             child.QueueFree();
@@ -3568,6 +3600,7 @@ public partial class PaintTabUI : VBoxContainer
             var layer = layers[i];
 
             var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 4);
 
             var visCheck = new CheckBox
             {
@@ -3580,7 +3613,7 @@ public partial class PaintTabUI : VBoxContainer
             {
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 SizeFlagsVertical = SizeFlags.Fill,
-                CustomMinimumSize = new Vector2(0, 26),
+                CustomMinimumSize = new Vector2(0, 30),
                 ClipContents = true
             };
 
@@ -3617,50 +3650,103 @@ public partial class PaintTabUI : VBoxContainer
             btnWrapper.AddChild(selectBtn);
 
             EnsureRenameButtonStyles();
+            _iconAlphaLock ??= GD.Load<Texture2D>("res://assets/at-icons/checkerboard.svg");
+            bool isLayerAlphaConstrained = layer.ClipToBaseAlpha || layer.IsAlphaLocked;
+            var alphaClipBtn = new Button
+            {
+                ToggleMode = true,
+                ButtonPressed = isLayerAlphaConstrained,
+                Modulate = isLayerAlphaConstrained ? new Color(0.45f, 0.85f, 1.0f, 1.0f) : new Color(0.75f, 0.78f, 0.85f, 0.75f),
+                TooltipText = "Alpha Lock / Clip to Base Alpha\nClick: Toggle Clip to Base Alpha\nShift+Click: Toggle Layer Alpha Lock",
+                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                Disabled = layer.IsLocked
+            };
+            ConfigureLayerIconButton(alphaClipBtn, _iconAlphaLock, 18);
+
+            int capturedIdx = layerIndex;
+            alphaClipBtn.Pressed += () =>
+            {
+                if (Input.IsKeyPressed(Key.Shift))
+                {
+                    bool nextLock = !layer.IsAlphaLocked;
+                    _layerManager.SetLayerAlphaLock(capturedIdx, nextLock);
+                    StudioUIManager.Instance?.ShowToast(nextLock ? $"'{layer.Name}': Alpha Lock Enabled" : $"'{layer.Name}': Alpha Lock Disabled");
+                }
+                else
+                {
+                    bool nextClip = !layer.ClipToBaseAlpha;
+                    _layerManager.SetLayerClipToBaseAlpha(capturedIdx, nextClip);
+                    StudioUIManager.Instance?.ShowToast(nextClip ? $"'{layer.Name}': Clip to Base Alpha Enabled" : $"'{layer.Name}': Clip to Base Alpha Disabled");
+                }
+                RefreshLayersListUI();
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                uvCanvas?.QueueCanvasRedraw();
+            };
+
             _iconPencil ??= GD.Load<Texture2D>("res://assets/at-icons/pencil.svg");
             var renameBtn = new Button
             {
-                Icon = _iconPencil,
-                ExpandIcon = true,
-                IconAlignment = HorizontalAlignment.Center,
-                CustomMinimumSize = new Vector2(28, 28),
                 TooltipText = "Rename layer",
                 SizeFlagsVertical = SizeFlags.ShrinkCenter,
-                Disabled = layer.IsLocked,
-                ThemeTypeVariation = "ToolbarButton"
+                Disabled = layer.IsLocked
             };
-
-            int capturedIdx = layerIndex;
+            ConfigureLayerIconButton(renameBtn, _iconPencil, 18);
             renameBtn.Pressed += () => ShowRenameLayerDialog(capturedIdx);
 
             row.AddChild(visCheck);
             row.AddChild(btnWrapper);
+            row.AddChild(alphaClipBtn);
             row.AddChild(renameBtn);
 
             _layersListContainer.AddChild(row);
         }
 
-        // Pinned bottom row: 🔒 BASE TEXTURE
+        // Pinned bottom row: BASE TEXTURE (Interactive Lock/Unlock + Direct Editing + Import/Export/Reset)
         var baseRow = new HBoxContainer();
+        baseRow.AddThemeConstantOverride("separation", 4);
+
+        _iconLock ??= GD.Load<Texture2D>("res://assets/at-icons/lock.svg");
+        _iconUnlock ??= GD.Load<Texture2D>("res://assets/at-icons/unlock.svg");
+        bool isBaseLocked = _layerManager.IsBaseTextureLocked;
+        var lockBaseBtn = new Button
+        {
+            ToggleMode = true,
+            ButtonPressed = !isBaseLocked,
+            Modulate = isBaseLocked ? new Color(0.75f, 0.78f, 0.85f, 0.85f) : new Color(1.0f, 0.82f, 0.35f, 1.0f),
+            TooltipText = isBaseLocked
+                ? "Base Texture is Locked (Click to Unlock for direct painting, adjustments, and alpha cutout erasing)"
+                : "Base Texture is Unlocked for direct editing (Click to Lock)",
+            SizeFlagsVertical = SizeFlags.ShrinkCenter
+        };
+        ConfigureLayerIconButton(lockBaseBtn, isBaseLocked ? _iconLock : _iconUnlock, 18);
+        lockBaseBtn.Pressed += () =>
+        {
+            bool nowLocked = _layerManager.ToggleBaseTextureLock();
+            if (!nowLocked)
+            {
+                _layerManager.SelectBaseTexture();
+            }
+            RefreshLayersListUI();
+            StudioUIManager.Instance?.ShowToast(nowLocked
+                ? "Base Texture Locked"
+                : "Base Texture Unlocked (Direct Editing & Alpha Erase Enabled)");
+        };
 
         var baseBtnWrapper = new Control
         {
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             SizeFlagsVertical = SizeFlags.Fill,
-            CustomMinimumSize = new Vector2(0, 26),
+            CustomMinimumSize = new Vector2(0, 30),
             ClipContents = true
         };
 
-        _iconLock ??= GD.Load<Texture2D>("res://assets/at-icons/lock.svg");
         var baseSelectBtn = new Button
         {
-            Text = " BASE TEXTURE",
-            Icon = _iconLock,
-            ExpandIcon = true,
+            Text = isBaseLocked ? " BASE TEXTURE" : " BASE (Unlocked)",
             Alignment = HorizontalAlignment.Left,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            TooltipText = "Base Texture (Vanilla .vtex_c). Can be modified via adjustments, filters, or painting."
+            TooltipText = "Base Texture (Vanilla .vtex_c). Unlock to paint directly, apply Adjustments/Filters, or use the Eraser to cut out transparency. Right-click for Import/Export/Reset."
         };
         baseSelectBtn.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         baseSelectBtn.OffsetLeft = 0;
@@ -3683,26 +3769,45 @@ public partial class PaintTabUI : VBoxContainer
         };
         baseBtnWrapper.AddChild(baseSelectBtn);
 
+        _iconImportBase ??= GD.Load<Texture2D>("res://assets/at-icons/folder_open.svg");
+        var importBaseBtn = new Button
+        {
+            TooltipText = "Import / Replace Base Texture (.png / .tga)...",
+            SizeFlagsVertical = SizeFlags.ShrinkCenter
+        };
+        ConfigureLayerIconButton(importBaseBtn, _iconImportBase, 18);
+        importBaseBtn.Pressed += OpenImportBaseTextureDialog;
+
+        _iconExportBase ??= GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg");
+        var exportBaseBtn = new Button
+        {
+            TooltipText = "Export Base Texture (.png) with full RGBA & Alpha channel...",
+            SizeFlagsVertical = SizeFlags.ShrinkCenter
+        };
+        ConfigureLayerIconButton(exportBaseBtn, _iconExportBase, 18);
+        exportBaseBtn.Pressed += OpenExportSingleBaseTextureDialog;
+
         _iconRefresh ??= GD.Load<Texture2D>("res://assets/at-icons/arrow_counterclockwise.svg");
         var resetBaseBtn = new Button
         {
-            Icon = _iconRefresh,
-            ExpandIcon = true,
-            IconAlignment = HorizontalAlignment.Center,
-            CustomMinimumSize = new Vector2(28, 28),
             TooltipText = "Reset Base Texture to pristine vanilla texture",
             SizeFlagsVertical = SizeFlags.ShrinkCenter,
-            ThemeTypeVariation = "ToolbarButton"
+            Disabled = !_layerManager.HasBaseTextureEdits && !_layerManager.HasBaseAlphaEdits
         };
-
+        ConfigureLayerIconButton(resetBaseBtn, _iconRefresh, 18);
         resetBaseBtn.Pressed += () =>
         {
             _layerManager.ResetBaseTexture();
             RefreshLayersListUI();
+            var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+            uvCanvas?.QueueCanvasRedraw();
             StudioUIManager.Instance?.ShowToast("Base Texture restored to vanilla");
         };
 
+        baseRow.AddChild(lockBaseBtn);
         baseRow.AddChild(baseBtnWrapper);
+        baseRow.AddChild(importBaseBtn);
+        baseRow.AddChild(exportBaseBtn);
         baseRow.AddChild(resetBaseBtn);
         _layersListContainer.AddChild(baseRow);
 
@@ -3719,6 +3824,88 @@ public partial class PaintTabUI : VBoxContainer
     private Texture2D _iconRefresh;
     private Texture2D _iconAlphaLock;
     private Texture2D _iconLock;
+    private Texture2D _iconUnlock;
+    private Texture2D _iconImportBase;
+    private Texture2D _iconExportBase;
+
+    public void OpenImportBaseTextureDialog()
+    {
+        if (_importBaseTexDialog == null)
+        {
+            _importBaseTexDialog = new FileDialog
+            {
+                Title = "Import / Replace Base Texture (.png / .tga)",
+                FileMode = FileDialog.FileModeEnum.OpenFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new[] { "*.png, *.tga, *.webp ; RGBA Texture Files (*.png, *.tga, *.webp)" },
+                UseNativeDialog = true
+            };
+            _importBaseTexDialog.FileSelected += (path) =>
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || _layerManager == null) return;
+                var img = Image.LoadFromFile(path);
+                if (img == null || img.IsEmpty())
+                {
+                    _studioUI?.ShowToast("Failed to load Base Texture file.");
+                    return;
+                }
+                if (_layerManager.ImportBaseTextureFromImage(img))
+                {
+                    RegisterActiveStrokeMetadata();
+                    RefreshLayersListUI();
+                    var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                    uvCanvas?.QueueCanvasRedraw();
+                    _studioUI?.ShowToast($"Base Texture Replaced: {Path.GetFileName(path)}");
+                }
+            };
+            AddChild(_importBaseTexDialog);
+        }
+        _importBaseTexDialog.PopupCentered(new Vector2I(750, 500));
+    }
+
+    public void OpenExportSingleBaseTextureDialog()
+    {
+        if (_layerManager == null) return;
+        if (_exportSingleBaseTexDialog == null)
+        {
+            _exportSingleBaseTexDialog = new FileDialog
+            {
+                Title = "Export Base Texture (.png)",
+                FileMode = FileDialog.FileModeEnum.SaveFile,
+                Access = FileDialog.AccessEnum.Filesystem,
+                Filters = new[] { "*.png ; PNG Image (*.png)" },
+                UseNativeDialog = true
+            };
+            _exportSingleBaseTexDialog.FileSelected += (path) =>
+            {
+                if (string.IsNullOrWhiteSpace(path) || _layerManager == null) return;
+                if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) path += ".png";
+                using var img = _layerManager.ExportBaseTextureToImage();
+                if (img != null && !img.IsEmpty())
+                {
+                    var err = img.SavePng(path);
+                    if (err == Error.Ok)
+                    {
+                        _studioUI?.ShowToast($"Base Texture Exported: {Path.GetFileName(path)}", path);
+                    }
+                    else
+                    {
+                        _studioUI?.ShowToast($"Failed to save Base Texture: {err}");
+                    }
+                }
+                else
+                {
+                    _studioUI?.ShowToast("No Base Texture available to export.");
+                }
+            };
+            AddChild(_exportSingleBaseTexDialog);
+        }
+
+        string heroName = !string.IsNullOrEmpty(_currentHeroId) ? _currentHeroId : "hero";
+        string meshName = _meshHierarchy?.ActiveTarget?.RawName ?? "base";
+        _exportSingleBaseTexDialog.CurrentFile = $"{heroName}_{meshName}_base_color.png";
+        _exportSingleBaseTexDialog.PopupCentered(new Vector2I(750, 500));
+    }
 
     private void ShowBaseTextureContextMenu(Vector2 screenPos)
     {
@@ -3732,7 +3919,14 @@ public partial class PaintTabUI : VBoxContainer
         }
 
         _baseContextMenu.Clear();
-        _baseContextMenu.AddItem("Reset to Vanilla Texture", 0);
+        _baseContextMenu.AddItem(_layerManager.IsBaseTextureLocked
+            ? "Unlock Base Texture (Enable Direct Editing)"
+            : "Lock Base Texture", 0);
+        _baseContextMenu.AddSeparator();
+        _baseContextMenu.AddItem("Import / Replace Base Texture (.png / .tga)...", 1);
+        _baseContextMenu.AddItem("Export Base Texture (.png)...", 2);
+        _baseContextMenu.AddSeparator();
+        _baseContextMenu.AddItem("Reset Base Texture to Vanilla", 3);
 
         var connections = _baseContextMenu.GetSignalConnectionList("id_pressed");
         foreach (var conn in connections)
@@ -3747,8 +3941,25 @@ public partial class PaintTabUI : VBoxContainer
         {
             if (id == 0)
             {
+                bool nowLocked = _layerManager.ToggleBaseTextureLock();
+                if (!nowLocked) _layerManager.SelectBaseTexture();
+                RefreshLayersListUI();
+                StudioUIManager.Instance?.ShowToast(nowLocked ? "Base Texture Locked" : "Base Texture Unlocked");
+            }
+            else if (id == 1)
+            {
+                OpenImportBaseTextureDialog();
+            }
+            else if (id == 2)
+            {
+                OpenExportSingleBaseTextureDialog();
+            }
+            else if (id == 3)
+            {
                 _layerManager.ResetBaseTexture();
                 RefreshLayersListUI();
+                var uvCanvas = GetTree()?.Root?.FindChild("UVCanvasPanel", true, false) as UVCanvas2DUI;
+                uvCanvas?.QueueCanvasRedraw();
                 StudioUIManager.Instance?.ShowToast("Base Texture restored to vanilla");
             }
         };
@@ -3943,11 +4154,6 @@ public partial class PaintTabUI : VBoxContainer
         if (activeLayer == null) return;
 
         if (_btnDeleteLayer != null) _btnDeleteLayer.Disabled = isBase;
-        if (_btnAlphaLock != null)
-        {
-            _btnAlphaLock.Disabled = isBase || activeLayer.IsLocked;
-            _btnAlphaLock.SetPressedNoSignal(!isBase && activeLayer.IsAlphaLocked);
-        }
         if (_btnMoveUp != null) _btnMoveUp.Disabled = isBase || (_layerManager.ActiveLayerIndex >= _layerManager.Layers.Count - 1);
         if (_btnMoveDown != null) _btnMoveDown.Disabled = isBase || (_layerManager.ActiveLayerIndex <= 0);
 
@@ -4042,6 +4248,11 @@ public partial class PaintTabUI : VBoxContainer
         }
         if (!hasParticleActive)
         {
+            if (_currentHero != null && GodotObject.IsInstanceValid(_currentHero))
+            {
+                RestoreCharacterTabMeshVisibility(_currentHero);
+            }
+            _meshHierarchy?.SyncPreSoloFromVisibility();
             _layerManager?.RebuildBaseAtlasBuffer();
         }
         RefreshSubmeshListUI();
@@ -4087,6 +4298,7 @@ public partial class PaintTabUI : VBoxContainer
             {
                 RestoreCharacterTabMeshVisibility(_currentHero);
             }
+            _meshHierarchy?.SyncPreSoloFromVisibility();
 
             RestoreCharacterPose();
         }

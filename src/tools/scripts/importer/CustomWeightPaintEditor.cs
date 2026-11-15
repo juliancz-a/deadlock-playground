@@ -241,7 +241,7 @@ namespace DeadlockPlayground.Importer
             return hitSurface != null;
         }
 
-        private static bool RayTriangle(Vector3 orig, Vector3 dir, Vector3 v0, Vector3 v1, Vector3 v2, out float t)
+        public static bool RayTriangle(Vector3 orig, Vector3 dir, Vector3 v0, Vector3 v1, Vector3 v2, out float t)
         {
             t = 0f;
             Vector3 e1 = v1 - v0;

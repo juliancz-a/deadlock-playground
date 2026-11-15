@@ -1064,6 +1064,7 @@ public partial class StudioUIManager : CanvasLayer
         if (prevTab == 8 && tabIndex != 8)
         {
             _tabPaint?.OnTabDeactivated();
+            _tabCharacter?.SyncSubmeshVisibilityFromScene();
             if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
             var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
             bool hasActiveParticle = stage != null && stage.HasActiveParticle;
@@ -1167,6 +1168,10 @@ public partial class StudioUIManager : CanvasLayer
         else if (tabIndex == 6)
         {
             _tabLighting?.SyncUIToScene();
+        }
+        if (tabIndex == 0 && prevTab != 8)
+        {
+            _tabCharacter?.SyncSubmeshVisibilityFromScene();
         }
         if (tabIndex != 8 && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
         {

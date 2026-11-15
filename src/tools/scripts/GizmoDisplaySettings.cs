@@ -122,6 +122,21 @@ public static class GizmoDisplaySettings
         }
     }
 
+    private static bool _gizmoUseLocalSpace = false;
+    /// <summary>
+    /// Whether the 3D bone gizmo transforms along each bone's own local axes (true) or global world axes (false).
+    /// </summary>
+    public static bool GizmoUseLocalSpace
+    {
+        get => _gizmoUseLocalSpace;
+        set
+        {
+            if (_gizmoUseLocalSpace == value) return;
+            _gizmoUseLocalSpace = value;
+            if (!_isLoading) NotifyChanged();
+        }
+    }
+
     /// <summary>
     /// Converts linear opacity [0.0, 1.0] to a perceptual quadratic/cubic curve alpha = pow(x, 1.8).
     /// Ensures 5% setting renders as a faint hairline, and 50% remains translucent.
@@ -157,6 +172,7 @@ public static class GizmoDisplaySettings
         PainterOutlineColor = new Color(1.0f, 0.85f, 0.35f, 1.0f);
         PainterOutlineOpacity = 0.40f;
         PainterOutlineWidth = 0.7f;
+        GizmoUseLocalSpace = false;
         _isLoading = false;
 
         NotifyChanged();
@@ -204,6 +220,9 @@ public static class GizmoDisplaySettings
 
                 if (config.HasSectionKey(SectionName, "PainterOutlineWidth"))
                     _painterOutlineWidth = Mathf.Clamp((float)config.GetValue(SectionName, "PainterOutlineWidth", _painterOutlineWidth), 0.1f, 3.0f);
+
+                if (config.HasSectionKey(SectionName, "GizmoUseLocalSpace"))
+                    _gizmoUseLocalSpace = (bool)config.GetValue(SectionName, "GizmoUseLocalSpace", _gizmoUseLocalSpace);
             }
             catch (Exception ex)
             {
@@ -233,6 +252,7 @@ public static class GizmoDisplaySettings
         config.SetValue(SectionName, "PainterOutlineColor", PainterOutlineColor);
         config.SetValue(SectionName, "PainterOutlineOpacity", PainterOutlineOpacity);
         config.SetValue(SectionName, "PainterOutlineWidth", PainterOutlineWidth);
+        config.SetValue(SectionName, "GizmoUseLocalSpace", GizmoUseLocalSpace);
 
         Error err = config.Save(ConfigPath);
         if (err != Error.Ok)

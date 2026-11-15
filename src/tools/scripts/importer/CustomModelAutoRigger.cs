@@ -31,6 +31,16 @@ namespace DeadlockPlayground.Importer
             PartialAccessory
         }
 
+        public enum AccessoryIntent
+        {
+            Auto = 0,
+            FullCharacter = 1,
+            AddAccessory = 2,
+            ReplacePart = 3
+        }
+
+        public const int MaxAccessorySlots = 6;
+
         public sealed class SkinWeightOverride
         {
             public int VertexCount { get; set; }
@@ -39,8 +49,26 @@ namespace DeadlockPlayground.Importer
             public float[] Weights { get; set; } = Array.Empty<float>();      // VertexCount * 4
         }
 
+        public enum HeroDeformMode
+        {
+            FlattenTopDown = 0,
+            RadialShrink = 1
+        }
+
+        public enum HeroSculptBrushMode
+        {
+            PushIn = 0,
+            PullOut = 1,
+            Flatten = 2,
+            Smooth = 3,
+            Erase = 4
+        }
+
         public class RiggingOptions
         {
+            public string SlotId { get; set; } = "";
+            public string AccessoryName { get; set; } = "";
+            public AccessoryIntent Intent { get; set; } = AccessoryIntent.Auto;
             public RiggingMethod Method { get; set; } = RiggingMethod.KnnSurfaceProjection;
             public PosePreset Preset { get; set; } = PosePreset.MatchHeroBindPose;
             public float CustomArmAngleDeg { get; set; } = 0f;
@@ -51,6 +79,7 @@ namespace DeadlockPlayground.Importer
             public ReplaceMode Mode { get; set; } = ReplaceMode.FullReplacement;
             public List<string> IncludedImportedSubmeshNames { get; set; } = new();
             public List<string> KeptOriginalSubmeshNames { get; set; } = new();
+            public List<string> ExplicitReplacedTargets { get; set; } = new();
             public Dictionary<string, string> SubmeshAttachmentSockets { get; set; } = new();
             public Dictionary<string, string> SubmeshReplacementMap { get; set; } = new();
             public Dictionary<string, bool> SubmeshSnapToSocket { get; set; } = new();
@@ -86,6 +115,16 @@ namespace DeadlockPlayground.Importer
             public Vector3 RootPosition { get; set; } = Vector3.Zero;
             public Vector3 RootRotationDeg { get; set; } = Vector3.Zero;
             public float RootScale { get; set; } = 1.0f;
+            public Vector3 RootScaleXYZ { get; set; } = Vector3.One;
+            public bool OriginalMeshDeformEnabled { get; set; } = false;
+            public string OriginalMeshDeformTargetFilter { get; set; } = "hair";
+            public string OriginalMeshDeformBoneName { get; set; } = "head";
+            public HeroDeformMode OriginalMeshDeformMode { get; set; } = HeroDeformMode.FlattenTopDown;
+            public float OriginalMeshDeformStrength { get; set; } = 0.55f;
+            public float OriginalMeshDeformRadius { get; set; } = 0.24f;
+            public float OriginalMeshDeformHeightOffset { get; set; } = 0.06f;
+            /// <summary>Optional sparse per-surface vertex deltas (hero-space) from the 3D Hero Deform Sculpt Brush, keyed by MakeOriginalSurfaceDeformKey(mi, surfIdx).</summary>
+            public Dictionary<string, Dictionary<int, Vector3>> OriginalMeshDeformSculpts { get; set; } = null;
             /// <summary>16 landmark pins (see CustomLandmarkWeightSolver.PinNames) in imported-scene space. Null = auto-estimate.</summary>
             public Dictionary<string, Vector3> LandmarkPins { get; set; } = null;
             /// <summary>Optional user-painted per-surface weight overrides keyed by MakeSurfaceKeepKey(meshName, surfaceIdx).</summary>
@@ -888,8 +927,9 @@ namespace DeadlockPlayground.Importer
                 return result;
             }
 
-            // Clean up any previously injected Custom_Rigged_Character to prevent stacking duplicates on re-confirm
-            var existingCustom = heroNode.FindChild("Custom_Rigged_Character", true, false);
+            // Clean up only the matching slot container (never deleting other accessory slots or full character base)
+            string targetContainerName = GetContainerNameForSlot(options?.SlotId);
+            var existingCustom = heroNode.FindChild(targetContainerName, true, false);
             if (existingCustom != null && GodotObject.IsInstanceValid(existingCustom))
             {
                 existingCustom.GetParent()?.RemoveChild(existingCustom);
@@ -961,7 +1001,13 @@ namespace DeadlockPlayground.Importer
 
                 if (result.Success)
                 {
-                    ApplyReplacementMode(heroNode, result.CustomSubmeshes, options);
+                    if (result.ContainerNode != null && GodotObject.IsInstanceValid(result.ContainerNode))
+                    {
+                        result.ContainerNode.SetMeta("IsCustomImportedMesh", true);
+                        result.ContainerNode.SetMeta("AccessorySlotId", options.SlotId ?? "");
+                        result.ContainerNode.SetMeta("AccessorySlotName", options.AccessoryName ?? "");
+                    }
+                    ApplyReplacementMode(heroNode, result.CustomSubmeshes, options, result.ContainerNode);
                 }
 
                 return result;
@@ -1061,7 +1107,7 @@ namespace DeadlockPlayground.Importer
             GD.Print($"[CustomModelAutoRigger] Grid={swGrid.ElapsedMilliseconds} ms, Capsules={swCap.ElapsedMilliseconds} ms ({capsuleSegments.Count} segments).");
 
             // 6. Process each imported mesh
-            var containerNode = new Node3D { Name = "Custom_Rigged_Character" };
+            var containerNode = new Node3D { Name = GetContainerNameForSlot(options?.SlotId) };
             heroNode.AddChild(containerNode);
             result.ContainerNode = containerNode;
 
@@ -1294,7 +1340,7 @@ namespace DeadlockPlayground.Importer
 
             GD.Print($"[CustomModelAutoRigger] Mapped {sourceToTargetBoneMap.Count} of {sourceSkeleton.GetBoneCount()} bones from source rig to hero skeleton.");
 
-            var containerNode = new Node3D { Name = "Custom_Rigged_Character" };
+            var containerNode = new Node3D { Name = GetContainerNameForSlot(options?.SlotId) };
             heroNode.AddChild(containerNode);
             result.ContainerNode = containerNode;
 
@@ -1752,20 +1798,19 @@ namespace DeadlockPlayground.Importer
                 WasAlreadyRigged = false
             };
 
-            int targetBoneIdx = skeleton.FindBone(options.RigidBoneName);
-            if (targetBoneIdx == -1)
+            int defaultTargetBoneIdx = skeleton.FindBone(options.RigidBoneName);
+            if (defaultTargetBoneIdx == -1)
             {
-                targetBoneIdx = skeleton.FindBone("head");
+                defaultTargetBoneIdx = skeleton.FindBone("head");
             }
-            if (targetBoneIdx == -1)
+            if (defaultTargetBoneIdx == -1)
             {
-                targetBoneIdx = 0;
+                defaultTargetBoneIdx = 0;
             }
 
             var (skeletonToBindMap, _) = BuildSkinIndexMappings(skeleton, heroSkin);
-            int targetBindIdx = skeletonToBindMap.TryGetValue(targetBoneIdx, out int bIdx) ? bIdx : 0;
 
-            var containerNode = new Node3D { Name = "Custom_Rigid_Accessory" };
+            var containerNode = new Node3D { Name = GetContainerNameForSlot(options?.SlotId) };
             heroNode.AddChild(containerNode);
             result.ContainerNode = containerNode;
 
@@ -1777,6 +1822,38 @@ namespace DeadlockPlayground.Importer
             {
                 var srcMesh = srcMi.Mesh;
                 if (srcMesh == null || srcMesh.GetSurfaceCount() == 0) continue;
+
+                string srcMeshName = srcMi.Name.ToString();
+                string assignedBoneName = options.RigidBoneName;
+                if (options.SubmeshAttachmentSockets != null &&
+                    options.SubmeshAttachmentSockets.TryGetValue(srcMeshName, out string subSocketBone) &&
+                    !string.IsNullOrWhiteSpace(subSocketBone))
+                {
+                    assignedBoneName = subSocketBone;
+                }
+
+                int targetBoneIdx = !string.IsNullOrWhiteSpace(assignedBoneName)
+                    ? skeleton.FindBone(assignedBoneName)
+                    : defaultTargetBoneIdx;
+                if (targetBoneIdx == -1) targetBoneIdx = defaultTargetBoneIdx;
+                int targetBindIdx = skeletonToBindMap.TryGetValue(targetBoneIdx, out int bIdx) ? bIdx : 0;
+
+                bool hasExplicitSocketOffset =
+                    (options.SubmeshSnapToSocket != null && options.SubmeshSnapToSocket.TryGetValue(srcMeshName, out bool snapFlag) && snapFlag) ||
+                    (options.SubmeshSocketOffsetPos != null && options.SubmeshSocketOffsetPos.TryGetValue(srcMeshName, out var sPos) && sPos.LengthSquared() > 1e-6f) ||
+                    (options.SubmeshSocketOffsetRot != null && options.SubmeshSocketOffsetRot.TryGetValue(srcMeshName, out var sRot) && sRot.LengthSquared() > 1e-4f) ||
+                    (options.SubmeshSocketScale != null && options.SubmeshSocketScale.TryGetValue(srcMeshName, out float sSc) && Math.Abs(sSc - 1.0f) > 1e-3f);
+                Transform3D boneRest = skeleton.GetBoneGlobalRest(targetBoneIdx);
+                Transform3D socketDelta = Transform3D.Identity;
+                if (hasExplicitSocketOffset)
+                {
+                    Vector3 uPos = options.SubmeshSocketOffsetPos != null && options.SubmeshSocketOffsetPos.TryGetValue(srcMeshName, out var p) ? p : Vector3.Zero;
+                    Vector3 uRot = options.SubmeshSocketOffsetRot != null && options.SubmeshSocketOffsetRot.TryGetValue(srcMeshName, out var r) ? r : Vector3.Zero;
+                    float uScale = options.SubmeshSocketScale != null && options.SubmeshSocketScale.TryGetValue(srcMeshName, out float sc) && sc > 0.001f ? sc : 1.0f;
+                    socketDelta = boneRest * new Transform3D(
+                        Basis.FromEuler(new Vector3(Mathf.DegToRad(uRot.X), Mathf.DegToRad(uRot.Y), Mathf.DegToRad(uRot.Z))).Scaled(new Vector3(uScale, uScale, uScale)),
+                        uPos) * boneRest.AffineInverse();
+                }
 
                 for (int s = 0; s < srcMesh.GetSurfaceCount(); s++)
                 {
@@ -1797,6 +1874,15 @@ namespace DeadlockPlayground.Importer
                     totalTris += (rawIndices != null) ? rawIndices.Length / 3 : vCount / 3;
 
                     EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, hybridFallbackSkel, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] alignedVerts, out Vector3[] alignedNorms);
+
+                    if (hasExplicitSocketOffset)
+                    {
+                        for (int v = 0; v < vCount; v++)
+                        {
+                            alignedVerts[v] = socketDelta * alignedVerts[v];
+                            alignedNorms[v] = (socketDelta.Basis * alignedNorms[v]).Normalized();
+                        }
+                    }
 
                     int[] boneIndices = new int[vCount * 4];
                     float[] boneWeights = new float[vCount * 4];
@@ -4910,51 +4996,240 @@ namespace DeadlockPlayground.Importer
             };
         }
 
-        private static void ApplyReplacementMode(Node3D heroNode, List<MeshInstance3D> customMeshes, RiggingOptions options)
+        public static string GetContainerNameForSlot(string slotId)
+            => string.IsNullOrWhiteSpace(slotId) ? "Custom_Rigged_Character" : $"Custom_Accessory_{slotId}";
+
+        public static List<Node3D> CollectCustomContainers(Node3D heroNode)
+        {
+            var list = new List<Node3D>();
+            if (heroNode == null || !GodotObject.IsInstanceValid(heroNode)) return list;
+            foreach (Node n in heroNode.FindChildren("*", "Node3D", recursive: true, owned: false))
+            {
+                if (n is not Node3D n3d) continue;
+                string name = n3d.Name.ToString();
+                if (name == "Custom_Rigged_Character" ||
+                    name == "Custom_Rigid_Accessory" ||
+                    name.StartsWith("Custom_Accessory_", StringComparison.Ordinal))
+                {
+                    list.Add(n3d);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Computes an aligned Transform3D in hero space that normalizes an accessory's imported bounds
+        /// and snaps its pivot directly onto a target skeleton bone in rest pose.
+        /// </summary>
+        public static Transform3D ComputeAutoFitTransformToBone(Node3D importedScene, Skeleton3D heroSkeleton, string boneName)
+        {
+            if (importedScene == null || heroSkeleton == null) return Transform3D.Identity;
+
+            int bIdx = !string.IsNullOrWhiteSpace(boneName) ? heroSkeleton.FindBone(boneName) : -1;
+            if (bIdx < 0) bIdx = FindBoneAny(heroSkeleton, "head", "spine_3", "pelvis", "weapon_hand_R", "hand_R");
+            if (bIdx < 0) bIdx = 0;
+
+            var meshes = CollectMeshes(importedScene);
+            Vector3 minV = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 maxV = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            bool anyVert = false;
+
+            foreach (var mi in meshes)
+            {
+                if (mi?.Mesh == null) continue;
+                Transform3D rel = ComputeTransformRelativeToRoot(mi, importedScene);
+                for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+                {
+                    var arrays = mi.Mesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
+                    var verts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (verts == null) continue;
+                    foreach (var v in verts)
+                    {
+                        Vector3 rv = rel * v;
+                        minV = new Vector3(Mathf.Min(minV.X, rv.X), Mathf.Min(minV.Y, rv.Y), Mathf.Min(minV.Z, rv.Z));
+                        maxV = new Vector3(Mathf.Max(maxV.X, rv.X), Mathf.Max(maxV.Y, rv.Y), Mathf.Max(maxV.Z, rv.Z));
+                        anyVert = true;
+                    }
+                }
+            }
+
+            if (!anyVert) return Transform3D.Identity;
+
+            Vector3 size = maxV - minV;
+            float maxDim = Mathf.Max(size.X, Mathf.Max(size.Y, size.Z));
+            float scale = 1.0f;
+            if (maxDim > 0.0001f)
+            {
+                string lowerBone = boneName?.ToLowerInvariant() ?? "";
+                float desiredMax = lowerBone.Contains("head") ? 0.30f
+                                 : (lowerBone.Contains("hand") || lowerBone.Contains("weapon")) ? 0.35f
+                                 : (lowerBone.Contains("spine") || lowerBone.Contains("pelvis")) ? 0.48f
+                                 : 0.34f;
+                if (maxDim > desiredMax * 1.8f || maxDim < desiredMax * 0.25f)
+                {
+                    scale = desiredMax / maxDim;
+                }
+            }
+
+            string bLow = boneName?.ToLowerInvariant() ?? "";
+            Vector3 pivotLocal = bLow.Contains("head")
+                ? new Vector3((minV.X + maxV.X) * 0.5f, minV.Y + size.Y * 0.25f, (minV.Z + maxV.Z) * 0.5f)
+                : (minV + maxV) * 0.5f;
+
+            Transform3D boneRest = heroSkeleton.GetBoneGlobalRest(bIdx);
+            Vector3 boneLocalOrigin = heroSkeleton.Transform * boneRest.Origin;
+            if (bLow.Contains("head"))
+            {
+                boneLocalOrigin += new Vector3(0f, 0.14f, 0f);
+            }
+
+            Vector3 origin = boneLocalOrigin - (pivotLocal * scale);
+            return new Transform3D(Basis.Identity.Scaled(new Vector3(scale, scale, scale)), origin);
+        }
+
+        private static void ApplyReplacementMode(Node3D heroNode, List<MeshInstance3D> customMeshes, RiggingOptions options, Node3D slotContainer = null)
         {
             // In preview mode inside modal, NEVER hide ghost reference mannequin meshes!
             if (options.IsPreviewOnly) return;
 
             var existingMeshes = CollectOriginalHeroMeshes(heroNode);
+            var slotHiddenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool isAddOnlyAccessory = options.Intent == AccessoryIntent.AddAccessory;
 
-            foreach (var mi in existingMeshes)
+            if (!isAddOnlyAccessory)
             {
-                if (mi.HasMeta("IsCustomImportedMesh")) continue;
-
-                string rawName = mi.Name.ToString();
-                bool forceHiddenByReplacement = false;
-
-                // If explicitly replaced by a custom submesh (e.g. custom gun replacing hero gun), force hidden
+                // Explicit submesh replacement targets (including gun holster/hip companions)
                 if (options.SubmeshReplacementMap != null)
                 {
                     foreach (var repTarget in options.SubmeshReplacementMap.Values)
                     {
                         if (string.IsNullOrEmpty(repTarget) || repTarget == "[ None ]") continue;
-                        if (rawName.Equals(repTarget, StringComparison.OrdinalIgnoreCase))
-                        {
-                            forceHiddenByReplacement = true;
-                            break;
-                        }
-                        // If replacing primary gun model (e.g. _CHRONO_GUN_MODEL), also hide corresponding hip/holstered version (_CHRONO_GUN_ON_HIP)
+                        slotHiddenTargets.Add(repTarget);
                         string repLower = repTarget.ToLowerInvariant();
-                        string rawLower = rawName.ToLowerInvariant();
-                        if (repLower.Contains("gun") && rawLower.Contains("gun"))
+                        if (repLower.Contains("gun"))
                         {
-                            if (rawLower.Contains("hip") || rawLower.Contains("holster") || rawLower.Contains("back") || rawLower.Contains("sheath"))
+                            foreach (var origMi in existingMeshes)
                             {
-                                forceHiddenByReplacement = true;
-                                break;
+                                string rawLower = origMi.Name.ToString().ToLowerInvariant();
+                                if (rawLower.Contains("gun") &&
+                                    (rawLower.Contains("hip") || rawLower.Contains("holster") || rawLower.Contains("back") || rawLower.Contains("sheath")))
+                                {
+                                    slotHiddenTargets.Add(origMi.Name.ToString());
+                                }
                             }
                         }
                     }
                 }
 
+                // Explicit target replacements requested by Part-Replacement UI
+                if (options.ExplicitReplacedTargets != null && options.ExplicitReplacedTargets.Count > 0)
+                {
+                    foreach (var exp in options.ExplicitReplacedTargets)
+                    {
+                        if (!string.IsNullOrWhiteSpace(exp))
+                            slotHiddenTargets.Add(exp);
+                    }
+                }
+                else
+                {
+                    // Legacy FullReplacement / KeptOriginalSubmeshNames filtering
+                    foreach (var mi in existingMeshes)
+                    {
+                        if (mi.HasMeta("IsCustomImportedMesh")) continue;
+                        string rawName = mi.Name.ToString();
+                        int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
+                        if (surfCount > 1)
+                        {
+                            for (int s = 0; s < surfCount; s++)
+                            {
+                                string genName = null;
+                                if (mi.HasMeta("GeneratedSubmeshes"))
+                                {
+                                    var genArr = mi.GetMeta("GeneratedSubmeshes").AsGodotArray();
+                                    foreach (var gv in genArr)
+                                    {
+                                        if (gv.AsGodotObject() is MeshInstance3D subMi && GodotObject.IsInstanceValid(subMi))
+                                        {
+                                            int sIdx = subMi.HasMeta("SurfaceIndex") ? subMi.GetMeta("SurfaceIndex").AsInt32() : -1;
+                                            if (sIdx == s) { genName = subMi.Name.ToString(); break; }
+                                        }
+                                    }
+                                }
+                                if (!IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, s, genName))
+                                {
+                                    slotHiddenTargets.Add(MakeSurfaceKeepKey(rawName, s));
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (!IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, 0))
+                            {
+                                slotHiddenTargets.Add(rawName);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (slotContainer != null && GodotObject.IsInstanceValid(slotContainer))
+            {
+                slotContainer.SetMeta("SlotHiddenTargets", slotHiddenTargets.ToArray());
+                slotContainer.SetMeta("SlotIsAddAccessory", isAddOnlyAccessory);
+                slotContainer.SetMeta("SlotDeformEnabled", options.OriginalMeshDeformEnabled);
+                slotContainer.SetMeta("SlotDeformTarget", options.OriginalMeshDeformTargetFilter ?? "hair");
+                slotContainer.SetMeta("SlotDeformBone", options.OriginalMeshDeformBoneName ?? options.RigidBoneName ?? "head");
+                slotContainer.SetMeta("SlotDeformMode", (int)options.OriginalMeshDeformMode);
+                slotContainer.SetMeta("SlotDeformStrength", options.OriginalMeshDeformStrength);
+                slotContainer.SetMeta("SlotDeformRadius", options.OriginalMeshDeformRadius);
+                slotContainer.SetMeta("SlotDeformHeightOffset", options.OriginalMeshDeformHeightOffset);
+                if (options.OriginalMeshDeformSculpts != null && options.OriginalMeshDeformSculpts.Count > 0)
+                {
+                    slotContainer.SetMeta("SlotDeformSculpts", SerializeSculptsToGodotDict(options.OriginalMeshDeformSculpts));
+                }
+                else if (slotContainer.HasMeta("SlotDeformSculpts"))
+                {
+                    slotContainer.RemoveMeta("SlotDeformSculpts");
+                }
+            }
+
+            RecomputeHeroReplacementVisibility(heroNode, customMeshes);
+        }
+
+        public static void RecomputeHeroReplacementVisibility(Node3D heroNode, List<MeshInstance3D> newlyBuiltMeshes = null)
+        {
+            if (heroNode == null || !GodotObject.IsInstanceValid(heroNode)) return;
+
+            var combinedHiddenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var container in CollectCustomContainers(heroNode))
+            {
+                if (!container.Visible) continue;
+                if (container.HasMeta("SlotIsAddAccessory") && container.GetMeta("SlotIsAddAccessory").AsBool())
+                    continue;
+                if (container.HasMeta("SlotHiddenTargets"))
+                {
+                    var arr = container.GetMeta("SlotHiddenTargets").AsStringArray();
+                    if (arr != null)
+                    {
+                        foreach (var t in arr)
+                        {
+                            if (!string.IsNullOrEmpty(t)) combinedHiddenTargets.Add(t);
+                        }
+                    }
+                }
+            }
+
+            var existingMeshes = CollectOriginalHeroMeshes(heroNode);
+            foreach (var mi in existingMeshes)
+            {
+                if (mi.HasMeta("IsCustomImportedMesh")) continue;
+                string rawName = mi.Name.ToString();
+                bool wholeMeshHidden = combinedHiddenTargets.Contains(rawName);
                 int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
 
                 if (mi.HasMeta("GeneratedSubmeshes"))
                 {
-                    // Composite mesh has already been split into per-surface MeshInstance3D siblings (_surf_s)
-                    // Keep the composite container hidden to avoid double rendering, and toggle each split surface individually.
                     mi.Visible = false;
                     bool anySubKept = false;
                     var genArr = mi.GetMeta("GeneratedSubmeshes").AsGodotArray();
@@ -4963,8 +5238,10 @@ namespace DeadlockPlayground.Importer
                         if (genArr[gIdx].AsGodotObject() is MeshInstance3D subMi && GodotObject.IsInstanceValid(subMi))
                         {
                             int sIdx = subMi.HasMeta("SurfaceIndex") ? subMi.GetMeta("SurfaceIndex").AsInt32() : gIdx;
-                            bool keepSub = !forceHiddenByReplacement &&
-                                           IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, sIdx, subMi.Name.ToString());
+                            string surfKey = MakeSurfaceKeepKey(rawName, sIdx);
+                            bool keepSub = !wholeMeshHidden &&
+                                           !combinedHiddenTargets.Contains(surfKey) &&
+                                           !combinedHiddenTargets.Contains(subMi.Name.ToString());
                             mi.SetMeta($"SurfaceKept_{sIdx}", keepSub);
                             subMi.SetMeta("SurfaceIndex", sIdx);
                             subMi.Visible = keepSub;
@@ -4990,8 +5267,8 @@ namespace DeadlockPlayground.Importer
                     bool allKept = true;
                     for (int s = 0; s < surfCount; s++)
                     {
-                        bool keepSurf = !forceHiddenByReplacement &&
-                                        IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, s);
+                        string surfKey = MakeSurfaceKeepKey(rawName, s);
+                        bool keepSurf = !wholeMeshHidden && !combinedHiddenTargets.Contains(surfKey);
                         if (keepSurf) anyKept = true;
                         else allKept = false;
                     }
@@ -5003,8 +5280,8 @@ namespace DeadlockPlayground.Importer
                         var hiddenMat = CreateHiddenSurfaceMaterial();
                         for (int s = 0; s < surfCount; s++)
                         {
-                            bool keepSurf = !forceHiddenByReplacement &&
-                                            IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, s);
+                            string surfKey = MakeSurfaceKeepKey(rawName, s);
+                            bool keepSurf = !wholeMeshHidden && !combinedHiddenTargets.Contains(surfKey);
                             mi.SetMeta($"SurfaceKept_{s}", keepSurf);
                             if (keepSurf)
                             {
@@ -5035,7 +5312,8 @@ namespace DeadlockPlayground.Importer
                 }
                 else
                 {
-                    bool keep = !forceHiddenByReplacement && IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, rawName, 0);
+                    string surfKey = MakeSurfaceKeepKey(rawName, 0);
+                    bool keep = !wholeMeshHidden && !combinedHiddenTargets.Contains(surfKey);
                     mi.Visible = keep;
                     mi.SetMeta("UserVisibility", keep);
                     if (keep) mi.RemoveMeta("UserHiddenByCustomModel");
@@ -5043,10 +5321,553 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            foreach (var cm in customMeshes)
+            if (newlyBuiltMeshes != null)
             {
-                cm.Visible = true;
+                foreach (var cm in newlyBuiltMeshes)
+                {
+                    if (cm != null && GodotObject.IsInstanceValid(cm)) cm.Visible = true;
+                }
             }
+
+            RecomputeHeroDeformations(heroNode);
+        }
+
+        private readonly struct ActiveHeroDeformSpec
+        {
+            public readonly string TargetFilter;
+            public readonly string BoneName;
+            public readonly HeroDeformMode Mode;
+            public readonly float Strength;
+            public readonly float Radius;
+            public readonly float HeightOffset;
+
+            public ActiveHeroDeformSpec(string targetFilter, string boneName, HeroDeformMode mode, float strength, float radius, float heightOffset)
+            {
+                TargetFilter = targetFilter ?? "hair";
+                BoneName = string.IsNullOrWhiteSpace(boneName) ? "head" : boneName;
+                Mode = mode;
+                Strength = Mathf.Clamp(strength, 0f, 1f);
+                Radius = MathF.Max(0.03f, radius);
+                HeightOffset = heightOffset;
+            }
+        }
+
+        public static string MakeOriginalSurfaceDeformKey(MeshInstance3D mi, int surfIdx)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi)) return "";
+            if (mi.HasMeta("ParentCompositeMesh"))
+            {
+                var parent = mi.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                if (parent != null && GodotObject.IsInstanceValid(parent))
+                {
+                    int origSurf = mi.HasMeta("SurfaceIndex") ? mi.GetMeta("SurfaceIndex").AsInt32() : surfIdx;
+                    return MakeSurfaceKeepKey(parent.Name.ToString(), origSurf);
+                }
+            }
+            return MakeSurfaceKeepKey(mi.Name.ToString(), surfIdx);
+        }
+
+        private static Godot.Collections.Dictionary<string, Variant> SerializeSculptsToGodotDict(
+            Dictionary<string, Dictionary<int, Vector3>> sculpts)
+        {
+            var root = new Godot.Collections.Dictionary<string, Variant>();
+            if (sculpts == null) return root;
+            foreach (var (surfKey, vertMap) in sculpts)
+            {
+                if (string.IsNullOrEmpty(surfKey) || vertMap == null || vertMap.Count == 0) continue;
+                var idxList = new List<int>(vertMap.Count);
+                var deltaList = new List<Vector3>(vertMap.Count);
+                foreach (var (vi, d) in vertMap)
+                {
+                    if (d.LengthSquared() < 1e-10f) continue;
+                    idxList.Add(vi);
+                    deltaList.Add(d);
+                }
+                if (idxList.Count == 0) continue;
+                var entryDict = new Godot.Collections.Dictionary<string, Variant>
+                {
+                    ["indices"] = idxList.ToArray(),
+                    ["deltas"] = deltaList.ToArray()
+                };
+                root[surfKey] = entryDict;
+            }
+            return root;
+        }
+
+        public static void MergeSerializedSculpts(
+            Godot.Collections.Dictionary<string, Variant> srcDict,
+            Dictionary<string, Dictionary<int, Vector3>> target)
+        {
+            if (srcDict == null || target == null) return;
+            foreach (var key in srcDict.Keys)
+            {
+                if (srcDict[key].VariantType != Variant.Type.Dictionary) continue;
+                var entry = srcDict[key].AsGodotDictionary();
+                if (!entry.ContainsKey("indices") || !entry.ContainsKey("deltas")) continue;
+                var indices = entry["indices"].AsInt32Array();
+                var deltas = entry["deltas"].AsVector3Array();
+                int count = Math.Min(indices.Length, deltas.Length);
+                if (count == 0) continue;
+                if (!target.TryGetValue(key, out var vertMap))
+                {
+                    vertMap = new Dictionary<int, Vector3>();
+                    target[key] = vertMap;
+                }
+                for (int i = 0; i < count; i++)
+                {
+                    int vi = indices[i];
+                    Vector3 cur = vertMap.TryGetValue(vi, out var ex) ? ex : Vector3.Zero;
+                    vertMap[vi] = cur + deltas[i];
+                }
+            }
+        }
+
+        private static bool IsHeroOriginalMeshForDeform(MeshInstance3D mi, Node3D heroNode)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi) || mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0)
+                return false;
+            if (mi.Mesh is ImmediateMesh) return false;
+            if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool())
+                return false;
+
+            string lowerName = mi.Name.ToString().ToLowerInvariant();
+            if (lowerName.StartsWith("@", StringComparison.Ordinal) ||
+                lowerName.Contains("picker") || lowerName.Contains("handle") || lowerName.Contains("visual") ||
+                lowerName.Contains("gizmo") || lowerName.Contains("marker") || lowerName.Contains("preview") ||
+                lowerName.Contains("tip") || lowerName.Contains("pole") || lowerName.Contains("outline"))
+            {
+                return false;
+            }
+
+            Node p = mi.GetParent();
+            while (p != null && p != heroNode)
+            {
+                string pName = p.Name.ToString();
+                string pLower = pName.ToLowerInvariant();
+                if (pName.StartsWith("@", StringComparison.Ordinal) ||
+                    pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") ||
+                    pName.Contains("Custom_Rigged_Character") ||
+                    pName.StartsWith("Custom_Accessory_", StringComparison.Ordinal) ||
+                    pName == "Custom_Rigid_Accessory" ||
+                    (p.HasMeta("IsCustomImportedMesh") && p.GetMeta("IsCustomImportedMesh").AsBool()))
+                {
+                    return false;
+                }
+                p = p.GetParent();
+            }
+            return true;
+        }
+
+        private static int FindDeformBoneIndex(Skeleton3D skel, string boneName)
+        {
+            if (skel == null) return -1;
+            if (!string.IsNullOrWhiteSpace(boneName))
+            {
+                int exact = skel.FindBone(boneName);
+                if (exact >= 0) return exact;
+            }
+            int headExact = skel.FindBone("head");
+            if (headExact >= 0) return headExact;
+
+            int fallback = -1;
+            for (int b = 0; b < skel.GetBoneCount(); b++)
+            {
+                string bn = skel.GetBoneName(b).ToLowerInvariant();
+                if (!bn.Contains("head")) continue;
+                if (bn.Contains("_end") || bn.Contains("prop") || bn.Contains("weapon") || bn.Contains("attach"))
+                {
+                    if (fallback < 0) fallback = b;
+                    continue;
+                }
+                return b;
+            }
+            return fallback;
+        }
+
+        public static void RecomputeHeroDeformations(Node3D heroNode, RiggingOptions previewDeformOverride = null)
+        {
+            if (heroNode == null || !GodotObject.IsInstanceValid(heroNode)) return;
+
+            // Gather both composite/standalone original meshes and any HeroMeshHierarchy-split _surf_* siblings
+            var allOriginalMeshes = new List<MeshInstance3D>();
+            var stack = new Stack<Node>();
+            stack.Push(heroNode);
+            while (stack.Count > 0)
+            {
+                var n = stack.Pop();
+                if (n is MeshInstance3D mi && IsHeroOriginalMeshForDeform(mi, heroNode))
+                {
+                    allOriginalMeshes.Add(mi);
+                }
+                foreach (Node ch in n.GetChildren()) stack.Push(ch);
+            }
+
+            // 1. Always restore every previously deformed mesh cleanly back to its original pre-deform Mesh
+            foreach (var mi in allOriginalMeshes)
+            {
+                if (mi.HasMeta("OriginalPreDeformMesh"))
+                {
+                    var origMesh = mi.GetMeta("OriginalPreDeformMesh").As<Mesh>();
+                    if (origMesh != null)
+                    {
+                        mi.Mesh = origMesh;
+                    }
+                }
+                if (mi.HasMeta("IsDeformedOriginalMesh"))
+                {
+                    mi.RemoveMeta("IsDeformedOriginalMesh");
+                }
+            }
+
+            // 2. Gather active parametric deform specs & sculpted vertex deltas
+            var specs = new List<ActiveHeroDeformSpec>();
+            var sculptDeltasByKey = new Dictionary<string, Dictionary<int, Vector3>>(StringComparer.OrdinalIgnoreCase);
+
+            if (previewDeformOverride != null)
+            {
+                if (previewDeformOverride.OriginalMeshDeformEnabled && previewDeformOverride.OriginalMeshDeformStrength > 0.001f)
+                {
+                    specs.Add(new ActiveHeroDeformSpec(
+                        previewDeformOverride.OriginalMeshDeformTargetFilter,
+                        !string.IsNullOrWhiteSpace(previewDeformOverride.OriginalMeshDeformBoneName)
+                            ? previewDeformOverride.OriginalMeshDeformBoneName
+                            : previewDeformOverride.RigidBoneName,
+                        previewDeformOverride.OriginalMeshDeformMode,
+                        previewDeformOverride.OriginalMeshDeformStrength,
+                        previewDeformOverride.OriginalMeshDeformRadius,
+                        previewDeformOverride.OriginalMeshDeformHeightOffset));
+                }
+                if (previewDeformOverride.OriginalMeshDeformSculpts != null)
+                {
+                    foreach (var (sk, vMap) in previewDeformOverride.OriginalMeshDeformSculpts)
+                    {
+                        if (string.IsNullOrEmpty(sk) || vMap == null || vMap.Count == 0) continue;
+                        sculptDeltasByKey[sk] = new Dictionary<int, Vector3>(vMap);
+                    }
+                }
+            }
+            else
+            {
+                foreach (var container in CollectCustomContainers(heroNode))
+                {
+                    if (!container.Visible) continue;
+
+                    if (container.HasMeta("SlotDeformSculpts") && container.GetMeta("SlotDeformSculpts").VariantType == Variant.Type.Dictionary)
+                    {
+                        MergeSerializedSculpts(container.GetMeta("SlotDeformSculpts").AsGodotDictionary<string, Variant>(), sculptDeltasByKey);
+                    }
+
+                    if (!container.HasMeta("SlotDeformEnabled") || !container.GetMeta("SlotDeformEnabled").AsBool())
+                        continue;
+
+                    float str = container.HasMeta("SlotDeformStrength") ? (float)container.GetMeta("SlotDeformStrength").AsDouble() : 0.55f;
+                    if (str <= 0.001f) continue;
+
+                    string filter = container.HasMeta("SlotDeformTarget") ? container.GetMeta("SlotDeformTarget").AsString() : "hair";
+                    string bone = container.HasMeta("SlotDeformBone") ? container.GetMeta("SlotDeformBone").AsString() : "head";
+                    var mode = container.HasMeta("SlotDeformMode") ? (HeroDeformMode)container.GetMeta("SlotDeformMode").AsInt32() : HeroDeformMode.FlattenTopDown;
+                    float rad = container.HasMeta("SlotDeformRadius") ? (float)container.GetMeta("SlotDeformRadius").AsDouble() : 0.24f;
+                    float hOff = container.HasMeta("SlotDeformHeightOffset") ? (float)container.GetMeta("SlotDeformHeightOffset").AsDouble() : 0.06f;
+
+                    specs.Add(new ActiveHeroDeformSpec(filter, bone, mode, str, rad, hOff));
+                }
+            }
+
+            if (specs.Count == 0 && sculptDeltasByKey.Count == 0) return;
+
+            Skeleton3D heroSkeleton = FindSkeleton(heroNode);
+            Transform3D skelToHero = heroSkeleton != null
+                ? ComputeTransformRelativeToRoot(heroSkeleton, heroNode)
+                : Transform3D.Identity;
+
+            var resolvedSpecs = new (ActiveHeroDeformSpec Spec, Vector3 CenterHero)[specs.Count];
+            for (int i = 0; i < specs.Count; i++)
+            {
+                var sp = specs[i];
+                Vector3 boneHeroPos = new Vector3(0f, 1.55f, 0f);
+                if (heroSkeleton != null)
+                {
+                    int bIdx = FindDeformBoneIndex(heroSkeleton, sp.BoneName);
+                    if (bIdx >= 0)
+                    {
+                        boneHeroPos = (skelToHero * heroSkeleton.GetBoneGlobalRest(bIdx)).Origin;
+                    }
+                }
+                resolvedSpecs[i] = (sp, boneHeroPos + new Vector3(0f, sp.HeightOffset, 0f));
+            }
+
+            foreach (var mi in allOriginalMeshes)
+            {
+                Mesh srcMesh = mi.Mesh;
+                if (srcMesh == null) continue;
+                int surfCount = srcMesh.GetSurfaceCount();
+                if (surfCount == 0) continue;
+
+                // Determine if any surface on this MeshInstance3D matches any deform spec or sculpt delta
+                bool anySurfaceMatched = false;
+                for (int s = 0; s < surfCount; s++)
+                {
+                    string surfDeformKey = MakeOriginalSurfaceDeformKey(mi, s);
+                    string surfOwnKey = MakeSurfaceKeepKey(mi.Name.ToString(), s);
+                    if (sculptDeltasByKey.ContainsKey(surfDeformKey) || sculptDeltasByKey.ContainsKey(surfOwnKey))
+                    {
+                        anySurfaceMatched = true;
+                        break;
+                    }
+                    for (int spIdx = 0; spIdx < resolvedSpecs.Length; spIdx++)
+                    {
+                        if (DoesHeroSurfaceMatchDeformFilter(mi, s, resolvedSpecs[spIdx].Spec.TargetFilter))
+                        {
+                            anySurfaceMatched = true;
+                            break;
+                        }
+                    }
+                    if (anySurfaceMatched) break;
+                }
+                if (!anySurfaceMatched) continue;
+
+                if (!mi.HasMeta("OriginalPreDeformMesh"))
+                {
+                    mi.SetMeta("OriginalPreDeformMesh", srcMesh);
+                }
+
+                Transform3D miToHero = ComputeTransformRelativeToRoot(mi, heroNode);
+                Transform3D heroToMi = miToHero.AffineInverse();
+
+                var deformedMesh = new ArrayMesh();
+                bool meshActuallyModified = false;
+
+                for (int s = 0; s < surfCount; s++)
+                {
+                    var arrays = srcMesh.SurfaceGetArrays(s);
+                    Material surfMat = srcMesh.SurfaceGetMaterial(s);
+                    Mesh.ArrayFormat formatFlags = (srcMesh is ArrayMesh srcArrMesh) ? srcArrMesh.SurfaceGetFormat(s) : default;
+                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex)
+                    {
+                        continue;
+                    }
+
+                    Vector3[] verts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (verts == null || verts.Length == 0) continue;
+
+                    if (arrays.Count > (int)Mesh.ArrayType.Bones && arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil)
+                    {
+                        int[] boneIdxArr = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                        if (boneIdxArr != null && boneIdxArr.Length == verts.Length * 8)
+                        {
+                            formatFlags |= Mesh.ArrayFormat.FlagUse8BoneWeights;
+                        }
+                    }
+
+                    var matchedSpecs = new List<(ActiveHeroDeformSpec Spec, Vector3 CenterHero)>();
+                    for (int spIdx = 0; spIdx < resolvedSpecs.Length; spIdx++)
+                    {
+                        if (DoesHeroSurfaceMatchDeformFilter(mi, s, resolvedSpecs[spIdx].Spec.TargetFilter))
+                        {
+                            matchedSpecs.Add(resolvedSpecs[spIdx]);
+                        }
+                    }
+
+                    string surfDeformKey = MakeOriginalSurfaceDeformKey(mi, s);
+                    string surfOwnKey = MakeSurfaceKeepKey(mi.Name.ToString(), s);
+                    Dictionary<int, Vector3> surfSculpt = null;
+                    if (!sculptDeltasByKey.TryGetValue(surfDeformKey, out surfSculpt))
+                    {
+                        sculptDeltasByKey.TryGetValue(surfOwnKey, out surfSculpt);
+                    }
+
+                    if (matchedSpecs.Count > 0 || (surfSculpt != null && surfSculpt.Count > 0))
+                    {
+                        var clonedVerts = (Vector3[])verts.Clone();
+                        Vector3[] norms = arrays.Count > (int)Mesh.ArrayType.Normal
+                            ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal])
+                            : null;
+                        Vector3[] clonedNorms = norms != null && norms.Length == verts.Length
+                            ? (Vector3[])norms.Clone()
+                            : null;
+                        float[] vertexWeights = new float[verts.Length];
+                        bool surfDisplaced = false;
+
+                        for (int v = 0; v < clonedVerts.Length; v++)
+                        {
+                            Vector3 vHero = miToHero * clonedVerts[v];
+                            Vector3 origHero = vHero;
+                            float maxW = 0f;
+
+                            foreach (var (sp, center) in matchedSpecs)
+                            {
+                                Vector3 dVec = vHero - center;
+                                float w = 0f;
+
+                                if (sp.Mode == HeroDeformMode.FlattenTopDown)
+                                {
+                                    float horiz = MathF.Sqrt(dVec.X * dVec.X + dVec.Z * dVec.Z);
+                                    float rHoriz = sp.Radius * 1.25f;
+                                    if (horiz < rHoriz)
+                                    {
+                                        float tH = Math.Clamp(1f - horiz / rHoriz, 0f, 1f);
+                                        float wH = tH * tH * (3f - 2f * tH);
+                                        float minY = center.Y - sp.Radius * 0.35f;
+                                        float band = MathF.Max(0.03f, sp.Radius * 0.45f);
+                                        float tV = Math.Clamp((vHero.Y - minY) / band, 0f, 1f);
+                                        float wV = tV * tV * (3f - 2f * tV);
+                                        w = wH * wV * sp.Strength;
+                                        if (w > 0.0001f)
+                                        {
+                                            float excessY = MathF.Max(0f, vHero.Y - center.Y);
+                                            if (excessY > 0f)
+                                            {
+                                                float topT = Math.Clamp(excessY / MathF.Max(0.02f, sp.Radius * 0.3f), 0f, 1f);
+                                                float topSmooth = topT * topT * (3f - 2f * topT);
+                                                vHero.Y -= excessY * wH * sp.Strength * (0.65f + 0.27f * topSmooth);
+                                            }
+                                            float tuck = 1f - (w * 0.22f);
+                                            vHero.X = center.X + dVec.X * tuck;
+                                            vHero.Z = center.Z + dVec.Z * tuck;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    float dist = dVec.Length();
+                                    if (dist < sp.Radius)
+                                    {
+                                        float tR = Math.Clamp(1f - dist / sp.Radius, 0f, 1f);
+                                        w = tR * tR * (3f - 2f * tR) * sp.Strength;
+                                        if (w > 0.0001f)
+                                        {
+                                            vHero = vHero.Lerp(center, w * 0.65f);
+                                        }
+                                    }
+                                }
+                                if (w > maxW) maxW = w;
+                            }
+
+                            if (surfSculpt != null && surfSculpt.TryGetValue(v, out var sDelta) && sDelta.LengthSquared() > 1e-10f)
+                            {
+                                vHero += sDelta;
+                                float sw = Math.Clamp(sDelta.Length() * 14f, 0.25f, 1.0f);
+                                if (sw > maxW) maxW = sw;
+                            }
+
+                            if (maxW > 0.0001f && vHero.DistanceSquaredTo(origHero) > 1e-10f)
+                            {
+                                clonedVerts[v] = heroToMi * vHero;
+                                vertexWeights[v] = maxW;
+                                surfDisplaced = true;
+                            }
+                        }
+
+                        if (surfDisplaced)
+                        {
+                            meshActuallyModified = true;
+                            if (clonedNorms != null)
+                            {
+                                int[] triIdx = arrays.Count > (int)Mesh.ArrayType.Index
+                                    ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index])
+                                    : null;
+                                Vector3[] accumNorm = new Vector3[clonedVerts.Length];
+                                int triCount = triIdx != null ? triIdx.Length / 3 : clonedVerts.Length / 3;
+                                for (int t = 0; t < triCount; t++)
+                                {
+                                    int i0 = triIdx != null ? triIdx[t * 3 + 0] : t * 3 + 0;
+                                    int i1 = triIdx != null ? triIdx[t * 3 + 1] : t * 3 + 1;
+                                    int i2 = triIdx != null ? triIdx[t * 3 + 2] : t * 3 + 2;
+                                    if ((uint)i0 >= (uint)clonedVerts.Length || (uint)i1 >= (uint)clonedVerts.Length || (uint)i2 >= (uint)clonedVerts.Length)
+                                        continue;
+                                    Vector3 e1 = clonedVerts[i1] - clonedVerts[i0];
+                                    Vector3 e2 = clonedVerts[i2] - clonedVerts[i0];
+                                    Vector3 fn = e2.Cross(e1);
+                                    accumNorm[i0] += fn;
+                                    accumNorm[i1] += fn;
+                                    accumNorm[i2] += fn;
+                                }
+                                for (int v = 0; v < clonedVerts.Length; v++)
+                                {
+                                    if (vertexWeights[v] > 0.001f && accumNorm[v].LengthSquared() > 1e-10f)
+                                    {
+                                        Vector3 smoothN = accumNorm[v].Normalized();
+                                        float blend = MathF.Min(1f, vertexWeights[v] * 1.4f);
+                                        Vector3 n = clonedNorms[v].Lerp(smoothN, blend);
+                                        if (n.LengthSquared() > 1e-10f) clonedNorms[v] = n.Normalized();
+                                    }
+                                }
+                                arrays[(int)Mesh.ArrayType.Normal] = clonedNorms;
+                            }
+                            arrays[(int)Mesh.ArrayType.Vertex] = clonedVerts;
+                        }
+                    }
+
+                    deformedMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, formatFlags);
+                    int addedSurfIdx = deformedMesh.GetSurfaceCount() - 1;
+                    if (surfMat != null) deformedMesh.SurfaceSetMaterial(addedSurfIdx, surfMat);
+                    if (srcMesh is ArrayMesh srcArrMeshForName)
+                    {
+                        deformedMesh.SurfaceSetName(addedSurfIdx, srcArrMeshForName.SurfaceGetName(s));
+                    }
+                }
+
+                if (meshActuallyModified && deformedMesh.GetSurfaceCount() == surfCount)
+                {
+                    deformedMesh.LightmapSizeHint = srcMesh.LightmapSizeHint;
+                    mi.Mesh = deformedMesh;
+                    mi.SetMeta("IsDeformedOriginalMesh", true);
+                }
+            }
+        }
+
+        public static bool DoesHeroSurfaceMatchDeformFilter(MeshInstance3D mi, int surfIdx, string filter)
+        {
+            if (mi == null) return false;
+            string f = (filter ?? "hair").Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(f)) return false;
+
+            string rawName = mi.Name.ToString();
+            string matName = mi.Mesh?.SurfaceGetMaterial(surfIdx)?.ResourceName ?? "";
+            string vmatName = "";
+            try { vmatName = DeadlockPlayground.Painter.HeroMeshHierarchy.ResolveAuthenticVmatFullPath(mi, surfIdx) ?? ""; } catch { }
+            string origVmat = mi.HasMeta("OriginalVmatPath") ? mi.GetMeta("OriginalVmatPath").AsString() : "";
+            string surfName = (mi.Mesh is ArrayMesh arrMesh) ? arrMesh.SurfaceGetName(surfIdx) : "";
+            string surfKey = MakeSurfaceKeepKey(rawName, surfIdx);
+
+            string parentName = "";
+            string parentSurfKey = "";
+            if (mi.HasMeta("ParentCompositeMesh"))
+            {
+                var p = mi.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                if (p != null && GodotObject.IsInstanceValid(p))
+                {
+                    parentName = p.Name.ToString();
+                    int pSurf = mi.HasMeta("SurfaceIndex") ? mi.GetMeta("SurfaceIndex").AsInt32() : surfIdx;
+                    parentSurfKey = MakeSurfaceKeepKey(parentName, pSurf);
+                }
+            }
+
+            string combined = $"{rawName} {matName} {vmatName} {origVmat} {surfName} {parentName}".ToLowerInvariant();
+
+            if (f == "all") return true;
+            if (f == "hair")
+            {
+                return combined.Contains("hair") || combined.Contains("ponytail") ||
+                       combined.Contains("braid") || combined.Contains("bangs") ||
+                       combined.Contains("mohawk") || combined.Contains("fur") ||
+                       combined.Contains("wig") || combined.Contains("mane") ||
+                       combined.Contains("locks") || combined.Contains("tuft") ||
+                       combined.Contains("crest");
+            }
+            if (f == "head")
+            {
+                return combined.Contains("hair") || combined.Contains("head") ||
+                       combined.Contains("scalp") || combined.Contains("face") ||
+                       combined.Contains("skull") || combined.Contains("cranium") ||
+                       combined.Contains("hat") || combined.Contains("hood") ||
+                       combined.Contains("helmet") || combined.Contains("cap");
+            }
+
+            return string.Equals(surfKey, f, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(parentSurfKey, f, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(rawName, f, StringComparison.OrdinalIgnoreCase) ||
+                   combined.Contains(f);
         }
 
         private static Material CreateDefaultPbrMaterial(string name)
@@ -5189,7 +6010,7 @@ namespace DeadlockPlayground.Importer
             string lower = nName.ToLowerInvariant();
             if (nName == "SkeletonGizmoManager" || nName == "BoneLayerManager" || nName == "CharacterIKManager" ||
                 lower.Contains("gizmo") || lower.Contains("picker") || lower.Contains("tipvisual") || lower.Contains("polevisual") ||
-                nName.StartsWith("@") || nName.Contains("Custom_Rigged_Character"))
+                nName.StartsWith("@") || nName.Contains("Custom_Rigged_Character") || nName.StartsWith("Custom_Accessory_") || nName == "Custom_Rigid_Accessory")
             {
                 return;
             }
@@ -5233,7 +6054,7 @@ namespace DeadlockPlayground.Importer
             string lower = nName.ToLowerInvariant();
             if (nName == "SkeletonGizmoManager" || nName == "BoneLayerManager" || nName == "CharacterIKManager" ||
                 lower.Contains("gizmo") || lower.Contains("picker") || lower.Contains("tipvisual") || lower.Contains("polevisual") ||
-                nName.StartsWith("@") || nName.Contains("Custom_Rigged_Character"))
+                nName.StartsWith("@") || nName.Contains("Custom_Rigged_Character") || nName.StartsWith("Custom_Accessory_") || nName == "Custom_Rigid_Accessory")
             {
                 return;
             }
@@ -5327,11 +6148,14 @@ namespace DeadlockPlayground.Importer
 
             if (!useSkinning)
             {
+                Basis normalXform = MathF.Abs(fallbackXform.Basis.Determinant()) > 1e-8f
+                    ? fallbackXform.Basis.Inverse().Transposed()
+                    : fallbackXform.Basis;
                 for (int v = 0; v < vCount; v++)
                 {
                     outVerts[v] = fallbackXform * rawVerts[v];
                     outNorms[v] = (rawNorms != null && rawNorms.Length == vCount)
-                        ? (fallbackXform.Basis * rawNorms[v]).Normalized()
+                        ? (normalXform * rawNorms[v]).Normalized()
                         : Vector3.Up;
                 }
                 return;
@@ -5706,11 +6530,25 @@ namespace DeadlockPlayground.Importer
             DriveForearmTwist(skeleton);
         }
 
-        public static void RemoveCustomModelAndRestoreHero(Node3D heroNode)
+        public static void RemoveAccessorySlot(Node3D heroNode, string slotId)
+        {
+            if (heroNode == null || !GodotObject.IsInstanceValid(heroNode) || string.IsNullOrWhiteSpace(slotId)) return;
+            string containerName = GetContainerNameForSlot(slotId);
+            var existing = heroNode.FindChild(containerName, true, false);
+            if (existing != null && GodotObject.IsInstanceValid(existing))
+            {
+                existing.GetParent()?.RemoveChild(existing);
+                existing.QueueFree();
+            }
+            RecomputeHeroReplacementVisibility(heroNode);
+            new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
+        }
+
+        public static void RemoveCustomModelAndRestoreHero(Node3D heroNode, bool includeAccessories = true)
         {
             if (heroNode == null || !GodotObject.IsInstanceValid(heroNode)) return;
 
-            // 1. Remove all Custom_Rigged_Character container nodes
+            // 1. Remove Custom_Rigged_Character (and optionally all Custom_Accessory_* containers)
             var containers = heroNode.FindChildren("Custom_Rigged_Character", recursive: true, owned: false);
             foreach (var node in containers)
             {
@@ -5718,15 +6556,36 @@ namespace DeadlockPlayground.Importer
                 node.QueueFree();
             }
 
-            // Also remove any standalone custom meshes
+            if (includeAccessories)
+            {
+                foreach (var acc in CollectCustomContainers(heroNode))
+                {
+                    if (GodotObject.IsInstanceValid(acc))
+                    {
+                        acc.GetParent()?.RemoveChild(acc);
+                        acc.QueueFree();
+                    }
+                }
+            }
+
+            // Also remove any standalone custom meshes matching reset scope
             var allMeshes = CollectMeshes(heroNode);
             foreach (var mi in allMeshes)
             {
+                bool isSlotAcc = mi.HasMeta("AccessorySlotId") && !string.IsNullOrEmpty(mi.GetMeta("AccessorySlotId").AsString());
+                if (!includeAccessories && isSlotAcc) continue;
                 if (mi.HasMeta("IsCustomImportedMesh") || mi.Name.ToString().StartsWith("Custom_"))
                 {
                     mi.GetParent()?.RemoveChild(mi);
                     mi.QueueFree();
                 }
+            }
+
+            if (!includeAccessories)
+            {
+                RecomputeHeroReplacementVisibility(heroNode);
+                new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
+                return;
             }
 
             // 2. Restore all authentic Deadlock hero submeshes to full visibility
@@ -5748,7 +6607,8 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            // 3. Re-scan hero hierarchy
+            // 3. Restore any original hero deformations and re-scan hero hierarchy
+            RecomputeHeroDeformations(heroNode);
             new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
         }
 
@@ -6258,6 +7118,14 @@ namespace DeadlockPlayground.Importer
 
             newMi.SetMeta("IsOutlineShell", isOutline);
             newMi.SetMeta("SourceSubmeshName", srcName);
+            if (!string.IsNullOrWhiteSpace(options?.SlotId))
+            {
+                newMi.SetMeta("AccessorySlotId", options.SlotId);
+                if (!string.IsNullOrWhiteSpace(options.AccessoryName))
+                {
+                    newMi.SetMeta("AccessorySlotName", options.AccessoryName);
+                }
+            }
 
             string matName = surfMat?.ResourceName;
             if (string.IsNullOrWhiteSpace(matName) && srcMi.HasMeta("SourceMaterialName"))
@@ -6266,7 +7134,16 @@ namespace DeadlockPlayground.Importer
             }
             if (!string.IsNullOrWhiteSpace(matName))
             {
+                if (!string.IsNullOrWhiteSpace(options?.SlotId) &&
+                    !matName.StartsWith(options.SlotId, StringComparison.OrdinalIgnoreCase))
+                {
+                    matName = $"{options.SlotId}_{matName}";
+                }
                 newMi.SetMeta("SourceMaterialName", matName);
+                if (surfMat != null && string.IsNullOrWhiteSpace(surfMat.ResourceName) == false)
+                {
+                    surfMat.ResourceName = matName;
+                }
             }
 
             if (options?.SubmeshReplacementMap != null &&

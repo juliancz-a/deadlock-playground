@@ -128,6 +128,70 @@ corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_icon_btn_disabled"]
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+bg_color = Color(0.133333, 0.12549, 0.129412, 0.45)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.247059, 0.364706, 0.301961, 0.3)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_icon_btn_hover"]
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+bg_color = Color(0.247059, 0.364706, 0.301961, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.447059, 0.580392, 0.498039, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_icon_btn_normal"]
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+bg_color = Color(0.184314, 0.266667, 0.258824, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.247059, 0.364706, 0.301961, 0.85)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_icon_btn_pressed"]
+content_margin_left = 5.0
+content_margin_top = 4.0
+content_margin_right = 5.0
+content_margin_bottom = 4.0
+bg_color = Color(0.133333, 0.12549, 0.129412, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.937255, 0.870588, 0.74902, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
 content_margin_left = 8.0
 content_margin_top = 8.0
@@ -647,9 +711,20 @@ TitleLabel/base_type = &"Label"
 TitleLabel/colors/font_color = Color(0.937255, 0.870588, 0.74902, 1)
 TitleLabel/font_sizes/font_size = 21
 TitleLabel/fonts/font = ExtResource("1_colus")
+IconButton/base_type = &"Button"
+IconButton/styles/disabled = SubResource("StyleBoxFlat_icon_btn_disabled")
+IconButton/styles/focus = SubResource("StyleBoxFlat_btn_focus")
+IconButton/styles/hover = SubResource("StyleBoxFlat_icon_btn_hover")
+IconButton/styles/normal = SubResource("StyleBoxFlat_icon_btn_normal")
+IconButton/styles/pressed = SubResource("StyleBoxFlat_icon_btn_pressed")
 ToolbarButton/base_type = &"Button"
 ToolbarButton/font_sizes/font_size = 15
 ToolbarButton/fonts/font = ExtResource("2_dahlia")
+ToolbarButton/styles/disabled = SubResource("StyleBoxFlat_icon_btn_disabled")
+ToolbarButton/styles/focus = SubResource("StyleBoxFlat_btn_focus")
+ToolbarButton/styles/hover = SubResource("StyleBoxFlat_icon_btn_hover")
+ToolbarButton/styles/normal = SubResource("StyleBoxFlat_icon_btn_normal")
+ToolbarButton/styles/pressed = SubResource("StyleBoxFlat_icon_btn_pressed")
 TooltipLabel/colors/font_color = Color(0.937255, 0.870588, 0.74902, 1)
 TooltipLabel/font_sizes/font_size = 15
 TooltipLabel/fonts/font = ExtResource("2_dahlia")

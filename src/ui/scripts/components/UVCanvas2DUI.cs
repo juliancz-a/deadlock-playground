@@ -23,12 +23,15 @@ namespace DeadlockPlayground.UI
         private Button _btnResetZoom;
         private OptionButton _optBlendMode;
         private Button _btnBaseTex;
+        private Button _btnAlphaPreview;
         private Button _btnMesh;
         private Button _btnOutline;
         private Button _btnWireOpacity;
         private SubViewportContainer _viewportContainer;
         private SubViewport _subViewport;
         private Control _canvasDrawArea;
+        private bool _showAlphaMask = false;
+        private ImageTexture _checkerboardTexture;
 
         // Subsystems
         private SkinLayerManager _layerManager;
@@ -288,6 +291,39 @@ namespace DeadlockPlayground.UI
             _btnBaseTex = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/BtnBaseTex")
                        ?? FindChild("BtnBaseTex", true, false) as Button;
 
+            var toolbarRow = _btnBaseTex?.GetParent() as HBoxContainer
+                          ?? GetNodeOrNull<HBoxContainer>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow")
+                          ?? FindChild("ToolbarRow", true, false) as HBoxContainer;
+            if (toolbarRow != null)
+            {
+                _btnAlphaPreview = toolbarRow.GetNodeOrNull<Button>("BtnAlphaPreview");
+                if (_btnAlphaPreview == null)
+                {
+                    _btnAlphaPreview = new Button
+                    {
+                        Name = "BtnAlphaPreview",
+                        Text = "Alpha",
+                        ToggleMode = true,
+                        ButtonPressed = _showAlphaMask,
+                        TooltipText = "Alpha Preview / Show Alpha Mask (Black = Transparent A=0, White = Opaque A=1)",
+                        CustomMinimumSize = new Vector2(54, 24),
+                        ThemeTypeVariation = "ToolbarButton"
+                    };
+                    var alphaIcon = GD.Load<Texture2D>("res://assets/at-icons/checkerboard.svg");
+                    if (alphaIcon != null)
+                    {
+                        _btnAlphaPreview.Icon = alphaIcon;
+                        _btnAlphaPreview.ExpandIcon = true;
+                        _btnAlphaPreview.AddThemeConstantOverride("icon_max_width", 14);
+                    }
+                    toolbarRow.AddChild(_btnAlphaPreview);
+                    if (_btnBaseTex != null)
+                    {
+                        toolbarRow.MoveChild(_btnAlphaPreview, _btnBaseTex.GetIndex() + 1);
+                    }
+                }
+            }
+
             _btnMesh = GetNodeOrNull<Button>("VBoxContainer/Header/Margin/HeaderVBox/ToolbarRow/BtnMesh")
                     ?? FindChild("BtnMesh", true, false) as Button;
 
@@ -479,6 +515,12 @@ namespace DeadlockPlayground.UI
             if (_btnBaseTex != null)
             {
                 _btnBaseTex.Pressed += OnBaseTexButtonPressed;
+            }
+
+            if (_btnAlphaPreview != null)
+            {
+                _btnAlphaPreview.Pressed += OnAlphaPreviewButtonPressed;
+                UpdateAlphaPreviewButton();
             }
 
             if (_btnMesh != null)
@@ -827,6 +869,47 @@ namespace DeadlockPlayground.UI
             }
         }
 
+        private void OnAlphaPreviewButtonPressed()
+        {
+            _showAlphaMask = _btnAlphaPreview?.ButtonPressed ?? false;
+            UpdateAlphaPreviewButton();
+            _baseTextureMat?.SetShaderParameter("show_alpha_mask", _showAlphaMask);
+            _paintOverlayMat?.SetShaderParameter("show_alpha_mask", _showAlphaMask);
+            _canvasDrawArea?.QueueRedraw();
+        }
+
+        private void UpdateAlphaPreviewButton()
+        {
+            if (_btnAlphaPreview != null)
+            {
+                _btnAlphaPreview.ButtonPressed = _showAlphaMask;
+                _btnAlphaPreview.Modulate = _showAlphaMask ? new Color(1.0f, 0.88f, 0.45f, 1.0f) : new Color(0.75f, 0.78f, 0.85f, 0.8f);
+            }
+        }
+
+        private ImageTexture EnsureCheckerboardTexture()
+        {
+            if (_checkerboardTexture != null && GodotObject.IsInstanceValid(_checkerboardTexture))
+                return _checkerboardTexture;
+
+            const int tileSize = 12;
+            const int texSize = tileSize * 2;
+            var img = Image.CreateEmpty(texSize, texSize, false, Image.Format.Rgba8);
+            Color dark = new Color(0.11f, 0.13f, 0.16f, 1.0f);
+            Color light = new Color(0.16f, 0.19f, 0.23f, 1.0f);
+            for (int y = 0; y < texSize; y++)
+            {
+                bool yOdd = (y / tileSize) % 2 == 1;
+                for (int x = 0; x < texSize; x++)
+                {
+                    bool xOdd = (x / tileSize) % 2 == 1;
+                    img.SetPixel(x, y, (xOdd ^ yOdd) ? light : dark);
+                }
+            }
+            _checkerboardTexture = ImageTexture.CreateFromImage(img);
+            return _checkerboardTexture;
+        }
+
         private void UpdateWireButtons()
         {
             if (_btnMesh != null)
@@ -947,12 +1030,8 @@ namespace DeadlockPlayground.UI
             var edgeCounts = new Dictionary<EdgeKey, int>();
             var edgeCoords = new Dictionary<EdgeKey, (Vector2 p1, Vector2 p2)>();
 
-            void ProcessEdge(int i1, int i2)
+            void ProcessEdge(Vector2 uv1, Vector2 uv2)
             {
-                if (i1 < 0 || i2 < 0 || i1 >= uvs.Length || i2 >= uvs.Length) return;
-                Vector2 uv1 = uvs[i1];
-                Vector2 uv2 = uvs[i2];
-
                 // 1. Filter seam-crossing wrap jumps (chords across the entire texture)
                 if (Mathf.Abs(uv1.X - uv2.X) > 0.35f || Mathf.Abs(uv1.Y - uv2.Y) > 0.35f)
                 {
@@ -988,22 +1067,30 @@ namespace DeadlockPlayground.UI
                 }
             }
 
+            void ProcessTriangle(int i0, int i1, int i2)
+            {
+                if (i0 < 0 || i1 < 0 || i2 < 0 || i0 >= uvs.Length || i1 >= uvs.Length || i2 >= uvs.Length) return;
+                Vector2 uv0 = uvs[i0];
+                Vector2 uv1 = uvs[i1];
+                Vector2 uv2 = uvs[i2];
+                MeshRaycaster.WrapTriangleUvsToUnitSquare(ref uv0, ref uv1, ref uv2);
+                ProcessEdge(uv0, uv1);
+                ProcessEdge(uv1, uv2);
+                ProcessEdge(uv2, uv0);
+            }
+
             if (indices != null && indices.Length >= 3)
             {
                 for (int i = 0; i < indices.Length - 2; i += 3)
                 {
-                    ProcessEdge(indices[i], indices[i + 1]);
-                    ProcessEdge(indices[i + 1], indices[i + 2]);
-                    ProcessEdge(indices[i + 2], indices[i]);
+                    ProcessTriangle(indices[i], indices[i + 1], indices[i + 2]);
                 }
             }
             else
             {
                 for (int i = 0; i < uvs.Length - 2; i += 3)
                 {
-                    ProcessEdge(i, i + 1);
-                    ProcessEdge(i + 1, i + 2);
-                    ProcessEdge(i + 2, i);
+                    ProcessTriangle(i, i + 1, i + 2);
                 }
             }
 
@@ -1057,10 +1144,26 @@ namespace DeadlockPlayground.UI
             // 1. Background fill
             canvas.DrawRect(new Rect2(Vector2.Zero, canvas.Size), new Color(0.06f, 0.07f, 0.09f, 1.0f));
 
-            // 2. Atlas bounds backdrop
-            canvas.DrawRect(new Rect2(_pan, new Vector2(atlasW * _zoom, atlasH * _zoom)), new Color(0.12f, 0.14f, 0.18f, 1.0f));
+            // 2. Atlas bounds backdrop (subtle transparency checkerboard when BASE is visible)
+            Rect2 atlasScreenRect = new Rect2(_pan, new Vector2(atlasW * _zoom, atlasH * _zoom));
+            if (_showBaseTexture)
+            {
+                var checkerTex = EnsureCheckerboardTexture();
+                if (checkerTex != null)
+                {
+                    canvas.DrawTextureRect(checkerTex, atlasScreenRect, tile: true);
+                }
+                else
+                {
+                    canvas.DrawRect(atlasScreenRect, new Color(0.12f, 0.14f, 0.18f, 1.0f));
+                }
+            }
+            else
+            {
+                canvas.DrawRect(atlasScreenRect, new Color(0.12f, 0.14f, 0.18f, 1.0f));
+            }
 
-            // 3. Update base diffuse texture with opaque RGB shader (prevents low-alpha crushing)
+            // 3. Update base diffuse texture shader (supports transparency checkerboard & alpha mask preview)
             var baseTex = _layerManager?.GetBaseTextureResource();
             if (_baseTextureRect != null)
             {
@@ -1081,6 +1184,8 @@ namespace DeadlockPlayground.UI
                             _baseTextureRect.Material = _baseTextureMat;
                         }
                         _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
+                        _baseTextureMat?.SetShaderParameter("show_alpha_mask", _showAlphaMask);
+                        _baseTextureMat?.SetShaderParameter("preview_transparency", true);
                     }
                     else
                     {
@@ -1109,6 +1214,7 @@ namespace DeadlockPlayground.UI
                         {
                             _paintOverlayRect.Material = _paintOverlayMat;
                         }
+                        _paintOverlayMat?.SetShaderParameter("show_alpha_mask", _showAlphaMask);
                     }
                     else
                     {

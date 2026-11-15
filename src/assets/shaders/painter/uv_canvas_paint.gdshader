@@ -1,6 +1,8 @@
 shader_type canvas_item;
 render_mode blend_mix;
 
+uniform bool show_alpha_mask = false;
+
 // Converts linear HDR half-float color from the GPU atlas composite buffer
 // to sRGB for accurate presentation on the 2D canvas.
 vec3 linear_to_srgb(vec3 c) {
@@ -13,9 +15,13 @@ vec3 linear_to_srgb(vec3 c) {
 
 void fragment() {
     vec4 col = texture(TEXTURE, UV);
-    // Discard transparent/empty pixels completely so they never affect or darken underlying base texture
-    if (col.a <= 0.001) {
-        discard;
+    if (show_alpha_mask) {
+        COLOR = vec4(vec3(clamp(col.a, 0.0, 1.0)), clamp(col.a, 0.0, 1.0));
+    } else {
+        // Discard transparent/empty pixels completely so they never affect or darken underlying base texture
+        if (col.a <= 0.001) {
+            discard;
+        }
+        COLOR = vec4(linear_to_srgb(col.rgb), col.a);
     }
-    COLOR = vec4(linear_to_srgb(col.rgb), col.a);
 }

@@ -837,9 +837,9 @@
         </div>
 
         <div class="form-group">
-          <label>Highlights (One per line)</label>
-          <textarea id="input-highlights" rows="3" placeholder="• Fixed additive animation recoil coordinate conversion&#10;• Added particle texture repainting tab&#10;• Optimized 4K atlas VRAM compositing"></textarea>
-          <div class="input-hint">Will be rendered as bullet items on the website and GameBanana update notice.</div>
+          <label>Highlights / Release Notes (Supports Markdown)</label>
+          <textarea id="input-highlights" rows="5" placeholder="## New Features&#10;• Added particle texture repainting tab&#10;  - Supports 2D UV &amp; 3D brush painting&#10;---&#10;## Bug Fixes&#10;• Fixed additive animation recoil coordinate conversion"></textarea>
+          <div class="input-hint">Supports Markdown headers (##, ###), separators (---), **bold**, `code`, and nested sub-bullets (  - item).</div>
         </div>
 
         <div class="form-group">
@@ -1433,18 +1433,54 @@
       alert('Console logs copied to clipboard!');
     }
 
+    function parseHighlightLines(rawText) {
+      return rawText.split('\n').map(line => {
+        const trimmedRight = line.replace(/\s+$/, '');
+        const trimmed = trimmedRight.trim();
+        if (!trimmed) return '';
+        // Preserve Markdown headers, separators, blockquotes, ordered lists, and indented sub-bullets
+        if (/^#{1,6}\s+/.test(trimmed)) return trimmed;
+        if (/^(?:-{3,}|\*{3,}|_{3,}|={3,})$/.test(trimmed)) return '---';
+        if (/^>\s?/.test(trimmed)) return trimmed;
+        if (/^\d+\.\s+/.test(trimmed)) return trimmedRight;
+        if (/^(\s{2,}|\t+)[-*•+]\s+/.test(trimmedRight)) {
+          return '  - ' + trimmed.replace(/^[-*•+]\s+/, '');
+        }
+        // Strip top-level bullet marker only when followed by whitespace
+        return trimmed.replace(/^[-•*+→]\s+/, '');
+      }).filter(h => h.length > 0);
+    }
+
+    function highlightsToMarkdownBody(lines) {
+      const out = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (/^#{1,6}\s+/.test(trimmed)) {
+          if (out.length > 0 && out[out.length - 1] !== '') out.push('');
+          out.push(trimmed);
+        } else if (/^(?:-{3,}|\*{3,}|_{3,}|={3,})$/.test(trimmed)) {
+          if (out.length > 0 && out[out.length - 1] !== '') out.push('');
+          out.push('---', '');
+        } else if (/^>\s?/.test(trimmed) || /^\d+\.\s+/.test(trimmed)) {
+          out.push(line);
+        } else if (/^\s{2,}[-*•+]\s+/.test(line)) {
+          out.push(line);
+        } else {
+          out.push(`* ${trimmed.replace(/^[-•*+→]\s+/, '')}`);
+        }
+      }
+      while (out.length > 0 && out[out.length - 1] === '') out.pop();
+      return out.join('\n');
+    }
+
     function generateMarkdownFromHighlights() {
       const version = document.getElementById('input-version').value.trim() || '1.X.X';
       const title = document.getElementById('input-title').value.trim() || 'New Update';
-      const rawHighlights = document.getElementById('input-highlights').value.trim().split('\n');
-      
-      const bullets = rawHighlights
-        .map(h => h.trim().replace(/^[-•*]\s*/, ''))
-        .filter(h => h.length > 0)
-        .map(h => `* ${h}`)
-        .join('\n');
+      const lines = parseHighlightLines(document.getElementById('input-highlights').value);
+      const body = highlightsToMarkdownBody(lines);
 
-      const md = `### Version ${version} — ${title}\n\n#### Highlights & Changes:\n${bullets}`;
+      const md = `### Version ${version} — ${title}\n\n${body}`;
       document.getElementById('input-markdown').value = md;
     }
 
@@ -1471,8 +1507,7 @@
       const version = document.getElementById('input-version').value.trim();
       const title = document.getElementById('input-title').value.trim();
       const date = document.getElementById('input-date').value.trim();
-      const rawHighlights = document.getElementById('input-highlights').value.trim().split('\n');
-      const highlights = rawHighlights.map(h => h.trim().replace(/^[-•*]\s*/, '')).filter(h => h.length > 0);
+      const highlights = parseHighlightLines(document.getElementById('input-highlights').value);
       const markdown = document.getElementById('input-markdown').value.trim();
       const archivePath = document.getElementById('input-archive-path').value.trim();
       const targetBranch = document.getElementById('input-target-branch').value.trim() || 'main';
@@ -1534,11 +1569,11 @@
     function copyChangelogToClipboard() {
       const version = document.getElementById('input-version').value.trim() || 'Latest';
       const title = document.getElementById('input-title').value.trim() || 'Release';
-      const rawHighlights = document.getElementById('input-highlights').value.trim().split('\n');
-      const bullets = rawHighlights.map(h => '• ' + h.trim().replace(/^[-•*]\s*/, '')).filter(h => h.length > 2).join('\n');
+      const lines = parseHighlightLines(document.getElementById('input-highlights').value);
       const md = document.getElementById('input-markdown').value.trim();
 
-      const text = `Version ${version} — ${title}\n\n${bullets ? 'Highlights:\n' + bullets + '\n\n' : ''}${md}`;
+      const body = md || highlightsToMarkdownBody(lines);
+      const text = `Version ${version} — ${title}\n\n${body}`;
       navigator.clipboard.writeText(text);
       alert('Changelog text copied to clipboard!');
     }

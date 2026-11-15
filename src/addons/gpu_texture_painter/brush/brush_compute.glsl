@@ -24,7 +24,7 @@ layout(push_constant, std430) uniform Params {
     float brush_depth;
     vec2 brush_center;
     float brush_radius;
-    float pad;
+    float alpha_flags; // Bit 0 (1): IsAlphaLocked on active layer; Bit 1 (2): PreserveBaseAlpha / ClipToBaseAlpha
 } params;
 
 layout(rgba16f, set = 2, binding = 0) uniform restrict image2D overlay_texture_0;
@@ -181,11 +181,26 @@ void main() {
                     blended_brush_rgb = brush_color.rgb; \
                 } \
                 float stroke_alpha = clamp(brush_color.a * mask_val, 0.0f, 1.0f); \
-                float out_alpha = clamp(stroke_alpha + exist_a * (1.0f - stroke_alpha), 0.0f, 1.0f); \
-                vec3 out_color = (out_alpha > 0.0001f) ? \
-                    clamp((blended_brush_rgb * stroke_alpha + existing_color.rgb * exist_a * (1.0f - stroke_alpha)) / out_alpha, vec3(0.0f), vec3(1.0f)) : \
-                    clamp(blended_brush_rgb, vec3(0.0f), vec3(1.0f)); \
-                imageStore(tex, bleed_coords, vec4(out_color, out_alpha)); \
+                int a_flags = int(params.alpha_flags + 0.5f); \
+                bool is_alpha_locked = (a_flags & 1) != 0; \
+                bool clip_to_base_alpha = (a_flags & 2) != 0; \
+                if (clip_to_base_alpha) { \
+                    stroke_alpha *= clamp(base_val.a, 0.0f, 1.0f); \
+                } \
+                if (is_alpha_locked) { \
+                    if (exist_a <= 0.001f) continue; \
+                    vec3 out_color = clamp(mix(existing_color.rgb, blended_brush_rgb, stroke_alpha), vec3(0.0f), vec3(1.0f)); \
+                    imageStore(tex, bleed_coords, vec4(out_color, exist_a)); \
+                } else { \
+                    float out_alpha = clamp(stroke_alpha + exist_a * (1.0f - stroke_alpha), 0.0f, 1.0f); \
+                    if (clip_to_base_alpha) { \
+                        out_alpha = min(out_alpha, clamp(base_val.a, 0.0f, 1.0f)); \
+                    } \
+                    vec3 out_color = (out_alpha > 0.0001f) ? \
+                        clamp((blended_brush_rgb * stroke_alpha + existing_color.rgb * exist_a * (1.0f - stroke_alpha)) / max(stroke_alpha + exist_a * (1.0f - stroke_alpha), 0.0001f), vec3(0.0f), vec3(1.0f)) : \
+                        clamp(blended_brush_rgb, vec3(0.0f), vec3(1.0f)); \
+                    imageStore(tex, bleed_coords, vec4(out_color, out_alpha)); \
+                } \
             } \
         } \
     } } 

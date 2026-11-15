@@ -440,7 +440,7 @@ namespace DeadlockPlayground.UI
                     string delCmHero = hero.HeroId;
                     cmTrashBtn.Pressed += () =>
                     {
-                        ModWorkspaceSession.Instance.DiscardCustomModel(delCmHero);
+                        ModWorkspaceSession.Instance.DiscardCustomModel(delCmHero, includeAccessories: false);
                         if (isCurrentActiveHero)
                         {
                             var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
@@ -451,6 +451,116 @@ namespace DeadlockPlayground.UI
                     cmBox.AddChild(cmTrashBtn);
 
                     cardVBox.AddChild(cmBox);
+                }
+
+                // 0b. Custom Accessories & Outfit Part Replacements
+                if (hero.Accessories != null && hero.Accessories.Count > 0)
+                {
+                    cardVBox.AddChild(new Label
+                    {
+                        Text = $"• Accessories & Outfit Parts ({hero.Accessories.Count}/{DeadlockPlayground.Importer.CustomModelAutoRigger.MaxAccessorySlots})",
+                        ThemeTypeVariation = "HeaderLabel"
+                    });
+
+                    foreach (var acc in hero.Accessories)
+                    {
+                        if (acc == null) continue;
+                        var accBox = new HBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+                        accBox.AddThemeConstantOverride("separation", 10);
+                        accBox.AddChild(new Control { CustomMinimumSize = new Vector2(16, 0) });
+
+                        bool isReplace = acc.ModelConfig?.Intent == (int)DeadlockPlayground.Importer.CustomModelAutoRigger.AccessoryIntent.ReplacePart
+                            || (acc.ModelConfig?.ExplicitReplacedTargets?.Count ?? 0) > 0;
+                        accBox.AddChild(new Label
+                        {
+                            Text = isReplace ? "[REPLACE PART]" : "[ACCESSORY]",
+                            ThemeTypeVariation = "BadgeLabelInfo",
+                            SizeFlagsVertical = SizeFlags.ShrinkCenter
+                        });
+
+                        string boneOrTarget = isReplace && (acc.ModelConfig?.ExplicitReplacedTargets?.Count ?? 0) > 0
+                            ? $"replaces {string.Join(", ", acc.ModelConfig.ExplicitReplacedTargets)}"
+                            : (!string.IsNullOrEmpty(acc.ModelConfig?.RigidBoneName) ? $"bone: {acc.ModelConfig.RigidBoneName}" : "skinned");
+                        string visNote = acc.Visible ? "" : " (Hidden)";
+                        var accLbl = new Label
+                        {
+                            Text = $"{acc.DisplayName} — {acc.ModelConfig?.OriginalFileName} ({boneOrTarget}){visNote}",
+                            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                            ClipText = true,
+                            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                            TooltipText = acc.ModelConfig?.RelativeModelPath ?? acc.SlotId,
+                            ThemeTypeVariation = "BodyLabel"
+                        };
+                        accBox.AddChild(accLbl);
+
+                        string slotContainerName = DeadlockPlayground.Importer.CustomModelAutoRigger.GetContainerNameForSlot(acc.SlotId);
+                        bool isSlotActive = isCurrentActiveHero &&
+                                            vpkLoader?.CurrentHeroNode?.FindChild(slotContainerName, true, false) != null;
+                        if (isSlotActive)
+                        {
+                            accBox.AddChild(new Label
+                            {
+                                Text = acc.Visible ? "[Active]" : "[Hidden]",
+                                ThemeTypeVariation = acc.Visible ? "BadgeLabelSuccess" : "BadgeLabelInfo",
+                                SizeFlagsVertical = SizeFlags.ShrinkCenter
+                            });
+                        }
+                        else
+                        {
+                            var applyAccBtn = new Button
+                            {
+                                Text = "Apply",
+                                CustomMinimumSize = new Vector2(96, 28),
+                                SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                                ThemeTypeVariation = "ToolbarButton"
+                            };
+                            string localAccHero = hero.HeroId;
+                            applyAccBtn.Pressed += async () =>
+                            {
+                                CloseModal();
+                                var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
+                                if (vpkLoader != null)
+                                {
+                                    string cur = vpkLoader.LastLoadedHeroEntry?.InternalCodename ?? "";
+                                    if (!string.Equals(cur, localAccHero, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        var catEntry = DeadlockPlayground.Catalog.DeadlockHeroCatalog.GetByCodename(localAccHero)
+                                                    ?? DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(localAccHero);
+                                        if (catEntry != null) await vpkLoader.LoadHeroModelAsync(catEntry);
+                                        else await vpkLoader.LoadHeroAsync(localAccHero, localAccHero);
+                                    }
+                                    if (vpkLoader.CurrentHeroNode != null)
+                                        charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, localAccHero);
+                                }
+                            };
+                            accBox.AddChild(applyAccBtn);
+                        }
+
+                        var accTrashBtn = new Button
+                        {
+                            Text = "🗑",
+                            CustomMinimumSize = new Vector2(26, 24),
+                            TooltipText = "Discard accessory / outfit part",
+                            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+                            Flat = true,
+                            Modulate = new Color(0.9f, 0.45f, 0.45f)
+                        };
+                        string delAccHero = hero.HeroId;
+                        string delSlotId = acc.SlotId;
+                        accTrashBtn.Pressed += () =>
+                        {
+                            ModWorkspaceSession.Instance.DiscardAccessory(delAccHero, delSlotId);
+                            if (isCurrentActiveHero)
+                            {
+                                var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
+                                charTab?.RemoveAccessorySlotById(delSlotId);
+                            }
+                            RefreshList();
+                        };
+                        accBox.AddChild(accTrashBtn);
+
+                        cardVBox.AddChild(accBox);
+                    }
                 }
 
                 // Group assets into Character Model, Extra Models, VFX

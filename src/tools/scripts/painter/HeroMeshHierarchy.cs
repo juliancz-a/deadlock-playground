@@ -157,6 +157,8 @@ namespace DeadlockPlayground.Painter
                     while (curr != null && curr != heroNode)
                     {
                         if (curr.Name.ToString().Contains("Custom_Rigged_Character") ||
+                            curr.Name.ToString().StartsWith("Custom_Accessory_", StringComparison.Ordinal) ||
+                            curr.Name.ToString() == "Custom_Rigid_Accessory" ||
                             (curr.HasMeta("IsCustomImportedMesh") && curr.GetMeta("IsCustomImportedMesh").AsBool()))
                         {
                             isCustomMesh = true;
@@ -304,6 +306,10 @@ namespace DeadlockPlayground.Painter
                             newMi.SetMeta("FullVmatPath", fullSurfVmatPath);
                         }
                         newMi.SetMeta("ParentCompositeMesh", mi);
+                        if (mi.HasMeta("IsDeformedOriginalMesh") && mi.GetMeta("IsDeformedOriginalMesh").AsBool())
+                        {
+                            newMi.SetMeta("IsDeformedOriginalMesh", true);
+                        }
                         if (hasSurfKeptMeta && !isSurfKept)
                         {
                             newMi.SetMeta("UserHiddenByCustomModel", true);
@@ -417,7 +423,8 @@ namespace DeadlockPlayground.Painter
                 string pName = parent.Name.ToString();
                 if (pName.StartsWith("@")) return false;
                 string pLower = pName.ToLowerInvariant();
-                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual") || pName.Contains("Custom_Rigged_Character"))
+                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual") ||
+                    pName.Contains("Custom_Rigged_Character") || pName.StartsWith("Custom_Accessory_", StringComparison.Ordinal) || pName == "Custom_Rigid_Accessory")
                 {
                     return false;
                 }
@@ -736,6 +743,8 @@ namespace DeadlockPlayground.Painter
                     sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, activeMat);
                 }
             }
+
+            SkinLayerManager.Instance?.ApplyOverlayParametersToMeshes();
         }
 
         public void UpdateToonUniforms(float intensity, float steps, float smoothness, float shadowAmt, Color shadowColor, float outlineWidth, Color outlineColor)
@@ -1340,11 +1349,55 @@ namespace DeadlockPlayground.Painter
             NotifyTargetMeshChanged(info.Mesh, targetSurface);
         }
 
+        private static void ApplyPersistentMeshVisibility(MeshInstance3D mesh, bool visible)
+        {
+            if (mesh == null || !GodotObject.IsInstanceValid(mesh)) return;
+
+            bool hiddenByCustom = mesh.HasMeta("UserHiddenByCustomModel") && mesh.GetMeta("UserHiddenByCustomModel").AsBool();
+            bool actualVis = visible && !hiddenByCustom;
+            mesh.SetMeta("UserVisibility", visible);
+            mesh.Visible = actualVis;
+            if (actualVis) mesh.Layers |= (1u << 20);
+            else mesh.Layers &= ~(1u << 20);
+
+            if (mesh.HasMeta("ParentCompositeMesh"))
+            {
+                var parent = mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                if (parent != null && GodotObject.IsInstanceValid(parent))
+                {
+                    bool anyGenVis = visible;
+                    if (parent.HasMeta("GeneratedSubmeshes"))
+                    {
+                        var genList = parent.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                        anyGenVis = genList.Any(g => g != null && GodotObject.IsInstanceValid(g) &&
+                            (g.HasMeta("UserVisibility") ? g.GetMeta("UserVisibility").AsBool() : g.Visible));
+                    }
+                    parent.SetMeta("UserVisibility", anyGenVis);
+                }
+            }
+        }
+
         public void SetMeshVisibility(SubmeshNodeInfo info, bool visible)
         {
             if (info == null || info.Mesh == null || !GodotObject.IsInstanceValid(info.Mesh)) return;
-            info.Mesh.Visible = visible;
-            _preSoloVisibility[info.Mesh] = visible;
+            info.IsSoloed = false;
+            ApplyPersistentMeshVisibility(info.Mesh, visible);
+            _preSoloVisibility[info.Mesh] = info.Mesh.Visible;
+            NotifyHierarchyChanged();
+        }
+
+        public void SyncPreSoloFromVisibility()
+        {
+            _isAnySoloed = false;
+            _preSoloVisibility.Clear();
+            foreach (var s in _submeshes)
+            {
+                s.IsSoloed = false;
+                if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
+                {
+                    _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
+                }
+            }
             NotifyHierarchyChanged();
         }
 
@@ -1474,8 +1527,8 @@ namespace DeadlockPlayground.Painter
                 s.IsSoloed = false;
                 if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                 {
-                    s.Mesh.Visible = true;
-                    _preSoloVisibility[s.Mesh] = true;
+                    ApplyPersistentMeshVisibility(s.Mesh, true);
+                    _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
                 }
             }
             NotifyHierarchyChanged();
@@ -1491,8 +1544,9 @@ namespace DeadlockPlayground.Painter
                 s.IsSoloed = false;
                 if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                 {
-                    s.Mesh.Visible = !s.IsAccessory;
-                    _preSoloVisibility[s.Mesh] = !s.IsAccessory;
+                    bool vis = !s.IsAccessory;
+                    ApplyPersistentMeshVisibility(s.Mesh, vis);
+                    _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
                 }
             }
             NotifyHierarchyChanged();

@@ -5,6 +5,8 @@ render_mode blend_mix;
 // In Valve's Source 2, the alpha channel contains packed shader masks (tint, cavity AO, or fabric specularity)
 // rather than transparency. This canvas shader forces opaque RGB evaluation so low-alpha areas are never crushed.
 uniform sampler2D texture_base : hint_default_transparent, filter_linear_mipmap;
+uniform bool show_alpha_mask = false;
+uniform bool preview_transparency = true;
 
 vec3 linear_to_srgb(vec3 c) {
     return mix(
@@ -17,15 +19,19 @@ vec3 linear_to_srgb(vec3 c) {
 void fragment() {
     vec4 base_sample = texture(TEXTURE, UV);
     // If TEXTURE is not set or empty, check texture_base uniform fallback
-    if (base_sample.a <= 0.001) {
+    if (base_sample.a <= 0.001 && length(base_sample.rgb) <= 0.001) {
         vec4 alt = texture(texture_base, UV);
-        if (alt.a > 0.001) {
+        if (alt.a > 0.001 || length(alt.rgb) > 0.001) {
             base_sample = alt;
         }
     }
 
-    vec3 rgb = base_sample.rgb;
-
-    // Convert from linear HDR half-float to sRGB for accurate 2D canvas presentation
-    COLOR = vec4(linear_to_srgb(rgb), 1.0);
+    if (show_alpha_mask) {
+        COLOR = vec4(vec3(clamp(base_sample.a, 0.0, 1.0)), 1.0);
+    } else {
+        vec3 rgb = base_sample.rgb;
+        float out_a = preview_transparency ? clamp(base_sample.a, 0.0, 1.0) : 1.0;
+        // Convert from linear HDR half-float to sRGB for accurate 2D canvas presentation
+        COLOR = vec4(linear_to_srgb(rgb), out_a);
+    }
 }

@@ -401,8 +401,8 @@ dragger_visibility = 1
 split_offset = 360
 
 [node name="LeftPanel" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=2054274140]
-custom_minimum_size = Vector2(280, 0)
-custom_maximum_size = Vector2(400, -1)
+custom_minimum_size = Vector2(316, 0)
+custom_maximum_size = Vector2(420, -1)
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -986,7 +986,7 @@ theme_override_fonts/normal_font = ExtResource("30_kq58d")
 theme_override_fonts/bold_font = ExtResource("30_kq58d")
 bbcode_enabled = true
 text = "[font_size=24][b]Deadlock Playground[/b][/font_size]
-[color=#A35A4E]v1.2.0[/color]
+[color=#A35A4E]v1.3.0[/color]
 
 An open-source, community-driven tool designed to view, inspect, pose, and paint 3D character models from Valve's Deadlock for art reference, virtual photography, skin creation, and modding.
 

@@ -39,6 +39,7 @@ namespace DeadlockPlayground.UI
         private SpinBox _spinCurrentFrame;
         private Label _lblTotalFrames;
         private Label _lblTimeDisplay;
+        private Button _btnGizmoSpace;
         private Button _btnAutoKey;
         private MenuButton _menuQuickTools;
         private MenuButton _menuKeyActions;
@@ -275,6 +276,8 @@ namespace DeadlockPlayground.UI
 
             SkeletonGizmoManager.OnBoneSelected += OnViewportBoneSelected;
             SkeletonGizmoManager.OnBoneTransformEnded += OnViewportBoneTransformEnded;
+            GizmoDisplaySettings.OnSettingsChanged += OnGizmoDisplaySettingsChanged;
+            SyncGizmoSpaceButton();
 
             AnimationTransportService.Instance.PlaybackStateChanged += OnTransportPlaybackStateChanged;
             AnimationTransportService.Instance.TimeChanged += OnTransportTimeChanged;
@@ -363,6 +366,7 @@ namespace DeadlockPlayground.UI
             _lblTotalFrames = GetNodeOrNull<Label>("%LblTotalFrames");
             _lblTimeDisplay = GetNodeOrNull<Label>("%LblTimeDisplay");
 
+            _btnGizmoSpace = GetNodeOrNull<Button>("%BtnGizmoSpace");
             _btnAutoKey = GetNodeOrNull<Button>("%BtnAutoKey");
             _menuQuickTools = GetNodeOrNull<MenuButton>("%MenuQuickTools");
             _menuKeyActions = GetNodeOrNull<MenuButton>("%MenuKeyActions");
@@ -473,6 +477,7 @@ namespace DeadlockPlayground.UI
             DockIcons.Apply(_btnJumpEnd, "arrow_right_to_line", "Jump to End (Shift+Right)");
             DockIcons.Apply(_btnLoop, "arrows_clockwise", "Toggle Loop Playback");
             DockIcons.Apply(_btnAutoKey, "circle", "Toggle Auto-Keying (I)");
+            SyncGizmoSpaceButton();
             DockIcons.Apply(_btnUndo, "undo", "Undo (Ctrl+Z)");
             DockIcons.Apply(_btnRedo, "redo", "Redo (Ctrl+Y)");
 
@@ -529,6 +534,17 @@ namespace DeadlockPlayground.UI
 
             // Frame Input
             if (_spinCurrentFrame != null) _spinCurrentFrame.ValueChanged += (val) => AnimationTransportService.Instance.Seek((int)val / (double)_fps);
+
+            // Gizmo Space (Global / Local)
+            if (_btnGizmoSpace != null)
+            {
+                _btnGizmoSpace.Toggled += (useLocal) =>
+                {
+                    GizmoDisplaySettings.GizmoUseLocalSpace = useLocal;
+                    GizmoDisplaySettings.SaveConfig();
+                    SyncGizmoSpaceButton();
+                };
+            }
 
             // Auto-Key
             if (_btnAutoKey != null)
@@ -1025,6 +1041,7 @@ namespace DeadlockPlayground.UI
                 popup.SetItemIcon(popup.GetItemIndex(10), pinIcon);
             }
             popup.AddItem("Toggle Additive Clip Offset Mode", 11);
+            popup.AddItem("Toggle Gizmo Space (Global / Local) [L]", 17);
             popup.AddSeparator();
             popup.AddItem("Set Ease: Linear", 12);
             popup.AddItem("Set Ease: Ease In", 13);
@@ -1355,6 +1372,7 @@ namespace DeadlockPlayground.UI
             }
             SkeletonGizmoManager.OnBoneSelected -= OnViewportBoneSelected;
             SkeletonGizmoManager.OnBoneTransformEnded -= OnViewportBoneTransformEnded;
+            GizmoDisplaySettings.OnSettingsChanged -= OnGizmoDisplaySettingsChanged;
             AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
             AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
             AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
@@ -2391,7 +2409,30 @@ namespace DeadlockPlayground.UI
                 case 14: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseOut); break;
                 case 15: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseInOut); break;
                 case 16: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.Constant); break;
+                case 17:
+                    GizmoDisplaySettings.GizmoUseLocalSpace = !GizmoDisplaySettings.GizmoUseLocalSpace;
+                    GizmoDisplaySettings.SaveConfig();
+                    break;
             }
+        }
+
+        private void OnGizmoDisplaySettingsChanged()
+        {
+            SyncGizmoSpaceButton();
+        }
+
+        private void SyncGizmoSpaceButton()
+        {
+            if (_btnGizmoSpace == null || !GodotObject.IsInstanceValid(_btnGizmoSpace)) return;
+            bool useLocal = GizmoDisplaySettings.GizmoUseLocalSpace;
+            _btnGizmoSpace.SetPressedNoSignal(useLocal);
+            _btnGizmoSpace.Text = useLocal ? "Local" : "Global";
+            _btnGizmoSpace.Modulate = useLocal ? new Color(0.45f, 0.90f, 1.0f) : Colors.White;
+            DockIcons.Apply(_btnGizmoSpace, useLocal ? "rotate" : "globe",
+                useLocal
+                    ? "Transform Space: Local Bone Axes (Click or press L to switch to Global)"
+                    : "Transform Space: Global World Axes (Click or press L to switch to Local)",
+                iconOnly: false);
         }
 
         private void ExportToGlb()

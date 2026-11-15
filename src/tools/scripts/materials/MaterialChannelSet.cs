@@ -1325,11 +1325,52 @@ public static class MaterialChannelDiscovery
         if (preloaded == null)
         {
             bool loadAttempted = false;
+            string packageFilePath = null;
+            string addonFilePath = null;
+            try { packageFilePath = package?.FileName; } catch { }
+            try { addonFilePath = addonPackage?.FileName; } catch { }
+
             entry.LazyMaterialize = (e) =>
             {
                 if (loadAttempted) return;
                 loadAttempted = true;
-                var tex = Source2TextureLoader.GetOrLoadTexture(package, vtexPath, forceOpaque: false, addonPackage: addonPackage);
+                ImageTexture tex = null;
+                try
+                {
+                    tex = Source2TextureLoader.GetOrLoadTexture(package, vtexPath, forceOpaque: false, addonPackage: addonPackage);
+                }
+                catch (ObjectDisposedException)
+                {
+                    Package tempPkg = null;
+                    Package tempAddon = null;
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(packageFilePath) && System.IO.File.Exists(packageFilePath))
+                        {
+                            var fs = new System.IO.FileStream(packageFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete);
+                            tempPkg = new Package();
+                            tempPkg.SetFileName(packageFilePath);
+                            tempPkg.Read(fs);
+                        }
+                        if (!string.IsNullOrEmpty(addonFilePath) && System.IO.File.Exists(addonFilePath))
+                        {
+                            var fs = new System.IO.FileStream(addonFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete);
+                            tempAddon = new Package();
+                            tempAddon.SetFileName(addonFilePath);
+                            tempAddon.Read(fs);
+                        }
+                        if (tempPkg != null || tempAddon != null)
+                        {
+                            tex = Source2TextureLoader.GetOrLoadTexture(tempPkg, vtexPath, forceOpaque: false, addonPackage: tempAddon);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        tempAddon?.Dispose();
+                        tempPkg?.Dispose();
+                    }
+                }
                 if (tex != null)
                 {
                     if (e.Texture == null) e.Texture = tex;

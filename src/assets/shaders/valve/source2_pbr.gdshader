@@ -37,6 +37,9 @@ uniform bool enable_roughness = true;
 uniform bool enable_shadow_map = true;
 uniform bool has_shadow_map = false;
 uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=Emissive, 7=Metalness
+uniform bool has_painter_base_override = false;
+uniform sampler2D painter_base_texture : hint_default_transparent, filter_linear, repeat_enable;
+uniform float alpha_scissor_threshold = 0.0;
 
 vec3 DecodeHemiOctahedron(vec2 e) {
 
@@ -46,6 +49,11 @@ vec3 DecodeHemiOctahedron(vec2 e) {
 }
 
 void fragment() {
+    if (has_painter_base_override && alpha_scissor_threshold > 0.0) {
+        if (texture(painter_base_texture, fract(UV)).a < alpha_scissor_threshold) {
+            discard;
+        }
+    }
     vec3 vert = COLOR.rgb;
 
     // 1. Transmissive color (g_tNprTransmissiveColor texture or g_vSkinColor vector) with CSB matrix

@@ -262,6 +262,13 @@ namespace DeadlockPlayground.UI
                 GD.PrintErr("[FilterModalUI] No active layer selected.");
                 return;
             }
+            if (_activeLayer.IsLocked)
+            {
+                StudioUIManager.Instance?.ShowToast(_layerManager.IsBaseTextureActive
+                    ? "Base Texture is locked. Click the lock icon on BASE TEXTURE to unlock it first."
+                    : $"Cannot apply filter to '{_activeLayer.Name}' because it is locked.");
+                return;
+            }
 
             int w = _layerManager.CanvasSize.X > 0 ? _layerManager.CanvasSize.X : 2048;
             int h = _layerManager.CanvasSize.Y > 0 ? _layerManager.CanvasSize.Y : 2048;

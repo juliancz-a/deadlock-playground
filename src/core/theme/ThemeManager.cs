@@ -612,7 +612,7 @@ public partial class ThemeManager : Node
         btnFocus.DrawCenter = false;
 
         void ApplyButtonStyles(string typeName, Font font, int size, Color fg, Color fgHover, Color fgPressed, Color fgDisabled,
-            StyleBoxFlat sNormal, StyleBoxFlat sHover, StyleBoxFlat sPressed)
+            StyleBoxFlat sNormal, StyleBoxFlat sHover, StyleBoxFlat sPressed, StyleBoxFlat sDisabled = null)
         {
             theme.SetFont("font", typeName, font);
             theme.SetFontSize("font_size", typeName, size);
@@ -634,7 +634,7 @@ public partial class ThemeManager : Node
             theme.SetStylebox("hover", typeName, sHover);
             theme.SetStylebox("pressed", typeName, sPressed);
             theme.SetStylebox("hover_pressed", typeName, sPressed);
-            theme.SetStylebox("disabled", typeName, btnDisabled);
+            theme.SetStylebox("disabled", typeName, sDisabled ?? btnDisabled);
             theme.SetStylebox("focus", typeName, btnFocus);
         }
 
@@ -644,12 +644,13 @@ public partial class ThemeManager : Node
         theme.SetTypeVariation("SecondaryButton", "Button");
         ApplyButtonStyles("SecondaryButton", bodyFont, bodySize, textPrimary, accentPrimary, accentPrimary, textMutedDisabled, btnNormal, btnHover, btnPressed);
 
-        // Compact square IconButton (4px margins so 28-32px icon buttons don't shrink SVG icons)
+        // Compact square IconButton (4px margins across all states including disabled so 28-32px icon buttons never shrink SVG icons)
         var iconNormal = MakeBox(btnNormalBg, borderCol, r, bw, 4, 4, 4, 4);
         var iconHover = MakeBox(btnHoverBg, borderHover, r, bw, 4, 4, 4, 4);
         var iconPressed = MakeBox(btnPressedBg, borderFocus, r, bw, 4, 4, 4, 4);
+        var iconDisabled = MakeBox(btnDisabledBg, new Color(borderCol.R, borderCol.G, borderCol.B, 0.3f), r, bw, 4, 4, 4, 4);
         theme.SetTypeVariation("IconButton", "Button");
-        ApplyButtonStyles("IconButton", bodyFont, badgeSize, textPrimary, accentPrimary, accentPrimary, textMutedDisabled, iconNormal, iconHover, iconPressed);
+        ApplyButtonStyles("IconButton", bodyFont, badgeSize, textPrimary, accentPrimary, accentPrimary, textMutedDisabled, iconNormal, iconHover, iconPressed, iconDisabled);
 
         // Primary / Accent Button
         var accNormal = MakeBox(accentSecondary, borderFocus, r, bw, padH + 2, padV + 1, padH + 2, padV + 1);
@@ -673,12 +674,13 @@ public partial class ThemeManager : Node
         ApplyButtonStyles("DangerButton", headingFont, bodySize, onDanger, onDanger, onDanger, textMutedDisabled, dangerNormal, dangerHover, dangerPressed);
 
         // Toolbar & FilterPill & Tab Buttons
-        var tbNormal = MakeBox(bgSecondary, borderCol, r, bw, Math.Max(6, padH - 4), Math.Max(4, padV - 2), Math.Max(6, padH - 4), Math.Max(4, padV - 2));
-        var tbHover = MakeBox(btnHoverBg, borderHover, r, bw, Math.Max(6, padH - 4), Math.Max(4, padV - 2), Math.Max(6, padH - 4), Math.Max(4, padV - 2));
-        var tbPressed = MakeBox(surfaceHeader, borderFocus, r, bw, Math.Max(6, padH - 4), Math.Max(4, padV - 2), Math.Max(6, padH - 4), Math.Max(4, padV - 2));
+        var tbNormal = MakeBox(bgSecondary, borderCol, r, bw, 5, 4, 5, 4);
+        var tbHover = MakeBox(btnHoverBg, borderHover, r, bw, 5, 4, 5, 4);
+        var tbPressed = MakeBox(surfaceHeader, borderFocus, r, bw, 5, 4, 5, 4);
+        var tbDisabled = MakeBox(btnDisabledBg, new Color(borderCol.R, borderCol.G, borderCol.B, 0.3f), r, bw, 5, 4, 5, 4);
 
         theme.SetTypeVariation("ToolbarButton", "Button");
-        ApplyButtonStyles("ToolbarButton", bodyFont, badgeSize, textPrimary, accentPrimary, accentPrimary, textMutedDisabled, tbNormal, tbHover, tbPressed);
+        ApplyButtonStyles("ToolbarButton", bodyFont, badgeSize, textPrimary, accentPrimary, accentPrimary, textMutedDisabled, tbNormal, tbHover, tbPressed, tbDisabled);
 
         var pillRadius = Math.Min(16, r + 6);
         var pillNormal = MakeBox(bgSecondary, borderCol, pillRadius, bw, 10, 4, 10, 4);

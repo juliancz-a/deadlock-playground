@@ -24,6 +24,7 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
     [ExportCategory("X-Ray & Gizmo")]
     [Export] private Button _toggleXRayButton;
     [Export] private CheckBox _toggleLinesButton;
+    private CheckBox _checkLocalSpace;
 
     [ExportCategory("Inverse Kinematics (IK)")]
     [Export] private CheckBox _checkMasterIK;
@@ -108,6 +109,17 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
             _toggleLinesButton.ButtonPressed = false;
             _toggleLinesButton.Toggled += (pressed) => OnLinesToggled?.Invoke(pressed);
             OnLinesToggled?.Invoke(false);
+        }
+
+        _checkLocalSpace = GetNodeOrNull<CheckBox>("XRayGroup/CheckLocalSpace");
+        if (_checkLocalSpace != null)
+        {
+            _checkLocalSpace.SetPressedNoSignal(GizmoDisplaySettings.GizmoUseLocalSpace);
+            _checkLocalSpace.Toggled += (pressed) =>
+            {
+                GizmoDisplaySettings.GizmoUseLocalSpace = pressed;
+                GizmoDisplaySettings.SaveConfig();
+            };
         }
 
         if (_allBonesOptionButton != null)
@@ -195,6 +207,11 @@ public partial class BonesTabUI : VBoxContainer, IBoneUIController
             float curVal = GizmoDisplaySettings.IKHandlesOpacity * 100.0f;
             _sliderIKOpacity.SetValueNoSignal(curVal);
             if (_labelIKOpacity != null) _labelIKOpacity.Text = $"{curVal:F0}%";
+        }
+
+        if (_checkLocalSpace != null && GodotObject.IsInstanceValid(_checkLocalSpace))
+        {
+            _checkLocalSpace.SetPressedNoSignal(GizmoDisplaySettings.GizmoUseLocalSpace);
         }
     }
 

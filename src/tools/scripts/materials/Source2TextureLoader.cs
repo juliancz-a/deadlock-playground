@@ -54,7 +54,19 @@ public static class Source2TextureLoader
         }
         internalPath = internalPath.Trim('"', '\'', ' ');
 
-        string addonTag = addonPackage != null ? $"_addon_{addonPackage.FileName.GetHashCode():X}" : "";
+        string addonTag = "";
+        if (addonPackage != null)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(addonPackage.FileName))
+                    addonTag = $"_addon_{addonPackage.FileName.GetHashCode():X}";
+            }
+            catch (ObjectDisposedException)
+            {
+                addonPackage = null;
+            }
+        }
         string remapTag = (alphaRemapInRange.HasValue || alphaRemapOutRange.HasValue)
             ? $"_remap_{alphaRemapInRange?.X ?? 0f:F4}_{alphaRemapInRange?.Y ?? 1f:F4}_{alphaRemapOutRange?.X ?? 0f:F4}_{alphaRemapOutRange?.Y ?? 1f:F4}"
             : "";
@@ -182,55 +194,124 @@ public static class Source2TextureLoader
 
         PackageEntry entry = null;
         Package targetPackage = null;
+        Package tempAddonPkg = null;
+        Package tempBasePkg = null;
 
-        // Priority 1: Check active Addon VPK
-        if (addonPackage != null)
+        try
         {
-            entry = FindVtexEntry(addonPackage, vtexInternalPath);
-            if (entry != null)
+            Package TryUseOrReopen(Package candidate, ref Package tempHolder)
             {
-                targetPackage = addonPackage;
+                if (candidate == null) return null;
+                try
+                {
+                    entry = FindVtexEntry(candidate, vtexInternalPath);
+                    return entry != null ? candidate : null;
+                }
+                catch (ObjectDisposedException)
+                {
+                    string fName = null;
+                    try { fName = candidate.FileName; } catch { }
+                    if (!string.IsNullOrEmpty(fName) && File.Exists(fName))
+                    {
+                        try
+                        {
+                            var fs = new FileStream(fName, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                            tempHolder = new Package();
+                            tempHolder.SetFileName(fName);
+                            tempHolder.Read(fs);
+                            entry = FindVtexEntry(tempHolder, vtexInternalPath);
+                            return entry != null ? tempHolder : null;
+                        }
+                        catch { }
+                    }
+                    return null;
+                }
+            }
+
+            // Priority 1: Check active Addon VPK
+            targetPackage = TryUseOrReopen(addonPackage, ref tempAddonPkg);
+            if (targetPackage != null && entry != null)
+            {
                 GD.Print($"  [AddonTexture] Injected custom texture from addon: {entry.DirectoryName}/{entry.FileName}.{entry.TypeName}");
             }
-        }
 
-        // Priority 2: Fallback to Base Game VPK
-        if (entry == null && package != null)
-        {
-            entry = FindVtexEntry(package, vtexInternalPath);
-            if (entry != null)
+            // Priority 2: Fallback to Base Game VPK
+            if (entry == null)
             {
-                targetPackage = package;
+                targetPackage = TryUseOrReopen(package, ref tempBasePkg);
             }
-        }
 
-        // Priority 3: Fallback to Core Engine VPK (game/core/pak01_dir.vpk)
-        if (entry == null && CorePackage != null)
-        {
-            entry = FindVtexEntry(CorePackage, vtexInternalPath);
-            if (entry != null)
+            // Priority 3: Fallback to Core Engine VPK (game/core/pak01_dir.vpk)
+            if (entry == null && CorePackage != null)
             {
-                targetPackage = CorePackage;
+                try
+                {
+                    entry = FindVtexEntry(CorePackage, vtexInternalPath);
+                    if (entry != null)
+                    {
+                        targetPackage = CorePackage;
+                    }
+                }
+                catch (ObjectDisposedException) { }
             }
-        }
 
-        if (entry == null || targetPackage == null)
+            if (entry == null || targetPackage == null)
+            {
+                GD.PrintErr($"[TextureLoader] Texture not found in VPK (Addon, Base or Core): {vtexInternalPath}");
+                return null;
+            }
+
+            ImageTexture DecodeEntry(Package srcPkg, PackageEntry srcEntry)
+            {
+                using var stream = srcPkg.GetMemoryMappedStreamIfPossible(srcEntry);
+                using var resource = new ValveResourceFormat.Resource { FileName = vtexInternalPath };
+                resource.Read(stream, leaveOpen: true, mode: ReadMode.Deferred);
+                if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture texture)
+                {
+                    return null;
+                }
+                bool averageAnisoRg = IsAnisoRoughnessRg(resource);
+                return DecodeTextureToGodot(texture, vtexInternalPath, maxDimension, forceOpaque, averageAnisoRg, alphaRemapInRange, alphaRemapOutRange);
+            }
+
+            ImageTexture DecodeFromPkgOrReopen(Package pkg, PackageEntry e)
+            {
+                Package reopenedHolder = null;
+                try
+                {
+                    return DecodeEntry(pkg, e);
+                }
+                catch (ObjectDisposedException)
+                {
+                    string fName = null;
+                    try { fName = pkg.FileName; } catch { }
+                    if (!string.IsNullOrEmpty(fName) && File.Exists(fName))
+                    {
+                        using var fs = new FileStream(fName, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                        reopenedHolder = new Package();
+                        reopenedHolder.SetFileName(fName);
+                        reopenedHolder.Read(fs);
+                        var reopenedEntry = FindVtexEntry(reopenedHolder, vtexInternalPath);
+                        if (reopenedEntry != null)
+                        {
+                            return DecodeEntry(reopenedHolder, reopenedEntry);
+                        }
+                    }
+                    return null;
+                }
+                finally
+                {
+                    reopenedHolder?.Dispose();
+                }
+            }
+
+            return DecodeFromPkgOrReopen(targetPackage, entry);
+        }
+        finally
         {
-            GD.PrintErr($"[TextureLoader] Texture not found in VPK (Addon, Base or Core): {vtexInternalPath}");
-            return null;
+            tempAddonPkg?.Dispose();
+            tempBasePkg?.Dispose();
         }
-
-        using var stream = targetPackage.GetMemoryMappedStreamIfPossible(entry);
-        using var resource = new ValveResourceFormat.Resource { FileName = vtexInternalPath };
-        resource.Read(stream, leaveOpen: true, mode: ReadMode.Deferred);
-
-        if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture texture)
-        {
-            return null;
-        }
-
-        bool averageAnisoRg = IsAnisoRoughnessRg(resource);
-        return DecodeTextureToGodot(texture, vtexInternalPath, maxDimension, forceOpaque, averageAnisoRg, alphaRemapInRange, alphaRemapOutRange);
     }
 
     /// <summary>
@@ -721,6 +802,7 @@ public static class Source2TextureLoader
 
     private static PackageEntry FindVtexEntry(Package package, string vtexPath)
     {
+        if (package == null || package.Entries == null || string.IsNullOrWhiteSpace(vtexPath)) return null;
         var entry = package.FindEntry(vtexPath);
         if (entry != null) return entry;
 

@@ -314,6 +314,7 @@ namespace DeadlockPlayground.UI
             // 6. Posing & History
             col2.AddChild(CreateCategoryCard("bone", "Posing & History", new (string label, string action, string overrideKey)[]
             {
+                ("Toggle Gizmo Space (Global/Local)", "anim_toggle_local_space", null),
                 ("Copy Bone Pose", "anim_copy_pose", null),
                 ("Paste Bone Pose", "anim_paste_pose", null),
                 ("Paste Mirrored Pose", "anim_paste_mirror_pose", null),

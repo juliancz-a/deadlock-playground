@@ -118,6 +118,12 @@ namespace DeadlockPlayground.Animation
                 _dock.PastePose();
                 return true;
             }
+            if (KeybindsManager.IsActionTriggered("anim_toggle_local_space", keyEvent))
+            {
+                GizmoDisplaySettings.GizmoUseLocalSpace = !GizmoDisplaySettings.GizmoUseLocalSpace;
+                GizmoDisplaySettings.SaveConfig();
+                return true;
+            }
 
             // 6. Keyframe Insert
             if (KeybindsManager.IsActionTriggered("anim_insert_key", keyEvent))

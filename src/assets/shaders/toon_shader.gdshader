@@ -4,6 +4,8 @@ render_mode blend_mix, depth_draw_opaque, cull_disabled;
 group_uniforms Shader.Albedo;
 uniform vec4 albedo_color : source_color = vec4(1.0);
 uniform sampler2D albedo_texture : source_color, hint_default_white, filter_linear_mipmap;
+uniform bool has_painter_base_override = false;
+uniform sampler2D painter_base_texture : hint_default_transparent, filter_linear, repeat_enable;
 uniform vec3 uv1_scale = vec3(1.0, 1.0, 1.0);
 uniform vec3 uv1_offset = vec3(0.0, 0.0, 0.0);
 uniform float alpha_scissor_threshold : hint_range(0.0, 1.0, 0.05) = 0.0;
@@ -149,7 +151,8 @@ float npr_rim_factor(vec3 view_normal, vec3 view_dir, float world_normal_y, floa
 void fragment() {
 	vec2 uv = UV * uv1_scale.xy + uv1_offset.xy;
 	vec3 safe_albedo_col = (dot(albedo_color.rgb, vec3(1.0)) > 0.001) ? albedo_color.rgb : vec3(1.0);
-	vec4 tex_col = enable_color_map ? texture(albedo_texture, uv) : vec4(vec3(0.85), texture(albedo_texture, uv).a);
+	vec4 raw_albedo_sample = has_painter_base_override ? texture(painter_base_texture, fract(uv)) : texture(albedo_texture, uv);
+	vec4 tex_col = enable_color_map ? raw_albedo_sample : vec4(vec3(0.85), raw_albedo_sample.a);
 	vec4 albedo = vec4(tex_col.rgb * safe_albedo_col, tex_col.a * albedo_color.a);
 
 	if (alpha_scissor_threshold > 0.0) {

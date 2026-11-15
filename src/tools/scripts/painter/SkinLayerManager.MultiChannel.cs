@@ -152,8 +152,14 @@ public partial class SkinLayerManager : Node
         }
         _currentContext.Layers = new List<SkinLayer>(_layers);
         _currentContext.ActiveLayerIndex = _activeLayerIndex;
-        // Never pin 128 MiB base buffer in inactive channel contexts; rebuilt on demand.
-        _currentContext.BaseAtlasBuffer = null;
+        _currentContext.HasBaseTextureEdits = HasBaseTextureEdits;
+        _currentContext.HasBaseAlphaEdits = HasBaseAlphaEdits;
+        _currentContext.PreserveBaseAlpha = PreserveBaseAlpha;
+        _currentContext.EnableAlphaTransparency = EnableAlphaTransparency;
+        _currentContext.IsBaseTextureLocked = IsBaseTextureLocked;
+        _currentContext.PristineBaseAtlasBuffer = (HasBaseTextureEdits || HasBaseAlphaEdits) ? _pristineBaseAtlasBuffer : null;
+        // Retain edited base atlas buffer if modified; otherwise drop to save RAM and rebuild on demand.
+        _currentContext.BaseAtlasBuffer = (HasBaseTextureEdits || HasBaseAlphaEdits) ? _baseAtlasBuffer : null;
         _currentContext.CanvasSize = CanvasSize;
         _currentContext.UndoStack = new List<LayerPaintSnapshot>(_undoStack);
         while (_currentContext.UndoStack.Count > 1)
@@ -161,6 +167,7 @@ public partial class SkinLayerManager : Node
             _currentContext.UndoStack.RemoveAt(0);
         }
         _currentContext.RedoStack.Clear();
+        UpdateContextBakedTextures(_currentContext, ActiveTextureChannel);
         _materialContexts[ctxKey] = _currentContext;
     }
 
@@ -224,16 +231,20 @@ public partial class SkinLayerManager : Node
 
         int w = CanvasSize.X > 0 ? CanvasSize.X : 2048;
         int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
+        int bufLen = w * h * 8;
 
         var chEntry = chSet.GetChannel(channel);
         chEntry?.EnsureMaterialized();
-        Texture2D chBaseTex = chEntry?.Texture;
+        Texture2D chBaseTex = (chEntry?.OriginalTexture != null && GodotObject.IsInstanceValid(chEntry.OriginalTexture))
+            ? chEntry.OriginalTexture
+            : chEntry?.Texture;
 
         if (_materialContexts.TryGetValue(nextCtxKey, out var nextCtx) && nextCtx != null && nextCtx.Layers.Count > 0)
         {
             var rd = RenderingServer.GetRenderingDevice();
-            int bufLen = w * h * 8;
-            int nextActiveIdx = Mathf.Clamp(nextCtx.ActiveLayerIndex, 0, Math.Max(0, nextCtx.Layers.Count - 1));
+            int nextActiveIdx = (nextCtx.ActiveLayerIndex == BaseTextureLayerIndex)
+                ? BaseTextureLayerIndex
+                : Mathf.Clamp(nextCtx.ActiveLayerIndex, 0, Math.Max(0, nextCtx.Layers.Count - 1));
             for (int i = 0; i < nextCtx.Layers.Count; i++)
             {
                 var layer = nextCtx.Layers[i];
@@ -259,16 +270,23 @@ public partial class SkinLayerManager : Node
             _layers.Clear();
             _layers.AddRange(nextCtx.Layers);
             _activeLayerIndex = nextActiveIdx;
+            HasBaseTextureEdits = nextCtx.HasBaseTextureEdits;
+            HasBaseAlphaEdits = nextCtx.HasBaseAlphaEdits;
+            PreserveBaseAlpha = nextCtx.PreserveBaseAlpha;
+            EnableAlphaTransparency = nextCtx.EnableAlphaTransparency;
+            _pristineBaseAtlasBuffer = nextCtx.PristineBaseAtlasBuffer;
             _undoStack.Clear();
             _undoStack.AddRange(nextCtx.UndoStack);
             _redoStack.Clear();
             _redoStack.AddRange(nextCtx.RedoStack);
+            ClearFastUndoRedo();
         }
         else
         {
             _layers.Clear();
             _undoStack.Clear();
             _redoStack.Clear();
+            ClearFastUndoRedo();
 
             EnsureShadersLoaded();
             var defaultLayer = new SkinLayer();
@@ -277,6 +295,11 @@ public partial class SkinLayerManager : Node
             defaultLayer.IsCpuSynced = false;
             _layers.Add(defaultLayer);
             _activeLayerIndex = 0;
+            HasBaseTextureEdits = false;
+            HasBaseAlphaEdits = false;
+            PreserveBaseAlpha = true;
+            EnableAlphaTransparency = false;
+            _pristineBaseAtlasBuffer = null;
 
             nextCtx = new MaterialPaintingContext
             {
@@ -290,23 +313,43 @@ public partial class SkinLayerManager : Node
             _currentContext = nextCtx;
         }
 
-        // Update base texture layer & rebuild active channel GPU base atlas buffer (never touch _standaloneBaseTexture!)
+        // Update base texture layer & restore or rebuild active channel GPU base atlas buffer (never touch _standaloneBaseTexture!)
+        EnsureBaseLayer();
         if (_baseLayer != null)
         {
             _baseLayer.Texture = chBaseTex as ImageTexture ?? (chBaseTex != null ? ImageTexture.CreateFromImage(chBaseTex.GetImage()) : null);
             _baseLayer.Name = channel == MaterialTextureChannel.Color
                 ? "Base Texture"
                 : $"{MaterialChannelSet.GetDisplayLabel(channel)} Map";
+            _baseLayer.IsLocked = nextCtx.IsBaseTextureLocked;
         }
-        InvalidateBaseAtlasBuffer();
-        RebuildBaseAtlasBuffer();
+
+        if ((nextCtx.HasBaseTextureEdits || nextCtx.HasBaseAlphaEdits) &&
+            nextCtx.BaseAtlasBuffer != null && nextCtx.BaseAtlasBuffer.Length == bufLen)
+        {
+            _baseAtlasBuffer = nextCtx.BaseAtlasBuffer;
+            _pristineBaseAtlasBuffer = nextCtx.PristineBaseAtlasBuffer;
+            _hasPopulatedBaseAtlasBuffer = true;
+            if (_baseLayer != null)
+            {
+                _baseLayer.GpuData = _baseAtlasBuffer;
+                _baseLayer.IsCpuSynced = true;
+            }
+            SyncBaseTextureToGpu();
+        }
+        else
+        {
+            _pristineBaseAtlasBuffer = null;
+            InvalidateBaseAtlasBuffer();
+            RebuildBaseAtlasBuffer();
+        }
 
         UploadLayersToActiveAtlasManager();
         _otherLayersDirty = true;
         UpdateActiveLayerBinding();
         RecompositeGpuLayers();
-        ApplyOverlayParametersToMeshes();
         SyncChannelsToTargetMaterials(baseKey);
+        ApplyOverlayParametersToMeshes();
 
         NotifyStackChanged();
         NotifyLayerSelected(_activeLayerIndex);
@@ -446,6 +489,7 @@ public partial class SkinLayerManager : Node
         tex.ResourceName = System.IO.Path.GetFileName(sourcePathOrName ?? "imported.png");
 
         entry.Texture = tex;
+        entry.OriginalTexture = tex;
         entry.SourceImage = loadedImg;
         entry.SourcePath = sourcePathOrName ?? "Imported PNG";
         entry.IsPresent = true;
@@ -459,6 +503,29 @@ public partial class SkinLayerManager : Node
         if (_baseLayer != null)
         {
             _baseLayer.Texture = tex;
+        }
+        if (ch == MaterialTextureChannel.Color)
+        {
+            HasBaseTextureEdits = true;
+            bool hasTransparency = loadedImg.DetectAlpha() != Image.AlphaMode.None;
+            if (hasTransparency)
+            {
+                HasBaseAlphaEdits = true;
+                EnableAlphaTransparency = true;
+            }
+            if (_currentContext != null)
+            {
+                _currentContext.HasBaseTextureEdits = true;
+                if (hasTransparency)
+                {
+                    _currentContext.HasBaseAlphaEdits = true;
+                    _currentContext.EnableAlphaTransparency = true;
+                }
+            }
+            if (hasTransparency)
+            {
+                Update3DMaterialTransparency(true);
+            }
         }
         SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
         ApplyOverlayParametersToMeshes();
@@ -496,13 +563,31 @@ public partial class SkinLayerManager : Node
             if (l.GpuData != null) Array.Clear(l.GpuData, 0, l.GpuData.Length);
             l.IsCpuSynced = true;
         }
+        HasBaseTextureEdits = false;
+        HasBaseAlphaEdits = false;
+        EnableAlphaTransparency = false;
+        _pristineBaseAtlasBuffer = null;
+        if (_currentContext != null)
+        {
+            _currentContext.HasBaseTextureEdits = false;
+            _currentContext.HasBaseAlphaEdits = false;
+            _currentContext.EnableAlphaTransparency = false;
+            _currentContext.PristineBaseAtlasBuffer = null;
+            _currentContext.BaseAtlasBuffer = null;
+            _currentContext.BakedEditedBaseTexture = null;
+            _currentContext.BakedColorOverrideTexture = null;
+        }
+        if (ch == MaterialTextureChannel.Color)
+        {
+            Update3DMaterialTransparency(false);
+        }
         SyncChannelsToTargetMaterials(ActiveBaseMaterialKey);
-        ApplyOverlayParametersToMeshes();
         UploadLayersToActiveAtlasManager();
         InvalidateBaseAtlasBuffer();
         RebuildBaseAtlasBuffer();
         _otherLayersDirty = true;
         RecompositeGpuLayers();
+        ApplyOverlayParametersToMeshes();
         if (entry != null) entry.IsDirty = false;
         SetActiveContextHasPaintStrokes(false);
         NotifyStackChanged();
@@ -515,10 +600,24 @@ public partial class SkinLayerManager : Node
         var chSet = GetActiveChannelSet();
         if (chSet == null) return;
 
-        bool isColor = ActiveTextureChannel == MaterialTextureChannel.Color;
-        if (isColor && !forceBakeColorCache) return;
+        EnsureCpuSynced();
 
-        bool hasPaint = HasPaintStrokes();
+        bool isColor = ActiveTextureChannel == MaterialTextureChannel.Color;
+        if (isColor)
+        {
+            if (_currentContext != null)
+            {
+                _currentContext.HasBaseTextureEdits = HasBaseTextureEdits;
+                _currentContext.HasBaseAlphaEdits = HasBaseAlphaEdits;
+                _currentContext.PreserveBaseAlpha = PreserveBaseAlpha;
+                _currentContext.EnableAlphaTransparency = EnableAlphaTransparency;
+                _currentContext.IsBaseTextureLocked = IsBaseTextureLocked;
+                UpdateContextBakedTextures(_currentContext, MaterialTextureChannel.Color);
+            }
+            if (!forceBakeColorCache) return;
+        }
+
+        bool hasPaint = HasPaintStrokes() || HasBaseTextureEdits || HasBaseAlphaEdits;
         var entry = chSet.GetChannel(ActiveTextureChannel);
         if (entry == null) return;
 
@@ -608,7 +707,12 @@ public partial class SkinLayerManager : Node
 
         if (editingOtherChannel)
         {
-            var colorTex = chSet.GetChannel(MaterialTextureChannel.Color)?.Texture ?? ExtractMeshBaseTexture(mesh);
+            MaterialPaintingContext colorCtx = null;
+            _materialContexts.TryGetValue(StripChannelSuffix(baseMatKey), out colorCtx);
+            var colorTex = colorCtx?.BakedColorOverrideTexture
+                ?? colorCtx?.BakedEditedBaseTexture
+                ?? chSet.GetChannel(MaterialTextureChannel.Color)?.Texture
+                ?? ExtractMeshBaseTexture(mesh);
             bool validColorTex = IsTextureRenderReady(colorTex);
             mat.SetShaderParameter("use_channel_color_override", validColorTex);
             mat.SetShaderParameter("channel_color_override_texture", validColorTex ? colorTex : null);
@@ -637,7 +741,7 @@ public partial class SkinLayerManager : Node
             string baseKey = !string.IsNullOrEmpty(submesh.OriginalVmatPath)
                 ? submesh.OriginalVmatPath.ToLowerInvariant().Trim()
                 : GetMaterialKey(submesh.Mesh, submesh.SurfaceIndex);
-            if (HasPaintStrokes(baseKey)) return true;
+            if (HasPaintStrokes(baseKey) || HasEditedBaseTextureForMaterial(baseKey) || HasEditedAlphaForMaterial(baseKey)) return true;
         }
 
         var entry = submesh.Channels?.GetChannel(channel);
