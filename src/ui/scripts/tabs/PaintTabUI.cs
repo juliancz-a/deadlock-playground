@@ -1121,9 +1121,9 @@ public partial class PaintTabUI : VBoxContainer
                         charTab?.LoadParticleDirectly(targetPath, ownerHeroId: targetHero);
                     }
                     else if (manifest?.Heroes != null &&
-                             manifest.Heroes.TryGetValue(targetHero, out var restoredHeroEntry) &&
-                             restoredHeroEntry?.CustomModel != null &&
-                             vpkLoader.CurrentHeroNode != null)
+                        manifest.Heroes.TryGetValue(targetHero, out var restoredHeroEntry) &&
+                        (restoredHeroEntry?.CustomModel != null || (restoredHeroEntry?.Accessories != null && restoredHeroEntry.Accessories.Count > 0)) &&
+                        vpkLoader.CurrentHeroNode != null)
                     {
                         var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
                         charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, targetHero);
@@ -1807,10 +1807,10 @@ public partial class PaintTabUI : VBoxContainer
                             {
                                 continue; // Already baked this material channel!
                             }
-                            if (!string.IsNullOrEmpty(chCtxKey) && _flushedMaterialKeys.Contains(chCtxKey))
-                            {
-                                continue; // Already flushed to disk and no new strokes since!
-                            }
+                            // if (!string.IsNullOrEmpty(chCtxKey) && _flushedMaterialKeys.Contains(chCtxKey))
+                            // {
+                            //     continue; // Already flushed to disk and no new strokes since!
+                            // }
 
                             var baked = _layerManager.BakeChannelImageForSubmesh(sm, ch);
                             if (baked != null && !baked.IsEmpty())
@@ -4600,6 +4600,7 @@ public partial class PaintTabUI : VBoxContainer
     public void OpenExportModDialog(string overrideHeroCodename = null, string overrideHeroDisplayName = null)
     {
         if (_layerManager == null) return;
+        _flushedMaterialKeys.Clear();
         FlushActiveChangesToWorkspace(true);
 
         string activeHeroCodename = !string.IsNullOrEmpty(_currentHeroId)

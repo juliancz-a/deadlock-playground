@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- IMAGE PLACEHOLDER: Project Banner / Hero Studio Header (replace with docs/images/banner.png or screenshots when ready) -->
-<img src="public\deadlock_playground_header.gif" alt="Deadlock Playground Banner Placeholder" width="850" />
+<img src="public/deadlock_playground_header.gif" alt="Deadlock Playground Banner Placeholder" width="850" />
 
   <h1>Deadlock Playground (v1.3.0)</h1>
   <p>
@@ -71,7 +71,7 @@
 * **Hero Mesh Deformer & Interactive 3D Sculpt Brush:** Sculpt, flatten, smooth, push, or tuck underlying vanilla hero meshes (such as hair or shoulder pads) so custom hats and armor fit cleanly with zero clipping.
 * **Direct Source 2 Compilation:** Sanitized Deadlock NPR/toon PBR shader conversion with automatic AO/Normal/Roughness detection and headless `resourcecompiler.exe` `.vmdl_c` / `.vmat_c` compilation directly into your addon `.vpk`.
 
-![Custom Model & Accessory Fitting Room](web\public\screenshots\custom_3d_model_importer_suite.png)
+![Custom Model & Accessory Fitting Room](web/public/screenshots/custom_3d_model_importer_suite.png)
 
 ### 3. Multi-Channel 3D & 2D UV Texture Painting
 * **Dual Synchronized 3D + 2D UV Canvas:** Paint directly on the 3D hero/accessory surface via GPU compute projection (`brush_compute.glsl`) or on the unwrapped 2D UV canvas (`UVCanvas2DUI`).
@@ -83,7 +83,7 @@
 * **Professional Brush, Selection & Filter Suite:** Non-destructive layer stack (Normal, Multiply, Screen, Overlay, HSL Color blend), Clone Stamp Tool, Magic Wand / Lasso / Polygonal / Marquee selection masks, 3D Decal & Typography Projectors, Photoshop-grade **Filters** (Gaussian/Box/Motion Blur, Sharpen, Pixelate, Halftone, Oil Paint, Emboss, High Pass, Noise, Chromatic Aberration), and **Color Adjustments** (Gradient Maps with `.grd` import, Levels, Curves, Hue/Saturation, Exposure, Posterize, Threshold).
 
 <!-- IMAGE PLACEHOLDER: Multi-Channel Texture Painter & 2D UV Canvas Screenshot -->
-![3D & 2D UV Texture Painter](web\public\screenshots\2d_canvas_pbr_textures_editor.png)
+![3D & 2D UV Texture Painter](web/public/screenshots/2d_canvas_pbr_textures_editor.png)
 
 ### 4. Animation Studio Deck, Local/Global Gizmos & Retargeter
 * **Blender-Style Bottom Dock (`AnimationStudioDock`):**
@@ -94,14 +94,14 @@
   * Evaluate Source 2 **Bone Constraints** (all 11 ModelDoc constraints via `Source2BoneConstraintDriver`), `FeModel` jiggle bone spring physics, analytical Two-Bone IK, and Position-Based Dynamics (PBD) cloth conformance.
 * **External Retargeting & VPK Export:** Import Mixamo, Mesh2Motion, or custom `.glb`/`.gltf`/`.fbx` humanoid clips, retarget with T-Pose/A-Pose calibration, edit loaded addon animation mods (`Modified` category), and export native `.vnmclip_c` binaries with automated Source 2 IK constraints straight to `.vpk`.
 
-![Placeholder: Animation Studio & Local Bone Gizmo](web\public\screenshots\animation_studio_deck.png)
+![Animation Studio & Local Bone Gizmo](web/public/screenshots/animation_studio_deck.png)
 
 ### 5. Hero Particle VFX Studio, Themes & Virtual Photography
 * **Particle VFX Simulation & Texture Repainting:** Preview hero `.vpcf_c` systems via VRF 21.1 SoA `ParticleSystemSimulation` with physics collision and model socket attachments, scrub timelines, and repaint particle sprite sheets cleanly back into `.vpk`.
 * **1-Click `.vpk` Mod Builder:** Automatic addon index resolution (`pak##_dir.vpk`), staged in-place `.vtex_c` / `.vmdl_c` / `.vnmclip_c` compilation, and mod change overview modal.
 * **Custom UI Theme System & Staging Studio:** Built-in theme switcher with custom theme editor and JSON export/import, plus 3D environment/camera lighting presets, Depth of Field, Color Grading, and high-res transparent PNG captures for Discord & GameBanana showcases.
 
-![Placeholder: Staging Studio & UI Themes](web\public\screenshots\hero_particle_editor_and_stage_3d.png)
+![Staging Studio & UI Themes](web/public/screenshots/hero_particle_editor_and_stage_3d.png)
 
 ---
 

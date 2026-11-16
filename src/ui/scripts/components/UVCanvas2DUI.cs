@@ -581,6 +581,7 @@ namespace DeadlockPlayground.UI
             if (_layerManager != null)
             {
                 _layerManager.StackChanged -= OnStackChanged;
+                _layerManager.LayerSelected -= OnLayerSelected;
             }
             if (_meshHierarchy != null)
             {
@@ -618,6 +619,8 @@ namespace DeadlockPlayground.UI
             
             if (_painter != null)
             {
+                _painter.StrokeStarted -= OnPainterStrokeStarted;
+                _painter.StrokeStarted += OnPainterStrokeStarted;
                 _painter.StrokeFinished -= OnPainterStrokeFinished;
                 _painter.StrokeFinished += OnPainterStrokeFinished;
                 if (_painter.ProjectionGizmo != null)
@@ -630,6 +633,7 @@ namespace DeadlockPlayground.UI
             if (_layerManager != null)
             {
                 _layerManager.StackChanged += OnStackChanged;
+                _layerManager.LayerSelected += OnLayerSelected;
                 UpdateResolutionLabel();
             }
 
@@ -721,6 +725,11 @@ namespace DeadlockPlayground.UI
             }
             QueueCanvasRedraw();
             _cursorOverlay?.QueueRedraw();
+        }
+
+        private void OnPainterStrokeStarted()
+        {
+            QueueCanvasRedraw();
         }
 
         private void OnPainterStrokeFinished()
@@ -934,9 +943,15 @@ namespace DeadlockPlayground.UI
             }
         }
 
-        private void OnStackChanged()
+        private void OnLayerSelected(int _index)
         {
-            UpdateResolutionLabel();
+            SyncBlendModeDropdownFromLayerManager();
+            _brushPalette?.UpdateUndoRedoState(_layerManager?.CanUndo ?? false, _layerManager?.CanRedo ?? false);
+            QueueCanvasRedraw();
+        }
+
+        private void SyncBlendModeDropdownFromLayerManager()
+        {
             if (_optBlendMode != null && _layerManager?.ActiveLayer != null)
             {
                 int bMode = (int)_layerManager.ActiveLayer.BlendMode;
@@ -945,6 +960,12 @@ namespace DeadlockPlayground.UI
                     _optBlendMode.Select(bMode);
                 }
             }
+        }
+
+        private void OnStackChanged()
+        {
+            UpdateResolutionLabel();
+            SyncBlendModeDropdownFromLayerManager();
             if (_onParticleTextureUpdated != null && _layerManager != null &&
                 !string.IsNullOrEmpty(_activeParticleTexturePath) && _layerManager.HasPaintStrokes())
             {
@@ -1194,31 +1215,75 @@ namespace DeadlockPlayground.UI
                 }
             }
 
-            // 4. Update GPU composited atlas texture (paint overlay)
-            var atlasTex = _layerManager?.GetAtlasTextureResource();
+            // 4. Update GPU composited atlas texture (paint overlay) — bind live active/below/above Texture2DRDs so 3D strokes stream in real time
             if (_paintOverlayRect != null)
             {
-                bool showAtlas = atlasTex != null && GodotObject.IsInstanceValid(atlasTex);
-                _paintOverlayRect.Visible = showAtlas;
-                if (showAtlas)
+                bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
+                if (!isStandalone && _layerManager != null && _layerManager.TryGetLiveCanvasTextures(
+                        out var belowTex, out var activeTex, out var aboveTex, out var liveBaseTex, out var fallbackAtlasTex))
                 {
-                    _paintOverlayRect.Position = _pan;
-                    _paintOverlayRect.Scale = new Vector2(_zoom, _zoom);
-                    _paintOverlayRect.Size = new Vector2(atlasW, atlasH);
-                    _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
-                    _paintOverlayRect.Texture = atlasTex;
-                    bool isStandalone = !string.IsNullOrEmpty(_activeParticleTexturePath);
-                    if (!isStandalone)
+                    var displayTex = activeTex ?? belowTex ?? aboveTex ?? fallbackAtlasTex ?? liveBaseTex;
+                    bool showAtlas = displayTex != null && GodotObject.IsInstanceValid(displayTex);
+                    _paintOverlayRect.Visible = showAtlas;
+                    if (showAtlas)
                     {
+                        _paintOverlayRect.Position = _pan;
+                        _paintOverlayRect.Scale = new Vector2(_zoom, _zoom);
+                        _paintOverlayRect.Size = new Vector2(atlasW, atlasH);
+                        _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
+                        _paintOverlayRect.Texture = displayTex;
+
                         if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
                         {
                             _paintOverlayRect.Material = _paintOverlayMat;
                         }
-                        _paintOverlayMat?.SetShaderParameter("show_alpha_mask", _showAlphaMask);
+                        if (_paintOverlayMat != null)
+                        {
+                            var activeLayer = _layerManager.ActiveLayer;
+                            bool activeVisible = !_layerManager.IsBaseTextureActive && (activeLayer?.IsVisible ?? true);
+                            bool clipActive = (_layerManager.PreserveBaseAlpha || (!_layerManager.IsBaseTextureActive && (activeLayer?.ClipToBaseAlpha ?? false))) && liveBaseTex != null;
+                            _paintOverlayMat.SetShaderParameter("show_alpha_mask", _showAlphaMask);
+                            _paintOverlayMat.SetShaderParameter("use_live_layers", true);
+                            _paintOverlayMat.SetShaderParameter("below_texture", belowTex);
+                            _paintOverlayMat.SetShaderParameter("active_layer_texture", activeTex);
+                            _paintOverlayMat.SetShaderParameter("above_texture", aboveTex);
+                            _paintOverlayMat.SetShaderParameter("base_atlas_texture", liveBaseTex);
+                            _paintOverlayMat.SetShaderParameter("has_base_atlas_texture", liveBaseTex != null);
+                            _paintOverlayMat.SetShaderParameter("active_layer_visible", activeVisible);
+                            _paintOverlayMat.SetShaderParameter("active_layer_opacity", activeLayer?.Opacity ?? 1.0f);
+                            _paintOverlayMat.SetShaderParameter("blend_mode", (int)(activeLayer?.BlendMode ?? LayerBlendMode.Normal));
+                            _paintOverlayMat.SetShaderParameter("clip_active_to_base_alpha", clipActive);
+                        }
                     }
-                    else
+                }
+                else
+                {
+                    var atlasTex = _layerManager?.GetAtlasTextureResource();
+                    bool showAtlas = atlasTex != null && GodotObject.IsInstanceValid(atlasTex);
+                    _paintOverlayRect.Visible = showAtlas;
+                    if (showAtlas)
                     {
-                        _paintOverlayRect.Material = null;
+                        _paintOverlayRect.Position = _pan;
+                        _paintOverlayRect.Scale = new Vector2(_zoom, _zoom);
+                        _paintOverlayRect.Size = new Vector2(atlasW, atlasH);
+                        _paintOverlayRect.TextureFilter = TextureFilterEnum.Nearest;
+                        _paintOverlayRect.Texture = atlasTex;
+                        if (!isStandalone)
+                        {
+                            if (_paintOverlayRect.Material != _paintOverlayMat && _paintOverlayMat != null)
+                            {
+                                _paintOverlayRect.Material = _paintOverlayMat;
+                            }
+                            if (_paintOverlayMat != null)
+                            {
+                                _paintOverlayMat.SetShaderParameter("use_live_layers", false);
+                                _paintOverlayMat.SetShaderParameter("show_alpha_mask", _showAlphaMask);
+                            }
+                        }
+                        else
+                        {
+                            _paintOverlayRect.Material = null;
+                        }
                     }
                 }
             }

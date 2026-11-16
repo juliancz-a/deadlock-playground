@@ -496,6 +496,14 @@ public static class MaterialChannelDiscovery
         return manifest;
     }
 
+    public static bool IsModLocalCompiledDefaultTexture(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string norm = path.Replace("\\", "/").TrimStart('/').ToLowerInvariant();
+        string file = Path.GetFileNameWithoutExtension(norm);
+        return norm.StartsWith("models/", StringComparison.Ordinal) && file.StartsWith("default_", StringComparison.Ordinal);
+    }
+
     public static bool IsPlaceholderOrDevTexture(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return true;
@@ -507,7 +515,7 @@ public static class MaterialChannelDiscovery
         }
 
         string file = Path.GetFileNameWithoutExtension(norm);
-        if (file.StartsWith("default_") || file == "black" || file == "white" || file == "grey")
+        if ((!IsModLocalCompiledDefaultTexture(norm) && file.StartsWith("default_")) || file == "black" || file == "white" || file == "grey")
         {
             return true;
         }
@@ -1112,8 +1120,8 @@ public static class MaterialChannelDiscovery
                 InitialOriginalTexture = loadedAo,
                 SourcePath = aoPath,
                 InitialSourcePath = aoPath,
-                IsPresent = true,
-                IsDefaultFallback = false
+                IsPresent = !IsModLocalCompiledDefaultTexture(aoPath),
+                IsDefaultFallback = IsModLocalCompiledDefaultTexture(aoPath)
             });
         }
 
@@ -1219,8 +1227,8 @@ public static class MaterialChannelDiscovery
                     InitialOriginalTexture = nTex,
                     SourcePath = standaloneNormalPath,
                     InitialSourcePath = standaloneNormalPath,
-                    IsPresent = true,
-                    IsDefaultFallback = false
+                    IsPresent = !IsModLocalCompiledDefaultTexture(aoPath),
+                    IsDefaultFallback = IsModLocalCompiledDefaultTexture(aoPath)
                 });
             }
         }
@@ -1240,8 +1248,8 @@ public static class MaterialChannelDiscovery
                     InitialOriginalTexture = rTex,
                     SourcePath = standaloneRoughPath,
                     InitialSourcePath = standaloneRoughPath,
-                    IsPresent = true,
-                    IsDefaultFallback = false
+                    IsPresent = !IsModLocalCompiledDefaultTexture(aoPath),
+                    IsDefaultFallback = IsModLocalCompiledDefaultTexture(aoPath)
                 });
             }
         }
@@ -1259,6 +1267,7 @@ public static class MaterialChannelDiscovery
         }
         if (loadedShadow != null)
         {
+            bool isDefShadow = IsModLocalCompiledDefaultTexture(shadowPath);
             set.SetChannel(MaterialTextureChannel.Shadow, new ChannelMapEntry
             {
                 Channel = MaterialTextureChannel.Shadow,
@@ -1269,8 +1278,8 @@ public static class MaterialChannelDiscovery
                 InitialOriginalTexture = loadedShadow,
                 SourcePath = shadowPath,
                 InitialSourcePath = shadowPath,
-                IsPresent = true,
-                IsDefaultFallback = false
+                IsPresent = !isDefShadow,
+                IsDefaultFallback = isDefShadow
             });
         }
 
@@ -1308,6 +1317,7 @@ public static class MaterialChannelDiscovery
             preloaded = std.EmissionTexture as ImageTexture;
         }
 
+        bool isDefMask = IsModLocalCompiledDefaultTexture(vtexPath);
         var entry = new ChannelMapEntry
         {
             Channel = ch,
@@ -1318,8 +1328,8 @@ public static class MaterialChannelDiscovery
             InitialOriginalTexture = preloaded,
             SourcePath = vtexPath,
             InitialSourcePath = vtexPath,
-            IsPresent = true,
-            IsDefaultFallback = false
+            IsPresent = !isDefMask,
+            IsDefaultFallback = isDefMask
         };
 
         if (preloaded == null)

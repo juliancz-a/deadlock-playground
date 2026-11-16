@@ -4335,6 +4335,7 @@ namespace DeadlockPlayground.Painter
                 _raycaster.BuildFromMesh(_currentMesh, -1);
             }
             if (!_raycaster.IsInitialized || _raycaster.TriangleCount == 0) return;
+            _raycaster.UpdateSkinningIfNeeded(_currentMesh);
 
             var selMask = _magicWandTool?.SelectionMask;
             if (selMask == null) return;
