@@ -810,7 +810,14 @@ public partial class ExportModDialog : CanvasLayer
             }
             else if (hasSourceModInAddons && _chkPrioritizeNewMod?.ButtonPressed != false)
             {
-                _lblTargetVpkInfo.Text = $"Will take priority slot '{srcFileName}' & shift original mod to '{nextVpk}' (both kept!)";
+                if (VpkIndexResolver.IsStandardPakFileName(srcFileName))
+                {
+                    _lblTargetVpkInfo.Text = $"Will take priority slot '{srcFileName}' & shift original mod to '{nextVpk}' (both kept!)";
+                }
+                else
+                {
+                    _lblTargetVpkInfo.Text = $"Will install as '{nextVpk}' & archive '{srcFileName}' to '{srcFileName}.bak' (prevents old VPK override)";
+                }
                 _targetVpkStatusKind = "success";
             }
             else

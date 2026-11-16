@@ -206,18 +206,21 @@ namespace DeadlockPlayground.Painter
                 return _layerManager != null && _layerManager.HasChannelEdits(smInfo, MaterialTextureChannel.Color);
             }
 
-            var actuallyPaintedNonCustomKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (config.TargetSubmeshes != null)
-            {
-                foreach (var sm in config.TargetSubmeshes)
-                {
-                    if (sm?.Mesh == null || sm.IsCustomImportedMesh) continue;
-                    string matKeySm = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
-                    bool hasActualPaint = (_layerManager != null && _layerManager.HasPaintStrokes(matKeySm)) || HasAnyChannelEdits(sm);
-                    if (hasActualPaint)
-                        actuallyPaintedNonCustomKeys.Add(ResolveSubmeshKey(sm));
-                }
-            }
+var actuallyPaintedNonCustomKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+         if (config.TargetSubmeshes != null)
+         {
+             foreach (var sm in config.TargetSubmeshes)
+             {
+                 if (sm?.Mesh == null || sm.IsCustomImportedMesh) continue;
+                 string matKeySm = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
+                 bool hasActualPaint = (_layerManager != null && (
+                     _layerManager.HasPaintStrokes(matKeySm) ||
+                     _layerManager.HasEditedBaseTextureForMaterial(matKeySm) ||
+                     _layerManager.HasEditedAlphaForMaterial(matKeySm))) || HasAnyChannelEdits(sm);
+                 if (hasActualPaint)
+                     actuallyPaintedNonCustomKeys.Add(ResolveSubmeshKey(sm));
+             }
+         }
 
             var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && (s.IsDirty || HasAnyChannelEdits(s))).ToList();
             if (candidateSubmeshes == null || candidateSubmeshes.Count == 0)
@@ -505,37 +508,64 @@ namespace DeadlockPlayground.Painter
                 // If the user actually painted on a specific custom submesh in the 3D painter, merge the baked paint strokes
                 // directly into preExtractedCustomBundle.Submeshes so CustomModelExporter compiles the painted texture.
                 // If the user did NOT paint strokes on that submesh, leave the original custom texture/color untouched!
-                if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
-                {
-                    foreach (var sm in config.TargetSubmeshes)
-                    {
-                        if (sm?.Mesh == null || !sm.IsCustomImportedMesh) continue;
-                        string smKey = !string.IsNullOrEmpty(sm.DisplayName) ? sm.DisplayName : sm.Mesh.Name.ToString();
-                        string matKey = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
-                        bool hasPaint = _layerManager != null && _layerManager.HasPaintStrokes(matKey);
-                        if (!hasPaint) continue;
+  if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
+             {
+                 foreach (var sm in config.TargetSubmeshes)
+                 {
+                     if (sm?.Mesh == null || !sm.IsCustomImportedMesh) continue;
+                     string smKey = !string.IsNullOrEmpty(sm.DisplayName) ? sm.DisplayName : sm.Mesh.Name.ToString();
+                     string matKey = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
+                     bool hasPaint = (_layerManager != null && (
+                         _layerManager.HasPaintStrokes(matKey) ||
+                         _layerManager.HasEditedBaseTextureForMaterial(matKey) ||
+                         _layerManager.HasEditedAlphaForMaterial(matKey))) || sm.IsDirty;
+                     if (!hasPaint) continue;
 
-                        int targetRes = config.Resolution > 0 ? config.Resolution : 2048;
-                        Image blendedImg = ExtractAndBlendSubmeshImage(config, sm, targetRes);
-                        if (blendedImg != null && !blendedImg.IsEmpty())
-                        {
-                            byte[] paintedPng = blendedImg.SavePngToBuffer();
-                            if (paintedPng != null && paintedPng.Length > 0)
-                            {
-                                string meshName = sm.Mesh.Name.ToString();
-                                foreach (var bundleSub in preExtractedCustomBundle.Submeshes)
-                                {
-                                    if (string.Equals(bundleSub.SubmeshName, smKey, StringComparison.OrdinalIgnoreCase) ||
-                                        string.Equals(bundleSub.SubmeshName, meshName, StringComparison.OrdinalIgnoreCase) ||
-                                        bundleSub.SubmeshName.StartsWith(meshName + "_s", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        bundleSub.AlbedoPngBytes = paintedPng;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                     int targetRes = config.Resolution > 0 ? config.Resolution : 2048;
+                     Image blendedImg = ExtractAndBlendSubmeshImage(config, sm, targetRes);
+                     if (blendedImg != null && !blendedImg.IsEmpty())
+                     {
+                         byte[] paintedPng = blendedImg.SavePngToBuffer();
+                         if (paintedPng != null && paintedPng.Length > 0)
+                         {
+                             string meshName = sm.Mesh.Name.ToString();
+                             string rawName = sm.RawName ?? "";
+                             string smMatStem = SkinLayerManager.ExtractMaterialStem(matKey);
+                             var matchedMatNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                             foreach (var bundleSub in preExtractedCustomBundle.Submeshes)
+                             {
+                                 string bMatStem = SkinLayerManager.ExtractMaterialStem(bundleSub.MaterialName);
+                                 bool match =
+                                     string.Equals(bundleSub.SubmeshName, smKey, StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(bundleSub.SubmeshName, meshName, StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(bundleSub.SubmeshName, rawName, StringComparison.OrdinalIgnoreCase) ||
+                                     bundleSub.SubmeshName.StartsWith(meshName + "_s", StringComparison.OrdinalIgnoreCase) ||
+                                     meshName.StartsWith(bundleSub.SubmeshName + "_surf_", StringComparison.OrdinalIgnoreCase) ||
+                                     (!string.IsNullOrEmpty(smMatStem) && string.Equals(bMatStem, smMatStem, StringComparison.OrdinalIgnoreCase));
+
+                                 if (match)
+                                 {
+                                     bundleSub.AlbedoPngBytes = paintedPng;
+                                     if (!string.IsNullOrWhiteSpace(bundleSub.MaterialName))
+                                         matchedMatNames.Add(bundleSub.MaterialName);
+                                 }
+                             }
+
+                             if (matchedMatNames.Count > 0)
+                             {
+                                 foreach (var bundleSub in preExtractedCustomBundle.Submeshes)
+                                 {
+                                     if (!string.IsNullOrWhiteSpace(bundleSub.MaterialName) && matchedMatNames.Contains(bundleSub.MaterialName))
+                                     {
+                                         bundleSub.AlbedoPngBytes = paintedPng;
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
             }
 
             return await Task.Run(async () =>
@@ -621,11 +651,23 @@ bool isSourceModInTargetAddons = false;
                     }
                     else if (isSourceModInTargetAddons && config.MergeWithSourceModVpk && config.PrioritizeNewModOverSource)
                     {
-                        // Opción 2 (DEFAULT): El nuevo mod toma el número menor (ej. pak01_dir.vpk) y el original se mueve al siguiente libre (ej. pak02_dir.vpk)!
+                        string srcFileName = Path.GetFileName(config.SourceModVpkPath);
                         string nextFreeSlotName = VpkIndexResolver.ResolveNextFileName(targetDir);
-                        shiftedOriginalModDestinationPath = Path.Combine(targetDir, nextFreeSlotName);
-                        vpkFileName = Path.GetFileName(config.SourceModVpkPath);
-                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New export (animation/recolor/VFX/misc) will take '{vpkFileName}' (higher priority) and original mod will be preserved as '{nextFreeSlotName}'."));
+                        if (VpkIndexResolver.IsStandardPakFileName(srcFileName))
+                        {
+                            // Standard pakXX_dir.vpk: new mod claims the lower-index priority slot, original shifts to nextFreeSlotName
+                            shiftedOriginalModDestinationPath = Path.Combine(targetDir, nextFreeSlotName);
+                            vpkFileName = srcFileName;
+                            progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New export (animation/recolor/VFX/misc) will take '{vpkFileName}' (higher priority) and original mod will be preserved as '{nextFreeSlotName}'."));
+                        }
+                        else
+                        {
+                            // Non-pakXX_dir.vpk (e.g. vansdicta_blue.vpk): moving old mod to pakXX_dir.vpk would give the OLD mod priority in Source 2!
+                            // Install the new merged export into the standard pakXX_dir.vpk slot and archive the old VPK as .vpk.bak.
+                            vpkFileName = nextFreeSlotName;
+                            shiftedOriginalModDestinationPath = config.SourceModVpkPath + ".bak";
+                            progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New export will take standard slot '{vpkFileName}' and original '{srcFileName}' will be archived as '{srcFileName}.bak'."));
+                        }
                     }
                     else
                     {
@@ -1356,12 +1398,11 @@ bool isSourceModInTargetAddons = false;
                             sourceModPackage = null;
                         }
 
-                        // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al siguiente slot pakXX libre!
-                        if (!string.IsNullOrWhiteSpace(finalVpkPath) &&
-                            !string.IsNullOrWhiteSpace(config.SourceModVpkPath) &&
+                        // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al destino de respaldo/siguiente slot
+                        if (!string.IsNullOrWhiteSpace(config.SourceModVpkPath) &&
                             !string.IsNullOrEmpty(shiftedOriginalModDestinationPath) &&
                             File.Exists(config.SourceModVpkPath) &&
-                            string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath), StringComparison.OrdinalIgnoreCase))
+                            !string.Equals(Path.GetFullPath(config.SourceModVpkPath), Path.GetFullPath(shiftedOriginalModDestinationPath), StringComparison.OrdinalIgnoreCase))
                         {
                             if (File.Exists(shiftedOriginalModDestinationPath))
                             {
@@ -1966,12 +2007,10 @@ bool isSourceModInTargetAddons = false;
                             }
                         }
 
+                        // NOTE: paintData from BakeCompositeImageForSubmesh ALREADY has the paint layers composited over the base texture RGB!
+                        // Do NOT clamp pA to origBaseA before blending RGB, because in Source 2 Deadlock g_tColor.a often stores Metalness (0 on cloth/skin),
+                        // which previously forced pA = 0 and overwrote 100% of the painted RGB with unedited baseData!
                         float pA = paintData[idx + 3] / 255.0f;
-                        if (config.PreserveBaseAlpha)
-                        {
-                            pA = Mathf.Min(pA, origBaseA / 255.0f);
-                        }
-
                         if (pA <= 0.001f)
                         {
                             paintData[idx] = baseData[idx];
@@ -2003,7 +2042,6 @@ bool isSourceModInTargetAddons = false;
                         }
                         else
                         {
-                            // Unconstrained alpha mode or edited base alpha
                             paintData[idx + 3] = (byte)Mathf.Clamp(Mathf.Max((int)paintData[idx + 3], (int)baseData[idx + 3]), 0, 255);
                         }
                     }

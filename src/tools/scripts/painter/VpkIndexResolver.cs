@@ -17,6 +17,11 @@ namespace DeadlockPlayground.Painter
             RegexOptions.IgnoreCase | RegexOptions.Compiled
         );
 
+        public static bool IsStandardPakFileName(string fileName)
+        {
+            return !string.IsNullOrWhiteSpace(fileName) && VpkPattern.IsMatch(Path.GetFileName(fileName));
+        }
+
         /// <summary>
         /// Scans the given directory and returns a sorted list of all existing pak numbers.
         /// </summary>

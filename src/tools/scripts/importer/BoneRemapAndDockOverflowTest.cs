@@ -1000,6 +1000,133 @@ namespace DeadlockPlayground.Tests
                     Check(synthMi.Skin == null, "BuildSyntheticRig.Restore() cleanly reverted test mesh skin");
                     synthScene.QueueFree();
                 }
+
+                // =========================================================================
+                // TEST 9: Skinned MeshRaycaster Posed Hit Accuracy (Paint Tab Non-A-Pose Fix)
+                // =========================================================================
+                GD.Print("\n=== Test 9: Skinned MeshRaycaster Posed Hit Accuracy ===");
+                {
+                    var posedHero = vpkLoader.CurrentHeroNode;
+                    var posedSkel = CustomModelAutoRigger.FindSkeleton(posedHero);
+                    MeshInstance3D bodyMi = null;
+                    foreach (var m in CustomModelAutoRigger.CollectOriginalHeroMeshes(posedHero))
+                    {
+                        if (m.Skin != null && m.Name.ToString().Contains("fencer_model", StringComparison.OrdinalIgnoreCase))
+                        {
+                            bodyMi = m;
+                            break;
+                        }
+                    }
+                    Check(posedSkel != null && bodyMi != null && bodyMi.Skin != null,
+                        $"Located skinned mesh '{bodyMi?.Name}' on hero for posed raycast test");
+
+                    if (posedSkel != null && bodyMi != null && bodyMi.Skin != null)
+                    {
+                        int armUpperL = posedSkel.FindBone("arm_upper_L");
+                        int handL = posedSkel.FindBone("hand_L");
+                        Check(armUpperL >= 0 && handL >= 0, $"Found arm_upper_L ({armUpperL}) and hand_L ({handL})");
+
+                        // Find a vertex strongly weighted to hand_L (bind -> handL) and check 8-bone support
+                        var arr = bodyMi.Mesh.SurfaceGetArrays(0);
+                        var verts = arr[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                        var bones = arr[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                        var weights = arr[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                        int stride = (bones.Length >= verts.Length * 8 && weights.Length >= verts.Length * 8) ? 8 : 4;
+
+                        int handVertIdx = -1;
+                        float bestW = 0f;
+                        int handBindIdx = -1;
+                        for (int bi = 0; bi < bodyMi.Skin.GetBindCount(); bi++)
+                        {
+                            int sb = bodyMi.Skin.GetBindBone(bi);
+                            if (sb < 0) sb = posedSkel.FindBone(bodyMi.Skin.GetBindName(bi));
+                            if (sb == handL) { handBindIdx = bi; break; }
+                        }
+                        for (int v = 0; v < verts.Length && handBindIdx >= 0; v++)
+                        {
+                            for (int k = 0; k < stride; k++)
+                            {
+                                if (bones[v * stride + k] == handBindIdx && weights[v * stride + k] > bestW)
+                                {
+                                    bestW = weights[v * stride + k];
+                                    handVertIdx = v;
+                                }
+                            }
+                        }
+                        Check(handVertIdx >= 0 && bestW > 0.7f,
+                            $"Found strongly weighted hand_L vertex (idx={handVertIdx}, weight={bestW:F2}, stride={stride})");
+
+                        // Build MeshRaycaster on rest pose first, then locate the largest non-degenerate triangle containing handVertIdx
+                        posedSkel.ResetBonePoses();
+                        await ToSignal(this, SignalName.ProcessFrame);
+
+                        var rc = new DeadlockPlayground.Painter.MeshRaycaster();
+                        Check(rc.BuildFromMesh(bodyMi, -1), "MeshRaycaster built from 8-bone skinned hero mesh");
+
+                        var indices = arr.Count > (int)Mesh.ArrayType.Index ? arr[(int)Mesh.ArrayType.Index].AsInt32Array() : null;
+                        int handTriIdx = -1;
+                        float bestAreaSq = 1e-10f;
+                        if (indices != null)
+                        {
+                            for (int t = 0; t + 2 < indices.Length; t += 3)
+                            {
+                                if (indices[t] == handVertIdx || indices[t + 1] == handVertIdx || indices[t + 2] == handVertIdx)
+                                {
+                                    int candidate = t / 3;
+                                    var candTri = rc.GetTriangle(candidate);
+                                    float areaSq = (candTri.V1 - candTri.V0).Cross(candTri.V2 - candTri.V0).LengthSquared();
+                                    if (areaSq > bestAreaSq && candTri.Normal.LengthSquared() > 0.5f)
+                                    {
+                                        bestAreaSq = areaSq;
+                                        handTriIdx = candidate;
+                                    }
+                                }
+                            }
+                        }
+                        Check(handTriIdx >= 0, $"Located non-degenerate triangle {handTriIdx} containing hand_L vertex (areaSq={bestAreaSq:E2})");
+
+                        var restTri = rc.GetTriangle(handTriIdx);
+                        Vector3 restTriWorld = bodyMi.GlobalTransform * ((restTri.V0 + restTri.V1 + restTri.V2) / 3f);
+                        Vector3 restNormWorld = (bodyMi.GlobalTransform.Basis * restTri.Normal).Normalized();
+
+                        // Rotate arm_upper_L 75deg upward/forward away from A-Pose
+                        Quaternion baseArmRot = posedSkel.GetBoneRest(armUpperL).Basis.Orthonormalized().GetRotationQuaternion();
+                        posedSkel.SetBonePoseRotation(armUpperL, Quaternion.FromEuler(new Vector3(0f, Mathf.DegToRad(75f), Mathf.DegToRad(75f))) * baseArmRot);
+                        await ToSignal(this, SignalName.ProcessFrame);
+
+                        rc.UpdateSkinningIfNeeded(bodyMi);
+                        var posedTri = rc.GetTriangle(handTriIdx);
+                        Vector3 posedTriWorld = bodyMi.GlobalTransform * ((posedTri.V0 + posedTri.V1 + posedTri.V2) / 3f);
+                        Vector3 posedNormWorld = (bodyMi.GlobalTransform.Basis * posedTri.Normal).Normalized();
+                        float moveDist = posedTriWorld.DistanceTo(restTriWorld);
+                        Check(moveDist > 0.25f, $"Posed hand_L triangle moved significantly from A-Pose ({moveDist:F3}m)");
+
+                        // Cast a short probe ray from just outside the posed triangle face back into the front face (matching painter cullBackfaces: true)
+                        Vector3 rayDir = -posedNormWorld;
+                        Vector3 rayOrigin = posedTriWorld + posedNormWorld * 0.02f;
+                        var hitPosed = rc.IntersectRay(bodyMi, rayOrigin, rayDir, cullBackfaces: true);
+                        Check(hitPosed.Hit && hitPosed.WorldPosition.DistanceTo(posedTriWorld) < 0.01f,
+                            $"MeshRaycaster hit posed hand triangle accurately (hit={hitPosed.Hit}, err={hitPosed.WorldPosition.DistanceTo(posedTriWorld):F4}m)");
+
+                        // Empty old A-Pose location should NOT falsely match the old A-Pose triangle
+                        var hitOldSpot = rc.IntersectRay(bodyMi, restTriWorld + restNormWorld * 0.02f, -restNormWorld, cullBackfaces: false);
+                        bool oldSpotClean = !hitOldSpot.Hit || hitOldSpot.WorldPosition.DistanceTo(restTriWorld) > 0.15f;
+                        Check(oldSpotClean, "Old A-Pose location no longer registers phantom hits while hero is posed");
+
+                        // Raycaster UV lookup (with camera context) evaluates to the posed world coordinate
+                        var uvPointPosed = rc.FindPointFromUV(bodyMi, hitPosed.HitUV, rayOrigin);
+                        Check(uvPointPosed.Hit && uvPointPosed.WorldPosition.DistanceTo(posedTriWorld) < 0.01f,
+                            $"FindPointFromUV returned posed hand world position (err={uvPointPosed.WorldPosition.DistanceTo(posedTriWorld):F4}m)");
+
+                        // Reset back to Bind A-Pose without rebuilding MeshRaycaster -> should automatically track rest position
+                        posedSkel.ResetBonePoses();
+                        await ToSignal(this, SignalName.ProcessFrame);
+                        Vector3 restOrigin = restTriWorld + restNormWorld * 0.02f;
+                        var hitRest = rc.IntersectRay(bodyMi, restOrigin, -restNormWorld, cullBackfaces: true);
+                        Check(hitRest.Hit && hitRest.WorldPosition.DistanceTo(restTriWorld) < 0.01f,
+                            $"MeshRaycaster automatically tracked Skeleton3D ResetBonePoses back to A-Pose (err={hitRest.WorldPosition.DistanceTo(restTriWorld):F4}m)");
+                    }
+                }
             }
             catch (Exception ex)
             {
