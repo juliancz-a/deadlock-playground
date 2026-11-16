@@ -1,15 +1,26 @@
 {
-  "latestVersion": "1.3.0",
-  "publishedAt": "2026-11-16T07:17:37Z",
-  "title": "Version 1.3.0 — Custom Model & Accessory Importer, Multi-Channel PBR, Themes, Base Alpha/Eraser & Local Anim Gizmos",
-  "markdown": "### Version 1.3.0 — Custom Model & Accessory Importer, Multi-Channel PBR, Themes, Base Alpha/Eraser & Local Anim Gizmos\n\n## 🎭 Custom 3D Model Replacement & Accessory / Outfit Importer\n* **Full Custom Character Replacement:** Import `.glb`, `.gltf`, and `.fbx` models in the **Interactive 3D Fitting Room** with a translucent ghost hero reference mannequin, transform gizmos, axis locking, and multi-material inspection.\n* **Landmark Auto-Rigging & 3D Weight Paint Editor:**\n  - Automatically rig custom characters using Source 2 KNN donor skin-weight transfer with anatomical capsule fallback, or place manual anatomical Landmarks for exact bone alignment.\n  - Refine skin weights live in 3D with interactive Paint & Smooth weight brushes, X-Ray wireframe inspection, and T-Pose inverse baking.\n  - Keep unreplaced vanilla weapons/props intact cleanly inside exported `.vmdl_c` mods, with full `.dpp` session persistence.\n* **Accessory & Outfit Part Importer:**\n  - Add standalone hats, glasses, capes, backpacks, or custom props rigidly to quick-pick skeleton sockets (`Head`, `Chest / Back`, `Right Hand`, `Left Hand`, `Pelvis`, or full skeleton picker), or replace individual vanilla hero submeshes without rebuilding the whole hero.\n  - Fine-tune fit with independent X/Y/Z axis scaling, `Snap Grip` / `Straighten`, and clean slot management inside **Mod Changes**.\n* **Hero Mesh Deformer & 3D Sculpt Brush:** Sculpt, push, pull, flatten, or smooth original hero meshes (such as hair or tall collars) in 3D so custom hats and accessories fit without clipping.\n* **Deadlock Material Conversion:** Automatically converts imported model & accessory textures to sanitized Source 2 Deadlock PBR/toon shaders with AO, Normal, and Roughness map detection.\n\n---\n\n## 🎨 Multi-Channel Material Painting, Base Texture Eraser & Alpha Control\n* **Multi-Channel PBR Texture Support:** Inspect, paint, import, and export across **Color (Albedo)**, **Normal**, **Roughness**, **Ambient Occlusion (AO)**, **Shadow Map**, and **Self-Illum / Emissive** channels—with smart 2D canvas toolbar filtering that hides maps absent on the active material.\n* **Base Texture Unlock & Eraser-to-Transparency:** Unlock the **BASE TEXTURE** layer to paint over, apply Filters / Color Adjustments / Gradient Maps directly onto it, or erase base pixels straight to alpha transparency.\n* **Clip Paint Layers to Base Alpha & Alpha Preview:**\n  - Keep **Clip Paint Layers to Base Alpha** enabled to prevent brush strokes and fills from bleeding into Source 2 transparent cutouts and packed masks.\n  - Inspect live alpha masks in the 2D UV Canvas using the **Alpha Preview** toggle and transparency checkerboard backdrop, plus alpha-scissored outlines in the 3D viewport.\n* **Tiled/Negative UV Wrapping & Stability Fixes:**\n  - Fixed out-of-bounds UV islands on heroes and props via proper `fract(UV)` wrapping in both the 2D UV canvas and 3D GPU brush projection.\n  - Fixed purple missing-texture overlays on material switching/LRU eviction and eliminated disposed VPK stream errors during workspace texture restoration.\n\n---\n\n## 🎬 Animation Studio: Local Gizmos, Mod Editing & Source 2 Constraints\n* **Local / Global 3D Gizmo Coordinate Space:** Toggle between **Local bone axes** and **Global world axes** from the Animation Studio toolbar, `Key Actions` menu, `Bones` tab, or hotkey **`L`** for natural joint posing.\n* **Addon Animation Mod Editing & Re-Export:** Load existing `.vnmclip_c` animation mods from your addon picker under the new `\"Modified\"` category, tweak curves or poses in the Animation Studio, and re-export cleanly with fixed Source 2 IK chain & constraint handling.\n* **Source 2 Constraints, Jiggle Bones & Secondary `.vnmskel` Retargeting:** Full `Source2BoneConstraintDriver` evaluation across all 11 ModelDoc constraints and `FeModel` jiggle springs, plus accurate additive decoding on secondary `.vnmskel` skeletons.\n\n---\n\n## 🎨 UI Theme System, Markdown Changelogs & Engine Upgrade\n* **Custom UI Theme System:** Switch between built-in studio themes, customize accent and surface colors, and export/import shareable JSON theme presets.\n* **VRF 21.1, .NET 11.0 & Non-Standard `.vpk` Mods:** Upgraded core parsing to `ValveResourceFormat 21.1` on `.NET 11.0` with SoA `ParticleSystemSimulation`, lock-free deferred VPK reads, non-standard community `.vpk` addon discovery, and safe in-place `.vpk` overwriting.\n* **UI Polish & Rich Markdown Changelogs:** Cleaner Fitting Room top toolbars, persistent submesh visibility across tab switches (fixing parts like Viscous inflated mesh reappearing), and full Markdown rendering across the in-app Update Modal, Web Showcase, and Release Hub.",
+  "latestVersion": "1.3.1",
+  "publishedAt": "2026-12-16T07:17:37Z",
+  "title": "Version 1.3.1 — Modded textures appearing transparent in-game hotfix",
+  "markdown": "### Version 1.3.1 — Modded textures appearing transparent in-game hotfix",
   "history": [
+    {
+      "version": "1.3.1",
+      "date": "November 17, 2026",
+      "title": "Version 1.3.1 — Modded textures appearing transparent in-game hotfix",
+      "badge": "Latest Release",
+      "badgeType": "gold",
+      "videoUrl": "",
+      "highlights": [
+        "- Quick hotfix! lemme now if you encounter more issues."
+      ]
+    },
     {
       "version": "1.3.0",
       "date": "November 16, 2026",
       "title": "Version 1.3.0 — Custom Model & Accessory Importer, Multi-Channel PBR, Themes, Base Alpha/Eraser & Local Anim Gizmos",
-      "badge": "Latest Release",
-      "badgeType": "gold",
+      "badge": "Release",
+      "badgeType": "slate",
       "videoUrl": "",
       "highlights": [
         "## 🎭 Custom 3D Model Replacement & Accessory / Outfit Importer",
