@@ -91,6 +91,18 @@ namespace DeadlockPlayground.Workspace
         public float[] DeltasXyz { get; set; } = Array.Empty<float>();
     }
 
+    public class WorkspaceKeptPartTransformEntry
+    {
+        [JsonPropertyName("pos")]
+        public float[] Pos { get; set; } = new[] { 0f, 0f, 0f };
+
+        [JsonPropertyName("rot")]
+        public float[] Rot { get; set; } = new[] { 0f, 0f, 0f };
+
+        [JsonPropertyName("scale")]
+        public float Scale { get; set; } = 1.0f;
+    }
+
     public class WorkspaceCustomModelEntry
     {
         [JsonPropertyName("relative_model_path")]
@@ -246,6 +258,24 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("skin_weight_overrides")]
         public Dictionary<string, WorkspaceSkinWeightOverrideEntry> CustomSkinWeightOverrides { get; set; }
 
+        [JsonPropertyName("auto_align_hand_orientation")]
+        public bool AutoAlignHandOrientation { get; set; } = true;
+
+        [JsonPropertyName("left_hand_snap_offset_deg")]
+        public float[] LeftHandSnapOffsetDeg { get; set; }
+
+        [JsonPropertyName("right_hand_snap_offset_deg")]
+        public float[] RightHandSnapOffsetDeg { get; set; }
+
+        [JsonPropertyName("left_hand_snap_scale")]
+        public float LeftHandSnapScale { get; set; } = 1.0f;
+
+        [JsonPropertyName("right_hand_snap_scale")]
+        public float RightHandSnapScale { get; set; } = 1.0f;
+
+        [JsonPropertyName("kept_part_transforms")]
+        public Dictionary<string, WorkspaceKeptPartTransformEntry> KeptOriginalPartTransforms { get; set; }
+
         public static WorkspaceCustomModelEntry FromRiggingOptions(
             string relativeModelPath,
             string originalFileName,
@@ -306,8 +336,28 @@ namespace DeadlockPlayground.Workspace
                 SubmeshSnapToSocket = o.SubmeshSnapToSocket != null ? new Dictionary<string, bool>(o.SubmeshSnapToSocket) : new(),
                 SubmeshSocketScale = o.SubmeshSocketScale != null ? new Dictionary<string, float>(o.SubmeshSocketScale) : new(),
                 SubmeshIsOutlineShell = o.SubmeshIsOutlineShell != null ? new Dictionary<string, bool>(o.SubmeshIsOutlineShell, StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase),
-                CustomBoneRemap = o.CustomBoneRemap != null ? new Dictionary<string, string>(o.CustomBoneRemap) : new()
+                CustomBoneRemap = o.CustomBoneRemap != null ? new Dictionary<string, string>(o.CustomBoneRemap) : new(),
+                AutoAlignHandOrientation = o.AutoAlignHandOrientation,
+                LeftHandSnapOffsetDeg = new[] { o.LeftHandSnapOffsetDeg.X, o.LeftHandSnapOffsetDeg.Y, o.LeftHandSnapOffsetDeg.Z },
+                RightHandSnapOffsetDeg = new[] { o.RightHandSnapOffsetDeg.X, o.RightHandSnapOffsetDeg.Y, o.RightHandSnapOffsetDeg.Z },
+                LeftHandSnapScale = o.LeftHandSnapScale > 0.001f ? o.LeftHandSnapScale : 1.0f,
+                RightHandSnapScale = o.RightHandSnapScale > 0.001f ? o.RightHandSnapScale : 1.0f
             };
+
+            if (o.KeptOriginalPartTransforms != null && o.KeptOriginalPartTransforms.Count > 0)
+            {
+                entry.KeptOriginalPartTransforms = new Dictionary<string, WorkspaceKeptPartTransformEntry>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in o.KeptOriginalPartTransforms)
+                {
+                    if (string.IsNullOrWhiteSpace(kv.Key) || kv.Value == null || kv.Value.IsIdentity) continue;
+                    entry.KeptOriginalPartTransforms[kv.Key] = new WorkspaceKeptPartTransformEntry
+                    {
+                        Pos = new[] { kv.Value.PositionOffset.X, kv.Value.PositionOffset.Y, kv.Value.PositionOffset.Z },
+                        Rot = new[] { kv.Value.RotationDeg.X, kv.Value.RotationDeg.Y, kv.Value.RotationDeg.Z },
+                        Scale = kv.Value.Scale > 0.001f ? kv.Value.Scale : 1.0f
+                    };
+                }
+            }
 
             if (o.SubmeshSocketOffsetPos != null)
             {
@@ -415,8 +465,31 @@ namespace DeadlockPlayground.Workspace
                 SubmeshSnapToSocket = SubmeshSnapToSocket != null ? new Dictionary<string, bool>(SubmeshSnapToSocket) : new(),
                 SubmeshSocketScale = SubmeshSocketScale != null ? new Dictionary<string, float>(SubmeshSocketScale) : new(),
                 SubmeshIsOutlineShell = SubmeshIsOutlineShell != null ? new Dictionary<string, bool>(SubmeshIsOutlineShell, StringComparer.OrdinalIgnoreCase) : new(StringComparer.OrdinalIgnoreCase),
-                CustomBoneRemap = CustomBoneRemap != null ? new Dictionary<string, string>(CustomBoneRemap) : new()
+                CustomBoneRemap = CustomBoneRemap != null ? new Dictionary<string, string>(CustomBoneRemap) : new(),
+                AutoAlignHandOrientation = AutoAlignHandOrientation,
+                LeftHandSnapScale = LeftHandSnapScale > 0.001f ? LeftHandSnapScale : 1.0f,
+                RightHandSnapScale = RightHandSnapScale > 0.001f ? RightHandSnapScale : 1.0f
             };
+
+            if (LeftHandSnapOffsetDeg != null && LeftHandSnapOffsetDeg.Length == 3)
+                o.LeftHandSnapOffsetDeg = new Vector3(LeftHandSnapOffsetDeg[0], LeftHandSnapOffsetDeg[1], LeftHandSnapOffsetDeg[2]);
+            if (RightHandSnapOffsetDeg != null && RightHandSnapOffsetDeg.Length == 3)
+                o.RightHandSnapOffsetDeg = new Vector3(RightHandSnapOffsetDeg[0], RightHandSnapOffsetDeg[1], RightHandSnapOffsetDeg[2]);
+            if (KeptOriginalPartTransforms != null && KeptOriginalPartTransforms.Count > 0)
+            {
+                o.KeptOriginalPartTransforms = new Dictionary<string, DeadlockPlayground.Importer.CustomModelAutoRigger.KeptHeroPartTransform>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in KeptOriginalPartTransforms)
+                {
+                    if (string.IsNullOrWhiteSpace(kv.Key) || kv.Value == null) continue;
+                    var xf = new DeadlockPlayground.Importer.CustomModelAutoRigger.KeptHeroPartTransform
+                    {
+                        PositionOffset = (kv.Value.Pos != null && kv.Value.Pos.Length == 3) ? new Vector3(kv.Value.Pos[0], kv.Value.Pos[1], kv.Value.Pos[2]) : Vector3.Zero,
+                        RotationDeg = (kv.Value.Rot != null && kv.Value.Rot.Length == 3) ? new Vector3(kv.Value.Rot[0], kv.Value.Rot[1], kv.Value.Rot[2]) : Vector3.Zero,
+                        Scale = kv.Value.Scale > 0.001f ? kv.Value.Scale : 1.0f
+                    };
+                    if (!xf.IsIdentity) o.KeptOriginalPartTransforms[kv.Key] = xf;
+                }
+            }
 
             if (RootPosition != null && RootPosition.Length == 3)
                 o.RootPosition = new Vector3(RootPosition[0], RootPosition[1], RootPosition[2]);

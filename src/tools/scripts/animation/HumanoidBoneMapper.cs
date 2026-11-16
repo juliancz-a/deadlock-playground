@@ -71,7 +71,7 @@ namespace DeadlockPlayground.Animation
                 new[] { "neck", "neck_01", "neck1", "neck.001", "spine.005", "def-spine.005", "def_spine_005", "b_neck", "bip_neck" }),
             new("head", "Head", BoneGroup.Head,
                 new[] { "head", "head_01", "head0" },
-                new[] { "head", "head_01", "head.001", "spine.006", "def-spine.006", "def_spine_006", "b_head", "bip_head" }),
+                new[] { "head", "head_01", "head.001", "head1", "head_1", "head_0", "bip01_head1", "spine.006", "def-spine.006", "def_spine_006", "b_head", "bip_head" }),
 
             // --- Left Arm Chain ---
             new("clavicle_L", "Left Shoulder / Clavicle", BoneGroup.LeftArm,
@@ -345,6 +345,11 @@ namespace DeadlockPlayground.Animation
             int slashIdx = name.LastIndexOf('/');
             if (slashIdx != -1) name = name[(slashIdx + 1)..];
 
+            // Strip wrapper prefixes such as "ValveBiped." before skeletal rig prefixes ("Bip01_", etc.)
+            if (name.StartsWith("valvebiped.", StringComparison.OrdinalIgnoreCase)) name = name[11..];
+            else if (name.StartsWith("valvebiped_", StringComparison.OrdinalIgnoreCase)) name = name[11..];
+            else if (name.StartsWith("valvebiped ", StringComparison.OrdinalIgnoreCase)) name = name[11..];
+
             // Strip standard prefixes (case-insensitive)
             if (name.StartsWith("mixamorig:", StringComparison.OrdinalIgnoreCase)) name = name[10..];
             else if (name.StartsWith("mixamorig_", StringComparison.OrdinalIgnoreCase)) name = name[10..];
@@ -601,6 +606,9 @@ namespace DeadlockPlayground.Animation
                     // "head" must not match "forehead"
                     if (def.CanonicalName == "head" && c.Contains("forehead")) return false;
 
+                    // Leaf "_end" nubs (e.g. head1_end, hand_end) must not steal primary joint slots
+                    if (c.EndsWith("_end") && !cleanAlias.EndsWith("_end")) return false;
+
                     // Match tokens or exact compound word
                     return c == cleanAlias || c.StartsWith(cleanAlias + "_") || c.EndsWith("_" + cleanAlias) || c.Contains("_" + cleanAlias + "_");
                 });
@@ -724,6 +732,7 @@ namespace DeadlockPlayground.Animation
                     if (isLeft && (c.EndsWith("_r") || c.Contains("_r_") || c.Contains("right")) && !c.Contains("left")) continue;
                     if (isRight && (c.EndsWith("_l") || c.Contains("_l_") || c.Contains("left")) && !c.Contains("right")) continue;
                     if (def.CanonicalName == "head" && c.Contains("forehead")) continue;
+                    if (c.EndsWith("_end") && !cleanAlias.EndsWith("_end")) continue;
 
                     if (c == cleanAlias || c.StartsWith(cleanAlias + "_") || c.EndsWith("_" + cleanAlias) || c.Contains("_" + cleanAlias + "_"))
                         return e.Raw;

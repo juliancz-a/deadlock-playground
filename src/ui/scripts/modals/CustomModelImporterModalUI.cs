@@ -253,6 +253,31 @@ namespace DeadlockPlayground.UI
         private CheckBox _chkClampLimbStretching;
         private CheckBox _chkStabilizeNeckFloatingHead;
         private CheckBox _chkAutoCounterTwistWeights;
+        private CheckBox _chkAutoAlignHandOrientation;
+        private VBoxContainer _boxHandSnapTuning;
+        private SpinBox _spinRightHandPitch;
+        private SpinBox _spinRightHandYaw;
+        private SpinBox _spinRightHandRoll;
+        private SpinBox _spinRightHandScale;
+        private SpinBox _spinLeftHandPitch;
+        private SpinBox _spinLeftHandYaw;
+        private SpinBox _spinLeftHandRoll;
+        private SpinBox _spinLeftHandScale;
+
+        // Tab 3: Reposition Kept Original Hero Part / Weapon (Artist Override)
+        private readonly Dictionary<string, CustomModelAutoRigger.KeptHeroPartTransform> _keptPartTransforms = new(StringComparer.OrdinalIgnoreCase);
+        private PanelContainer _boxKeptPartCard;
+        private OptionButton _optKeptPartTarget;
+        private Button _btnKeptGizmoToggle;
+        private Button _btnKeptResetPart;
+        private SpinBox _spinKeptPosX;
+        private SpinBox _spinKeptPosY;
+        private SpinBox _spinKeptPosZ;
+        private SpinBox _spinKeptRotPitch;
+        private SpinBox _spinKeptRotYaw;
+        private SpinBox _spinKeptRotRoll;
+        private SpinBox _spinKeptScale;
+        private bool _isSyncingKeptPartUi = false;
 
         public CustomModelAutoRigger.RiggingOptions LastRiggingOptions { get; private set; }
         public Transform3D GetAlignedTransform() => _previewModelRoot?.Transform ?? Transform3D.Identity;
@@ -275,6 +300,7 @@ namespace DeadlockPlayground.UI
         private bool _isGizmoUpdatingFromUI = false;
         private bool _isGizmoDragging = false;
         private bool _suppressScalePivotCompensation = false;
+        private bool _userModifiedTransform = false;
         private bool _rigUpdatePending = false;
         private Godot.Timer _liveRigDebounceTimer;
         private Transform3D _bakedPreviewTransform = Transform3D.Identity;
@@ -325,8 +351,27 @@ namespace DeadlockPlayground.UI
 
         public override void _Input(InputEvent @event)
         {
-            if (@event is InputEventKey key && key.Pressed && !key.Echo)
+            if (Visible && @event is InputEventKey key && key.Pressed && !key.Echo)
             {
+                Control focusOwner = GetViewport()?.GuiGetFocusOwner();
+                bool textFocused = focusOwner is LineEdit || focusOwner is TextEdit;
+
+                if (!textFocused && IsPinEditActive())
+                {
+                    if (key.CtrlPressed && !key.AltPressed && key.Keycode == Key.A)
+                    {
+                        ToggleSelectAllPins();
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
+                    if (!key.CtrlPressed && key.Keycode == Key.Escape && _selectedPins.Count > 0)
+                    {
+                        ClearPinSelection();
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
+                }
+
                 if (IsWeightPaintActive())
                 {
                     if (key.CtrlPressed && key.Keycode == Key.Z)
@@ -829,6 +874,7 @@ namespace DeadlockPlayground.UI
             _optGizmoTarget.AddItem("Weapon (R)", 1);
             _optGizmoTarget.AddItem("Weapon (L)", 2);
             _optGizmoTarget.AddItem("Model Root", 3);
+            _optGizmoTarget.AddItem("Kept Part (Hero)", 4);
             _optGizmoTarget.ItemSelected += OnGizmoTargetChanged;
             tbRow1.AddChild(_optGizmoTarget);
 
@@ -1204,7 +1250,11 @@ namespace DeadlockPlayground.UI
             _gizmoDummyTarget = new Node3D { Name = "GizmoDummyTarget" };
             _previewWorldRoot.AddChild(_gizmoDummyTarget);
 
-            _previewGizmo.TransformBegin += (_) => _isGizmoDragging = true;
+            _previewGizmo.TransformBegin += (_) =>
+            {
+                _isGizmoDragging = true;
+                _userModifiedTransform = true;
+            };
             _previewGizmo.TransformChanged += OnGizmoTransformChanged;
             _previewGizmo.TransformEnd += OnGizmoTransformEnd;
         }
@@ -1736,6 +1786,7 @@ namespace DeadlockPlayground.UI
             SetButtonIcon(_btnFlipYaw, "res://assets/at-icons/rotate.svg", 22);
             _btnFlipYaw.Pressed += () =>
             {
+                _userModifiedTransform = true;
                 double cur = _spinRotYaw.Value;
                 double next = (cur + 180.0) % 360.0;
                 if (next > 180.0) next -= 360.0;
@@ -1752,7 +1803,11 @@ namespace DeadlockPlayground.UI
                 CustomMinimumSize = new Vector2(130, 34)
             };
             SetButtonIcon(_btnSnapFeet, "res://assets/at-icons/arrow_down.svg", 22);
-            _btnSnapFeet.Pressed += SnapFeetToFloor;
+            _btnSnapFeet.Pressed += () =>
+            {
+                _userModifiedTransform = true;
+                SnapFeetToFloor();
+            };
             fitHBox.AddChild(_btnSnapFeet);
 
             _btnResetTransform = new Button
@@ -1762,7 +1817,11 @@ namespace DeadlockPlayground.UI
                 CustomMinimumSize = new Vector2(82, 34)
             };
             SetButtonIcon(_btnResetTransform, "res://assets/at-icons/arrow_counterclockwise.svg", 22);
-            _btnResetTransform.Pressed += ResetTransform;
+            _btnResetTransform.Pressed += () =>
+            {
+                _userModifiedTransform = true;
+                ResetTransform();
+            };
             fitHBox.AddChild(_btnResetTransform);
 
             tBody.AddChild(fitHBox);
@@ -1782,6 +1841,7 @@ namespace DeadlockPlayground.UI
             };
             _spinScale.ValueChanged += (v) =>
             {
+                _userModifiedTransform = true;
                 if (!Mathf.IsEqualApprox((float)_sliderScale.Value, (float)v))
                 {
                     _sliderScale.SetValueNoSignal(v);
@@ -1801,6 +1861,7 @@ namespace DeadlockPlayground.UI
             };
             _sliderScale.ValueChanged += (v) =>
             {
+                _userModifiedTransform = true;
                 if (!Mathf.IsEqualApprox((float)_spinScale.Value, (float)v))
                 {
                     _spinScale.SetValueNoSignal(v);
@@ -1825,9 +1886,9 @@ namespace DeadlockPlayground.UI
             _spinScaleX.TooltipText = "Non-uniform X width multiplier";
             _spinScaleY.TooltipText = "Non-uniform Y height multiplier";
             _spinScaleZ.TooltipText = "Non-uniform Z depth multiplier";
-            _spinScaleX.ValueChanged += (_) => ApplyScaleChangeKeepingCenter();
-            _spinScaleY.ValueChanged += (_) => ApplyScaleChangeKeepingCenter();
-            _spinScaleZ.ValueChanged += (_) => ApplyScaleChangeKeepingCenter();
+            _spinScaleX.ValueChanged += (_) => { _userModifiedTransform = true; ApplyScaleChangeKeepingCenter(); };
+            _spinScaleY.ValueChanged += (_) => { _userModifiedTransform = true; ApplyScaleChangeKeepingCenter(); };
+            _spinScaleZ.ValueChanged += (_) => { _userModifiedTransform = true; ApplyScaleChangeKeepingCenter(); };
             var btnResetXyz = new Button
             {
                 Text = "1:1",
@@ -1837,6 +1898,7 @@ namespace DeadlockPlayground.UI
             };
             btnResetXyz.Pressed += () =>
             {
+                _userModifiedTransform = true;
                 _spinScaleX.SetValueNoSignal(1.0);
                 _spinScaleY.SetValueNoSignal(1.0);
                 _spinScaleZ.SetValueNoSignal(1.0);
@@ -1864,9 +1926,9 @@ namespace DeadlockPlayground.UI
             posHBox.AddChild(_spinPosZ);
             tBody.AddChild(posHBox);
 
-            _spinPosX.ValueChanged += (_) => ApplyTransformToPreviewModel();
-            _spinPosY.ValueChanged += (_) => ApplyTransformToPreviewModel();
-            _spinPosZ.ValueChanged += (_) => ApplyTransformToPreviewModel();
+            _spinPosX.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
+            _spinPosY.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
+            _spinPosZ.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
 
             // Rotation (Pitch, Yaw, Roll degrees)
             var lblRot = new Label { Text = "Rotation (Pitch, Yaw, Roll degrees):" };
@@ -1884,9 +1946,9 @@ namespace DeadlockPlayground.UI
             rotHBox.AddChild(_spinRotRoll);
             tBody.AddChild(rotHBox);
 
-            _spinRotPitch.ValueChanged += (_) => ApplyTransformToPreviewModel();
-            _spinRotYaw.ValueChanged += (_) => ApplyTransformToPreviewModel();
-            _spinRotRoll.ValueChanged += (_) => ApplyTransformToPreviewModel();
+            _spinRotPitch.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
+            _spinRotYaw.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
+            _spinRotRoll.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
 
             // Card B: Legacy KNN Reference Pose Calibration (hidden unless KNN Fallback is selected)
             var (poseCard, poseBody) = CreateInspectorCard("Reference Pose Calibration (KNN Fallback)");
@@ -2068,6 +2130,103 @@ namespace DeadlockPlayground.UI
                 "Aligns neck and head to Deadlock hero cervical pivot with clamped tilt angle.",
                 true,
                 snapBody);
+
+            _chkAutoAlignHandOrientation = AddDescribedCheckBox(
+                "Auto-Align Palm & Grip Roll",
+                "Automatically aligns palm roll around the forearm axis to match hero weapon grip.",
+                "Aligns axial hand/forearm roll to hero palm orientation using finger bones or distal palm PCA.",
+                true,
+                snapBody);
+
+            _boxHandSnapTuning = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxHandSnapTuning.AddThemeConstantOverride("separation", 4);
+            snapBody.AddChild(_boxHandSnapTuning);
+
+            var handTuneHeader = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            var lblHandTuneTitle = new Label
+            {
+                Text = "Pre-Bind Hand & Grip Fine-Tune (Roll / Tilt / Size):",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            lblHandTuneTitle.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(lblHandTuneTitle);
+            handTuneHeader.AddChild(lblHandTuneTitle);
+
+            var btnResetHands = new Button
+            {
+                Text = "Reset Hands",
+                CustomMinimumSize = new Vector2(88, 22),
+                TooltipText = "Resets both Left and Right pre-bind hand rotation and scale offsets to 0° / 1.0x."
+            };
+            btnResetHands.Pressed += () =>
+            {
+                _isGizmoUpdatingFromUI = true;
+                _spinRightHandPitch.Value = 0.0;
+                _spinRightHandYaw.Value = 0.0;
+                _spinRightHandRoll.Value = 0.0;
+                _spinRightHandScale.Value = 1.0;
+                _spinLeftHandPitch.Value = 0.0;
+                _spinLeftHandYaw.Value = 0.0;
+                _spinLeftHandRoll.Value = 0.0;
+                _spinLeftHandScale.Value = 1.0;
+                _isGizmoUpdatingFromUI = false;
+                TriggerRealtimeRigUpdate();
+            };
+            handTuneHeader.AddChild(btnResetHands);
+            _boxHandSnapTuning.AddChild(handTuneHeader);
+
+            SpinBox MakeHandSpin(double min, double max, double step, double val, string prefix, string tip)
+            {
+                var sb = CreateCoordSpinBox(min, max, step, prefix);
+                sb.Value = val;
+                sb.CustomArrowStep = step < 0.1 ? 0.02 : 2.0;
+                sb.TooltipText = tip;
+                sb.ValueChanged += (_) =>
+                {
+                    if (!_isGizmoUpdatingFromUI) ScheduleDebouncedLiveRigUpdate();
+                };
+                return sb;
+            }
+
+            var lblRightHand = new Label { Text = "Right Hand (Primary Weapon Grip):" };
+            lblRightHand.AddThemeFontSizeOverride("font_size", 11);
+            _boxHandSnapTuning.AddChild(lblRightHand);
+
+            var rightHandGrid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            rightHandGrid.AddThemeConstantOverride("h_separation", 4);
+            rightHandGrid.AddThemeConstantOverride("v_separation", 4);
+            _spinRightHandPitch = MakeHandSpin(-90, 90, 0.5, 0, "Curl", "Wrist pitch / palm cup around knuckle axis (deg)");
+            _spinRightHandYaw = MakeHandSpin(-90, 90, 0.5, 0, "Tilt", "Wrist ulnar/radial side tilt (deg)");
+            _spinRightHandRoll = MakeHandSpin(-180, 180, 0.5, 0, "Roll", "Axial forearm twist / palm pronation roll (deg)");
+            _spinRightHandScale = MakeHandSpin(0.5, 1.8, 0.01, 1.0, "Size", "Right hand size around wrist pivot");
+            rightHandGrid.AddChild(_spinRightHandPitch);
+            rightHandGrid.AddChild(_spinRightHandYaw);
+            rightHandGrid.AddChild(_spinRightHandRoll);
+            rightHandGrid.AddChild(_spinRightHandScale);
+            _boxHandSnapTuning.AddChild(rightHandGrid);
+
+            var lblLeftHand = new Label { Text = "Left Hand:" };
+            lblLeftHand.AddThemeFontSizeOverride("font_size", 11);
+            _boxHandSnapTuning.AddChild(lblLeftHand);
+
+            var leftHandGrid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            leftHandGrid.AddThemeConstantOverride("h_separation", 4);
+            leftHandGrid.AddThemeConstantOverride("v_separation", 4);
+            _spinLeftHandPitch = MakeHandSpin(-90, 90, 0.5, 0, "Curl", "Wrist pitch / palm cup around knuckle axis (deg)");
+            _spinLeftHandYaw = MakeHandSpin(-90, 90, 0.5, 0, "Tilt", "Wrist ulnar/radial side tilt (deg)");
+            _spinLeftHandRoll = MakeHandSpin(-180, 180, 0.5, 0, "Roll", "Axial forearm twist / palm pronation roll (deg)");
+            _spinLeftHandScale = MakeHandSpin(0.5, 1.8, 0.01, 1.0, "Size", "Left hand size around wrist pivot");
+            leftHandGrid.AddChild(_spinLeftHandPitch);
+            leftHandGrid.AddChild(_spinLeftHandYaw);
+            leftHandGrid.AddChild(_spinLeftHandRoll);
+            leftHandGrid.AddChild(_spinLeftHandScale);
+            _boxHandSnapTuning.AddChild(leftHandGrid);
+
+            _chkAutoAlignArms.Toggled += (on) =>
+            {
+                if (_chkAutoAlignHandOrientation != null) _chkAutoAlignHandOrientation.Disabled = !on;
+                if (_boxHandSnapTuning != null) _boxHandSnapTuning.Visible = on;
+            };
 
             // Card D: Animation Deformation Guards
             var (guardCard, guardBody) = CreateInspectorCard("Animation Deformation Guards");
@@ -2521,7 +2680,8 @@ namespace DeadlockPlayground.UI
                     : "Adjusts reference hero pose for KNN transfer.";
             }
 
-            if (_cachedSourceSkeleton == null || _cachedSourceSkeleton.GetBoneCount() == 0)
+            var srcSkeleton = GetValidSourceSkeleton();
+            if (srcSkeleton == null || srcSkeleton.GetBoneCount() == 0)
             {
                 SetRigBadgeStatus(method switch
                 {
@@ -2629,7 +2789,7 @@ namespace DeadlockPlayground.UI
                         chk.SetPressedNoSignal(includeOutlines);
                     }
                 }
-                TriggerRealtimeRigUpdate();
+                OnImportedSubmeshesChanged();
             };
             vBox.AddChild(_chkIncludeBakedOutlines);
 
@@ -2657,6 +2817,96 @@ namespace DeadlockPlayground.UI
                 Visible = true
             };
             vBox.AddChild(_boxHeroSubmeshes);
+
+            vBox.AddChild(new HSeparator());
+
+            var (keptCard, keptBody) = CreateInspectorCard("Reposition Kept Hero Weapon / Part");
+            _boxKeptPartCard = keptCard;
+            keptCard.Visible = false;
+            vBox.AddChild(keptCard);
+
+            var lblKeptHint = new Label
+            {
+                Text = "Nudge or rotate a kept Deadlock weapon/part in rest pose while preserving 100% of its original bone weights and animations.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            lblKeptHint.AddThemeFontSizeOverride("font_size", 11);
+            _secondaryLabels.Add(lblKeptHint);
+            keptBody.AddChild(lblKeptHint);
+
+            var keptTargetRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            keptTargetRow.AddThemeConstantOverride("separation", 6);
+            _optKeptPartTarget = new OptionButton
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(140, 28)
+            };
+            ConfigureOptionButton(_optKeptPartTarget);
+            _optKeptPartTarget.ItemSelected += (_) =>
+            {
+                SyncKeptPartSpinboxesFromSelected();
+                int gTgt = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
+                if (gTgt == 4) UpdateGizmoTargetTransform();
+            };
+            keptTargetRow.AddChild(_optKeptPartTarget);
+
+            _btnKeptGizmoToggle = new Button
+            {
+                Text = "3D Gizmo",
+                CustomMinimumSize = new Vector2(82, 28),
+                TooltipText = "Selects this kept hero weapon/part in the 3D viewport gizmo so you can drag or rotate it directly."
+            };
+            _btnKeptGizmoToggle.Pressed += () =>
+            {
+                SelectGizmoTargetById(4);
+            };
+            keptTargetRow.AddChild(_btnKeptGizmoToggle);
+            keptBody.AddChild(keptTargetRow);
+
+            SpinBox MakeKeptSpin(double min, double max, double step, double val, string prefix, double arrowStep)
+            {
+                var sb = CreateCoordSpinBox(min, max, step, prefix);
+                sb.Value = val;
+                sb.CustomArrowStep = arrowStep;
+                sb.ValueChanged += (_) => OnKeptPartSpinboxChanged();
+                return sb;
+            }
+
+            var keptPosGrid = new GridContainer { Columns = 3, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            keptPosGrid.AddThemeConstantOverride("h_separation", 4);
+            _spinKeptPosX = MakeKeptSpin(-2.0, 2.0, 0.001, 0.0, "X", 0.005);
+            _spinKeptPosY = MakeKeptSpin(-2.0, 2.0, 0.001, 0.0, "Y", 0.005);
+            _spinKeptPosZ = MakeKeptSpin(-2.0, 2.0, 0.001, 0.0, "Z", 0.005);
+            keptPosGrid.AddChild(_spinKeptPosX);
+            keptPosGrid.AddChild(_spinKeptPosY);
+            keptPosGrid.AddChild(_spinKeptPosZ);
+            keptBody.AddChild(keptPosGrid);
+
+            var keptRotGrid = new GridContainer { Columns = 3, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            keptRotGrid.AddThemeConstantOverride("h_separation", 4);
+            _spinKeptRotPitch = MakeKeptSpin(-180.0, 180.0, 0.1, 0.0, "Pitch", 1.0);
+            _spinKeptRotYaw = MakeKeptSpin(-180.0, 180.0, 0.1, 0.0, "Yaw", 1.0);
+            _spinKeptRotRoll = MakeKeptSpin(-180.0, 180.0, 0.1, 0.0, "Roll", 1.0);
+            keptRotGrid.AddChild(_spinKeptRotPitch);
+            keptRotGrid.AddChild(_spinKeptRotYaw);
+            keptRotGrid.AddChild(_spinKeptRotRoll);
+            keptBody.AddChild(keptRotGrid);
+
+            var keptScaleRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            keptScaleRow.AddThemeConstantOverride("separation", 6);
+            _spinKeptScale = MakeKeptSpin(0.1, 5.0, 0.01, 1.0, "Scale", 0.02);
+            keptScaleRow.AddChild(_spinKeptScale);
+
+            _btnKeptResetPart = new Button
+            {
+                Text = "Reset Part",
+                CustomMinimumSize = new Vector2(88, 28),
+                TooltipText = "Resets the selected kept hero weapon/part back to its original position, rotation, and scale."
+            };
+            _btnKeptResetPart.Pressed += OnResetSelectedKeptPartPressed;
+            keptScaleRow.AddChild(_btnKeptResetPart);
+            keptBody.AddChild(keptScaleRow);
 
             return scroll;
         }
@@ -2752,6 +3002,8 @@ namespace DeadlockPlayground.UI
 
             _previewModelInstance = (Node3D)_liveImportedScene.Duplicate();
             _previewModelRoot.AddChild(_previewModelInstance);
+            SyncPreviewModelMeshVisibility();
+            _cachedSourceSkeleton = CustomModelAutoRigger.FindSkeleton(_previewModelInstance);
 
             foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
             {
@@ -2778,8 +3030,27 @@ namespace DeadlockPlayground.UI
             // 6. Analyze rig status and bone mapper
             AnalyzeModelRigStatus();
 
+            _userModifiedTransform = false;
+            _userMovedLandmarkPins = false;
+            _selectedPins.Clear();
+            _keptPartTransforms.Clear();
+            _isGizmoUpdatingFromUI = true;
+            if (_chkAutoAlignHandOrientation != null) _chkAutoAlignHandOrientation.SetPressedNoSignal(true);
+            if (_spinRightHandPitch != null) _spinRightHandPitch.SetValueNoSignal(0.0);
+            if (_spinRightHandYaw != null) _spinRightHandYaw.SetValueNoSignal(0.0);
+            if (_spinRightHandRoll != null) _spinRightHandRoll.SetValueNoSignal(0.0);
+            if (_spinRightHandScale != null) _spinRightHandScale.SetValueNoSignal(1.0);
+            if (_spinLeftHandPitch != null) _spinLeftHandPitch.SetValueNoSignal(0.0);
+            if (_spinLeftHandYaw != null) _spinLeftHandYaw.SetValueNoSignal(0.0);
+            if (_spinLeftHandRoll != null) _spinLeftHandRoll.SetValueNoSignal(0.0);
+            if (_spinLeftHandScale != null) _spinLeftHandScale.SetValueNoSignal(1.0);
+            _isGizmoUpdatingFromUI = false;
+            SyncKeptPartSpinboxesFromSelected();
             if (initialOptions != null)
             {
+                _userModifiedTransform = true;
+                _userMovedLandmarkPins = initialOptions.LandmarkPins != null &&
+                                         initialOptions.LandmarkPins.Count >= CustomLandmarkWeightSolver.PinNames.Length;
                 RestoreRiggingOptions(initialOptions);
                 SetHeroGhostEnabled(_workflowIntent == ImportWorkflowIntent.AccessoryAddOrReplace ? false : _showGhost);
                 if (_workflowIntent == ImportWorkflowIntent.AccessoryAddOrReplace)
@@ -2829,7 +3100,8 @@ namespace DeadlockPlayground.UI
                     UpdatePreviewHeroKeepAndGhostMaterials();
 
                     // Default unrigged accessories to RigidSingleBone on "head" (user can switch to KNN skinning on Tab 2 for coats/capes)
-                    if (_cachedSourceSkeleton == null || _cachedSourceSkeleton.GetBoneCount() == 0)
+                    var accSrcSkeleton = GetValidSourceSkeleton();
+                    if (accSrcSkeleton == null || accSrcSkeleton.GetBoneCount() == 0)
                     {
                         for (int i = 0; i < _optRiggingMethod.ItemCount; i++)
                         {
@@ -2850,7 +3122,8 @@ namespace DeadlockPlayground.UI
                     return;
                 }
 
-                if (_cachedSourceSkeleton == null || _cachedSourceSkeleton.GetBoneCount() == 0)
+                var fullSrcSkeleton = GetValidSourceSkeleton();
+                if (fullSrcSkeleton == null || fullSrcSkeleton.GetBoneCount() == 0)
                 {
                     SetHeroGhostEnabled(false);
                     if (_rightTabs != null) _rightTabs.CurrentTab = 1;
@@ -3027,6 +3300,37 @@ namespace DeadlockPlayground.UI
             if (_chkAutoAlignArms != null) _chkAutoAlignArms.ButtonPressed = options.AutoSnapArmsToHero;
             if (_chkAutoAlignLegs != null) _chkAutoAlignLegs.ButtonPressed = options.AutoSnapLegsToHero;
             if (_chkAutoAlignHead != null) _chkAutoAlignHead.ButtonPressed = options.AutoSnapHeadToHero;
+            if (_chkAutoAlignHandOrientation != null)
+            {
+                _chkAutoAlignHandOrientation.SetPressedNoSignal(options.AutoAlignHandOrientation);
+                _chkAutoAlignHandOrientation.Disabled = !options.AutoSnapArmsToHero;
+            }
+            if (_boxHandSnapTuning != null) _boxHandSnapTuning.Visible = options.AutoSnapArmsToHero;
+            _isGizmoUpdatingFromUI = true;
+            if (_spinRightHandPitch != null) _spinRightHandPitch.SetValueNoSignal(options.RightHandSnapOffsetDeg.X);
+            if (_spinRightHandYaw != null) _spinRightHandYaw.SetValueNoSignal(options.RightHandSnapOffsetDeg.Y);
+            if (_spinRightHandRoll != null) _spinRightHandRoll.SetValueNoSignal(options.RightHandSnapOffsetDeg.Z);
+            if (_spinRightHandScale != null) _spinRightHandScale.SetValueNoSignal(options.RightHandSnapScale > 0.001f ? options.RightHandSnapScale : 1.0f);
+            if (_spinLeftHandPitch != null) _spinLeftHandPitch.SetValueNoSignal(options.LeftHandSnapOffsetDeg.X);
+            if (_spinLeftHandYaw != null) _spinLeftHandYaw.SetValueNoSignal(options.LeftHandSnapOffsetDeg.Y);
+            if (_spinLeftHandRoll != null) _spinLeftHandRoll.SetValueNoSignal(options.LeftHandSnapOffsetDeg.Z);
+            if (_spinLeftHandScale != null) _spinLeftHandScale.SetValueNoSignal(options.LeftHandSnapScale > 0.001f ? options.LeftHandSnapScale : 1.0f);
+            _isGizmoUpdatingFromUI = false;
+
+            _keptPartTransforms.Clear();
+            if (options.KeptOriginalPartTransforms != null)
+            {
+                foreach (var (k, xf) in options.KeptOriginalPartTransforms)
+                {
+                    if (string.IsNullOrWhiteSpace(k) || xf == null || xf.IsIdentity) continue;
+                    _keptPartTransforms[k] = new CustomModelAutoRigger.KeptHeroPartTransform
+                    {
+                        PositionOffset = xf.PositionOffset,
+                        RotationDeg = xf.RotationDeg,
+                        Scale = xf.Scale > 0.001f ? xf.Scale : 1.0f
+                    };
+                }
+            }
             if (_chkClampLimbStretching != null) _chkClampLimbStretching.ButtonPressed = options.ClampLimbStretching;
             if (_chkStabilizeNeckFloatingHead != null) _chkStabilizeNeckFloatingHead.ButtonPressed = options.StabilizeNeckFloatingHead;
             if (_chkAutoCounterTwistWeights != null) _chkAutoCounterTwistWeights.ButtonPressed = options.AutoCounterTwistWeights;
@@ -3101,9 +3405,11 @@ namespace DeadlockPlayground.UI
                     if (chk.HasMeta("SubmeshName"))
                     {
                         string sName = chk.GetMeta("SubmeshName").AsString();
-                        chk.ButtonPressed = options.IncludedImportedSubmeshNames.Contains(sName);
+                        chk.SetPressedNoSignal(options.IncludedImportedSubmeshNames.Contains(sName));
                     }
                 }
+                SyncPreviewModelMeshVisibility();
+                ComputeAccLocalBoundsCenter();
             }
             if (options.KeptOriginalSubmeshNames != null && options.KeptOriginalSubmeshNames.Count > 0)
             {
@@ -3219,6 +3525,8 @@ namespace DeadlockPlayground.UI
             }
             _isGizmoUpdatingFromUI = false;
 
+            RefreshKeptPartTargetList();
+            SyncKeptPartSpinboxesFromSelected();
             ApplyTransformToPreviewModel(immediate: true);
         }
 
@@ -3346,6 +3654,170 @@ namespace DeadlockPlayground.UI
                     mi.Visible = _showGhost;
                 }
             }
+            RefreshKeptPartTargetList();
+        }
+
+        private static Dictionary<string, CustomModelAutoRigger.KeptHeroPartTransform> CloneKeptPartTransforms(
+            Dictionary<string, CustomModelAutoRigger.KeptHeroPartTransform> src)
+        {
+            if (src == null || src.Count == 0) return null;
+            var copy = new Dictionary<string, CustomModelAutoRigger.KeptHeroPartTransform>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, xf) in src)
+            {
+                if (string.IsNullOrWhiteSpace(k) || xf == null || xf.IsIdentity) continue;
+                copy[k] = new CustomModelAutoRigger.KeptHeroPartTransform
+                {
+                    PositionOffset = xf.PositionOffset,
+                    RotationDeg = xf.RotationDeg,
+                    Scale = xf.Scale > 0.001f ? xf.Scale : 1.0f
+                };
+            }
+            return copy.Count > 0 ? copy : null;
+        }
+
+        private static bool IsWeaponLikeKeepLabel(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string l = text.ToLowerInvariant();
+            return l.Contains("sword") || l.Contains("gun") || l.Contains("weapon") ||
+                   l.Contains("rapier") || l.Contains("blade") || l.Contains("staff") ||
+                   l.Contains("bow") || l.Contains("rifle") || l.Contains("pistol") ||
+                   l.Contains("dagger") || l.Contains("shield") || l.Contains("hammer") ||
+                   l.Contains("spear") || l.Contains("scythe") || l.Contains("wand");
+        }
+
+        private void RefreshKeptPartTargetList()
+        {
+            if (_optKeptPartTarget == null || _boxKeptPartCard == null) return;
+
+            var checkedItems = new List<(string Key, string Label)>();
+            foreach (var chk in _heroKeepCheckboxes)
+            {
+                if (!GodotObject.IsInstanceValid(chk) || !chk.ButtonPressed || !chk.HasMeta("SubmeshName")) continue;
+                string key = chk.GetMeta("SubmeshName").AsString();
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    checkedItems.Add((key, chk.Text));
+                }
+            }
+
+            _boxKeptPartCard.Visible = checkedItems.Count > 0;
+            string prevKey = GetSelectedKeptPartKey();
+
+            // Skip rebuilding dropdown if exact same key list is already loaded
+            if (_optKeptPartTarget.ItemCount == checkedItems.Count)
+            {
+                bool same = true;
+                for (int i = 0; i < checkedItems.Count; i++)
+                {
+                    if (!string.Equals(_optKeptPartTarget.GetItemMetadata(i).AsString(), checkedItems[i].Key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        same = false;
+                        break;
+                    }
+                }
+                if (same)
+                {
+                    SyncKeptPartSpinboxesFromSelected();
+                    return;
+                }
+            }
+
+            _isSyncingKeptPartUi = true;
+            try
+            {
+                _optKeptPartTarget.Clear();
+                int selectedIdx = -1;
+                int firstWeaponIdx = -1;
+                for (int i = 0; i < checkedItems.Count; i++)
+                {
+                    var (key, label) = checkedItems[i];
+                    _optKeptPartTarget.AddItem(label, i);
+                    _optKeptPartTarget.SetItemMetadata(i, key);
+                    if (!string.IsNullOrEmpty(prevKey) && string.Equals(key, prevKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedIdx = i;
+                    }
+                    if (firstWeaponIdx < 0 && (IsWeaponLikeKeepLabel(label) || IsWeaponLikeKeepLabel(key)))
+                    {
+                        firstWeaponIdx = i;
+                    }
+                }
+                if (_optKeptPartTarget.ItemCount > 0)
+                {
+                    _optKeptPartTarget.Select(selectedIdx >= 0 ? selectedIdx : (firstWeaponIdx >= 0 ? firstWeaponIdx : 0));
+                }
+            }
+            finally
+            {
+                _isSyncingKeptPartUi = false;
+            }
+            SyncKeptPartSpinboxesFromSelected();
+        }
+
+        private string GetSelectedKeptPartKey()
+        {
+            if (_optKeptPartTarget == null || _optKeptPartTarget.Selected < 0) return "";
+            return _optKeptPartTarget.GetItemMetadata(_optKeptPartTarget.Selected).AsString() ?? "";
+        }
+
+        private void SyncKeptPartSpinboxesFromSelected()
+        {
+            if (_spinKeptPosX == null) return;
+            string key = GetSelectedKeptPartKey();
+            var xf = (!string.IsNullOrEmpty(key) && _keptPartTransforms.TryGetValue(key, out var found) && found != null)
+                ? found
+                : new CustomModelAutoRigger.KeptHeroPartTransform();
+
+            _isSyncingKeptPartUi = true;
+            try
+            {
+                _spinKeptPosX.SetValueNoSignal(Math.Round(xf.PositionOffset.X, 4));
+                _spinKeptPosY.SetValueNoSignal(Math.Round(xf.PositionOffset.Y, 4));
+                _spinKeptPosZ.SetValueNoSignal(Math.Round(xf.PositionOffset.Z, 4));
+                _spinKeptRotPitch.SetValueNoSignal(Math.Round(xf.RotationDeg.X, 2));
+                _spinKeptRotYaw.SetValueNoSignal(Math.Round(xf.RotationDeg.Y, 2));
+                _spinKeptRotRoll.SetValueNoSignal(Math.Round(xf.RotationDeg.Z, 2));
+                _spinKeptScale.SetValueNoSignal(Math.Round(xf.Scale > 0.001f ? xf.Scale : 1.0f, 3));
+            }
+            finally
+            {
+                _isSyncingKeptPartUi = false;
+            }
+        }
+
+        private void OnKeptPartSpinboxChanged()
+        {
+            if (_isSyncingKeptPartUi) return;
+            string key = GetSelectedKeptPartKey();
+            if (string.IsNullOrEmpty(key)) return;
+
+            var xf = new CustomModelAutoRigger.KeptHeroPartTransform
+            {
+                PositionOffset = new Vector3((float)_spinKeptPosX.Value, (float)_spinKeptPosY.Value, (float)_spinKeptPosZ.Value),
+                RotationDeg = new Vector3((float)_spinKeptRotPitch.Value, (float)_spinKeptRotYaw.Value, (float)_spinKeptRotRoll.Value),
+                Scale = (float)_spinKeptScale.Value
+            };
+            if (xf.IsIdentity) _keptPartTransforms.Remove(key);
+            else _keptPartTransforms[key] = xf;
+
+            ApplyPreviewHeroDeformation();
+            int gTarget = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
+            if (gTarget == 4 && !_isGizmoDragging && !(_previewGizmo?.Editing ?? false))
+            {
+                UpdateGizmoTargetTransform();
+            }
+        }
+
+        private void OnResetSelectedKeptPartPressed()
+        {
+            string key = GetSelectedKeptPartKey();
+            if (string.IsNullOrEmpty(key)) return;
+            _keptPartTransforms.Remove(key);
+            SyncKeptPartSpinboxesFromSelected();
+            ApplyPreviewHeroDeformation();
+            int gTarget = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
+            if (gTarget == 4) UpdateGizmoTargetTransform();
         }
 
         private List<string> GetHeroSocketBoneNames()
@@ -3819,11 +4291,9 @@ namespace DeadlockPlayground.UI
                     TooltipText = $"{rawMeshName} ({vCount:N0} verts | {tCount:N0} tris)"
                 };
                 chk.SetMeta("SubmeshName", rawMeshName);
-                chk.Toggled += (v) =>
+                chk.Toggled += (_) =>
                 {
-                    if (!GodotObject.IsInstanceValid(mi)) return;
-                    mi.Visible = v;
-                    TriggerRealtimeRigUpdate();
+                    OnImportedSubmeshesChanged();
                 };
                 _importedSubmeshCheckboxes.Add(chk);
                 headerRow.AddChild(chk);
@@ -4447,6 +4917,26 @@ namespace DeadlockPlayground.UI
             return $"Source Bone: {rawName}\nParent: {parentName}";
         }
 
+        private Skeleton3D GetValidSourceSkeleton()
+        {
+            if (_cachedSourceSkeleton != null && GodotObject.IsInstanceValid(_cachedSourceSkeleton) && !_cachedSourceSkeleton.IsQueuedForDeletion())
+            {
+                return _cachedSourceSkeleton;
+            }
+
+            Skeleton3D found = null;
+            if (_previewModelInstance != null && GodotObject.IsInstanceValid(_previewModelInstance) && !_previewModelInstance.IsQueuedForDeletion())
+            {
+                found = CustomModelAutoRigger.FindSkeleton(_previewModelInstance);
+            }
+            if (found == null && _liveImportedScene != null && GodotObject.IsInstanceValid(_liveImportedScene))
+            {
+                found = CustomModelAutoRigger.FindSkeleton(_liveImportedScene);
+            }
+            _cachedSourceSkeleton = found;
+            return found;
+        }
+
         private void AnalyzeModelRigStatus()
         {
             var sourceSkeleton = CustomModelAutoRigger.FindSkeleton(_previewModelInstance);
@@ -4494,11 +4984,13 @@ namespace DeadlockPlayground.UI
 
                 // Cache source dropdown item entries once (clean glTF suffix de-emphasis + hierarchy tooltip)
                 int srcCount = sourceSkeleton.GetBoneCount();
+                var srcRawNames = new string[srcCount];
                 var srcDisplayLabels = new string[srcCount];
                 var srcTooltips = new string[srcCount];
                 for (int b = 0; b < srcCount; b++)
                 {
                     string raw = sourceSkeleton.GetBoneName(b);
+                    srcRawNames[b] = raw;
                     srcDisplayLabels[b] = FormatSourceBoneDisplayName(raw, sourceSkeleton.GetBoneParent(b), sourceSkeleton);
                     srcTooltips[b] = FormatSourceBoneTooltip(raw, sourceSkeleton);
                 }
@@ -4546,12 +5038,12 @@ namespace DeadlockPlayground.UI
                         CustomMinimumSize = new Vector2(0, 28)
                     };
                     ConfigureOptionButton(optBone);
-                    optBone.AddItem("[ None / Auto-Collapse ]", -1);
+                    optBone.AddItem("[ None / Auto-Collapse ]", 0);
 
                     PopupMenu popup = optBone.GetPopup();
                     for (int b = 0; b < srcCount; b++)
                     {
-                        optBone.AddItem(srcDisplayLabels[b], b);
+                        optBone.AddItem(srcDisplayLabels[b], b + 1);
                         if (popup != null)
                         {
                             popup.SetItemTooltip(b + 1, srcTooltips[b]);
@@ -4598,12 +5090,13 @@ namespace DeadlockPlayground.UI
                     optBone.ItemSelected += (long itemIdx) =>
                     {
                         if (_isUpdatingBoneDropdowns) return;
-                        long bIdx = optBone.GetItemId((int)itemIdx);
-                        if (bIdx >= 0 && bIdx < sourceSkeleton.GetBoneCount())
+                        long rawId = optBone.GetItemId((int)itemIdx);
+                        int bIdx = (int)rawId - 1;
+                        if (bIdx >= 0 && bIdx < srcRawNames.Length)
                         {
-                            string rawBone = sourceSkeleton.GetBoneName((int)bIdx);
+                            string rawBone = srcRawNames[bIdx];
                             _userBoneRemap[entry.CanonicalName] = rawBone;
-                            optBone.TooltipText = FormatSourceBoneTooltip(rawBone, sourceSkeleton);
+                            optBone.TooltipText = srcTooltips[bIdx];
                         }
                         else
                         {
@@ -4665,9 +5158,14 @@ namespace DeadlockPlayground.UI
                 return;
             }
             int matchedBoneIdx = sourceSkeleton.FindBone(sourceBoneName);
+            if (matchedBoneIdx < 0)
+            {
+                optBone.Select(0);
+                return;
+            }
             for (int item = 1; item < optBone.ItemCount; item++)
             {
-                if (optBone.GetItemId(item) == matchedBoneIdx)
+                if (optBone.GetItemId(item) == matchedBoneIdx + 1)
                 {
                     optBone.Select(item);
                     return;
@@ -4878,10 +5376,11 @@ namespace DeadlockPlayground.UI
 
         private void OnAutoMapBonesPressed()
         {
-            if (_cachedSourceSkeleton == null || !GodotObject.IsInstanceValid(_cachedSourceSkeleton)) return;
+            var srcSkel = GetValidSourceSkeleton();
+            if (srcSkel == null) return;
 
             var autoMap = _previewHeroSkeleton != null
-                ? HumanoidBoneMapper.AutoMap(_cachedSourceSkeleton, _previewHeroSkeleton)
+                ? HumanoidBoneMapper.AutoMap(srcSkel, _previewHeroSkeleton)
                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             _isUpdatingBoneDropdowns = true;
@@ -4898,15 +5397,15 @@ namespace DeadlockPlayground.UI
                     else
                     {
                         var def = HumanoidBoneMapper.Definitions.FirstOrDefault(d => d.CanonicalName == entry.CanonicalName);
-                        if (def != null) matched = HumanoidBoneMapper.ResolveSourceBone(_cachedSourceSkeleton, def);
+                        if (def != null) matched = HumanoidBoneMapper.ResolveSourceBone(srcSkel, def);
                     }
                     matched ??= "";
                     _autoMappedSnapshot[entry.CanonicalName] = matched;
-                    SelectBoneDropdownBySourceName(entry.BoneDropdown, _cachedSourceSkeleton, matched);
+                    SelectBoneDropdownBySourceName(entry.BoneDropdown, srcSkel, matched);
                     if (!string.IsNullOrEmpty(matched))
                     {
                         _userBoneRemap[entry.CanonicalName] = matched;
-                        entry.BoneDropdown.TooltipText = FormatSourceBoneTooltip(matched, _cachedSourceSkeleton);
+                        entry.BoneDropdown.TooltipText = FormatSourceBoneTooltip(matched, srcSkel);
                     }
                     else
                     {
@@ -4968,7 +5467,8 @@ namespace DeadlockPlayground.UI
 
         private void OnMirrorBonesPressed()
         {
-            if (_cachedSourceSkeleton == null || !GodotObject.IsInstanceValid(_cachedSourceSkeleton)) return;
+            var srcSkel = GetValidSourceSkeleton();
+            if (srcSkel == null) return;
 
             int mirroredCount = 0;
             _isUpdatingBoneDropdowns = true;
@@ -4985,23 +5485,23 @@ namespace DeadlockPlayground.UI
 
                     if (!string.IsNullOrEmpty(leftSrc))
                     {
-                        string mirroredR = TryFindMirroredSourceBone(_cachedSourceSkeleton, leftSrc, leftToRight: true);
+                        string mirroredR = TryFindMirroredSourceBone(srcSkel, leftSrc, leftToRight: true);
                         if (!string.IsNullOrEmpty(mirroredR))
                         {
                             _userBoneRemap[rightCanonical] = mirroredR;
-                            SelectBoneDropdownBySourceName(rightEntry.BoneDropdown, _cachedSourceSkeleton, mirroredR);
-                            rightEntry.BoneDropdown.TooltipText = FormatSourceBoneTooltip(mirroredR, _cachedSourceSkeleton);
+                            SelectBoneDropdownBySourceName(rightEntry.BoneDropdown, srcSkel, mirroredR);
+                            rightEntry.BoneDropdown.TooltipText = FormatSourceBoneTooltip(mirroredR, srcSkel);
                             mirroredCount++;
                         }
                     }
                     else if (!string.IsNullOrEmpty(rightSrc))
                     {
-                        string mirroredL = TryFindMirroredSourceBone(_cachedSourceSkeleton, rightSrc, leftToRight: false);
+                        string mirroredL = TryFindMirroredSourceBone(srcSkel, rightSrc, leftToRight: false);
                         if (!string.IsNullOrEmpty(mirroredL))
                         {
                             _userBoneRemap[entry.CanonicalName] = mirroredL;
-                            SelectBoneDropdownBySourceName(entry.BoneDropdown, _cachedSourceSkeleton, mirroredL);
-                            entry.BoneDropdown.TooltipText = FormatSourceBoneTooltip(mirroredL, _cachedSourceSkeleton);
+                            SelectBoneDropdownBySourceName(entry.BoneDropdown, srcSkel, mirroredL);
+                            entry.BoneDropdown.TooltipText = FormatSourceBoneTooltip(mirroredL, srcSkel);
                             mirroredCount++;
                         }
                     }
@@ -5020,7 +5520,8 @@ namespace DeadlockPlayground.UI
 
         private void OnClearUnmatchedBonesPressed()
         {
-            if (_cachedSourceSkeleton == null || !GodotObject.IsInstanceValid(_cachedSourceSkeleton)) return;
+            var srcSkel = GetValidSourceSkeleton();
+            if (srcSkel == null) return;
 
             int clearedCount = 0;
             var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -5035,7 +5536,7 @@ namespace DeadlockPlayground.UI
                         continue;
                     }
 
-                    bool existsInSource = _cachedSourceSkeleton.FindBone(mapped) >= 0;
+                    bool existsInSource = srcSkel.FindBone(mapped) >= 0;
                     _autoMappedSnapshot.TryGetValue(entry.CanonicalName, out string autoExpected);
                     bool matchesAuto = !string.IsNullOrEmpty(autoExpected) && string.Equals(autoExpected, mapped, StringComparison.OrdinalIgnoreCase);
                     bool isDuplicate = !seenSources.Add(mapped);
@@ -5043,7 +5544,7 @@ namespace DeadlockPlayground.UI
                     if (!existsInSource || isDuplicate || (!matchesAuto && string.IsNullOrEmpty(autoExpected)))
                     {
                         _userBoneRemap.Remove(entry.CanonicalName);
-                        SelectBoneDropdownBySourceName(entry.BoneDropdown, _cachedSourceSkeleton, "");
+                        SelectBoneDropdownBySourceName(entry.BoneDropdown, srcSkel, "");
                         entry.BoneDropdown.TooltipText = "Unmapped (auto-collapses to parent bone)";
                         clearedCount++;
                     }
@@ -5072,11 +5573,70 @@ namespace DeadlockPlayground.UI
         {
             _accLocalBoundsCenter = Vector3.Zero;
             if (_liveImportedScene == null) return;
-            var (minV, maxV, ok) = CustomModelAutoRigger.ComputePristineModelBounds(_liveImportedScene);
+            var (minV, maxV, ok) = CustomModelAutoRigger.ComputePristineModelBounds(
+                _liveImportedScene, GetActiveImportedSubmeshFilter());
             if (ok)
             {
                 _accLocalBoundsCenter = (minV + maxV) * 0.5f;
             }
+        }
+
+        private HashSet<string> GetActiveImportedSubmeshFilter()
+        {
+            if (_importedSubmeshCheckboxes.Count == 0) return null;
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var chk in _importedSubmeshCheckboxes)
+            {
+                if (!GodotObject.IsInstanceValid(chk) || !chk.ButtonPressed) continue;
+                string name = chk.HasMeta("SubmeshName") ? chk.GetMeta("SubmeshName").AsString() : chk.Text;
+                if (!string.IsNullOrEmpty(name)) set.Add(name);
+            }
+            return set;
+        }
+
+        private List<MeshInstance3D> FilterActiveImportedMeshes(IEnumerable<MeshInstance3D> meshes)
+        {
+            var filter = GetActiveImportedSubmeshFilter();
+            if (filter == null) return meshes.ToList();
+            return meshes.Where(m => filter.Contains(m.Name.ToString())).ToList();
+        }
+
+        private void SyncPreviewModelMeshVisibility()
+        {
+            if (_previewModelInstance == null || !GodotObject.IsInstanceValid(_previewModelInstance)) return;
+            var filter = GetActiveImportedSubmeshFilter();
+            foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
+            {
+                mi.Visible = filter == null || filter.Contains(mi.Name.ToString());
+            }
+        }
+
+        private void OnImportedSubmeshesChanged()
+        {
+            SyncPreviewModelMeshVisibility();
+            ComputeAccLocalBoundsCenter();
+
+            var filter = GetActiveImportedSubmeshFilter();
+            bool hasAnyActive = filter == null || filter.Count > 0;
+            if (hasAnyActive && _liveImportedScene != null && GodotObject.IsInstanceValid(_liveImportedScene))
+            {
+                EnsureLandmarkPins(force: true);
+                UpdateActivePinBadge();
+                RefreshPinVisuals();
+            }
+
+            if (hasAnyActive && _workflowIntent == ImportWorkflowIntent.FullCharacter && !_userModifiedTransform)
+            {
+                AutoFitToHero();
+                return;
+            }
+
+            if (hasAnyActive && GetValidSourceSkeleton() == null)
+            {
+                AutoCalibratePoseFromMesh(triggerRigUpdate: false);
+            }
+
+            TriggerRealtimeRigUpdate();
         }
 
         private string GetSelectedAccBoneName()
@@ -5437,8 +5997,9 @@ namespace DeadlockPlayground.UI
             // Ensure reference hero clone is in bind pose
             _previewHeroSkeleton?.ResetBonePoses();
 
+            var activeFilter = GetActiveImportedSubmeshFilter();
             var (heroMin, heroMax, heroOk) = CustomModelAutoRigger.ComputeAuthenticHeroBounds(_previewHeroClone);
-            var (modelMin, modelMax, modelOk) = CustomModelAutoRigger.ComputePristineModelBounds(_previewModelInstance);
+            var (modelMin, modelMax, modelOk) = CustomModelAutoRigger.ComputePristineModelBounds(_previewModelInstance, activeFilter);
 
             float heroHeight = heroOk ? (heroMax.Y - Math.Max(0.0f, heroMin.Y)) : 2.45f;
             float modelHeight = modelOk ? (modelMax.Y - modelMin.Y) : 1.0f;
@@ -5490,7 +6051,7 @@ namespace DeadlockPlayground.UI
             UpdateCamera();
 
             SetBottomStatus($"Auto-Fit applied: Scale={scale:F3}x | Pos=({posX:F2}, {posY:F2}, {posZ:F2}) | Yaw=180°", StatusTone.Success);
-            if (_cachedSourceSkeleton == null)
+            if (GetValidSourceSkeleton() == null)
             {
                 AutoCalibratePoseFromMesh(triggerRigUpdate: false);
             }
@@ -5500,7 +6061,7 @@ namespace DeadlockPlayground.UI
         {
             if (_previewModelInstance == null || _previewHeroClone == null) return;
             var (heroMin, _, _) = CustomModelAutoRigger.ComputeAuthenticHeroBounds(_previewHeroClone);
-            var (modelMin, _, _) = CustomModelAutoRigger.ComputePristineModelBounds(_previewModelInstance);
+            var (modelMin, _, _) = CustomModelAutoRigger.ComputePristineModelBounds(_previewModelInstance, GetActiveImportedSubmeshFilter());
 
             float scale = (float)_spinScale.Value;
             float posY = 0.0f - (modelMin.Y * scale);
@@ -5661,6 +6222,9 @@ namespace DeadlockPlayground.UI
         private string _draggingPin;
         private string _selectedPin;
         private string _hoveredPin;
+        private readonly HashSet<string> _selectedPins = new(StringComparer.Ordinal);
+        private Button _btnSelectAllPins;
+        private bool _userMovedLandmarkPins = false;
 
         // Interactive Bone Weight Paint state
         private Control _boxWeightPaintSection;
@@ -5771,13 +6335,93 @@ namespace DeadlockPlayground.UI
             };
         }
 
+        private bool AreAllPinsSelected() => _selectedPins.Count >= CustomLandmarkWeightSolver.PinNames.Length;
+
+        private void UpdateSelectAllPinsButtonText()
+        {
+            if (_btnSelectAllPins == null) return;
+            bool all = AreAllPinsSelected();
+            _btnSelectAllPins.SetPressedNoSignal(all);
+            _btnSelectAllPins.Text = all ? "Deselect All (16)" : "Select All Bones";
+        }
+
+        private void SelectAllPins()
+        {
+            _selectedPins.Clear();
+            foreach (string pin in CustomLandmarkWeightSolver.PinNames)
+            {
+                _selectedPins.Add(pin);
+            }
+            if (string.IsNullOrEmpty(_selectedPin))
+            {
+                _selectedPin = "Pelvis";
+            }
+            UpdateSelectAllPinsButtonText();
+            UpdateActivePinBadge();
+            RefreshPinVisuals();
+        }
+
+        private void ClearPinSelection()
+        {
+            _selectedPins.Clear();
+            _selectedPin = null;
+            UpdateSelectAllPinsButtonText();
+            UpdateActivePinBadge();
+            RefreshPinVisuals();
+        }
+
+        private void ToggleSelectAllPins()
+        {
+            if (AreAllPinsSelected()) ClearPinSelection();
+            else SelectAllPins();
+        }
+
+        private void TogglePinInSelection(string pinName, bool includeMirror)
+        {
+            if (string.IsNullOrEmpty(pinName)) return;
+            if (_selectedPins.Count == 0 && !string.IsNullOrEmpty(_selectedPin) && _selectedPin != pinName)
+            {
+                _selectedPins.Add(_selectedPin);
+            }
+
+            bool add = !_selectedPins.Contains(pinName);
+            if (add) _selectedPins.Add(pinName);
+            else _selectedPins.Remove(pinName);
+
+            if (includeMirror)
+            {
+                string mir = CustomLandmarkWeightSolver.MirrorName(pinName);
+                if (!string.IsNullOrEmpty(mir))
+                {
+                    if (add) _selectedPins.Add(mir);
+                    else _selectedPins.Remove(mir);
+                }
+            }
+
+            _selectedPin = add ? pinName : _selectedPins.FirstOrDefault();
+            UpdateSelectAllPinsButtonText();
+            UpdateActivePinBadge();
+            RefreshPinVisuals();
+        }
+
         private void UpdateActivePinBadge()
         {
+            UpdateSelectAllPinsButtonText();
             if (_lblActivePinBadge == null) return;
+            if (AreAllPinsSelected())
+            {
+                _lblActivePinBadge.Text = "Editing: ALL 16 Joint Pins (drag any pin to move all together)";
+                return;
+            }
+            if (_selectedPins.Count > 1)
+            {
+                _lblActivePinBadge.Text = $"Editing: {_selectedPins.Count} Joint Pins selected (drag any to move together, Shift+Click to add/remove)";
+                return;
+            }
             string active = _draggingPin ?? _hoveredPin ?? _selectedPin;
             if (string.IsNullOrEmpty(active))
             {
-                _lblActivePinBadge.Text = "Active Pin: None (hover or drag a pin in the 3D viewport)";
+                _lblActivePinBadge.Text = "Active Pin: None (drag a pin, or Shift+Click to multi-select)";
                 return;
             }
             string mirror = CustomLandmarkWeightSolver.MirrorName(active);
@@ -5798,7 +6442,7 @@ namespace DeadlockPlayground.UI
         {
             var (card, box) = CreateInspectorCard(
                 "Step 1: Place Joint Pins (16 Joints)",
-                "Drag the colored pins in the 3D viewport onto your model's joints (orbit camera for depth). Switch to Step 2 or Tab 1/3 to inspect the applied rig.");
+                "Drag pins in 3D onto your model's joints. Shift+Click toggles multiple pins (Shift+Double-Click or Ctrl+A selects all 16). Switch to Step 2 or Tab 1/3 to inspect.");
             card.Visible = false;
 
             var badgePanel = new PanelContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, ThemeTypeVariation = "SubPanelContainer" };
@@ -5809,7 +6453,7 @@ namespace DeadlockPlayground.UI
             badgePad.AddThemeConstantOverride("margin_bottom", 6);
             _lblActivePinBadge = new Label
             {
-                Text = "Active Pin: None (hover or drag a pin in the 3D viewport)",
+                Text = "Active Pin: None (drag a pin, or Shift+Click to multi-select)",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
             _lblActivePinBadge.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.AccentPrimary)));
@@ -5827,23 +6471,45 @@ namespace DeadlockPlayground.UI
 
             var ghostHint = new Label
             {
-                Text = "Tip: Toggle Hero Ghost on the viewport toolbar when comparing silhouettes.",
+                Text = "Tip: Use 'Select All Bones' (or Shift+Click / Ctrl+A) to shift multiple pins at once; toggle Hero Ghost to compare silhouettes.",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
             ghostHint.AddThemeFontSizeOverride("font_size", 11);
             _secondaryLabels.Add(ghostHint);
             box.AddChild(ghostHint);
 
-            var btn = new Button { Text = "Auto-Place Pins (Reset)", TooltipText = "Re-estimates all 16 joints from your mesh geometry." };
+            var btnRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            btnRow.AddThemeConstantOverride("separation", 6);
+
+            _btnSelectAllPins = new Button
+            {
+                Text = "Select All Bones",
+                ToggleMode = true,
+                ThemeTypeVariation = "ToolbarButton",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Selects all 16 joint pins so dragging any pin moves the whole auto-rig skeleton together (Shortcut: Ctrl+A or Shift+Double-Click)."
+            };
+            SetButtonIcon(_btnSelectAllPins, "res://assets/at-icons/bone.svg", 16);
+            _btnSelectAllPins.Pressed += ToggleSelectAllPins;
+            btnRow.AddChild(_btnSelectAllPins);
+
+            var btn = new Button
+            {
+                Text = "Auto-Place Pins (Reset)",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Re-estimates all 16 joints from your enabled mesh geometry."
+            };
             btn.Pressed += () =>
             {
                 _selectedPin = null; _hoveredPin = null; _draggingPin = null;
+                _selectedPins.Clear();
                 EnsureLandmarkPins(true);
                 UpdateActivePinBadge();
                 RefreshPinVisuals();
                 TriggerRealtimeRigUpdate();
             };
-            box.AddChild(btn);
+            btnRow.AddChild(btn);
+            box.AddChild(btnRow);
             return card;
         }
 
@@ -6100,11 +6766,14 @@ namespace DeadlockPlayground.UI
         {
             if (!force && _landmarkPins.Count >= CustomLandmarkWeightSolver.PinNames.Length) return;
             if (_liveImportedScene == null || !GodotObject.IsInstanceValid(_liveImportedScene)) return;
-            var selected = new HashSet<string>(GetSelectedImportedSubmeshNames(), StringComparer.OrdinalIgnoreCase);
-            var meshes = CustomModelAutoRigger.CollectMeshes(_liveImportedScene)
-                .Where(m => selected.Count == 0 || selected.Contains(m.Name.ToString())).ToList();
+            var meshes = FilterActiveImportedMeshes(CustomModelAutoRigger.CollectMeshes(_liveImportedScene));
+            if (meshes.Count == 0) return;
             var est = CustomLandmarkWeightSolver.EstimateLandmarks(_liveImportedScene, meshes);
-            if (est.Count > 0) _landmarkPins = est;
+            if (est.Count > 0)
+            {
+                _landmarkPins = est;
+                if (force) _userMovedLandmarkPins = false;
+            }
         }
 
         private Color PinColor(string name)
@@ -6152,10 +6821,17 @@ namespace DeadlockPlayground.UI
                     _previewWorldRoot.AddChild(sphere);
                     _pinSpheres[name] = sphere;
                 }
-                bool isLit = name == active || (mirrorActive != null && name == mirrorActive);
-                float s = isLit ? 1.55f : 1f;
+                bool inMulti = _selectedPins.Contains(name);
+                bool isLit = inMulti || name == active || (mirrorActive != null && name == mirrorActive);
+                float s = (name == active || (mirrorActive != null && name == mirrorActive))
+                    ? 1.55f
+                    : (inMulti ? 1.40f : 1f);
                 sphere.Scale = new Vector3(s, s, s);
                 sphere.Position = xf * _landmarkPins[name];
+                if (sphere.Mesh is SphereMesh sm && sm.Material is StandardMaterial3D sphereMat)
+                {
+                    sphereMat.AlbedoColor = inMulti ? PinColor(name).Lerp(Colors.White, 0.45f) : PinColor(name);
+                }
                 sphere.Visible = true;
             }
 
@@ -6210,11 +6886,31 @@ namespace DeadlockPlayground.UI
 
             if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
             {
-                if (mb.Pressed && !mb.ShiftPressed)
+                if (mb.Pressed)
                 {
                     string best = PickPinUnderCursor(mb.Position);
                     if (best != null)
                     {
+                        if (mb.ShiftPressed)
+                        {
+                            if (mb.DoubleClick)
+                            {
+                                SelectAllPins();
+                            }
+                            else
+                            {
+                                TogglePinInSelection(best, _chkMirrorPins?.ButtonPressed ?? true);
+                            }
+                            _isOrbiting = false; _isPanning = false;
+                            GetViewport().SetInputAsHandled();
+                            return true;
+                        }
+
+                        if (!_selectedPins.Contains(best))
+                        {
+                            _selectedPins.Clear();
+                            _selectedPins.Add(best);
+                        }
                         _draggingPin = best;
                         _selectedPin = best;
                         _hoveredPin = best;
@@ -6239,7 +6935,8 @@ namespace DeadlockPlayground.UI
                 if (_draggingPin != null)
                 {
                     Transform3D xf = BuildCurrentAlignedTransform();
-                    Vector3 worldPin = xf * _landmarkPins[_draggingPin];
+                    Vector3 oldLocal = _landmarkPins[_draggingPin];
+                    Vector3 worldPin = xf * oldLocal;
                     Vector3 origin = _previewCamera.ProjectRayOrigin(mm.Position);
                     Vector3 dir = _previewCamera.ProjectRayNormal(mm.Position);
                     Vector3 normal = -_previewCamera.GlobalTransform.Basis.Z;
@@ -6249,13 +6946,41 @@ namespace DeadlockPlayground.UI
                         float t = (worldPin - origin).Dot(normal) / denom;
                         Vector3 hit = origin + dir * t;
                         Vector3 local = xf.AffineInverse() * hit;
-                        _landmarkPins[_draggingPin] = local;
+                        Vector3 delta = local - oldLocal;
+                        _userMovedLandmarkPins = true;
 
-                        string mirror = CustomLandmarkWeightSolver.MirrorName(_draggingPin);
-                        if (mirror != null && (_chkMirrorPins?.ButtonPressed ?? true))
+                        if (_selectedPins.Count > 1 && _selectedPins.Contains(_draggingPin))
                         {
                             float cx = _landmarkPins["Pelvis"].X;
-                            _landmarkPins[mirror] = new Vector3(2f * cx - local.X, local.Y, local.Z);
+                            foreach (string p in _selectedPins)
+                            {
+                                if (_landmarkPins.TryGetValue(p, out Vector3 cur))
+                                {
+                                    _landmarkPins[p] = cur + delta;
+                                }
+                            }
+                            if (_chkMirrorPins?.ButtonPressed ?? true)
+                            {
+                                foreach (string p in _selectedPins)
+                                {
+                                    string mir = CustomLandmarkWeightSolver.MirrorName(p);
+                                    if (mir != null && !_selectedPins.Contains(mir) && _landmarkPins.TryGetValue(p, out Vector3 moved))
+                                    {
+                                        _landmarkPins[mir] = new Vector3(2f * cx - moved.X, moved.Y, moved.Z);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            _landmarkPins[_draggingPin] = local;
+
+                            string mirror = CustomLandmarkWeightSolver.MirrorName(_draggingPin);
+                            if (mirror != null && (_chkMirrorPins?.ButtonPressed ?? true))
+                            {
+                                float cx = _landmarkPins["Pelvis"].X;
+                                _landmarkPins[mirror] = new Vector3(2f * cx - local.X, local.Y, local.Z);
+                            }
                         }
                         UpdateActivePinBadge();
                         RefreshPinVisuals();
@@ -6811,12 +7536,7 @@ namespace DeadlockPlayground.UI
                 {
                     if (riggedValid) _previewRiggedContainer.Visible = false;
                     _previewModelRoot.Transform = BuildCurrentAlignedTransform();
-                    if (_previewModelInstance != null && GodotObject.IsInstanceValid(_previewModelInstance))
-                    {
-                        var selected = new HashSet<string>(GetSelectedImportedSubmeshNames(), StringComparer.OrdinalIgnoreCase);
-                        foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
-                            mi.Visible = selected.Count == 0 || selected.Contains(mi.Name.ToString());
-                    }
+                    SyncPreviewModelMeshVisibility();
                     _previewModelRoot.Visible = true;
                 }
                 else if (riggedValid)
@@ -6849,14 +7569,7 @@ namespace DeadlockPlayground.UI
                     _previewRiggedContainer.Visible = false;
                 }
                 _previewModelRoot.Transform = BuildCurrentAlignedTransform();
-                if (_previewModelInstance != null && GodotObject.IsInstanceValid(_previewModelInstance))
-                {
-                    var selected = new HashSet<string>(GetSelectedImportedSubmeshNames(), StringComparer.OrdinalIgnoreCase);
-                    foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
-                    {
-                        mi.Visible = selected.Count == 0 || selected.Contains(mi.Name.ToString());
-                    }
-                }
+                SyncPreviewModelMeshVisibility();
                 _previewModelRoot.Visible = true;
             }
 
@@ -7123,6 +7836,18 @@ namespace DeadlockPlayground.UI
                 AutoSnapArmsToHero = _chkAutoAlignArms?.ButtonPressed ?? true,
                 AutoSnapLegsToHero = _chkAutoAlignLegs?.ButtonPressed ?? true,
                 AutoSnapHeadToHero = _chkAutoAlignHead?.ButtonPressed ?? true,
+                AutoAlignHandOrientation = _chkAutoAlignHandOrientation?.ButtonPressed ?? true,
+                LeftHandSnapOffsetDeg = new Vector3(
+                    (float)(_spinLeftHandPitch?.Value ?? 0.0),
+                    (float)(_spinLeftHandYaw?.Value ?? 0.0),
+                    (float)(_spinLeftHandRoll?.Value ?? 0.0)),
+                RightHandSnapOffsetDeg = new Vector3(
+                    (float)(_spinRightHandPitch?.Value ?? 0.0),
+                    (float)(_spinRightHandYaw?.Value ?? 0.0),
+                    (float)(_spinRightHandRoll?.Value ?? 0.0)),
+                LeftHandSnapScale = (float)(_spinLeftHandScale?.Value ?? 1.0),
+                RightHandSnapScale = (float)(_spinRightHandScale?.Value ?? 1.0),
+                KeptOriginalPartTransforms = CloneKeptPartTransforms(_keptPartTransforms),
                 ClampLimbStretching = _chkClampLimbStretching?.ButtonPressed ?? true,
                 StabilizeNeckFloatingHead = _chkStabilizeNeckFloatingHead?.ButtonPressed ?? (_heroCodename == "chrono"),
                 AutoCounterTwistWeights = _chkAutoCounterTwistWeights?.ButtonPressed ?? true,
@@ -7251,6 +7976,8 @@ namespace DeadlockPlayground.UI
             }
             _previewModelInstance = (Node3D)_liveImportedScene.Duplicate();
             _previewModelRoot.AddChild(_previewModelInstance);
+            SyncPreviewModelMeshVisibility();
+            _cachedSourceSkeleton = CustomModelAutoRigger.FindSkeleton(_previewModelInstance);
 
             // Re-apply preview model root transform
             _previewModelRoot.Transform = BuildCurrentAlignedTransform();
@@ -7310,7 +8037,7 @@ namespace DeadlockPlayground.UI
         private void SyncGizmoSpaceButton()
         {
             int target = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
-            bool hasTarget = target == 1 || target == 2 || target == 3;
+            bool hasTarget = target == 1 || target == 2 || target == 3 || target == 4;
             bool useLocal = _btnGizmoLocalSpace?.ButtonPressed ?? false;
             if (_btnGizmoLocalSpace != null)
             {
@@ -7423,6 +8150,64 @@ namespace DeadlockPlayground.UI
                     Vector3 offRot = (wpMesh != null && _submeshSocketOffsetRot.TryGetValue(wpMesh, out var r)) ? r : Vector3.Zero;
                     _gizmoDummyTarget.Position = offPos;
                     _gizmoDummyTarget.RotationDegrees = offRot;
+                    _gizmoDummyTarget.RemoveMeta("KeptPartFallbackOrigin");
+                }
+            }
+            else if (target == 4) // Kept Hero Part / Weapon (Rest-Pose Override)
+            {
+                string keepKey = GetSelectedKeptPartKey();
+                if (string.IsNullOrEmpty(keepKey))
+                {
+                    _previewGizmo.Visible = false;
+                    if (_gizmoDummyTarget != null && GodotObject.IsInstanceValid(_gizmoDummyTarget))
+                        _previewGizmo.Deselect(_gizmoDummyTarget);
+                    _isGizmoUpdatingFromUI = false;
+                    return;
+                }
+
+                _previewGizmo.Mode = Gizmo3D.ToolMode.Rotate | Gizmo3D.ToolMode.Move;
+                var xf = _keptPartTransforms.TryGetValue(keepKey, out var existing) && existing != null
+                    ? existing
+                    : new CustomModelAutoRigger.KeptHeroPartTransform();
+
+                CustomModelAutoRigger.FindDominantBoneForHeroKeepKey(_previewHeroClone, keepKey, out string domBoneName, out Transform3D pivotRestHero);
+                int bIdx = !string.IsNullOrEmpty(domBoneName) ? _previewHeroSkeleton.FindBone(domBoneName) : -1;
+
+                if (_gizmoDummyTarget == null || !GodotObject.IsInstanceValid(_gizmoDummyTarget))
+                {
+                    _gizmoDummyTarget = new Node3D { Name = "GizmoDummyTarget" };
+                }
+
+                if (bIdx >= 0)
+                {
+                    string actualBoneName = _previewHeroSkeleton.GetBoneName(bIdx);
+                    if (_boneAttachment == null || !GodotObject.IsInstanceValid(_boneAttachment) || _boneAttachment.GetParent() != _previewHeroSkeleton)
+                    {
+                        if (_boneAttachment != null && GodotObject.IsInstanceValid(_boneAttachment))
+                            _boneAttachment.QueueFree();
+                        _boneAttachment = new BoneAttachment3D();
+                        _previewHeroSkeleton.AddChild(_boneAttachment);
+                    }
+                    _boneAttachment.BoneName = actualBoneName;
+                    if (_gizmoDummyTarget.GetParent() != _boneAttachment)
+                    {
+                        _gizmoDummyTarget.GetParent()?.RemoveChild(_gizmoDummyTarget);
+                        _boneAttachment.AddChild(_gizmoDummyTarget);
+                    }
+                    _gizmoDummyTarget.RemoveMeta("KeptPartFallbackOrigin");
+                    _gizmoDummyTarget.Position = xf.PositionOffset;
+                    _gizmoDummyTarget.RotationDegrees = xf.RotationDeg;
+                }
+                else if (_previewWorldRoot != null)
+                {
+                    if (_gizmoDummyTarget.GetParent() != _previewWorldRoot)
+                    {
+                        _gizmoDummyTarget.GetParent()?.RemoveChild(_gizmoDummyTarget);
+                        _previewWorldRoot.AddChild(_gizmoDummyTarget);
+                    }
+                    _gizmoDummyTarget.SetMeta("KeptPartFallbackOrigin", pivotRestHero.Origin);
+                    _gizmoDummyTarget.Position = pivotRestHero.Origin + xf.PositionOffset;
+                    _gizmoDummyTarget.RotationDegrees = xf.RotationDeg;
                 }
             }
             if (_gizmoDummyTarget != null && !_previewGizmo.IsSelected(_gizmoDummyTarget))
@@ -7450,6 +8235,7 @@ namespace DeadlockPlayground.UI
                     _optGizmoTarget.AddItem("Weapon (L)", 2);
                 }
                 _optGizmoTarget.AddItem("Model Root", 3);
+                _optGizmoTarget.AddItem("Kept Part (Hero)", 4);
 
                 int targetToSelect = (!isFullCharacter && (prevId == 1 || prevId == 2)) ? 3 : prevId;
                 SelectGizmoTargetById(targetToSelect);
@@ -7471,12 +8257,55 @@ namespace DeadlockPlayground.UI
                     ScheduleDebouncedLiveRigUpdate();
                 }
             }
+            else if (target == 4)
+            {
+                ApplyPreviewHeroDeformation();
+            }
         }
 
         private void OnGizmoTransformChanged(int mode, Vector3 value)
         {
             if (_isGizmoUpdatingFromUI || _previewGizmo == null || _gizmoDummyTarget == null) return;
             int target = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
+            if (target == 4)
+            {
+                string keepKey = GetSelectedKeptPartKey();
+                if (string.IsNullOrEmpty(keepKey)) return;
+
+                Vector3 pos = _gizmoDummyTarget.Position;
+                if (_gizmoDummyTarget.HasMeta("KeptPartFallbackOrigin"))
+                {
+                    pos -= _gizmoDummyTarget.GetMeta("KeptPartFallbackOrigin").AsVector3();
+                }
+                Vector3 rot = _gizmoDummyTarget.RotationDegrees;
+                float scale = (float)(_spinKeptScale?.Value ?? 1.0);
+
+                var xf = new CustomModelAutoRigger.KeptHeroPartTransform
+                {
+                    PositionOffset = pos,
+                    RotationDeg = rot,
+                    Scale = scale
+                };
+                if (xf.IsIdentity) _keptPartTransforms.Remove(keepKey);
+                else _keptPartTransforms[keepKey] = xf;
+
+                _isSyncingKeptPartUi = true;
+                try
+                {
+                    _spinKeptPosX?.SetValueNoSignal(Math.Round(pos.X, 4));
+                    _spinKeptPosY?.SetValueNoSignal(Math.Round(pos.Y, 4));
+                    _spinKeptPosZ?.SetValueNoSignal(Math.Round(pos.Z, 4));
+                    _spinKeptRotPitch?.SetValueNoSignal(Math.Round(rot.X, 2));
+                    _spinKeptRotYaw?.SetValueNoSignal(Math.Round(rot.Y, 2));
+                    _spinKeptRotRoll?.SetValueNoSignal(Math.Round(rot.Z, 2));
+                }
+                finally
+                {
+                    _isSyncingKeptPartUi = false;
+                }
+                ApplyPreviewHeroDeformation();
+                return;
+            }
             if (target == 3 && _previewModelRoot != null)
             {
                 Basis rotBasis = _gizmoDummyTarget.GlobalTransform.Basis.Orthonormalized();

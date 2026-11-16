@@ -130,6 +130,11 @@ namespace DeadlockPlayground.Animation
                     btn.AddThemeStyleboxOverride("focus", IconBtnHover);
                     btn.AddThemeStyleboxOverride("disabled", IconBtnDisabled);
                 }
+                else
+                {
+                    btn.AddThemeConstantOverride("icon_max_width", 16);
+                    btn.AddThemeConstantOverride("h_separation", 5);
+                }
             }
 
             if (!string.IsNullOrEmpty(tooltip))

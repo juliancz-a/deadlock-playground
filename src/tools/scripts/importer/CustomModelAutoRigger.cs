@@ -129,6 +129,32 @@ namespace DeadlockPlayground.Importer
             public Dictionary<string, Vector3> LandmarkPins { get; set; } = null;
             /// <summary>Optional user-painted per-surface weight overrides keyed by MakeSurfaceKeepKey(meshName, surfaceIdx).</summary>
             public Dictionary<string, SkinWeightOverride> CustomSkinWeightOverrides { get; set; } = null;
+
+            /// <summary>Auto-align axial forearm/palm roll during Auto-Snap Arms &amp; Wrists using palm/finger orientation.</summary>
+            public bool AutoAlignHandOrientation { get; set; } = true;
+            /// <summary>Manual left-hand rest-pose Euler offset (Pitch X, Yaw Y, Roll Z in degrees) around wrist pivot when Auto-Snap Arms is enabled.</summary>
+            public Vector3 LeftHandSnapOffsetDeg { get; set; } = Vector3.Zero;
+            /// <summary>Manual right-hand rest-pose Euler offset (Pitch X, Yaw Y, Roll Z in degrees) around wrist pivot when Auto-Snap Arms is enabled.</summary>
+            public Vector3 RightHandSnapOffsetDeg { get; set; } = Vector3.Zero;
+            /// <summary>Manual uniform scale around wrist pivot for left hand when Auto-Snap Arms is enabled.</summary>
+            public float LeftHandSnapScale { get; set; } = 1.0f;
+            /// <summary>Manual uniform scale around wrist pivot for right hand when Auto-Snap Arms is enabled.</summary>
+            public float RightHandSnapScale { get; set; } = 1.0f;
+            /// <summary>Optional rest-pose transforms for kept original hero parts/weapons, keyed by surface keep key (e.g. "_sword_model::surf::0").</summary>
+            public Dictionary<string, KeptHeroPartTransform> KeptOriginalPartTransforms { get; set; } = null;
+        }
+
+        /// <summary>Artist rest-pose offset applied to a kept original hero part/weapon (e.g. Fencer's sword) around its dominant bone pivot.</summary>
+        public sealed class KeptHeroPartTransform
+        {
+            public Vector3 PositionOffset { get; set; } = Vector3.Zero;
+            public Vector3 RotationDeg { get; set; } = Vector3.Zero;
+            public float Scale { get; set; } = 1.0f;
+
+            public bool IsIdentity =>
+                PositionOffset.LengthSquared() < 1e-8f &&
+                RotationDeg.LengthSquared() < 1e-6f &&
+                MathF.Abs(Scale - 1.0f) < 1e-4f;
         }
 
         public class FingerPhalanxSegment
@@ -200,6 +226,15 @@ namespace DeadlockPlayground.Importer
             public float SigmaLower { get; set; }
             public Quaternion RotationLower { get; set; }
 
+            /// <summary>Axial twist component (auto palm roll + manual Roll Z) around UnitTargetLower, blended smoothly across distal forearm.</summary>
+            public Quaternion RotationForearmTwistExtra { get; set; } = Quaternion.Identity;
+            /// <summary>Manual wrist bend (Pitch X / Yaw Y in target palm frame) applied at Ct for hand and fingers.</summary>
+            public Quaternion RotationHandBend { get; set; } = Quaternion.Identity;
+            /// <summary>Total hand orientation = (RotationHandBend * RotationForearmTwistExtra * RotationLower).</summary>
+            public Quaternion RotationHandTotal { get; set; } = Quaternion.Identity;
+            /// <summary>Uniform scale around wrist pivot Ct applied to hand + fingers.</summary>
+            public float HandScale { get; set; } = 1.0f;
+
             public bool AppliesTo(int targetBoneIdx, Skeleton3D targetSkeleton)
             {
                 if (targetBoneIdx == TargetUpperBone || targetBoneIdx == TargetLowerBone || targetBoneIdx == TargetHandBone)
@@ -234,13 +269,29 @@ namespace DeadlockPlayground.Importer
                 {
                     Vector3 d = vHero - Bs;
                     float proj = d.Dot(UnitSourceLower);
-                    Vector3 dScaled = UnitSourceLower * (proj * SigmaLower) + (d - UnitSourceLower * proj);
+                    Vector3 perp = d - UnitSourceLower * proj;
+                    float tArm = LengthSourceLower > 1e-4f ? Mathf.Clamp(proj / LengthSourceLower, 0f, 1f) : 0f;
+                    float twistWeight = 0f;
+                    if (tArm > 0.35f)
+                    {
+                        float u = (tArm - 0.35f) / 0.65f;
+                        twistWeight = u * u * (3f - 2f * u);
+                    }
+                    float perpScale = Mathf.Lerp(1.0f, HandScale, twistWeight);
+                    Vector3 dScaled = UnitSourceLower * (proj * SigmaLower) + (perp * perpScale);
+                    if (twistWeight > 1e-4f && !RotationForearmTwistExtra.IsEqualApprox(Quaternion.Identity))
+                    {
+                        Quaternion qStep = Quaternion.Identity.Slerp(RotationForearmTwistExtra, twistWeight);
+                        return (Bt + qStep * (RotationLower * dScaled), (qStep * RotationLower).Normalized());
+                    }
                     return (Bt + RotationLower * dScaled, RotationLower);
                 }
 
                 // TargetHandBone or finger descendants
-                Vector3 vHand = Ct + RotationLower * (vHero - Cs);
-                Quaternion rotHand = RotationLower;
+                Quaternion rotHand = !RotationHandTotal.IsEqualApprox(default) && RotationHandTotal.LengthSquared() > 0.5f
+                    ? RotationHandTotal
+                    : RotationLower;
+                Vector3 vHand = Ct + rotHand * ((vHero - Cs) * HandScale);
 
                 if (Fingers != null && Fingers.AppliesTo(targetBoneIdx))
                 {
@@ -696,8 +747,11 @@ namespace DeadlockPlayground.Importer
             float avgArmLen = (armLenL + armLenR) * 0.5f;
 
             var allMeshes = CollectMeshes(importedScene);
-            var targetMeshes = (includedSubmeshNames != null && includedSubmeshNames.Count > 0)
-                ? allMeshes.Where(m => includedSubmeshNames.Contains(m.Name.ToString())).ToList()
+            HashSet<string> includedSet = (includedSubmeshNames != null && includedSubmeshNames.Count > 0)
+                ? new HashSet<string>(includedSubmeshNames, StringComparer.OrdinalIgnoreCase)
+                : null;
+            var targetMeshes = includedSet != null
+                ? allMeshes.Where(m => includedSet.Contains(m.Name.ToString())).ToList()
                 : allMeshes;
             if (targetMeshes.Count == 0) targetMeshes = allMeshes;
 
@@ -1347,10 +1401,22 @@ namespace DeadlockPlayground.Importer
             // 2. Build Hero-Space Bone-Segment Registrations (Arms, Legs/Feet, Neck/Head)
             Transform3D skelToHero = options.AlignedTransform * ComputeTransformRelativeToRoot(sourceSkeleton, importedScene);
             ArmSegmentRegistration leftArm = options.AutoSnapArmsToHero
-                ? BuildArmSegmentRegistration(sourceSkeleton, targetSkeleton, sourceToTargetBoneMap, "arm_upper_L", "arm_lower_L", "hand_L", skelToHero, options.KeepFingersRigidOnHand)
+                ? BuildArmSegmentRegistration(
+                    sourceSkeleton, targetSkeleton, sourceToTargetBoneMap,
+                    "arm_upper_L", "arm_lower_L", "hand_L",
+                    skelToHero, options.KeepFingersRigidOnHand,
+                    options.AutoAlignHandOrientation,
+                    options.LeftHandSnapOffsetDeg, options.LeftHandSnapScale,
+                    importedMeshes, importedScene, options.AlignedTransform)
                 : null;
             ArmSegmentRegistration rightArm = options.AutoSnapArmsToHero
-                ? BuildArmSegmentRegistration(sourceSkeleton, targetSkeleton, sourceToTargetBoneMap, "arm_upper_R", "arm_lower_R", "hand_R", skelToHero, options.KeepFingersRigidOnHand)
+                ? BuildArmSegmentRegistration(
+                    sourceSkeleton, targetSkeleton, sourceToTargetBoneMap,
+                    "arm_upper_R", "arm_lower_R", "hand_R",
+                    skelToHero, options.KeepFingersRigidOnHand,
+                    options.AutoAlignHandOrientation,
+                    options.RightHandSnapOffsetDeg, options.RightHandSnapScale,
+                    importedMeshes, importedScene, options.AlignedTransform)
                 : null;
 
             LegSegmentRegistration leftLeg = options.AutoSnapLegsToHero
@@ -2412,7 +2478,13 @@ namespace DeadlockPlayground.Importer
             string lowerName,
             string handName,
             Transform3D skelToHero,
-            bool keepFingersRigid = false)
+            bool keepFingersRigid = false,
+            bool autoAlignHandOrientation = true,
+            Vector3 manualHandOffsetDeg = default,
+            float manualHandScale = 1.0f,
+            List<MeshInstance3D> importedMeshes = null,
+            Node3D importedScene = null,
+            Transform3D alignedTransform = default)
         {
             if (sourceSkeleton == null || targetSkeleton == null || sourceToTargetMap == null) return null;
 
@@ -2466,13 +2538,54 @@ namespace DeadlockPlayground.Importer
                 return null;
             }
 
-            GD.Print($"[CustomModelAutoRigger] Auto-Snap Arm Registration for '{upperName}': Upper L_src={Ls1:F3}m, L_tgt={Lt1:F3}m, sigma={sigma1:F2}; Forearm L_src={Ls2:F3}m, L_tgt={Lt2:F3}m, sigma={sigma2:F2}");
-
             bool isLeft = upperName.EndsWith("_L") || upperName.Contains("_l");
+            string side = isLeft ? "L" : "R";
+            float handScale = Mathf.Clamp(manualHandScale > 0.001f ? manualHandScale : 1.0f, 0.5f, 1.8f);
+
+            // Compute palm lateral axes & automatic axial forearm roll around uT2
+            Vector3 tgtPalmLat = TryGetTargetPalmLateralAxis(targetSkeleton, side, uT2, out _);
+            Quaternion twistAuto = Quaternion.Identity;
+            if (autoAlignHandOrientation)
+            {
+                twistAuto = ComputeAutoPalmRollRotation(
+                    sourceSkeleton, targetSkeleton, sourceToTargetMap,
+                    srcHand, side, Cs, uS2, uT2, R2, skelToHero, tgtPalmLat,
+                    importedMeshes, importedScene, alignedTransform,
+                    out float autoRollDeg, out string palmSignalSource);
+                if (MathF.Abs(autoRollDeg) > 0.5f)
+                {
+                    GD.Print($"[CustomModelAutoRigger] Auto-Snap Hand {side} axial roll={autoRollDeg:F1}° (signal={palmSignalSource}).");
+                }
+            }
+
+            // Orthonormal frame at target hand: axRoll = forearm axis, axPitch = palm knuckle width axis, axYaw = palm normal
+            Vector3 axRoll = uT2;
+            Vector3 axPitch = tgtPalmLat.LengthSquared() > 0.25f
+                ? (tgtPalmLat - axRoll * tgtPalmLat.Dot(axRoll)).Normalized()
+                : ComputeFallbackPerpAxis(axRoll);
+            if (axPitch.LengthSquared() < 0.25f) axPitch = ComputeFallbackPerpAxis(axRoll);
+            Vector3 axYaw = axRoll.Cross(axPitch).Normalized();
+
+            Quaternion qRollManual = Mathf.Abs(manualHandOffsetDeg.Z) > 1e-4f
+                ? new Quaternion(axRoll, Mathf.DegToRad(manualHandOffsetDeg.Z))
+                : Quaternion.Identity;
+            Quaternion qPitchManual = Mathf.Abs(manualHandOffsetDeg.X) > 1e-4f
+                ? new Quaternion(axPitch, Mathf.DegToRad(manualHandOffsetDeg.X))
+                : Quaternion.Identity;
+            Quaternion qYawManual = Mathf.Abs(manualHandOffsetDeg.Y) > 1e-4f
+                ? new Quaternion(axYaw, Mathf.DegToRad(manualHandOffsetDeg.Y))
+                : Quaternion.Identity;
+
+            Quaternion forearmTwistExtra = (qRollManual * twistAuto).Normalized();
+            Quaternion handBend = (qPitchManual * qYawManual).Normalized();
+            Quaternion handTotalRot = (handBend * forearmTwistExtra * R2).Normalized();
+
+            GD.Print($"[CustomModelAutoRigger] Auto-Snap Arm Registration for '{upperName}': Upper L_src={Ls1:F3}m, L_tgt={Lt1:F3}m, sigma={sigma1:F2}; Forearm L_src={Ls2:F3}m, L_tgt={Lt2:F3}m, sigma={sigma2:F2}, HandOffset=({manualHandOffsetDeg.X:F1},{manualHandOffsetDeg.Y:F1},{manualHandOffsetDeg.Z:F1})°, HandScale={handScale:F2}");
+
             HandFingersRegistration fingersReg = null;
             if (!keepFingersRigid)
             {
-                fingersReg = BuildFingerSegmentRegistration(sourceSkeleton, targetSkeleton, sourceToTargetMap, isLeft, tgtHand, Cs, Ct, R2, skelToHero);
+                fingersReg = BuildFingerSegmentRegistration(sourceSkeleton, targetSkeleton, sourceToTargetMap, isLeft, tgtHand, Cs, Ct, handTotalRot, skelToHero, handScale);
             }
 
             return new ArmSegmentRegistration
@@ -2498,8 +2611,293 @@ namespace DeadlockPlayground.Importer
                 LengthSourceLower = Ls2,
                 LengthTargetLower = Lt2,
                 SigmaLower = sigma2,
-                RotationLower = R2
+                RotationLower = R2,
+                RotationForearmTwistExtra = forearmTwistExtra,
+                RotationHandBend = handBend,
+                RotationHandTotal = handTotalRot,
+                HandScale = handScale
             };
+        }
+
+        private static Vector3 ComputeFallbackPerpAxis(Vector3 unitAxis)
+        {
+            Vector3 up = Mathf.Abs(unitAxis.Dot(Vector3.Up)) < 0.9f ? Vector3.Up : Vector3.Forward;
+            return (up - unitAxis * up.Dot(unitAxis)).Normalized();
+        }
+
+        private static Vector3 TryGetTargetPalmLateralAxis(Skeleton3D targetSkeleton, string side, Vector3 uT2, out bool hasFingerSpread)
+        {
+            hasFingerSpread = false;
+            int idxBone = FindBoneAny(targetSkeleton, $"finger_index_0_{side}", $"finger_index_0_{side}".ToLowerInvariant());
+            int pkyBone = FindBoneAny(targetSkeleton, $"finger_pinky_0_{side}", $"finger_pinky_0_{side}".ToLowerInvariant(),
+                $"finger_ring_0_{side}", $"finger_ring_0_{side}".ToLowerInvariant());
+            if (idxBone >= 0 && pkyBone >= 0)
+            {
+                Vector3 v = targetSkeleton.GetBoneGlobalRest(idxBone).Origin - targetSkeleton.GetBoneGlobalRest(pkyBone).Origin;
+                v -= uT2 * v.Dot(uT2);
+                if (v.LengthSquared() > 1e-6f)
+                {
+                    hasFingerSpread = true;
+                    return v.Normalized();
+                }
+            }
+
+            int thumbBone = FindBoneAny(targetSkeleton, $"finger_thumb_0_{side}", $"finger_thumb_0_{side}".ToLowerInvariant());
+            int handBone = FindBoneAny(targetSkeleton, $"hand_{side}", $"hand_{side}".ToLowerInvariant());
+            if (thumbBone >= 0 && handBone >= 0)
+            {
+                Vector3 v = targetSkeleton.GetBoneGlobalRest(thumbBone).Origin - targetSkeleton.GetBoneGlobalRest(handBone).Origin;
+                v -= uT2 * v.Dot(uT2);
+                if (v.LengthSquared() > 1e-6f)
+                {
+                    hasFingerSpread = true;
+                    return v.Normalized();
+                }
+            }
+
+            int wpnOrHand = FindBoneAny(targetSkeleton, $"weapon_hand_{side}", $"hand_{side}", $"hand_{side}".ToLowerInvariant());
+            if (wpnOrHand >= 0)
+            {
+                Basis b = targetSkeleton.GetBoneGlobalRest(wpnOrHand).Basis;
+                Vector3 v = b.X - uT2 * b.X.Dot(uT2);
+                if (v.LengthSquared() < 0.04f) v = b.Y - uT2 * b.Y.Dot(uT2);
+                if (v.LengthSquared() > 1e-5f) return v.Normalized();
+            }
+
+            return ComputeFallbackPerpAxis(uT2);
+        }
+
+        public static Quaternion ComputeAutoPalmRollRotation(
+            Skeleton3D sourceSkeleton,
+            Skeleton3D targetSkeleton,
+            Dictionary<int, int> sourceToTargetMap,
+            int srcHand,
+            string side,
+            Vector3 Cs,
+            Vector3 uS2,
+            Vector3 uT2,
+            Quaternion R2,
+            Transform3D skelToHero,
+            Vector3 tgtPalmLat,
+            List<MeshInstance3D> importedMeshes,
+            Node3D importedScene,
+            Transform3D alignedTransform,
+            out float rollDegOut,
+            out string signalSource)
+        {
+            rollDegOut = 0f;
+            signalSource = "none";
+            if (tgtPalmLat.LengthSquared() < 0.25f) return Quaternion.Identity;
+
+            Vector3 srcPalmLat = Vector3.Zero;
+            bool hasSignedDirection = false;
+
+            // 1. Primary signal: mapped finger_index_0 -> finger_pinky_0 / ring / thumb on source rig (unambiguous sign!)
+            int tgtIdx = FindBoneAny(targetSkeleton, $"finger_index_0_{side}", $"finger_index_0_{side}".ToLowerInvariant());
+            int tgtPky = FindBoneAny(targetSkeleton, $"finger_pinky_0_{side}", $"finger_pinky_0_{side}".ToLowerInvariant(),
+                $"finger_ring_0_{side}", $"finger_ring_0_{side}".ToLowerInvariant());
+            int srcIdx = tgtIdx >= 0 ? FindSourceBoneForTarget(sourceToTargetMap, tgtIdx) : -1;
+            int srcPky = tgtPky >= 0 ? FindSourceBoneForTarget(sourceToTargetMap, tgtPky) : -1;
+
+            if (srcIdx >= 0 && srcPky >= 0 && srcIdx != srcPky)
+            {
+                Vector3 v = (skelToHero * sourceSkeleton.GetBoneGlobalRest(srcIdx).Origin)
+                          - (skelToHero * sourceSkeleton.GetBoneGlobalRest(srcPky).Origin);
+                v -= uS2 * v.Dot(uS2);
+                if (v.LengthSquared() > 1e-6f)
+                {
+                    srcPalmLat = v.Normalized();
+                    hasSignedDirection = true;
+                    signalSource = "fingers";
+                }
+            }
+
+            // 2. Fallback signal: PCA over distal hand vertices weighted to srcHand (works for Landmark Auto-Rig & fingerless rigs!)
+            if (srcPalmLat.LengthSquared() < 0.25f && importedMeshes != null && srcHand >= 0)
+            {
+                var handOffsets = CollectDistalHandOffsetsHeroSpace(
+                    importedMeshes, importedScene, sourceSkeleton, srcHand, alignedTransform, Cs, uS2);
+                if (handOffsets.Count >= 6 && TryComputePcaPalmWidthAxis(handOffsets, uS2, out Vector3 pcaWidth))
+                {
+                    srcPalmLat = pcaWidth;
+                    hasSignedDirection = false;
+                    signalSource = $"pca({handOffsets.Count}v)";
+                }
+            }
+
+            if (srcPalmLat.LengthSquared() < 0.25f) return Quaternion.Identity;
+
+            Vector3 v0 = R2 * srcPalmLat;
+            v0 -= uT2 * v0.Dot(uT2);
+            if (v0.LengthSquared() < 1e-6f) return Quaternion.Identity;
+            v0 = v0.Normalized();
+
+            Vector3 v1 = tgtPalmLat - uT2 * tgtPalmLat.Dot(uT2);
+            if (v1.LengthSquared() < 1e-6f) return Quaternion.Identity;
+            v1 = v1.Normalized();
+
+            // Resolve eigenvector sign ambiguity for PCA so palm aligns within [-90, +90] instead of flipping upside down
+            if (!hasSignedDirection && v0.Dot(v1) < 0f)
+            {
+                v0 = -v0;
+            }
+
+            float rollRad = Mathf.Atan2(uT2.Dot(v0.Cross(v1)), v0.Dot(v1));
+            float maxRad = Mathf.DegToRad(hasSignedDirection ? 110f : 75f);
+            rollRad = Mathf.Clamp(rollRad, -maxRad, maxRad);
+            rollDegOut = Mathf.RadToDeg(rollRad);
+
+            if (MathF.Abs(rollRad) < 1e-4f) return Quaternion.Identity;
+            return new Quaternion(uT2, rollRad);
+        }
+
+        private static List<Vector3> CollectDistalHandOffsetsHeroSpace(
+            List<MeshInstance3D> importedMeshes,
+            Node3D importedScene,
+            Skeleton3D sourceSkeleton,
+            int srcHandBone,
+            Transform3D alignedTransform,
+            Vector3 Cs,
+            Vector3 uS2)
+        {
+            var result = new List<Vector3>();
+            if (importedMeshes == null || sourceSkeleton == null || srcHandBone < 0) return result;
+
+            var handTreeBones = new HashSet<int> { srcHandBone };
+            int boneCount = sourceSkeleton.GetBoneCount();
+            for (int b = 0; b < boneCount; b++)
+            {
+                int cur = b;
+                while (cur >= 0)
+                {
+                    if (cur == srcHandBone) { handTreeBones.Add(b); break; }
+                    cur = sourceSkeleton.GetBoneParent(cur);
+                }
+            }
+
+            foreach (var mi in importedMeshes)
+            {
+                if (mi?.Mesh == null) continue;
+                Transform3D miToHero = importedScene != null
+                    ? alignedTransform * ComputeTransformRelativeToRoot(mi, importedScene)
+                    : alignedTransform;
+
+                bool[] bindIsHand = null;
+                if (mi.Skin != null)
+                {
+                    int bc = mi.Skin.GetBindCount();
+                    bindIsHand = new bool[bc];
+                    for (int k = 0; k < bc; k++)
+                    {
+                        int skIdx = mi.Skin.GetBindBone(k);
+                        if (skIdx < 0)
+                        {
+                            string bName = mi.Skin.GetBindName(k);
+                            if (!string.IsNullOrEmpty(bName)) skIdx = sourceSkeleton.FindBone(bName);
+                        }
+                        if (skIdx >= 0 && handTreeBones.Contains(skIdx)) bindIsHand[k] = true;
+                    }
+                }
+
+                for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+                {
+                    var arrays = mi.Mesh.SurfaceGetArrays(s);
+                    var verts = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                    if (verts == null || verts.Length == 0) continue;
+                    int[] bones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    float[] weights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+                    if (bones == null || weights == null || bones.Length == 0) continue;
+
+                    int bpv = weights.Length / verts.Length;
+                    if (bpv <= 0) continue;
+
+                    for (int v = 0; v < verts.Length; v++)
+                    {
+                        float hw = 0f;
+                        int baseOff = v * bpv;
+                        for (int k = 0; k < bpv; k++)
+                        {
+                            float w = weights[baseOff + k];
+                            if (w <= 0.001f) continue;
+                            int bi = bones[baseOff + k];
+                            bool match = bindIsHand != null
+                                ? (bi >= 0 && bi < bindIsHand.Length && bindIsHand[bi])
+                                : handTreeBones.Contains(bi);
+                            if (match) hw += w;
+                        }
+                        if (hw < 0.35f) continue;
+
+                        Vector3 d = (miToHero * verts[v]) - Cs;
+                        float axial = d.Dot(uS2);
+                        if (axial >= 0.01f && axial <= 0.22f)
+                        {
+                            result.Add(d - uS2 * axial);
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+
+        public static bool TryComputePcaPalmWidthAxis(IReadOnlyList<Vector3> radialOffsets, Vector3 uForearm, out Vector3 widthAxisHero)
+        {
+            widthAxisHero = Vector3.Zero;
+            if (radialOffsets == null || radialOffsets.Count < 6) return false;
+
+            Vector3 e1 = ComputeFallbackPerpAxis(uForearm);
+            Vector3 e2 = uForearm.Cross(e1).Normalized();
+
+            float mx = 0f, my = 0f;
+            int n = radialOffsets.Count;
+            for (int i = 0; i < n; i++)
+            {
+                mx += radialOffsets[i].Dot(e1);
+                my += radialOffsets[i].Dot(e2);
+            }
+            mx /= n;
+            my /= n;
+
+            float cxx = 0f, cxy = 0f, cyy = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float x = radialOffsets[i].Dot(e1) - mx;
+                float y = radialOffsets[i].Dot(e2) - my;
+                cxx += x * x;
+                cxy += x * y;
+                cyy += y * y;
+            }
+            cxx /= n;
+            cxy /= n;
+            cyy /= n;
+
+            float tr = cxx + cyy;
+            float diff = cxx - cyy;
+            float disc = MathF.Sqrt(diff * diff + 4f * cxy * cxy);
+            float lMax = 0.5f * (tr + disc);
+            float lMin = 0.5f * (tr - disc);
+            if (lMax <= 1e-6f || lMax < lMin * 1.35f) return false;
+
+            float vx, vy;
+            if (MathF.Abs(cxy) > 1e-7f)
+            {
+                vx = lMax - cyy;
+                vy = cxy;
+            }
+            else if (cxx >= cyy)
+            {
+                vx = 1f;
+                vy = 0f;
+            }
+            else
+            {
+                vx = 0f;
+                vy = 1f;
+            }
+
+            Vector3 res = e1 * vx + e2 * vy;
+            if (res.LengthSquared() < 1e-8f) return false;
+            widthAxisHero = res.Normalized();
+            return true;
         }
 
         private static HandFingersRegistration BuildFingerSegmentRegistration(
@@ -2511,7 +2909,8 @@ namespace DeadlockPlayground.Importer
             Vector3 Cs,
             Vector3 Ct,
             Quaternion Rlower,
-            Transform3D skelToHero)
+            Transform3D skelToHero,
+            float handScale = 1.0f)
         {
             if (sourceSkeleton == null || targetSkeleton == null || sourceToTargetMap == null) return null;
 
@@ -2579,19 +2978,19 @@ namespace DeadlockPlayground.Importer
                     }
 
                     Vector3 rawAs = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcBoneA).Origin;
-                    Vector3 As = Ct + Rlower * (rawAs - Cs);
+                    Vector3 As = Ct + Rlower * ((rawAs - Cs) * handScale);
                     Vector3 Bs;
 
                     if (srcBoneB != -1)
                     {
                         Vector3 rawBs = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcBoneB).Origin;
-                        Bs = Ct + Rlower * (rawBs - Cs);
+                        Bs = Ct + Rlower * ((rawBs - Cs) * handScale);
                     }
                     else if (sourceSkeleton.GetBoneChildren(srcBoneA).Length > 0)
                     {
                         int childSrc = sourceSkeleton.GetBoneChildren(srcBoneA)[0];
                         Vector3 rawBs = skelToHero * sourceSkeleton.GetBoneGlobalRest(childSrc).Origin;
-                        Bs = Ct + Rlower * (rawBs - Cs);
+                        Bs = Ct + Rlower * ((rawBs - Cs) * handScale);
                     }
                     else if (i > 0)
                     {
@@ -2599,7 +2998,7 @@ namespace DeadlockPlayground.Importer
                         int tgtPrev = FindBoneAny(targetSkeleton, tgtPrevName, tgtPrevName.ToLowerInvariant());
                         int srcPrev = tgtPrev != -1 ? FindSourceBoneForTarget(sourceToTargetMap, tgtPrev) : -1;
                         Vector3 rawPrev = srcPrev != -1 ? (skelToHero * sourceSkeleton.GetBoneGlobalRest(srcPrev).Origin) : rawAs - Vector3.Forward * 0.02f;
-                        Vector3 prevAs = Ct + Rlower * (rawPrev - Cs);
+                        Vector3 prevAs = Ct + Rlower * ((rawPrev - Cs) * handScale);
                         Vector3 dir = (As - prevAs);
                         Bs = As + (dir.Length() > 0.001f ? dir.Normalized() * (dir.Length() * 0.8f) : Vector3.Forward * 0.02f);
                     }
@@ -4722,6 +5121,19 @@ namespace DeadlockPlayground.Importer
                 {
                     if (string.IsNullOrWhiteSpace(sName) || string.IsNullOrWhiteSpace(tName)) continue;
                     int tIdx = targetSkeleton.FindBone(tName);
+                    if (tIdx == -1)
+                    {
+                        var def = HumanoidBoneMapper.Definitions.FirstOrDefault(d =>
+                            d.CanonicalName.Equals(tName, StringComparison.OrdinalIgnoreCase));
+                        if (def != null)
+                        {
+                            string resolvedTarget = HumanoidBoneMapper.ResolveTargetBone(targetSkeleton, def);
+                            if (!string.IsNullOrEmpty(resolvedTarget))
+                            {
+                                tIdx = targetSkeleton.FindBone(resolvedTarget);
+                            }
+                        }
+                    }
                     int sIdx = sourceSkeleton.FindBone(sName);
                     if (tIdx != -1 && sIdx != -1 && !map.ContainsKey(sIdx))
                     {
@@ -4830,6 +5242,7 @@ namespace DeadlockPlayground.Importer
                         for (int a = 0; a < cAliases.Length; a++)
                         {
                             string cAlias = cAliases[a];
+                            if (cleanNoGltf.EndsWith("_end") && !cAlias.EndsWith("_end")) continue;
                             if (cleanExact == cAlias || cleanNoGltf == cAlias ||
                                 cleanNoGltf.StartsWith(cAlias + "_") || cleanNoGltf.EndsWith("_" + cAlias) || cleanNoGltf.Contains("_" + cAlias + "_"))
                             {
@@ -5192,6 +5605,18 @@ namespace DeadlockPlayground.Importer
                 {
                     slotContainer.RemoveMeta("SlotDeformSculpts");
                 }
+                if (options.KeptOriginalPartTransforms != null && options.KeptOriginalPartTransforms.Count > 0)
+                {
+                    var serialized = SerializeKeptPartTransformsToGodotDict(options.KeptOriginalPartTransforms);
+                    if (serialized.Count > 0)
+                        slotContainer.SetMeta("SlotKeptPartTransforms", serialized);
+                    else if (slotContainer.HasMeta("SlotKeptPartTransforms"))
+                        slotContainer.RemoveMeta("SlotKeptPartTransforms");
+                }
+                else if (slotContainer.HasMeta("SlotKeptPartTransforms"))
+                {
+                    slotContainer.RemoveMeta("SlotKeptPartTransforms");
+                }
             }
 
             RecomputeHeroReplacementVisibility(heroNode, customMeshes);
@@ -5519,9 +5944,10 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            // 2. Gather active parametric deform specs & sculpted vertex deltas
+            // 2. Gather active parametric deform specs, sculpted vertex deltas & kept-hero-part transforms
             var specs = new List<ActiveHeroDeformSpec>();
             var sculptDeltasByKey = new Dictionary<string, Dictionary<int, Vector3>>(StringComparer.OrdinalIgnoreCase);
+            var keptPartTransforms = new Dictionary<string, KeptHeroPartTransform>(StringComparer.OrdinalIgnoreCase);
 
             if (previewDeformOverride != null)
             {
@@ -5545,6 +5971,19 @@ namespace DeadlockPlayground.Importer
                         sculptDeltasByKey[sk] = new Dictionary<int, Vector3>(vMap);
                     }
                 }
+                if (previewDeformOverride.KeptOriginalPartTransforms != null)
+                {
+                    foreach (var (pk, px) in previewDeformOverride.KeptOriginalPartTransforms)
+                    {
+                        if (string.IsNullOrEmpty(pk) || px == null || px.IsIdentity) continue;
+                        keptPartTransforms[pk] = new KeptHeroPartTransform
+                        {
+                            PositionOffset = px.PositionOffset,
+                            RotationDeg = px.RotationDeg,
+                            Scale = px.Scale > 0.001f ? px.Scale : 1.0f
+                        };
+                    }
+                }
             }
             else
             {
@@ -5555,6 +5994,11 @@ namespace DeadlockPlayground.Importer
                     if (container.HasMeta("SlotDeformSculpts") && container.GetMeta("SlotDeformSculpts").VariantType == Variant.Type.Dictionary)
                     {
                         MergeSerializedSculpts(container.GetMeta("SlotDeformSculpts").AsGodotDictionary<string, Variant>(), sculptDeltasByKey);
+                    }
+
+                    if (container.HasMeta("SlotKeptPartTransforms") && container.GetMeta("SlotKeptPartTransforms").VariantType == Variant.Type.Dictionary)
+                    {
+                        MergeSerializedKeptPartTransforms(container.GetMeta("SlotKeptPartTransforms").AsGodotDictionary<string, Variant>(), keptPartTransforms);
                     }
 
                     if (!container.HasMeta("SlotDeformEnabled") || !container.GetMeta("SlotDeformEnabled").AsBool())
@@ -5573,7 +6017,7 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            if (specs.Count == 0 && sculptDeltasByKey.Count == 0) return;
+            if (specs.Count == 0 && sculptDeltasByKey.Count == 0 && keptPartTransforms.Count == 0) return;
 
             Skeleton3D heroSkeleton = FindSkeleton(heroNode);
             Transform3D skelToHero = heroSkeleton != null
@@ -5603,13 +6047,15 @@ namespace DeadlockPlayground.Importer
                 int surfCount = srcMesh.GetSurfaceCount();
                 if (surfCount == 0) continue;
 
-                // Determine if any surface on this MeshInstance3D matches any deform spec or sculpt delta
+                // Determine if any surface on this MeshInstance3D matches any deform spec, sculpt delta, or kept-part transform
                 bool anySurfaceMatched = false;
                 for (int s = 0; s < surfCount; s++)
                 {
                     string surfDeformKey = MakeOriginalSurfaceDeformKey(mi, s);
                     string surfOwnKey = MakeSurfaceKeepKey(mi.Name.ToString(), s);
-                    if (sculptDeltasByKey.ContainsKey(surfDeformKey) || sculptDeltasByKey.ContainsKey(surfOwnKey))
+                    if (sculptDeltasByKey.ContainsKey(surfDeformKey) ||
+                        sculptDeltasByKey.ContainsKey(surfOwnKey) ||
+                        TryResolveKeptPartTransform(keptPartTransforms, mi, s, surfCount, out _))
                     {
                         anySurfaceMatched = true;
                         break;
@@ -5675,8 +6121,9 @@ namespace DeadlockPlayground.Importer
                     {
                         sculptDeltasByKey.TryGetValue(surfOwnKey, out surfSculpt);
                     }
+                    bool hasKeptPartXform = TryResolveKeptPartTransform(keptPartTransforms, mi, s, surfCount, out var keptPartXform);
 
-                    if (matchedSpecs.Count > 0 || (surfSculpt != null && surfSculpt.Count > 0))
+                    if (matchedSpecs.Count > 0 || (surfSculpt != null && surfSculpt.Count > 0) || hasKeptPartXform)
                     {
                         var clonedVerts = (Vector3[])verts.Clone();
                         Vector3[] norms = arrays.Count > (int)Mesh.ArrayType.Normal
@@ -5687,6 +6134,9 @@ namespace DeadlockPlayground.Importer
                             : null;
                         float[] vertexWeights = new float[verts.Length];
                         bool surfDisplaced = false;
+
+                        if (matchedSpecs.Count > 0 || (surfSculpt != null && surfSculpt.Count > 0))
+                        {
 
                         for (int v = 0; v < clonedVerts.Length; v++)
                         {
@@ -5796,6 +6246,59 @@ namespace DeadlockPlayground.Importer
                             }
                             arrays[(int)Mesh.ArrayType.Vertex] = clonedVerts;
                         }
+                        }
+
+                        if (hasKeptPartXform && keptPartXform != null && !keptPartXform.IsIdentity)
+                        {
+                            Transform3D boneRestHero = ResolveKeptHeroPartPivotRestHero(
+                                mi, s, arrays, verts, heroSkeleton, skelToHero, miToHero);
+                            Basis deltaRot = Basis.FromEuler(new Vector3(
+                                Mathf.DegToRad(keptPartXform.RotationDeg.X),
+                                Mathf.DegToRad(keptPartXform.RotationDeg.Y),
+                                Mathf.DegToRad(keptPartXform.RotationDeg.Z)), EulerOrder.Yxz);
+                            float sc = Mathf.Clamp(keptPartXform.Scale > 0.001f ? keptPartXform.Scale : 1.0f, 0.05f, 10.0f);
+                            Transform3D deltaLocal = new Transform3D(deltaRot.Scaled(new Vector3(sc, sc, sc)), keptPartXform.PositionOffset);
+                            Transform3D warpHero = boneRestHero * deltaLocal * boneRestHero.AffineInverse();
+                            Basis normalRotHero = (boneRestHero.Basis * deltaRot * boneRestHero.Basis.Inverse()).Orthonormalized();
+                            Basis normalRotMi = (heroToMi.Basis * normalRotHero * miToHero.Basis).Orthonormalized();
+
+                            for (int v = 0; v < clonedVerts.Length; v++)
+                            {
+                                Vector3 vHero = miToHero * clonedVerts[v];
+                                clonedVerts[v] = heroToMi * (warpHero * vHero);
+                                if (clonedNorms != null && clonedNorms[v].LengthSquared() > 1e-10f)
+                                {
+                                    clonedNorms[v] = (normalRotMi * clonedNorms[v]).Normalized();
+                                }
+                            }
+                            arrays[(int)Mesh.ArrayType.Vertex] = clonedVerts;
+                            if (clonedNorms != null)
+                            {
+                                arrays[(int)Mesh.ArrayType.Normal] = clonedNorms;
+                            }
+                            if (arrays.Count > (int)Mesh.ArrayType.Tangent && arrays[(int)Mesh.ArrayType.Tangent].VariantType != Variant.Type.Nil)
+                            {
+                                float[] srcTan = arrays[(int)Mesh.ArrayType.Tangent].AsFloat32Array();
+                                if (srcTan != null && srcTan.Length == clonedVerts.Length * 4)
+                                {
+                                    var clonedTan = (float[])srcTan.Clone();
+                                    for (int v = 0; v < clonedVerts.Length; v++)
+                                    {
+                                        int off = v * 4;
+                                        Vector3 tVec = new Vector3(clonedTan[off], clonedTan[off + 1], clonedTan[off + 2]);
+                                        if (tVec.LengthSquared() > 1e-10f)
+                                        {
+                                            Vector3 tRot = (normalRotMi * tVec).Normalized();
+                                            clonedTan[off] = tRot.X;
+                                            clonedTan[off + 1] = tRot.Y;
+                                            clonedTan[off + 2] = tRot.Z;
+                                        }
+                                    }
+                                    arrays[(int)Mesh.ArrayType.Tangent] = clonedTan;
+                                }
+                            }
+                            meshActuallyModified = true;
+                        }
                     }
 
                     deformedMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, formatFlags);
@@ -5814,6 +6317,228 @@ namespace DeadlockPlayground.Importer
                     mi.SetMeta("IsDeformedOriginalMesh", true);
                 }
             }
+        }
+
+        public static Godot.Collections.Dictionary<string, Variant> SerializeKeptPartTransformsToGodotDict(
+            Dictionary<string, KeptHeroPartTransform> transforms)
+        {
+            var root = new Godot.Collections.Dictionary<string, Variant>();
+            if (transforms == null) return root;
+            foreach (var (key, xf) in transforms)
+            {
+                if (string.IsNullOrWhiteSpace(key) || xf == null || xf.IsIdentity) continue;
+                root[key] = new Godot.Collections.Dictionary<string, Variant>
+                {
+                    ["pos"] = xf.PositionOffset,
+                    ["rot"] = xf.RotationDeg,
+                    ["scale"] = xf.Scale > 0.001f ? xf.Scale : 1.0f
+                };
+            }
+            return root;
+        }
+
+        public static void MergeSerializedKeptPartTransforms(
+            Godot.Collections.Dictionary<string, Variant> srcDict,
+            Dictionary<string, KeptHeroPartTransform> target)
+        {
+            if (srcDict == null || target == null) return;
+            foreach (var key in srcDict.Keys)
+            {
+                if (string.IsNullOrWhiteSpace(key) || srcDict[key].VariantType != Variant.Type.Dictionary) continue;
+                var d = srcDict[key].AsGodotDictionary();
+                Vector3 pos = d.ContainsKey("pos") ? d["pos"].AsVector3() : Vector3.Zero;
+                Vector3 rot = d.ContainsKey("rot") ? d["rot"].AsVector3() : Vector3.Zero;
+                float scale = d.ContainsKey("scale") ? (float)d["scale"].AsDouble() : 1.0f;
+                var xf = new KeptHeroPartTransform
+                {
+                    PositionOffset = pos,
+                    RotationDeg = rot,
+                    Scale = scale > 0.001f ? scale : 1.0f
+                };
+                if (!xf.IsIdentity) target[key] = xf;
+            }
+        }
+
+        private static bool TryResolveKeptPartTransform(
+            Dictionary<string, KeptHeroPartTransform> map,
+            MeshInstance3D mi,
+            int surfIdx,
+            int surfCount,
+            out KeptHeroPartTransform transform)
+        {
+            transform = null;
+            if (map == null || map.Count == 0 || mi == null || !GodotObject.IsInstanceValid(mi)) return false;
+
+            string canonicalKey = MakeOriginalSurfaceDeformKey(mi, surfIdx);
+            if (!string.IsNullOrEmpty(canonicalKey) && map.TryGetValue(canonicalKey, out transform) && transform != null && !transform.IsIdentity)
+                return true;
+
+            string ownKey = MakeSurfaceKeepKey(mi.Name.ToString(), surfIdx);
+            if (!string.IsNullOrEmpty(ownKey) && map.TryGetValue(ownKey, out transform) && transform != null && !transform.IsIdentity)
+                return true;
+
+            if (surfCount == 1)
+            {
+                string bareName = mi.Name.ToString();
+                if (map.TryGetValue(bareName, out transform) && transform != null && !transform.IsIdentity)
+                    return true;
+                if (mi.HasMeta("ParentCompositeMesh"))
+                {
+                    var p = mi.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                    if (p != null && GodotObject.IsInstanceValid(p))
+                    {
+                        int pSurf = mi.HasMeta("SurfaceIndex") ? mi.GetMeta("SurfaceIndex").AsInt32() : surfIdx;
+                        string parentKey = MakeSurfaceKeepKey(p.Name.ToString(), pSurf);
+                        if (map.TryGetValue(parentKey, out transform) && transform != null && !transform.IsIdentity)
+                            return true;
+                    }
+                }
+            }
+            transform = null;
+            return false;
+        }
+
+        private static int ResolveDominantSkeletonBoneForSurface(
+            MeshInstance3D mi,
+            Godot.Collections.Array arrays,
+            Vector3[] verts,
+            Skeleton3D heroSkeleton)
+        {
+            if (heroSkeleton == null || arrays == null || verts == null || verts.Length == 0) return -1;
+            int[] rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+            float[] rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+            if (rawBones == null || rawWeights == null || rawBones.Length == 0 || rawWeights.Length == 0) return -1;
+
+            int bpv = rawWeights.Length / verts.Length;
+            if (bpv <= 0 || rawBones.Length < verts.Length * bpv) return -1;
+
+            var weightBySkelBone = new Dictionary<int, float>();
+            int step = verts.Length > 2000 ? 4 : 1;
+            for (int v = 0; v < verts.Length; v += step)
+            {
+                int off = v * bpv;
+                for (int k = 0; k < bpv; k++)
+                {
+                    float w = rawWeights[off + k];
+                    if (w <= 0.001f) continue;
+                    int rawIdx = rawBones[off + k];
+                    int skelIdx = -1;
+                    if (mi?.Skin != null && rawIdx >= 0 && rawIdx < mi.Skin.GetBindCount())
+                    {
+                        skelIdx = mi.Skin.GetBindBone(rawIdx);
+                        if (skelIdx < 0)
+                        {
+                            string bName = mi.Skin.GetBindName(rawIdx);
+                            if (!string.IsNullOrEmpty(bName)) skelIdx = heroSkeleton.FindBone(bName);
+                        }
+                    }
+                    else if (rawIdx >= 0 && rawIdx < heroSkeleton.GetBoneCount())
+                    {
+                        skelIdx = rawIdx;
+                    }
+                    if (skelIdx >= 0)
+                    {
+                        weightBySkelBone[skelIdx] = weightBySkelBone.TryGetValue(skelIdx, out float cur) ? cur + w : w;
+                    }
+                }
+            }
+
+            int bestBone = -1;
+            float bestW = 0f;
+            foreach (var (bIdx, sum) in weightBySkelBone)
+            {
+                if (sum > bestW)
+                {
+                    bestW = sum;
+                    bestBone = bIdx;
+                }
+            }
+            return bestBone;
+        }
+
+        private static Transform3D ResolveKeptHeroPartPivotRestHero(
+            MeshInstance3D mi,
+            int surfIdx,
+            Godot.Collections.Array arrays,
+            Vector3[] verts,
+            Skeleton3D heroSkeleton,
+            Transform3D skelToHero,
+            Transform3D miToHero)
+        {
+            if (heroSkeleton != null)
+            {
+                int bestBone = ResolveDominantSkeletonBoneForSurface(mi, arrays, verts, heroSkeleton);
+                if (bestBone >= 0 && bestBone < heroSkeleton.GetBoneCount())
+                {
+                    Transform3D bRest = skelToHero * heroSkeleton.GetBoneGlobalRest(bestBone);
+                    return new Transform3D(bRest.Basis.Orthonormalized(), bRest.Origin);
+                }
+            }
+
+            Vector3 minV = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 maxV = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            for (int v = 0; v < verts.Length; v++)
+            {
+                Vector3 vh = miToHero * verts[v];
+                minV = minV.Min(vh);
+                maxV = maxV.Max(vh);
+            }
+            Vector3 center = verts.Length > 0 ? (minV + maxV) * 0.5f : Vector3.Zero;
+            return new Transform3D(Basis.Identity, center);
+        }
+
+        public static bool FindDominantBoneForHeroKeepKey(
+            Node3D heroNode,
+            string keepKey,
+            out string boneName,
+            out Transform3D pivotRestHero)
+        {
+            boneName = null;
+            pivotRestHero = Transform3D.Identity;
+            if (heroNode == null || !GodotObject.IsInstanceValid(heroNode) || string.IsNullOrWhiteSpace(keepKey))
+                return false;
+
+            Skeleton3D heroSkeleton = FindSkeleton(heroNode);
+            Transform3D skelToHero = heroSkeleton != null ? ComputeTransformRelativeToRoot(heroSkeleton, heroNode) : Transform3D.Identity;
+
+            var lookup = new Dictionary<string, KeptHeroPartTransform>(StringComparer.OrdinalIgnoreCase)
+            {
+                [keepKey] = new KeptHeroPartTransform { Scale = 2.0f } // Sentinel non-identity
+            };
+
+            foreach (var mi in CollectMeshes(heroNode))
+            {
+                if (!IsHeroOriginalMeshForDeform(mi, heroNode)) continue;
+                Mesh srcMesh = mi.HasMeta("OriginalPreDeformMesh") ? mi.GetMeta("OriginalPreDeformMesh").As<Mesh>() : mi.Mesh;
+                if (srcMesh == null) continue;
+                int surfCount = srcMesh.GetSurfaceCount();
+                Transform3D miToHero = ComputeTransformRelativeToRoot(mi, heroNode);
+
+                for (int s = 0; s < surfCount; s++)
+                {
+                    if (!TryResolveKeptPartTransform(lookup, mi, s, surfCount, out _)) continue;
+                    var arrays = srcMesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
+                    var verts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (verts == null || verts.Length == 0) continue;
+
+                    if (heroSkeleton != null)
+                    {
+                        int bestBone = ResolveDominantSkeletonBoneForSurface(mi, arrays, verts, heroSkeleton);
+                        if (bestBone >= 0 && bestBone < heroSkeleton.GetBoneCount())
+                        {
+                            boneName = heroSkeleton.GetBoneName(bestBone);
+                            Transform3D bRest = skelToHero * heroSkeleton.GetBoneGlobalRest(bestBone);
+                            pivotRestHero = new Transform3D(bRest.Basis.Orthonormalized(), bRest.Origin);
+                            return true;
+                        }
+                    }
+
+                    pivotRestHero = ResolveKeptHeroPartPivotRestHero(mi, s, arrays, verts, heroSkeleton, skelToHero, miToHero);
+                    return true;
+                }
+            }
+            return false;
         }
 
         public static bool DoesHeroSurfaceMatchDeformFilter(MeshInstance3D mi, int surfIdx, string filter)
@@ -6221,18 +6946,26 @@ namespace DeadlockPlayground.Importer
         /// Computes pristine model vertex bounding box relative to its own root node (at scale 1.0, offset 0),
         /// accurately evaluating skinning bind transforms when present.
         /// Immune to current viewport slider or container transforms!
+        /// When <paramref name="includedMeshNames"/> is non-null, only submeshes whose node names appear in the set are measured.
         /// </summary>
-        public static (Vector3 Min, Vector3 Max, bool Valid) ComputePristineModelBounds(Node3D root)
+        public static (Vector3 Min, Vector3 Max, bool Valid) ComputePristineModelBounds(
+            Node3D root,
+            IReadOnlyCollection<string> includedMeshNames = null)
         {
             Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
             Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
             bool found = false;
+
+            HashSet<string> includedSet = includedMeshNames != null
+                ? new HashSet<string>(includedMeshNames, StringComparer.OrdinalIgnoreCase)
+                : null;
 
             Skeleton3D fallbackSkel = FindSkeleton(root);
             var meshes = CollectMeshes(root);
             foreach (var mi in meshes)
             {
                 if (mi.Mesh == null) continue;
+                if (includedSet != null && !includedSet.Contains(mi.Name.ToString())) continue;
 
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
