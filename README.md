@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- IMAGE PLACEHOLDER: Project Banner / Hero Studio Header (replace with docs/images/banner.png or screenshots when ready) -->
-<img src="https://placehold.co/960x320/14181f/e5c787?text=DEADLOCK+PLAYGROUND+%E2%80%94+Hero+Showcase+Banner+Placeholder" alt="Deadlock Playground Banner Placeholder" width="850" />
+<img src="public\deadlock_playground_header.gif" alt="Deadlock Playground Banner Placeholder" width="850" />
 
   <h1>Deadlock Playground (v1.3.0)</h1>
   <p>
@@ -43,19 +43,14 @@
 
 **Deadlock Playground** is a free, open-source desktop workspace built in **Godot 4.7.2 (.NET 11 / C#)** that runs 100% locally and offline. Designed for *Deadlock* modders, skin artists, 3D modelers, animators, and content creators, it connects directly to your local Deadlock installation (`pak01_dir.vpk` and installed `.vpk` addons) without requiring manual decompilation into Blender just to paint skins, attach hats/outfits, swap hero models, tweak animations, or compile `.vpk` mods.
 
-> [!NOTE]
 > *AI assistance was used while developing the codebase for this project. Features are actively evolving—please report bugs or edge cases via GitHub Issues or on Discord (`juliancz_`).*
 
 ---
 
-## 🎬 Video Demos
+## Video Demos
 
-### Custom 3D Model & Accessory / Outfit Replacement Demo *(Coming Soon)*
-<!-- RESERVED VIDEO SPACE: Replace the placeholder block below with your YouTube embed / thumbnail link once uploaded -->
-> 🎥 **Demo Video Reserved — Model & Accessory Replacement Showcase**  
-> *Space reserved for the upcoming walkthrough covering Full Custom 3D Model Replacement, Landmark Auto-Rigging, Interactive 3D Weight Painting, Accessory/Hat Rigging, and the Interactive Hero Mesh Deform Brush.*
->
-> `[![Watch Model & Accessory Replacement Demo](https://img.youtube.com/vi/<VIDEO_ID>/maxresdefault.jpg)](https://youtu.be/<VIDEO_ID>)`
+### Custom 3D Model & Accessory / Outfit Replacement Demo
+[![Watch Model & Accessory Replacement Demo](https://img.youtube.com/vi/_R9UDjxe85Y/maxresdefault.jpg)](https://youtu.be/_R9UDjxe85Y)
 
 ### Texture Painting & Studio Overview (v1.0 Showcase)
 [![Watch the Video Demo](https://img.youtube.com/vi/0GgRUHwB0ek/maxresdefault.jpg)](https://youtu.be/0GgRUHwB0ek)
@@ -76,8 +71,7 @@
 * **Hero Mesh Deformer & Interactive 3D Sculpt Brush:** Sculpt, flatten, smooth, push, or tuck underlying vanilla hero meshes (such as hair or shoulder pads) so custom hats and armor fit cleanly with zero clipping.
 * **Direct Source 2 Compilation:** Sanitized Deadlock NPR/toon PBR shader conversion with automatic AO/Normal/Roughness detection and headless `resourcecompiler.exe` `.vmdl_c` / `.vmat_c` compilation directly into your addon `.vpk`.
 
-<!-- IMAGE PLACEHOLDER: Model & Accessory Importer Fitting Room Screenshot -->
-![Placeholder: Custom Model & Accessory Fitting Room](https://placehold.co/800x420/14181f/8fa3b0?text=IMAGE+PLACEHOLDER+%E2%80%94+Custom+Model+%26+Accessory+Importer+Fitting+Room)
+![Custom Model & Accessory Fitting Room](web\public\screenshots\custom_3d_model_importer_suite.png)
 
 ### 3. Multi-Channel 3D & 2D UV Texture Painting
 * **Dual Synchronized 3D + 2D UV Canvas:** Paint directly on the 3D hero/accessory surface via GPU compute projection (`brush_compute.glsl`) or on the unwrapped 2D UV canvas (`UVCanvas2DUI`).
@@ -89,7 +83,7 @@
 * **Professional Brush, Selection & Filter Suite:** Non-destructive layer stack (Normal, Multiply, Screen, Overlay, HSL Color blend), Clone Stamp Tool, Magic Wand / Lasso / Polygonal / Marquee selection masks, 3D Decal & Typography Projectors, Photoshop-grade **Filters** (Gaussian/Box/Motion Blur, Sharpen, Pixelate, Halftone, Oil Paint, Emboss, High Pass, Noise, Chromatic Aberration), and **Color Adjustments** (Gradient Maps with `.grd` import, Levels, Curves, Hue/Saturation, Exposure, Posterize, Threshold).
 
 <!-- IMAGE PLACEHOLDER: Multi-Channel Texture Painter & 2D UV Canvas Screenshot -->
-![Placeholder: 3D & 2D UV Texture Painter](https://placehold.co/800x420/14181f/8fa3b0?text=IMAGE+PLACEHOLDER+%E2%80%94+3D+%26+2D+UV+Multi-Channel+Painter+%26+Alpha+Lock)
+![3D & 2D UV Texture Painter](web\public\screenshots\2d_canvas_pbr_textures_editor.png)
 
 ### 4. Animation Studio Deck, Local/Global Gizmos & Retargeter
 * **Blender-Style Bottom Dock (`AnimationStudioDock`):**
@@ -100,16 +94,14 @@
   * Evaluate Source 2 **Bone Constraints** (all 11 ModelDoc constraints via `Source2BoneConstraintDriver`), `FeModel` jiggle bone spring physics, analytical Two-Bone IK, and Position-Based Dynamics (PBD) cloth conformance.
 * **External Retargeting & VPK Export:** Import Mixamo, Mesh2Motion, or custom `.glb`/`.gltf`/`.fbx` humanoid clips, retarget with T-Pose/A-Pose calibration, edit loaded addon animation mods (`Modified` category), and export native `.vnmclip_c` binaries with automated Source 2 IK constraints straight to `.vpk`.
 
-<!-- IMAGE PLACEHOLDER: Animation Studio Dock & Local Gizmo Posing Screenshot -->
-![Placeholder: Animation Studio & Local Bone Gizmo](https://placehold.co/800x420/14181f/8fa3b0?text=IMAGE+PLACEHOLDER+%E2%80%94+Animation+Studio+(Dope+Sheet%2C+Graph+Editor+%26+Local+Gizmo))
+![Placeholder: Animation Studio & Local Bone Gizmo](web\public\screenshots\animation_studio_deck.png)
 
 ### 5. Hero Particle VFX Studio, Themes & Virtual Photography
 * **Particle VFX Simulation & Texture Repainting:** Preview hero `.vpcf_c` systems via VRF 21.1 SoA `ParticleSystemSimulation` with physics collision and model socket attachments, scrub timelines, and repaint particle sprite sheets cleanly back into `.vpk`.
 * **1-Click `.vpk` Mod Builder:** Automatic addon index resolution (`pak##_dir.vpk`), staged in-place `.vtex_c` / `.vmdl_c` / `.vnmclip_c` compilation, and mod change overview modal.
 * **Custom UI Theme System & Staging Studio:** Built-in theme switcher with custom theme editor and JSON export/import, plus 3D environment/camera lighting presets, Depth of Field, Color Grading, and high-res transparent PNG captures for Discord & GameBanana showcases.
 
-<!-- IMAGE PLACEHOLDER: Theme System / Particle VFX / Staging Studio Screenshot -->
-![Placeholder: Staging Studio & UI Themes](https://placehold.co/800x420/14181f/8fa3b0?text=IMAGE+PLACEHOLDER+%E2%80%94+Particle+VFX+%26+Staging+Studio)
+![Placeholder: Staging Studio & UI Themes](web\public\screenshots\hero_particle_editor_and_stage_3d.png)
 
 ---
 
