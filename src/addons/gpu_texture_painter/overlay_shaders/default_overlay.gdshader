@@ -6,14 +6,20 @@ uniform vec2 position_in_atlas;
 uniform vec2 size_in_atlas;
 uniform uint atlas_index;
 
-varying vec2 v_atlas_uv;
+varying vec2 v_mesh_uv;
+
+vec2 wrap_mesh_uv(vec2 uv) {
+	float wx = (uv.x < 0.0 || uv.x > 1.0) ? fract(uv.x) : uv.x;
+	float wy = (uv.y < 0.0 || uv.y > 1.0) ? fract(uv.y) : uv.y;
+	return vec2(wx, wy);
+}
 
 void vertex() {
-	vec2 mesh_uv = (length(UV2) > 0.0001) ? UV2 : UV;
-	v_atlas_uv = mesh_uv * size_in_atlas + position_in_atlas;
+	v_mesh_uv = (length(UV2) > 0.0001) ? UV2 : UV;
 }
 
 void fragment() {
+	vec2 v_atlas_uv = wrap_mesh_uv(v_mesh_uv) * size_in_atlas + position_in_atlas;
 	// if cull mask layer 21 is enabled, the camera acts as a brush
 	bool is_camera_brush = (CAMERA_VISIBLE_LAYERS & (1u << uint(20))) != 0u;
     if(is_camera_brush){

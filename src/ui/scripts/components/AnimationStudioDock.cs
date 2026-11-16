@@ -26,6 +26,7 @@ namespace DeadlockPlayground.UI
         // UI References - Top Bar
         private Control _resizeGrip;
         private PanelContainer _headerBar;
+        private Container _toolbar;
         private Button _btnToggleCollapse;
         private Button _btnTabDopeSheet;
         private Button _btnTabGraphEditor;
@@ -39,6 +40,8 @@ namespace DeadlockPlayground.UI
         private SpinBox _spinCurrentFrame;
         private Label _lblTotalFrames;
         private Label _lblTimeDisplay;
+        private Button _btnGizmoSpace;
+        private Button _btnBoneGizmoSpace;
         private Button _btnAutoKey;
         private MenuButton _menuQuickTools;
         private MenuButton _menuKeyActions;
@@ -250,7 +253,7 @@ namespace DeadlockPlayground.UI
         public override void _Ready()
         {
             ZIndex = 5;
-            AddThemeStyleboxOverride("panel", DockPanelStyle);
+            ThemeTypeVariation = "CardPanel";
             BindSceneNodes();
             ConnectSignals();
 
@@ -275,6 +278,8 @@ namespace DeadlockPlayground.UI
 
             SkeletonGizmoManager.OnBoneSelected += OnViewportBoneSelected;
             SkeletonGizmoManager.OnBoneTransformEnded += OnViewportBoneTransformEnded;
+            GizmoDisplaySettings.OnSettingsChanged += OnGizmoDisplaySettingsChanged;
+            SyncGizmoSpaceButton();
 
             AnimationTransportService.Instance.PlaybackStateChanged += OnTransportPlaybackStateChanged;
             AnimationTransportService.Instance.TimeChanged += OnTransportTimeChanged;
@@ -347,6 +352,7 @@ namespace DeadlockPlayground.UI
             // Top Bar
             _resizeGrip = GetNodeOrNull<Control>("%ResizeGrip");
             _headerBar = GetNodeOrNull<PanelContainer>("%HeaderBar");
+            _toolbar = GetNodeOrNull<Container>("%Toolbar");
             _btnToggleCollapse = GetNodeOrNull<Button>("%BtnToggleCollapse");
             _btnTabDopeSheet = GetNodeOrNull<Button>("%BtnTabDopeSheet");
             _btnTabGraphEditor = GetNodeOrNull<Button>("%BtnTabGraphEditor");
@@ -363,6 +369,7 @@ namespace DeadlockPlayground.UI
             _lblTotalFrames = GetNodeOrNull<Label>("%LblTotalFrames");
             _lblTimeDisplay = GetNodeOrNull<Label>("%LblTimeDisplay");
 
+            _btnGizmoSpace = GetNodeOrNull<Button>("%BtnGizmoSpace");
             _btnAutoKey = GetNodeOrNull<Button>("%BtnAutoKey");
             _menuQuickTools = GetNodeOrNull<MenuButton>("%MenuQuickTools");
             _menuKeyActions = GetNodeOrNull<MenuButton>("%MenuKeyActions");
@@ -380,14 +387,11 @@ namespace DeadlockPlayground.UI
             _boneSearch = FindSceneNode<LineEdit>("BoneSearch");
             if (_boneSearch != null)
             {
-                _boneSearch.AddThemeFontSizeOverride("font_size", 13);
             }
             var lblSummary = FindSceneNode<Label>("LblSummaryRow");
             if (lblSummary != null)
             {
                 var fontColus = PlaygroundThemeHelper.GetFontColus();
-                if (fontColus != null) lblSummary.AddThemeFontOverride("font", fontColus);
-                lblSummary.AddThemeFontSizeOverride("font_size", 13);
             }
             _boneListCanvas = FindSceneNode<BoneListCanvas>("BoneListCanvas");
             _boneListVScrollBar = FindSceneNode<VScrollBar>("BoneListVScrollBar");
@@ -462,6 +466,7 @@ namespace DeadlockPlayground.UI
             _sliderBoneRotZ = FindSceneNode<HSlider>("SliderBoneRotZ") ?? GetNodeOrNull<HSlider>("%SliderBoneRotZ");
             _btnResetBonePose = FindSceneNode<Button>("BtnResetBonePose") ?? GetNodeOrNull<Button>("%BtnResetBonePose");
             _btnDeselectBone = FindSceneNode<Button>("BtnDeselectBone") ?? GetNodeOrNull<Button>("%BtnDeselectBone");
+            _btnBoneGizmoSpace = FindSceneNode<Button>("BtnBoneGizmoSpace") ?? GetNodeOrNull<Button>("%BtnBoneGizmoSpace");
             _btnToggleAdditiveOffsetMode = FindSceneNode<Button>("BtnToggleAdditiveOffsetMode") ?? GetNodeOrNull<Button>("%BtnToggleAdditiveOffsetMode");
             _btnApplyOffsetToAllFrames = FindSceneNode<Button>("BtnApplyOffsetToAllFrames") ?? GetNodeOrNull<Button>("%BtnApplyOffsetToAllFrames");
         }
@@ -476,23 +481,21 @@ namespace DeadlockPlayground.UI
             DockIcons.Apply(_btnJumpEnd, "arrow_right_to_line", "Jump to End (Shift+Right)");
             DockIcons.Apply(_btnLoop, "arrows_clockwise", "Toggle Loop Playback");
             DockIcons.Apply(_btnAutoKey, "circle", "Toggle Auto-Keying (I)");
+            SyncGizmoSpaceButton();
             DockIcons.Apply(_btnUndo, "undo", "Undo (Ctrl+Z)");
             DockIcons.Apply(_btnRedo, "redo", "Redo (Ctrl+Y)");
 
-            if (_btnTabDopeSheet != null)
+            DockIcons.Apply(_btnTabDopeSheet, "film", "Dope Sheet Timeline", iconOnly: false);
+            DockIcons.Apply(_btnTabGraphEditor, "line_graph", "F-Curve Graph Editor", iconOnly: false);
+            DockIcons.Apply(_btnTabClipSettings, "sliders", "Clip Settings & Pose Assistants", iconOnly: false);
+
+            // Compact icon-only transport & history buttons to prevent toolbar overflow
+            foreach (var compactBtn in new[] { _btnToggleCollapse, _btnRewindStart, _btnStepBack, _btnPlayPause, _btnStepNext, _btnJumpEnd, _btnLoop, _btnUndo, _btnRedo, _btnShortcuts })
             {
-                var icon = DockIcons.Load("film");
-                if (icon != null) _btnTabDopeSheet.Icon = icon;
-            }
-            if (_btnTabGraphEditor != null)
-            {
-                var icon = DockIcons.Load("line_graph");
-                if (icon != null) _btnTabGraphEditor.Icon = icon;
-            }
-            if (_btnTabClipSettings != null)
-            {
-                var icon = DockIcons.Load("sliders");
-                if (icon != null) _btnTabClipSettings.Icon = icon;
+                if (compactBtn != null && GodotObject.IsInstanceValid(compactBtn))
+                {
+                    compactBtn.CustomMinimumSize = new Vector2(28f, 28f);
+                }
             }
 
             if (_btnCopyPose != null) DockIcons.Apply(_btnCopyPose, "duplicate", "Copy Pose (Ctrl+C)", iconOnly: false);
@@ -510,7 +513,15 @@ namespace DeadlockPlayground.UI
                 _resizeGrip.GuiInput += OnResizeGripGuiInput;
                 _resizeGrip.Draw += OnDrawResizeGrip;
             }
-            if (_headerBar != null) _headerBar.GuiInput += OnHeaderBarGuiInput;
+            if (_headerBar != null)
+            {
+                _headerBar.GuiInput += OnHeaderBarGuiInput;
+                _headerBar.MinimumSizeChanged += () => CallDeferred(MethodName.RefreshLayout);
+            }
+            if (_toolbar != null)
+            {
+                _toolbar.MinimumSizeChanged += () => CallDeferred(MethodName.RefreshLayout);
+            }
             if (_btnToggleCollapse != null) _btnToggleCollapse.Pressed += ToggleOpen;
 
             // Tabs
@@ -532,6 +543,26 @@ namespace DeadlockPlayground.UI
 
             // Frame Input
             if (_spinCurrentFrame != null) _spinCurrentFrame.ValueChanged += (val) => AnimationTransportService.Instance.Seek((int)val / (double)_fps);
+
+            // Gizmo Space (Global / Local)
+            if (_btnGizmoSpace != null)
+            {
+                _btnGizmoSpace.Toggled += (useLocal) =>
+                {
+                    GizmoDisplaySettings.GizmoUseLocalSpace = useLocal;
+                    GizmoDisplaySettings.SaveConfig();
+                    SyncGizmoSpaceButton();
+                };
+            }
+            if (_btnBoneGizmoSpace != null)
+            {
+                _btnBoneGizmoSpace.Toggled += (useLocal) =>
+                {
+                    GizmoDisplaySettings.GizmoUseLocalSpace = useLocal;
+                    GizmoDisplaySettings.SaveConfig();
+                    SyncGizmoSpaceButton();
+                };
+            }
 
             // Auto-Key
             if (_btnAutoKey != null)
@@ -846,10 +877,6 @@ namespace DeadlockPlayground.UI
             _menuQuickTools.Flat = false;
             _menuQuickTools.ExpandIcon = true;
             _menuQuickTools.AddThemeConstantOverride("icon_max_width", 16);
-            _menuQuickTools.AddThemeStyleboxOverride("normal", MenuBtnNormal);
-            _menuQuickTools.AddThemeStyleboxOverride("hover", MenuBtnHover);
-            _menuQuickTools.AddThemeStyleboxOverride("pressed", MenuBtnPressed);
-            _menuQuickTools.AddThemeStyleboxOverride("focus", MenuBtnHover);
 
             var popup = _menuQuickTools.GetPopup();
             popup.Clear();
@@ -1008,10 +1035,6 @@ namespace DeadlockPlayground.UI
         {
             if (_menuKeyActions == null) return;
             _menuKeyActions.Flat = false;
-            _menuKeyActions.AddThemeStyleboxOverride("normal", MenuBtnNormal);
-            _menuKeyActions.AddThemeStyleboxOverride("hover", MenuBtnHover);
-            _menuKeyActions.AddThemeStyleboxOverride("pressed", MenuBtnPressed);
-            _menuKeyActions.AddThemeStyleboxOverride("focus", MenuBtnHover);
 
             var popup = _menuKeyActions.GetPopup();
             popup.Clear();
@@ -1036,6 +1059,7 @@ namespace DeadlockPlayground.UI
                 popup.SetItemIcon(popup.GetItemIndex(10), pinIcon);
             }
             popup.AddItem("Toggle Additive Clip Offset Mode", 11);
+            popup.AddItem("Toggle Gizmo Space (Global / Local) [L]", 17);
             popup.AddSeparator();
             popup.AddItem("Set Ease: Linear", 12);
             popup.AddItem("Set Ease: Ease In", 13);
@@ -1079,14 +1103,26 @@ namespace DeadlockPlayground.UI
                 _btnToggleCollapse.Text = "";
                 _btnToggleCollapse.Icon = DockIcons.Load("arrow_up");
             }
-            ApplyDockHeight(HeaderBarHeight);
+            ApplyDockHeight(GetEffectiveCollapsedHeight());
             SaveDockSettings();
             EmitSignal(SignalName.VisibilityToggled, false);
         }
 
+        private float GetEffectiveCollapsedHeight()
+        {
+            float gripH = _resizeGrip != null && GodotObject.IsInstanceValid(_resizeGrip)
+                ? Mathf.Max(8f, _resizeGrip.GetCombinedMinimumSize().Y)
+                : 8f;
+            float headerH = _headerBar != null && GodotObject.IsInstanceValid(_headerBar)
+                ? Mathf.Max(36f, _headerBar.GetCombinedMinimumSize().Y)
+                : 36f;
+            return Mathf.Max(HeaderBarHeight, gripH + headerH);
+        }
+
         private void ApplyDockHeight(float height)
         {
-            float h = Mathf.Max(height, HeaderBarHeight);
+            float minH = GetEffectiveCollapsedHeight();
+            float h = Mathf.Max(height, minH);
 
             // In Godot, for anchors_preset = 12 (bottom-wide):
             // Firmly anchor with EdgeMargin so all borders remain cleanly visible inside the screen.
@@ -1238,7 +1274,7 @@ namespace DeadlockPlayground.UI
                 _currentDockHeight = maxAllowedDockH;
             }
 
-            ApplyDockHeight(_isOpen ? _currentDockHeight : HeaderBarHeight);
+            ApplyDockHeight(_isOpen ? _currentDockHeight : GetEffectiveCollapsedHeight());
         }
 
         public void UpdateFloatingViewportControls()
@@ -1250,7 +1286,7 @@ namespace DeadlockPlayground.UI
             float maxAllowedDockH = Mathf.Clamp(vpHeight * 0.65f, MinDockHeight, MaxDockHeight);
             if (_currentDockHeight > maxAllowedDockH) _currentDockHeight = maxAllowedDockH;
 
-            float dockH = isDockActive ? (_isOpen ? _currentDockHeight : HeaderBarHeight) : 0f;
+            float dockH = isDockActive ? (_isOpen ? _currentDockHeight : GetEffectiveCollapsedHeight()) : 0f;
             float bottom = -(dockH + EdgeMargin + 14f); // 14px clear margin above dock top border
             float minTopSafe = -vpHeight + 54f; // Safe margin below top headers
             float usableHeight = vpHeight - dockH;
@@ -1366,6 +1402,7 @@ namespace DeadlockPlayground.UI
             }
             SkeletonGizmoManager.OnBoneSelected -= OnViewportBoneSelected;
             SkeletonGizmoManager.OnBoneTransformEnded -= OnViewportBoneTransformEnded;
+            GizmoDisplaySettings.OnSettingsChanged -= OnGizmoDisplaySettingsChanged;
             AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
             AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
             AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
@@ -1774,7 +1811,6 @@ namespace DeadlockPlayground.UI
                         Modulate = new Color(0.4f, 0.85f, 1.0f, 0.9f),
                         TooltipText = $"{curve.Modifiers.Count} Modifier(s) on this curve (Right-click to manage)"
                     };
-                    badge.AddThemeFontSizeOverride("font_size", 10);
                     row.AddChild(badge);
                 }
 
@@ -2403,6 +2439,41 @@ namespace DeadlockPlayground.UI
                 case 14: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseOut); break;
                 case 15: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.EaseInOut); break;
                 case 16: _graphEditorCanvas?.SetSelectedEasePreset(GraphEditorCanvas.EasePreset.Constant); break;
+                case 17:
+                    GizmoDisplaySettings.GizmoUseLocalSpace = !GizmoDisplaySettings.GizmoUseLocalSpace;
+                    GizmoDisplaySettings.SaveConfig();
+                    break;
+            }
+        }
+
+        private void OnGizmoDisplaySettingsChanged()
+        {
+            SyncGizmoSpaceButton();
+        }
+
+        private void SyncGizmoSpaceButton()
+        {
+            bool useLocal = GizmoDisplaySettings.GizmoUseLocalSpace;
+            string iconName = useLocal ? "rotate" : "globe";
+            string tip = useLocal
+                ? "Transform Space: Local Bone Axes (Click or press L to switch to Global)"
+                : "Transform Space: Global World Axes (Click or press L to switch to Local)";
+            Color tint = useLocal ? new Color(0.45f, 0.90f, 1.0f) : Colors.White;
+
+            if (_btnGizmoSpace != null && GodotObject.IsInstanceValid(_btnGizmoSpace))
+            {
+                _btnGizmoSpace.SetPressedNoSignal(useLocal);
+                _btnGizmoSpace.Text = useLocal ? "Local" : "Global";
+                _btnGizmoSpace.Modulate = tint;
+                DockIcons.Apply(_btnGizmoSpace, iconName, tip, iconOnly: false);
+            }
+
+            if (_btnBoneGizmoSpace != null && GodotObject.IsInstanceValid(_btnBoneGizmoSpace))
+            {
+                _btnBoneGizmoSpace.SetPressedNoSignal(useLocal);
+                _btnBoneGizmoSpace.Text = useLocal ? "Space: Local" : "Space: Global";
+                _btnBoneGizmoSpace.Modulate = tint;
+                DockIcons.Apply(_btnBoneGizmoSpace, iconName, tip, iconOnly: false);
             }
         }
 

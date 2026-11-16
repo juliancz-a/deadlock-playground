@@ -1,9 +1,10 @@
 using Godot;
 using System;
+using DeadlockPlayground.Theming;
 
 /// <summary>
 /// Production theme helper and styling utility for the Deadlock 3D Playground.
-/// Provides access to the Deadlock dark-green & parchment palette, theme type variations,
+/// Provides access to dynamic ThemeManager tokens, theme type variations,
 /// and automated UI decoration methods.
 /// </summary>
 public static class PlaygroundThemeHelper
@@ -12,39 +13,46 @@ public static class PlaygroundThemeHelper
     public const string FontColusPath = "res://assets/fonts/Colus-Regular.ttf";
     public const string FontDahliaPath = "res://assets/fonts/dahlia-bold.otf";
     public const string FontOrganicPath = "res://assets/fonts/Organic Relief.ttf";
+    public const string FontSupersonicPath = "res://assets/fonts/Supersonic Rocketship.ttf";
 
-    // --- Official Deadlock Palette Constants ---
-    /// <summary> #efdebf - Parchment / Cream highlight (titles, active accents, headers) </summary>
-    public static readonly Color Parchment = new Color(0.937255f, 0.870588f, 0.74902f, 1.0f);
+    // --- Dynamic Palette Accessors (Backed by ThemeManager) ---
+    public static Color Parchment => ThemeManager.GetColor(nameof(ThemePaletteData.AccentPrimary));
+    public static Color SageGreen => ThemeManager.GetColor(nameof(ThemePaletteData.AccentSecondary));
+    public static Color PineGreen => ThemeManager.GetColor(nameof(ThemePaletteData.BorderColor));
+    public static Color DeepTeal => ThemeManager.GetColor(nameof(ThemePaletteData.SurfaceHeader));
+    public static Color DarkCharcoal => ThemeManager.GetColor(nameof(ThemePaletteData.BackgroundSecondary));
 
-    /// <summary> #72947f - Sage Green / Jade accent (sliders, active borders, toggles) </summary>
-    public static readonly Color SageGreen = new Color(0.447059f, 0.580392f, 0.498039f, 1.0f);
-
-    /// <summary> #3f5d4d - Pine / Moss Green (button hover, focused outlines, card borders) </summary>
-    public static readonly Color PineGreen = new Color(0.247059f, 0.364706f, 0.301961f, 1.0f);
-
-    /// <summary> #2f4442 - Deep Teal / Forest (cards, sub-panels, button normal surfaces) </summary>
-    public static readonly Color DeepTeal = new Color(0.184314f, 0.266667f, 0.258824f, 1.0f);
-
-    /// <summary> #222021 - Dark Charcoal Base (sidebar, dialog backdrops, line edits) </summary>
-    public static readonly Color DarkCharcoal = new Color(0.133333f, 0.12549f, 0.129412f, 1.0f);
-
-    // --- Text & Border Helpers ---
-    public static readonly Color TextPrimary = new Color(0.92f, 0.94f, 0.92f, 1.0f);
-    public static readonly Color TextSecondary = new Color(0.72f, 0.78f, 0.75f, 1.0f);
-    public static readonly Color TextMuted = new Color(0.50f, 0.55f, 0.52f, 0.45f);
-    public static readonly Color BorderSubtle = new Color(0.247059f, 0.364706f, 0.301961f, 0.65f);
-    public static readonly Color DividerColor = new Color(0.447059f, 0.580392f, 0.498039f, 0.22f);
+    public static Color TextPrimary => ThemeManager.GetColor(nameof(ThemePaletteData.TextPrimary));
+    public static Color TextSecondary => ThemeManager.GetColor(nameof(ThemePaletteData.TextSecondary));
+    public static Color TextMuted => new Color(TextSecondary.R, TextSecondary.G, TextSecondary.B, 0.55f);
+    public static Color BorderSubtle => new Color(PineGreen.R, PineGreen.G, PineGreen.B, 0.65f);
+    public static Color DividerColor => new Color(SageGreen.R, SageGreen.G, SageGreen.B, 0.25f);
 
     // --- Theme Type Variation Names ---
     public const string VarAccentButton = "AccentButton";
+    public const string VarPrimaryActionButton = "PrimaryActionButton";
+    public const string VarDangerButton = "DangerButton";
+    public const string VarToolbarButton = "ToolbarButton";
+    public const string VarFilterPillButton = "FilterPillButton";
     public const string VarTabButton = "TabButton";
     public const string VarSecondaryButton = "SecondaryButton";
     public const string VarHeaderLabel = "HeaderLabel";
+    public const string VarSubheaderLabel = "SubheaderLabel";
+    public const string VarSectionHeaderLabel = "SectionHeaderLabel";
     public const string VarTitleLabel = "TitleLabel";
+    public const string VarModalTitleLabel = "ModalTitleLabel";
+    public const string VarBodyLabel = "BodyLabel";
     public const string VarMutedLabel = "MutedLabel";
     public const string VarNumericLabel = "NumericLabel";
+    public const string VarNumericSpinBox = "NumericSpinBox";
+    public const string VarNumericLineEdit = "NumericLineEdit";
+    public const string VarBadgeSuccess = "BadgeLabelSuccess";
+    public const string VarBadgeWarning = "BadgeLabelWarning";
+    public const string VarBadgeInfo = "BadgeLabelInfo";
+    public const string VarBadgeDanger = "BadgeLabelDanger";
     public const string VarCardPanel = "CardPanel";
+    public const string VarInspectorSectionPanel = "InspectorSectionPanel";
+    public const string VarModalHeaderPanel = "ModalHeaderPanel";
     public const string VarSubPanel = "SubPanelContainer";
 
     private static Theme _cachedTheme;
@@ -155,6 +163,99 @@ public static class PlaygroundThemeHelper
     }
 
     /// <summary>
+    /// Creates theme-aware Normal, Hover, and Selected StyleBoxFlats for gallery/picker cards.
+    /// </summary>
+    public static (StyleBoxFlat Normal, StyleBoxFlat Hover, StyleBoxFlat Selected) CreateCardStateStyles(int cornerRadius = 8, int padding = 6)
+    {
+        Color bgNormal = ThemeManager.GetColor(nameof(ThemePaletteData.BackgroundSecondary));
+        Color bgHover = ThemeManager.IsLightTheme()
+            ? ThemeManager.GetColor(nameof(ThemePaletteData.SurfaceHeader))
+            : bgNormal.Lightened(0.06f);
+        Color bgSelected = ThemeManager.GetColor(nameof(ThemePaletteData.SurfaceHeader));
+        Color borderNormal = ThemeManager.GetColor(nameof(ThemePaletteData.BorderColor));
+        Color borderAccent = ThemeManager.GetColor(nameof(ThemePaletteData.AccentPrimary));
+
+        StyleBoxFlat Make(Color bg, Color border, int bw) => new StyleBoxFlat
+        {
+            BgColor = bg,
+            BorderColor = border,
+            BorderWidthLeft = bw,
+            BorderWidthRight = bw,
+            BorderWidthTop = bw,
+            BorderWidthBottom = bw,
+            CornerRadiusTopLeft = cornerRadius,
+            CornerRadiusTopRight = cornerRadius,
+            CornerRadiusBottomLeft = cornerRadius,
+            CornerRadiusBottomRight = cornerRadius,
+            ContentMarginLeft = padding,
+            ContentMarginRight = padding,
+            ContentMarginTop = padding,
+            ContentMarginBottom = padding
+        };
+
+        return (
+            Make(bgNormal, new Color(borderNormal.R, borderNormal.G, borderNormal.B, 0.85f), 1),
+            Make(bgHover, borderAccent, 1),
+            Make(bgSelected, borderAccent, 2)
+        );
+    }
+
+    /// <summary>
+    /// Styles a card badge pill (<see cref="PanelContainer"/> + <see cref="Label"/>) so it remains
+    /// crisp and high-contrast in both Light and Dark/Night themes.
+    /// </summary>
+    public static void ApplyCardBadgeStyle(PanelContainer badgePanel, Label badgeLabel, Color accentColor)
+    {
+        bool isLight = ThemeManager.IsLightTheme();
+        Color pillBg;
+        Color borderCol;
+        Color textCol;
+
+        if (isLight)
+        {
+            Color lightBase = new Color(0.95f, 0.96f, 0.98f, 0.95f);
+            pillBg = lightBase.Lerp(new Color(accentColor.R, accentColor.G, accentColor.B, 0.95f), 0.16f);
+            float lum = accentColor.Luminance;
+            float darken = lum > 0.55f ? 0.42f : (lum > 0.35f ? 0.55f : 0.72f);
+            textCol = new Color(accentColor.R * darken, accentColor.G * darken, accentColor.B * darken, 1.0f);
+            borderCol = new Color(textCol.R, textCol.G, textCol.B, 0.35f);
+        }
+        else
+        {
+            pillBg = new Color(0.05f, 0.06f, 0.08f, 0.85f);
+            borderCol = new Color(accentColor.R, accentColor.G, accentColor.B, 0.45f);
+            textCol = accentColor;
+        }
+
+        if (badgePanel != null)
+        {
+            badgePanel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+            {
+                BgColor = pillBg,
+                CornerRadiusTopLeft = 4,
+                CornerRadiusTopRight = 4,
+                CornerRadiusBottomLeft = 4,
+                CornerRadiusBottomRight = 4,
+                BorderWidthLeft = 1,
+                BorderWidthRight = 1,
+                BorderWidthTop = 1,
+                BorderWidthBottom = 1,
+                BorderColor = borderCol,
+                ContentMarginLeft = 6,
+                ContentMarginRight = 6,
+                ContentMarginTop = 2,
+                ContentMarginBottom = 2
+            });
+        }
+
+        if (badgeLabel != null)
+        {
+            badgeLabel.Modulate = Colors.White;
+            badgeLabel.AddThemeColorOverride("font_color", textCol);
+        }
+    }
+
+    /// <summary>
     /// Styles a label with Colus header typography in Deadlock Parchment.
     /// </summary>
     public static void MakeHeaderLabel(Label label)
@@ -232,10 +333,18 @@ public static class PlaygroundThemeHelper
     {
         string name = control.Name.ToString();
 
-        // 1. Buttons (MUST NOT match CheckBox, CheckButton, or OptionButton)
+        // 1. Buttons (MUST NOT match CheckBox, CheckButton, or OptionButton for variation styling;
+        //    keep Button AutowrapMode=Off so single-word buttons and HFlowContainer/HBoxContainer buttons never collapse or break mid-word.
+        //    Only wrap CheckBox when inside a VBoxContainer so HBoxContainer checkboxes like BonesTab CheckLines never hide their label.)
+        if (control is CheckBox chk)
+        {
+            if (chk.AutowrapMode == TextServer.AutowrapMode.Off && chk.GetParent() is VBoxContainer)
+                chk.AutowrapMode = TextServer.AutowrapMode.Word;
+        }
+
         if (control is Button btn && !(control is CheckBox) && !(control is CheckButton) && !(control is OptionButton))
         {
-            // If already explicitly set, skip
+            // If already explicitly set, skip variation auto-assignment
             if (!string.IsNullOrEmpty(btn.ThemeTypeVariation))
                 return;
 

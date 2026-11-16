@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Painter;
 using DeadlockPlayground.Tools;
 using DeadlockPlayground.UI;
@@ -159,10 +160,21 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
     // State
     private MeshPainter3D _painter;
+    private SkinLayerManager _subscribedLayerManager;
     private DecalStamper _decalStamper;
     private TextProjector _textProjector;
     private BrushToolMode _currentTool = BrushToolMode.Paint;
+    private MaterialTextureChannel _activeChannel = MaterialTextureChannel.Color;
+    private readonly Dictionary<MaterialTextureChannel, Color> _perChannelBrushColors = new();
     public bool IsPinned { get; set; } = true;
+
+    // Non-Color channel adaptation bar inside BrushOptions
+    private VBoxContainer _channelBrushBar;
+    private Label _lblChannelModeBanner;
+    private HBoxContainer _channelGrayRow;
+    private HSlider _sliderChannelGray;
+    private Label _lblChannelGrayValue;
+    private HBoxContainer _channelPresetsRow;
 
     private bool _isDragging = false;
     private Vector2 _dragOffset = Vector2.Zero;
@@ -182,8 +194,10 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         var keymapHint = GetNodeOrNull<Control>("%KeymapHintContainer") ?? FindChild("KeymapHintContainer", true, false) as Control;
         if (keymapHint != null) keymapHint.MouseFilter = MouseFilterEnum.Ignore;
 
-        CreateButtonStyles();
         LinkControls();
+        BuildChannelAdaptationBar();
+        NormalizeFlyoutLabelSizes();
+        CreateButtonStyles();
         if (_flyoutPanel != null) _flyoutPanel.MouseFilter = MouseFilterEnum.Stop;
         ConnectEvents();
         
@@ -196,6 +210,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         ApplyIdleModulates();
         KeybindsManager.OnKeybindsChanged += UpdateTooltipsAndKeymaps;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
         SelectTool(BrushToolMode.Paint, forceFlyoutOpen: true);
 
         Resized += () => CallDeferred(nameof(ClampPositionToBounds));
@@ -227,43 +242,94 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_btnToggleFlyout != null) _btnToggleFlyout.Modulate = idleCol;
     }
 
+    private void NormalizeFlyoutLabelSizes()
+    {
+        var flyout = _flyoutPanel ?? FindChild("FlyoutPanel", true, false) as Control;
+        if (flyout == null) return;
+        ApplyCompactLabelsRecursive(flyout);
+    }
+
+    private static void ApplyCompactLabelsRecursive(Node node)
+    {
+        foreach (Node child in node.GetChildren())
+        {
+            if (child is Label lbl)
+            {
+                string name = lbl.Name.ToString();
+                if (name == "LblTitle" || name.Contains("Value") || name.StartsWith("Val"))
+                {
+                    lbl.ThemeTypeVariation = "CompactLabel";
+                }
+            }
+            ApplyCompactLabelsRecursive(child);
+        }
+    }
+
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
+    {
+        CreateButtonStyles();
+        UpdatePinVisuals();
+        ApplyIdleModulates();
+    }
+
     private void UpdatePinVisuals()
     {
         if (_btnPin == null) return;
-        _btnPin.Text = IsPinned ? "PIN" : "UNPIN";
-        _btnPin.Modulate = IsPinned ? new Color(1.0f, 0.85f, 0.4f, 1.0f) : new Color(0.6f, 0.6f, 0.6f, 1.0f);
+        _btnPin.Text = "";
+        _btnPin.ExpandIcon = true;
+        _btnPin.IconAlignment = HorizontalAlignment.Center;
+        _btnPin.Icon = GD.Load<Texture2D>(IsPinned
+            ? "res://assets/at-icons/thumbtack.svg"
+            : "res://assets/at-icons/thumbtack_diagonal.svg");
+        _btnPin.Modulate = IsPinned
+            ? DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary))
+            : DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.TextSecondary));
         _btnPin.TooltipText = IsPinned ? "Panel Pinned (Click to Unpin)" : "Panel Unpinned (Click to Pin)";
     }
 
     private void CreateButtonStyles()
     {
-        _activeButtonStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.2f, 0.22f, 0.28f, 1.0f),
-            BorderColor = new Color(0.95f, 0.8f, 0.4f, 1.0f),
-            BorderWidthLeft = 2,
-            BorderWidthTop = 2,
-            BorderWidthRight = 2,
-            BorderWidthBottom = 2,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomRight = 4,
-            CornerRadiusBottomLeft = 4
-        };
+        Color bgNormal = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.BackgroundPrimary));
+        Color bgActive = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.SurfaceHeader));
+        Color borderNormal = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.BorderColor));
+        Color borderActive = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary));
 
-        _normalButtonStyle = new StyleBoxFlat
+        _activeButtonStyle ??= new StyleBoxFlat();
+        _activeButtonStyle.BgColor = bgActive;
+        _activeButtonStyle.BorderColor = borderActive;
+        _activeButtonStyle.BorderWidthLeft = 2;
+        _activeButtonStyle.BorderWidthTop = 2;
+        _activeButtonStyle.BorderWidthRight = 2;
+        _activeButtonStyle.BorderWidthBottom = 2;
+        _activeButtonStyle.CornerRadiusTopLeft = 4;
+        _activeButtonStyle.CornerRadiusTopRight = 4;
+        _activeButtonStyle.CornerRadiusBottomRight = 4;
+        _activeButtonStyle.CornerRadiusBottomLeft = 4;
+        _activeButtonStyle.ContentMarginLeft = 4;
+        _activeButtonStyle.ContentMarginTop = 4;
+        _activeButtonStyle.ContentMarginRight = 4;
+        _activeButtonStyle.ContentMarginBottom = 4;
+
+        _normalButtonStyle ??= new StyleBoxFlat();
+        _normalButtonStyle.BgColor = bgNormal;
+        _normalButtonStyle.BorderColor = new Color(borderNormal.R, borderNormal.G, borderNormal.B, 0.7f);
+        _normalButtonStyle.BorderWidthLeft = 1;
+        _normalButtonStyle.BorderWidthTop = 1;
+        _normalButtonStyle.BorderWidthRight = 1;
+        _normalButtonStyle.BorderWidthBottom = 1;
+        _normalButtonStyle.CornerRadiusTopLeft = 4;
+        _normalButtonStyle.CornerRadiusTopRight = 4;
+        _normalButtonStyle.CornerRadiusBottomRight = 4;
+        _normalButtonStyle.CornerRadiusBottomLeft = 4;
+        _normalButtonStyle.ContentMarginLeft = 4;
+        _normalButtonStyle.ContentMarginTop = 4;
+        _normalButtonStyle.ContentMarginRight = 4;
+        _normalButtonStyle.ContentMarginBottom = 4;
+
+        foreach (var iconBtn in new[] { _btnMirror, _btnUndo, _btnRedo, _btnToggleFlyout, _btnPin })
         {
-            BgColor = new Color(0.12f, 0.13f, 0.16f, 0.9f),
-            BorderColor = new Color(0.28f, 0.3f, 0.38f, 0.6f),
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomRight = 4,
-            CornerRadiusBottomLeft = 4
-        };
+            if (iconBtn != null) iconBtn.ThemeTypeVariation = "IconButton";
+        }
     }
 
     public void Setup(MeshPainter3D painter, DecalStamper decalStamper, TextProjector textProjector = null)
@@ -283,6 +349,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
             }
         }
 
+        if (_subscribedLayerManager != null && GodotObject.IsInstanceValid(_subscribedLayerManager))
+        {
+            _subscribedLayerManager.ActiveChannelChanged -= OnActiveTextureChannelChanged;
+            _subscribedLayerManager = null;
+        }
+
         _painter = painter;
         _decalStamper = decalStamper;
         _textProjector = textProjector;
@@ -290,6 +362,12 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         if (_painter != null)
         {
             _painter.ColorSampled += OnColorSampled;
+            if (_painter.LayerManager != null && GodotObject.IsInstanceValid(_painter.LayerManager))
+            {
+                _subscribedLayerManager = _painter.LayerManager;
+                _subscribedLayerManager.ActiveChannelChanged += OnActiveTextureChannelChanged;
+                _activeChannel = _subscribedLayerManager.ActiveTextureChannel;
+            }
             if (_painter.MeshHierarchy != null)
             {
                 _painter.MeshHierarchy.TargetMeshChanged += OnPainterTargetMeshChanged;
@@ -306,6 +384,7 @@ public partial class FloatingBrushPaletteUI : PanelContainer
                 _painter.ShapeTool.ShapeCancelled += OnShapeToolCancelled;
             }
             SyncFromPainter();
+            RefreshChannelBrushUI();
         }
 
         if (_textProjector != null)
@@ -384,7 +463,8 @@ public partial class FloatingBrushPaletteUI : PanelContainer
         // Toolbar strip & Flyout container
         _toolStripPanel = ResolveNode<Control>("ToolStripPanel", "ToolStripPanel")
                        ?? FindChild("ToolStripPanel", true, false) as Control;
-        _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel");
+        _flyoutPanel = ResolveNode<Control>("FlyoutPanel", "FlyoutPanel")
+                    ?? FindChild("FlyoutPanel", true, false) as Control;
         _chkFrontFacesOnly = ResolveNode<CheckBox>("ChkFrontFacesOnly", "ChkFrontFacesOnly");
         if (_flyoutPanel != null)
         {
@@ -1595,10 +1675,13 @@ public partial class FloatingBrushPaletteUI : PanelContainer
 
         if (_lblFlyoutTitle != null)
         {
+            string paintTitle = _activeChannel == MaterialTextureChannel.Color
+                ? "BRUSH OPTIONS"
+                : $"{MaterialChannelSet.GetDisplayLabel(_activeChannel).ToUpperInvariant()} BRUSH";
             _lblFlyoutTitle.Text = mode switch
             {
                 BrushToolMode.SelectSubmesh => "SUBMESH SELECTOR",
-                BrushToolMode.Paint => "BRUSH OPTIONS",
+                BrushToolMode.Paint => paintTitle,
                 BrushToolMode.Erase => "ERASER OPTIONS",
                 BrushToolMode.Clone => "CLONE STAMP",
                 BrushToolMode.Eyedropper => "EYEDROPPER",
@@ -1659,16 +1742,247 @@ public partial class FloatingBrushPaletteUI : PanelContainer
     {
         if (_painter != null) _painter.BrushColor = color;
         if (_btnColor != null && _btnColor.Color != color) _btnColor.Color = color;
+        _perChannelBrushColors[_activeChannel] = color;
+
+        if (_sliderChannelGray != null && IsScalarGrayscaleChannel(_activeChannel))
+        {
+            float lum = Mathf.Clamp(0.299f * color.R + 0.587f * color.G + 0.114f * color.B, 0.0f, 1.0f);
+            _sliderChannelGray.SetValueNoSignal(lum);
+            if (_lblChannelGrayValue != null)
+            {
+                _lblChannelGrayValue.Text = $"{Mathf.RoundToInt(lum * 100)}%";
+            }
+        }
 
         var quickPalette = GetNodeOrNull<QuickColorPaletteUI>("../QuickColorPalette")
                         ?? GetTree()?.Root?.FindChild("QuickColorPalette", true, false) as QuickColorPaletteUI;
-        if (commitToRecents)
+        bool shouldCommit = commitToRecents && !IsScalarGrayscaleChannel(_activeChannel) && _activeChannel != MaterialTextureChannel.Normal;
+        if (shouldCommit)
         {
             quickPalette?.AddRecentColor(color);
         }
         else
         {
             quickPalette?.SetActiveColor(color, commitToRecents: false);
+        }
+    }
+
+    private static bool IsScalarGrayscaleChannel(MaterialTextureChannel ch)
+    {
+        return ch is MaterialTextureChannel.AmbientOcclusion
+            or MaterialTextureChannel.Roughness
+            or MaterialTextureChannel.Metalness
+            or MaterialTextureChannel.TintMask
+            or MaterialTextureChannel.RimMask
+            or MaterialTextureChannel.OutlineMask;
+    }
+
+    private static Color GetDefaultChannelBrushColor(MaterialTextureChannel ch)
+    {
+        return ch switch
+        {
+            MaterialTextureChannel.AmbientOcclusion => new Color(0.25f, 0.25f, 0.25f, 1.0f),
+            MaterialTextureChannel.Normal => new Color(0.502f, 0.502f, 1.0f, 1.0f),
+            MaterialTextureChannel.Roughness => new Color(0.5f, 0.5f, 0.5f, 1.0f),
+            MaterialTextureChannel.Metalness => new Color(1.0f, 1.0f, 1.0f, 1.0f),
+            MaterialTextureChannel.Shadow => new Color(0.75f, 0.78f, 0.88f, 1.0f),
+            MaterialTextureChannel.SelfIllum => new Color(1.0f, 0.85f, 0.35f, 1.0f),
+            MaterialTextureChannel.TintMask or MaterialTextureChannel.RimMask or MaterialTextureChannel.OutlineMask => Colors.White,
+            _ => new Color(0.85f, 0.15f, 0.20f, 1.0f)
+        };
+    }
+
+    private void OnActiveTextureChannelChanged(MaterialTextureChannel newChannel)
+    {
+        if (_activeChannel == newChannel)
+        {
+            RefreshChannelBrushUI();
+            return;
+        }
+
+        if (_painter != null)
+        {
+            _perChannelBrushColors[_activeChannel] = _painter.BrushColor;
+        }
+
+        _activeChannel = newChannel;
+
+        if (_painter != null)
+        {
+            if (!_perChannelBrushColors.TryGetValue(newChannel, out Color nextColor))
+            {
+                nextColor = GetDefaultChannelBrushColor(newChannel);
+                _perChannelBrushColors[newChannel] = nextColor;
+            }
+            SetUniversalColor(nextColor, commitToRecents: false);
+        }
+
+        RefreshChannelBrushUI();
+        UpdateFlyoutSections(_currentTool);
+    }
+
+    private void BuildChannelAdaptationBar()
+    {
+        if (_brushOptions == null || _channelBrushBar != null) return;
+
+        _channelBrushBar = new VBoxContainer
+        {
+            Name = "ChannelBrushBar",
+            Visible = false
+        };
+        _channelBrushBar.AddThemeConstantOverride("separation", 4);
+
+        _lblChannelModeBanner = new Label
+        {
+            Text = "CHANNEL: COLOR",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart
+        };
+        _lblChannelModeBanner.AddThemeFontSizeOverride("font_size", 11);
+        _lblChannelModeBanner.AddThemeColorOverride("font_color",
+            DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary)));
+        _channelBrushBar.AddChild(_lblChannelModeBanner);
+
+        _channelGrayRow = new HBoxContainer { Visible = false };
+        _channelGrayRow.AddThemeConstantOverride("separation", 6);
+        var lblGrayTitle = new Label
+        {
+            Text = "Value:",
+            CustomMinimumSize = new Vector2(65, 0)
+        };
+        _sliderChannelGray = new HSlider
+        {
+            MinValue = 0.0,
+            MaxValue = 1.0,
+            Step = 0.01,
+            Value = 0.5,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill
+        };
+        _lblChannelGrayValue = new Label
+        {
+            Text = "50%",
+            CustomMinimumSize = new Vector2(40, 0),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            ThemeTypeVariation = "CompactLabel"
+        };
+        _sliderChannelGray.ValueChanged += (val) =>
+        {
+            float v = (float)val;
+            if (_lblChannelGrayValue != null)
+            {
+                _lblChannelGrayValue.Text = $"{Mathf.RoundToInt(v * 100)}%";
+            }
+            SetUniversalColor(new Color(v, v, v, 1.0f), commitToRecents: false);
+        };
+        _channelGrayRow.AddChild(lblGrayTitle);
+        _channelGrayRow.AddChild(_sliderChannelGray);
+        _channelGrayRow.AddChild(_lblChannelGrayValue);
+        _channelBrushBar.AddChild(_channelGrayRow);
+
+        _channelPresetsRow = new HBoxContainer();
+        _channelPresetsRow.AddThemeConstantOverride("separation", 4);
+        _channelBrushBar.AddChild(_channelPresetsRow);
+
+        var sep = new HSeparator();
+        _channelBrushBar.AddChild(sep);
+
+        _brushOptions.AddChild(_channelBrushBar);
+        _brushOptions.MoveChild(_channelBrushBar, 0);
+    }
+
+    private void RefreshChannelBrushUI()
+    {
+        if (_channelBrushBar == null) return;
+
+        bool isColor = _activeChannel == MaterialTextureChannel.Color;
+        _channelBrushBar.Visible = !isColor;
+
+        if (_btnColor != null)
+        {
+            _btnColor.TooltipText = _activeChannel switch
+            {
+                MaterialTextureChannel.AmbientOcclusion => "Active AO Value (Grayscale 0%=Occluded, 100%=Lit)",
+                MaterialTextureChannel.Normal => "Active Tangent Normal RGB (#8080FF = Flat)",
+                MaterialTextureChannel.Roughness => "Active Roughness (0%=Smooth, 100%=Matte)",
+                MaterialTextureChannel.Metalness => "Active Metalness (0%=Dielectric, 100%=Metal)",
+                MaterialTextureChannel.Shadow => "Active Shadow Tint Color",
+                MaterialTextureChannel.SelfIllum => "Active Self-Illumination Glow Color",
+                _ when IsScalarGrayscaleChannel(_activeChannel) => $"Active {MaterialChannelSet.GetDisplayLabel(_activeChannel)} Mask Value",
+                _ => "Active Paint Color"
+            };
+        }
+
+        if (isColor) return;
+
+        bool isGray = IsScalarGrayscaleChannel(_activeChannel);
+        if (_lblChannelModeBanner != null)
+        {
+            _lblChannelModeBanner.Text = _activeChannel switch
+            {
+                MaterialTextureChannel.AmbientOcclusion => "CHANNEL: AO (GRAYSCALE OCCLUSION)",
+                MaterialTextureChannel.Normal => "CHANNEL: TANGENT NORMAL (RGB)",
+                MaterialTextureChannel.Roughness => "CHANNEL: ROUGHNESS (0=SMOOTH · 1=MATTE)",
+                MaterialTextureChannel.Metalness => "CHANNEL: METALNESS (0=NON-METAL · 1=METAL)",
+                MaterialTextureChannel.Shadow => "CHANNEL: SHADOW / NPR TRANSMISSIVE",
+                MaterialTextureChannel.SelfIllum => "CHANNEL: SELF-ILLUMINATION (EMISSIVE)",
+                _ => $"CHANNEL: {MaterialChannelSet.GetDisplayLabel(_activeChannel).ToUpperInvariant()}"
+            };
+        }
+
+        if (_channelGrayRow != null)
+        {
+            _channelGrayRow.Visible = isGray;
+            if (isGray && _sliderChannelGray != null && _painter != null)
+            {
+                Color c = _painter.BrushColor;
+                float lum = Mathf.Clamp(0.299f * c.R + 0.587f * c.G + 0.114f * c.B, 0.0f, 1.0f);
+                _sliderChannelGray.SetValueNoSignal(lum);
+                if (_lblChannelGrayValue != null) _lblChannelGrayValue.Text = $"{Mathf.RoundToInt(lum * 100)}%";
+            }
+        }
+
+        if (_channelPresetsRow != null)
+        {
+            foreach (Node child in _channelPresetsRow.GetChildren())
+            {
+                _channelPresetsRow.RemoveChild(child);
+                child.QueueFree();
+            }
+
+            void AddPreset(string label, Color col, string tip)
+            {
+                var btn = new Button
+                {
+                    Text = label,
+                    CustomMinimumSize = new Vector2(0, 22),
+                    SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                    TooltipText = tip
+                };
+                btn.AddThemeFontSizeOverride("font_size", 10);
+                btn.Pressed += () => SetUniversalColor(col, commitToRecents: false);
+                _channelPresetsRow.AddChild(btn);
+            }
+
+            if (isGray)
+            {
+                AddPreset("0%", Colors.Black, "0% (Black / Full Occlusion / Smooth / Off)");
+                AddPreset("25%", new Color(0.25f, 0.25f, 0.25f, 1.0f), "25% Grayscale");
+                AddPreset("50%", new Color(0.50f, 0.50f, 0.50f, 1.0f), "50% Mid Gray");
+                AddPreset("100%", Colors.White, "100% (White / Lit / Matte / On)");
+            }
+            else if (_activeChannel == MaterialTextureChannel.Normal)
+            {
+                AddPreset("Flat", new Color(0.502f, 0.502f, 1.0f, 1.0f), "Flat Neutral Tangent Normal (#8080FF)");
+                AddPreset("+X", new Color(0.80f, 0.502f, 0.90f, 1.0f), "Tilt Right (+X)");
+                AddPreset("-X", new Color(0.20f, 0.502f, 0.90f, 1.0f), "Tilt Left (-X)");
+                AddPreset("+Y", new Color(0.502f, 0.80f, 0.90f, 1.0f), "Tilt Up (+Y)");
+            }
+            else
+            {
+                AddPreset("White", Colors.White, "White (Neutral / Full Intensity)");
+                AddPreset("Cool", new Color(0.32f, 0.36f, 0.54f, 1.0f), "Cool Shadow Tint");
+                AddPreset("Warm", new Color(0.85f, 0.48f, 0.35f, 1.0f), "Warm Subsurface Tint");
+                AddPreset("Black", Colors.Black, "Black (Off)");
+            }
         }
     }
 
@@ -1797,6 +2111,21 @@ public void UpdateTooltipsAndKeymaps()
         UpdateSelectTargetLabel();
         UpdateUndoRedoState(_painter?.LayerManager?.CanUndo ?? false, _painter?.LayerManager?.CanRedo ?? false);
         UpdateCloneUI();
+        if (_painter?.LayerManager != null)
+        {
+            if (_subscribedLayerManager != _painter.LayerManager && GodotObject.IsInstanceValid(_painter.LayerManager))
+            {
+                if (_subscribedLayerManager != null && GodotObject.IsInstanceValid(_subscribedLayerManager))
+                {
+                    _subscribedLayerManager.ActiveChannelChanged -= OnActiveTextureChannelChanged;
+                }
+                _subscribedLayerManager = _painter.LayerManager;
+                _subscribedLayerManager.ActiveChannelChanged += OnActiveTextureChannelChanged;
+            }
+            _activeChannel = _painter.LayerManager.ActiveTextureChannel;
+        }
+        RefreshChannelBrushUI();
+        UpdateFlyoutSections(_currentTool);
     }
 
     public void UpdateCloneUI()
@@ -2037,6 +2366,7 @@ public void UpdateTooltipsAndKeymaps()
     public override void _ExitTree()
     {
         KeybindsManager.OnKeybindsChanged -= UpdateTooltipsAndKeymaps;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
         if (_painter != null && GodotObject.IsInstanceValid(_painter))
         {
             _painter.ColorSampled -= OnColorSampled;

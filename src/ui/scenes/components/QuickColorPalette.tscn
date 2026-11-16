@@ -92,7 +92,7 @@ corner_radius_bottom_left = 4
 [node name="QuickColorPalette" type="PanelContainer" unique_id=1984729103 node_paths=PackedStringArray("_swatchContainer", "_btnSwatch0", "_btnSwatch1", "_btnSwatch2", "_btnSwatch3", "_btnSwatch4", "_btnExpand", "_popupPanel", "_lblTitle", "_btnClosePopup", "_recentGrid", "_btnPinCurrent", "_favoritesGrid")]
 z_index = 15
 custom_minimum_size = Vector2(164, 32)
-theme_override_styles/panel = SubResource("StyleBoxFlat_bar_panel")
+theme_type_variation = &"CardPanel"
 script = ExtResource("1_palette_script")
 _swatchContainer = NodePath("SwatchContainer")
 _btnSwatch0 = NodePath("SwatchContainer/Swatch0")
@@ -175,7 +175,6 @@ tooltip_text = "Color History & Favorites"
 focus_mode = 0
 mouse_default_cursor_shape = 2
 theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 12
 theme_override_styles/normal = SubResource("StyleBoxFlat_expand_normal")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_expand_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_expand_hover")
@@ -187,7 +186,7 @@ top_level = true
 z_index = 25
 custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_popup_panel")
+theme_type_variation = &"CardPanel"
 
 [node name="VBox" type="VBoxContainer" parent="ColorPalettePopup" unique_id=1498102309]
 layout_mode = 2
@@ -201,7 +200,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.75, 0.8, 0.9, 0.95)
 theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 10
 text = "COLOR PALETTE"
 
 [node name="BtnClose" type="Button" parent="ColorPalettePopup/VBox/Header" unique_id=1498102312]
@@ -209,13 +207,11 @@ custom_minimum_size = Vector2(18, 18)
 layout_mode = 2
 focus_mode = 0
 mouse_default_cursor_shape = 2
-theme_override_font_sizes/font_size = 9
-text = "✕"
+text = "X"
 
 [node name="LblRecent" type="Label" parent="ColorPalettePopup/VBox" unique_id=1498102313]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.6, 0.7, 0.8)
-theme_override_font_sizes/font_size = 12
 text = "Recent Swatches"
 
 [node name="RecentGrid" type="GridContainer" parent="ColorPalettePopup/VBox" unique_id=1498102314]
@@ -234,7 +230,6 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.55, 0.6, 0.7, 0.8)
-theme_override_font_sizes/font_size = 12
 text = "Pinned Favorites"
 
 [node name="BtnPin" type="Button" parent="ColorPalettePopup/VBox/FavoritesHeader" unique_id=1498102318]
@@ -243,7 +238,6 @@ layout_mode = 2
 tooltip_text = "Pin current active color to favorites"
 focus_mode = 0
 mouse_default_cursor_shape = 2
-theme_override_font_sizes/font_size = 9
 theme_override_styles/normal = SubResource("StyleBoxFlat_pin_btn")
 text = "+ Pin"
 

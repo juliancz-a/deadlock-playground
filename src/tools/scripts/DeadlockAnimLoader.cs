@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
 using ValveResourceFormat.ResourceTypes;
@@ -45,7 +45,7 @@ public static class DeadlockAnimLoader
         public bool IsCompatible { get; set; } = true;
         public string IncompatibilityReason { get; set; } = null;
         public string VpkClipPath { get; set; } = string.Empty;
-        public ValveResourceFormat.ResourceTypes.ModelAnimation.Animation VrfAnimation { get; set; }
+        public ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase VrfAnimation { get; set; }
     }
 
     private static readonly Dictionary<int, Dictionary<string, PoseData>> _heroPosesCache = new();
@@ -76,7 +76,7 @@ public static class DeadlockAnimLoader
         }
 
         // 1. Gather all animations (embedded + referenced anim groups + external weapon/included clips)
-        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> allAnimations;
+        List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase> allAnimations;
         try
         {
             allAnimations = vrfModel.GetAllAnimations(fileLoader).ToList();
@@ -84,7 +84,7 @@ public static class DeadlockAnimLoader
         catch (Exception ex)
         {
             GD.PrintErr($"[AnimLoader] Error retrieving model animations: {ex.Message}");
-            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>().ToList();
+            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>().ToList();
         }
 
         // Also check any external referenced anim groups not resolved yet
@@ -159,17 +159,22 @@ public static class DeadlockAnimLoader
         {
             try
             {
-                frame.ClearToIdentity();
+                if (anim.IsAdditive)
+                {
+                    frame.ClearToIdentity();
+                }
+                else
+                {
+                    frame.Clear(vrfSkeleton);
+                }
                 frame.FrameIndex = 0;
                 anim.DecodeFrame(frame);
 
                 string animName = anim.Name;
                 string cleanName = SanitizePoseName(animName);
 
-                bool isAdditive = anim.IsAdditive ||
-                                  IsAdditiveOrRecoilSequence(animName) ||
-                                  IsAdditiveOrRecoilSequence(cleanName) ||
-                                  IsAdditiveDeltaFrame(frame, anim.IsAdditive, animName, vrfSkeleton);
+                // Rule D.1: VRF IsAdditive binary metadata is the single source of truth.
+                bool isAdditive = anim.IsAdditive;
 
                 var godotAnim = new Godot.Animation
                 {
@@ -474,31 +479,14 @@ public static class DeadlockAnimLoader
     }
 
     /// <summary>
-    /// Accurately detects whether an animation sequence is an additive delta layer.
-    /// Checks Source 2 metadata, semantic category, and authored delta naming patterns.
+    /// Detects whether an animation sequence is an additive delta layer.
+    /// Strictly trusts Source 2 VRF binary metadata (<see cref="AnimationBase.IsAdditive"/>) — never substring guesses.
     /// </summary>
     public static bool IsDeltaSequence(AnimSequenceInfo info, Skeleton vrfSkeleton = null)
     {
         if (info == null) return false;
-        if (info.Category == "Idles & Stances" || info.Category == "Idle") return false;
-        if (info.Category == "Locomotion") return false;
-        if (info.VrfAnimation != null && info.VrfAnimation.IsAdditive) return true;
-        if (info.IsAdditive) return true;
-
-        string name = info.CleanName.ToLowerInvariant();
-        if (name.StartsWith("item_")) return false; // Item carriage animations are full locomotion/idles
-        if (info.Category == "Additive Layers") return true;
-
-        if (name.Contains("_add") || name.Contains("_delta") || name.Contains("delta_") ||
-            name.Contains("aim") || name.Contains("flinch") || name.Contains("recoil") ||
-            name.Contains("lean") || name.Contains("swing") || name.Contains("impact") ||
-            name.StartsWith("custom01_slide") ||
-            name.Contains("fire_l") || name.Contains("fire_r"))
-        {
-            return true;
-        }
-
-        return false;
+        if (info.VrfAnimation != null) return info.VrfAnimation.IsAdditive;
+        return info.IsAdditive;
     }
 
     /// <summary>
@@ -560,6 +548,7 @@ public static class DeadlockAnimLoader
 
     public static int GetCategoryPriority(string category) => category switch
     {
+        "Modified" => -1,
         "Remapped" => 0,
         "Exported" => 0,
         "Idles & Stances" or "Idle" => 1,
@@ -582,7 +571,7 @@ public static class DeadlockAnimLoader
         var result = new List<AnimSequenceInfo>();
         if (vrfModel == null || fileLoader == null) return result;
 
-        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> allAnimations;
+        List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase> allAnimations;
         try
         {
             allAnimations = vrfModel.GetAllAnimations(fileLoader).ToList();
@@ -590,7 +579,7 @@ public static class DeadlockAnimLoader
         catch (Exception ex)
         {
             GD.PrintErr($"[AnimLoader] Error retrieving model animations: {ex.Message}");
-            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>().ToList();
+            allAnimations = vrfModel.GetEmbeddedAnimations().Cast<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>().ToList();
         }
 
         // Secondary scan: resolve referenced animation groups (.vagrp_c) not loaded yet
@@ -955,7 +944,7 @@ public static class DeadlockAnimLoader
             var existing = animLibrary.GetAnimation(registerName);
             if (existing != null && existing.HasMeta("decoded_by_anim_loader"))
             {
-                bool isStaleVersion = !existing.HasMeta("anim_loader_version") || existing.GetMeta("anim_loader_version").AsInt32() < 5;
+                bool isStaleVersion = !existing.HasMeta("anim_loader_version") || existing.GetMeta("anim_loader_version").AsInt32() < 8;
                 bool isMismatchedInPlace = existing.HasMeta("in_place") && existing.GetMeta("in_place").AsBool() != inPlace;
                 bool hasBrokenPrefix = false;
                 for (int t = 0; t < existing.GetTrackCount(); t++)
@@ -1001,11 +990,12 @@ public static class DeadlockAnimLoader
 
         string skeletonNodePath = GetSkeletonTrackPathPrefix(animPlayer, skeleton);
 
-        bool isAdditive = info.VrfAnimation.IsAdditive || IsDeltaSequence(info, vrfSkeleton);
+        // Rule D.1: VRF IsAdditive binary metadata is the single source of truth.
+        bool isAdditive = info.VrfAnimation.IsAdditive;
         info.IsAdditive = isAdditive;
         godotAnim.SetMeta("is_additive", isAdditive);
         godotAnim.SetMeta("decoded_by_anim_loader", true);
-        godotAnim.SetMeta("anim_loader_version", 5);
+        godotAnim.SetMeta("anim_loader_version", 8);
         godotAnim.SetMeta("in_place", inPlace);
 
         var boneTrackMap = new Dictionary<int, (int PosTrack, int RotTrack)>();
@@ -1071,7 +1061,7 @@ public static class DeadlockAnimLoader
         Skeleton secondarySkel = null;
         SkeletonRetargeter retargeter = null;
 
-        if (!isAdditive && info.VrfAnimation is ValveResourceFormat.ResourceTypes.ModelAnimation.ClipAnimation ca &&
+        if (info.VrfAnimation is ValveResourceFormat.ResourceTypes.ModelAnimation.ClipAnimation ca &&
             !string.IsNullOrEmpty(ca.Clip.SkeletonName) && fileLoader != null)
         {
             string secSkelName = ca.Clip.SkeletonName;
@@ -1100,6 +1090,7 @@ public static class DeadlockAnimLoader
         System.Numerics.Matrix4x4[] modelWorld = null;
         System.Numerics.Matrix4x4[] invWorld = null;
         int[] parentIndices = null;
+        var prevRotByBone = new Dictionary<int, Godot.Quaternion>();
 
         if (requiresRetargeting)
         {
@@ -1118,16 +1109,32 @@ public static class DeadlockAnimLoader
             frame = new Frame(vrfSkeleton, vrfModel.FlexControllers);
         }
 
+        bool isMaskedPartialSequence = false;
+        bool pelvisIsDelta = false;
+
         for (int f = 0; f < totalFrames; f++)
         {
-            float time = totalFrames > 1 ? (f / fps) : 0f;
+            float time = (totalFrames > 1 && duration > 0f)
+                ? (f * duration / (totalFrames - 1))
+                : (totalFrames > 1 ? (f / fps) : 0f);
             if (time > (float)godotAnim.Length) time = (float)godotAnim.Length;
 
             if (requiresRetargeting)
             {
-                secFrame.Clear(secondarySkel);
-                secFrame.FrameIndex = f;
-                info.VrfAnimation.DecodeFrame(secFrame);
+                if (isAdditive)
+                {
+                    // Compose additive deltas over secondary skeleton bind pose before retargeting world transforms
+                    secFrame.ClearToIdentity();
+                    secFrame.FrameIndex = f;
+                    info.VrfAnimation.DecodeFrame(secFrame);
+                    info.VrfAnimation.ComposeAdditiveOverBindPose(secFrame.Bones, secondarySkel);
+                }
+                else
+                {
+                    secFrame.Clear(secondarySkel);
+                    secFrame.FrameIndex = f;
+                    info.VrfAnimation.DecodeFrame(secFrame);
+                }
                 retargeter.Retarget(secFrame, modelWorld);
 
                 for (int i = 0; i < vrfSkeleton.Bones.Length; i++)
@@ -1145,6 +1152,7 @@ public static class DeadlockAnimLoader
                     var vrfBone = vrfSkeleton.Bones[b];
                     bool isParentless = (vrfBone.Parent == null);
                     bool isRootMotionBone = IsRootMotionBoneName(vrfBone.Name);
+                    bool isPelvis = vrfBone.Name.Equals("pelvis", StringComparison.OrdinalIgnoreCase);
 
                     System.Numerics.Matrix4x4 localMat;
                     if (isParentless)
@@ -1158,6 +1166,25 @@ public static class DeadlockAnimLoader
                     }
 
                     System.Numerics.Matrix4x4.Decompose(localMat, out _, out var compAngle, out var compPos);
+
+                    if (isAdditive && idleFrame != null)
+                    {
+                        if (isParentless || isPelvis || isRootMotionBone)
+                        {
+                            compPos = idleFrame.Bones[b].Position;
+                            compAngle = idleFrame.Bones[b].Angle;
+                        }
+                        else
+                        {
+                            var deltaAngle = System.Numerics.Quaternion.Conjugate(vrfBone.Angle) * compAngle;
+                            if (deltaAngle.W < 0f) deltaAngle = -deltaAngle;
+                            compPos = idleFrame.Bones[b].Position + (compPos - vrfBone.Position);
+                            compAngle = Math.Abs(deltaAngle.W) > 0.99999f
+                                ? idleFrame.Bones[b].Angle
+                                : System.Numerics.Quaternion.Normalize(idleFrame.Bones[b].Angle * deltaAngle);
+                        }
+                    }
+
                     var (convPos, convRot) = BakeConversion(compPos, compAngle, isParentless);
 
                     if (inPlace && isRootMotionBone)
@@ -1167,6 +1194,12 @@ public static class DeadlockAnimLoader
 
                     var gPos = new Godot.Vector3(convPos.X, convPos.Y, convPos.Z);
                     var gRot = new Godot.Quaternion(convRot.X, convRot.Y, convRot.Z, convRot.W).Normalized();
+                    if (prevRotByBone.TryGetValue(b, out var prevRot) &&
+                        (prevRot.X * gRot.X + prevRot.Y * gRot.Y + prevRot.Z * gRot.Z + prevRot.W * gRot.W) < 0f)
+                    {
+                        gRot = -gRot;
+                    }
+                    prevRotByBone[b] = gRot;
 
                     godotAnim.PositionTrackInsertKey(tracks.PosTrack, time, gPos);
                     godotAnim.RotationTrackInsertKey(tracks.RotTrack, time, gRot);
@@ -1178,51 +1211,145 @@ public static class DeadlockAnimLoader
                 {
                     frame.ClearToIdentity();
                 }
-                else if (idleFrame != null && clipTrackCount > 0 && clipTrackCount < vrfSkeleton.Bones.Length)
-                {
-                    // For partial clips, initialize unkeyed bones from idle stance rather than rigid T-pose
+                    else if (idleFrame != null && clipTrackCount > 0 && clipTrackCount < vrfSkeleton.Bones.Length)
+                    {
+                        // For partial clips, initialize unkeyed bones from idle stance rather than rigid T-pose
+                        for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
+                        {
+                            frame.Bones[b].Position = idleFrame.Bones[b].Position;
+                            frame.Bones[b].Angle = idleFrame.Bones[b].Angle;
+                        }
+                    }
+                    else
+                    {
+                        frame.Clear(vrfSkeleton);
+                    }
+                    frame.FrameIndex = f;
+                    info.VrfAnimation.DecodeFrame(frame);
+
+                    if (f == 0 && !isAdditive)
+                    {
+                        int zeroedStructuralCount = 0;
+                        for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
+                        {
+                            var bBone = vrfSkeleton.Bones[b];
+                            if (bBone.Parent == null || IsClothOrFlapBone(bBone.Name) || IsRootMotionBoneName(bBone.Name)) continue;
+                            if (bBone.Position.LengthSquared() > 1.0f &&
+                                frame.Bones[b].Position.LengthSquared() < 1e-6f &&
+                                Math.Abs(frame.Bones[b].Angle.W) > 0.99999f)
+                            {
+                                zeroedStructuralCount++;
+                            }
+                        }
+
+                        if (zeroedStructuralCount >= 10)
+                        {
+                            isMaskedPartialSequence = true;
+                            if (idleFrame == null && vrfModel != null)
+                            {
+                                var defaultIdle = FindDefaultIdleFromModel(vrfModel, fileLoader);
+                                if (defaultIdle?.VrfAnimation != null)
+                                {
+                                    try
+                                    {
+                                        idleFrame = new Frame(vrfSkeleton, vrfModel.FlexControllers);
+                                        idleFrame.Clear(vrfSkeleton);
+                                        idleFrame.FrameIndex = 0;
+                                        defaultIdle.VrfAnimation.DecodeFrame(idleFrame);
+                                    }
+                                    catch { idleFrame = null; }
+                                }
+                            }
+
+                            for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
+                            {
+                                var bBone = vrfSkeleton.Bones[b];
+                                if (bBone.Name.Equals("pelvis", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    float baseZ = idleFrame != null ? idleFrame.Bones[b].Position.Z : bBone.Position.Z;
+                                    if (baseZ > 15.0f && frame.Bones[b].Position.Z < baseZ * 0.25f)
+                                    {
+                                        pelvisIsDelta = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
                     {
-                        frame.Bones[b].Position = idleFrame.Bones[b].Position;
-                        frame.Bones[b].Angle = idleFrame.Bones[b].Angle;
-                    }
-                }
-                else
-                {
-                    frame.Clear(vrfSkeleton);
-                }
-                frame.FrameIndex = f;
-                info.VrfAnimation.DecodeFrame(frame);
+                        if (!boneTrackMap.TryGetValue(b, out var tracks)) continue;
 
-                for (int b = 0; b < vrfSkeleton.Bones.Length; b++)
-                {
-                    if (!boneTrackMap.TryGetValue(b, out var tracks)) continue;
+                        var vrfBone = vrfSkeleton.Bones[b];
+                        bool isParentless = (vrfBone.Parent == null);
+                        bool isRootMotionBone = IsRootMotionBoneName(vrfBone.Name);
+                        bool isPelvis = vrfBone.Name.Equals("pelvis", StringComparison.OrdinalIgnoreCase);
 
-                    var vrfBone = vrfSkeleton.Bones[b];
-                    bool isParentless = (vrfBone.Parent == null);
-                    bool isRootMotionBone = IsRootMotionBoneName(vrfBone.Name);
-                    bool isPelvis = vrfBone.Name.Equals("pelvis", StringComparison.OrdinalIgnoreCase);
+                        System.Numerics.Vector3 compPos;
+                        System.Numerics.Quaternion compAngle;
 
-                    System.Numerics.Vector3 compPos;
-                    System.Numerics.Quaternion compAngle;
-
-                    if (isAdditive)
-                    {
-                        var basePos = idleFrame != null ? idleFrame.Bones[b].Position : vrfSkeleton.Bones[b].Position;
-                        var baseAngle = idleFrame != null ? idleFrame.Bones[b].Angle : vrfSkeleton.Bones[b].Angle;
-                        var delta = info.VrfAnimation.GetAdditiveDelta(b, frame.Bones[b]);
-
-                        if (isParentless || isPelvis || isRootMotionBone)
+                        if (isAdditive)
                         {
-                            // Maintain standing root/pelvis height and orientation from base idle (or bind pose)
-                            compPos = basePos;
-                            compAngle = baseAngle;
+                            var basePos = idleFrame != null ? idleFrame.Bones[b].Position : vrfSkeleton.Bones[b].Position;
+                            var baseAngle = idleFrame != null ? idleFrame.Bones[b].Angle : vrfSkeleton.Bones[b].Angle;
+                            var delta = info.VrfAnimation.GetAdditiveDelta(b, frame.Bones[b]);
+
+                            if (isParentless || isPelvis || isRootMotionBone)
+                            {
+                                // Maintain standing root/pelvis height and orientation from base idle (or bind pose)
+                                compPos = basePos;
+                                compAngle = baseAngle;
+                            }
+                            else
+                            {
+                                compPos = basePos + delta.Position;
+                                var deltaAngle = delta.Angle;
+                                if (Math.Abs(deltaAngle.W) > 0.99999f)
+                                {
+                                    compAngle = baseAngle;
+                                }
+                                else
+                                {
+                                    if (deltaAngle.W < 0f) deltaAngle = -deltaAngle;
+                                    compAngle = System.Numerics.Quaternion.Normalize(baseAngle * deltaAngle);
+                                }
+                            }
                         }
-                        else
+                        else if (isMaskedPartialSequence && isPelvis)
                         {
-                            compPos = basePos;
-                            var deltaAngle = delta.Angle;
-                            if (Math.Abs(deltaAngle.W) > 0.999f)
+                            if (pelvisIsDelta)
+                            {
+                                var basePos = idleFrame != null ? idleFrame.Bones[b].Position : vrfBone.Position;
+                                var baseAngle = idleFrame != null ? idleFrame.Bones[b].Angle : vrfBone.Angle;
+                                compPos = basePos + frame.Bones[b].Position;
+                                var deltaAngle = frame.Bones[b].Angle;
+                                if (Math.Abs(deltaAngle.W) > 0.99999f)
+                                {
+                                    compAngle = baseAngle;
+                                }
+                                else
+                                {
+                                    if (deltaAngle.W < 0f) deltaAngle = -deltaAngle;
+                                    compAngle = System.Numerics.Quaternion.Normalize(baseAngle * deltaAngle);
+                                }
+                            }
+                            else
+                            {
+                                compPos = frame.Bones[b].Position;
+                                compAngle = frame.Bones[b].Angle;
+                            }
+                        }
+                        else if (isMaskedPartialSequence && !isRootMotionBone)
+                        {
+                            // Source 2 masked/partial SequenceAnimations (such as jump_landing* and aim/recoil layers)
+                            // encode delta translations and rotations relative to (0, Identity) across all frames,
+                            // leaving unkeyed bones at (0, Identity). Compose them over the standing idle/rest pose.
+                            var basePos = idleFrame != null ? idleFrame.Bones[b].Position : vrfBone.Position;
+                            var baseAngle = idleFrame != null ? idleFrame.Bones[b].Angle : vrfBone.Angle;
+                            compPos = basePos + frame.Bones[b].Position;
+                            var deltaAngle = frame.Bones[b].Angle;
+                            if (Math.Abs(deltaAngle.W) > 0.99999f)
                             {
                                 compAngle = baseAngle;
                             }
@@ -1232,14 +1359,13 @@ public static class DeadlockAnimLoader
                                 compAngle = System.Numerics.Quaternion.Normalize(baseAngle * deltaAngle);
                             }
                         }
-                    }
-                    else
-                    {
-                        compPos = frame.Bones[b].Position;
-                        compAngle = frame.Bones[b].Angle;
-                    }
+                        else
+                        {
+                            compPos = frame.Bones[b].Position;
+                            compAngle = frame.Bones[b].Angle;
+                        }
 
-                    var (convPos, convRot) = BakeConversion(compPos, compAngle, isParentless);
+                        var (convPos, convRot) = BakeConversion(compPos, compAngle, isParentless);
 
                     // In-place root motion locking (locks horizontal travel only on root motion bones so hero stays centered)
                     if (inPlace && isRootMotionBone)
@@ -1249,6 +1375,12 @@ public static class DeadlockAnimLoader
 
                     var gPos = new Godot.Vector3(convPos.X, convPos.Y, convPos.Z);
                     var gRot = new Godot.Quaternion(convRot.X, convRot.Y, convRot.Z, convRot.W).Normalized();
+                    if (prevRotByBone.TryGetValue(b, out var prevRot) &&
+                        (prevRot.X * gRot.X + prevRot.Y * gRot.Y + prevRot.Z * gRot.Z + prevRot.W * gRot.W) < 0f)
+                    {
+                        gRot = -gRot;
+                    }
+                    prevRotByBone[b] = gRot;
 
                     godotAnim.PositionTrackInsertKey(tracks.PosTrack, time, gPos);
                     godotAnim.RotationTrackInsertKey(tracks.RotTrack, time, gRot);
@@ -1292,58 +1424,12 @@ public static class DeadlockAnimLoader
     /// Distinguishes between delta layers (child bone translation deltas < 10 inches from rest/identity)
     /// and full body animations (pelvis translation ~35-45 inches).
     /// </summary>
+    /// <summary>
+    /// Strictly trusts VRF binary IsAdditive metadata (Rule D.1); never infers additive mode from names or delta thresholds.
+    /// </summary>
     public static bool IsAdditiveDeltaFrame(Frame frame, bool isVrfAdditive, string animName = null, Skeleton vrfSkeleton = null)
     {
-        if (isVrfAdditive) return true;
-
-        bool nameMatches = IsAdditiveOrRecoilSequence(animName);
-
-        if (frame?.Bones != null && frame.Bones.Length > 0)
-        {
-            if (vrfSkeleton != null && vrfSkeleton.Bones.Length == frame.Bones.Length)
-            {
-                float maxDiff = 0f;
-                int nonZeroDeltaBones = 0;
-                for (int i = 0; i < frame.Bones.Length; i++)
-                {
-                    if (vrfSkeleton.Bones[i].Parent == null) continue; // skip root
-                    float diff = (frame.Bones[i].Position - vrfSkeleton.Bones[i].Position).Length();
-                    if (diff > 0.05f) nonZeroDeltaBones++;
-                    if (diff > maxDiff) maxDiff = diff;
-                }
-
-                // If non-root child bones have zero delta or tiny offsets (< 5 inches) from rest:
-                // It is an additive delta layer!
-                if (maxDiff < 5.0f || nonZeroDeltaBones == 0)
-                {
-                    return true;
-                }
-            }
-            else
-            {
-                float maxDist = 0f;
-                int nonZeroBones = 0;
-                for (int i = 0; i < frame.Bones.Length; i++)
-                {
-                    float d = frame.Bones[i].Position.Length();
-                    if (d > 0.05f) nonZeroBones++;
-                    if (d > maxDist) maxDist = d;
-                }
-
-                // In Source 2 inches:
-                // Any full body pose (idle, run, jump) has pelvis at ~35-45 inches from root.
-                // An additive delta layer has max bone translation < 5 inches across all bones.
-                // If maxDist is < 10 inches, it is a delta layer.
-                if (maxDist < 10f || nonZeroBones == 0)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        return nameMatches;
+        return isVrfAdditive;
     }
 
     /// <summary>
@@ -1770,7 +1856,7 @@ public static class DeadlockAnimLoader
         composed.SetMeta("composed", true);
         composed.SetMeta("is_additive", false);
         composed.SetMeta("decoded_by_anim_loader", true);
-        composed.SetMeta("anim_loader_version", 5);
+        composed.SetMeta("anim_loader_version", 8);
 
         return composed;
     }
@@ -1796,10 +1882,10 @@ public static class DeadlockAnimLoader
         }
     }
 
-    private static List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> FilterPoses(
-        List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation> rawAnims)
+    private static List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase> FilterPoses(
+        List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase> rawAnims)
     {
-        var result = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
+        var result = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var anim in rawAnims)

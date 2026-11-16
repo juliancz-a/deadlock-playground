@@ -289,19 +289,17 @@ public partial class ExportBaseTexturesModalUI : PanelContainer
         var lblName = new Label
         {
             Text = item.DisplayName,
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "BodyLabel"
         };
-        lblName.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.98f));
-        lblName.AddThemeFontSizeOverride("font_size", 13);
         vboxLabels.AddChild(lblName);
 
         var lblSubmesh = new Label
         {
             Text = $"Submeshes: {item.SubmeshInfo}",
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "MutedLabel"
         };
-        lblSubmesh.AddThemeColorOverride("font_color", new Color(0.60f, 0.66f, 0.74f));
-        lblSubmesh.AddThemeFontSizeOverride("font_size", 11);
         vboxLabels.AddChild(lblSubmesh);
 
         hbox.AddChild(vboxLabels);
@@ -309,33 +307,15 @@ public partial class ExportBaseTexturesModalUI : PanelContainer
         // Resolution Badge
         var badgePanel = new PanelContainer
         {
-            SizeFlagsVertical = SizeFlags.ShrinkCenter
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            ThemeTypeVariation = "SubPanelContainer"
         };
-        var badgeStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.18f, 0.22f, 0.30f, 0.9f),
-            BorderColor = new Color(0.32f, 0.40f, 0.52f, 0.8f),
-            BorderWidthBottom = 1,
-            BorderWidthTop = 1,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            CornerRadiusBottomLeft = 4,
-            CornerRadiusBottomRight = 4,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            ContentMarginBottom = 3,
-            ContentMarginTop = 3,
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6
-        };
-        badgePanel.AddThemeStyleboxOverride("panel", badgeStyle);
 
         var lblRes = new Label
         {
-            Text = $"{item.Resolution.X} × {item.Resolution.Y}"
+            Text = $"{item.Resolution.X} × {item.Resolution.Y}",
+            ThemeTypeVariation = "NumericLabel"
         };
-        lblRes.AddThemeColorOverride("font_color", new Color(0.85f, 0.90f, 0.96f));
-        lblRes.AddThemeFontSizeOverride("font_size", 11);
         badgePanel.AddChild(lblRes);
 
         hbox.AddChild(badgePanel);

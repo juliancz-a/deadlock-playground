@@ -6,9 +6,18 @@ using DeadlockPlayground.Addons;
 
 namespace DeadlockPlayground.UI;
 
+public enum ModFilterCategory
+{
+    All,
+    Models,
+    Textures,
+    Animations,
+    VfxOther
+}
+
 /// <summary>
 /// Modal dialog displaying installed user mods (.vpk) in a rich visual gallery.
-/// Allows selecting full character replacement models, texture mods, or resetting to vanilla.
+/// Allows selecting full character replacement models, texture mods, animation mods, VFX mods, or resetting to vanilla.
 /// </summary>
 public partial class ModPickerModalUI : PanelContainer
 {
@@ -20,7 +29,14 @@ public partial class ModPickerModalUI : PanelContainer
     private Button _btnSelect;
     private Button _btnCancel;
     private Label _lblSelectedInfo;
+    private HFlowContainer _filterFlow;
+    private CheckBox _chkShowNonStandard;
     private HFlowContainer _flowMods;
+
+    private IReadOnlyList<AddonModInfo> _currentMods;
+
+    private readonly Dictionary<ModFilterCategory, Button> _filterButtons = new();
+    private ModFilterCategory _activeFilter = ModFilterCategory.All;
 
     private readonly List<ModCardUI> _allCards = new();
     private ModCardUI _selectedCard = null;
@@ -53,24 +69,7 @@ public partial class ModPickerModalUI : PanelContainer
 
     private void BuildModalLayout()
     {
-        var mainStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.09f, 0.11f, 0.14f, 0.98f),
-            CornerRadiusTopLeft = 10,
-            CornerRadiusTopRight = 10,
-            CornerRadiusBottomLeft = 10,
-            CornerRadiusBottomRight = 10,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.26f, 0.32f, 0.42f, 0.8f),
-            ContentMarginLeft = 20,
-            ContentMarginRight = 20,
-            ContentMarginTop = 16,
-            ContentMarginBottom = 16
-        };
-        AddThemeStyleboxOverride("panel", mainStyle);
+        ThemeTypeVariation = "ModalPanel";
 
         var rootVbox = new VBoxContainer
         {
@@ -88,11 +87,9 @@ public partial class ModPickerModalUI : PanelContainer
         var titleLabel = new Label
         {
             Text = "MODDED CHARACTER MODELS",
-            ThemeTypeVariation = "TitleLabel",
+            ThemeTypeVariation = "ModalTitleLabel",
             SizeFlagsHorizontal = SizeFlags.ShrinkBegin
         };
-        titleLabel.AddThemeFontSizeOverride("font_size", 16);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.40f, 0.75f, 1.0f, 1.0f));
         header.AddChild(titleLabel);
 
         _searchBar = new LineEdit
@@ -110,6 +107,37 @@ public partial class ModPickerModalUI : PanelContainer
             CustomMinimumSize = new Vector2(32, 32)
         };
         header.AddChild(_btnClose);
+
+        // Filter Pill / Badge Bar
+        _filterFlow = new HFlowContainer
+        {
+            SizeFlagsHorizontal = SizeFlags.Fill
+        };
+        _filterFlow.AddThemeConstantOverride("h_separation", 8);
+        _filterFlow.AddThemeConstantOverride("v_separation", 6);
+        rootVbox.AddChild(_filterFlow);
+
+        CreateFilterPill(ModFilterCategory.All, "All", new Color(0.40f, 0.75f, 1.0f, 1.0f));
+        CreateFilterPill(ModFilterCategory.Models, "Model Mods", new Color(0.95f, 0.85f, 0.30f, 1.0f));
+        CreateFilterPill(ModFilterCategory.Textures, "Texture Mods", new Color(0.60f, 0.85f, 0.50f, 1.0f));
+        CreateFilterPill(ModFilterCategory.Animations, "Animation Mods", new Color(0.82f, 0.52f, 0.98f, 1.0f));
+        CreateFilterPill(ModFilterCategory.VfxOther, "VFX / Other", new Color(1.0f, 0.62f, 0.25f, 1.0f));
+        SetActiveFilter(ModFilterCategory.All, applyFilter: false);
+
+        _chkShowNonStandard = new CheckBox
+        {
+            Text = "Show Non-Standard VPKs",
+            ButtonPressed = true,
+            FocusMode = FocusModeEnum.None,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+            TooltipText = "Show .vpk mods that do not follow the standard top-level *_dir.vpk structure (e.g., single-file .vpk or subfolder mods)."
+        };
+        _chkShowNonStandard.Toggled += (_) =>
+        {
+            UpdateFilterCounts(_currentMods);
+            ApplyFilters();
+        };
+        _filterFlow.AddChild(_chkShowNonStandard);
 
         rootVbox.AddChild(new HSeparator());
 
@@ -144,16 +172,16 @@ public partial class ModPickerModalUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MaxLinesVisible = 2
+            MaxLinesVisible = 2,
+            ThemeTypeVariation = "BodyLabel"
         };
-        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 14);
-        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.85f, 0.88f, 0.94f, 1.0f));
         footer.AddChild(_lblSelectedInfo);
 
         _btnCancel = new Button
         {
             Text = "Cancel",
-            CustomMinimumSize = new Vector2(90, 32)
+            CustomMinimumSize = new Vector2(90, 32),
+            ThemeTypeVariation = "SecondaryButton"
         };
         footer.AddChild(_btnCancel);
 
@@ -161,10 +189,91 @@ public partial class ModPickerModalUI : PanelContainer
         {
             Text = "Load Mod",
             CustomMinimumSize = new Vector2(130, 32),
-            Disabled = true
+            Disabled = true,
+            ThemeTypeVariation = "PrimaryActionButton"
         };
-        _btnSelect.AddThemeColorOverride("font_color", new Color(0.40f, 0.75f, 1.0f, 1.0f));
         footer.AddChild(_btnSelect);
+    }
+
+    private void CreateFilterPill(ModFilterCategory category, string label, Color accentColor)
+    {
+        var btn = new Button
+        {
+            Text = label,
+            ToggleMode = true,
+            FocusMode = FocusModeEnum.None,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+            CustomMinimumSize = new Vector2(0, 30),
+            ThemeTypeVariation = "FilterPillButton"
+        };
+
+        btn.Pressed += () => SetActiveFilter(category, applyFilter: true);
+
+        _filterFlow.AddChild(btn);
+        _filterButtons[category] = btn;
+    }
+
+    private void SetActiveFilter(ModFilterCategory category, bool applyFilter)
+    {
+        _activeFilter = category;
+        foreach (var kvp in _filterButtons)
+        {
+            kvp.Value.SetPressedNoSignal(kvp.Key == category);
+        }
+
+        if (applyFilter)
+        {
+            ApplyFilters();
+        }
+    }
+
+    private void UpdateFilterCounts(IReadOnlyList<AddonModInfo> mods)
+    {
+        bool showNonStandard = _chkShowNonStandard?.ButtonPressed ?? true;
+        int totalCount = 1; // Includes Vanilla card
+        int modelCount = 0;
+        int textureCount = 0;
+        int animCount = 0;
+        int vfxOtherCount = 0;
+
+        if (mods != null)
+        {
+            foreach (var mod in mods)
+            {
+                if (mod == null) continue;
+                if (!showNonStandard && !mod.IsStandardPakFormat) continue;
+                totalCount++;
+                switch (mod.ModType)
+                {
+                    case AddonModType.FullModel:
+                        modelCount++;
+                        break;
+                    case AddonModType.TextureOnly:
+                        textureCount++;
+                        break;
+                    case AddonModType.AnimationOnly:
+                        animCount++;
+                        break;
+                    case AddonModType.ParticleOnly:
+                    case AddonModType.Mixed:
+                    case AddonModType.Unknown:
+                    default:
+                        vfxOtherCount++;
+                        break;
+                }
+            }
+        }
+
+        if (_filterButtons.TryGetValue(ModFilterCategory.All, out var btnAll))
+            btnAll.Text = $"All ({totalCount})";
+        if (_filterButtons.TryGetValue(ModFilterCategory.Models, out var btnModels))
+            btnModels.Text = $"Model Mods ({modelCount})";
+        if (_filterButtons.TryGetValue(ModFilterCategory.Textures, out var btnTextures))
+            btnTextures.Text = $"Texture Mods ({textureCount})";
+        if (_filterButtons.TryGetValue(ModFilterCategory.Animations, out var btnAnims))
+            btnAnims.Text = $"Animation Mods ({animCount})";
+        if (_filterButtons.TryGetValue(ModFilterCategory.VfxOther, out var btnVfx))
+            btnVfx.Text = $"VFX / Other ({vfxOtherCount})";
     }
 
     private void ConnectEvents()
@@ -184,6 +293,7 @@ public partial class ModPickerModalUI : PanelContainer
 
     public void PopulateMods(IReadOnlyList<AddonModInfo> mods, string activeModPath = null)
     {
+        _currentMods = mods;
         _allCards.Clear();
         foreach (Node child in _flowMods.GetChildren())
         {
@@ -221,6 +331,9 @@ public partial class ModPickerModalUI : PanelContainer
                 }
             }
         }
+
+        UpdateFilterCounts(mods);
+        ApplyFilters();
     }
 
     private void OnCardSelected(ModCardUI card)
@@ -264,26 +377,52 @@ public partial class ModPickerModalUI : PanelContainer
 
     private void OnSearchFilterChanged(string query)
     {
-        string q = query?.Trim().ToLowerInvariant() ?? "";
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        string q = _searchBar?.Text?.Trim().ToLowerInvariant() ?? "";
         foreach (var card in _allCards)
         {
             if (card == null) continue;
             if (card.IsVanilla)
             {
-                card.Visible = string.IsNullOrEmpty(q) || "vanilla".Contains(q) || "official".Contains(q);
+                bool matchesCat = _activeFilter == ModFilterCategory.All;
+                bool matchesSearch = string.IsNullOrEmpty(q) || "vanilla".Contains(q) || "official".Contains(q);
+                card.Visible = matchesCat && matchesSearch;
                 continue;
             }
 
             var mod = card.ModInfo;
             if (mod == null) continue;
 
-            bool matches = string.IsNullOrEmpty(q) ||
-                           mod.DisplayTitle.ToLowerInvariant().Contains(q) ||
-                           mod.FileName.ToLowerInvariant().Contains(q) ||
-                           (!string.IsNullOrEmpty(mod.DetectedHeroDisplayName) && mod.DetectedHeroDisplayName.ToLowerInvariant().Contains(q)) ||
-                           (!string.IsNullOrEmpty(mod.DetectedHeroCodename) && mod.DetectedHeroCodename.ToLowerInvariant().Contains(q));
+            bool showNonStandard = _chkShowNonStandard?.ButtonPressed ?? true;
+            if (!showNonStandard && !mod.IsStandardPakFormat)
+            {
+                card.Visible = false;
+                continue;
+            }
 
-            card.Visible = matches;
+            bool matchesCategory = _activeFilter switch
+            {
+                ModFilterCategory.All => true,
+                ModFilterCategory.Models => mod.ModType == AddonModType.FullModel,
+                ModFilterCategory.Textures => mod.ModType == AddonModType.TextureOnly,
+                ModFilterCategory.Animations => mod.ModType == AddonModType.AnimationOnly,
+                ModFilterCategory.VfxOther => mod.ModType == AddonModType.ParticleOnly ||
+                                              mod.ModType == AddonModType.Mixed ||
+                                              mod.ModType == AddonModType.Unknown,
+                _ => true
+            };
+
+            bool matchesQuery = string.IsNullOrEmpty(q) ||
+                                mod.DisplayTitle.ToLowerInvariant().Contains(q) ||
+                                mod.FileName.ToLowerInvariant().Contains(q) ||
+                                (!string.IsNullOrEmpty(mod.DetectedHeroDisplayName) && mod.DetectedHeroDisplayName.ToLowerInvariant().Contains(q)) ||
+                                (!string.IsNullOrEmpty(mod.DetectedHeroCodename) && mod.DetectedHeroCodename.ToLowerInvariant().Contains(q));
+
+            card.Visible = matchesCategory && matchesQuery;
         }
     }
 

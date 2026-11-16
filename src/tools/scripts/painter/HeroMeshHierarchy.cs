@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Materials;
 
 namespace DeadlockPlayground.Painter
@@ -18,15 +19,18 @@ namespace DeadlockPlayground.Painter
         public MeshRaycaster Raycaster { get; set; }
         public string OriginalVmatPath { get; set; }
         public string MaterialName { get; set; }
+        public string SourceAddonVpkPath { get; set; } = "";
 
         // Dirty tracking & export selection
         public bool IsDirty { get; set; } = false;
         public bool IsSelected { get; set; } = false;
+        public bool IsCustomImportedMesh { get; set; } = false;
 
         // Exact compiled color texture path for direct in-place VPK replacement
         public string OriginalColorVtexCPath { get; set; }
         public string OriginalSecondaryColorVtexCPath { get; set; }
         public List<string> AllColorVtexCPaths { get; set; } = new();
+        public DeadlockPlayground.Materials.MaterialChannelSet Channels { get; set; }
 
         // Original Source 2 material texture parameters
         public string OriginalNormalVtex { get; set; }
@@ -49,6 +53,7 @@ namespace DeadlockPlayground.Painter
         public string DisplayName { get; set; }
         public List<SubmeshNodeInfo> Submeshes { get; } = new();
         public bool IsExpanded { get; set; } = false;
+        public DeadlockPlayground.Materials.MaterialChannelSet Channels { get; set; }
     }
 
     public partial class HeroMeshHierarchy : Node
@@ -67,6 +72,9 @@ namespace DeadlockPlayground.Painter
 
         public bool IsPaintingModeActive { get; set; } = false;
         public Node3D HeroRoot { get; private set; }
+        public string HeroCodename { get; set; } = "";
+        public string HeroDisplayName { get; set; } = "";
+        public string HeroWipAlias { get; set; } = "";
 
         private bool _isAnySoloed = false;
         private readonly Dictionary<MeshInstance3D, bool> _preSoloVisibility = new();
@@ -82,6 +90,24 @@ namespace DeadlockPlayground.Painter
 
             HeroRoot = heroNode;
             _currentHeroName = heroNode?.Name.ToString().ToLowerInvariant() ?? string.Empty;
+            if (heroNode != null && GodotObject.IsInstanceValid(heroNode))
+            {
+                if (heroNode.HasMeta("HeroId")) HeroCodename = heroNode.GetMeta("HeroId").AsString();
+                if (heroNode.HasMeta("HeroDisplayName")) HeroDisplayName = heroNode.GetMeta("HeroDisplayName").AsString();
+                if (heroNode.HasMeta("HeroWipFolder")) HeroWipAlias = heroNode.GetMeta("HeroWipFolder").AsString();
+                if (string.IsNullOrEmpty(HeroCodename))
+                {
+                    var catEntry = DeadlockHeroCatalog.Entries.FirstOrDefault(h =>
+                        _currentHeroName.Contains(h.InternalCodename, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(h.WipAlias) && _currentHeroName.Contains(h.WipAlias, StringComparison.OrdinalIgnoreCase)));
+                    if (catEntry != null)
+                    {
+                        HeroCodename = catEntry.InternalCodename;
+                        HeroDisplayName = catEntry.DisplayName;
+                        HeroWipAlias = catEntry.WipAlias ?? "";
+                    }
+                }
+            }
             _submeshes.Clear();
             _materialGroups.Clear();
             _preSoloVisibility.Clear();
@@ -93,10 +119,22 @@ namespace DeadlockPlayground.Painter
                 NotifyHierarchyChanged();
                 return;
             }
+            string heroAddonVpkPath = "";
+            if (heroNode.HasMeta("SourceAddonVpkPath"))
+            {
+                heroAddonVpkPath = heroNode.GetMeta("SourceAddonVpkPath").AsString();
+            }
+            else if (heroNode.GetParent() is VpkLoaderTest loader && !string.IsNullOrWhiteSpace(loader.ActiveAddonVpkPath))
+            {
+                heroAddonVpkPath = loader.ActiveAddonVpkPath;
+            }
 
             // 1. Gather all candidate MeshInstance3D nodes first so modifying the tree doesn't affect recursion
             var candidateMeshes = new List<MeshInstance3D>();
             CollectCandidateMeshesRecursive(heroNode, candidateMeshes);
+            bool hasVisibleBakedOutlineShells = candidateMeshes.Any(m =>
+                m != null && GodotObject.IsInstanceValid(m) && m.Visible &&
+                m.HasMeta("IsOutlineShell") && m.GetMeta("IsOutlineShell").AsBool());
 
             // 2. Process each mesh: register candidate meshes directly preserving original skinning and materials
             foreach (var mi in candidateMeshes)
@@ -106,19 +144,51 @@ namespace DeadlockPlayground.Painter
                 if (surfaceCount == 0) continue;
 
                 bool isAcc = IsAccessoryKeyword(rawName);
+                bool isCustomMesh = mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool();
+                if (!isCustomMesh && mi.HasMeta("ParentCompositeMesh"))
+                {
+                    var parentMi = mi.GetMeta("ParentCompositeMesh").AsGodotObject() as MeshInstance3D;
+                    if (parentMi != null && parentMi.HasMeta("IsCustomImportedMesh"))
+                        isCustomMesh = parentMi.GetMeta("IsCustomImportedMesh").AsBool();
+                }
+                if (!isCustomMesh)
+                {
+                    Node curr = mi;
+                    while (curr != null && curr != heroNode)
+                    {
+                        if (curr.Name.ToString().Contains("Custom_Rigged_Character") ||
+                            curr.Name.ToString().StartsWith("Custom_Accessory_", StringComparison.Ordinal) ||
+                            curr.Name.ToString() == "Custom_Rigid_Accessory" ||
+                            (curr.HasMeta("IsCustomImportedMesh") && curr.GetMeta("IsCustomImportedMesh").AsBool()))
+                        {
+                            isCustomMesh = true;
+                            break;
+                        }
+                        curr = curr.GetParent();
+                    }
+                }
 
                 if (surfaceCount == 1)
                 {
                     string matPath = ResolveSurfaceMaterialName(mi, 0);
                     string cleanMat = !string.IsNullOrEmpty(matPath) ? Path.GetFileNameWithoutExtension(matPath) : "";
                     mi.SetMeta("OriginalVmatPath", matPath ?? "");
+                    string fullVmatPath = ResolveAuthenticVmatFullPath(mi, 0);
+                    if (!string.IsNullOrEmpty(fullVmatPath))
+                    {
+                        mi.SetMeta("FullVmatPath", fullVmatPath);
+                    }
 
                     Material origMat = GetAuthenticMaterial(mi, 0);
                     if (origMat != null)
                     {
                         mi.SetMeta("OriginalMaterial_0", origMat);
                     }
-                    var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, rawName, matPath);
+                    bool isOutlineShell = (mi.HasMeta("IsOutlineShell") && mi.GetMeta("IsOutlineShell").AsBool()) ||
+                                          (origMat != null && origMat.HasMeta("IsOutlineShell") && origMat.GetMeta("IsOutlineShell").AsBool());
+                    var (toonMat, outlineMat, preserve) = isOutlineShell
+                        ? (null, null, true)
+                        : CreateToonMaterials(origMat, rawName, matPath, suppressOutlinePass: isCustomMesh && hasVisibleBakedOutlineShells);
 
                     string singleDisplay = CleanName(rawName);
                     if (!string.IsNullOrEmpty(matPath))
@@ -139,12 +209,14 @@ namespace DeadlockPlayground.Painter
                         IsSoloed = false,
                         OriginalVmatPath = matPath,
                         MaterialName = cleanMat,
+                        SourceAddonVpkPath = mi.HasMeta("SourceAddonVpkPath") ? mi.GetMeta("SourceAddonVpkPath").AsString() : heroAddonVpkPath,
                         IsDirty = false,
                         IsSelected = false,
                         OriginalMaterial = origMat,
                         ToonMaterial = toonMat,
                         OutlineMaterial = outlineMat,
-                        PreserveOriginal = preserve
+                        PreserveOriginal = preserve,
+                        IsCustomImportedMesh = isCustomMesh
                     };
                     ExtractMaterialMetadata(info, mi, 0);
                     _submeshes.Add(info);
@@ -211,6 +283,10 @@ namespace DeadlockPlayground.Painter
                         }
                         newMesh.LightmapSizeHint = mi.Mesh.LightmapSizeHint != Vector2I.Zero ? mi.Mesh.LightmapSizeHint : new Vector2I(256, 256);
 
+                        bool hasSurfKeptMeta = mi.HasMeta($"SurfaceKept_{s}");
+                        bool isSurfKept = !hasSurfKeptMeta || mi.GetMeta($"SurfaceKept_{s}").AsBool();
+                        bool surfVisible = isCompositeVisible && isSurfKept;
+
                         var newMi = new MeshInstance3D
                         {
                             Name = $"{mi.Name}_surf_{s}_{display.Replace(" ", "_").Replace("(", "").Replace(")", "")}",
@@ -219,20 +295,49 @@ namespace DeadlockPlayground.Painter
                             Skeleton = mi.Skeleton,
                             Transform = mi.Transform,
                             Layers = mi.Layers,
-                            Visible = isCompositeVisible
+                            Visible = surfVisible
                         };
+                        newMi.SetMeta("SurfaceIndex", s);
+                        newMi.SetMeta("UserVisibility", surfVisible);
                         newMi.SetMeta("OriginalVmatPath", matName ?? "");
+                        string fullSurfVmatPath = ResolveAuthenticVmatFullPath(mi, s);
+                        if (!string.IsNullOrEmpty(fullSurfVmatPath))
+                        {
+                            newMi.SetMeta("FullVmatPath", fullSurfVmatPath);
+                        }
                         newMi.SetMeta("ParentCompositeMesh", mi);
+                        if (mi.HasMeta("IsDeformedOriginalMesh") && mi.GetMeta("IsDeformedOriginalMesh").AsBool())
+                        {
+                            newMi.SetMeta("IsDeformedOriginalMesh", true);
+                        }
+                        if (hasSurfKeptMeta && !isSurfKept)
+                        {
+                            newMi.SetMeta("UserHiddenByCustomModel", true);
+                        }
                         if (origMat != null)
                         {
                             newMi.SetMeta("OriginalMaterial_0", origMat);
+                        }
+                        if (!string.IsNullOrEmpty(heroAddonVpkPath))
+                        {
+                            newMi.SetMeta("SourceAddonVpkPath", heroAddonVpkPath);
                         }
 
                         mi.GetParent()?.AddChild(newMi);
                         _generatedSubmeshNodes.Add(newMi);
                         genArray.Add(newMi);
 
-                        var (toonMat, outlineMat, preserve) = CreateToonMaterials(origMat, surfaceRawName, matName);
+                        if (hasSurfKeptMeta && !isSurfKept)
+                        {
+                            _preSoloVisibility[newMi] = false;
+                            continue;
+                        }
+
+                        bool isOutlineShell = (mi.HasMeta("IsOutlineShell") && mi.GetMeta("IsOutlineShell").AsBool()) ||
+                                              (origMat != null && origMat.HasMeta("IsOutlineShell") && origMat.GetMeta("IsOutlineShell").AsBool());
+                        var (toonMat, outlineMat, preserve) = isOutlineShell
+                            ? (null, null, true)
+                            : CreateToonMaterials(origMat, surfaceRawName, matName, suppressOutlinePass: isCustomMesh && hasVisibleBakedOutlineShells);
 
                         var info = new SubmeshNodeInfo
                         {
@@ -249,7 +354,9 @@ namespace DeadlockPlayground.Painter
                             OriginalMaterial = origMat,
                             ToonMaterial = toonMat,
                             OutlineMaterial = outlineMat,
-                            PreserveOriginal = preserve
+                            PreserveOriginal = preserve,
+                            SourceAddonVpkPath = heroAddonVpkPath,
+                            IsCustomImportedMesh = isCustomMesh
                         };
                         ExtractMaterialMetadata(info, mi, s);
                         _submeshes.Add(info);
@@ -292,11 +399,12 @@ namespace DeadlockPlayground.Painter
             return false;
         }
 
-        public static bool IsAuthenticHeroMesh(MeshInstance3D mi)
+        public static bool IsOriginalHeroMesh(MeshInstance3D mi)
         {
             if (mi == null || !GodotObject.IsInstanceValid(mi)) return false;
             if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) return false;
             if (mi.Mesh is ImmediateMesh) return false;
+            if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool()) return false;
 
             string name = mi.Name.ToString();
             if (name.StartsWith("@")) return false;
@@ -308,18 +416,55 @@ namespace DeadlockPlayground.Painter
                 return false;
             }
 
-            // Verify the node is an authentic descendant and not part of an editor/gizmo tree
+            // Verify the node is an authentic descendant and not part of an editor/gizmo/custom tree
             Node parent = mi.GetParent();
             while (parent != null)
             {
                 string pName = parent.Name.ToString();
                 if (pName.StartsWith("@")) return false;
                 string pLower = pName.ToLowerInvariant();
-                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual"))
+                if (pLower.Contains("picker") || pLower.Contains("gizmo") || pLower.Contains("handle") || pLower.Contains("visual") ||
+                    pName.Contains("Custom_Rigged_Character") || pName.StartsWith("Custom_Accessory_", StringComparison.Ordinal) || pName == "Custom_Rigid_Accessory")
                 {
                     return false;
                 }
                 parent = parent.GetParent();
+            }
+
+            return true;
+        }
+
+        public static bool IsAuthenticHeroMesh(MeshInstance3D mi)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi)) return false;
+            if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) return false;
+            if (mi.Mesh is ImmediateMesh) return false;
+
+            // 1. Accept active custom imported character submeshes (including baked outline shells unless hidden)
+            if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool())
+            {
+                string name = mi.Name.ToString();
+                if (name.StartsWith("@")) return false;
+                string lower = name.ToLowerInvariant();
+                if (lower.Contains("picker") || lower.Contains("handle") || lower.Contains("visual") ||
+                    lower.Contains("gizmo") || lower.Contains("marker") || lower.Contains("preview") ||
+                    lower.Contains("tip") || lower.Contains("pole"))
+                {
+                    return false;
+                }
+                if (mi.HasMeta("UserHiddenOutlineShell") && mi.GetMeta("UserHiddenOutlineShell").AsBool())
+                {
+                    return false;
+                }
+                return true;
+            }
+
+            // 2. Otherwise require authentic original hero mesh that is not hidden by a custom model
+            if (!IsOriginalHeroMesh(mi)) return false;
+
+            if (mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool())
+            {
+                return false;
             }
 
             return true;
@@ -351,6 +496,11 @@ namespace DeadlockPlayground.Painter
                 return overrideMat;
             }
 
+            if (mi.MaterialOverride != null && !IsToonMaterial(mi.MaterialOverride))
+            {
+                return mi.MaterialOverride;
+            }
+
             return baseMat ?? overrideMat;
         }
 
@@ -369,16 +519,24 @@ namespace DeadlockPlayground.Painter
             return _toonOutlineShader;
         }
 
-        private static (ShaderMaterial ToonMat, ShaderMaterial OutlineMat, bool Preserve) CreateToonMaterials(Material origMat, string meshName, string vmatPath)
+        private static (ShaderMaterial ToonMat, ShaderMaterial OutlineMat, bool Preserve) CreateToonMaterials(Material origMat, string meshName, string vmatPath, bool suppressOutlinePass = false)
         {
+            if (origMat is StandardMaterial3D stdCheck &&
+                stdCheck.HasMeta("IsOutlineShell") && stdCheck.GetMeta("IsOutlineShell").AsBool())
+            {
+                return (null, null, true);
+            }
+
             var toonShader = GetToonShader();
             var outlineShader = GetToonOutlineShader();
 
             bool isWeapon = meshName.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
                             meshName.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                            meshName.Contains("pistol", StringComparison.OrdinalIgnoreCase) ||
                             meshName.Contains("blaster", StringComparison.OrdinalIgnoreCase) ||
                             (!string.IsNullOrEmpty(vmatPath) && (vmatPath.Contains("weapon", StringComparison.OrdinalIgnoreCase) ||
                                                                   vmatPath.Contains("gun", StringComparison.OrdinalIgnoreCase) ||
+                                                                  vmatPath.Contains("pistol", StringComparison.OrdinalIgnoreCase) ||
                                                                   vmatPath.Contains("blaster", StringComparison.OrdinalIgnoreCase)));
 
             bool isGlass = meshName.Contains("glass", StringComparison.OrdinalIgnoreCase) ||
@@ -394,7 +552,7 @@ namespace DeadlockPlayground.Painter
             bool shouldPreserve = isGlass || DeadlockMaterialResolver.ShouldPreserveOriginalMaterial(meshName, vmatPath, origMat);
             if (shouldPreserve)
             {
-                if (!isGlass && isWeapon && outlineShader != null)
+                if (!suppressOutlinePass && !isGlass && isWeapon && outlineShader != null)
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var weaponOutline = new ShaderMaterial { Shader = outlineShader };
@@ -417,7 +575,7 @@ namespace DeadlockPlayground.Painter
                       smPbr.Shader?.ResourcePath?.Contains("source2_pbr") == true ||
                       smPbr.Shader?.ResourcePath?.Contains("unicorn_hair") == true))
             {
-                if (outlineShader != null)
+                if (!suppressOutlinePass && outlineShader != null)
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var outline = new ShaderMaterial { Shader = outlineShader };
@@ -435,7 +593,7 @@ namespace DeadlockPlayground.Painter
             if (isGlass || isAdditive || isTranslucent)
             {
                 // NEVER create outline for glass or translucent surfaces (even on weapons)
-                if (!isGlass && !isTranslucent && isWeapon && outlineShader != null)
+                if (!suppressOutlinePass && !isGlass && !isTranslucent && isWeapon && outlineShader != null)
                 {
                     Color sigColor = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
                     var weaponOutline = new ShaderMaterial { Shader = outlineShader };
@@ -453,10 +611,13 @@ namespace DeadlockPlayground.Painter
 
             Color outlineCol = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, vmatPath) ?? new Color(0.08f, 0.08f, 0.08f, 1.0f);
             var toonMat = new ShaderMaterial { Shader = toonShader };
-            var outlineMat = new ShaderMaterial { Shader = outlineShader };
-
-            outlineMat.SetShaderParameter("outline_width", 0.5f);
-            outlineMat.SetShaderParameter("outline_color", outlineCol);
+            ShaderMaterial outlineMat = null;
+            if (!suppressOutlinePass)
+            {
+                outlineMat = new ShaderMaterial { Shader = outlineShader };
+                outlineMat.SetShaderParameter("outline_width", 0.5f);
+                outlineMat.SetShaderParameter("outline_color", outlineCol);
+            }
 
             if (origMat is StandardMaterial3D stdMat)
             {
@@ -471,6 +632,11 @@ namespace DeadlockPlayground.Painter
                     toonMat.SetShaderParameter("normal_strength", stdMat.NormalEnabled ? 1.0f : 0.0f);
                 }
                 toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                toonMat.SetShaderParameter("has_metallic_texture", stdMat.MetallicTexture != null);
+                if (stdMat.MetallicTexture != null)
+                {
+                    toonMat.SetShaderParameter("metallic_texture", stdMat.MetallicTexture);
+                }
                 toonMat.SetShaderParameter("roughness", stdMat.Roughness > 0.01f ? stdMat.Roughness : 0.65f);
                 toonMat.SetShaderParameter("specular", stdMat.Metallic > 0.5f ? 0.45f : 0.30f);
                 toonMat.SetShaderParameter("uv1_scale", stdMat.Uv1Scale);
@@ -504,6 +670,14 @@ namespace DeadlockPlayground.Painter
             toonMat.SetShaderParameter("rim_smoothness", 0.2f);
             toonMat.SetShaderParameter("rim_blend", 1.0f);
             toonMat.SetShaderParameter("rim_mask_shadow", 1.0f);
+            global::Source2MaterialHelper.ApplyToonNprMetadata(toonMat, origMat);
+
+            var origChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(origMat);
+            if (origChannels != null)
+            {
+                DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(toonMat, origChannels);
+                DeadlockPlayground.Materials.MaterialChannelDiscovery.ApplyChannelsToMaterial(toonMat, origChannels);
+            }
 
             return (toonMat, outlineMat, false);
         }
@@ -569,6 +743,8 @@ namespace DeadlockPlayground.Painter
                     sm.Mesh.SetSurfaceOverrideMaterial(sm.SurfaceIndex, activeMat);
                 }
             }
+
+            SkinLayerManager.Instance?.ApplyOverlayParametersToMeshes();
         }
 
         public void UpdateToonUniforms(float intensity, float steps, float smoothness, float shadowAmt, Color shadowColor, float outlineWidth, Color outlineColor)
@@ -671,15 +847,92 @@ namespace DeadlockPlayground.Painter
                    lower.Contains("boot");
         }
 
-        private static string CleanName(string raw)
-        {
-            if (string.IsNullOrEmpty(raw)) return "Mesh Part";
+        private static readonly HashSet<string> _knownHeroAndGenericPrefixes = BuildKnownPrefixSet();
 
-            string leaf = raw.Trim();
+        private static HashSet<string> BuildKnownPrefixSet()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "model", "mesh", "hero", "mat", "vmat", "vmdl", "chr", "skn",
+                // Core codenames, aliases & documented WIP prefixes (including 1-char typo variants like deapack)
+                "deadpack", "deapack", "deadman_danny", "deadman", "danny",
+                "chrono", "paradox", "haze", "paige", "fencer", "punkgoat",
+                "shiv", "warden", "viper", "kali", "necro", "hornet", "vindicta",
+                "ghost", "lady_geist", "geist", "tengu", "ivy", "inferno", "infernus",
+                "atlas", "abrams", "astro", "holliday", "forge", "mcginnis", "synth", "pocket",
+                "mirage", "lash", "bebop", "dynamo", "kelvin", "krill", "mo", "wraith",
+                "yamato", "viscous", "calico", "nano", "holiday", "magician", "sinclair",
+                "trapper", "wrecker", "slork", "fathom", "drifter", "doorman", "priest",
+                "frank", "victor", "vampirebat", "mina", "unicorn", "celeste", "bookworm",
+                "familiar", "skyrunner", "apollo", "venator", "rem", "silver", "graves", "swan"
+            };
+            foreach (var h in DeadlockHeroCatalog.Entries)
+            {
+                if (!string.IsNullOrWhiteSpace(h.InternalCodename)) set.Add(h.InternalCodename);
+                if (!string.IsNullOrWhiteSpace(h.WipAlias)) set.Add(h.WipAlias);
+                if (!string.IsNullOrWhiteSpace(h.DisplayName))
+                {
+                    foreach (var part in h.DisplayName.Split(new[] { ' ', '_', '-' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        if (part.Length >= 3) set.Add(part);
+                    }
+                }
+            }
+            return set;
+        }
+
+        private static int LevenshteinDistance(string a, string b)
+        {
+            if (string.IsNullOrEmpty(a)) return b?.Length ?? 0;
+            if (string.IsNullOrEmpty(b)) return a.Length;
+            if (Math.Abs(a.Length - b.Length) > 2) return 99;
+
+            var prev = new int[b.Length + 1];
+            var curr = new int[b.Length + 1];
+            for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+            for (int i = 1; i <= a.Length; i++)
+            {
+                curr[0] = i;
+                for (int j = 1; j <= b.Length; j++)
+                {
+                    int cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                    curr[j] = Math.Min(Math.Min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+                }
+                (prev, curr) = (curr, prev);
+            }
+            return prev[b.Length];
+        }
+
+        /// <summary>
+        /// Strips leading hero codenames, WIP aliases, 1-char Valve typo prefixes (e.g. deapack_ vs deadpack_),
+        /// and generic model_/mat_ tags while keeping the full raw string available for tooltips.
+        /// Never returns empty if the hero token is the only token present.
+        /// </summary>
+        public static string FormatCleanMaterialDisplayName(
+            string rawName,
+            string heroCodename = null,
+            string heroDisplayName = null,
+            string wipAlias = null)
+        {
+            if (string.IsNullOrWhiteSpace(rawName)) return "MESH PART";
+
+            string leaf = rawName.Trim();
             int lastSlash = Math.Max(leaf.LastIndexOf('/'), leaf.LastIndexOf('\\'));
             if (lastSlash >= 0 && lastSlash < leaf.Length - 1)
             {
                 leaf = leaf.Substring(lastSlash + 1);
+            }
+
+            while (leaf.EndsWith(".vmat_c", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vmat", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vmdl_c", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vmdl", StringComparison.OrdinalIgnoreCase) ||
+                   leaf.EndsWith(".vtex_c", StringComparison.OrdinalIgnoreCase))
+            {
+                int d = leaf.LastIndexOf('.');
+                if (d > 0) leaf = leaf.Substring(0, d);
+                else break;
             }
 
             int dotIndex = leaf.LastIndexOf('.');
@@ -688,40 +941,124 @@ namespace DeadlockPlayground.Painter
                 leaf = leaf.Substring(0, dotIndex);
             }
 
-            string[] prefixes = new[] { "model_", "mesh_", "hero_", "mat_" };
-            bool stripped;
-            do
+            var dynamicStems = new HashSet<string>(_knownHeroAndGenericPrefixes, StringComparer.OrdinalIgnoreCase);
+            var activeHeroStems = new List<string>();
+            void AddActiveStem(string s)
             {
-                stripped = false;
-                foreach (var p in prefixes)
+                if (string.IsNullOrWhiteSpace(s)) return;
+                dynamicStems.Add(s.Trim());
+                activeHeroStems.Add(s.Trim());
+                foreach (var p in s.Split(new[] { '_', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (leaf.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                    if (p.Length >= 3)
                     {
-                        leaf = leaf.Substring(p.Length);
-                        stripped = true;
+                        dynamicStems.Add(p);
+                        activeHeroStems.Add(p);
                     }
                 }
-            } while (stripped && leaf.Length > 0);
+            }
 
-            string clean = leaf.TrimStart('.', '_', '-').Trim();
-            if (string.IsNullOrEmpty(clean)) return "Mesh Part";
+            AddActiveStem(heroCodename);
+            AddActiveStem(heroDisplayName);
+            AddActiveStem(wipAlias);
+            AddActiveStem(_currentHeroName);
 
-            string formatted = clean.Replace('_', ' ').Replace('-', ' ').Trim();
-            if (string.IsNullOrEmpty(formatted)) return "Mesh Part";
+            bool IsStrippablePrefixToken(string tok)
+            {
+                if (string.IsNullOrEmpty(tok)) return false;
+                if (dynamicStems.Contains(tok)) return true;
 
-            return char.ToUpperInvariant(formatted[0]) + formatted.Substring(1);
+                // Check multi-token combined prefix e.g. deadman_danny_
+                if (tok.Length >= 5)
+                {
+                    foreach (var stem in activeHeroStems)
+                    {
+                        if (stem.Length >= 5 && LevenshteinDistance(tok, stem) <= 1)
+                            return true;
+                    }
+                    foreach (var known in _knownHeroAndGenericPrefixes)
+                    {
+                        if (known.Length >= 6 && LevenshteinDistance(tok, known) <= 1)
+                            return true;
+                    }
+                }
+                return false;
+            }
+
+            // First check multi-word leading prefixes like "deadman_danny_"
+            foreach (var stem in activeHeroStems.OrderByDescending(s => s.Length))
+            {
+                if (stem.Length < 4) continue;
+                string p1 = stem + "_";
+                string p2 = stem + "-";
+                if (leaf.Length > p1.Length && leaf.StartsWith(p1, StringComparison.OrdinalIgnoreCase))
+                {
+                    leaf = leaf.Substring(p1.Length);
+                    break;
+                }
+                if (leaf.Length > p2.Length && leaf.StartsWith(p2, StringComparison.OrdinalIgnoreCase))
+                {
+                    leaf = leaf.Substring(p2.Length);
+                    break;
+                }
+            }
+
+            // Strip individual leading delimiter-separated tokens while descriptive remainder exists
+            var tokens = leaf.Split(new[] { '_', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            while (tokens.Count > 1 && IsStrippablePrefixToken(tokens[0]))
+            {
+                tokens.RemoveAt(0);
+            }
+
+            string joined = string.Join(" ", tokens).Trim();
+            if (string.IsNullOrWhiteSpace(joined))
+            {
+                joined = leaf.TrimStart('.', '_', '-').Replace('_', ' ').Replace('-', ' ').Trim();
+            }
+
+            return string.IsNullOrWhiteSpace(joined) ? "MESH PART" : joined.ToUpperInvariant();
         }
 
-        private static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
+        private string CleanName(string raw)
+        {
+            return FormatCleanMaterialDisplayName(raw, HeroCodename, HeroDisplayName, HeroWipAlias);
+        }
+
+        public static string ResolveAuthenticVmatFullPath(MeshInstance3D mi, int s)
+        {
+            if (mi == null || !GodotObject.IsInstanceValid(mi)) return null;
+            var mat = GetAuthenticMaterial(mi, s);
+            if (mat != null)
+            {
+                if (mat.HasMeta("OriginalVmatPath"))
+                {
+                    string metaVmat = mat.GetMeta("OriginalVmatPath").AsString();
+                    if (!string.IsNullOrWhiteSpace(metaVmat) && (metaVmat.Contains('/') || metaVmat.Contains('\\')))
+                        return metaVmat.Replace('\\', '/').TrimStart('/');
+                }
+                if (!string.IsNullOrWhiteSpace(mat.ResourceName) && (mat.ResourceName.Contains('/') || mat.ResourceName.Contains('\\')))
+                    return mat.ResourceName.Replace('\\', '/').TrimStart('/');
+                if (!string.IsNullOrWhiteSpace(mat.ResourcePath) && (mat.ResourcePath.Contains('/') || mat.ResourcePath.Contains('\\')) && !mat.ResourcePath.StartsWith("res://", StringComparison.OrdinalIgnoreCase))
+                    return mat.ResourcePath.Replace('\\', '/').TrimStart('/');
+            }
+            if (mi.HasMeta("FullVmatPath"))
+            {
+                string fullMeta = mi.GetMeta("FullVmatPath").AsString();
+                if (!string.IsNullOrWhiteSpace(fullMeta))
+                    return fullMeta.Replace('\\', '/').TrimStart('/');
+            }
+            return null;
+        }
+
+        public static string ResolveSurfaceMaterialName(MeshInstance3D mi, int s)
         {
             if (mi == null) return null;
             var mat = GetAuthenticMaterial(mi, s);
-            if (mat == null) return null;
 
-            string name = mat.ResourceName;
+            string name = mat?.ResourceName;
             if (string.IsNullOrEmpty(name))
             {
-                name = mat.ResourcePath;
+                name = mat?.ResourcePath;
             }
 
             if (!string.IsNullOrEmpty(name))
@@ -738,6 +1075,14 @@ namespace DeadlockPlayground.Painter
                 }
                 return name;
             }
+
+            // Fallback for custom imported meshes or in-memory materials lacking resource paths
+            if (mi.HasMeta("IsCustomImportedMesh") || mat != null)
+            {
+                string meshName = mi.Name.ToString().TrimStart('@');
+                return s > 0 ? $"{meshName}_surf{s}_mat" : $"{meshName}_mat";
+            }
+
             return null;
         }
 
@@ -864,6 +1209,16 @@ namespace DeadlockPlayground.Painter
 
             if (mat.HasMeta("TextureParam_g_tNPROutlineMask")) info.OriginalNprOutlineVtex = mat.GetMeta("TextureParam_g_tNPROutlineMask").AsString();
             if (mat.HasMeta("TextureParam_g_tSelfIllumMask")) info.OriginalMaskVtex = mat.GetMeta("TextureParam_g_tSelfIllumMask").AsString();
+
+            var attachedChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(mat);
+            if (attachedChannels == null)
+            {
+                attachedChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.DiscoverCustomModelChannels(
+                    mat,
+                    !string.IsNullOrEmpty(info.OriginalVmatPath) ? info.OriginalVmatPath : info.RawName);
+                DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(mat, attachedChannels);
+            }
+            info.Channels = attachedChannels;
         }
 
         public void MarkSubmeshDirty(MeshInstance3D mesh)
@@ -896,7 +1251,8 @@ namespace DeadlockPlayground.Painter
         public void MarkMaterialDirty(string matKey, SkinLayerManager layerManager = null)
         {
             if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
-            string normKey = matKey.ToLowerInvariant().Trim();
+            string strippedKey = SkinLayerManager.StripChannelSuffix(matKey);
+            string normKey = strippedKey.ToLowerInvariant().Trim();
             foreach (var sm in _submeshes)
             {
                 if (sm.Mesh == null || sm.IsDirty) continue;
@@ -916,7 +1272,8 @@ namespace DeadlockPlayground.Painter
         public void ClearMaterialDirty(string matKey, SkinLayerManager layerManager = null)
         {
             if (string.IsNullOrEmpty(matKey) || _submeshes == null) return;
-            string normKey = matKey.ToLowerInvariant().Trim();
+            string strippedKey = SkinLayerManager.StripChannelSuffix(matKey);
+            string normKey = strippedKey.ToLowerInvariant().Trim();
             foreach (var sm in _submeshes)
             {
                 if (sm.Mesh == null) continue;
@@ -940,6 +1297,7 @@ namespace DeadlockPlayground.Painter
         public void ReconcileDirtyStates(SkinLayerManager layerManager)
         {
             if (layerManager == null || _submeshes == null) return;
+            var allChannels = (MaterialTextureChannel[])Enum.GetValues(typeof(MaterialTextureChannel));
             foreach (var sm in _submeshes)
             {
                 if (sm.Mesh == null) continue;
@@ -947,6 +1305,16 @@ namespace DeadlockPlayground.Painter
                 if (layerManager.HasPaintStrokes(matKey))
                 {
                     sm.IsDirty = true;
+                    continue;
+                }
+
+                foreach (var ch in allChannels)
+                {
+                    if (layerManager.HasChannelEdits(sm, ch) || (sm.Channels?.GetChannel(ch)?.IsDirty ?? false))
+                    {
+                        sm.IsDirty = true;
+                        break;
+                    }
                 }
                 // Never overwrite sm.IsDirty back to false if it was already true!
             }
@@ -981,11 +1349,55 @@ namespace DeadlockPlayground.Painter
             NotifyTargetMeshChanged(info.Mesh, targetSurface);
         }
 
+        private static void ApplyPersistentMeshVisibility(MeshInstance3D mesh, bool visible)
+        {
+            if (mesh == null || !GodotObject.IsInstanceValid(mesh)) return;
+
+            bool hiddenByCustom = mesh.HasMeta("UserHiddenByCustomModel") && mesh.GetMeta("UserHiddenByCustomModel").AsBool();
+            bool actualVis = visible && !hiddenByCustom;
+            mesh.SetMeta("UserVisibility", visible);
+            mesh.Visible = actualVis;
+            if (actualVis) mesh.Layers |= (1u << 20);
+            else mesh.Layers &= ~(1u << 20);
+
+            if (mesh.HasMeta("ParentCompositeMesh"))
+            {
+                var parent = mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                if (parent != null && GodotObject.IsInstanceValid(parent))
+                {
+                    bool anyGenVis = visible;
+                    if (parent.HasMeta("GeneratedSubmeshes"))
+                    {
+                        var genList = parent.GetMeta("GeneratedSubmeshes").AsGodotArray<MeshInstance3D>();
+                        anyGenVis = genList.Any(g => g != null && GodotObject.IsInstanceValid(g) &&
+                            (g.HasMeta("UserVisibility") ? g.GetMeta("UserVisibility").AsBool() : g.Visible));
+                    }
+                    parent.SetMeta("UserVisibility", anyGenVis);
+                }
+            }
+        }
+
         public void SetMeshVisibility(SubmeshNodeInfo info, bool visible)
         {
             if (info == null || info.Mesh == null || !GodotObject.IsInstanceValid(info.Mesh)) return;
-            info.Mesh.Visible = visible;
-            _preSoloVisibility[info.Mesh] = visible;
+            info.IsSoloed = false;
+            ApplyPersistentMeshVisibility(info.Mesh, visible);
+            _preSoloVisibility[info.Mesh] = info.Mesh.Visible;
+            NotifyHierarchyChanged();
+        }
+
+        public void SyncPreSoloFromVisibility()
+        {
+            _isAnySoloed = false;
+            _preSoloVisibility.Clear();
+            foreach (var s in _submeshes)
+            {
+                s.IsSoloed = false;
+                if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
+                {
+                    _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
+                }
+            }
             NotifyHierarchyChanged();
         }
 
@@ -1068,14 +1480,19 @@ namespace DeadlockPlayground.Painter
 
                 if (!map.TryGetValue(key, out var group))
                 {
-                    string display = CleanName(key);
+                    string display = FormatCleanMaterialDisplayName(key, HeroCodename, HeroDisplayName, HeroWipAlias);
                     group = new MaterialGroup
                     {
                         MaterialKey = key,
-                        DisplayName = display
+                        DisplayName = display,
+                        Channels = sub.Channels
                     };
                     map[key] = group;
                     _materialGroups.Add(group);
+                }
+                else if (group.Channels == null && sub.Channels != null)
+                {
+                    group.Channels = sub.Channels;
                 }
                 group.Submeshes.Add(sub);
             }
@@ -1110,8 +1527,8 @@ namespace DeadlockPlayground.Painter
                 s.IsSoloed = false;
                 if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                 {
-                    s.Mesh.Visible = true;
-                    _preSoloVisibility[s.Mesh] = true;
+                    ApplyPersistentMeshVisibility(s.Mesh, true);
+                    _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
                 }
             }
             NotifyHierarchyChanged();
@@ -1127,8 +1544,9 @@ namespace DeadlockPlayground.Painter
                 s.IsSoloed = false;
                 if (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh))
                 {
-                    s.Mesh.Visible = !s.IsAccessory;
-                    _preSoloVisibility[s.Mesh] = !s.IsAccessory;
+                    bool vis = !s.IsAccessory;
+                    ApplyPersistentMeshVisibility(s.Mesh, vis);
+                    _preSoloVisibility[s.Mesh] = s.Mesh.Visible;
                 }
             }
             NotifyHierarchyChanged();
@@ -1212,16 +1630,95 @@ namespace DeadlockPlayground.Painter
             {
                 if (node != null && GodotObject.IsInstanceValid(node))
                 {
+                    node.MaterialOverlay = null;
+                    node.Visible = false;
+                    node.GetParent()?.RemoveChild(node);
                     node.QueueFree();
                 }
             }
             _generatedSubmeshNodes.Clear();
 
+            // Also purge any stray ParentCompositeMesh orphans on HeroRoot left by external/prior scans
+            if (HeroRoot != null && GodotObject.IsInstanceValid(HeroRoot))
+            {
+                var orphanSubmeshes = new List<MeshInstance3D>();
+                var compositeParents = new List<MeshInstance3D>();
+                foreach (Node child in HeroRoot.FindChildren("*", "MeshInstance3D", recursive: true, owned: false))
+                {
+                    if (child is not MeshInstance3D mi || !GodotObject.IsInstanceValid(mi)) continue;
+                    if (mi.HasMeta("ParentCompositeMesh"))
+                    {
+                        orphanSubmeshes.Add(mi);
+                    }
+                    else if (mi.HasMeta("IsHiddenComposite") || mi.HasMeta("GeneratedSubmeshes"))
+                    {
+                        compositeParents.Add(mi);
+                    }
+                }
+                foreach (var orphan in orphanSubmeshes)
+                {
+                    orphan.MaterialOverlay = null;
+                    orphan.Visible = false;
+                    orphan.GetParent()?.RemoveChild(orphan);
+                    orphan.QueueFree();
+                }
+                foreach (var cp in compositeParents)
+                {
+                    if (!_hiddenOriginalNodes.Contains(cp))
+                    {
+                        _hiddenOriginalNodes.Add(cp);
+                    }
+                }
+            }
+
             foreach (var orig in _hiddenOriginalNodes)
             {
                 if (orig != null && GodotObject.IsInstanceValid(orig))
                 {
-                    orig.Visible = true;
+                    bool hiddenByCustom = orig.HasMeta("UserHiddenByCustomModel") && orig.GetMeta("UserHiddenByCustomModel").AsBool();
+                    bool userVis = !orig.HasMeta("UserVisibility") || orig.GetMeta("UserVisibility").AsBool();
+                    orig.Visible = !hiddenByCustom && userVis;
+                    orig.MaterialOverlay = null;
+                    if (orig.Mesh != null)
+                    {
+                        int surfCount = orig.Mesh.GetSurfaceCount();
+                        bool anyHiddenSurf = false;
+                        for (int s = 0; s < surfCount; s++)
+                        {
+                            if (orig.HasMeta($"SurfaceKept_{s}") && !orig.GetMeta($"SurfaceKept_{s}").AsBool())
+                            {
+                                anyHiddenSurf = true;
+                                break;
+                            }
+                        }
+                        if (orig.Visible && anyHiddenSurf)
+                        {
+                            var hiddenMat = DeadlockPlayground.Importer.CustomModelAutoRigger.CreateHiddenSurfaceMaterial();
+                            for (int s = 0; s < surfCount; s++)
+                            {
+                                bool isKept = !orig.HasMeta($"SurfaceKept_{s}") || orig.GetMeta($"SurfaceKept_{s}").AsBool();
+                                if (!isKept)
+                                {
+                                    orig.SetSurfaceOverrideMaterial(s, hiddenMat);
+                                }
+                                else if (orig.HasMeta($"OriginalMaterial_{s}"))
+                                {
+                                    orig.SetSurfaceOverrideMaterial(s, orig.GetMeta($"OriginalMaterial_{s}").As<Material>());
+                                }
+                            }
+                        }
+                        else if (!anyHiddenSurf)
+                        {
+                            for (int s = 0; s < surfCount; s++)
+                            {
+                                Material cur = orig.GetSurfaceOverrideMaterial(s);
+                                if (cur != null && cur.HasMeta("IsHiddenSurfaceMaterial") && orig.HasMeta($"OriginalMaterial_{s}"))
+                                {
+                                    orig.SetSurfaceOverrideMaterial(s, orig.GetMeta($"OriginalMaterial_{s}").As<Material>());
+                                }
+                            }
+                        }
+                    }
                     if (orig.HasMeta("IsHiddenComposite"))
                     {
                         orig.RemoveMeta("IsHiddenComposite");

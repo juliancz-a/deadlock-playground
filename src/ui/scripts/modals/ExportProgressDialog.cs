@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Threading;
 using DeadlockPlayground.Painter;
+using DeadlockPlayground.Theming;
 
 public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgressReport>
 {
@@ -19,15 +20,97 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
     private CancellationTokenSource _cts;
     private string _exportTargetFolder;
     private bool _isCompleted = false;
+    private ColorRect _backdrop;
+    private PanelContainer _dialogPanel;
+    private string _stepStatusKind = "info";
 
     public override void _Ready()
     {
         FindNodes();
         ConnectEvents();
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        ApplyThemeStyling();
+    }
+
+    public override void _ExitTree()
+    {
+        ThemeManager.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged(ThemeProfile _)
+    {
+        if (GodotObject.IsInstanceValid(this))
+        {
+            ApplyThemeStyling();
+        }
+    }
+
+    private void ApplyThemeStyling()
+    {
+        if (_backdrop != null && GodotObject.IsInstanceValid(_backdrop))
+        {
+            _backdrop.Color = ThemeManager.GetModalBackdropColor();
+        }
+
+        if (_dialogPanel != null && GodotObject.IsInstanceValid(_dialogPanel))
+        {
+            var modalTheme = ThemeManager.Instance?.GetModalTheme();
+            if (modalTheme != null)
+            {
+                _dialogPanel.Theme = modalTheme;
+            }
+            _dialogPanel.ThemeTypeVariation = "ModalPanel";
+        }
+
+        if (_logConsole != null && GodotObject.IsInstanceValid(_logConsole))
+        {
+            var profile = ThemeManager.CurrentProfile;
+            var consoleBg = ThemeManager.GetColor(nameof(ThemePaletteData.BackgroundTertiary));
+            var border = ThemeManager.GetColor(nameof(ThemePaletteData.BorderColor));
+            int radius = profile?.Style?.CornerRadius ?? 6;
+            int bw = Math.Max(1, profile?.Style?.BorderWidth ?? 1);
+            var consoleBox = new StyleBoxFlat
+            {
+                BgColor = consoleBg,
+                BorderColor = new Color(border.R, border.G, border.B, 0.7f),
+                BorderWidthLeft = bw,
+                BorderWidthTop = bw,
+                BorderWidthRight = bw,
+                BorderWidthBottom = bw,
+                CornerRadiusTopLeft = radius,
+                CornerRadiusTopRight = radius,
+                CornerRadiusBottomRight = radius,
+                CornerRadiusBottomLeft = radius,
+                ContentMarginLeft = 10,
+                ContentMarginTop = 8,
+                ContentMarginRight = 10,
+                ContentMarginBottom = 8
+            };
+            _logConsole.AddThemeStyleboxOverride("normal", consoleBox);
+            _logConsole.AddThemeColorOverride("default_color", ThemeManager.GetColor(nameof(ThemePaletteData.TextPrimary)));
+        }
+
+        ApplyStepStatusColor();
+    }
+
+    private void ApplyStepStatusColor()
+    {
+        if (_lblStepStatus == null || !GodotObject.IsInstanceValid(_lblStepStatus)) return;
+        _lblStepStatus.Modulate = Colors.White;
+        (string variation, string token) = _stepStatusKind switch
+        {
+            "success" => ("BadgeLabelSuccess", nameof(ThemePaletteData.SemanticSuccess)),
+            "danger" => ("BadgeLabelDanger", nameof(ThemePaletteData.SemanticDanger)),
+            _ => ("BadgeLabelInfo", nameof(ThemePaletteData.AccentSecondary))
+        };
+        _lblStepStatus.ThemeTypeVariation = variation;
+        _lblStepStatus.AddThemeColorOverride("font_color", ThemeManager.GetColor(token));
     }
 
     private void FindNodes()
     {
+        _backdrop ??= GetNodeOrNull<ColorRect>("Backdrop");
+        _dialogPanel ??= GetNodeOrNull<PanelContainer>("DialogPanel");
         _lblHeader ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/Title");
         _lblStepStatus ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/LblStepStatus");
         _progressBar ??= GetNodeOrNull<ProgressBar>("DialogPanel/Margin/VBox/ProgressBar");
@@ -35,6 +118,51 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
         _btnCancel ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnCancel");
         _btnOpenFolder ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnOpenFolder");
         _btnCopyLog ??= GetNodeOrNull<Button>("DialogPanel/Margin/VBox/HBoxButtons/BtnCopyLog");
+
+        if (_lblStepStatus != null)
+        {
+            _lblStepStatus.ClipText = true;
+            _lblStepStatus.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        }
+
+        if (_logConsole != null)
+        {
+            _logConsole.SelectionEnabled = true;
+            _logConsole.ContextMenuEnabled = true;
+        }
+    }
+
+    public override void _Input(InputEvent @event)
+    {
+        if (!Visible || !_isCompleted) return;
+        if (@event is InputEventKey key && key.Pressed && !key.Echo && key.Keycode == Key.Escape)
+        {
+            OnCancelOrClosePressed();
+            GetViewport()?.SetInputAsHandled();
+        }
+    }
+
+    private static string FormatSingleLineStatus(string raw, int maxLen = 85)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        string clean = raw
+            .Replace("[INFO]", "")
+            .Replace("[SUCCESS]", "")
+            .Replace("[WARNING]", "")
+            .Replace("[ERROR]", "")
+            .Trim();
+
+        int newlineIdx = clean.IndexOfAny(new[] { '\r', '\n' });
+        if (newlineIdx >= 0)
+        {
+            clean = clean.Substring(0, newlineIdx).Trim();
+        }
+
+        if (clean.Length > maxLen)
+        {
+            clean = clean.Substring(0, maxLen - 3) + "...";
+        }
+        return clean;
     }
 
     private void ConnectEvents()
@@ -64,10 +192,10 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
         _isCompleted = false;
 
         if (_progressBar != null) _progressBar.Value = 0;
+        _stepStatusKind = "info";
         if (_lblStepStatus != null)
         {
             _lblStepStatus.Text = "Initializing export pipeline...";
-            _lblStepStatus.Modulate = new Color(0.75f, 0.82f, 0.95f);
         }
         if (_logConsole != null) _logConsole.Clear();
         if (_btnCancel != null)
@@ -80,6 +208,7 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
             _btnOpenFolder.Visible = false;
         }
 
+        ApplyThemeStyling();
         Visible = true;
     }
 
@@ -105,10 +234,7 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
 
                 if (_lblStepStatus != null)
                 {
-                    string clean = report.Message;
-                    clean = clean.Replace("[INFO]", "").Replace("[SUCCESS]", "").Replace("[WARNING]", "").Replace("[ERROR]", "").Trim();
-                    if (clean.Length > 80) clean = clean.Substring(0, 77) + "...";
-                    _lblStepStatus.Text = clean;
+                    _lblStepStatus.Text = FormatSingleLineStatus(report.Message, 85);
                 }
             }
         }).CallDeferred();
@@ -137,19 +263,32 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
                     _btnOpenFolder.Disabled = false;
                 }
                 if (_progressBar != null) _progressBar.Value = 100;
+                _stepStatusKind = "success";
                 if (_lblStepStatus != null)
                 {
                     _lblStepStatus.Text = "Export successfully completed!";
-                    _lblStepStatus.Modulate = Colors.LightGreen;
                 }
+                ApplyStepStatusColor();
             }
             else
             {
+                string fullErr = result?.ErrorMessage ?? "Unknown error";
+                if (_logConsole != null)
+                {
+                    string existingLog = _logConsole.GetParsedText() ?? "";
+                    if (!existingLog.Contains(fullErr, StringComparison.Ordinal))
+                    {
+                        AppendLog($"[ERROR] {fullErr}", ExportLogLevel.Error);
+                    }
+                }
+
+                _stepStatusKind = "danger";
                 if (_lblStepStatus != null)
                 {
-                    _lblStepStatus.Text = $"Export failed: {result?.ErrorMessage ?? "Unknown error"}";
-                    _lblStepStatus.Modulate = Colors.Salmon;
+                    string singleLineErr = FormatSingleLineStatus(fullErr, 75);
+                    _lblStepStatus.Text = $"Export failed: {singleLineErr}";
                 }
+                ApplyStepStatusColor();
             }
         }).CallDeferred();
     }
@@ -158,31 +297,38 @@ public partial class ExportProgressDialog : CanvasLayer, IProgress<ExportProgres
     {
         if (_logConsole == null) return;
 
+        bool isLight = ThemeManager.IsLightTheme();
+        string infoHex = isLight ? "#0f5298" : "#63b3ed";
+        string successHex = isLight ? "#157347" : "#68d391";
+        string warnHex = isLight ? "#9a5b00" : "#ecc94b";
+        string errHex = isLight ? "#b91c1c" : "#fc8181";
+        string mutedHex = isLight ? "#374151" : "#a0aec0";
+
         string colorTag = level switch
         {
-            ExportLogLevel.Success => "[color=#68d391]",
-            ExportLogLevel.Warning => "[color=#ecc94b]",
-            ExportLogLevel.Error => "[color=#fc8181]",
-            _ => "[color=#a0aec0]"
+            ExportLogLevel.Success => $"[color={successHex}]",
+            ExportLogLevel.Warning => $"[color={warnHex}]",
+            ExportLogLevel.Error => $"[color={errHex}]",
+            _ => $"[color={mutedHex}]"
         };
 
-        // Format [TAG] with distinct color
+        // Format [TAG] with distinct contrast-aware color
         string formatted = message;
         if (message.StartsWith("[INFO]"))
         {
-            formatted = "[color=#63b3ed][b][INFO][/b][/color] " + message.Substring(6).TrimStart();
+            formatted = $"[color={infoHex}][b][INFO][/b][/color] " + message.Substring(6).TrimStart();
         }
         else if (message.StartsWith("[SUCCESS]"))
         {
-            formatted = "[color=#68d391][b][SUCCESS][/b][/color] " + message.Substring(9).TrimStart();
+            formatted = $"[color={successHex}][b][SUCCESS][/b][/color] " + message.Substring(9).TrimStart();
         }
         else if (message.StartsWith("[WARNING]"))
         {
-            formatted = "[color=#ecc94b][b][WARNING][/b][/color] " + message.Substring(9).TrimStart();
+            formatted = $"[color={warnHex}][b][WARNING][/b][/color] " + message.Substring(9).TrimStart();
         }
         else if (message.StartsWith("[ERROR]"))
         {
-            formatted = "[color=#fc8181][b][ERROR][/b][/color] " + message.Substring(7).TrimStart();
+            formatted = $"[color={errHex}][b][ERROR][/b][/color] " + message.Substring(7).TrimStart();
         }
         else
         {

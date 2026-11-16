@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DeadlockPlayground.Painter;
+using DeadlockPlayground.Theming;
 using DeadlockPlayground.Workspace;
 
 public partial class ExportModDialog : CanvasLayer
@@ -34,22 +35,95 @@ public partial class ExportModDialog : CanvasLayer
 
     private string _heroCodename = "hero";
     private string _heroDisplayName = "Hero";
+    private string _detectedSourceModVpkPath = "";
     private List<SubmeshNodeInfo> _allSubmeshes = new();
     private readonly Dictionary<CheckBox, SubmeshNodeInfo> _submeshCheckboxes = new();
     private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _extraModelCheckboxes = new();
     private readonly Dictionary<CheckBox, WorkspaceAssetEntry> _particleCheckboxes = new();
+    private readonly Dictionary<CheckBox, WorkspaceAnimationEntry> _animationCheckboxes = new();
     private Image _preBakedAtlas;
     private GamePathManager _pathManager;
     private bool _isBrowsingCsdk = false;
+
+    private CheckBox _chkMergeBaseMod;
+    private CheckBox _chkPrioritizeNewMod;
+    private CheckBox _chkOverwriteOriginalMod;
+    private VBoxContainer _modMergeOptionsBox;
+    private ColorRect _backdrop;
+    private PanelContainer _dialogPanel;
+    private bool _isCompilerFound;
+    private string _targetVpkStatusKind = "success";
 
     public override void _Ready()
     {
         FindNodes();
         ConnectEvents();
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        ApplyThemeStyling();
+    }
+
+    public override void _ExitTree()
+    {
+        ThemeManager.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged(ThemeProfile _)
+    {
+        if (GodotObject.IsInstanceValid(this))
+        {
+            ApplyThemeStyling();
+        }
+    }
+
+    private void ApplyThemeStyling()
+    {
+        if (_backdrop != null && GodotObject.IsInstanceValid(_backdrop))
+        {
+            _backdrop.Color = ThemeManager.GetModalBackdropColor();
+        }
+
+        if (_dialogPanel != null && GodotObject.IsInstanceValid(_dialogPanel))
+        {
+            var modalTheme = ThemeManager.Instance?.GetModalTheme();
+            if (modalTheme != null)
+            {
+                _dialogPanel.Theme = modalTheme;
+            }
+            _dialogPanel.ThemeTypeVariation = "ModalPanel";
+        }
+
+        ApplyCompilerStatusColor();
+        ApplyTargetVpkStatusColor();
+    }
+
+    private void ApplyCompilerStatusColor()
+    {
+        if (_lblCompilerStatus == null || !GodotObject.IsInstanceValid(_lblCompilerStatus)) return;
+        _lblCompilerStatus.Modulate = Colors.White;
+        _lblCompilerStatus.ThemeTypeVariation = _isCompilerFound ? "BadgeLabelSuccess" : "BadgeLabelWarning";
+        _lblCompilerStatus.AddThemeColorOverride("font_color", ThemeManager.GetColor(_isCompilerFound
+            ? nameof(ThemePaletteData.SemanticSuccess)
+            : nameof(ThemePaletteData.SemanticWarning)));
+    }
+
+    private void ApplyTargetVpkStatusColor()
+    {
+        if (_lblTargetVpkInfo == null || !GodotObject.IsInstanceValid(_lblTargetVpkInfo)) return;
+        _lblTargetVpkInfo.Modulate = Colors.White;
+        (string variation, string token) = _targetVpkStatusKind switch
+        {
+            "danger" => ("BadgeLabelDanger", nameof(ThemePaletteData.SemanticDanger)),
+            "warning" => ("BadgeLabelWarning", nameof(ThemePaletteData.SemanticWarning)),
+            _ => ("BadgeLabelSuccess", nameof(ThemePaletteData.SemanticSuccess))
+        };
+        _lblTargetVpkInfo.ThemeTypeVariation = variation;
+        _lblTargetVpkInfo.AddThemeColorOverride("font_color", ThemeManager.GetColor(token));
     }
 
     private void FindNodes()
     {
+        _backdrop ??= GetNodeOrNull<ColorRect>("Backdrop");
+        _dialogPanel ??= GetNodeOrNull<PanelContainer>("DialogPanel");
         _txtModName ??= GetNodeOrNull<LineEdit>("DialogPanel/Margin/VBox/VBoxInstall/CustomFolderContainer/HBoxFileName/TxtModName")
                      ?? FindChild("TxtModName", true, false) as LineEdit;
         _lblHero ??= GetNodeOrNull<Label>("DialogPanel/Margin/VBox/HBoxHero/LblHeroValue");
@@ -135,7 +209,6 @@ public partial class ExportModDialog : CanvasLayer
                 UpdateCompilerValidationStatus(file);
                 _pathManager?.SaveResourceCompilerPath(file);
 
-                // Try to auto-populate CSDK Root if currently blank
                 if (string.IsNullOrEmpty(_txtCsdkPath?.Text))
                 {
                     string autoRoot = AutoDeriveCsdkRoot(file);
@@ -183,7 +256,7 @@ public partial class ExportModDialog : CanvasLayer
                 _isBrowsingCsdk = true;
                 if (_folderDialog != null)
                 {
-                    _folderDialog.Title = "Select CSDK12 Root Directory (Optional)";
+                    _folderDialog.Title = "Select CSDK13 Root Directory (Optional)";
                     _folderDialog.CurrentDir = !string.IsNullOrEmpty(_txtCsdkPath?.Text) && Directory.Exists(_txtCsdkPath.Text)
                         ? _txtCsdkPath.Text
                         : "C:/";
@@ -228,12 +301,46 @@ public partial class ExportModDialog : CanvasLayer
             };
         }
 
-        // Open the CSDK12 download page in the system default browser.
         if (_btnDownloadCsdk != null)
         {
             _btnDownloadCsdk.Pressed += () =>
-                OS.ShellOpen("https://deadlockmodding.pages.dev/modding-tools/csdk-12");
+                OS.ShellOpen("https://deadlockmodding.pages.dev/modding-tools/csdk-13");
         }
+    }
+
+    private string ResolveActiveSourceModVpk()
+    {
+        if (_allSubmeshes != null)
+        {
+            foreach (var sm in _allSubmeshes)
+            {
+                if (!string.IsNullOrWhiteSpace(sm?.SourceAddonVpkPath) && File.Exists(sm.SourceAddonVpkPath))
+                    return sm.SourceAddonVpkPath;
+                if (sm?.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("SourceAddonVpkPath"))
+                {
+                    string meta = sm.Mesh.GetMeta("SourceAddonVpkPath").AsString();
+                    if (!string.IsNullOrWhiteSpace(meta) && File.Exists(meta))
+                        return meta;
+                }
+            }
+        }
+
+        if (ModWorkspaceSession.Instance != null &&
+            !string.IsNullOrWhiteSpace(_heroCodename) &&
+            ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(_heroCodename, out var wsHero) &&
+            !string.IsNullOrWhiteSpace(wsHero?.SourceAddonVpkPath) &&
+            File.Exists(wsHero.SourceAddonVpkPath))
+        {
+            return wsHero.SourceAddonVpkPath;
+        }
+
+        var vpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as global::VpkLoaderTest;
+        if (vpkLoader != null && !string.IsNullOrWhiteSpace(vpkLoader.ActiveAddonVpkPath) && File.Exists(vpkLoader.ActiveAddonVpkPath))
+        {
+            return vpkLoader.ActiveAddonVpkPath;
+        }
+
+        return "";
     }
 
     public void Setup(
@@ -252,9 +359,29 @@ public partial class ExportModDialog : CanvasLayer
         _preBakedAtlas = preBakedAtlas;
         _pathManager = pathManager;
 
+        _detectedSourceModVpkPath = ResolveActiveSourceModVpk();
+        bool hasSourceMod = !string.IsNullOrWhiteSpace(_detectedSourceModVpkPath) && File.Exists(_detectedSourceModVpkPath);
+
         if (_lblCommunityModWarning != null)
         {
-            _lblCommunityModWarning.Visible = isCommunityMod;
+            _lblCommunityModWarning.Visible = isCommunityMod || hasSourceMod;
+            if (hasSourceMod)
+            {
+                _lblCommunityModWarning.Text = $"📦 Base Mod Detected: {Path.GetFileName(_detectedSourceModVpkPath)}";
+            }
+        }
+
+        // Mount the Mod Merge checkboxes inside VBoxInstall (right below the install destination checkboxes)
+        var installBox = _chkInstallCitadel?.GetParent() as Container
+                      ?? GetNodeOrNull<Container>("DialogPanel/Margin/VBox/VBoxInstall")
+                      ?? GetNodeOrNull<Container>("DialogPanel/Margin/VBox");
+        if (installBox != null)
+        {
+            EnsureModMergeUICreated(installBox);
+            if (_modMergeOptionsBox != null)
+            {
+                _modMergeOptionsBox.Visible = hasSourceMod;
+            }
         }
 
         if (_txtModName != null)
@@ -267,7 +394,6 @@ public partial class ExportModDialog : CanvasLayer
             _lblHero.Text = $"{_heroDisplayName} ({_heroCodename})";
         }
 
-        // Resolve Resource Compiler Path
         string compilerPath = _pathManager?.ResolveResourceCompilerExe();
         if (_txtCompilerPath != null)
         {
@@ -275,7 +401,6 @@ public partial class ExportModDialog : CanvasLayer
         }
         UpdateCompilerValidationStatus(compilerPath);
 
-        // Populate CSDK path if available
         string csdk = _pathManager?.CurrentCsdkPath;
         if (string.IsNullOrEmpty(csdk) && !string.IsNullOrEmpty(compilerPath))
         {
@@ -286,14 +411,13 @@ public partial class ExportModDialog : CanvasLayer
             _txtCsdkPath.Text = csdk ?? "";
         }
 
-        // Setup submeshes checklist
         PopulateSubmeshChecklist();
 
-        // Default install mode
         if (_chkInstallCitadel != null) _chkInstallCitadel.ButtonPressed = true;
         if (_chkCustomFolder != null) _chkCustomFolder.ButtonPressed = false;
         UpdateInstallModeUI();
         UpdateTargetVpkInfo();
+        ApplyThemeStyling();
 
         Visible = true;
     }
@@ -304,14 +428,22 @@ public partial class ExportModDialog : CanvasLayer
 
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path.Trim()))
         {
-            _lblCompilerStatus.Text = $"✓ Found compiler: {Path.GetFileName(path.Trim())}";
-            _lblCompilerStatus.Modulate = new Color(0.4f, 0.95f, 0.5f);
+            _isCompilerFound = true;
+            string trimmed = path.Trim();
+            string norm = trimmed.Replace('\\', '/');
+            bool isLegacy12 = norm.Contains("CSDK12", StringComparison.OrdinalIgnoreCase)
+                           || norm.Contains("CSDK_12", StringComparison.OrdinalIgnoreCase)
+                           || norm.Contains("/bin_cs2/", StringComparison.OrdinalIgnoreCase);
+            _lblCompilerStatus.Text = isLegacy12
+                ? $"✓ Found compiler: {Path.GetFileName(trimmed)} (Legacy CSDK12 deprecated — CSDK13 recommended)"
+                : $"✓ Found compiler: {Path.GetFileName(trimmed)}";
         }
         else
         {
+            _isCompilerFound = false;
             _lblCompilerStatus.Text = "⚠ resourcecompiler.exe not found! Please browse to the executable file.";
-            _lblCompilerStatus.Modulate = new Color(1.0f, 0.65f, 0.4f);
         }
+        ApplyCompilerStatusColor();
     }
 
     private static string AutoDeriveCsdkRoot(string compilerExePath)
@@ -344,11 +476,13 @@ public partial class ExportModDialog : CanvasLayer
         _submeshCheckboxes.Clear();
         _extraModelCheckboxes.Clear();
         _particleCheckboxes.Clear();
+        _animationCheckboxes.Clear();
 
         var session = ModWorkspaceSession.Instance;
         var characterModelAssets = new List<WorkspaceAssetEntry>();
         var extraModelAssets = new List<WorkspaceAssetEntry>();
         var particleAssets = new List<WorkspaceAssetEntry>();
+        var animationEntries = new List<WorkspaceAnimationEntry>();
 
         if (session != null && session.Manifest != null)
         {
@@ -359,88 +493,135 @@ public partial class ExportModDialog : CanvasLayer
                     if (asset.Category == "CharacterModel") characterModelAssets.Add(asset);
                     else if (asset.Category == "ExtraModel") extraModelAssets.Add(asset);
                     else if (asset.Category == "ParticleVFX") particleAssets.Add(asset);
+
+                    if (asset.Animations != null && asset.Animations.Count > 0)
+                    {
+                        animationEntries.AddRange(asset.Animations);
+                    }
                 }
             }
         }
 
-        var colus = PlaygroundThemeHelper.GetFontColus();
-
-        void AddSectionHeader(string title, Color color)
+        void AddSectionHeader(string title)
         {
             var header = new Label
             {
-                Text = title
+                Text = title,
+                ThemeTypeVariation = "SectionHeaderLabel"
             };
-            if (colus != null) header.AddThemeFontOverride("font", colus);
-            header.AddThemeFontSizeOverride("font_size", 14);
-            header.AddThemeColorOverride("font_color", color);
             _submeshChecklistContainer.AddChild(header);
         }
 
-        void AddSubmeshRow(SubmeshNodeInfo submesh, bool isPreChecked)
+        HBoxContainer AddChecklistRow(string text, bool isPreChecked, string initialStatusText, string fileBadgeText, out CheckBox chkOut, out Label statusOut)
         {
             var hbox = new HBoxContainer();
             hbox.AddThemeConstantOverride("separation", 8);
 
-            submesh.IsSelected = isPreChecked;
-
             var chk = new CheckBox
             {
-                Text = $"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]",
+                Text = text,
                 ButtonPressed = isPreChecked,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            if (colus != null) chk.AddThemeFontOverride("font", colus);
-            chk.AddThemeFontSizeOverride("font_size", 14);
 
             var lblStatusBadge = new Label
             {
-                Text = submesh.IsDirty ? "[MODIFIED]" : "[UNMODIFIED]"
+                Text = initialStatusText,
+                ThemeTypeVariation = isPreChecked ? "BadgeLabelSuccess" : "MutedLabel"
             };
-            if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-            lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-            lblStatusBadge.AddThemeColorOverride("font_color", submesh.IsDirty ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+
+            hbox.AddChild(chk);
+            hbox.AddChild(lblStatusBadge);
+
+            if (!string.IsNullOrEmpty(fileBadgeText))
+            {
+                var lblBadge = new Label
+                {
+                    Text = fileBadgeText,
+                    ThemeTypeVariation = "BadgeLabelInfo"
+                };
+                hbox.AddChild(lblBadge);
+            }
+
+            _submeshChecklistContainer.AddChild(hbox);
+            chkOut = chk;
+            statusOut = lblStatusBadge;
+            return hbox;
+        }
+
+        bool hasCustomImportedModel = _allSubmeshes.Any(s =>
+            s.IsCustomImportedMesh ||
+            (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
+             s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool()));
+
+        void AddSubmeshRow(SubmeshNodeInfo submesh, bool isPreChecked)
+        {
+            submesh.IsSelected = isPreChecked;
+            if (isPreChecked && !hasCustomImportedModel)
+            {
+                submesh.IsDirty = true;
+            }
+
+            bool isOutline = submesh.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh) &&
+                             submesh.Mesh.HasMeta("IsOutlineShell") && submesh.Mesh.GetMeta("IsOutlineShell").AsBool();
+            string outlineTag = isOutline ? " [OUTLINE SHELL]" : "";
+
+            string statusText = isPreChecked ? ((hasCustomImportedModel && !submesh.IsCustomImportedMesh && !submesh.IsDirty) ? "[KEPT PROP]" : (submesh.IsDirty ? "[SELECTED]" : "[MODIFIED]")) : "[UNMODIFIED]";
+            string fileBadge = !string.IsNullOrEmpty(submesh.OriginalVmatPath) ? Path.GetFileName(submesh.OriginalVmatPath) : null;
+
+            AddChecklistRow($"{submesh.DisplayName} [{submesh.MaterialName ?? "mat"}]{outlineTag}", isPreChecked, statusText, fileBadge, out var chk, out var lblStatusBadge);
 
             chk.Toggled += (pressed) =>
             {
                 submesh.IsSelected = pressed;
                 if (pressed)
                 {
-                    submesh.IsDirty = true;
-                    lblStatusBadge.Text = "[SELECTED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
+                    if (!hasCustomImportedModel)
+                        submesh.IsDirty = true;
+                    lblStatusBadge.Text = (hasCustomImportedModel && !submesh.IsCustomImportedMesh && !submesh.IsDirty) ? "[KEPT PROP]" : "[SELECTED]";
+                    lblStatusBadge.ThemeTypeVariation = "BadgeLabelSuccess";
                 }
                 else
                 {
                     lblStatusBadge.Text = "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = "MutedLabel";
                 }
             };
 
             _submeshCheckboxes[chk] = submesh;
-            hbox.AddChild(chk);
-            hbox.AddChild(lblStatusBadge);
-
-            if (!string.IsNullOrEmpty(submesh.OriginalVmatPath))
-            {
-                var lblBadge = new Label
-                {
-                    Text = Path.GetFileName(submesh.OriginalVmatPath)
-                };
-                lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                hbox.AddChild(lblBadge);
-            }
-
-            _submeshChecklistContainer.AddChild(hbox);
         }
 
-        // Section 1: Hero Model Submeshes
-        AddSectionHeader("👤 Hero Model Submeshes", new Color(0.95f, 0.85f, 0.45f));
+        AddSectionHeader("Hero Model Submeshes");
         var dirtySubmeshes = _allSubmeshes.Where(s => s.IsDirty).ToList();
-        bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0;
+        bool hasOtherWorkspaceMods = extraModelAssets.Count > 0 || particleAssets.Count > 0 || animationEntries.Count > 0;
 
-        if (dirtySubmeshes.Count > 0)
+        if (_allSubmeshes.Count > 1)
+        {
+            var chkSelectAll = new CheckBox
+            {
+                Text = "Select All / Deselect All Materials",
+                ButtonPressed = hasCustomImportedModel || dirtySubmeshes.Count > 0,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            chkSelectAll.Toggled += (selectAll) =>
+            {
+                foreach (var kv in _submeshCheckboxes)
+                {
+                    kv.Key.ButtonPressed = selectAll;
+                }
+            };
+            _submeshChecklistContainer.AddChild(chkSelectAll);
+        }
+
+        if (hasCustomImportedModel)
+        {
+            foreach (var sm in _allSubmeshes)
+            {
+                bool isVisible = sm.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh) || sm.Mesh.Visible;
+                AddSubmeshRow(sm, isVisible);
+            }
+        }
+        else if (dirtySubmeshes.Count > 0)
         {
             foreach (var sm in dirtySubmeshes)
             {
@@ -451,36 +632,18 @@ public partial class ExportModDialog : CanvasLayer
         {
             foreach (var charAsset in characterModelAssets)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
                 int texCount = charAsset.ModifiedTextures.Count;
-                var chk = new CheckBox
-                {
-                    Text = $"{charAsset.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
+                AddChecklistRow($"{charAsset.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})", true, "[MODIFIED]", null, out var chk, out _);
                 _extraModelCheckboxes[chk] = charAsset;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
         else if (hasOtherWorkspaceMods)
         {
             var emptyLbl = new Label
             {
-                Text = "   (No character model submeshes modified)"
+                Text = "   (No character model submeshes modified)",
+                ThemeTypeVariation = "MutedLabel"
             };
-            emptyLbl.AddThemeFontSizeOverride("font_size", 13);
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f));
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
         else if (_allSubmeshes.Count > 0)
@@ -494,114 +657,120 @@ public partial class ExportModDialog : CanvasLayer
         {
             var emptyLbl = new Label
             {
-                Text = "   No submeshes found. Default body will be exported."
+                Text = "   No submeshes found. Default body will be exported.",
+                ThemeTypeVariation = "MutedLabel"
             };
-            emptyLbl.AddThemeFontSizeOverride("font_size", 13);
-            emptyLbl.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.84f));
             _submeshChecklistContainer.AddChild(emptyLbl);
         }
 
-        // Section 2: Extra Models
         if (extraModelAssets.Count > 0)
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
-            _submeshChecklistContainer.AddChild(spacer);
-
-            AddSectionHeader("🗡️ Extra Models", new Color(0.45f, 0.80f, 0.98f));
+            _submeshChecklistContainer.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+            AddSectionHeader("Extra Models");
 
             foreach (var extra in extraModelAssets)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
-
                 int texCount = extra.ModifiedTextures.Count;
-                var chk = new CheckBox
-                {
-                    Text = $"{extra.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
-
+                string modelFile = Path.GetFileName(extra.OwnerAssetPath);
+                AddChecklistRow($"{extra.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})", true, "[MODIFIED]", modelFile, out var chk, out var lblStatusBadge);
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = pressed ? "BadgeLabelSuccess" : "MutedLabel";
                 };
-
                 _extraModelCheckboxes[chk] = extra;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-
-                string modelFile = Path.GetFileName(extra.OwnerAssetPath);
-                if (!string.IsNullOrEmpty(modelFile))
-                {
-                    var lblBadge = new Label { Text = modelFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                    hbox.AddChild(lblBadge);
-                }
-
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
 
-        // Section 3: Particle VFX
         if (particleAssets.Count > 0)
         {
-            var spacer = new Control { CustomMinimumSize = new Vector2(0, 6) };
-            _submeshChecklistContainer.AddChild(spacer);
-
-            AddSectionHeader("✨ Particle VFX", new Color(0.90f, 0.60f, 0.98f));
+            _submeshChecklistContainer.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+            AddSectionHeader("Particle VFX");
 
             foreach (var part in particleAssets)
             {
-                var hbox = new HBoxContainer();
-                hbox.AddThemeConstantOverride("separation", 8);
-
                 int texCount = part.ModifiedTextures.Count;
-                var chk = new CheckBox
-                {
-                    Text = $"{part.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})",
-                    ButtonPressed = true,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-                };
-                if (colus != null) chk.AddThemeFontOverride("font", colus);
-                chk.AddThemeFontSizeOverride("font_size", 14);
-
-                var lblStatusBadge = new Label { Text = "[MODIFIED]" };
-                if (colus != null) lblStatusBadge.AddThemeFontOverride("font", colus);
-                lblStatusBadge.AddThemeFontSizeOverride("font_size", 12);
-                lblStatusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.95f, 0.55f));
-
+                string vpcfFile = Path.GetFileName(part.OwnerAssetPath);
+                AddChecklistRow($"{part.DisplayName} ({texCount} texture{(texCount != 1 ? "s" : "")})", true, "[MODIFIED]", vpcfFile, out var chk, out var lblStatusBadge);
                 chk.Toggled += (pressed) =>
                 {
                     lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
-                    lblStatusBadge.AddThemeColorOverride("font_color", pressed ? new Color(0.45f, 0.95f, 0.55f) : new Color(0.65f, 0.70f, 0.80f));
+                    lblStatusBadge.ThemeTypeVariation = pressed ? "BadgeLabelSuccess" : "MutedLabel";
                 };
-
                 _particleCheckboxes[chk] = part;
-                hbox.AddChild(chk);
-                hbox.AddChild(lblStatusBadge);
-
-                string vpcfFile = Path.GetFileName(part.OwnerAssetPath);
-                if (!string.IsNullOrEmpty(vpcfFile))
-                {
-                    var lblBadge = new Label { Text = vpcfFile };
-                    lblBadge.AddThemeFontSizeOverride("font_size", 12);
-                    lblBadge.AddThemeColorOverride("font_color", new Color(0.50f, 0.75f, 0.95f));
-                    hbox.AddChild(lblBadge);
-                }
-
-                _submeshChecklistContainer.AddChild(hbox);
             }
         }
+
+        if (animationEntries.Count > 0)
+        {
+            _submeshChecklistContainer.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+            AddSectionHeader("Animations");
+
+            foreach (var animEntry in animationEntries)
+            {
+                string label = !string.IsNullOrEmpty(animEntry.CleanName) ? animEntry.CleanName : animEntry.AnimName;
+                string clipFile = Path.GetFileName(animEntry.TargetVpkPath ?? animEntry.RelativeVnmclipPath ?? "");
+                AddChecklistRow($"{label} ({animEntry.Duration:0.00}s)", true, "[MODIFIED]", clipFile, out var chk, out var lblStatusBadge);
+                chk.Toggled += (pressed) =>
+                {
+                    lblStatusBadge.Text = pressed ? "[SELECTED]" : "[SKIPPED]";
+                    lblStatusBadge.ThemeTypeVariation = pressed ? "BadgeLabelSuccess" : "MutedLabel";
+                };
+                _animationCheckboxes[chk] = animEntry;
+            }
+        }
+    }
+
+    private void EnsureModMergeUICreated(Container parentContainer)
+    {
+        if (_modMergeOptionsBox != null && GodotObject.IsInstanceValid(_modMergeOptionsBox))
+            return;
+
+        _modMergeOptionsBox = new VBoxContainer
+        {
+            Name = "ModMergeOptionsBox",
+            Visible = false
+        };
+        _modMergeOptionsBox.AddThemeConstantOverride("separation", 4);
+
+        _chkMergeBaseMod = new CheckBox
+        {
+            Text = "Bundle Base Mod Files (Standalone Merged VPK)",
+            ButtonPressed = true,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = "Includes the original mod's 3D model (.vmdl_c), materials (.vmat_c), and base assets alongside your exported changes (animation/recolor/VFX/misc) in the new VPK."
+        };
+        _chkMergeBaseMod.Toggled += (_) => UpdateTargetVpkInfo();
+
+        _chkPrioritizeNewMod = new CheckBox
+        {
+            Text = "Give New Export Highest Load Priority (Takes lower pakXX number & shifts original mod up)",
+            ButtonPressed = true, // TRUE by default so the new export (animation/recolor/VFX/misc) wins in Deadlock without deleting the original!
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = "In Source 2, lower pakXX numbers have higher priority. This places your new mod (animation/recolor/VFX/misc) in the original mod's slot and moves the original mod to the next pakXX slot so nothing is lost."
+        };
+        _chkPrioritizeNewMod.Toggled += (_) => UpdateTargetVpkInfo();
+
+        _chkOverwriteOriginalMod = new CheckBox
+        {
+            Text = "Overwrite Original Mod VPK in addons/ (Replace instead of keeping both)",
+            ButtonPressed = false, // FALSE by default: keeps both mods!
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = "If checked, overwrites the original mod file directly instead of keeping both VPK files."
+        };
+        _chkOverwriteOriginalMod.Toggled += (on) =>
+        {
+            if (_chkPrioritizeNewMod != null)
+            {
+                _chkPrioritizeNewMod.Disabled = on;
+            }
+            UpdateTargetVpkInfo();
+        };
+
+        _modMergeOptionsBox.AddChild(_chkMergeBaseMod);
+        _modMergeOptionsBox.AddChild(_chkPrioritizeNewMod);
+        _modMergeOptionsBox.AddChild(_chkOverwriteOriginalMod);
+        parentContainer.AddChild(_modMergeOptionsBox);
     }
 
     private void UpdateInstallModeUI()
@@ -623,8 +792,32 @@ public partial class ExportModDialog : CanvasLayer
             string deadlockPath = _pathManager?.CurrentGamePath ?? "";
             string addonsDir = Path.Combine(deadlockPath, "game", "citadel", "addons");
             string nextVpk = VpkIndexResolver.ResolveNextFileName(addonsDir);
-            _lblTargetVpkInfo.Text = $"Will be installed as: {nextVpk} (in game/citadel/addons)";
-            _lblTargetVpkInfo.Modulate = new Color(0.4f, 0.9f, 0.5f);
+
+            bool hasSourceModInAddons = false;
+            string srcFileName = "";
+            if (!string.IsNullOrWhiteSpace(_detectedSourceModVpkPath) && File.Exists(_detectedSourceModVpkPath) && Directory.Exists(addonsDir))
+            {
+                string srcDir = Path.GetDirectoryName(Path.GetFullPath(_detectedSourceModVpkPath))?.TrimEnd('\\', '/') ?? "";
+                string tgtDir = Path.GetFullPath(addonsDir).TrimEnd('\\', '/');
+                hasSourceModInAddons = string.Equals(srcDir, tgtDir, StringComparison.OrdinalIgnoreCase);
+                srcFileName = Path.GetFileName(_detectedSourceModVpkPath);
+            }
+
+            if (hasSourceModInAddons && _chkOverwriteOriginalMod?.ButtonPressed == true)
+            {
+                _lblTargetVpkInfo.Text = $"Will overwrite original mod in-place: {srcFileName} (in game/citadel/addons)";
+                _targetVpkStatusKind = "warning";
+            }
+            else if (hasSourceModInAddons && _chkPrioritizeNewMod?.ButtonPressed != false)
+            {
+                _lblTargetVpkInfo.Text = $"Will take priority slot '{srcFileName}' & shift original mod to '{nextVpk}' (both kept!)";
+                _targetVpkStatusKind = "success";
+            }
+            else
+            {
+                _lblTargetVpkInfo.Text = $"Will be installed as: {nextVpk} (in game/citadel/addons)";
+                _targetVpkStatusKind = "success";
+            }
         }
         else
         {
@@ -637,19 +830,26 @@ public partial class ExportModDialog : CanvasLayer
             string folder = _txtCustomFolder?.Text.Trim();
             if (string.IsNullOrEmpty(folder)) folder = "Custom Folder";
             _lblTargetVpkInfo.Text = $"Will be exported as: {modName}.vpk (in {folder})";
-            _lblTargetVpkInfo.Modulate = new Color(0.9f, 0.8f, 0.4f);
+            _targetVpkStatusKind = "warning";
         }
+        ApplyTargetVpkStatusColor();
     }
 
     private void OnConfirmPressed()
     {
         var selectedSubmeshes = new List<SubmeshNodeInfo>();
+        bool hasCustomImported = _allSubmeshes.Any(s =>
+            s.IsCustomImportedMesh ||
+            (s.Mesh != null && GodotObject.IsInstanceValid(s.Mesh) &&
+             s.Mesh.HasMeta("IsCustomImportedMesh") && s.Mesh.GetMeta("IsCustomImportedMesh").AsBool()));
         foreach (var kvp in _submeshCheckboxes)
         {
             var sm = kvp.Value;
             sm.IsSelected = kvp.Key.ButtonPressed;
-            if (sm.IsSelected && sm.IsDirty)
+            if (sm.IsSelected)
             {
+                if (!hasCustomImported)
+                    sm.IsDirty = true;
                 selectedSubmeshes.Add(sm);
             }
         }
@@ -657,14 +857,16 @@ public partial class ExportModDialog : CanvasLayer
         int totalSelectedCount = selectedSubmeshes.Count;
         int totalExtraSelected = _extraModelCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
         int totalParticlesSelected = _particleCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
-        int totalItems = totalSelectedCount + totalExtraSelected + totalParticlesSelected;
+        int totalAnimsSelected = _animationCheckboxes.Count(kvp => kvp.Key.ButtonPressed);
+        int totalItems = totalSelectedCount + totalExtraSelected + totalParticlesSelected + totalAnimsSelected;
 
         if (totalItems == 0 && ModWorkspaceSession.Instance.GetTotalModifiedCount() == 0)
         {
             if (_lblTargetVpkInfo != null)
             {
                 _lblTargetVpkInfo.Text = "⚠ No modified assets or submeshes selected! Please check at least one item.";
-                _lblTargetVpkInfo.Modulate = Colors.Salmon;
+                _targetVpkStatusKind = "danger";
+                ApplyTargetVpkStatusColor();
             }
             return;
         }
@@ -684,6 +886,19 @@ public partial class ExportModDialog : CanvasLayer
             {
                 if (!string.IsNullOrEmpty(kvp.Value.VpkPath)) excludedPaths.Add(kvp.Value.VpkPath);
                 if (!string.IsNullOrEmpty(kvp.Value.OwnerAssetPath)) excludedPaths.Add(kvp.Value.OwnerAssetPath);
+            }
+        }
+        foreach (var kvp in _animationCheckboxes)
+        {
+            if (!kvp.Key.ButtonPressed)
+            {
+                string targetVpk = !string.IsNullOrEmpty(kvp.Value.TargetVpkPath)
+                    ? kvp.Value.TargetVpkPath
+                    : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(_heroCodename, null, kvp.Value.CleanName);
+                if (!string.IsNullOrEmpty(targetVpk))
+                {
+                    excludedPaths.Add(targetVpk.Replace('\\', '/').TrimStart('/'));
+                }
             }
         }
 
@@ -723,11 +938,14 @@ public partial class ExportModDialog : CanvasLayer
             DeadlockGamePath = _pathManager?.CurrentGamePath ?? "",
             ResourceCompilerPath = compilerPath,
             CsdkPath = csdkPath,
+            SourceModVpkPath = _detectedSourceModVpkPath,
+            MergeWithSourceModVpk = _chkMergeBaseMod == null || _chkMergeBaseMod.ButtonPressed,
+            PrioritizeNewModOverSource = _chkPrioritizeNewMod == null || _chkPrioritizeNewMod.ButtonPressed,
+            OverwriteSourceModInAddons = _chkOverwriteOriginalMod != null && _chkOverwriteOriginalMod.ButtonPressed,
             PreBakedAtlas = _preBakedAtlas,
             ExcludedAssetVpkPaths = excludedPaths
         };
 
-        // Persist paths to user config
         if (!string.IsNullOrEmpty(compilerPath))
         {
             _pathManager?.SaveResourceCompilerPath(compilerPath);

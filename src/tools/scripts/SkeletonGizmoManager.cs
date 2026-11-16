@@ -47,6 +47,14 @@ public partial class SkeletonGizmoManager : Node3D
 
     public int SelectedBoneIdx => _selectedBoneIdx;
 
+    public bool UseLocalSpace => GizmoDisplaySettings.GizmoUseLocalSpace;
+
+    public void SetUseLocalSpace(bool useLocal)
+    {
+        GizmoDisplaySettings.GizmoUseLocalSpace = useLocal;
+        GizmoDisplaySettings.SaveConfig();
+    }
+
     public bool IsGizmoEnabled
     {
         get => _isGizmoEnabled;
@@ -165,12 +173,18 @@ public partial class SkeletonGizmoManager : Node3D
             col.A = GizmoDisplaySettings.XRayLineAlpha;
             stdMat.AlbedoColor = col;
         }
+
+        if (_gizmo != null && GodotObject.IsInstanceValid(_gizmo))
+        {
+            _gizmo.UseLocalSpace = GizmoDisplaySettings.GizmoUseLocalSpace;
+        }
     }
 
     private void InitGizmo()
     {
         _gizmo = new Gizmo3D();
         _gizmo.Mode = Gizmo3D.ToolMode.Rotate;
+        _gizmo.UseLocalSpace = GizmoDisplaySettings.GizmoUseLocalSpace;
         _gizmo.Layers = 2;
         AddChild(_gizmo);
 
@@ -253,6 +267,15 @@ public partial class SkeletonGizmoManager : Node3D
         }
         else if (@event is InputEventKey key && key.Pressed && !key.Echo)
         {
+            var focusOwner = GetViewport()?.GuiGetFocusOwner();
+            if (focusOwner is not LineEdit && focusOwner is not TextEdit &&
+                DeadlockPlayground.Tools.KeybindsManager.IsActionTriggered("anim_toggle_local_space", key))
+            {
+                SetUseLocalSpace(!UseLocalSpace);
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
             if (_selectedBoneIdx != -1 && GodotObject.IsInstanceValid(TargetSkeleton) && !TargetSkeleton.IsQueuedForDeletion())
             {
                 if (key.Keycode == Key.G && key.AltPressed)
@@ -330,13 +353,14 @@ public partial class SkeletonGizmoManager : Node3D
         }
        
         _gizmo.Visible = true;
+        _gizmo.UseLocalSpace = GizmoDisplaySettings.GizmoUseLocalSpace;
         if (!_gizmo.IsSelected(_dummyTarget))
         {
             _gizmo.ClearSelection();
             _gizmo.Select(_dummyTarget);
         }
 
-        _dummyTarget.GlobalTransform = controlItem.Attachment.GlobalTransform;
+        SyncDummyTargetTransform(controlItem.Attachment.GlobalTransform);
         
         string bName = TargetSkeleton.GetBoneName(_selectedBoneIdx)?.ToLowerInvariant() ?? "";
         bool isRootOrProp = bName.Contains("weapon") || bName.Contains("gun") || 
@@ -450,9 +474,15 @@ public partial class SkeletonGizmoManager : Node3D
             var item = _boneLayerManager?.GetControl(_selectedBoneIdx);
             if (item != null && GodotObject.IsInstanceValid(item.Attachment) && GodotObject.IsInstanceValid(_dummyTarget))
             {
-                _dummyTarget.GlobalTransform = item.Attachment.GlobalTransform;
+                SyncDummyTargetTransform(item.Attachment.GlobalTransform);
             }
         }
+    }
+
+    private void SyncDummyTargetTransform(Transform3D xf)
+    {
+        if (_dummyTarget == null || !GodotObject.IsInstanceValid(_dummyTarget)) return;
+        _dummyTarget.GlobalTransform = new Transform3D(xf.Basis.Orthonormalized(), xf.Origin);
     }
 
     private void DrawSkeleton()

@@ -33,8 +33,8 @@
 [ext_resource type="PackedScene" uid="uid://bkc7qpal8tx01" path="res://ui/scenes/components/QuickColorPalette.tscn" id="31_quick_palette"]
 [ext_resource type="PackedScene" path="res://ui/scenes/modals/ChangelogModal.tscn" id="32_changelog_modal"]
 [ext_resource type="PackedScene" uid="uid://ccanx3q4pj08j" path="res://ui/scenes/modals/ColorAdjustmentModal.tscn" id="33_color_adj_modal"]
-[ext_resource type="PackedScene" uid="uid://c6exportbasetexmodal" path="res://ui/scenes/modals/ExportBaseTexturesModal.tscn" id="34_export_base_tex_modal"]
-[ext_resource type="PackedScene" uid="uid://b8gradmapmodal" path="res://ui/scenes/modals/GradientMapModal.tscn" id="35_gradient_map_modal"]
+[ext_resource type="PackedScene" uid="uid://bcwou8lew6qrn" path="res://ui/scenes/modals/ExportBaseTexturesModal.tscn" id="34_export_base_tex_modal"]
+[ext_resource type="PackedScene" uid="uid://bqthcnnf08hel" path="res://ui/scenes/modals/GradientMapModal.tscn" id="35_gradient_map_modal"]
 [ext_resource type="PackedScene" uid="uid://c8fltrmodal" path="res://ui/scenes/modals/FilterModal.tscn" id="36_filter_modal"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pgrle"]
@@ -401,8 +401,8 @@ dragger_visibility = 1
 split_offset = 360
 
 [node name="LeftPanel" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit" unique_id=2054274140]
-custom_minimum_size = Vector2(280, 0)
-custom_maximum_size = Vector2(400, -1)
+custom_minimum_size = Vector2(316, 0)
+custom_maximum_size = Vector2(420, -1)
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -767,6 +767,7 @@ offset_top = 56.0
 offset_bottom = 440.0
 
 [node name="QuickActionsStrip" type="PanelContainer" parent="UIRoot/MainHUD/VBoxContainer/MainSplit/ViewportArea" unique_id=420354827]
+modulate = Color(1, 1, 1, 0.78)
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -985,7 +986,7 @@ theme_override_fonts/normal_font = ExtResource("30_kq58d")
 theme_override_fonts/bold_font = ExtResource("30_kq58d")
 bbcode_enabled = true
 text = "[font_size=24][b]Deadlock Playground[/b][/font_size]
-[color=#A35A4E]v1.1.0-beta2[/color]
+[color=#A35A4E]v1.3.0[/color]
 
 An open-source, community-driven tool designed to view, inspect, pose, and paint 3D character models from Valve's Deadlock for art reference, virtual photography, skin creation, and modding.
 

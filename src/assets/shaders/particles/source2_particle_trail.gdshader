@@ -2,6 +2,8 @@ shader_type spatial;
 render_mode blend_add, depth_draw_never, cull_disabled, unshaded;
 
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap, hint_default_transparent;
+uniform sampler2D secondary_texture : source_color, filter_linear_mipmap, hint_default_transparent;
+uniform bool u_has_secondary = false;
 uniform vec4 constant_color : source_color = vec4(1.0);
 uniform float overbright_factor : hint_range(1.0, 32.0) = 2.0;
 uniform float tail_alpha_scale : hint_range(0.0, 1.0) = 0.0;
@@ -17,6 +19,8 @@ uniform int u_seq_count = 0;
 
 // UV transform controls from m_TextureControls (ScaleU, ScaleV, OffsetU, OffsetV)
 uniform vec4 u_uv_transform = vec4(1.0, -1.0, 0.0, 1.0);
+uniform vec4 u_sec_uv_transform = vec4(1.0, -1.0, 0.0, 1.0);
+uniform float u_crop_frames = 0.0;
 
 // Debug mode: 0=normal, 1=alpha (vec3(a)), 2=raw tex.rgb, 3=raw tex.a, 4=vtx color, 5=zero albedo (decisive test)
 uniform int u_debug_mode = 0;
@@ -71,10 +75,24 @@ void fragment() {
         active_rect = u_seq_rects[seq_idx];
     }
 
-    // 3. Map transformed card UV into active atlas sequence rect
-    vec2 uv = place_corner(card_uv, u_uv_transform, active_rect.xy, active_rect.zw);
+    // 3. Map transformed card UV into active atlas sequence rect (with optional half-texel crop padding)
+    vec2 rmin = active_rect.xy;
+    vec2 rmax = active_rect.zw;
+    if (u_crop_frames > 0.5) {
+        vec2 pad = 0.5 / max(vec2(textureSize(albedo_texture, 0)), vec2(1.0));
+        rmin = min(rmin + pad, rmax);
+        rmax = max(rmax - pad, rmin);
+    }
 
+    vec2 uv = place_corner(card_uv, u_uv_transform, rmin, rmax);
     vec4 tex = texture(albedo_texture, uv);
+
+    if (u_has_secondary) {
+        vec2 sec_uv = place_corner(card_uv, u_sec_uv_transform, vec2(0.0), vec2(1.0));
+        vec4 sec_tex = texture(secondary_texture, sec_uv);
+        tex.rgb *= sec_tex.rgb;
+        tex.a *= sec_tex.a;
+    }
 
     // 4. Trail ribbon length gradient:
     // At center (v_ribbon_t = 0.0): alpha scales by tail_alpha_scale (mostly translucent, soft center).

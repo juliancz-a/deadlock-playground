@@ -27,6 +27,9 @@ public static class ProceduralClothSolver
             return;
         }
 
+        // Drive custom model forearm twist & clamp limb bone translation stretch
+        DeadlockPlayground.Importer.CustomModelAutoRigger.UpdateCustomModelRuntimePosing(skeleton, clampStretch: true);
+
         ConformProceduralClothPoses(skeleton, animPlayer);
         _isDirty = false;
         _lastSolvedFrame = currentFrame;

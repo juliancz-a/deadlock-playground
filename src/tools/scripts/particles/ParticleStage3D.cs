@@ -4,8 +4,10 @@ using System.Collections.Generic;
 using System.Linq;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Workspace;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat.IO;
+using ValveResourceFormat.Particles;
+using VrfModel = ValveResourceFormat.ResourceTypes.Model;
 
 namespace DeadlockPlayground.Particles;
 
@@ -52,6 +54,10 @@ public partial class ParticleStage3D : Node3D
     private Package _currentBasePackage;
     private Package _currentAddonPackage;
     private Node3D _currentHeroNode;
+    private GodotParticleCollision _activeCollision;
+    private GodotParticleModelObject _activeModelObject;
+    private VfxPlaybackMode _vfxPlaybackMode = VfxPlaybackMode.Normal;
+    private bool _collideWithFloor = false;
 
     private static Texture2D _fallbackParticleTexture;
 
@@ -61,6 +67,8 @@ public partial class ParticleStage3D : Node3D
     public float Duration => _simulator?.Duration ?? 3.0f;
     public float CurrentTime => _simulator?.CurrentTime ?? 0.0f;
     public bool IsPlaying => _simulator?.IsPlaying ?? false;
+    public VfxPlaybackMode PlaybackMode => _vfxPlaybackMode;
+    public bool CollideWithFloor => _collideWithFloor;
 
     public bool AutoChargeLoop
     {
@@ -92,6 +100,12 @@ public partial class ParticleStage3D : Node3D
     {
         if (!HasActiveParticle) return;
 
+        Camera3D camera = GetViewport()?.GetCamera3D();
+        if (camera != null)
+        {
+            _simulator.SetCameraPosition(camera.GlobalPosition);
+        }
+
         // 1. Synchronize bone sockets and Control Points with active skeleton animation
         SyncControlPoints();
 
@@ -99,7 +113,6 @@ public partial class ParticleStage3D : Node3D
         _simulator.Update((float)delta);
 
         // 3. Render all active particle systems via MultiMesh
-        Camera3D camera = GetViewport()?.GetCamera3D();
         var cpRegistry = _simulator.ControlPoints;
 
         for (int i = 0; i < _renderers.Count; i++)
@@ -113,7 +126,7 @@ public partial class ParticleStage3D : Node3D
     }
 
     /// <summary>
-    /// Loads and mounts a particle system hierarchy in the 3D scene using Plan v2 CPU simulator.
+    /// Loads and mounts a particle system hierarchy in the 3D scene using VRF 21.1 CPU simulator.
     /// </summary>
     public void LoadParticle(
         string vpcfPath,
@@ -123,7 +136,8 @@ public partial class ParticleStage3D : Node3D
         IFileLoader fileLoader,
         Package basePackage = null,
         Package addonPackage = null,
-        string ownerHeroId = null)
+        string ownerHeroId = null,
+        VrfModel heroVrfModel = null)
     {
         // 1. Clean up existing active particle
         UnloadActiveParticle();
@@ -167,98 +181,140 @@ public partial class ParticleStage3D : Node3D
 
         GD.Print($"[ParticleStage3D] Loading deterministic CPU particle hierarchy for '{abilityName} - {variantName}' ({vpcfPath})...");
 
-        // 2. Load strongly typed ParticleSystemDefinition hierarchy
-        ActiveRootDefinition = ParticleHierarchyDefinitionLoader.LoadHierarchy(
+        // 2. Try VRF 21.1 authoritative ParticleSystemSimulation backend first
+        var rootVrfSim = ParticleHierarchyDefinitionLoader.CreateVrfSimulation(
             vpcfPath,
             fileLoader,
             basePackage,
             addonPackage,
-            maxDepth: 4);
+            out var vrfRootDef,
+            out var compositeLoader);
 
-        if (ActiveRootDefinition == null)
-        {
-            GD.PrintErr($"[ParticleStage3D] Failed to load particle definition hierarchy for {vpcfPath}");
-            return;
-        }
-
-        _vanillaConstantColor = ActiveRootDefinition.ConstantColor;
-
-        // 3. Build simulator instance hierarchy
         _simulator = new CpuParticleSimulator();
-        var flattened = ParticleHierarchyDefinitionLoader.FlattenHierarchy(ActiveRootDefinition);
-
+        _simulator.SetCollideWithFloor(_collideWithFloor);
         uint seedCounter = 1337;
-        foreach (var item in flattened)
+
+        if (rootVrfSim != null && vrfRootDef != null)
         {
-            var inst = new ParticleSystemInstance(item.Def, seedCounter++)
-            {
-                Delay = item.Delay,
-                IsEndCap = item.IsEndCap
-            };
-            inst.ControlPoints = new ControlPointRegistry();
-            inst.ControlPoints.CopyFrom(_simulator.ControlPoints);
-            _simulator.AddInstance(inst);
+            ActiveRootDefinition = vrfRootDef;
+            _vanillaConstantColor = ActiveRootDefinition.ConstantColor;
 
-            // 4. Instantiate a MultiMesh renderer for each renderer definition in the system
-            if (item.Def.Renderers.Count == 0)
+            _activeCollision = new GodotParticleCollision { CollideWithFloor = _collideWithFloor };
+            void AssignCollisionRecursive(ParticleSystemSimulation sim)
             {
-                continue;
+                sim.RenderState.Collision = _activeCollision;
+                foreach (var child in sim.Children)
+                {
+                    AssignCollisionRecursive(child);
+                }
+            }
+            AssignCollisionRecursive(rootVrfSim);
+
+            if (heroVrfModel == null && heroNode != null)
+            {
+                ModelAttachmentRegistry.TryGetHeroModel(heroNode, out heroVrfModel);
             }
 
-            for (int rIdx = 0; rIdx < item.Def.Renderers.Count; rIdx++)
+            if (heroVrfModel?.Skeleton != null)
             {
-                var rDef = item.Def.Renderers[rIdx];
-                if (rDef is RenderRopesDef rRopes && rRopes.OnlyRenderInEffectsBloomPass)
+                _activeModelObject = new GodotParticleModelObject(
+                    heroVrfModel,
+                    heroNode,
+                    fileLoader: compositeLoader);
+                rootVrfSim.GetControlPoint(0).ModelObject = _activeModelObject;
+            }
+            else
+            {
+                _activeModelObject = null;
+            }
+
+            ParticleHierarchyDefinitionLoader.ApplyRuntimeControlPointDefaults(rootVrfSim, _simulator.ControlPoints);
+
+            var flattenedVrf = ParticleHierarchyDefinitionLoader.FlattenVrfSimulation(rootVrfSim, vpcfPath);
+            foreach (var item in flattenedVrf)
+            {
+                var def = item.Def;
+                if (def == null) continue;
+
+                // Publish sprite sheet sequence durations onto RenderState for VRF sequence-rate operators
+                foreach (var rDef in def.Renderers)
                 {
-                    continue;
+                    if (!string.IsNullOrEmpty(rDef.PrimaryTexturePath))
+                    {
+                        var durations = ParticleHierarchyDefinitionLoader.ExtractSpriteSheetDurations(
+                            rDef.PrimaryTexturePath,
+                            compositeLoader,
+                            basePackage,
+                            addonPackage);
+                        if (durations != null && durations.Length > 0)
+                        {
+                            item.Sim.RenderState.SequenceDurations = durations;
+                            break;
+                        }
+                    }
                 }
 
-                Texture2D tex = null;
-                Vector4[] seqRects = null;
-
-                string texPath = rDef.PrimaryTexturePath;
-                if (!string.IsNullOrEmpty(texPath))
+                var inst = new ParticleSystemInstance(def, seedCounter++, item.Sim)
                 {
-                    tex = LoadOrGetTexture(texPath, fileLoader, basePackage, addonPackage);
-                    seqRects = Source2TextureLoader.ExtractSpriteSheetSequences(texPath, fileLoader, basePackage, addonPackage);
-                }
-
-                if (tex == null)
-                {
-                    tex = GetFallbackParticleTexture();
-                }
-
-                Texture2D noiseTex = null;
-                if (rDef is RenderModelsDef)
-                {
-                    noiseTex = tex;
-                }
-
-                var renderer = new ParticleMultiMeshRenderer(inst, rDef, tex, seqRects, noiseTex);
-                renderer.Name = $"Renderer_{inst.Definition.VpcfPath.GetFile().GetBaseName()}_{rIdx}_{rDef.ClassName}";
-
-                var randInit = inst.Definition.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
-                var fadeOp = inst.Definition.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
-
-                _vanillaEmitterStates[renderer] = new VanillaEmitterColorState
-                {
-                    ConstantColor = inst.Definition.ConstantColor,
-                    HasRandomColor = randInit != null,
-                    ColorMin = randInit?.ColorMin ?? Colors.White,
-                    ColorMax = randInit?.ColorMax ?? Colors.White,
-                    HasColorFade = fadeOp != null,
-                    ColorFade = fadeOp?.ColorFade ?? Colors.White
+                    Delay = item.Delay,
+                    IsEndCap = item.IsEndCap
                 };
+                inst.ControlPoints = new ControlPointRegistry();
+                inst.ControlPoints.CopyFrom(_simulator.ControlPoints);
+                _simulator.AddInstance(inst);
 
-                renderer.SetCustomTint(Colors.White);
-                AddChild(renderer);
-                _renderers.Add(renderer);
+                SpawnRenderersForInstance(inst, compositeLoader, basePackage, addonPackage);
             }
+
+            Camera3D initialCam = GetViewport()?.GetCamera3D();
+            if (initialCam != null)
+            {
+                _simulator.SetCameraPosition(initialCam.GlobalPosition);
+            }
+
+            _simulator.SetRootVrfSimulation(rootVrfSim, _activeCollision);
+            SyncControlPoints();
+            _simulator.SetVfxPlaybackMode(_vfxPlaybackMode);
+        }
+        else
+        {
+            // Fallback to legacy KV3 hierarchy loader when resource is not a compiled ParticleSystem
+            ActiveRootDefinition = ParticleHierarchyDefinitionLoader.LoadHierarchy(
+                vpcfPath,
+                fileLoader,
+                basePackage,
+                addonPackage,
+                maxDepth: 4);
+
+            if (ActiveRootDefinition == null)
+            {
+                GD.PrintErr($"[ParticleStage3D] Failed to load particle definition hierarchy for {vpcfPath}");
+                return;
+            }
+
+            _vanillaConstantColor = ActiveRootDefinition.ConstantColor;
+            var flattened = ParticleHierarchyDefinitionLoader.FlattenHierarchy(ActiveRootDefinition);
+
+            foreach (var item in flattened)
+            {
+                var inst = new ParticleSystemInstance(item.Def, seedCounter++)
+                {
+                    Delay = item.Delay,
+                    IsEndCap = item.IsEndCap
+                };
+                inst.ControlPoints = new ControlPointRegistry();
+                inst.ControlPoints.CopyFrom(_simulator.ControlPoints);
+                _simulator.AddInstance(inst);
+
+                SpawnRenderersForInstance(inst, fileLoader, basePackage, addonPackage);
+            }
+
+            _simulator.SetVfxPlaybackMode(_vfxPlaybackMode);
         }
 
         float calculatedDuration = ParticleHierarchyDefinitionLoader.CalculateDuration(ActiveRootDefinition);
         _simulator.SetDuration(calculatedDuration);
-        GD.Print($"[ParticleStage3D] Dynamic system duration calculated: {calculatedDuration:F2}s");
+        GD.Print($"[ParticleStage3D] Dynamic system duration calculated: {calculatedDuration:F2}s (VRF Sim: {(_simulator.RootVrfSimulation != null ? "Active" : "Fallback")})");
 
         // 6. Restore any staged overrides or painted textures from workspace session
         RestoreFromWorkspaceSession();
@@ -266,6 +322,83 @@ public partial class ParticleStage3D : Node3D
         // 7. Emit loaded signal and notify global state
         EmitSignal(SignalName.ParticleLoaded, ActiveVpcfPath, ActiveVariantName, ActiveAbilityName);
         OnParticleActiveStateChanged?.Invoke(true);
+    }
+
+    private void SpawnRenderersForInstance(
+        ParticleSystemInstance inst,
+        IFileLoader loader,
+        Package basePackage,
+        Package addonPackage)
+    {
+        if (inst?.Definition == null || inst.Definition.Renderers.Count == 0)
+        {
+            return;
+        }
+
+        for (int rIdx = 0; rIdx < inst.Definition.Renderers.Count; rIdx++)
+        {
+            var rDef = inst.Definition.Renderers[rIdx];
+            if (rDef is RenderRopesDef rRopes && rRopes.OnlyRenderInEffectsBloomPass)
+            {
+                continue;
+            }
+
+            Texture2D tex = null;
+            Vector4[] seqRects = null;
+            string texPath = rDef.PrimaryTexturePath;
+            if (!string.IsNullOrEmpty(texPath))
+            {
+                tex = LoadOrGetTexture(texPath, loader, basePackage, addonPackage);
+                seqRects = Source2TextureLoader.ExtractSpriteSheetSequences(texPath, loader, basePackage, addonPackage);
+            }
+
+            if (tex == null)
+            {
+                tex = GetFallbackParticleTexture();
+            }
+
+            Texture2D secTex = null;
+            string secTexPath = rDef.SecondaryTexturePath;
+            if (!string.IsNullOrEmpty(secTexPath))
+            {
+                secTex = LoadOrGetTexture(secTexPath, loader, basePackage, addonPackage);
+            }
+
+            Texture2D noiseTex = null;
+            if (rDef is RenderModelsDef)
+            {
+                noiseTex = tex;
+            }
+
+            var renderer = new ParticleMultiMeshRenderer(
+                inst,
+                rDef,
+                tex,
+                seqRects,
+                noiseTex,
+                secTex,
+                loader,
+                basePackage,
+                addonPackage);
+            renderer.Name = $"Renderer_{inst.Definition.VpcfPath.GetFile().GetBaseName()}_{rIdx}_{rDef.ClassName}";
+
+            var randInit = inst.Definition.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
+            var fadeOp = inst.Definition.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
+
+            _vanillaEmitterStates[renderer] = new VanillaEmitterColorState
+            {
+                ConstantColor = inst.Definition.ConstantColor,
+                HasRandomColor = randInit != null,
+                ColorMin = randInit?.ColorMin ?? Colors.White,
+                ColorMax = randInit?.ColorMax ?? Colors.White,
+                HasColorFade = fadeOp != null,
+                ColorFade = fadeOp?.ColorFade ?? Colors.White
+            };
+
+            renderer.SetCustomTint(Colors.White);
+            AddChild(renderer);
+            _renderers.Add(renderer);
+        }
     }
 
     private void SyncControlPoints()
@@ -345,6 +478,9 @@ public partial class ParticleStage3D : Node3D
             _simulator.ControlPoints.SetOrientation(10, cp0Rot);
         }
 
+        // Push host CPs into VRF root simulation before per-child custom socket overrides
+        _simulator.SyncControlPointsToVrf();
+
         // Section A4: Sync each child system's own ControlPointRegistry
         foreach (var inst in _simulator.Instances)
         {
@@ -369,6 +505,13 @@ public partial class ParticleStage3D : Node3D
                     Quaternion childRot = (skeleton.GlobalTransform.Basis * bonePose.Basis).Orthonormalized().GetRotationQuaternion();
                     inst.ControlPoints.SetPosition(0, childPos);
                     inst.ControlPoints.SetOrientation(0, childRot);
+
+                    if (inst.VrfSimulation != null)
+                    {
+                        var childCp0 = inst.VrfSimulation.GetControlPoint(0);
+                        childCp0.Position = ParticleCoordUtils.GodotToSource2Position(childPos);
+                        childCp0.Rotation = ParticleCoordUtils.GodotToSource2Rotation(childRot);
+                    }
                 }
             }
         }
@@ -528,13 +671,13 @@ public partial class ParticleStage3D : Node3D
         {
             if (IsInstanceValid(renderer))
             {
-                string rTexPath = renderer.RendererDef?.PrimaryTexturePath;
-                if (!string.IsNullOrEmpty(rTexPath) && 
-                    (string.Equals(rTexPath, vtexPath, StringComparison.OrdinalIgnoreCase) || 
-                    rTexPath.EndsWith(vtexPath, StringComparison.OrdinalIgnoreCase) || 
-                    vtexPath.EndsWith(rTexPath, StringComparison.OrdinalIgnoreCase)))
+                if (MatchesTexturePath(renderer.RendererDef?.PrimaryTexturePath, vtexPath))
                 {
                     renderer.SetTexture(newTex);
+                }
+                if (MatchesTexturePath(renderer.RendererDef?.SecondaryTexturePath, vtexPath))
+                {
+                    renderer.SetSecondaryTexture(newTex);
                 }
             }
         }
@@ -592,6 +735,10 @@ public void RestoreAllVanillaOverrides()
                 {
                     var def = r.Instance.Definition;
                     def.ConstantColor = st.ConstantColor;
+                    r.Instance.ConstantColorOverride = null;
+                    r.Instance.HasRandomColorOverride = false;
+                    r.Instance.HasColorFadeOverride = false;
+                    r.Instance.RadiusOverrideInches = null;
                     var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
                     if (randInit != null && st.HasRandomColor)
                     {
@@ -622,13 +769,13 @@ public void RestoreAllVanillaOverrides()
                 {
                     if (IsInstanceValid(renderer))
                     {
-                        string rTexPath = renderer.RendererDef?.PrimaryTexturePath;
-                        if (!string.IsNullOrEmpty(rTexPath) && 
-                            (string.Equals(rTexPath, vtexPath, StringComparison.OrdinalIgnoreCase) || 
-                             rTexPath.EndsWith(vtexPath, StringComparison.OrdinalIgnoreCase) || 
-                             vtexPath.EndsWith(rTexPath, StringComparison.OrdinalIgnoreCase)))
+                        if (MatchesTexturePath(renderer.RendererDef?.PrimaryTexturePath, vtexPath))
                         {
                             renderer.SetTexture(vanillaTex);
+                        }
+                        if (MatchesTexturePath(renderer.RendererDef?.SecondaryTexturePath, vtexPath))
+                        {
+                            renderer.SetSecondaryTexture(vanillaTex);
                         }
                     }
                 }
@@ -757,6 +904,14 @@ public void RestoreAllVanillaOverrides()
         }
     }
 
+    private static bool MatchesTexturePath(string candidate, string target)
+    {
+        if (string.IsNullOrEmpty(candidate) || string.IsNullOrEmpty(target)) return false;
+        return string.Equals(candidate, target, StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(target, StringComparison.OrdinalIgnoreCase) ||
+               target.EndsWith(candidate, StringComparison.OrdinalIgnoreCase);
+    }
+
     public Color GetParticleColor()
     {
         return ActiveRootDefinition?.ConstantColor ?? Colors.White;
@@ -773,6 +928,7 @@ public void RestoreAllVanillaOverrides()
                 foreach (var inst in _simulator.Instances)
                 {
                     inst.Definition.ConstantColor = color;
+                    inst.ConstantColorOverride = color;
                     inst.OverrideActiveParticlesColor(color);
                 }
             }
@@ -806,13 +962,13 @@ public void RestoreAllVanillaOverrides()
                     {
                         if (IsInstanceValid(renderer))
                         {
-                            string rTexPath = renderer.RendererDef?.PrimaryTexturePath;
-                            if (!string.IsNullOrEmpty(rTexPath) && 
-                                (string.Equals(rTexPath, vtexPath, StringComparison.OrdinalIgnoreCase) || 
-                                 rTexPath.EndsWith(vtexPath, StringComparison.OrdinalIgnoreCase) || 
-                                 vtexPath.EndsWith(rTexPath, StringComparison.OrdinalIgnoreCase)))
+                            if (MatchesTexturePath(renderer.RendererDef?.PrimaryTexturePath, vtexPath))
                             {
                                 renderer.SetTexture(newTex);
+                            }
+                            if (MatchesTexturePath(renderer.RendererDef?.SecondaryTexturePath, vtexPath))
+                            {
+                                renderer.SetSecondaryTexture(newTex);
                             }
                         }
                     }
@@ -838,21 +994,41 @@ public void RestoreAllVanillaOverrides()
                         var def = r.Instance?.Definition;
                         if (def != null)
                         {
+                            _vanillaEmitterStates.TryGetValue(r, out var vanillaSt);
                             if (emData.TintColorRgba != null && emData.TintColorRgba.Length >= 3)
                             {
                                 float a = emData.TintColorRgba.Length >= 4 ? emData.TintColorRgba[3] : 1f;
-                                def.ConstantColor = new Color(emData.TintColorRgba[0], emData.TintColorRgba[1], emData.TintColorRgba[2], a);
+                                var restoredCol = new Color(emData.TintColorRgba[0], emData.TintColorRgba[1], emData.TintColorRgba[2], a);
+                                def.ConstantColor = restoredCol;
+                                if (!restoredCol.IsEqualApprox(vanillaSt.ConstantColor))
+                                {
+                                    r.Instance.ConstantColorOverride = restoredCol;
+                                }
                             }
                             var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
                             if (randInit != null && emData.ColorMinRgb?.Length >= 3 && emData.ColorMaxRgb?.Length >= 3)
                             {
-                                randInit.ColorMin = new Color(emData.ColorMinRgb[0], emData.ColorMinRgb[1], emData.ColorMinRgb[2], 1f);
-                                randInit.ColorMax = new Color(emData.ColorMaxRgb[0], emData.ColorMaxRgb[1], emData.ColorMaxRgb[2], 1f);
+                                var minCol = new Color(emData.ColorMinRgb[0], emData.ColorMinRgb[1], emData.ColorMinRgb[2], 1f);
+                                var maxCol = new Color(emData.ColorMaxRgb[0], emData.ColorMaxRgb[1], emData.ColorMaxRgb[2], 1f);
+                                randInit.ColorMin = minCol;
+                                randInit.ColorMax = maxCol;
+                                if (vanillaSt.HasRandomColor && (!minCol.IsEqualApprox(vanillaSt.ColorMin) || !maxCol.IsEqualApprox(vanillaSt.ColorMax)))
+                                {
+                                    r.Instance.HasRandomColorOverride = true;
+                                    r.Instance.RandomColorMinOverride = minCol;
+                                    r.Instance.RandomColorMaxOverride = maxCol;
+                                }
                             }
                             var fadeOp = def.Operators.OfType<ColorInterpolateOperatorDef>().FirstOrDefault();
                             if (fadeOp != null && emData.ColorFadeRgb?.Length >= 3)
                             {
-                                fadeOp.ColorFade = new Color(emData.ColorFadeRgb[0], emData.ColorFadeRgb[1], emData.ColorFadeRgb[2], 1f);
+                                var fadeCol = new Color(emData.ColorFadeRgb[0], emData.ColorFadeRgb[1], emData.ColorFadeRgb[2], 1f);
+                                fadeOp.ColorFade = fadeCol;
+                                if (vanillaSt.HasColorFade && !fadeCol.IsEqualApprox(vanillaSt.ColorFade))
+                                {
+                                    r.Instance.HasColorFadeOverride = true;
+                                    r.Instance.ColorFadeOverride = fadeCol;
+                                }
                             }
                         }
                         r.SetCustomTint(Colors.White);
@@ -1035,6 +1211,7 @@ public void RestoreAllVanillaOverrides()
         _hasParticleEdits = true;
         _modifiedEmitterIndices.Add(index);
         def.ConstantColor = color;
+        r.Instance.ConstantColorOverride = color;
         r.SetCustomTint(Colors.White);
         _simulator?.Reset();
         RenderImmediate();
@@ -1053,6 +1230,9 @@ public void RestoreAllVanillaOverrides()
         _modifiedEmitterIndices.Add(index);
         randInit.ColorMin = colorMin;
         randInit.ColorMax = colorMax;
+        r.Instance.HasRandomColorOverride = true;
+        r.Instance.RandomColorMinOverride = colorMin;
+        r.Instance.RandomColorMaxOverride = colorMax;
         r.SetCustomTint(Colors.White);
         _simulator?.Reset();
         RenderImmediate();
@@ -1069,6 +1249,8 @@ public void RestoreAllVanillaOverrides()
         _hasParticleEdits = true;
         _modifiedEmitterIndices.Add(index);
         fadeOp.ColorFade = colorFade;
+        r.Instance.HasColorFadeOverride = true;
+        r.Instance.ColorFadeOverride = colorFade;
         r.SetCustomTint(Colors.White);
         _simulator?.Reset();
         RenderImmediate();
@@ -1090,6 +1272,7 @@ public void RestoreAllVanillaOverrides()
                 foreach (var inst in _simulator.Instances)
                 {
                     inst.Definition.ConstantRadius = radius;
+                    inst.RadiusOverrideInches = radius;
                     inst.OverrideActiveParticlesRadius(radius);
                 }
             }
@@ -1138,6 +1321,10 @@ public void RestoreAllVanillaOverrides()
     private void RenderImmediate()
     {
         Camera3D camera = GetViewport()?.GetCamera3D();
+        if (camera != null)
+        {
+            _simulator?.SetCameraPosition(camera.GlobalPosition);
+        }
         var cpRegistry = _simulator?.ControlPoints;
         foreach (var renderer in _renderers)
         {
@@ -1154,6 +1341,19 @@ public void RestoreAllVanillaOverrides()
         {
             _simulator.SpeedScale = speed;
         }
+    }
+
+    public void SetVfxPlaybackMode(VfxPlaybackMode mode)
+    {
+        _vfxPlaybackMode = mode;
+        _simulator?.SetVfxPlaybackMode(mode);
+        RenderImmediate();
+    }
+
+    public void SetCollideWithFloor(bool enabled)
+    {
+        _collideWithFloor = enabled;
+        _simulator?.SetCollideWithFloor(enabled);
     }
 
     public void TriggerRelease()
@@ -1211,6 +1411,9 @@ public void RestoreAllVanillaOverrides()
 
         _simulator?.ClearInstances();
         _loadedTextures.Clear();
+        _vanillaTextures.Clear();
+        _activeCollision = null;
+        _activeModelObject = null;
 
         ActiveVpcfPath = null;
         ActiveVariantName = null;
@@ -1282,6 +1485,10 @@ public void ResetEmitterParametersOnly()
                 {
                     var def = r.Instance.Definition;
                     def.ConstantColor = st.ConstantColor;
+                    r.Instance.ConstantColorOverride = null;
+                    r.Instance.HasRandomColorOverride = false;
+                    r.Instance.HasColorFadeOverride = false;
+                    r.Instance.RadiusOverrideInches = null;
                     var randInit = def.Initializers.OfType<RandomColorInitializerDef>().FirstOrDefault();
                     if (randInit != null && st.HasRandomColor)
                     {

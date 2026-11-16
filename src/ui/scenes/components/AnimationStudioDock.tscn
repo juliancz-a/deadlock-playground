@@ -4,8 +4,5 @@
 
 [node name="AnimationStudioDock" unique_id=956735042 instance=ExtResource("1_dock_scene")]
 
-[node name="MenuQuickTools" parent="RootVBox/HeaderBar/HeaderMargin/Toolbar" index="11"]
-expand_icon = true
-
 [node name="DopeSheetView" parent="RootVBox/ContentContainer/BodyHBox" index="0"]
 split_offsets = PackedInt32Array(240)

@@ -166,6 +166,41 @@ namespace DeadlockPlayground.Painter
         }
 
         /// <summary>
+        /// Wraps a UV coordinate outside [0, 1] into [0, 1) using Source 2 repeat tiling rules,
+        /// preserving coordinates that already lie inside [0.0, 1.0].
+        /// </summary>
+        public static Vector2 WrapUv01(Vector2 uv)
+        {
+            float u = (uv.X < 0.0f || uv.X > 1.0f) ? Mathf.PosMod(uv.X, 1.0f) : uv.X;
+            float v = (uv.Y < 0.0f || uv.Y > 1.0f) ? Mathf.PosMod(uv.Y, 1.0f) : uv.Y;
+            return new Vector2(u, v);
+        }
+
+        /// <summary>
+        /// Shifts a triangle's UV coordinates by an integer tile offset when its centroid lies outside [0, 1],
+        /// mapping shifted UV tiles cleanly into [0, 1] without splitting edges or clamping islands.
+        /// </summary>
+        public static void WrapTriangleUvsToUnitSquare(ref Vector2 uv0, ref Vector2 uv1, ref Vector2 uv2)
+        {
+            float minX = MathF.Min(uv0.X, MathF.Min(uv1.X, uv2.X));
+            float maxX = MathF.Max(uv0.X, MathF.Max(uv1.X, uv2.X));
+            float minY = MathF.Min(uv0.Y, MathF.Min(uv1.Y, uv2.Y));
+            float maxY = MathF.Max(uv0.Y, MathF.Max(uv1.Y, uv2.Y));
+
+            Vector2 avg = (uv0 + uv1 + uv2) * (1.0f / 3.0f);
+            float shiftX = (minX < -0.005f || maxX > 1.005f) ? MathF.Floor(avg.X) : 0.0f;
+            float shiftY = (minY < -0.005f || maxY > 1.005f) ? MathF.Floor(avg.Y) : 0.0f;
+
+            if (shiftX != 0.0f || shiftY != 0.0f)
+            {
+                Vector2 offset = new Vector2(shiftX, shiftY);
+                uv0 -= offset;
+                uv1 -= offset;
+                uv2 -= offset;
+            }
+        }
+
+        /// <summary>
         /// Casts a ray against the mesh geometry and returns the closest hit point, normal, surface index, and interpolated UV.
         /// </summary>
         public RaycastHitResult IntersectRay(MeshInstance3D meshInstance, Vector3 worldRayOrigin, Vector3 worldRayDir, bool cullBackfaces = false)
@@ -292,7 +327,7 @@ namespace DeadlockPlayground.Painter
 
                 result.Hit = true;
                 result.HitMesh = meshInstance;
-                result.HitUV = interpolatedUV;
+                result.HitUV = WrapUv01(interpolatedUV);
                 result.WorldPosition = worldHitPos;
                 result.WorldNormal = worldNormal;
                 result.WorldTangent = worldTangent;
@@ -390,6 +425,7 @@ namespace DeadlockPlayground.Painter
                 Vector2 uv0 = tri.UV0;
                 Vector2 uv1 = tri.UV1;
                 Vector2 uv2 = tri.UV2;
+                WrapTriangleUvsToUnitSquare(ref uv0, ref uv1, ref uv2);
 
                 Vector2 v0 = uv1 - uv0;
                 Vector2 v1 = uv2 - uv0;
@@ -491,7 +527,7 @@ namespace DeadlockPlayground.Painter
                 float cw = Math.Clamp(w, 0.0f, 1.0f);
                 float csum = cu + cv + cw;
                 if (csum > 0.0001f) { cu /= csum; cv /= csum; cw /= csum; }
-                Vector2 clampedUV = cu * tri.UV0 + cv * tri.UV1 + cw * tri.UV2;
+                Vector2 clampedUV = cu * uv0 + cv * uv1 + cw * uv2;
                 float dSq = targetUV.DistanceSquaredTo(clampedUV);
                 if (dSq < closestDistSq)
                 {

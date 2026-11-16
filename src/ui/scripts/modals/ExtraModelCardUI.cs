@@ -77,12 +77,14 @@ public partial class ExtraModelCardUI : PanelContainer
             if (entry.IsMainHeroModel)
             {
                 _lblTag.Text = isActiveModel ? "Main Model (ACTIVE)" : "Main Model";
-                _lblTag.Modulate = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.40f, 0.75f, 1.0f, 1.0f);
+                Color tagColor = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.40f, 0.75f, 1.0f, 1.0f);
+                PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, tagColor);
             }
             else
             {
                 _lblTag.Text = isActiveModel ? "Extra Model (ACTIVE)" : "Ability / Extra Model";
-                _lblTag.Modulate = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.95f, 0.85f, 0.35f, 1.0f);
+                Color tagColor = isActiveModel ? new Color(0.35f, 0.95f, 0.55f, 1.0f) : new Color(0.95f, 0.85f, 0.35f, 1.0f);
+                PlaygroundThemeHelper.ApplyCardBadgeStyle(_tagPanel, _lblTag, tagColor);
             }
 
             if (isActiveModel)
@@ -95,59 +97,7 @@ public partial class ExtraModelCardUI : PanelContainer
 
     private void InitStyles()
     {
-        _styleNormal = new StyleBoxFlat
-        {
-            BgColor = new Color(0.10f, 0.12f, 0.16f, 0.95f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.22f, 0.26f, 0.34f, 0.8f),
-            ContentMarginLeft = 10,
-            ContentMarginRight = 10,
-            ContentMarginTop = 10,
-            ContentMarginBottom = 10
-        };
-
-        _styleHover = new StyleBoxFlat
-        {
-            BgColor = new Color(0.14f, 0.17f, 0.22f, 0.98f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.95f, 0.85f, 0.40f, 0.9f),
-            ContentMarginLeft = 10,
-            ContentMarginRight = 10,
-            ContentMarginTop = 10,
-            ContentMarginBottom = 10
-        };
-
-        _styleSelected = new StyleBoxFlat
-        {
-            BgColor = new Color(0.16f, 0.22f, 0.30f, 1.0f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            BorderWidthLeft = 2,
-            BorderWidthRight = 2,
-            BorderWidthTop = 2,
-            BorderWidthBottom = 2,
-            BorderColor = new Color(0.95f, 0.85f, 0.30f, 1.0f),
-            ContentMarginLeft = 10,
-            ContentMarginRight = 10,
-            ContentMarginTop = 10,
-            ContentMarginBottom = 10
-        };
+        (_styleNormal, _styleHover, _styleSelected) = PlaygroundThemeHelper.CreateCardStateStyles(cornerRadius: 8, padding: 10);
     }
 
     private void BuildUI()
@@ -202,12 +152,7 @@ public partial class ExtraModelCardUI : PanelContainer
 
         var colusFont = PlaygroundThemeHelper.GetFontColus();
 
-        _lblTag = new Label { Text = "Extra Model", MouseFilter = MouseFilterEnum.Ignore };
-        if (colusFont != null)
-        {
-            _lblTag.AddThemeFontOverride("font", colusFont);
-        }
-        _lblTag.AddThemeFontSizeOverride("font_size", 12);
+        _lblTag = new Label { Text = "Extra Model", MouseFilter = MouseFilterEnum.Ignore, ThemeTypeVariation = "BadgeLabelInfo" };
         _tagPanel.AddChild(_lblTag);
         headerRow.AddChild(_tagPanel);
 
@@ -217,14 +162,9 @@ public partial class ExtraModelCardUI : PanelContainer
             Text = "Model Name",
             SizeFlagsHorizontal = SizeFlags.Fill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        if (colusFont != null)
-        {
-            _lblTitle.AddThemeFontOverride("font", colusFont);
-        }
-        _lblTitle.AddThemeFontSizeOverride("font_size", 14);
-        _lblTitle.AddThemeColorOverride("font_color", Colors.White);
         vbox.AddChild(_lblTitle);
 
         // Path
@@ -234,10 +174,9 @@ public partial class ExtraModelCardUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.Fill,
             ClipText = true,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MouseFilter = MouseFilterEnum.Ignore
+            MouseFilter = MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "MutedLabel"
         };
-        _lblPath.AddThemeFontSizeOverride("font_size", 13);
-        _lblPath.AddThemeColorOverride("font_color", new Color(0.75f, 0.80f, 0.88f, 1.0f));
         vbox.AddChild(_lblPath);
 
         if (Entry != null)

@@ -15,6 +15,7 @@ const  GROUP_NAME := "overlay_atlas_managers"
 @export_storage var active_layer_resource: Texture2DRD = null
 @export_storage var full_composite_resource: Texture2DRD = null
 @export_storage var composite_above_resource: Texture2DRD = null
+@export_storage var base_texture_resource: Texture2DRD = null
 ## Shader used for overlay materials.
 @export var overlay_shader: Shader = preload("uid://qow53ph8eivf")
 
@@ -154,11 +155,13 @@ func apply_to_mesh(mesh_instance: MeshInstance3D) -> void:
 	if not mesh_instance or not is_instance_valid(mesh_instance) or not mesh_instance.mesh or mesh_instance.mesh.get_surface_count() == 0:
 		return
 
+	_apply_texture_to_texture_resource()
+
 	var overlay_material := ShaderMaterial.new()
 	overlay_material.shader = overlay_shader
-	overlay_material.set_shader_parameter("overlay_texture", atlas_texture_resource)
-	overlay_material.set_shader_parameter("active_layer_texture", active_layer_resource)
-	overlay_material.set_shader_parameter("overlay_above_texture", composite_above_resource)
+	overlay_material.set_shader_parameter("overlay_texture", atlas_texture_resource if (atlas_texture_resource and atlas_texture_resource.texture_rd_rid.is_valid()) else null)
+	overlay_material.set_shader_parameter("active_layer_texture", active_layer_resource if (active_layer_resource and active_layer_resource.texture_rd_rid.is_valid()) else null)
+	overlay_material.set_shader_parameter("overlay_above_texture", composite_above_resource if (composite_above_resource and composite_above_resource.texture_rd_rid.is_valid()) else null)
 	overlay_material.set_shader_parameter("position_in_atlas", Vector2(0.0, 0.0))
 	overlay_material.set_shader_parameter("size_in_atlas", Vector2(1.0, 1.0))
 	overlay_material.set_shader_parameter("atlas_index", atlas_index)
@@ -220,21 +223,19 @@ func _create_texture() -> void:
 
 	var image: Image
 
-	# try to load texture from file
-	if !atlas_texture_path.is_empty() and FileAccess.file_exists(atlas_texture_path):
+	# Create new textures on RenderingDevice without allocating duplicate 128 MiB CPU Images when blank
+	var loaded_from_file := !atlas_texture_path.is_empty() and FileAccess.file_exists(atlas_texture_path)
+	if loaded_from_file:
 		var loaded = load(atlas_texture_path)
 		if loaded:
 			if loaded is Texture2D:
 				image = loaded.get_image()
 			if loaded is Image:
 				image = loaded
-			image.decompress()
-			if image.get_format() != Image.FORMAT_RGBAH:
-				image.convert(Image.FORMAT_RGBAH)
-	
-	#if not loaded create new image
-	if !image:
-		image = Image.create(atlas_width, atlas_height, false, Image.FORMAT_RGBAH)
+			if image:
+				image.decompress()
+				if image.get_format() != Image.FORMAT_RGBAH:
+					image.convert(Image.FORMAT_RGBAH)
 
 	# Clean up previous texture and resource binding
 	if atlas_texture_resource:
@@ -245,6 +246,8 @@ func _create_texture() -> void:
 		full_composite_resource.texture_rd_rid = RID()
 	if composite_above_resource:
 		composite_above_resource.texture_rd_rid = RID()
+	if base_texture_resource:
+		base_texture_resource.texture_rd_rid = RID()
 
 	var old_rid := atlas_texture_rid
 	atlas_texture_rid = RID()
@@ -273,19 +276,30 @@ func _create_texture() -> void:
 		rd.free_rid(old_base_rid)
 
 	# Create new textures on RenderingDevice
-	var raw_init_data := [image.get_data()]
-	atlas_texture_rid = rd.texture_create(fmt, view, raw_init_data)
-	owns_atlas_texture_rid = true
-	composite_texture_rid = rd.texture_create(fmt, view, raw_init_data)
-	composite_above_rid = rd.texture_create(fmt, view, raw_init_data)
-	full_composite_rid = rd.texture_create(fmt, view, raw_init_data)
-	image = null # Free CPU RAM immediately
+	if image:
+		var raw_init_data := [image.get_data()]
+		atlas_texture_rid = rd.texture_create(fmt, view, raw_init_data)
+		owns_atlas_texture_rid = true
+		composite_texture_rid = rd.texture_create(fmt, view, raw_init_data)
+		composite_above_rid = rd.texture_create(fmt, view, raw_init_data)
+		full_composite_rid = rd.texture_create(fmt, view, raw_init_data)
+		image = null # Free CPU RAM immediately
+	else:
+		atlas_texture_rid = rd.texture_create(fmt, view, [])
+		owns_atlas_texture_rid = true
+		composite_texture_rid = rd.texture_create(fmt, view, [])
+		composite_above_rid = rd.texture_create(fmt, view, [])
+		full_composite_rid = rd.texture_create(fmt, view, [])
+		var zero_col := Color(0.0, 0.0, 0.0, 0.0)
+		rd.texture_clear(atlas_texture_rid, zero_col, 0, 1, 0, 1)
+		rd.texture_clear(composite_texture_rid, zero_col, 0, 1, 0, 1)
+		rd.texture_clear(composite_above_rid, zero_col, 0, 1, 0, 1)
+		rd.texture_clear(full_composite_rid, zero_col, 0, 1, 0, 1)
 	print("OverlayAtlasManager: Created texture RID {0}, composite RID {1}, above RID {2}".format([atlas_texture_rid.get_id(), composite_texture_rid.get_id(), composite_above_rid.get_id()]))
 
-	# Create companion base texture on RenderingDevice
-	var base_image := Image.create(atlas_width, atlas_height, false, Image.FORMAT_RGBAH)
-	base_texture_rid = rd.texture_create(fmt, view, [base_image.get_data()])
-	base_image = null
+	# Create companion base texture on RenderingDevice without temporary CPU image
+	base_texture_rid = rd.texture_create(fmt, view, [])
+	rd.texture_clear(base_texture_rid, Color(0.0, 0.0, 0.0, 0.0), 0, 1, 0, 1)
 	print("OverlayAtlasManager: Created base texture RID {0}".format([base_texture_rid.get_id()]))
 
 	# update texture resource and notify brushes immediately
@@ -303,6 +317,8 @@ func _cleanup_texture() -> void:
 		full_composite_resource.texture_rd_rid = RID()
 	if composite_above_resource:
 		composite_above_resource.texture_rd_rid = RID()
+	if base_texture_resource:
+		base_texture_resource.texture_rd_rid = RID()
 
 	if owns_atlas_texture_rid and atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
 		rd.free_rid(atlas_texture_rid)
@@ -331,11 +347,12 @@ func _create_texture_resource() -> void:
 	active_layer_resource = Texture2DRD.new()
 	full_composite_resource = Texture2DRD.new()
 	composite_above_resource = Texture2DRD.new()
+	base_texture_resource = Texture2DRD.new()
 
 
 func _apply_texture_to_texture_resource() -> void:
 	#create Texture2DRD
-	if not atlas_texture_resource or not active_layer_resource or not full_composite_resource or not composite_above_resource:
+	if not atlas_texture_resource or not active_layer_resource or not full_composite_resource or not composite_above_resource or not base_texture_resource:
 		_create_texture_resource()
 	
 	var target_atlas_rid := RID()
@@ -345,24 +362,33 @@ func _apply_texture_to_texture_resource() -> void:
 		target_atlas_rid = atlas_texture_rid
 
 	if atlas_texture_resource.texture_rd_rid != target_atlas_rid:
-		atlas_texture_resource = Texture2DRD.new()
-		atlas_texture_resource.texture_rd_rid = target_atlas_rid
+		if not target_atlas_rid.is_valid():
+			atlas_texture_resource.texture_rd_rid = RID()
+		else:
+			atlas_texture_resource = Texture2DRD.new()
+			atlas_texture_resource.texture_rd_rid = target_atlas_rid
 
 	var target_active_rid := RID()
 	if atlas_texture_rid.is_valid() and rd and rd.texture_is_valid(atlas_texture_rid):
 		target_active_rid = atlas_texture_rid
 
 	if active_layer_resource.texture_rd_rid != target_active_rid:
-		active_layer_resource = Texture2DRD.new()
-		active_layer_resource.texture_rd_rid = target_active_rid
+		if not target_active_rid.is_valid():
+			active_layer_resource.texture_rd_rid = RID()
+		else:
+			active_layer_resource = Texture2DRD.new()
+			active_layer_resource.texture_rd_rid = target_active_rid
 
 	var target_above_rid := RID()
 	if composite_above_rid.is_valid() and rd and rd.texture_is_valid(composite_above_rid):
 		target_above_rid = composite_above_rid
 
 	if composite_above_resource.texture_rd_rid != target_above_rid:
-		composite_above_resource = Texture2DRD.new()
-		composite_above_resource.texture_rd_rid = target_above_rid
+		if not target_above_rid.is_valid():
+			composite_above_resource.texture_rd_rid = RID()
+		else:
+			composite_above_resource = Texture2DRD.new()
+			composite_above_resource.texture_rd_rid = target_above_rid
 
 	var target_full_rid := RID()
 	if full_composite_rid.is_valid() and rd and rd.texture_is_valid(full_composite_rid):
@@ -373,9 +399,23 @@ func _apply_texture_to_texture_resource() -> void:
 		target_full_rid = atlas_texture_rid
 
 	if full_composite_resource.texture_rd_rid != target_full_rid:
-		if full_composite_resource.texture_rd_rid.is_valid() and rd and not rd.texture_is_valid(full_composite_resource.texture_rd_rid):
-			full_composite_resource = Texture2DRD.new()
-		full_composite_resource.texture_rd_rid = target_full_rid
+		if not target_full_rid.is_valid():
+			full_composite_resource.texture_rd_rid = RID()
+		else:
+			if full_composite_resource.texture_rd_rid.is_valid() and rd and not rd.texture_is_valid(full_composite_resource.texture_rd_rid):
+				full_composite_resource = Texture2DRD.new()
+			full_composite_resource.texture_rd_rid = target_full_rid
+
+	var target_base_rid := RID()
+	if base_texture_rid.is_valid() and rd and rd.texture_is_valid(base_texture_rid):
+		target_base_rid = base_texture_rid
+
+	if base_texture_resource.texture_rd_rid != target_base_rid:
+		if not target_base_rid.is_valid():
+			base_texture_resource.texture_rd_rid = RID()
+		else:
+			base_texture_resource = Texture2DRD.new()
+			base_texture_resource.texture_rd_rid = target_base_rid
 
 	notify_property_list_changed()
 

@@ -56,18 +56,8 @@ namespace DeadlockPlayground.UI
 
         private void BuildUI()
         {
-            // Panel styling
-            var style = new StyleBoxFlat
-            {
-                BgColor = new Color(0.12f, 0.13f, 0.16f, 0.98f),
-                BorderWidthLeft = 1,
-                BorderColor = new Color(0.22f, 0.25f, 0.30f, 0.8f),
-                ContentMarginLeft = 8,
-                ContentMarginTop = 6,
-                ContentMarginRight = 8,
-                ContentMarginBottom = 6
-            };
-            AddThemeStyleboxOverride("panel", style);
+            // Panel styling (inherits active theme CardPanel)
+            ThemeTypeVariation = "CardPanel";
 
             var rootVBox = new VBoxContainer
             {
@@ -102,7 +92,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
             };
-            _lblTargetChannel.AddThemeFontSizeOverride("font_size", 12);
             headerHBox.AddChild(_lblTargetChannel);
 
             _btnClose = new Button
@@ -130,7 +119,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
                 Flat = false
             };
-            _btnAddModifier.AddThemeFontSizeOverride("font_size", 12);
             SetupAddModifierMenu();
             actionsHBox.AddChild(_btnAddModifier);
 
@@ -140,7 +128,6 @@ namespace DeadlockPlayground.UI
                 SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
                 Flat = false
             };
-            _btnDeleteModifiers.AddThemeFontSizeOverride("font_size", 12);
             SetupDeleteModifiersMenu();
             actionsHBox.AddChild(_btnDeleteModifiers);
 
@@ -301,7 +288,6 @@ namespace DeadlockPlayground.UI
                     AutowrapMode = TextServer.AutowrapMode.Word,
                     Modulate = new Color(0.7f, 0.7f, 0.7f, 0.8f)
                 };
-                lblEmpty.AddThemeFontSizeOverride("font_size", 11);
                 _modifiersListVBox.AddChild(lblEmpty);
                 return;
             }
@@ -314,7 +300,6 @@ namespace DeadlockPlayground.UI
                     AutowrapMode = TextServer.AutowrapMode.Word,
                     Modulate = new Color(0.6f, 0.65f, 0.7f, 0.8f)
                 };
-                lblNone.AddThemeFontSizeOverride("font_size", 11);
                 _modifiersListVBox.AddChild(lblNone);
                 return;
             }
@@ -330,26 +315,9 @@ namespace DeadlockPlayground.UI
         {
             var card = new PanelContainer
             {
-                SizeFlagsHorizontal = SizeFlags.ExpandFill
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ThemeTypeVariation = "InspectorSectionPanel"
             };
-            var cardStyle = new StyleBoxFlat
-            {
-                BgColor = new Color(0.16f, 0.17f, 0.20f, 0.95f),
-                BorderWidthLeft = 1,
-                BorderWidthTop = 1,
-                BorderWidthRight = 1,
-                BorderWidthBottom = 1,
-                BorderColor = mod.IsMuted ? new Color(0.3f, 0.3f, 0.3f, 0.5f) : new Color(0.35f, 0.45f, 0.60f, 0.8f),
-                CornerRadiusBottomLeft = 4,
-                CornerRadiusBottomRight = 4,
-                CornerRadiusTopLeft = 4,
-                CornerRadiusTopRight = 4,
-                ContentMarginLeft = 6,
-                ContentMarginTop = 6,
-                ContentMarginRight = 6,
-                ContentMarginBottom = 6
-            };
-            card.AddThemeStyleboxOverride("panel", cardStyle);
 
             var vbox = new VBoxContainer
             {
@@ -373,7 +341,6 @@ namespace DeadlockPlayground.UI
                 CustomMinimumSize = new Vector2(20, 20),
                 Disabled = index == 0 || mod.RequiresFirst
             };
-            btnUp.AddThemeFontSizeOverride("font_size", 10);
             btnUp.Pressed += () =>
             {
                 _canvas?.MoveModifier(_activeCurve, index, -1);
@@ -388,7 +355,6 @@ namespace DeadlockPlayground.UI
                 CustomMinimumSize = new Vector2(20, 20),
                 Disabled = index == _activeCurve.Modifiers.Count - 1 || mod.RequiresFirst
             };
-            btnDown.AddThemeFontSizeOverride("font_size", 10);
             btnDown.Pressed += () =>
             {
                 _canvas?.MoveModifier(_activeCurve, index, 1);
@@ -416,7 +382,6 @@ namespace DeadlockPlayground.UI
                 Text = string.IsNullOrEmpty(mod.Name) ? mod.TypeName : mod.Name,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill
             };
-            editName.AddThemeFontSizeOverride("font_size", 11);
             editName.TextChanged += (txt) =>
             {
                 mod.Name = txt;
@@ -426,11 +391,12 @@ namespace DeadlockPlayground.UI
             // Delete Button [X]
             var btnDelete = new Button
             {
-                Text = "✕",
-                CustomMinimumSize = new Vector2(22, 20),
-                TooltipText = "Delete Modifier"
+                Text = "X",
+                CustomMinimumSize = new Vector2(26, 26),
+                TooltipText = "Delete Modifier",
+                ThemeTypeVariation = "IconButton"
             };
-            btnDelete.AddThemeColorOverride("font_color", new Color(1f, 0.4f, 0.4f));
+            btnDelete.AddThemeColorOverride("font_color", DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.SemanticDanger)));
             btnDelete.Pressed += () =>
             {
                 _canvas?.RemoveModifier(_activeCurve, mod);
@@ -454,7 +420,6 @@ namespace DeadlockPlayground.UI
             vbox.AddChild(infRow);
 
             var lblInf = new Label { Text = "Influence:", CustomMinimumSize = new Vector2(70, 0) };
-            lblInf.AddThemeFontSizeOverride("font_size", 11);
             infRow.AddChild(lblInf);
 
             var sliderInf = new HSlider
@@ -495,7 +460,6 @@ namespace DeadlockPlayground.UI
                 Text = "Restrict Frame Range",
                 ButtonPressed = mod.RestrictFrameRange
             };
-            chkRange.AddThemeFontSizeOverride("font_size", 11);
             vbox.AddChild(chkRange);
 
             var rangeContainer = new VBoxContainer
@@ -686,7 +650,6 @@ namespace DeadlockPlayground.UI
             else if (mod is CyclesModifier cyc)
             {
                 var lblNote = new Label { Text = "Cycles Mode (Must be first in stack):", Modulate = new Color(0.9f, 0.8f, 0.4f) };
-                lblNote.AddThemeFontSizeOverride("font_size", 10);
                 container.AddChild(lblNote);
 
                 var beforeRow = new HBoxContainer();
@@ -756,7 +719,6 @@ namespace DeadlockPlayground.UI
             else if (mod is GaussianSmoothModifier sm)
             {
                 var lblNote = new Label { Text = "Gaussian Smooth (Must be first in stack):", Modulate = new Color(0.9f, 0.8f, 0.4f) };
-                lblNote.AddThemeFontSizeOverride("font_size", 10);
                 container.AddChild(lblNote);
 
                 AddFloatRow(container, "Sigma:", sm.Sigma, 0.1f, 50f, 0.1f, (v) => sm.Sigma = v);
@@ -771,7 +733,6 @@ namespace DeadlockPlayground.UI
             parent.AddChild(row);
 
             var lbl = new Label { Text = label, CustomMinimumSize = new Vector2(90, 0) };
-            lbl.AddThemeFontSizeOverride("font_size", 11);
             row.AddChild(lbl);
 
             var spin = new SpinBox
@@ -797,7 +758,6 @@ namespace DeadlockPlayground.UI
             parent.AddChild(row);
 
             var chk = new CheckBox { Text = label, ButtonPressed = isChecked, CustomMinimumSize = new Vector2(100, 0) };
-            chk.AddThemeFontSizeOverride("font_size", 11);
             row.AddChild(chk);
 
             var spin = new SpinBox

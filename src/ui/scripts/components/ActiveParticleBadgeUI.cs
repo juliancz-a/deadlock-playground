@@ -96,10 +96,9 @@ public partial class ActiveParticleBadgeUI : PanelContainer
         {
             Text = "ACTIVE PARTICLE VFX",
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            SizeFlagsVertical = SizeFlags.ShrinkCenter
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            ThemeTypeVariation = "HeaderLabel"
         };
-        _lblHeader.AddThemeFontSizeOverride("font_size", 13);
-        _lblHeader.AddThemeColorOverride("font_color", new Color(0.85f, 0.75f, 0.55f, 1.0f));
         headerRow.AddChild(_lblHeader);
 
         // Header separator
@@ -111,20 +110,18 @@ public partial class ActiveParticleBadgeUI : PanelContainer
         {
             Text = "Hero Particle",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "SubheaderLabel"
         };
-        _lblHeroAbility.AddThemeFontSizeOverride("font_size", 15);
-        _lblHeroAbility.AddThemeColorOverride("font_color", Colors.White);
         rootVbox.AddChild(_lblHeroAbility);
 
         _lblVariant = new Label
         {
             Text = "Variant: Default",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            ThemeTypeVariation = "MutedLabel"
         };
-        _lblVariant.AddThemeFontSizeOverride("font_size", 10);
-        _lblVariant.AddThemeColorOverride("font_color", new Color(0.65f, 0.70f, 0.78f, 1.0f));
         rootVbox.AddChild(_lblVariant);
 
         // 3. Explicit Button Layout: "Browse Particles" and "Unload"
@@ -140,9 +137,9 @@ public partial class ActiveParticleBadgeUI : PanelContainer
             Text = "Browse VFX",
             Icon = GD.Load<Texture2D>("res://assets/icons/sparkles.svg"),
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(0, 28)
+            CustomMinimumSize = new Vector2(0, 30),
+            ThemeTypeVariation = "ToolbarButton"
         };
-        _btnBrowse.AddThemeFontSizeOverride("font_size", 11);
         _btnBrowse.AddThemeConstantOverride("icon_max_width", 14);
         _btnBrowse.Pressed += () => EmitSignal(SignalName.BrowseRequested);
         buttonsRow.AddChild(_btnBrowse);
@@ -152,10 +149,9 @@ public partial class ActiveParticleBadgeUI : PanelContainer
             Text = "Close Effect",
             TooltipText = "Unload currently active particle VFX",
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(0, 28)
+            CustomMinimumSize = new Vector2(0, 30),
+            ThemeTypeVariation = "DangerButton"
         };
-        _btnUnload.AddThemeFontSizeOverride("font_size", 11);
-        _btnUnload.AddThemeColorOverride("font_hover_color", new Color(1.0f, 0.45f, 0.45f, 1.0f));
         _btnUnload.Pressed += () =>
         {
             HideBadge();

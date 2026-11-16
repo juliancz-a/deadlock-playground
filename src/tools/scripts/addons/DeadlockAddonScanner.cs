@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using DeadlockPlayground.Catalog;
 
 namespace DeadlockPlayground.Addons
@@ -14,6 +14,9 @@ namespace DeadlockPlayground.Addons
         Vanilla,
         FullModel,
         TextureOnly,
+        AnimationOnly,
+        ParticleOnly,
+        Mixed,
         Unknown
     }
 
@@ -21,6 +24,7 @@ namespace DeadlockPlayground.Addons
     {
         public string FilePath { get; set; } = "";
         public string FileName { get; set; } = "";
+        public bool IsStandardPakFormat { get; set; } = true;
         public AddonModType ModType { get; set; } = AddonModType.Unknown;
         public string DetectedHeroCodename { get; set; } = "";
         public string DetectedHeroDisplayName { get; set; } = "";
@@ -29,6 +33,8 @@ namespace DeadlockPlayground.Addons
         public List<string> ModelEntries { get; } = new();
         public List<string> MaterialEntries { get; } = new();
         public List<string> TextureEntries { get; } = new();
+        public List<string> AnimationEntries { get; } = new();
+        public List<string> ParticleEntries { get; } = new();
         public List<string> AllEntries { get; } = new();
 
         public override string ToString() => DisplayTitle;
@@ -45,8 +51,14 @@ namespace DeadlockPlayground.Addons
             RegexOptions.IgnoreCase | RegexOptions.Compiled
         );
 
+        private static readonly Regex DataChunkVpkRegex = new(
+            @"_\d{3}\.vpk$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
+
         /// <summary>
-        /// Scans the specified addons directory for all *_dir.vpk archives and inspects their contents.
+        /// Scans the specified addons directory (including subfolders and non-standard single-file .vpk archives)
+        /// and inspects their contents.
         /// </summary>
         public static List<AddonModInfo> ScanAddons(string addonsDirectory)
         {
@@ -59,7 +71,10 @@ namespace DeadlockPlayground.Addons
 
             try
             {
-                var vpkFiles = Directory.GetFiles(addonsDirectory, "*_dir.vpk");
+                string rootFull = Path.GetFullPath(addonsDirectory).TrimEnd('\\', '/');
+                var vpkFiles = Directory.GetFiles(addonsDirectory, "*.vpk", SearchOption.AllDirectories)
+                    .Where(f => !DataChunkVpkRegex.IsMatch(Path.GetFileName(f)))
+                    .ToArray();
                 Array.Sort(vpkFiles, StringComparer.OrdinalIgnoreCase);
 
                 foreach (var filePath in vpkFiles)
@@ -69,6 +84,10 @@ namespace DeadlockPlayground.Addons
                         var info = InspectAddonPackage(filePath);
                         if (info != null)
                         {
+                            string fileDir = Path.GetDirectoryName(Path.GetFullPath(filePath))?.TrimEnd('\\', '/') ?? "";
+                            bool isTopLevel = string.Equals(fileDir, rootFull, StringComparison.OrdinalIgnoreCase);
+                            bool isDirVpk = info.FileName.EndsWith("_dir.vpk", StringComparison.OrdinalIgnoreCase);
+                            info.IsStandardPakFormat = isTopLevel && isDirVpk;
                             results.Add(info);
                         }
                     }
@@ -101,7 +120,18 @@ namespace DeadlockPlayground.Addons
             };
 
             using var package = new Package();
-            package.Read(vpkPath);
+            FileStream vpkStream = null;
+            try
+            {
+                vpkStream = new FileStream(vpkPath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                package.SetFileName(vpkPath);
+                package.Read(vpkStream);
+                vpkStream = null; // Owned and disposed by package.Dispose()
+            }
+            finally
+            {
+                vpkStream?.Dispose();
+            }
 
             var heroFrequency = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -145,13 +175,28 @@ namespace DeadlockPlayground.Addons
                     {
                         modInfo.TextureEntries.Add(fullPath);
                     }
+                    else if (lower.EndsWith(".vnmclip_c") || lower.EndsWith(".vnmclip") ||
+                             lower.EndsWith(".vanim_c") || lower.EndsWith(".vanim") ||
+                             lower.EndsWith(".vagrp_c") || lower.EndsWith(".vagrp") ||
+                             lower.EndsWith(".vnmgraph_c") || lower.EndsWith(".vnmgraph"))
+                    {
+                        modInfo.AnimationEntries.Add(fullPath);
+                    }
+                    else if (lower.EndsWith(".vpcf_c") || lower.EndsWith(".vpcf"))
+                    {
+                        modInfo.ParticleEntries.Add(fullPath);
+                    }
                 }
             }
 
-            // Exclude packages that do not contain models, materials or textures
-            if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && modInfo.MaterialEntries.Count == 0)
+            // Exclude packages that do not contain models, materials, textures, animations or particles
+            if (modInfo.ModelEntries.Count == 0 &&
+                modInfo.TextureEntries.Count == 0 &&
+                modInfo.MaterialEntries.Count == 0 &&
+                modInfo.AnimationEntries.Count == 0 &&
+                modInfo.ParticleEntries.Count == 0)
             {
-                GD.Print($"[AddonScanner] Skipping '{fileName}': does not contain models, materials or textures.");
+                GD.Print($"[AddonScanner] Skipping '{fileName}': does not contain models, materials, textures, animations or particles.");
                 return null;
             }
 
@@ -222,21 +267,41 @@ namespace DeadlockPlayground.Addons
 
             // Classify mod type:
             // 1. If it contains .vmdl_c -> Full Model Replacement Mod
-            // 2. If it contains .vtex_c or .vmat_c without a base model -> Texture-Only Mod
+            // 2. Otherwise inspect non-model asset categories (Textures/Materials, Animations, Particles)
+            bool hasTextures = modInfo.TextureEntries.Count > 0 || modInfo.MaterialEntries.Count > 0;
+            bool hasAnimations = modInfo.AnimationEntries.Count > 0;
+            bool hasParticles = modInfo.ParticleEntries.Count > 0;
+
             if (modInfo.ModelEntries.Count > 0)
             {
                 modInfo.ModType = AddonModType.FullModel;
             }
-            else if (modInfo.TextureEntries.Count > 0 || modInfo.MaterialEntries.Count > 0)
-            {
-                modInfo.ModType = AddonModType.TextureOnly;
-            }
             else
             {
-                modInfo.ModType = AddonModType.Unknown;
+                int activeCategories = (hasTextures ? 1 : 0) + (hasAnimations ? 1 : 0) + (hasParticles ? 1 : 0);
+                if (activeCategories > 1)
+                {
+                    modInfo.ModType = AddonModType.Mixed;
+                }
+                else if (hasTextures)
+                {
+                    modInfo.ModType = AddonModType.TextureOnly;
+                }
+                else if (hasAnimations)
+                {
+                    modInfo.ModType = AddonModType.AnimationOnly;
+                }
+                else if (hasParticles)
+                {
+                    modInfo.ModType = AddonModType.ParticleOnly;
+                }
+                else
+                {
+                    modInfo.ModType = AddonModType.Unknown;
+                }
             }
 
-            // Format readable DisplayTitle: "Vindicta Model - pak_10_dir.vpk"
+            // Format readable DisplayTitle: "Vindicta Model" / "Vindicta Animation Mod"
             string heroName = !string.IsNullOrEmpty(modInfo.DetectedHeroDisplayName)
                 ? modInfo.DetectedHeroDisplayName
                 : "Custom Character";
@@ -245,6 +310,9 @@ namespace DeadlockPlayground.Addons
             {
                 AddonModType.FullModel => $"{heroName} Model",
                 AddonModType.TextureOnly => $"{heroName} Texture Mod",
+                AddonModType.AnimationOnly => $"{heroName} Animation Mod",
+                AddonModType.ParticleOnly => $"{heroName} VFX Mod",
+                AddonModType.Mixed => $"{heroName} Mixed Mod",
                 _ => $"{heroName} Mod"
             };
 

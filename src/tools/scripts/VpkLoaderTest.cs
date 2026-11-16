@@ -12,7 +12,8 @@ using DeadlockPlayground.Tools;
 using DeadlockPlayground.Materials;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Addons;
-using SteamDatabase.ValvePak;
+using DeadlockPlayground.Animation;
+using ValvePak;
 
 public partial class VpkLoaderTest : Node3D
 {
@@ -55,11 +56,14 @@ public partial class VpkLoaderTest : Node3D
 
     private ValveResourceFormat.Resource _currentVrfResource;
     private Model _currentVrfModel;
+    public Model CurrentVrfModel => _currentVrfModel;
     private IFileLoader _currentFileLoader;
     public IFileLoader CurrentFileLoader => _currentFileLoader;
 
     private Package _basePackage;
     private Package _corePackage;
+    private Package _addonPackage;
+    public Package AddonPackage => _addonPackage;
 
     public void EnsureVpkPathResolved()
     {
@@ -158,13 +162,16 @@ public partial class VpkLoaderTest : Node3D
         {
             try
             {
-                var addonPkg = new Package();
-                addonPkg.Read(AddonVpkPath);
-                IFileLoader addonLoader = new GameFileLoader(addonPkg, "");
+                _addonPackage?.Dispose();
+                _addonPackage = new Package();
+                _addonPackage.Read(AddonVpkPath);
+                IFileLoader addonLoader = new GameFileLoader(_addonPackage, "");
                 _currentFileLoader = new DualLayerGameFileLoader(addonLoader, composite);
             }
             catch
             {
+                _addonPackage?.Dispose();
+                _addonPackage = null;
                 _currentFileLoader = composite;
             }
         }
@@ -195,11 +202,29 @@ public partial class VpkLoaderTest : Node3D
 		EmitSignal(SignalName.LoadProgress, msg);
 	}
 
+	/// <summary>
+	/// Releases any open memory-mapped file handles on the currently mounted addon VPK
+	/// so the file can be safely overwritten or moved during mod export.
+	/// </summary>
+	public void ReleaseAddonFileLocks()
+	{
+		_currentFileLoader = null;
+		if (_addonPackage != null)
+		{
+			try
+			{
+				_addonPackage.Dispose();
+			}
+			catch { }
+			_addonPackage = null;
+		}
+	}
+
 	public void SetActiveAddon(string addonVpkPath, AddonModInfo modInfo = null)
 	{
 		AddonVpkPath = addonVpkPath ?? "";
 		ActiveAddonInfo = modInfo;
-		_currentFileLoader = null;
+		ReleaseAddonFileLocks();
 		GD.Print($"[VpkLoader] Active Addon set to: {(string.IsNullOrEmpty(AddonVpkPath) ? "None (Vanilla)" : Path.GetFileName(AddonVpkPath))}");
 	}
 
@@ -224,8 +249,12 @@ public partial class VpkLoaderTest : Node3D
 
 		SetActiveAddon(modInfo.FilePath, modInfo);
 
-		// If package info is incomplete, inspect package directly to populate model and texture entries
-		if (modInfo.ModelEntries.Count == 0 && modInfo.TextureEntries.Count == 0 && File.Exists(modInfo.FilePath))
+		// If package info is incomplete, inspect package directly to populate model, texture, animation and particle entries
+		if (modInfo.ModelEntries.Count == 0 &&
+			modInfo.TextureEntries.Count == 0 &&
+			modInfo.AnimationEntries.Count == 0 &&
+			modInfo.ParticleEntries.Count == 0 &&
+			File.Exists(modInfo.FilePath))
 		{
 			var inspected = DeadlockAddonScanner.InspectAddonPackage(modInfo.FilePath);
 			if (inspected != null)
@@ -235,8 +264,11 @@ public partial class VpkLoaderTest : Node3D
 			}
 		}
 
-		// If texture-only mod with detected hero, load the corresponding hero from catalog
-		if (modInfo.ModType == AddonModType.TextureOnly)
+		// If non-model mod (TextureOnly, AnimationOnly, ParticleOnly, Mixed) with detected hero, load the corresponding hero from catalog
+		if (modInfo.ModType == AddonModType.TextureOnly ||
+			modInfo.ModType == AddonModType.AnimationOnly ||
+			modInfo.ModType == AddonModType.ParticleOnly ||
+			modInfo.ModType == AddonModType.Mixed)
 		{
 			var catalogEntry = !string.IsNullOrEmpty(modInfo.DetectedHeroCodename)
 				? (DeadlockHeroCatalog.GetByCodename(modInfo.DetectedHeroCodename) ?? DeadlockHeroCatalog.ResolveHero(modInfo.DetectedHeroCodename))
@@ -246,7 +278,7 @@ public partial class VpkLoaderTest : Node3D
 
 			if (catalogEntry != null)
 			{
-				GD.Print($"[VpkLoader] Loading hero '{catalogEntry.DisplayName}' with addon textures from '{modInfo.FileName}'...");
+				GD.Print($"[VpkLoader] Loading hero '{catalogEntry.DisplayName}' with addon ({modInfo.ModType}) from '{modInfo.FileName}'...");
 				return await LoadHeroModelAsync(catalogEntry);
 			}
 		}
@@ -500,7 +532,7 @@ public partial class VpkLoaderTest : Node3D
 
 						var validAnims = allAnims.Where(a =>
 						{
-							if (DeadlockPlayground.Tools.DeadlockAnimLoader.IsBlacklisted(a.Name, a.IsAdditive)) return false;
+							if (DeadlockPlayground.Tools.DeadlockAnimLoader.IsBlacklisted(a.Name, a.IsAdditive, a.TargetSkeletonName)) return false;
 
 							string n = a.Name.ToLowerInvariant();
 							if (n.Contains("_nw") || n.Contains("_ne") || n.Contains("_sw") || n.Contains("_se") ||
@@ -510,10 +542,10 @@ public partial class VpkLoaderTest : Node3D
 						}).ToList();
 
 						var categorized = validAnims
-							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name)))
+							.GroupBy(a => DeadlockPlayground.Tools.DeadlockAnimLoader.ClassifyCategory(DeadlockPlayground.Tools.DeadlockAnimLoader.SanitizePoseName(a.Name), a.IsAdditive))
 							.ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.Animation>();
+						var selectedAnims = new List<ValveResourceFormat.ResourceTypes.ModelAnimation.AnimationBase>();
 
 						// Idle clips (take up to 4, prioritized)
 						if (categorized.TryGetValue("Idles & Stances", out var idles) || categorized.TryGetValue("Idle", out idles))
@@ -651,14 +683,16 @@ public partial class VpkLoaderTest : Node3D
 		}
 		finally
 		{
+			_currentFileLoader = null;
 			addonPackage?.Dispose();
 		}
 	}
 
     private void CleanupCurrentHero()
     {
-        var paintTab = (GetTree()?.Root?.FindChild("PaintTab", true, false) 
-                     ?? GetTree()?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
+        SceneTree tree = IsInsideTree() ? GetTree() : null;
+        var paintTab = (tree?.Root?.FindChild("PaintTab", true, false) 
+                     ?? tree?.Root?.FindChild("PaintTabUI", true, false)) as global::PaintTabUI;
         paintTab?.FlushActiveChangesToWorkspace(true);
 
         EmitSignal(SignalName.HeroUnloaded);
@@ -691,9 +725,9 @@ public partial class VpkLoaderTest : Node3D
         _currentFileLoader = null;
 
         // Unload active particle effect and badge
-        var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
+        var stage = tree?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
         stage?.UnloadActiveParticle();
-        var badge = GetTree()?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
+        var badge = tree?.Root?.FindChild("ActiveParticleBadge", true, false) as DeadlockPlayground.UI.ActiveParticleBadgeUI;
         badge?.HideBadge();
 
         // Clean texture cache so reloading a hero or switching heroes never accesses disposed texture objects
@@ -737,7 +771,7 @@ public partial class VpkLoaderTest : Node3D
 			return map;
 		}
 
-		foreach (var (mesh, meshIndex, meshName) in model.GetEmbeddedMeshes())
+		foreach (var (mesh, meshIndex, meshName, _) in model.GetEmbeddedMeshes())
 		{
 			var materials = new List<string>();
 
@@ -784,6 +818,16 @@ public partial class VpkLoaderTest : Node3D
 			Node3D modelScene = (Node3D)gltfDoc.GenerateScene(gltfState);
 			modelScene.Name = $"Hero_{hero}";
 
+			// [MOD MERGE SUPPORT] Stamp the source addon VPK path on the hero root node
+			if (!string.IsNullOrWhiteSpace(AddonVpkPath) && File.Exists(AddonVpkPath))
+			{
+				modelScene.SetMeta("SourceAddonVpkPath", AddonVpkPath);
+				if (DeadlockPlayground.Workspace.ModWorkspaceSession.Instance != null)
+				{
+					DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.RegisterHeroSourceAddonVpk(hero, LastLoadedDisplayName ?? hero, AddonVpkPath);
+				}
+			}
+
 			_currentHeroNode = modelScene;
 
 			// Register authoritative Model Attachments for data-driven particle sockets
@@ -804,16 +848,33 @@ public partial class VpkLoaderTest : Node3D
 			// Note: Retargeted, clean poses were exported directly into glTF AnimationPlayer by VRF.
 			// DeadlockAnimLoader.LoadHeroPoses is bypassed here so it does not clear AnimationPlayer or push unretargeted raw bone frames.
 
-			EmitSignal(SignalName.HeroLoaded, modelScene);
-			DeadlockPlayground.Painter.SkinLayerManager.RunHeroMaterialAudit(modelScene);
-
 			// Buscamos si generó el Skeleton3D para confirmar que vino riggeado
 			var skeleton = SearchSkeleton(modelScene);
 			var animPlayer = SearchAnimationPlayer(modelScene);
+			if (skeleton != null)
+			{
+				GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
+				ProceduralClothSolver.EnsureClothingBonesParented(skeleton);
+				if (vrfModel != null && (vrfModel.BoneConstraints.Count > 0 || (vrfModel.GetEmbeddedPhys()?.FeModel?.JiggleBones.Length ?? 0) > 0))
+				{
+					var constraintDriver = new Source2BoneConstraintDriver
+					{
+						Name = "Source2BoneConstraintDriver",
+						ProcessPriority = 50
+					};
+					modelScene.AddChild(constraintDriver);
+					constraintDriver.Initialize(vrfModel, skeleton, modelScene);
+					constraintDriver.EvaluateNow(0f);
+					GD.Print($"[Constraints] Attached Source2BoneConstraintDriver ({constraintDriver.ConstraintCount} constraints, {constraintDriver.JiggleBoneCount} jiggle bones).");
+				}
+				StageAddonAnimationsToWorkspace(hero, vrfModel, skeleton, animPlayer, addonPackage);
+			}
+
+			EmitSignal(SignalName.HeroLoaded, modelScene);
+			DeadlockPlayground.Painter.SkinLayerManager.RunHeroMaterialAudit(modelScene);
+
 		if (skeleton != null)
 		{
-			GD.Print($"Skeleton detectado con éxito: {skeleton.GetBoneCount()} huesos encontrados.");
-			ProceduralClothSolver.EnsureClothingBonesParented(skeleton);
 			
 			// Instanciar y configurar la UI del Pose Editor legacy si está explícitamente asignada
 			if (PoseEditorScene != null)
@@ -853,6 +914,72 @@ public partial class VpkLoaderTest : Node3D
 		catch (Exception ex)
 		{
 			GD.PrintErr($"[InstantiateInScene Crash]: {ex.Message}\n{ex.StackTrace}");
+		}
+	}
+
+	private void StageAddonAnimationsToWorkspace(string heroKey, Model vrfModel, Skeleton3D skeleton, AnimationPlayer animPlayer, Package addonPackage)
+	{
+		if (addonPackage == null || ActiveAddonInfo?.AnimationEntries == null || ActiveAddonInfo.AnimationEntries.Count == 0)
+			return;
+
+		var session = DeadlockPlayground.Workspace.ModWorkspaceSession.Instance;
+		if (session == null || skeleton == null || animPlayer == null || CurrentHeroAnimations == null)
+			return;
+
+		string heroDisplayName = LastLoadedDisplayName ?? heroKey;
+		string modelVpkPath = LastLoadedVmdlPath ?? "";
+
+		var idleInfo = CurrentHeroAnimations.FirstOrDefault(a =>
+			a.CleanName.Equals("stand_idle", StringComparison.OrdinalIgnoreCase) ||
+			a.CleanName.Equals("idle", StringComparison.OrdinalIgnoreCase))
+			?? CurrentHeroAnimations.FirstOrDefault(a => a.Category == "Idles & Stances" && !a.IsAdditive);
+
+		foreach (var addonAnim in ActiveAddonInfo.AnimationEntries)
+		{
+			if (string.IsNullOrEmpty(addonAnim)) continue;
+			string normPath = addonAnim.Replace('\\', '/').TrimStart('/');
+			if (!normPath.EndsWith(".vnmclip_c", StringComparison.OrdinalIgnoreCase) &&
+			    !normPath.EndsWith(".vnmclip", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string clipFileName = Path.GetFileNameWithoutExtension(normPath);
+			if (clipFileName.EndsWith(".vnmclip", StringComparison.OrdinalIgnoreCase))
+				clipFileName = Path.GetFileNameWithoutExtension(clipFileName);
+
+			var match = CurrentHeroAnimations.FirstOrDefault(a =>
+				(!string.IsNullOrEmpty(a.VpkClipPath) && a.VpkClipPath.Replace('\\', '/').TrimStart('/').Equals(normPath, StringComparison.OrdinalIgnoreCase)) ||
+				a.CleanName.Equals(clipFileName, StringComparison.OrdinalIgnoreCase) ||
+				a.RawName.Equals(clipFileName, StringComparison.OrdinalIgnoreCase));
+
+			if (match == null) continue;
+
+			if (session.Manifest?.Heroes != null &&
+			    session.Manifest.Heroes.TryGetValue(heroKey, out var hEntry) &&
+			    hEntry.Assets.Any(ast => ast.Animations.Any(sa => sa.CleanName.Equals(match.CleanName, StringComparison.OrdinalIgnoreCase))))
+			{
+				continue;
+			}
+
+			var decodedAnim = DeadlockPlayground.Tools.DeadlockAnimLoader.DecodeAnimationToGodot(
+				match, skeleton, animPlayer, vrfModel, _currentFileLoader, idleInfo, match.CleanName, inPlace: true);
+
+			if (decodedAnim != null)
+			{
+				string targetVpkPath = !string.IsNullOrEmpty(match.VpkClipPath) ? match.VpkClipPath : normPath;
+				session.StageAnimation(
+					heroKey,
+					heroDisplayName,
+					modelVpkPath,
+					match.RawName,
+					match.CleanName,
+					decodedAnim,
+					match.Fps > 0 ? match.Fps : 30f,
+					skeleton,
+					targetVpkPath);
+				GD.Print($"[VpkLoader] Staged addon animation '{match.CleanName}' -> '{targetVpkPath}' into ModWorkspaceSession.");
+			}
 		}
 	}
 
@@ -1127,6 +1254,13 @@ public partial class VpkLoaderTest : Node3D
 					if (mat != null)
 					{
 						mat.ResourceName = vmatPath;
+						// [MOD MERGE SUPPORT] Stamp source addon VPK path on material & meshInstance
+						if (!string.IsNullOrWhiteSpace(AddonVpkPath) && File.Exists(AddonVpkPath))
+						{
+							mat.SetMeta("SourceAddonVpkPath", AddonVpkPath);
+							meshInstance.SetMeta("SourceAddonVpkPath", AddonVpkPath);
+						}
+
 						HeroMaterialManager.ConfigureMaterial(heroName, meshName, i, vmatPath, mat, package, addonPackage);
 						meshInstance.SetSurfaceOverrideMaterial(i, mat);
 						if (meshInstance.Mesh is ArrayMesh arrMesh)

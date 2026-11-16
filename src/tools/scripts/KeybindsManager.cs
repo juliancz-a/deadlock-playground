@@ -149,6 +149,7 @@ namespace DeadlockPlayground.Tools
             AddDefault("Animation", "anim_paste_mirror_pose", "Paste Mirrored Pose", "Paste opposite mirrored bone pose onto current frame", Key.V, ctrl: true, shift: true);
             AddDefault("Animation", "anim_undo", "Undo Animation", "Undo last animation or keyframe modification", Key.Z, ctrl: true);
             AddDefault("Animation", "anim_redo", "Redo Animation", "Redo previously undone animation action", Key.Y, ctrl: true, secKey: Key.Z, secCtrl: true, secShift: true);
+            AddDefault("Animation", "anim_toggle_local_space", "Toggle Local / Global Gizmo", "Switch 3D bone gizmo orientation between Local bone axes and Global world axes", Key.L);
             AddDefault("Animation", "anim_cheatsheet", "Shortcuts Cheatsheet", "Open Animation Editor Shortcuts Cheatsheet dialog", Key.F1, secKey: Key.Slash, secShift: true);
         }
 

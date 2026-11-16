@@ -29,6 +29,18 @@ uniform float step_smoothness : hint_range(0.0, 1.0) = 0.3;
 uniform vec4 shadow_tint : source_color = vec4(0.18, 0.16, 0.26, 1.0);
 uniform float shadow_tint_amount : hint_range(0.0, 1.0) = 0.40;
 
+// Multi-channel interactive toggles & Solo channel preview
+uniform bool enable_color_map = true;
+uniform bool enable_ao = true;
+uniform bool enable_normal = true;
+uniform bool enable_roughness = true;
+uniform bool enable_shadow_map = true;
+uniform bool has_shadow_map = false;
+uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=Emissive, 7=Metalness
+uniform bool has_painter_base_override = false;
+uniform sampler2D painter_base_texture : hint_default_transparent, filter_linear, repeat_enable;
+uniform float alpha_scissor_threshold = 0.0;
+
 vec3 DecodeHemiOctahedron(vec2 e) {
 
     vec2 temp = e * 2.0 - 1.0;
@@ -37,6 +49,11 @@ vec3 DecodeHemiOctahedron(vec2 e) {
 }
 
 void fragment() {
+    if (has_painter_base_override && alpha_scissor_threshold > 0.0) {
+        if (texture(painter_base_texture, fract(UV)).a < alpha_scissor_threshold) {
+            discard;
+        }
+    }
     vec3 vert = COLOR.rgb;
 
     // 1. Transmissive color (g_tNprTransmissiveColor texture or g_vSkinColor vector) with CSB matrix
@@ -63,14 +80,31 @@ void fragment() {
 
     // 5. Normal & Roughness from g_tNormalRoughness (Separate Color.001: Blue -> Roughness)
     vec4 normSample = texture(g_tNormalRoughness, UV);
-    NORMAL_MAP = DecodeHemiOctahedron(normSample.rg) * 0.5 + 0.5;
-    NORMAL_MAP_DEPTH = normal_map_depth;
+    vec3 decodedNorm = DecodeHemiOctahedron(normSample.rg) * 0.5 + 0.5;
+    NORMAL_MAP = enable_normal ? decodedNorm : vec3(0.5, 0.5, 1.0);
+    NORMAL_MAP_DEPTH = enable_normal ? normal_map_depth : 0.0;
 
-    ALBEDO = clamp(finalAlbedo, vec3(0.0), vec3(1.0));
-    ROUGHNESS = normSample.b * roughness;
+    float ao_val = enable_ao ? texture(g_tAmbientOcclusion, UV).r : 1.0;
+    float rough_val = enable_roughness ? normSample.b * roughness : roughness;
+    vec3 color_out = enable_color_map ? clamp(finalAlbedo, vec3(0.0), vec3(1.0)) : vec3(0.85);
+
+    ALBEDO = color_out;
+    ROUGHNESS = rough_val;
     METALLIC = metallic;
     SPECULAR = 0.5;
-    AO = texture(g_tAmbientOcclusion, UV).r;
+    AO = ao_val;
+    AO_LIGHT_AFFECT = enable_ao ? 0.65 : 0.0;
+
+    if (debug_view_channel > 0) {
+        vec3 dbg = color_out;
+        if (debug_view_channel == 2) dbg = vec3(ao_val);
+        else if (debug_view_channel == 3) dbg = decodedNorm;
+        else if (debug_view_channel == 4) dbg = vec3(normSample.b);
+        else if (debug_view_channel == 5) dbg = has_transmissive_texture ? texture(g_tNprTransmissiveColor, UV).rgb : shadow_tint.rgb;
+        ALBEDO = vec3(0.0);
+        EMISSION = dbg;
+        AO = 1.0;
+    }
 
     // 6. Self-illumination & Emissive spectral pulse
     if (enable_self_illum) {
@@ -91,7 +125,10 @@ void fragment() {
 }
 
 void light() {
-	if (toon_intensity > 0.01) {
+	if (debug_view_channel > 0) {
+		DIFFUSE_LIGHT = vec3(0.0);
+		SPECULAR_LIGHT = vec3(0.0);
+	} else if (toon_intensity > 0.01) {
 		vec3 safe_norm = normalize(NORMAL);
 		vec3 safe_light = normalize(LIGHT);
 		float NdotL = dot(safe_norm, safe_light);

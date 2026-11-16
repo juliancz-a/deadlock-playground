@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 
@@ -22,10 +22,15 @@ public static class StandardPbrMaterialBuilder
         Package addonPackage = null)
     {
         string vmatLower = vmatPath?.ToLowerInvariant() ?? "";
+        string shaderLower = matResource.ShaderName?.ToLowerInvariant() ?? "";
         var godotMat = new StandardMaterial3D();
 
         bool isAdditive = matResource.IntParams.TryGetValue("F_ADDITIVE_BLEND", out long addVal) && addVal == 1;
-        bool isAlphaTest = matResource.IntParams.TryGetValue("F_ALPHA_TEST", out long alphaTestVal) && alphaTestVal == 1;
+        bool isOverlay = shaderLower.Contains("citadel_overlay")
+                      || (matResource.IntParams.TryGetValue("F_OVERLAY", out long overlayVal) && overlayVal == 1)
+                      || matResource.VectorParams.ContainsKey("g_vColorTranslucencyInputRange")
+                      || matResource.VectorParams.ContainsKey("g_vColorTranslucencyOutputRange");
+        bool isAlphaTest = !isOverlay && matResource.IntParams.TryGetValue("F_ALPHA_TEST", out long alphaTestVal) && alphaTestVal == 1;
         bool isVertColorMat = matResource.IntParams.GetValueOrDefault("F_VERTEX_COLOR", 0) == 1 || vmatLower.Contains("vertcolor");
         bool isFur = vmatLower.Contains("fur") || (meshName != null && meshName.Contains("fur", StringComparison.OrdinalIgnoreCase));
         bool isEyelashOrShadow = vmatLower.Contains("eyelash") || vmatLower.Contains("lashes") || vmatLower.Contains("eyeshadow");
@@ -57,6 +62,17 @@ public static class StandardPbrMaterialBuilder
             godotMat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
             godotMat.DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Always;
         }
+        else if (isOverlay || (glassParams?.IsTranslucent ?? false))
+        {
+            godotMat.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+            godotMat.DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled;
+            godotMat.CullMode = BaseMaterial3D.CullModeEnum.Back;
+            if (isOverlay)
+            {
+                godotMat.RenderPriority = 1;
+            }
+            godotMat.SetMeta("PreserveShading", true);
+        }
         else if (isSolidVertColorHair)
         {
             godotMat.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
@@ -71,12 +87,26 @@ public static class StandardPbrMaterialBuilder
         }
 
         var albedoParams = VmatColorExtractor.ExtractAlbedo(matResource, vmatPath, glassParams?.IsGlass ?? false, glassParams?.Opacity ?? 1.0f);
-        bool forceOpaqueColor = !isAdditive && !isAlphaTest && !isEyelashOrShadow && !isFur && !(glassParams?.IsTranslucent ?? false);
+        bool forceOpaqueColor = !isAdditive && !isAlphaTest && !isEyelashOrShadow && !isFur && !isOverlay && !(glassParams?.IsTranslucent ?? false);
         string diffusePath = albedoParams.ColorTexturePath;
+
+        Vector2? overlayInRange = null;
+        Vector2? overlayOutRange = null;
+        if (isOverlay)
+        {
+            if (matResource.VectorParams.TryGetValue("g_vColorTranslucencyInputRange", out var inVec))
+            {
+                overlayInRange = new Vector2(inVec.X, inVec.Y);
+            }
+            if (matResource.VectorParams.TryGetValue("g_vColorTranslucencyOutputRange", out var outVec))
+            {
+                overlayOutRange = new Vector2(outVec.X, outVec.Y);
+            }
+        }
 
         if (!string.IsNullOrEmpty(diffusePath))
         {
-            godotMat.AlbedoTexture = Source2TextureLoader.GetOrLoadTexture(package, diffusePath, forceOpaqueColor, addonPackage);
+            godotMat.AlbedoTexture = Source2TextureLoader.GetOrLoadTexture(package, diffusePath, forceOpaqueColor, addonPackage, overlayInRange, overlayOutRange);
             godotMat.VertexColorUseAsAlbedo = isVertColorMat;
             godotMat.AlbedoColor = Colors.White;
         }
@@ -109,17 +139,45 @@ public static class StandardPbrMaterialBuilder
             }
             else
             {
-                godotMat.AlbedoColor = Colors.White;
+                float alphaMul = (isOverlay || (glassParams?.IsTranslucent ?? false))
+                    ? Math.Clamp(glassParams?.Opacity ?? 1.0f, 0.0f, 1.0f)
+                    : 1.0f;
+                godotMat.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, alphaMul);
             }
         }
 
-        // Normal Map
+        // Normal Map & BlueToAlpha Roughness Map
         string normalPath = Source2TextureLoader.GetTextureParam(matResource, "g_tNormal") 
                          ?? Source2TextureLoader.GetTextureParam(matResource, "g_tNormalRoughness");
         if (!string.IsNullOrEmpty(normalPath))
         {
             godotMat.NormalEnabled = true;
             godotMat.NormalTexture = Source2TextureLoader.GetOrLoadTexture(package, normalPath, forceOpaque: true, addonPackage);
+        }
+
+        bool hasRoughnessTexture = false;
+        bool hasAnisoGloss = matResource.IntParams.TryGetValue("F_ANISOTROPIC_GLOSS", out long anisoVal) && anisoVal == 1;
+        if (hasAnisoGloss)
+        {
+            string anisoPath = Source2TextureLoader.GetTextureParam(matResource, "g_tAnisoGloss")
+                            ?? Source2TextureLoader.GetTextureParam(matResource, "TextureAnisoGloss");
+            if (!string.IsNullOrEmpty(anisoPath))
+            {
+                var anisoTex = Source2TextureLoader.GetOrLoadTexture(package, anisoPath, forceOpaque: true, addonPackage);
+                if (anisoTex != null)
+                {
+                    godotMat.RoughnessTexture = anisoTex;
+                    godotMat.RoughnessTextureChannel = BaseMaterial3D.TextureChannel.Red;
+                    hasRoughnessTexture = true;
+                }
+            }
+        }
+
+        if (!hasRoughnessTexture && godotMat.NormalTexture != null && godotMat.NormalTexture.HasMeta("HasBlueToAlphaRoughness"))
+        {
+            godotMat.RoughnessTexture = godotMat.NormalTexture;
+            godotMat.RoughnessTextureChannel = BaseMaterial3D.TextureChannel.Alpha;
+            hasRoughnessTexture = true;
         }
 
         // Ambient Occlusion
@@ -133,6 +191,7 @@ public static class StandardPbrMaterialBuilder
 
         // Emissive / Self-illumination
         var selfIllumParams = VmatColorExtractor.ExtractSelfIllum(matResource, vmatPath, isAdditive);
+        godotMat.SetMeta("SelfIllumAlbedoFactor", selfIllumParams.AlbedoFactor);
         if (selfIllumParams.IsEmissive)
         {
             ImageTexture maskTex = null;
@@ -174,7 +233,7 @@ public static class StandardPbrMaterialBuilder
             godotMat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
         }
 
-        float roughness = isWeapon ? 0.45f : 0.65f;
+        float roughness = hasRoughnessTexture ? 1.0f : (isWeapon ? 0.45f : 0.65f);
         if (matResource.VectorParams.TryGetValue("TextureRoughness1", out var rVec)) roughness = rVec.X;
         else if (matResource.VectorParams.TryGetValue("TextureRoughness", out var rVec0)) roughness = rVec0.X;
         else if (matResource.FloatParams.TryGetValue("g_flRoughnessScale1", out float rScale)) roughness = rScale;
@@ -187,15 +246,18 @@ public static class StandardPbrMaterialBuilder
         godotMat.Metallic = metallic;
 
         // Matte head / hair surfaces specular clamp: Godot's default MetallicSpecular = 0.5 produces
-        // blinding glare blowout on high-roughness surfaces. Clamp to 0.08 and roughness to 0.95.
-        bool isMatteHeadOrHair = roughness > 0.85f
+        // blinding glare blowout on high-roughness surfaces. Clamp to 0.08 and preserve per-pixel roughness maps.
+        bool isMatteHeadOrHair = (!hasRoughnessTexture && roughness > 0.85f)
                               || vmatLower.Contains("hair")
                               || vmatLower.Contains("head")
                               || vmatLower.Contains("vertcolor")
                               || isSolidVertColorHair;
         if (isMatteHeadOrHair)
         {
-            godotMat.Roughness = 0.95f;
+            if (!hasRoughnessTexture)
+            {
+                godotMat.Roughness = 0.95f;
+            }
             godotMat.MetallicSpecular = 0.08f;
         }
 

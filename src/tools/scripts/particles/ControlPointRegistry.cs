@@ -15,6 +15,7 @@ public class ControlPoint
     public Quaternion Orientation { get; set; } = Quaternion.Identity;
     public Vector3 Velocity { get; set; } = Vector3.Zero;
     public float Value { get; set; } = 0.0f;
+    public bool HasValue { get; set; } = false;
     public string AttachmentName { get; set; } = string.Empty;
     public string EntityName { get; set; } = string.Empty;
 
@@ -33,6 +34,7 @@ public class ControlPoint
             Orientation = Orientation,
             Velocity = Velocity,
             Value = Value,
+            HasValue = HasValue,
             AttachmentName = AttachmentName,
             EntityName = EntityName
         };
@@ -46,6 +48,8 @@ public class ControlPoint
 public class ControlPointRegistry
 {
     private readonly Dictionary<int, ControlPoint> _controlPoints = new();
+
+    public IReadOnlyDictionary<int, ControlPoint> AllControlPoints => _controlPoints;
 
     /// <summary>
     /// Default torso target height in Godot coordinate space (Y-up, ~1.288 meters / 50.72 inches).
@@ -116,6 +120,7 @@ public class ControlPointRegistry
     {
         var cp = GetOrCreate(index);
         cp.Value = val;
+        cp.HasValue = true;
     }
 
     public void CopyFrom(ControlPointRegistry source)

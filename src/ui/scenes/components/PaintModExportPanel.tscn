@@ -1,31 +1,6 @@
 [gd_scene format=3 uid="uid://c7k2p8b1mx5yq"]
 
 [ext_resource type="Script" uid="uid://drupgrsii05x7" path="res://ui/scripts/components/PaintModExportPanelUI.cs" id="1_mod_export"]
-[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_colus"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
-bg_color = Color(0.0784314, 0.0862745, 0.109804, 0.941176)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.282353, 0.321569, 0.419608, 0.6)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_mod"]
-bg_color = Color(0.188235, 0.313726, 0.235294, 0.95)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.4, 0.75, 0.45, 0.9)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
 
 [node name="PaintModExportPanel" type="PanelContainer" unique_id=714186499 node_paths=PackedStringArray("_btnExportMod", "_btnExportPng", "_btnExportVmat", "_lblStatus", "_exportFileDialog")]
 custom_minimum_size = Vector2(230, 0)
@@ -37,7 +12,7 @@ offset_top = 46.0
 offset_right = -16.0
 offset_bottom = 250.0
 grow_horizontal = 0
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+theme_type_variation = &"CardPanel"
 script = ExtResource("1_mod_export")
 _btnExportMod = NodePath("MarginContainer/VBoxContainer/BtnExportMod")
 _btnExportPng = NodePath("MarginContainer/VBoxContainer/BtnExportPng")
@@ -58,17 +33,13 @@ theme_override_constants/separation = 8
 
 [node name="Title" type="Label" parent="MarginContainer/VBoxContainer" unique_id=1480415999]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 14
+theme_type_variation = &"SubheaderLabel"
 text = "SOURCE 2 MOD EXPORT"
 
 [node name="BtnExportMod" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1982736451]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
-theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 13
-theme_override_styles/normal = SubResource("StyleBoxFlat_btn_mod")
+theme_type_variation = &"PrimaryActionButton"
 text = "EXPORT MOD (.VPK)..."
 
 [node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1982736452]
@@ -77,21 +48,16 @@ layout_mode = 2
 [node name="BtnExportPng" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1685181799]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 13
 text = "Export PNG Only..."
 
 [node name="BtnExportVmat" type="Button" parent="MarginContainer/VBoxContainer" unique_id=1722466599]
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 13
 text = "Generate .vmat KV3..."
 
 [node name="LblStatus" type="Label" parent="MarginContainer/VBoxContainer" unique_id=88028999]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.65, 0.85, 0.65, 1)
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"BadgeLabelSuccess"
 text = "Ready to export"
 autowrap_mode = 2
 

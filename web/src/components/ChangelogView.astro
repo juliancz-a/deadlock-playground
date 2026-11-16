@@ -1,6 +1,7 @@
 ---
 import Icon from './Icon.astro';
 import changelogData from '../data/changelog.json';
+import { renderChangelogEntryHtml } from '../utils/markdown';
 
 const changelogEntries = changelogData.history;
 
@@ -69,14 +70,7 @@ const displayJson = formatJsonDisplay(changelogData);
 
             <h3 class="entry-title font-heading">{entry.title}</h3>
 
-            <ul class="entry-list">
-              {entry.highlights.map((item) => (
-                <li class="entry-item">
-                  <Icon name="circle-check" size={16} color="var(--dl-accent-sage)" class="item-icon" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+            <div class="md-content" set:html={renderChangelogEntryHtml(entry)} />
           </article>
         ))}
       </div>
@@ -235,25 +229,165 @@ const displayJson = formatJsonDisplay(changelogData);
     line-height: 1.3;
   }
 
-  .entry-list {
+  .md-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 0.855rem;
+    color: var(--dl-text-secondary);
+    line-height: 1.5;
+  }
+
+  .md-content :global(.md-heading) {
+    font-family: var(--dl-font-heading);
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+    margin-top: 6px;
+  }
+
+  .md-content :global(.md-heading:first-child) {
+    margin-top: 0;
+  }
+
+  .md-content :global(.md-h1) {
+    font-size: 1.15rem;
+    color: var(--dl-accent-brass);
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(239, 222, 191, 0.22);
+  }
+
+  .md-content :global(.md-h2) {
+    font-size: 1rem;
+    color: var(--dl-accent-gold);
+    padding-bottom: 3px;
+    border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  }
+
+  .md-content :global(.md-h3) {
+    font-size: 0.92rem;
+    color: var(--dl-accent-brass);
+  }
+
+  .md-content :global(.md-h4),
+  .md-content :global(.md-h5),
+  .md-content :global(.md-h6) {
+    font-size: 0.85rem;
+    color: var(--dl-text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .md-content :global(.md-hr) {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(114, 148, 127, 0.45), rgba(43, 63, 55, 0.25), transparent);
+    margin: 4px 0;
+  }
+
+  .md-content :global(.md-list) {
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
   }
 
-  .entry-item {
+  .md-content :global(.md-item) {
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    font-size: 0.85rem;
-    color: var(--dl-text-secondary);
-    line-height: 1.45;
+    flex-wrap: wrap;
   }
 
-  .item-icon {
-    margin-top: 2px;
+  .md-content :global(.md-item > span) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .md-content :global(.md-check-icon) {
+    color: var(--dl-accent-sage);
+    margin-top: 3px;
     flex-shrink: 0;
+  }
+
+  .md-content :global(.md-sublist) {
+    width: 100%;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 5px;
+    padding-left: 26px;
+  }
+
+  .md-content :global(.md-subitem) {
+    position: relative;
+    padding-left: 14px;
+    font-size: 0.82rem;
+    color: var(--dl-text-muted);
+  }
+
+  .md-content :global(.md-subitem::before) {
+    content: '◦';
+    position: absolute;
+    left: 0;
+    color: var(--dl-accent-sage);
+  }
+
+  .md-content :global(.md-ol) {
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .md-content :global(.md-ol-item::marker) {
+    color: var(--dl-accent-gold);
+    font-weight: 700;
+  }
+
+  .md-content :global(.md-quote) {
+    border-left: 3px solid var(--dl-accent-sage);
+    background: rgba(114, 148, 127, 0.08);
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    color: var(--dl-text-muted);
+    font-style: italic;
+  }
+
+  .md-content :global(.md-code) {
+    font-family: var(--dl-font-code);
+    font-size: 0.8em;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(114, 148, 127, 0.25);
+    color: #a5b4fc;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .md-content :global(.md-pre) {
+    font-family: var(--dl-font-code);
+    font-size: 0.78rem;
+    background: var(--dl-bg-main);
+    border: 1px solid var(--dl-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    color: #cbd5e1;
+  }
+
+  .md-content :global(.md-link) {
+    color: #60a5fa;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .md-content :global(.md-link:hover) {
+    color: var(--dl-accent-brass);
+  }
+
+  .md-content :global(strong) {
+    color: var(--dl-text-primary);
+    font-weight: 650;
   }
 
   /* Right API Column */

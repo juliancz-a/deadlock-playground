@@ -9,12 +9,14 @@ using System.Threading.Tasks;
 using System.Text;
 using System.Runtime.InteropServices;
 using SkiaSharp;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.ResourceTypes;
 using VrfMaterial = ValveResourceFormat.ResourceTypes.Material;
 using DeadlockPlayground.Catalog;
+using DeadlockPlayground.Materials;
 using DeadlockPlayground.Workspace;
+using DeadlockPlayground.Importer;
 
 namespace DeadlockPlayground.Painter
 {
@@ -65,6 +67,10 @@ namespace DeadlockPlayground.Painter
         public string DeadlockGamePath { get; set; } = "";
         public string CsdkPath { get; set; } = "";
         public string ResourceCompilerPath { get; set; } = "";
+        public string SourceModVpkPath { get; set; } = "";
+        public bool MergeWithSourceModVpk { get; set; } = true;
+        public bool PrioritizeNewModOverSource { get; set; } = true;
+        public bool OverwriteSourceModInAddons { get; set; } = false;
         public Image PreBakedAtlas { get; set; } // Pre-extracted on Godot main thread
         public Dictionary<int, Image> PreBakedAtlasesBySurface { get; set; } = new();
         public Dictionary<int, Image> PreExtractedBaseImages { get; set; } = new();
@@ -72,7 +78,12 @@ namespace DeadlockPlayground.Painter
         public Dictionary<string, Image> PreBakedAtlasesBySubmesh { get; set; } = new();
         public Dictionary<string, Image> PreExtractedBaseImagesBySubmesh { get; set; } = new();
         public Dictionary<string, (Vector2 pos, Vector2 size)> SubmeshAtlasRectsBySubmesh { get; set; } = new();
+        public Dictionary<(string subKey, MaterialTextureChannel channel), Image> PreBakedChannelsBySubmesh { get; set; } = new();
+        public Dictionary<(string subKey, MaterialTextureChannel channel), Image> PreExtractedChannelOriginalsBySubmesh { get; set; } = new();
         public HashSet<string> ExcludedAssetVpkPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool PreserveBaseAlpha { get; set; } = true;
+        public HashSet<string> SubmeshesWithEditedAlpha { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> SubmeshesWithEditedBaseTexture { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public class SkinExportResult
@@ -107,7 +118,7 @@ namespace DeadlockPlayground.Painter
         /// Step A: Bake composite textures to PNG.
         /// Step B: Generate KV3 .vmat files.
         /// Step C: Compile via headless resourcecompiler.exe CLI.
-        /// Step D: Package into VPK archive with ValvePak and clean up staging.
+        /// Step D: Package into VPK archive with ValvePak (merging base mod VPK if editing a modded hero) and clean up staging.
         /// </summary>
         public async Task<SkinExportResult> ExportModAsync(
             ModExportConfig config,
@@ -123,11 +134,100 @@ namespace DeadlockPlayground.Painter
                 return result;
             }
 
+            // Auto-discover SourceModVpkPath on the main thread if not explicitly populated on config
+            if (string.IsNullOrWhiteSpace(config.SourceModVpkPath))
+            {
+                if (config.TargetSubmeshes != null)
+                {
+                    foreach (var sm in config.TargetSubmeshes)
+                    {
+                        if (!string.IsNullOrWhiteSpace(sm?.SourceAddonVpkPath) && File.Exists(sm.SourceAddonVpkPath))
+                        {
+                            config.SourceModVpkPath = sm.SourceAddonVpkPath;
+                            break;
+                        }
+                        if (sm?.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.Mesh.HasMeta("SourceAddonVpkPath"))
+                        {
+                            string metaVpk = sm.Mesh.GetMeta("SourceAddonVpkPath").AsString();
+                            if (!string.IsNullOrWhiteSpace(metaVpk) && File.Exists(metaVpk))
+                            {
+                                config.SourceModVpkPath = metaVpk;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(config.SourceModVpkPath) &&
+                    ModWorkspaceSession.Instance != null &&
+                    !string.IsNullOrWhiteSpace(config.HeroCodename) &&
+                    ModWorkspaceSession.Instance.Manifest.Heroes.TryGetValue(config.HeroCodename, out var wsHero) &&
+                    !string.IsNullOrWhiteSpace(wsHero?.SourceAddonVpkPath) &&
+                    File.Exists(wsHero.SourceAddonVpkPath))
+                {
+                    config.SourceModVpkPath = wsHero.SourceAddonVpkPath;
+                }
+
+                if (string.IsNullOrWhiteSpace(config.SourceModVpkPath) && Engine.GetMainLoop() is SceneTree tree && tree.Root != null)
+                {
+                    var vpkLoader = tree.Root.FindChild("VpkLoaderTest", true, false) as global::VpkLoaderTest;
+                    if (vpkLoader != null && !string.IsNullOrWhiteSpace(vpkLoader.ActiveAddonVpkPath) && File.Exists(vpkLoader.ActiveAddonVpkPath))
+                    {
+                        config.SourceModVpkPath = vpkLoader.ActiveAddonVpkPath;
+                    }
+                }
+            }
+
             // Pre-extract all textures, materials, and atlas rects on the Godot MAIN THREAD before entering worker thread
-            var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && s.IsDirty).ToList();
+            var exportableChannels = new[]
+            {
+                MaterialTextureChannel.AmbientOcclusion,
+                MaterialTextureChannel.Normal,
+                MaterialTextureChannel.Roughness,
+                MaterialTextureChannel.Shadow,
+                MaterialTextureChannel.SelfIllum,
+                MaterialTextureChannel.TintMask,
+                MaterialTextureChannel.Metalness,
+                MaterialTextureChannel.RimMask,
+                MaterialTextureChannel.OutlineMask
+            };
+
+            bool HasAnyChannelEdits(SubmeshNodeInfo smInfo)
+            {
+                if (smInfo == null) return false;
+                foreach (var ch in exportableChannels)
+                {
+                    if ((_layerManager != null && _layerManager.HasChannelEdits(smInfo, ch)) ||
+                        (smInfo.Channels?.GetChannel(ch)?.IsDirty ?? false))
+                    {
+                        return true;
+                    }
+                }
+                return _layerManager != null && _layerManager.HasChannelEdits(smInfo, MaterialTextureChannel.Color);
+            }
+
+            var actuallyPaintedNonCustomKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (config.TargetSubmeshes != null)
+            {
+                foreach (var sm in config.TargetSubmeshes)
+                {
+                    if (sm?.Mesh == null || sm.IsCustomImportedMesh) continue;
+                    string matKeySm = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
+                    bool hasActualPaint = (_layerManager != null && _layerManager.HasPaintStrokes(matKeySm)) || HasAnyChannelEdits(sm);
+                    if (hasActualPaint)
+                        actuallyPaintedNonCustomKeys.Add(ResolveSubmeshKey(sm));
+                }
+            }
+
+            var candidateSubmeshes = config.TargetSubmeshes?.Where(s => s.IsSelected && (s.IsDirty || HasAnyChannelEdits(s))).ToList();
             if (candidateSubmeshes == null || candidateSubmeshes.Count == 0)
             {
                 candidateSubmeshes = config.TargetSubmeshes ?? new List<SubmeshNodeInfo>();
+            }
+
+            if (_layerManager != null)
+            {
+                config.PreserveBaseAlpha = _layerManager.PreserveBaseAlpha;
             }
 
             foreach (var submesh in candidateSubmeshes)
@@ -135,6 +235,16 @@ namespace DeadlockPlayground.Painter
                 if (submesh == null) continue;
                 int sIdx = submesh.SurfaceIndex;
                 string subKey = ResolveSubmeshKey(submesh);
+                string matKeySub = submesh.Mesh != null ? (_layerManager?.GetMaterialKey(submesh.Mesh, sIdx) ?? submesh.OriginalVmatPath) : submesh.OriginalVmatPath;
+
+                if (_layerManager != null && _layerManager.HasEditedAlphaForMaterial(matKeySub))
+                {
+                    config.SubmeshesWithEditedAlpha.Add(subKey);
+                }
+                if (_layerManager != null && _layerManager.HasEditedBaseTextureForMaterial(matKeySub))
+                {
+                    config.SubmeshesWithEditedBaseTexture.Add(subKey);
+                }
 
                 if (!config.PreBakedAtlasesBySubmesh.ContainsKey(subKey))
                 {
@@ -151,41 +261,78 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
+                // Pre-bake edited non-color material channels on the main thread
+                foreach (var ch in exportableChannels)
+                {
+                    bool hasEdits = (_layerManager != null && _layerManager.HasChannelEdits(submesh, ch))
+                                 || (submesh.Channels?.GetChannel(ch)?.IsDirty ?? false);
+                    if (hasEdits && !config.PreBakedChannelsBySubmesh.ContainsKey((subKey, ch)))
+                    {
+                        var chBaked = _layerManager?.BakeChannelImageForSubmesh(submesh, ch)
+                                   ?? submesh.Channels?.GetChannel(ch)?.SourceImage;
+                        if (chBaked != null && !chBaked.IsEmpty())
+                        {
+                            config.PreBakedChannelsBySubmesh[(subKey, ch)] = (Image)chBaked.Duplicate();
+                        }
+                    }
+
+                    // Also snapshot Normal/Roughness originals on main thread if either side is edited (for g_tNormalRoughness repacking)
+                    if ((ch == MaterialTextureChannel.Normal || ch == MaterialTextureChannel.Roughness) &&
+                        !config.PreExtractedChannelOriginalsBySubmesh.ContainsKey((subKey, ch)))
+                    {
+                        var origImg = submesh.Channels?.GetChannel(ch)?.SourceImage
+                                   ?? submesh.Channels?.GetChannel(ch)?.Texture?.GetImage();
+                        if (origImg != null && !origImg.IsEmpty())
+                        {
+                            config.PreExtractedChannelOriginalsBySubmesh[(subKey, ch)] = (Image)origImg.Duplicate();
+                        }
+                    }
+                }
+
                 if (!config.PreExtractedBaseImagesBySubmesh.ContainsKey(subKey) && submesh.Mesh != null)
                 {
-                    var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
-                           ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
-                           ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
-                           ?? submesh.Mesh.MaterialOverride;
-
-                    if (mat != null)
+                    if (config.SubmeshesWithEditedBaseTexture.Contains(subKey) && _layerManager != null)
                     {
-                        var baseTex = SkinLayerManager.ExtractBaseTexture(mat);
-                        if (baseTex != null)
+                        var editedBaseImg = _layerManager.ExportBaseTextureToImage(matKeySub);
+                        if (editedBaseImg != null && !editedBaseImg.IsEmpty())
                         {
-                            var bImg = baseTex.GetImage();
-                            if (bImg != null && !bImg.IsEmpty())
+                            config.PreExtractedBaseImagesBySubmesh[subKey] = editedBaseImg;
+                            config.PreExtractedBaseImages[sIdx] = editedBaseImg;
+                        }
+                    }
+
+                    if (!config.PreExtractedBaseImagesBySubmesh.ContainsKey(subKey))
+                    {
+                        var mat = HeroMeshHierarchy.GetAuthenticMaterial(submesh.Mesh, submesh.SurfaceIndex)
+                               ?? submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) 
+                               ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex)
+                               ?? submesh.Mesh.MaterialOverride;
+
+                        if (mat != null)
+                        {
+                            var baseTex = SkinLayerManager.ExtractBaseTexture(mat);
+                            if (baseTex != null)
                             {
-                                if (bImg.IsCompressed()) bImg.Decompress();
-                                var dup = (Image)bImg.Duplicate();
-                                if (dup.HasMipmaps()) dup.ClearMipmaps();
-                                if (dup.GetFormat() != Image.Format.Rgba8) dup.Convert(Image.Format.Rgba8);
-                                byte[] bData = dup.GetData();
-                                if (bData != null)
+                                var bImg = baseTex.GetImage();
+                                if (bImg != null && !bImg.IsEmpty())
                                 {
-                                    int expectedBytes = dup.GetWidth() * dup.GetHeight() * 4;
-                                    if (bData.Length > expectedBytes)
+                                    if (bImg.IsCompressed()) bImg.Decompress();
+                                    var dup = (Image)bImg.Duplicate();
+                                    if (dup.HasMipmaps()) dup.ClearMipmaps();
+                                    if (dup.GetFormat() != Image.Format.Rgba8) dup.Convert(Image.Format.Rgba8);
+                                    byte[] bData = dup.GetData();
+                                    if (bData != null)
                                     {
-                                        Array.Resize(ref bData, expectedBytes);
+                                        int expectedBytes = dup.GetWidth() * dup.GetHeight() * 4;
+                                        if (bData.Length > expectedBytes)
+                                        {
+                                            Array.Resize(ref bData, expectedBytes);
+                                            dup = Image.CreateFromData(dup.GetWidth(), dup.GetHeight(), false, Image.Format.Rgba8, bData);
+                                        }
                                     }
-                                    for (int pIdx = 3; pIdx < expectedBytes; pIdx += 4)
-                                    {
-                                        bData[pIdx] = 255;
-                                    }
-                                    dup = Image.CreateFromData(dup.GetWidth(), dup.GetHeight(), false, Image.Format.Rgba8, bData);
+                                    config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
+                                    config.PreExtractedBaseImages[sIdx] = dup;
                                 }
-                                config.PreExtractedBaseImagesBySubmesh[subKey] = dup;
-                                config.PreExtractedBaseImages[sIdx] = dup;
                             }
                         }
                     }
@@ -204,7 +351,194 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            return await Task.Run(() =>
+            // Ensure IsCustomImportedMesh is populated on the main thread for all custom submeshes
+            if (config.TargetSubmeshes != null)
+            {
+                foreach (var sm in config.TargetSubmeshes)
+                {
+                    if (sm == null || sm.IsCustomImportedMesh) continue;
+                    if (sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh))
+                    {
+                        if ((sm.Mesh.HasMeta("IsCustomImportedMesh") && sm.Mesh.GetMeta("IsCustomImportedMesh").AsBool()) ||
+                            sm.Mesh.Name.ToString().StartsWith("Custom_"))
+                        {
+                            sm.IsCustomImportedMesh = true;
+                        }
+                        else
+                        {
+                            Node curr = sm.Mesh.GetParent();
+                            while (curr != null)
+                            {
+                                if (curr.Name.ToString().Contains("Custom_Rigged_Character") ||
+                                    curr.Name.ToString().StartsWith("Custom_Accessory_", StringComparison.Ordinal) ||
+                                    curr.Name.ToString() == "Custom_Rigid_Accessory" ||
+                                    (curr.HasMeta("IsCustomImportedMesh") && curr.GetMeta("IsCustomImportedMesh").AsBool()))
+                                {
+                                    sm.IsCustomImportedMesh = true;
+                                    break;
+                                }
+                                curr = curr.GetParent();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pre-extract custom imported meshes on the main thread to prevent cross-thread Godot crashes
+            var preExtractedCustomMeshes = config.TargetSubmeshes?
+                .Where(sm => sm.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && sm.IsCustomImportedMesh && sm.Mesh.Visible)
+                .Select(sm => sm.Mesh)
+                .Distinct()
+                .ToList() ?? new List<MeshInstance3D>();
+
+            CustomModelExporter.CustomModelExportBundle preExtractedCustomBundle = null;
+            if (preExtractedCustomMeshes.Count > 0)
+            {
+                var firstMesh = preExtractedCustomMeshes.FirstOrDefault() ?? config.TargetSubmeshes?.FirstOrDefault()?.Mesh;
+                Skeleton3D skeleton = null;
+                if (firstMesh != null && !firstMesh.Skeleton.IsEmpty)
+                {
+                    skeleton = firstMesh.GetNodeOrNull<Skeleton3D>(firstMesh.Skeleton);
+                }
+                if (skeleton == null && firstMesh != null)
+                {
+                    Node curr = firstMesh;
+                    while (curr != null)
+                    {
+                        if (curr is Skeleton3D s) { skeleton = s; break; }
+                        curr = curr.GetParent();
+                    }
+                    if (skeleton == null && firstMesh.GetTree()?.Root != null)
+                    {
+                        skeleton = CustomModelAutoRigger.FindSkeleton(firstMesh.GetTree().Root);
+                    }
+                }
+
+                string resolvedHeroVmdlPath = DeadlockHeroCatalog.ResolveHero(config.HeroCodename)?.VmdlRelativePath;
+                if (string.IsNullOrEmpty(resolvedHeroVmdlPath))
+                {
+                    resolvedHeroVmdlPath = $"models/heroes/{config.HeroCodename}/{config.HeroCodename}.vmdl_c";
+                }
+
+                preExtractedCustomBundle = CustomModelExporter.BuildExportBundle(
+                    preExtractedCustomMeshes,
+                    skeleton,
+                    config.HeroCodename,
+                    heroModelVpkPath: resolvedHeroVmdlPath,
+                    compilerExe: config.ResourceCompilerPath,
+                    deadlockGamePath: config.DeadlockGamePath
+                );
+
+                // Register kept visible vanilla props & split composite surfaces (e.g. shotgun, crossbow, stake)
+                // Optimization: if ALL surfaces of a composite hero mesh are kept & unpainted (e.g. "Add Hat Only" mod),
+                // keep the original standalone .dmx file untouched rather than decomposing vanilla body geometry to SMD.
+                if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
+                {
+                    bool anySelectedFlag = config.TargetSubmeshes.Any(s => s.IsSelected);
+                    var keptCompositeMeshes = new List<MeshInstance3D>();
+                    var keptStandaloneNames = new List<string>();
+                    var fullyKeptParents = new HashSet<MeshInstance3D>();
+
+                    var byParent = config.TargetSubmeshes
+                        .Where(sm => sm?.Mesh != null && GodotObject.IsInstanceValid(sm.Mesh) && !sm.IsCustomImportedMesh && sm.Mesh.HasMeta("ParentCompositeMesh"))
+                        .GroupBy(sm => sm.Mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>())
+                        .Where(g => g.Key != null && GodotObject.IsInstanceValid(g.Key));
+
+                    foreach (var grp in byParent)
+                    {
+                        var parentMi = grp.Key;
+                        int totalSurfs = parentMi.Mesh?.GetSurfaceCount() ?? 0;
+                        if (totalSurfs <= 0) continue;
+
+                        bool allSurfsKept = true;
+                        for (int s = 0; s < totalSurfs; s++)
+                        {
+                            if (parentMi.HasMeta($"SurfaceKept_{s}") && !parentMi.GetMeta($"SurfaceKept_{s}").AsBool())
+                            {
+                                allSurfsKept = false;
+                                break;
+                            }
+                        }
+                        if (!allSurfsKept) continue;
+
+                        bool isParentDeformed = parentMi.HasMeta("IsDeformedOriginalMesh") && parentMi.GetMeta("IsDeformedOriginalMesh").AsBool();
+                        bool allSelectedAndVisible = grp.Count() >= totalSurfs && grp.All(sm =>
+                            sm.Mesh.Visible &&
+                            (!anySelectedFlag || sm.IsSelected) &&
+                            (_layerManager == null || !_layerManager.HasPaintStrokes(_layerManager.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName)) &&
+                            !sm.IsDirty &&
+                            !(sm.Mesh.HasMeta("IsDeformedOriginalMesh") && sm.Mesh.GetMeta("IsDeformedOriginalMesh").AsBool()));
+
+                        if (allSelectedAndVisible && !isParentDeformed)
+                        {
+                            fullyKeptParents.Add(parentMi);
+                            keptStandaloneNames.Add(parentMi.Name.ToString());
+                        }
+                    }
+
+                    foreach (var sm in config.TargetSubmeshes)
+                    {
+                        if (sm?.Mesh == null || !GodotObject.IsInstanceValid(sm.Mesh) || sm.IsCustomImportedMesh || !sm.Mesh.Visible)
+                            continue;
+                        if (anySelectedFlag && !sm.IsSelected)
+                            continue;
+                        bool isDeformed = sm.Mesh.HasMeta("IsDeformedOriginalMesh") && sm.Mesh.GetMeta("IsDeformedOriginalMesh").AsBool();
+                        if (sm.Mesh.HasMeta("ParentCompositeMesh"))
+                        {
+                            var pMi = sm.Mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>();
+                            if (pMi != null && fullyKeptParents.Contains(pMi))
+                                continue;
+                            keptCompositeMeshes.Add(sm.Mesh);
+                        }
+                        else if (isDeformed)
+                        {
+                            keptCompositeMeshes.Add(sm.Mesh);
+                        }
+                        else
+                        {
+                            keptStandaloneNames.Add(!string.IsNullOrEmpty(sm.RawName) ? sm.RawName : sm.Mesh.Name.ToString());
+                        }
+                    }
+                    CustomModelExporter.AddPreservedVanillaMeshes(preExtractedCustomBundle, keptCompositeMeshes, keptStandaloneNames, skeleton);
+                }
+
+                // If the user actually painted on a specific custom submesh in the 3D painter, merge the baked paint strokes
+                // directly into preExtractedCustomBundle.Submeshes so CustomModelExporter compiles the painted texture.
+                // If the user did NOT paint strokes on that submesh, leave the original custom texture/color untouched!
+                if (preExtractedCustomBundle != null && config.TargetSubmeshes != null)
+                {
+                    foreach (var sm in config.TargetSubmeshes)
+                    {
+                        if (sm?.Mesh == null || !sm.IsCustomImportedMesh) continue;
+                        string smKey = !string.IsNullOrEmpty(sm.DisplayName) ? sm.DisplayName : sm.Mesh.Name.ToString();
+                        string matKey = _layerManager?.GetMaterialKey(sm.Mesh, sm.SurfaceIndex) ?? sm.MaterialName;
+                        bool hasPaint = _layerManager != null && _layerManager.HasPaintStrokes(matKey);
+                        if (!hasPaint) continue;
+
+                        int targetRes = config.Resolution > 0 ? config.Resolution : 2048;
+                        Image blendedImg = ExtractAndBlendSubmeshImage(config, sm, targetRes);
+                        if (blendedImg != null && !blendedImg.IsEmpty())
+                        {
+                            byte[] paintedPng = blendedImg.SavePngToBuffer();
+                            if (paintedPng != null && paintedPng.Length > 0)
+                            {
+                                string meshName = sm.Mesh.Name.ToString();
+                                foreach (var bundleSub in preExtractedCustomBundle.Submeshes)
+                                {
+                                    if (string.Equals(bundleSub.SubmeshName, smKey, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(bundleSub.SubmeshName, meshName, StringComparison.OrdinalIgnoreCase) ||
+                                        bundleSub.SubmeshName.StartsWith(meshName + "_s", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        bundleSub.AlbedoPngBytes = paintedPng;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return await Task.Run(async () =>
             {
                 string csdkPath = ResolveEffectiveCsdkPath(config.CsdkPath, config.DeadlockGamePath);
                 string deadlockPath = config.DeadlockGamePath;
@@ -215,7 +549,6 @@ namespace DeadlockPlayground.Painter
                 string compilerExe = ResolveCompilerExecutable(csdkPath, config.ResourceCompilerPath);
                 if (string.IsNullOrEmpty(compilerExe) || !File.Exists(compilerExe))
                 {
-                    // Check configured path manager
                     var pm = new GamePathManager();
                     pm.LoadConfig();
                     compilerExe = pm.ResolveResourceCompilerExe();
@@ -266,13 +599,41 @@ namespace DeadlockPlayground.Painter
                     }
                 }
 
-                // Resolve VPK filename via VpkIndexResolver
+                // Check if we are modifying a base mod that already lives in targetDir (game/citadel/addons)
+bool isSourceModInTargetAddons = false;
+                if (!string.IsNullOrWhiteSpace(config.SourceModVpkPath) && File.Exists(config.SourceModVpkPath))
+                {
+                    string srcDir = Path.GetDirectoryName(Path.GetFullPath(config.SourceModVpkPath))?.TrimEnd('\\', '/') ?? "";
+                    string tgtDirFull = Path.GetFullPath(targetDir).TrimEnd('\\', '/');
+                    isSourceModInTargetAddons = string.Equals(srcDir, tgtDirFull, StringComparison.OrdinalIgnoreCase);
+                }
+
                 string vpkFileName;
+                string shiftedOriginalModDestinationPath = null;
+
                 if (config.InstallDirectlyToGame)
                 {
-                    vpkFileName = VpkIndexResolver.ResolveNextFileName(targetDir);
-                    int highest = VpkIndexResolver.GetExistingIndices(targetDir).LastOrDefault();
-                    progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Detected highest addon: pak{highest:D2}_dir.vpk. Assigned: {vpkFileName}"));
+                    if (isSourceModInTargetAddons && config.MergeWithSourceModVpk && config.OverwriteSourceModInAddons)
+                    {
+                        // Opción 1: Reemplazar el archivo original in-place
+                        vpkFileName = Path.GetFileName(config.SourceModVpkPath);
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Overwriting existing addon in-place: {vpkFileName}"));
+                    }
+                    else if (isSourceModInTargetAddons && config.MergeWithSourceModVpk && config.PrioritizeNewModOverSource)
+                    {
+                        // Opción 2 (DEFAULT): El nuevo mod toma el número menor (ej. pak01_dir.vpk) y el original se mueve al siguiente libre (ej. pak02_dir.vpk)!
+                        string nextFreeSlotName = VpkIndexResolver.ResolveNextFileName(targetDir);
+                        shiftedOriginalModDestinationPath = Path.Combine(targetDir, nextFreeSlotName);
+                        vpkFileName = Path.GetFileName(config.SourceModVpkPath);
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Priority Mode: New export (animation/recolor/VFX/misc) will take '{vpkFileName}' (higher priority) and original mod will be preserved as '{nextFreeSlotName}'."));
+                    }
+                    else
+                    {
+                        // Opción 3: Guardar en el siguiente pakXX_dir.vpk libre sin mover el original
+                        vpkFileName = VpkIndexResolver.ResolveNextFileName(targetDir);
+                        int highest = VpkIndexResolver.GetExistingIndices(targetDir).LastOrDefault();
+                        progress?.Report(new ExportProgressReport(0.12f, $"[INFO] Detected highest addon: pak{highest:D2}_dir.vpk. Assigned: {vpkFileName}"));
+                    }
                 }
                 else
                 {
@@ -286,9 +647,6 @@ namespace DeadlockPlayground.Painter
                 string heroFolder = ResolveHeroInternalFolder(config.HeroCodename, config.TargetSubmeshes);
                 progress?.Report(new ExportProgressReport(0.14f, $"[INFO] Resolved internal hero path: {heroFolder}"));
 
-                // Setup Staging Paths in CSDK:
-                // {csdkPath}/content/citadel_addons/_temp_export/{heroFolder}/materials/
-                // {csdkPath}/game/citadel_addons/_temp_export/{heroFolder}/materials/
                 string contentStagingRoot = Path.Combine(csdkPath, "content", "citadel_addons", "_temp_export");
                 string gameStagingRoot = Path.Combine(csdkPath, "game", "citadel_addons", "_temp_export");
                 string contentMaterialsDir = Path.Combine(contentStagingRoot, heroFolder, "materials");
@@ -309,14 +667,32 @@ namespace DeadlockPlayground.Painter
                     return result;
                 }
 
+                bool hasAnyPreBakedChannels = config.PreBakedChannelsBySubmesh.Count > 0;
                 var submeshesToExport = config.TargetSubmeshes != null && config.TargetSubmeshes.Count > 0
-                    ? config.TargetSubmeshes.Where(s => s.IsSelected && s.IsDirty).ToList()
+                    ? config.TargetSubmeshes.Where(s => s.IsSelected && (s.IsDirty || HasAnySubmeshPreBakedChannels(config, s))).ToList()
                     : new List<SubmeshNodeInfo>();
 
-                // Fallback: If no submesh is marked dirty but user explicitly selected submeshes
+                bool hasCustomModel = preExtractedCustomBundle != null && preExtractedCustomBundle.Submeshes.Count > 0;
+
                 if (submeshesToExport.Count == 0 && config.TargetSubmeshes != null && config.TargetSubmeshes.Count > 0)
                 {
-                    submeshesToExport = config.TargetSubmeshes.Where(s => s.IsSelected).ToList();
+                    // Only fallback to all selected submeshes if we don't have a custom model bundle.
+                    // For custom models, unpainted meshes should not generate dummy vtex files.
+                    if (!hasCustomModel)
+                    {
+                        submeshesToExport = config.TargetSubmeshes.Where(s => s.IsSelected).ToList();
+                    }
+                }
+                else if (hasCustomModel)
+                {
+                    // Custom imported meshes are compiled with their own .vmat_c and .vtex_c in Step 2.5 (CustomModelExporter).
+                    // Kept vanilla weapons use vanilla .vmat remaps directly unless the user actually painted them in 3D,
+                    // preventing spurious .vtex_c overrides on unpainted props.
+                    submeshesToExport = submeshesToExport
+                        .Where(s => !s.IsCustomImportedMesh &&
+                                    (actuallyPaintedNonCustomKeys.Contains(ResolveSubmeshKey(s)) ||
+                                     (_layerManager == null && s.IsDirty)))
+                        .ToList();
                 }
 
                 var workspaceSession = ModWorkspaceSession.Instance;
@@ -329,19 +705,36 @@ namespace DeadlockPlayground.Painter
                 int workspaceVpcfCount = workspaceAssets.Count(a => a.Category == "ParticleVFX" && !string.IsNullOrEmpty(a.ParticleOverridesFile));
                 int workspaceAnimCount = workspaceAssets.Sum(a => a.Animations?.Count ?? 0);
 
-                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0 && workspaceAnimCount == 0)
+                if (submeshesToExport.Count == 0 && workspaceTexCount == 0 && workspaceVpcfCount == 0 && workspaceAnimCount == 0 && !hasCustomModel)
                 {
-                    string err = "No modified submeshes or workspace assets selected for compilation. Base game submeshes were left untouched.";
+                    string err = "No modified submeshes, custom models, or workspace assets selected for compilation.";
                     progress?.Report(new ExportProgressReport(0.15f, $"[WARNING] {err}", ExportLogLevel.Warning));
                     result.Success = false;
                     result.ErrorMessage = err;
                     return result;
                 }
 
-                // Open base pak01_dir.vpk if available to extract authentic normal/AO/mask textures
                 Package baseVpkPackage = null;
+                Package sourceModPackage = null;
                 try
                 {
+                    // 1. Open Source Mod VPK if editing a modded hero (Priority 1 for custom .vmat_c / .vtex_c resolution & merging)
+                    if (!string.IsNullOrWhiteSpace(config.SourceModVpkPath) && File.Exists(config.SourceModVpkPath))
+                    {
+                        try
+                        {
+                            sourceModPackage = OpenSharedReadPackage(config.SourceModVpkPath);
+                            progress?.Report(new ExportProgressReport(0.14f, $"[INFO] Mounted source mod VPK: {Path.GetFileName(config.SourceModVpkPath)}"));
+                        }
+                        catch (Exception ex)
+                        {
+                            GD.PrintErr($"[SkinExporter] Notice: Could not pre-read SourceModVpkPath '{config.SourceModVpkPath}': {ex.Message}");
+                            sourceModPackage?.Dispose();
+                            sourceModPackage = null;
+                        }
+                    }
+
+                    // 2. Open base pak01_dir.vpk if available (Priority 2 fallback for vanilla textures/materials)
                     string baseVpkPath = !string.IsNullOrEmpty(config.DeadlockGamePath)
                         ? Path.Combine(config.DeadlockGamePath, "game", "citadel", "pak01_dir.vpk")
                         : null;
@@ -350,12 +743,12 @@ namespace DeadlockPlayground.Painter
                     {
                         try
                         {
-                            baseVpkPackage = new Package();
-                            baseVpkPackage.Read(baseVpkPath);
+                            baseVpkPackage = OpenSharedReadPackage(baseVpkPath);
                         }
                         catch (Exception ex)
                         {
                             GD.Print($"[SkinExporter] Notice: Could not pre-read base pak01_dir.vpk: {ex.Message}");
+                            baseVpkPackage?.Dispose();
                             baseVpkPackage = null;
                         }
                     }
@@ -373,7 +766,7 @@ namespace DeadlockPlayground.Painter
                         ct.ThrowIfCancellationRequested();
 
                         string matName = ResolveSubmeshMaterialName(submesh, config.HeroCodename);
-                        var allColorPaths = ResolveAllColorVtexCPaths(submesh, config.HeroCodename, baseVpkPackage);
+                        var allColorPaths = ResolveAllColorVtexCPaths(submesh, config.HeroCodename, sourceModPackage ?? baseVpkPackage, baseVpkPackage);
 
                         foreach (var colorVtexC in allColorPaths)
                         {
@@ -393,60 +786,86 @@ namespace DeadlockPlayground.Painter
                             if (cleanTexBaseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                                 cleanTexBaseName = cleanTexBaseName[..^2];
 
-                            // Load original .vtex_c metadata (format, flags, and raw alpha channel byte-for-byte)
-                            var origMeta = LoadOriginalVtexMetadata(colorVtexC, baseVpkPackage, deadlockPath);
-                            if (origMeta != null && (origMeta.Width < 64 || origMeta.Height < 64))
+                            // Load original .vtex_c metadata (prioritizing sourceModPackage so modded hero textures/alpha are used!)
+                            var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(colorVtexC, sourceModPackage, deadlockPath) : null)
+                                        ?? LoadOriginalVtexMetadata(colorVtexC, baseVpkPackage, deadlockPath);
+
+                            try
                             {
-                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping low-res placeholder texture ({origMeta.Width}x{origMeta.Height}): {colorVtexC}"));
-                                continue;
+                                if (origMeta != null && (origMeta.Width < 64 || origMeta.Height < 64))
+                                {
+                                    progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Skipping low-res placeholder texture ({origMeta.Width}x{origMeta.Height}): {colorVtexC}"));
+                                    continue;
+                                }
+
+                                progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {colorVtexC}"));
+
+                                string pngFileName = $"{cleanTexBaseName}.png";
+                                string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
+
+                                if (origMeta != null)
+                                {
+                                    progress?.Report(new ExportProgressReport(0.19f, $"[INFO] Loaded original texture specs for '{cleanTexBaseName}': {origMeta.Width}x{origMeta.Height}, Format={origMeta.Format}, Flags={origMeta.Flags}, NonUniformAlpha={origMeta.HasNonUniformAlpha}"));
+                                }
+
+                                progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {cleanTexBaseName} composite -> {pngFileName}..."));
+
+                                using Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution, origMeta);
+                                if (submeshImage == null)
+                                {
+                                    string err = $"Failed to extract image for submesh '{submesh.DisplayName}' ({cleanTexBaseName}).";
+                                    progress?.Report(new ExportProgressReport(0.20f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                    result.Success = false;
+                                    result.ErrorMessage = err;
+                                    return result;
+                                }
+
+                                Error saveErr = submeshImage.SavePng(fullPngPath);
+                                if (saveErr != Error.Ok)
+                                {
+                                    string err = $"Failed to write PNG '{fullPngPath}' (Code: {saveErr}).";
+                                    progress?.Report(new ExportProgressReport(0.25f, $"[ERROR] {err}", ExportLogLevel.Error));
+                                    result.Success = false;
+                                    result.ErrorMessage = err;
+                                    return result;
+                                }
+
+                                string vtexFileName = $"{cleanTexBaseName}.vtex";
+                                string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
+                                string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
+
+                                string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                                VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                                string vtexContent = GenerateSource2DmxVtex(relativePngPath, outputFormat, vtexFlags);
+                                File.WriteAllText(fullVtexPath, vtexContent);
+                                progress?.Report(new ExportProgressReport(0.28f, $"[INFO] Generated DMX VTEX descriptor: {vtexFileName} (Format: {outputFormat}, Flags: {vtexFlags})"));
+
+                                stagedTextures.Add((cleanTexBaseName, fullPngPath, fullVtexPath, colorVtexC));
                             }
-
-                            progress?.Report(new ExportProgressReport(0.18f, $"[INFO] Submesh '{submesh.DisplayName}' intercepts: {colorVtexC}"));
-
-                            string pngFileName = $"{cleanTexBaseName}.png";
-                            string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
-
-                            if (origMeta != null)
+                            finally
                             {
-                                progress?.Report(new ExportProgressReport(0.19f, $"[INFO] Loaded original texture specs for '{cleanTexBaseName}': {origMeta.Width}x{origMeta.Height}, Format={origMeta.Format}, Flags={origMeta.Flags}, NonUniformAlpha={origMeta.HasNonUniformAlpha}"));
+                                if (origMeta != null)
+                                {
+                                    origMeta.BaseRgbaImage?.Dispose();
+                                    origMeta.BaseRgbaImage = null;
+                                    origMeta.RawAlpha = null;
+                                }
                             }
-
-                            progress?.Report(new ExportProgressReport(0.20f, $"[INFO] Baking {cleanTexBaseName} composite -> {pngFileName}..."));
-
-                            Image submeshImage = ExtractAndBlendSubmeshImage(config, submesh, config.Resolution, origMeta);
-                            if (submeshImage == null)
-                            {
-                                string err = $"Failed to extract image for submesh '{submesh.DisplayName}' ({cleanTexBaseName}).";
-                                progress?.Report(new ExportProgressReport(0.20f, $"[ERROR] {err}", ExportLogLevel.Error));
-                                result.Success = false;
-                                result.ErrorMessage = err;
-                                return result;
-                            }
-
-                            Error saveErr = submeshImage.SavePng(fullPngPath);
-                            if (saveErr != Error.Ok)
-                            {
-                                string err = $"Failed to write PNG '{fullPngPath}' (Code: {saveErr}).";
-                                progress?.Report(new ExportProgressReport(0.25f, $"[ERROR] {err}", ExportLogLevel.Error));
-                                result.Success = false;
-                                result.ErrorMessage = err;
-                                return result;
-                            }
-
-                            // Generate companion DMX .vtex descriptor with dynamic format & flags
-                            string vtexFileName = $"{cleanTexBaseName}.vtex";
-                            string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
-                            string relativePngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
-
-                            string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
-                            VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
-
-                            string vtexContent = GenerateSource2DmxVtex(relativePngPath, outputFormat, vtexFlags);
-                            File.WriteAllText(fullVtexPath, vtexContent);
-                            progress?.Report(new ExportProgressReport(0.28f, $"[INFO] Generated DMX VTEX descriptor: {vtexFileName} (Format: {outputFormat}, Flags: {vtexFlags})"));
-
-                            stagedTextures.Add((cleanTexBaseName, fullPngPath, fullVtexPath, colorVtexC));
                         }
+
+                        // Stage any modified non-Color channels (AO, Normal+Roughness, Shadow, Masks) for this submesh
+                        StageEditedMultiChannelMaps(
+                            config,
+                            submesh,
+                            heroFolder,
+                            contentMaterialsDir,
+                            sourceModPackage,
+                            baseVpkPackage,
+                            deadlockPath,
+                            stagedTextures,
+                            processedHeroVtexCPaths,
+                            progress);
                     }
 
                     // =========================================================================
@@ -454,7 +873,32 @@ namespace DeadlockPlayground.Painter
                     // =========================================================================
                     try
                     {
-                        var existingVtexPaths = new HashSet<string>(stagedTextures.Select(t => t.originalVtexCPath), StringComparer.OrdinalIgnoreCase);
+                        var existingVtexPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var staged in stagedTextures)
+                        {
+                            if (string.IsNullOrEmpty(staged.originalVtexCPath)) continue;
+                            string normExisting = staged.originalVtexCPath.Replace('\\', '/').TrimStart('/');
+                            existingVtexPaths.Add(normExisting);
+                            if (!normExisting.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                existingVtexPaths.Add(normExisting + "_c");
+                        }
+
+                        static string ParseWorkspaceVtexKey(string rawKey, out MaterialTextureChannel? explicitCh)
+                        {
+                            explicitCh = null;
+                            string clean = (rawKey ?? "").Replace('\\', '/').TrimStart('/');
+                            if (clean.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
+                                clean = clean.Substring("particle:".Length).TrimStart('/');
+                            int chIdx = clean.IndexOf("::ch:", StringComparison.OrdinalIgnoreCase);
+                            if (chIdx >= 0)
+                            {
+                                string chStr = clean.Substring(chIdx + 5);
+                                if (Enum.TryParse<MaterialTextureChannel>(chStr, ignoreCase: true, out var parsed))
+                                    explicitCh = parsed;
+                                clean = clean.Substring(0, chIdx);
+                            }
+                            return clean;
+                        }
 
                         foreach (var asset in workspaceAssets)
                         {
@@ -466,17 +910,19 @@ namespace DeadlockPlayground.Painter
 
                             foreach (var (vtexKey, relPath) in asset.ModifiedTextures)
                             {
-                                if (existingVtexPaths.Contains(vtexKey)) continue;
+                                string normVtex = ParseWorkspaceVtexKey(vtexKey, out var explicitChannel);
+                                if (!normVtex.Contains(".vtex", StringComparison.OrdinalIgnoreCase)) continue;
+
+                                string normVtexC = normVtex.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? normVtex : normVtex + "_c";
+                                if (existingVtexPaths.Contains(vtexKey) || existingVtexPaths.Contains(normVtex) || existingVtexPaths.Contains(normVtexC))
+                                {
+                                    continue;
+                                }
 
                                 string stagedPngFull = Path.Combine(workspaceSession.SessionDir, relPath);
                                 var inMemImg = workspaceSession.GetStagedTexture(vtexKey);
                                 if (!File.Exists(stagedPngFull) && (inMemImg == null || inMemImg.IsEmpty())) continue;
 
-                                string normVtex = vtexKey.Replace('\\', '/').TrimStart('/');
-                                if (normVtex.StartsWith("particle:", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    normVtex = normVtex.Substring("particle:".Length).TrimStart('/');
-                                }
                                 string assetFolder = Path.GetDirectoryName(normVtex)?.Replace('\\', '/');
                                 if (string.IsNullOrEmpty(assetFolder)) assetFolder = "materials/particle";
 
@@ -489,62 +935,141 @@ namespace DeadlockPlayground.Painter
                                     baseName = baseName.Substring(0, baseName.Length - 2);
                                 }
 
-                                var origMeta = LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath)
-                                            ?? LoadOriginalVtexMetadata(vtexKey, baseVpkPackage, deadlockPath);
+                                var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtexC, sourceModPackage, deadlockPath) : null)
+                                            ?? (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtex, sourceModPackage, deadlockPath) : null)
+                                            ?? LoadOriginalVtexMetadata(normVtexC, baseVpkPackage, deadlockPath)
+                                            ?? LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath);
 
                                 string targetPngFileName = $"{baseName}.png";
                                 string targetPngFull = Path.Combine(assetContentDir, targetPngFileName);
-                                if (File.Exists(stagedPngFull))
+                                try
                                 {
-                                    if (origMeta != null && origMeta.RawAlpha != null)
+                                    // Packed Normal+Roughness stored as ::ch:Normal / ::ch:Roughness in workspace
+                                    if (explicitChannel == MaterialTextureChannel.Normal || explicitChannel == MaterialTextureChannel.Roughness)
                                     {
-                                        var loadedImg = Image.LoadFromFile(stagedPngFull);
-                                        if (loadedImg != null)
+                                        Image LoadWorkspaceChannelImg(MaterialTextureChannel ch)
                                         {
-                                            loadedImg = ApplyOriginalAlphaChannel(loadedImg, origMeta);
-                                            loadedImg.SavePng(targetPngFull);
+                                            string candidateKey = $"{normVtex}::ch:{ch}";
+                                            string candidateKeyC = $"{normVtexC}::ch:{ch}";
+                                            foreach (var tryKey in new[] { candidateKey, candidateKeyC })
+                                            {
+                                                if (asset.ModifiedTextures.TryGetValue(tryKey, out string chRel))
+                                                {
+                                                    string fullChPng = Path.Combine(workspaceSession.SessionDir, chRel);
+                                                    if (File.Exists(fullChPng))
+                                                    {
+                                                        var loaded = Image.LoadFromFile(fullChPng);
+                                                        if (loaded != null && !loaded.IsEmpty()) return loaded;
+                                                    }
+                                                }
+                                                var mem = workspaceSession.GetStagedTexture(tryKey);
+                                                if (mem != null && !mem.IsEmpty()) return (Image)mem.Duplicate();
+                                            }
+                                            return null;
+                                        }
+
+                                        using Image wsNorm = LoadWorkspaceChannelImg(MaterialTextureChannel.Normal);
+                                        using Image wsRough = LoadWorkspaceChannelImg(MaterialTextureChannel.Roughness);
+                                        Image normSrc = wsNorm ?? origMeta?.BaseRgbaImage;
+                                        Image roughSrc = wsRough ?? origMeta?.BaseRgbaImage;
+                                        using Image packedImg = MaterialChannelDiscovery.PackNormalRoughnessImage(normSrc, roughSrc, packAsBlueToAlpha: true);
+                                        if (packedImg != null && !packedImg.IsEmpty())
+                                        {
+                                            packedImg.SavePng(targetPngFull);
+                                        }
+                                        else if (File.Exists(stagedPngFull))
+                                        {
+                                            File.Copy(stagedPngFull, targetPngFull, true);
+                                        }
+                                        else if (inMemImg != null)
+                                        {
+                                            inMemImg.SavePng(targetPngFull);
+                                        }
+                                    }
+                                    else if (File.Exists(stagedPngFull))
+                                    {
+                                        if (origMeta != null && origMeta.RawAlpha != null)
+                                        {
+                                            using var loadedImg = Image.LoadFromFile(stagedPngFull);
+                                            if (loadedImg != null)
+                                            {
+                                                var processedImg = ApplyOriginalAlphaChannel(loadedImg, origMeta);
+                                                try
+                                                {
+                                                    processedImg.SavePng(targetPngFull);
+                                                }
+                                                finally
+                                                {
+                                                    if (!ReferenceEquals(processedImg, loadedImg))
+                                                    {
+                                                        processedImg.Dispose();
+                                                    }
+                                                }
+                                            }
+                                            else
+                                            {
+                                                File.Copy(stagedPngFull, targetPngFull, true);
+                                            }
                                         }
                                         else
                                         {
                                             File.Copy(stagedPngFull, targetPngFull, true);
                                         }
                                     }
-                                    else
+                                    else if (inMemImg != null)
                                     {
-                                        File.Copy(stagedPngFull, targetPngFull, true);
+                                        if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
+                                        Image exportImg = origMeta != null
+                                            ? ApplyOriginalAlphaChannel(inMemImg, origMeta)
+                                            : inMemImg;
+                                        try
+                                        {
+                                            exportImg.SavePng(targetPngFull);
+                                        }
+                                        finally
+                                        {
+                                            if (!ReferenceEquals(exportImg, inMemImg))
+                                            {
+                                                exportImg.Dispose();
+                                            }
+                                        }
                                     }
+
+                                    string targetVtexFileName = $"{baseName}.vtex";
+                                    string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
+                                    string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
+
+                                    string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                                    VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                                    string vtexDesc = GenerateSource2DmxVtex(relPng, outputFormat, vtexFlags);
+                                    File.WriteAllText(targetVtexFull, vtexDesc);
+
+                                    string targetCompiledVtexCPath = origMeta != null && !string.IsNullOrEmpty(origMeta.VtexCPath)
+                                        ? origMeta.VtexCPath
+                                        : normVtexC;
+                                    if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        targetCompiledVtexCPath += "_c";
+                                    }
+
+                                    stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
+                                    existingVtexPaths.Add(vtexKey);
+                                    existingVtexPaths.Add(normVtex);
+                                    existingVtexPaths.Add(normVtexC);
+                                    existingVtexPaths.Add(targetCompiledVtexCPath);
+
+                                    progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {targetCompiledVtexCPath}"));
                                 }
-                                else if (inMemImg != null)
+                                finally
                                 {
-                                    if (inMemImg.HasMipmaps()) inMemImg.ClearMipmaps();
                                     if (origMeta != null)
                                     {
-                                        inMemImg = ApplyOriginalAlphaChannel(inMemImg, origMeta);
+                                        origMeta.BaseRgbaImage?.Dispose();
+                                        origMeta.BaseRgbaImage = null;
+                                        origMeta.RawAlpha = null;
                                     }
-                                    inMemImg.SavePng(targetPngFull);
                                 }
-
-                                string targetVtexFileName = $"{baseName}.vtex";
-                                string targetVtexFull = Path.Combine(assetContentDir, targetVtexFileName);
-                                string relPng = $"{assetFolder}/{targetPngFileName}".Replace('\\', '/').TrimStart('/');
-
-                                string outputFormat = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
-                                VTexFlags vtexFlags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
-
-                                string vtexDesc = GenerateSource2DmxVtex(relPng, outputFormat, vtexFlags);
-                                File.WriteAllText(targetVtexFull, vtexDesc);
-
-                                string targetCompiledVtexCPath = normVtex;
-                                if (!targetCompiledVtexCPath.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    targetCompiledVtexCPath += "_c";
-                                }
-
-                                stagedTextures.Add((baseName, targetPngFull, targetVtexFull, targetCompiledVtexCPath));
-                                existingVtexPaths.Add(vtexKey);
-                                existingVtexPaths.Add(targetCompiledVtexCPath);
-
-                                progress?.Report(new ExportProgressReport(0.36f, $"[INFO] Included workspace staged texture: {vtexKey}"));
                             }
                         }
                     }
@@ -576,7 +1101,6 @@ namespace DeadlockPlayground.Painter
                         float vtexProgress = texBase + (texSlice * 0.10f);
                         float vtexDoneProgress = texBase + (texSlice * 0.90f);
 
-                        // Compile Texture (.vtex -> .vtex_c)
                         progress?.Report(new ExportProgressReport(vtexProgress, $"[INFO] Compiling texture ({tIdx + 1}/{totalTextures}): {Path.GetFileName(vtexPath)}..."));
 
                         var vtexArgs = new List<string>
@@ -587,7 +1111,6 @@ namespace DeadlockPlayground.Painter
 
                         int vtexExitCode = RunCompilerProcess(compilerExe, compilerWorkingDir, string.Join(" ", vtexArgs), progress, ct, vtexProgress + 0.05f);
 
-                        // Exact file match without wildcards to avoid prefix collisions
                         string expectedVtexFileName = $"{Path.GetFileNameWithoutExtension(vtexPath)}.vtex_c";
                         string expectedVtexC = LocateEmittedFile(gameMaterialsDir, contentMaterialsDir, expectedVtexFileName, gameStagingRoot, contentStagingRoot);
                         bool vtexEmitted = !string.IsNullOrEmpty(expectedVtexC) && File.Exists(expectedVtexC);
@@ -620,7 +1143,7 @@ namespace DeadlockPlayground.Painter
                     // =========================================================================
                     // STEP C.2: Stage & Compile Modified Particle Systems (.vpcf -> .vpcf_c)
                     // =========================================================================
-                    if (baseVpkPackage != null)
+                    if (baseVpkPackage != null || sourceModPackage != null)
                     {
                         foreach (var asset in workspaceAssets)
                         {
@@ -638,7 +1161,6 @@ namespace DeadlockPlayground.Painter
                             if (normRootVpcf.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                                 normRootVpcf = normRootVpcf[..^2];
 
-                            // Agrupar overrides por cada archivo .vpcf hijo (ej. chrono_time_wall_warp.vpcf)
                             var childTargets = new Dictionary<string, EmitterOverrideData>(StringComparer.OrdinalIgnoreCase);
                             foreach (var em in pOverrides.Emitters.Values)
                             {
@@ -655,7 +1177,6 @@ namespace DeadlockPlayground.Painter
                                 }
                             }
 
-                            // Preparar override para la partícula raíz (orquestador principal)
                             EmitterOverrideData rootOverride = null;
                             foreach (var em in pOverrides.Emitters.Values)
                             {
@@ -684,8 +1205,6 @@ namespace DeadlockPlayground.Painter
                                 };
                             }
 
-                            // Orden de compilación: Primero las partículas hijas para que existan en gameStagingRoot,
-                            // seguido por la partícula raíz orquestadora al final.
                             var allCompileTargets = new List<(string TargetPath, EmitterOverrideData OverrideData, bool IsRoot)>();
                             foreach (var (childPath, em) in childTargets)
                             {
@@ -704,32 +1223,38 @@ namespace DeadlockPlayground.Painter
                                     normVpcf = normVpcf[..^2];
                                 string compiledVpcfPath = normVpcf + "_c";
 
-                                var vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
-                                if (vpkEntry == null)
+                                Package ownerPkg = null;
+                                PackageEntry vpkEntry = null;
+                                if (sourceModPackage != null)
                                 {
-                                    GD.PrintErr($"[SkinExporter] Could not find base VPK entry for particle: {compiledVpcfPath}");
+                                    vpkEntry = sourceModPackage.FindEntry(compiledVpcfPath);
+                                    if (vpkEntry != null) ownerPkg = sourceModPackage;
+                                }
+                                if (vpkEntry == null && baseVpkPackage != null)
+                                {
+                                    vpkEntry = baseVpkPackage.FindEntry(compiledVpcfPath);
+                                    if (vpkEntry != null) ownerPkg = baseVpkPackage;
+                                }
+
+                                if (vpkEntry == null || ownerPkg == null)
+                                {
+                                    GD.PrintErr($"[SkinExporter] Could not find VPK entry for particle: {compiledVpcfPath}");
                                     continue;
                                 }
 
-                                baseVpkPackage.ReadEntry(vpkEntry, out byte[] rawVpcfBytes);
-                                using var vrfRes = new ValveResourceFormat.Resource();
-                                using var ms = new MemoryStream(rawVpcfBytes);
-                                vrfRes.Read(ms);
+                                using var vpcfStream = ownerPkg.GetMemoryMappedStreamIfPossible(vpkEntry);
+                                using var vrfRes = new ValveResourceFormat.Resource { FileName = compiledVpcfPath };
+                                vrfRes.Read(vpcfStream, leaveOpen: true, mode: ReadMode.Deferred);
 
                                 string kv3Text = vrfRes.DataBlock?.ToString();
                                 if (string.IsNullOrEmpty(kv3Text)) continue;
 
-                                // Check if the emitter override actually introduces meaningful modifications compared to vanilla KV3.
-                                // NOTE: The root orchestrator particle (isRoot == true) is NEVER skipped because it represents the
-                                // primary entry point for the ability particle system in Deadlock, and must be included in the mod VPK
-                                // alongside its compiled child emitters.
                                 if (!isRoot && !HasMeaningfulVpcfOverrides(kv3Text, emOverride))
                                 {
                                     GD.Print($"[SkinExporter] Skipping untouched particle definition: {normVpcf}");
                                     continue;
                                 }
 
-                                // Si es la raíz, propagar estados de visibilidad desactivados a m_Children
                                 if (isRoot)
                                 {
                                     foreach (var (childPath, childOv) in childTargets)
@@ -746,7 +1271,6 @@ namespace DeadlockPlayground.Painter
                                     }
                                 }
 
-                                // Aplicar modificaciones al texto KV3 del .vpcf
                                 kv3Text = ApplyOverridesToVpcfKv3Text(kv3Text, emOverride);
 
                                 string vpcfFolder = Path.GetDirectoryName(normVpcf)?.Replace('\\', '/') ?? "particles";
@@ -756,12 +1280,11 @@ namespace DeadlockPlayground.Painter
 
                                 string vpcfFileName = Path.GetFileName(normVpcf);
                                 string fullVpcfContentPath = Path.Combine(vpcfContentDir, vpcfFileName);
-                                // Asegurar que todas las texturas referenciadas en el .vpcf existan en gameStagingRoot para que resourcecompiler.exe no falle
                                 foreach (System.Text.RegularExpressions.Match resMatch in System.Text.RegularExpressions.Regex.Matches(kv3Text, @"resource:""([^""]+)"""))
                                 {
                                     string rawDep = resMatch.Groups[1].Value.Replace('\\', '/').Trim().TrimStart('/');
                                     string compiledDep = rawDep.EndsWith("_c", StringComparison.OrdinalIgnoreCase) ? rawDep : rawDep + "_c";
-                                    EnsureTextureStagedInGameTree(gameStagingRoot, compiledDep, baseVpkPackage);
+                                    EnsureTextureStagedInGameTree(gameStagingRoot, compiledDep, sourceModPackage ?? baseVpkPackage);
                                 }
                                 File.WriteAllText(fullVpcfContentPath, kv3Text);
 
@@ -799,16 +1322,84 @@ namespace DeadlockPlayground.Painter
                             }
                         }
                     }
+
                     // =========================================================================
-                    // STEP D: Package Intercepted VTEX Binaries into VPK Archive (85% -> 100%)
+                    // STEP D: Package Intercepted VTEX Binaries (+ Base Mod Merge) into VPK Archive (85% -> 100%)
                     // =========================================================================
                     ct.ThrowIfCancellationRequested();
-                    progress?.Report(new ExportProgressReport(0.85f, $"[INFO] Packing intercepted textures into VPK archive '{vpkFileName}'..."));
+                    progress?.Report(new ExportProgressReport(0.85f, $"[INFO] Packing assets into VPK archive '{vpkFileName}'..."));
 
                     try
                     {
+                        // Pre-extract base mod entries into memory before writing in case finalVpkPath == config.SourceModVpkPath
+                        var baseModFilesToMerge = new List<(string InternalPath, byte[] Data)>();
+                        if (sourceModPackage != null && config.MergeWithSourceModVpk)
+                        {
+                            foreach (var extGroup in sourceModPackage.Entries)
+                            {
+                                foreach (var entry in extGroup.Value)
+                                {
+                                    string fullEntryPath = entry.GetFullPath().Replace('\\', '/').TrimStart('/');
+                                    sourceModPackage.ReadEntry(entry, out byte[] rawEntryBytes);
+                                    if (rawEntryBytes != null)
+                                    {
+                                        baseModFilesToMerge.Add((fullEntryPath, rawEntryBytes));
+                                    }
+                                }
+                            }
+                        }
+
+                       // Always release read lock on sourceModPackage now that entries are buffered in memory
+                        if (sourceModPackage != null)
+                        {
+                            sourceModPackage.Dispose();
+                            sourceModPackage = null;
+                        }
+
+                        // Si estamos en Priority Mode (sin borrar el original), movemos el VPK original al siguiente slot pakXX libre!
+                        if (!string.IsNullOrWhiteSpace(finalVpkPath) &&
+                            !string.IsNullOrWhiteSpace(config.SourceModVpkPath) &&
+                            !string.IsNullOrEmpty(shiftedOriginalModDestinationPath) &&
+                            File.Exists(config.SourceModVpkPath) &&
+                            string.Equals(Path.GetFullPath(finalVpkPath), Path.GetFullPath(config.SourceModVpkPath), StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (File.Exists(shiftedOriginalModDestinationPath))
+                            {
+                                File.Delete(shiftedOriginalModDestinationPath);
+                            }
+                            try
+                            {
+                                File.Move(config.SourceModVpkPath, shiftedOriginalModDestinationPath);
+                            }
+                            catch (IOException)
+                            {
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                                File.Move(config.SourceModVpkPath, shiftedOriginalModDestinationPath);
+                            }
+                            progress?.Report(new ExportProgressReport(0.88f, $"[INFO] Preserved original mod VPK -> moved to '{Path.GetFileName(shiftedOriginalModDestinationPath)}'."));
+                        }
+
+                        // If overwriting an existing VPK in-place, delete it first (forcing GC finalizers if a memory-mapped section was still pending)
+                        if (File.Exists(finalVpkPath))
+                        {
+                            try
+                            {
+                                File.Delete(finalVpkPath);
+                            }
+                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                            {
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                                File.Delete(finalVpkPath);
+                            }
+                        }
+
                         using (var package = new Package())
                         {
+                            var addedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                            // 1. Add our newly compiled recolored textures (.vtex_c) and particles (.vpcf_c)
                             foreach (var (vtexC, originalVtexCPath) in compiledOutputFiles)
                             {
                                 if (File.Exists(vtexC))
@@ -816,11 +1407,12 @@ namespace DeadlockPlayground.Painter
                                     byte[] vtexData = File.ReadAllBytes(vtexC);
                                     string internalVtexPath = originalVtexCPath.Replace('\\', '/').TrimStart('/');
                                     package.AddFile(internalVtexPath, vtexData);
-                                    progress?.Report(new ExportProgressReport(0.90f, $"[INFO] Added intercepted texture to VPK: {internalVtexPath} ({vtexData.Length / 1024} KB)"));
+                                    addedPaths.Add(internalVtexPath);
+                                    progress?.Report(new ExportProgressReport(0.90f, $"[INFO] Added modified asset to VPK: {internalVtexPath} ({vtexData.Length / 1024} KB)"));
                                 }
                             }
 
-                            // Include any staged workspace animations
+                            // 2. Include any staged workspace animations
                             if (workspaceSession != null)
                             {
                                 foreach (var asset in workspaceAssets)
@@ -839,8 +1431,15 @@ namespace DeadlockPlayground.Painter
                                                         ? animEntry.TargetVpkPath
                                                         : DeadlockPlayground.Tools.DeadlockAnimLoader.ResolveHeroClipVpkPath(config.HeroCodename, null, animEntry.CleanName);
                                                     targetVpkPath = targetVpkPath.Replace('\\', '/').TrimStart('/');
-                                                    package.AddFile(targetVpkPath, clipData);
-                                                    progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));
+                                                    if (config.ExcludedAssetVpkPaths != null && config.ExcludedAssetVpkPaths.Contains(targetVpkPath))
+                                                    {
+                                                        continue;
+                                                    }
+                                                    if (addedPaths.Add(targetVpkPath))
+                                                    {
+                                                        package.AddFile(targetVpkPath, clipData);
+                                                        progress?.Report(new ExportProgressReport(0.92f, $"[INFO] Added patched animation to VPK: {targetVpkPath} ({clipData.Length / 1024} KB)"));
+                                                    }
                                                 }
                                             }
                                         }
@@ -848,7 +1447,73 @@ namespace DeadlockPlayground.Painter
                                 }
                             }
 
+                            // 2.5. Include compiled custom 3D model (.vmdl_c, .vmesh_c, .vmat_c, .vtex_c) if custom imported meshes exist
+                            if (preExtractedCustomBundle != null && preExtractedCustomBundle.Submeshes.Count > 0)
+                            {
+                                preExtractedCustomBundle.StagingDir = csdkPath;
+                                preExtractedCustomBundle.ResourceCompilerExe = compilerExe;
+                                if (string.IsNullOrEmpty(preExtractedCustomBundle.DeadlockGamePath))
+                                {
+                                    preExtractedCustomBundle.DeadlockGamePath = deadlockPath;
+                                }
+
+                                var modelRes = await CustomModelExporter.ExportAndCompileCustomModelAsync(preExtractedCustomBundle, progress, ct);
+                                if (!modelRes.Success)
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = modelRes.ErrorMessage ?? "Custom model compilation failed.";
+                                    progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
+                                    return result;
+                                }
+
+                                if (!CustomModelExporter.ValidateAllowlist(modelRes.AllowlistedVpkFiles.Keys, out string rejectedReason))
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = $"VPK allowlist validation failed: {rejectedReason}";
+                                    progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
+                                    return result;
+                                }
+
+                                if (modelRes.AllowlistedVpkFiles.Count > 65)
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = $"Custom model export exceeded strict file count limit ({modelRes.AllowlistedVpkFiles.Count} > 65).";
+                                    progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
+                                    return result;
+                                }
+
+                                foreach (var (relVpkPath, fullDiskPath) in modelRes.AllowlistedVpkFiles)
+                                {
+                                    if (File.Exists(fullDiskPath))
+                                    {
+                                        string normRel = relVpkPath.Replace('\\', '/').TrimStart('/');
+                                        byte[] fileData = File.ReadAllBytes(fullDiskPath);
+                                        if (addedPaths.Add(normRel))
+                                        {
+                                            package.AddFile(normRel, fileData);
+                                            progress?.Report(new ExportProgressReport(0.94f, $"[INFO] Added compiled custom model asset to VPK: {normRel} ({fileData.Length / 1024} KB)"));
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Merge all untouched files (.vmdl_c, .vmesh_c, .vmat_c, .vtex_c) from the Base Mod VPK!
+                            if (baseModFilesToMerge.Count > 0)
+                            {
+                                int mergedCount = 0;
+                                foreach (var (internalPath, rawData) in baseModFilesToMerge)
+                                {
+                                    if (addedPaths.Add(internalPath))
+                                    {
+                                        package.AddFile(internalPath, rawData);
+                                        mergedCount++;
+                                    }
+                                }
+                                progress?.Report(new ExportProgressReport(0.94f, $"[SUCCESS] Merged {mergedCount} base mod file(s) (.vmdl_c, .vmat_c, meshes) into standalone VPK!", ExportLogLevel.Success));
+                            }
+
                             package.Write(finalVpkPath);
+                            baseModFilesToMerge.Clear();
                         }
 
                         if (!File.Exists(finalVpkPath))
@@ -868,45 +1533,76 @@ namespace DeadlockPlayground.Painter
                         return result;
                     }
 
-                // Clean up temporary staging folders in CSDK
-                try
-                {
-                    if (Directory.Exists(contentStagingRoot)) Directory.Delete(contentStagingRoot, true);
-                    if (Directory.Exists(gameStagingRoot)) Directory.Delete(gameStagingRoot, true);
-                    progress?.Report(new ExportProgressReport(0.98f, $"[INFO] Cleaned up temporary staging files."));
+                    // Clean up temporary staging folders in CSDK
+                    try
+                    {
+                        if (Directory.Exists(contentStagingRoot)) Directory.Delete(contentStagingRoot, true);
+                        if (Directory.Exists(gameStagingRoot)) Directory.Delete(gameStagingRoot, true);
+                        progress?.Report(new ExportProgressReport(0.98f, $"[INFO] Cleaned up temporary staging files."));
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.Print($"[SkinExporter] Non-fatal staging cleanup notice: {ex.Message}");
+                    }
+
+                    string installNote = config.InstallDirectlyToGame
+                        ? $"Mod successfully installed to citadel/addons/{vpkFileName}"
+                        : $"Mod successfully exported to {finalVpkPath}";
+
+                    progress?.Report(new ExportProgressReport(1.0f, $"[SUCCESS] {installNote}", ExportLogLevel.Success));
+
+                    result.Success = true;
+                    result.VpkPath = finalVpkPath;
+                    result.ModDirectory = targetDir;
+                    return result;
                 }
-                catch (Exception ex)
+                finally
                 {
-                    GD.Print($"[SkinExporter] Non-fatal staging cleanup notice: {ex.Message}");
+                    sourceModPackage?.Dispose();
+                    baseVpkPackage?.Dispose();
                 }
-
-                // Final 100% confirmation
-                string installNote = config.InstallDirectlyToGame
-                    ? $"Mod successfully installed to citadel/addons/{vpkFileName}"
-                    : $"Mod successfully exported to {finalVpkPath}";
-
-                progress?.Report(new ExportProgressReport(1.0f, $"[SUCCESS] {installNote}", ExportLogLevel.Success));
-
-                result.Success = true;
-                result.VpkPath = finalVpkPath;
-                result.ModDirectory = targetDir;
-                return result;
-            }
-            finally
-            {
-                baseVpkPackage?.Dispose();
-            }
-        }, ct);
+            }, ct);
         }
 
         private static string ResolveEffectiveCsdkPath(string userCsdkPath, string deadlockGamePath)
         {
+            // Prioritize CSDK13 / Reduced_CSDK_13 if present on disk (even if userCsdkPath was previously set to CSDK12)
+            if (!string.IsNullOrEmpty(userCsdkPath))
+            {
+                string up13 = userCsdkPath
+                    .Replace("Reduced_CSDK_12", "Reduced_CSDK_13", StringComparison.OrdinalIgnoreCase)
+                    .Replace("CSDK12", "CSDK13", StringComparison.OrdinalIgnoreCase);
+                if (Directory.Exists(up13)) return up13;
+            }
+
+            string[] csdk13Defaults = {
+                @"C:\CSDK13",
+                @"C:\Reduced_CSDK_13",
+                @"D:\CSDK13",
+                @"D:\Reduced_CSDK_13",
+                @"E:\CSDK13",
+                @"E:\Reduced_CSDK_13",
+                @"E:\SteamLibrary\steamapps\common\CSDK13"
+            };
+            foreach (var d13 in csdk13Defaults)
+            {
+                if (Directory.Exists(d13)) return d13;
+            }
+
+            if (!string.IsNullOrEmpty(deadlockGamePath))
+            {
+                string siblingCsdk13 = Path.GetFullPath(Path.Combine(deadlockGamePath, "..", "CSDK13"));
+                if (Directory.Exists(siblingCsdk13)) return siblingCsdk13;
+
+                string siblingReduced13 = Path.GetFullPath(Path.Combine(deadlockGamePath, "..", "Reduced_CSDK_13"));
+                if (Directory.Exists(siblingReduced13)) return siblingReduced13;
+            }
+
             if (!string.IsNullOrEmpty(userCsdkPath) && Directory.Exists(userCsdkPath))
             {
                 return userCsdkPath;
             }
 
-            // Check if deadlock path has compiler
             if (!string.IsNullOrEmpty(deadlockGamePath))
             {
                 string p1 = Path.Combine(deadlockGamePath, "game", "bin", "win64", "resourcecompiler.exe");
@@ -919,6 +1615,7 @@ namespace DeadlockPlayground.Painter
             string[] defaults = {
                 @"C:\CSDK12",
                 @"D:\CSDK12",
+                @"D:\Reduced_CSDK_12",
                 @"E:\CSDK12",
                 @"E:\SteamLibrary\steamapps\common\CSDK12"
             };
@@ -933,11 +1630,17 @@ namespace DeadlockPlayground.Painter
 
         private static string ResolveCompilerExecutable(string csdkPath, string explicitPath = null)
         {
+            string upgraded13 = GamePathManager.TryResolveCsdk13CompilerUpgrade(explicitPath, csdkPath);
+            if (!string.IsNullOrEmpty(upgraded13) && File.Exists(upgraded13))
+            {
+                return upgraded13;
+            }
+
             if (!string.IsNullOrEmpty(explicitPath) && File.Exists(explicitPath))
             {
-                // If user selected bin\win64\resourcecompiler.exe, prioritize bin_cs2 sibling!
                 string norm = explicitPath.Replace('\\', '/');
-                if (norm.Contains("/game/bin/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase))
+                bool isCsdk13 = norm.Contains("CSDK13", StringComparison.OrdinalIgnoreCase) || norm.Contains("CSDK_13", StringComparison.OrdinalIgnoreCase);
+                if (!isCsdk13 && norm.Contains("/game/bin/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase))
                 {
                     string binCs2Sibling = norm.Replace("/game/bin/win64/resourcecompiler.exe", "/game/bin_cs2/win64/resourcecompiler.exe", StringComparison.OrdinalIgnoreCase);
                     if (File.Exists(binCs2Sibling))
@@ -950,15 +1653,22 @@ namespace DeadlockPlayground.Painter
 
             if (!string.IsNullOrEmpty(csdkPath))
             {
-                // 1. Isolated bin_cs2 compiler (prevents particleslib schema mismatch aborts)
+                bool isCsdk13 = csdkPath.Contains("CSDK13", StringComparison.OrdinalIgnoreCase) || csdkPath.Contains("CSDK_13", StringComparison.OrdinalIgnoreCase);
+                if (isCsdk13)
+                {
+                    string p13 = Path.Combine(csdkPath, "game", "bin", "win64", "resourcecompiler.exe");
+                    if (File.Exists(p13)) return p13;
+
+                    string p13Sub = Path.Combine(csdkPath, "Reduced_CSDK_13", "game", "bin", "win64", "resourcecompiler.exe");
+                    if (File.Exists(p13Sub)) return p13Sub;
+                }
+
                 string p1 = Path.Combine(csdkPath, "game", "bin_cs2", "win64", "resourcecompiler.exe");
                 if (File.Exists(p1)) return p1;
 
-                // 2. Reduced_CSDK_12 nested
                 string p2 = Path.Combine(csdkPath, "Reduced_CSDK_12", "game", "bin_cs2", "win64", "resourcecompiler.exe");
                 if (File.Exists(p2)) return p2;
 
-                // 3. Fallbacks
                 string p3 = Path.Combine(csdkPath, "game", "bin", "win64", "resourcecompiler.exe");
                 if (File.Exists(p3)) return p3;
 
@@ -973,7 +1683,6 @@ namespace DeadlockPlayground.Painter
         {
             string cleanHero = string.IsNullOrEmpty(heroCodename) ? "custom_hero" : heroCodename.ToLowerInvariant();
 
-            // 1. Check if any submesh has an authentic OriginalVmatPath with exact folder structure
             if (submeshes != null)
             {
                 foreach (var sm in submeshes)
@@ -990,7 +1699,6 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 2. Query DeadlockHeroCatalog
             var entry = DeadlockHeroCatalog.ResolveHero(cleanHero) ?? DeadlockHeroCatalog.GetByPath(cleanHero);
             if (entry != null && !string.IsNullOrEmpty(entry.VmdlRelativePath))
             {
@@ -1001,13 +1709,11 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 3. If cleanHero is already a full or relative path starting with models/
             if (cleanHero.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
             {
                 return cleanHero.TrimEnd('/');
             }
 
-            // 4. Fallback default
             return $"models/heroes_staging/{cleanHero}";
         }
 
@@ -1063,7 +1769,6 @@ namespace DeadlockPlayground.Painter
 
             Image isolatedImage = atlasImage;
 
-            // Check if submesh is assigned an atlas rectangle
             Vector2 pos = Vector2.Zero;
             Vector2 size = Vector2.One;
             if (config.SubmeshAtlasRectsBySubmesh.TryGetValue(subKey, out var subRect))
@@ -1097,9 +1802,14 @@ namespace DeadlockPlayground.Painter
                 isolatedImage = atlasImage.GetRegion(new Rect2I(px, py, pw, ph));
             }
 
-            // Retrieve base texture image: prioritize authentic un-flattened image from origMeta
             Image baseImg = null;
-            if (origMeta?.BaseRgbaImage != null && !origMeta.BaseRgbaImage.IsEmpty())
+            bool hasEditedBase = config.SubmeshesWithEditedBaseTexture != null && config.SubmeshesWithEditedBaseTexture.Contains(subKey);
+            bool hasEditedAlpha = config.SubmeshesWithEditedAlpha != null && config.SubmeshesWithEditedAlpha.Contains(subKey);
+            if (hasEditedBase && config.PreExtractedBaseImagesBySubmesh.TryGetValue(subKey, out var editedSubBase) && editedSubBase != null && !editedSubBase.IsEmpty())
+            {
+                baseImg = editedSubBase;
+            }
+            else if (origMeta?.BaseRgbaImage != null && !origMeta.BaseRgbaImage.IsEmpty())
             {
                 baseImg = origMeta.BaseRgbaImage;
             }
@@ -1190,7 +1900,6 @@ namespace DeadlockPlayground.Painter
 
             if (isolatedImage == null || isolatedImage.IsEmpty()) return null;
 
-            // Ensure isolated painted region matches target dimensions with Bilinear interpolation
             var finalImage = (Image)isolatedImage.Duplicate();
             if (finalImage.IsCompressed())
             {
@@ -1206,10 +1915,9 @@ namespace DeadlockPlayground.Painter
             }
             finalImage.Convert(Image.Format.Rgba8);
 
-            // Composite over base texture if present
             if (baseImg != null && !baseImg.IsEmpty())
             {
-                var baseUnscaled = (Image)baseImg.Duplicate();
+                using var baseUnscaled = (Image)baseImg.Duplicate();
                 if (baseUnscaled.IsCompressed())
                 {
                     baseUnscaled.Decompress();
@@ -1224,7 +1932,6 @@ namespace DeadlockPlayground.Painter
                     baseUnscaled.Resize(exportWidth, exportHeight, Image.Interpolation.Bilinear);
                 }
 
-                // Alpha composite: final = paint.rgb * paint.a + base.rgb * (1 - paint.a)
                 byte[] paintData = finalImage.GetData();
                 byte[] baseData = baseUnscaled.GetData();
                 int pixelCount = exportWidth * exportHeight;
@@ -1233,16 +1940,40 @@ namespace DeadlockPlayground.Painter
                 if (paintData != null && baseData != null && paintData.Length >= expectedBytes && baseData.Length >= expectedBytes)
                 {
                     bool sameRes = (origMeta != null && origMeta.Width == exportWidth && origMeta.Height == exportHeight && origMeta.RawAlpha != null && origMeta.RawAlpha.Length == pixelCount);
+                    bool preserveOrigVtexAlpha = config.PreserveBaseAlpha && !hasEditedAlpha;
 
                     for (int i = 0; i < pixelCount; i++)
                     {
                         int idx = i * 4;
                         if (idx + 3 >= paintData.Length || idx + 3 >= baseData.Length) break;
 
+                        byte origBaseA = baseData[idx + 3];
+                        if (preserveOrigVtexAlpha && origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
+                        {
+                            if (sameRes && i < origMeta.RawAlpha.Length)
+                            {
+                                origBaseA = origMeta.RawAlpha[i];
+                            }
+                            else if (origMeta.Width > 0 && origMeta.Height > 0)
+                            {
+                                int srcX = Mathf.Clamp(Mathf.FloorToInt((i % exportWidth) * (float)origMeta.Width / exportWidth), 0, origMeta.Width - 1);
+                                int srcY = Mathf.Clamp(Mathf.FloorToInt((i / exportWidth) * (float)origMeta.Height / exportHeight), 0, origMeta.Height - 1);
+                                int srcIdx = srcY * origMeta.Width + srcX;
+                                if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
+                                {
+                                    origBaseA = origMeta.RawAlpha[srcIdx];
+                                }
+                            }
+                        }
+
                         float pA = paintData[idx + 3] / 255.0f;
+                        if (config.PreserveBaseAlpha)
+                        {
+                            pA = Mathf.Min(pA, origBaseA / 255.0f);
+                        }
+
                         if (pA <= 0.001f)
                         {
-                            // 1:1 unpainted: exact raw base texels byte-for-byte!
                             paintData[idx] = baseData[idx];
                             paintData[idx + 1] = baseData[idx + 1];
                             paintData[idx + 2] = baseData[idx + 2];
@@ -1262,27 +1993,18 @@ namespace DeadlockPlayground.Painter
                             paintData[idx + 2] = (byte)Mathf.Clamp(pB * pA + bB * (1.0f - pA), 0, 255);
                         }
 
-                        // Preserve Valve's original Alpha channel byte-for-byte
-                        if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
+                        if (preserveOrigVtexAlpha)
                         {
-                            if (sameRes && i < origMeta.RawAlpha.Length)
-                            {
-                                paintData[idx + 3] = origMeta.RawAlpha[i];
-                            }
-                            else if (origMeta.Width > 0 && origMeta.Height > 0)
-                            {
-                                int srcX = Mathf.Clamp(Mathf.FloorToInt((i % exportWidth) * (float)origMeta.Width / exportWidth), 0, origMeta.Width - 1);
-                                int srcY = Mathf.Clamp(Mathf.FloorToInt((i / exportWidth) * (float)origMeta.Height / exportHeight), 0, origMeta.Height - 1);
-                                int srcIdx = srcY * origMeta.Width + srcX;
-                                if (srcIdx >= 0 && srcIdx < origMeta.RawAlpha.Length)
-                                {
-                                    paintData[idx + 3] = origMeta.RawAlpha[srcIdx];
-                                }
-                            }
+                            paintData[idx + 3] = origBaseA;
+                        }
+                        else if (config.PreserveBaseAlpha && hasEditedAlpha)
+                        {
+                            paintData[idx + 3] = baseData[idx + 3];
                         }
                         else
                         {
-                            paintData[idx + 3] = baseData[idx + 3];
+                            // Unconstrained alpha mode or edited base alpha
+                            paintData[idx + 3] = (byte)Mathf.Clamp(Mathf.Max((int)paintData[idx + 3], (int)baseData[idx + 3]), 0, 255);
                         }
                     }
 
@@ -1290,12 +2012,12 @@ namespace DeadlockPlayground.Painter
                     {
                         Array.Resize(ref paintData, expectedBytes);
                     }
+                    finalImage.Dispose();
                     finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
             }
             else if (origMeta?.RawAlpha != null && origMeta.RawAlpha.Length > 0)
             {
-                // No base image, but authentic original alpha is available
                 byte[] paintData = finalImage.GetData();
                 int pixelCount = exportWidth * exportHeight;
                 int expectedBytes = pixelCount * 4;
@@ -1329,6 +2051,7 @@ namespace DeadlockPlayground.Painter
                     {
                         Array.Resize(ref paintData, expectedBytes);
                     }
+                    finalImage.Dispose();
                     finalImage = Image.CreateFromData(exportWidth, exportHeight, false, Image.Format.Rgba8, paintData);
                 }
             }
@@ -1344,7 +2067,6 @@ namespace DeadlockPlayground.Painter
             if (targetImage.IsCompressed()) targetImage.Decompress();
             if (targetImage.HasMipmaps()) targetImage.ClearMipmaps();
 
-            // If target image dimensions differ from origMeta, resize a copy to origMeta dimensions first
             if (origMeta.Width > 0 && origMeta.Height > 0 && 
                 (targetImage.GetWidth() != origMeta.Width || targetImage.GetHeight() != origMeta.Height))
             {
@@ -1391,7 +2113,202 @@ namespace DeadlockPlayground.Painter
             return Image.CreateFromData(w, h, false, Image.Format.Rgba8, data);
         }
 
-        public static List<string> ResolveAllColorVtexCPaths(SubmeshNodeInfo submesh, string heroCodename, Package baseVpkPackage)
+        private static bool HasAnySubmeshPreBakedChannels(ModExportConfig config, SubmeshNodeInfo submesh)
+        {
+            if (config?.PreBakedChannelsBySubmesh == null || submesh == null) return false;
+            string subKey = ResolveSubmeshKey(submesh);
+            foreach (var kvp in config.PreBakedChannelsBySubmesh)
+            {
+                if (kvp.Key.subKey.Equals(subKey, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        private static void StageEditedMultiChannelMaps(
+            ModExportConfig config,
+            SubmeshNodeInfo submesh,
+            string heroFolder,
+            string contentMaterialsDir,
+            Package sourceModPackage,
+            Package baseVpkPackage,
+            string deadlockPath,
+            List<(string materialName, string pngPath, string vtexPath, string originalVtexCPath)> stagedTextures,
+            HashSet<string> processedHeroVtexCPaths,
+            IProgress<ExportProgressReport> progress)
+        {
+            if (config?.PreBakedChannelsBySubmesh == null || submesh == null) return;
+            string subKey = ResolveSubmeshKey(submesh);
+            var chSet = submesh.Channels;
+
+            string NormalizeVtexC(string p)
+            {
+                if (string.IsNullOrWhiteSpace(p)) return null;
+                string norm = p.Replace('\\', '/').TrimStart('/');
+                if (!norm.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) norm += "_c";
+                return norm;
+            }
+
+            void StageSingleVtex(string vtexCPath, Image imgToStage, string label, bool preserveOrigAlpha = false)
+            {
+                string normVtex = NormalizeVtexC(vtexCPath);
+                if (string.IsNullOrEmpty(normVtex) || imgToStage == null || imgToStage.IsEmpty()) return;
+                if (!processedHeroVtexCPaths.Add(normVtex)) return;
+
+                string baseName = Path.GetFileNameWithoutExtension(normVtex);
+                if (baseName.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                    baseName = baseName[..^2];
+
+                var origMeta = (sourceModPackage != null ? LoadOriginalVtexMetadata(normVtex, sourceModPackage, deadlockPath) : null)
+                            ?? LoadOriginalVtexMetadata(normVtex, baseVpkPackage, deadlockPath);
+                try
+                {
+                    using Image workImg = (Image)imgToStage.Duplicate();
+                    if (workImg.IsCompressed()) workImg.Decompress();
+                    if (workImg.HasMipmaps()) workImg.ClearMipmaps();
+                    if (workImg.GetFormat() != Image.Format.Rgba8) workImg.Convert(Image.Format.Rgba8);
+
+                    int targetW = origMeta != null && origMeta.Width >= 64 ? origMeta.Width : (config.Resolution > 0 ? config.Resolution : workImg.GetWidth());
+                    int targetH = origMeta != null && origMeta.Height >= 64 ? origMeta.Height : (config.Resolution > 0 ? config.Resolution : workImg.GetHeight());
+                    if (workImg.GetWidth() != targetW || workImg.GetHeight() != targetH)
+                    {
+                        workImg.Resize(targetW, targetH, Image.Interpolation.Bilinear);
+                    }
+
+                    Image finalImg = preserveOrigAlpha && origMeta != null
+                        ? ApplyOriginalAlphaChannel(workImg, origMeta)
+                        : workImg;
+
+                    string pngFileName = $"{baseName}.png";
+                    string fullPngPath = Path.Combine(contentMaterialsDir, pngFileName);
+                    if (finalImg.SavePng(fullPngPath) != Error.Ok)
+                    {
+                        progress?.Report(new ExportProgressReport(0.25f, $"[WARNING] Failed saving multi-channel PNG '{pngFileName}'.", ExportLogLevel.Warning));
+                        return;
+                    }
+
+                    string vtexFileName = $"{baseName}.vtex";
+                    string fullVtexPath = Path.Combine(contentMaterialsDir, vtexFileName);
+                    string relPngPath = $"{heroFolder}/materials/{pngFileName}".Replace('\\', '/').TrimStart('/');
+                    string outFmt = !string.IsNullOrEmpty(origMeta?.Format) ? origMeta.Format : "BC7";
+                    VTexFlags flags = origMeta != null ? origMeta.Flags : (VTexFlags.SUGGEST_CLAMPS | VTexFlags.SUGGEST_CLAMPT);
+
+                    File.WriteAllText(fullVtexPath, GenerateSource2DmxVtex(relPngPath, outFmt, flags));
+                    stagedTextures.Add((baseName, fullPngPath, fullVtexPath, normVtex));
+                    progress?.Report(new ExportProgressReport(0.29f, $"[INFO] Staged edited {label} map -> {vtexFileName} ({normVtex})"));
+
+                    if (!ReferenceEquals(finalImg, workImg)) finalImg.Dispose();
+                }
+                finally
+                {
+                    if (origMeta != null)
+                    {
+                        origMeta.BaseRgbaImage?.Dispose();
+                        origMeta.BaseRgbaImage = null;
+                        origMeta.RawAlpha = null;
+                    }
+                }
+            }
+
+            // 1. Packed Normal + Roughness (g_tNormalRoughness) OR separate standalone Normal/Roughness
+            bool hasNormEdit = config.PreBakedChannelsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Normal), out var editedNorm);
+            bool hasRoughEdit = config.PreBakedChannelsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Roughness), out var editedRough);
+
+            if (hasNormEdit || hasRoughEdit)
+            {
+                var normEntry = chSet?.GetChannel(MaterialTextureChannel.Normal);
+                var roughEntry = chSet?.GetChannel(MaterialTextureChannel.Roughness);
+                string packedPath = normEntry?.PackedSourceVtexPath
+                                 ?? roughEntry?.PackedSourceVtexPath
+                                 ?? (submesh.OriginalNormalVtex?.Contains("normalroughness", StringComparison.OrdinalIgnoreCase) == true ? submesh.OriginalNormalVtex : null);
+
+                if (!string.IsNullOrEmpty(packedPath))
+                {
+                    Image normSrc = editedNorm ?? (config.PreExtractedChannelOriginalsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Normal), out var origN) ? origN : normEntry?.SourceImage);
+                    Image roughSrc = editedRough ?? (config.PreExtractedChannelOriginalsBySubmesh.TryGetValue((subKey, MaterialTextureChannel.Roughness), out var origR) ? origR : roughEntry?.SourceImage);
+                    using Image packedImg = MaterialChannelDiscovery.PackNormalRoughnessImage(
+                        normSrc,
+                        roughSrc,
+                        packAsBlueToAlpha: normEntry?.HasBlueToAlphaRoughness ?? true);
+                    if (packedImg != null)
+                    {
+                        StageSingleVtex(packedPath, packedImg, "Normal+Roughness", preserveOrigAlpha: false);
+                    }
+                }
+                else
+                {
+                    if (hasNormEdit)
+                    {
+                        StageSingleVtex(normEntry?.SourcePath ?? submesh.OriginalNormalVtex, editedNorm, "Normal");
+                    }
+                    if (hasRoughEdit)
+                    {
+                        string rTarget = roughEntry?.SourcePath;
+                        if (string.IsNullOrEmpty(rTarget) && submesh.OriginalTextureParams != null)
+                        {
+                            submesh.OriginalTextureParams.TryGetValue("g_tRoughness", out rTarget);
+                        }
+                        StageSingleVtex(rTarget, editedRough, "Roughness");
+                    }
+                }
+            }
+
+            // 2. AO, Shadow, SelfIllum, TintMask, Metalness, RimMask, OutlineMask
+            var standaloneChannels = new (MaterialTextureChannel ch, string label, Func<string> fallbackPath)[]
+            {
+                (MaterialTextureChannel.AmbientOcclusion, "AO", () => submesh.OriginalAoVtex),
+                (MaterialTextureChannel.Shadow, "Shadow/NPR", () =>
+                {
+                    if (submesh.OriginalTextureParams != null)
+                    {
+                        foreach (var k in new[] { "g_tNprTransmissiveColor", "TextureNprTramsissiveColor1", "TextureNprTransmissiveColor", "g_tShadowTint" })
+                        {
+                            if (submesh.OriginalTextureParams.TryGetValue(k, out var vp) && !string.IsNullOrEmpty(vp)) return vp;
+                        }
+                    }
+                    return null;
+                }),
+                (MaterialTextureChannel.SelfIllum, "Self-Illum", () =>
+                {
+                    string val = null;
+                    submesh.OriginalTextureParams?.TryGetValue("g_tSelfIllumMask", out val);
+                    return val;
+                }),
+                (MaterialTextureChannel.TintMask, "Tint Mask", () => submesh.OriginalMaskVtex),
+                (MaterialTextureChannel.Metalness, "Metalness", () =>
+                {
+                    string val = null;
+                    submesh.OriginalTextureParams?.TryGetValue("g_tMetalness", out val);
+                    return val;
+                }),
+                (MaterialTextureChannel.RimMask, "Rim Mask", () =>
+                {
+                    string val = null;
+                    submesh.OriginalTextureParams?.TryGetValue("g_tRimLightMask", out val);
+                    return val;
+                }),
+                (MaterialTextureChannel.OutlineMask, "Outline Mask", () => submesh.OriginalNprOutlineVtex)
+            };
+
+            foreach (var (ch, label, fallbackPath) in standaloneChannels)
+            {
+                if (!config.PreBakedChannelsBySubmesh.TryGetValue((subKey, ch), out var bakedImg) || bakedImg == null || bakedImg.IsEmpty())
+                    continue;
+
+                var entry = chSet?.GetChannel(ch);
+                string targetVtexC = entry?.SourcePath;
+                if (string.IsNullOrEmpty(targetVtexC) || !targetVtexC.Contains(".vtex", StringComparison.OrdinalIgnoreCase))
+                {
+                    targetVtexC = fallbackPath();
+                }
+
+                if (!string.IsNullOrEmpty(targetVtexC))
+                {
+                    StageSingleVtex(targetVtexC, bakedImg, label);
+                }
+            }
+        }
+
+        public static List<string> ResolveAllColorVtexCPaths(SubmeshNodeInfo submesh, string heroCodename, Package primaryVpkPackage, Package fallbackVpkPackage = null)
         {
             var list = new List<string>();
             if (submesh?.AllColorVtexCPaths != null && submesh.AllColorVtexCPaths.Count > 0)
@@ -1407,10 +2324,9 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // If we have at most 1 path and baseVpkPackage is available, inspect VPK material to discover any missing secondary/reveal textures
-            if (list.Count <= 1 && baseVpkPackage != null && submesh != null)
+            if (list.Count <= 1 && primaryVpkPackage != null && submesh != null)
             {
-                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, baseVpkPackage);
+                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, primaryVpkPackage, fallbackVpkPackage);
                 if (!string.IsNullOrEmpty(primary) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(primary) && !list.Contains(primary, StringComparer.OrdinalIgnoreCase))
                 {
                     list.Insert(0, primary);
@@ -1434,7 +2350,7 @@ namespace DeadlockPlayground.Painter
 
             if (list.Count == 0)
             {
-                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, baseVpkPackage);
+                string primary = ResolveOriginalColorVtexCPath(submesh, heroCodename, primaryVpkPackage, fallbackVpkPackage);
                 if (!string.IsNullOrEmpty(primary) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(primary) && !list.Contains(primary, StringComparer.OrdinalIgnoreCase))
                 {
                     list.Add(primary);
@@ -1450,56 +2366,78 @@ namespace DeadlockPlayground.Painter
             return list;
         }
 
-        public static string ResolveOriginalColorVtexCPath(SubmeshNodeInfo submesh, string heroCodename, Package baseVpkPackage)
+        private static PackageEntry FindVmatEntryInPackage(Package pkg, SubmeshNodeInfo submesh)
+        {
+            if (pkg == null || submesh == null) return null;
+
+            var candidates = new List<string>();
+            if (!string.IsNullOrEmpty(submesh.OriginalVmatPath)) candidates.Add(submesh.OriginalVmatPath);
+            if (!string.IsNullOrEmpty(submesh.MaterialName))
+            {
+                candidates.Add($"materials/{submesh.MaterialName}.vmat_c");
+                candidates.Add($"models/{submesh.MaterialName}.vmat_c");
+            }
+
+            foreach (var c in candidates)
+            {
+                string norm = c.Replace('\\', '/').TrimStart('/');
+                if (!norm.EndsWith("_c", StringComparison.OrdinalIgnoreCase)) norm += "_c";
+                var found = pkg.FindEntry(norm);
+                if (found != null) return found;
+            }
+
+            string targetMatName = !string.IsNullOrEmpty(submesh.MaterialName)
+                ? submesh.MaterialName
+                : (!string.IsNullOrEmpty(submesh.OriginalVmatPath) ? Path.GetFileNameWithoutExtension(submesh.OriginalVmatPath) : "");
+
+            if (!string.IsNullOrEmpty(targetMatName))
+            {
+                if (targetMatName.EndsWith(".vmat", StringComparison.OrdinalIgnoreCase))
+                    targetMatName = Path.GetFileNameWithoutExtension(targetMatName);
+
+                string targetFile = $"{targetMatName}.vmat_c";
+                if (pkg.Entries.TryGetValue("vmat_c", out var vmatEntries))
+                {
+                    var found = vmatEntries.FirstOrDefault(e => string.Equals(e.FileName + "." + e.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
+                             ?? vmatEntries.FirstOrDefault(e => e.FileName.Equals(targetMatName, StringComparison.OrdinalIgnoreCase));
+                    if (found != null) return found;
+                }
+            }
+
+            return null;
+        }
+
+        public static string ResolveOriginalColorVtexCPath(SubmeshNodeInfo submesh, string heroCodename, Package primaryVpkPackage, Package fallbackVpkPackage = null)
         {
             if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalColorVtexCPath) && submesh?.AllColorVtexCPaths != null && submesh.AllColorVtexCPaths.Count > 1)
             {
                 return submesh.OriginalColorVtexCPath.Replace('\\', '/').TrimStart('/');
             }
 
-            if (baseVpkPackage != null && submesh != null)
+            if (submesh != null)
             {
-                var candidates = new List<string>();
-                if (!string.IsNullOrEmpty(submesh.OriginalVmatPath)) candidates.Add(submesh.OriginalVmatPath);
-                if (!string.IsNullOrEmpty(submesh.MaterialName))
+                Package ownerPkg = primaryVpkPackage;
+                PackageEntry foundEntry = FindVmatEntryInPackage(primaryVpkPackage, submesh);
+                if (foundEntry == null && fallbackVpkPackage != null && fallbackVpkPackage != primaryVpkPackage)
                 {
-                    candidates.Add($"materials/{submesh.MaterialName}.vmat_c");
-                    candidates.Add($"models/{submesh.MaterialName}.vmat_c");
+                    foundEntry = FindVmatEntryInPackage(fallbackVpkPackage, submesh);
+                    if (foundEntry != null) ownerPkg = fallbackVpkPackage;
                 }
 
-                PackageEntry foundEntry = null;
-                foreach (var c in candidates)
-                {
-                    string norm = c.Replace('\\', '/').TrimStart('/');
-                    if (!norm.EndsWith("_c")) norm += "_c";
-                    foundEntry = baseVpkPackage.FindEntry(norm);
-                    if (foundEntry != null) break;
-                }
-
-                if (foundEntry == null && !string.IsNullOrEmpty(submesh.MaterialName))
-                {
-                    string targetFile = $"{submesh.MaterialName}.vmat_c";
-                    if (baseVpkPackage.Entries.TryGetValue("vmat_c", out var vmatEntries))
-                    {
-                        foundEntry = vmatEntries.FirstOrDefault(e => string.Equals(e.FileName + "." + e.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
-                                  ?? vmatEntries.FirstOrDefault(e => e.FileName.Equals(submesh.MaterialName, StringComparison.OrdinalIgnoreCase));
-                    }
-                }
-
-                if (foundEntry != null)
+                if (foundEntry != null && ownerPkg != null)
                 {
                     try
                     {
-                        baseVpkPackage.ReadEntry(foundEntry, out byte[] data);
+                        using var vmatStream = ownerPkg.GetMemoryMappedStreamIfPossible(foundEntry);
                         using var resource = new ValveResourceFormat.Resource();
-                        using var ms = new MemoryStream(data);
-                        resource.Read(ms);
+                        resource.Read(vmatStream, leaveOpen: true, mode: ReadMode.Deferred);
 
                         if (resource.ResourceType == ResourceType.Material && resource.DataBlock is VrfMaterial vmat)
                         {
                             string colorTex = DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor")
                                            ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColor")
-                                           ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor1");
+                                           ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor1")
+                                           ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColorA");
 
                             string secColorTex = DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "TextureColor2")
                                               ?? DeadlockPlayground.Materials.Source2TextureLoader.GetTextureParam(vmat, "g_tColor2")
@@ -1518,7 +2456,6 @@ namespace DeadlockPlayground.Painter
                                     submesh.AllColorVtexCPaths.Add(normSec);
                             }
 
-                            // Dynamic scan of all texture parameters in vmat for additional Color / Albedo / AltColor textures
                             if (vmat.TextureParams != null)
                             {
                                 foreach (var (pKey, pVal) in vmat.TextureParams)
@@ -1546,6 +2483,10 @@ namespace DeadlockPlayground.Painter
                                         {
                                             submesh.AllColorVtexCPaths.Add(normExtra);
                                         }
+                                        if (string.IsNullOrEmpty(colorTex))
+                                        {
+                                            colorTex = pVal;
+                                        }
                                     }
                                 }
                             }
@@ -1567,6 +2508,30 @@ namespace DeadlockPlayground.Painter
                         GD.Print($"[SkinExporter] Notice: Could not extract OriginalColorVtexCPath from VPK: {ex.Message}");
                     }
                 }
+
+                // Fallback for texture-only or custom-named mod textures in primaryVpkPackage: match vtex_c by material name prefix
+                if (primaryVpkPackage != null && primaryVpkPackage.Entries.TryGetValue("vtex_c", out var modVtexEntries))
+                {
+                    string matShort = ResolveSubmeshMaterialName(submesh, heroCodename);
+                    if (!string.IsNullOrEmpty(matShort))
+                    {
+                        var matchedVtex = modVtexEntries.FirstOrDefault(e =>
+                            e.FileName.StartsWith(matShort, StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("normal", StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("rough", StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("mask", StringComparison.OrdinalIgnoreCase) &&
+                            !e.FileName.Contains("_ao", StringComparison.OrdinalIgnoreCase));
+
+                        if (matchedVtex != null)
+                        {
+                            string matchedFull = matchedVtex.GetFullPath().Replace('\\', '/').TrimStart('/');
+                            submesh.OriginalColorVtexCPath = matchedFull;
+                            if (!submesh.AllColorVtexCPaths.Contains(matchedFull, StringComparer.OrdinalIgnoreCase))
+                                submesh.AllColorVtexCPaths.Insert(0, matchedFull);
+                            return matchedFull;
+                        }
+                    }
+                }
             }
 
             if (!string.IsNullOrEmpty(submesh?.OriginalColorVtexCPath) && !Source2MaterialHelper.IsEngineDummyOrPlaceholderTexture(submesh.OriginalColorVtexCPath))
@@ -1574,10 +2539,9 @@ namespace DeadlockPlayground.Painter
                 return submesh.OriginalColorVtexCPath.Replace('\\', '/').TrimStart('/');
             }
 
-            // Default fallback
-            string matName = ResolveSubmeshMaterialName(submesh, heroCodename);
+            string fallbackMatName = ResolveSubmeshMaterialName(submesh, heroCodename);
             string fallbackFolder = ResolveHeroInternalFolder(heroCodename, null);
-            string defaultPath = $"{fallbackFolder}/materials/{matName}_color.vtex_c".Replace('\\', '/').TrimStart('/');
+            string defaultPath = $"{fallbackFolder}/materials/{fallbackMatName}_color.vtex_c".Replace('\\', '/').TrimStart('/');
             if (submesh != null)
             {
                 submesh.OriginalColorVtexCPath = defaultPath;
@@ -1601,20 +2565,18 @@ namespace DeadlockPlayground.Painter
                 else normPath += ".vtex_c";
             }
 
-            byte[] rawVtexCBytes = null;
+            Stream vtexStream = null;
 
-            // 1. Direct disk check if full path or relative to current working directory
             if (File.Exists(originalVtexCPath))
             {
-                try { rawVtexCBytes = File.ReadAllBytes(originalVtexCPath); } catch { }
+                vtexStream = OpenSharedFileReadStream(originalVtexCPath);
             }
             else if (File.Exists(normPath))
             {
-                try { rawVtexCBytes = File.ReadAllBytes(normPath); } catch { }
+                vtexStream = OpenSharedFileReadStream(normPath);
             }
 
-            // 2. Query base pak01_dir.vpk if available (primary source for authentic assets)
-            if (rawVtexCBytes == null && baseVpkPackage != null)
+            if (vtexStream == null && baseVpkPackage != null)
             {
                 var entry = baseVpkPackage.FindEntry(normPath);
                 if (entry == null)
@@ -1632,27 +2594,26 @@ namespace DeadlockPlayground.Painter
                 {
                     try
                     {
-                        baseVpkPackage.ReadEntry(entry, out rawVtexCBytes);
+                        normPath = entry.GetFullPath().Replace('\\', '/').TrimStart('/');
+                        vtexStream = baseVpkPackage.GetMemoryMappedStreamIfPossible(entry);
                     }
                     catch (Exception ex)
                     {
-                        GD.Print($"[SkinExporter] Notice: Could not read entry '{normPath}' from base VPK: {ex.Message}");
+                        GD.Print($"[SkinExporter] Notice: Could not read entry '{normPath}' from VPK: {ex.Message}");
                     }
                 }
             }
 
-            // 3. Check within game citadel folder
-            if (rawVtexCBytes == null && !string.IsNullOrEmpty(deadlockGamePath))
+            if (vtexStream == null && !string.IsNullOrEmpty(deadlockGamePath))
             {
                 string gameCitadelFile = Path.Combine(deadlockGamePath, "game", "citadel", normPath);
                 if (File.Exists(gameCitadelFile))
                 {
-                    try { rawVtexCBytes = File.ReadAllBytes(gameCitadelFile); } catch { }
+                    vtexStream = OpenSharedFileReadStream(gameCitadelFile);
                 }
             }
 
-            // 4. Dynamic fallback search in project scratch / staging roots (without hardcoded drive letters or hero names)
-            if (rawVtexCBytes == null)
+            if (vtexStream == null)
             {
                 string projectDir = ProjectSettings.GlobalizePath("res://");
                 string projectRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
@@ -1667,114 +2628,122 @@ namespace DeadlockPlayground.Painter
 
                 foreach (var root in searchRoots)
                 {
-                    if (rawVtexCBytes != null) break;
+                    if (vtexStream != null) break;
                     if (!Directory.Exists(root)) continue;
 
                     string candidate = Path.Combine(root, normPath);
                     if (File.Exists(candidate))
                     {
-                        try { rawVtexCBytes = File.ReadAllBytes(candidate); break; } catch { }
+                        vtexStream = OpenSharedFileReadStream(candidate);
+                        if (vtexStream != null) break;
                     }
 
-                    // Recursive fallback search for texture filename inside workspace scratch
                     try
                     {
                         var matchingFiles = Directory.GetFiles(root, targetFileName, SearchOption.AllDirectories);
                         if (matchingFiles.Length > 0 && File.Exists(matchingFiles[0]))
                         {
-                            rawVtexCBytes = File.ReadAllBytes(matchingFiles[0]);
-                            break;
+                            vtexStream = OpenSharedFileReadStream(matchingFiles[0]);
+                            if (vtexStream != null) break;
                         }
                     }
                     catch { }
                 }
             }
 
-            if (rawVtexCBytes == null || rawVtexCBytes.Length == 0)
+            if (vtexStream == null)
             {
                 return null;
             }
 
-            try
+            using (vtexStream)
             {
-                using var resource = new ValveResourceFormat.Resource();
-                using var ms = new MemoryStream(rawVtexCBytes);
-                resource.Read(ms);
-
-                if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture vrfTex)
+                try
                 {
+                    using var resource = new ValveResourceFormat.Resource { FileName = normPath };
+                    resource.Read(vtexStream, leaveOpen: true, mode: ReadMode.Deferred);
+
+                    if (resource.ResourceType != ResourceType.Texture || resource.DataBlock is not ValveResourceFormat.ResourceTypes.Texture vrfTex)
+                    {
+                        return null;
+                    }
+
+                    var meta = new OriginalVtexMetadata
+                    {
+                        VtexCPath = normPath,
+                        Width = (int)vrfTex.Width,
+                        Height = (int)vrfTex.Height,
+                        Format = vrfTex.Format.ToString(),
+                        Flags = vrfTex.Flags,
+                        NumMipLevels = (int)vrfTex.NumMipLevels
+                    };
+
+                    using var skBitmap = vrfTex.GenerateBitmap(depth: 0, mipLevel: 0);
+                    if (skBitmap != null)
+                    {
+                        int w = skBitmap.Width;
+                        int h = skBitmap.Height;
+                        meta.Width = w;
+                        meta.Height = h;
+                        int count = w * h;
+                        int rowBytes = skBitmap.RowBytes;
+                        IntPtr ptr = skBitmap.GetPixels();
+                        if (ptr != IntPtr.Zero && rowBytes >= w * 4 && skBitmap.ByteCount >= rowBytes * h)
+                        {
+                            byte[] rawAlpha = new byte[count];
+                            byte[] rawRgba = new byte[count * 4];
+                            bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
+                            bool hasNonOpaqueAlpha = false;
+
+                            unsafe
+                            {
+                                byte* srcBase = (byte*)ptr;
+                                fixed (byte* dstPtr = rawRgba)
+                                fixed (byte* alphaPtr = rawAlpha)
+                                {
+                                    uint* d32 = (uint*)dstPtr;
+                                    for (int y = 0; y < h; y++)
+                                    {
+                                        uint* s32 = (uint*)(srcBase + y * rowBytes);
+                                        int rowOffset = y * w;
+                                        for (int x = 0; x < w; x++)
+                                        {
+                                            uint c = s32[x];
+                                            byte a = (byte)((c >> 24) & 0xFF);
+                                            int dstIdx = rowOffset + x;
+                                            alphaPtr[dstIdx] = a;
+                                            if (a < 250) hasNonOpaqueAlpha = true;
+
+                                            if (isBgra)
+                                            {
+                                                byte b = (byte)(c & 0xFF);
+                                                byte g = (byte)((c >> 8) & 0xFF);
+                                                byte r = (byte)((c >> 16) & 0xFF);
+                                                d32[dstIdx] = (uint)(r | (g << 8) | (b << 16) | ((uint)a << 24));
+                                            }
+                                            else
+                                            {
+                                                d32[dstIdx] = c;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            meta.RawAlpha = rawAlpha;
+                            meta.HasNonUniformAlpha = hasNonOpaqueAlpha;
+                            meta.BaseRgbaImage = Image.CreateFromData(w, h, false, Image.Format.Rgba8, rawRgba);
+                            rawRgba = null;
+                        }
+                    }
+
+                    return meta;
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[SkinExporter] Failed to decode original .vtex_c metadata for '{normPath}': {ex.Message}");
                     return null;
                 }
-
-                var meta = new OriginalVtexMetadata
-                {
-                    VtexCPath = normPath,
-                    Width = (int)vrfTex.Width,
-                    Height = (int)vrfTex.Height,
-                    Format = vrfTex.Format.ToString(),
-                    Flags = vrfTex.Flags,
-                    NumMipLevels = (int)vrfTex.NumMipLevels
-                };
-
-                using var skBitmap = vrfTex.GenerateBitmap(depth: 0, mipLevel: 0);
-                if (skBitmap != null)
-                {
-                    int w = skBitmap.Width;
-                    int h = skBitmap.Height;
-                    meta.Width = w;
-                    meta.Height = h;
-                    int count = w * h;
-                    byte[] rawAlpha = new byte[count];
-                    byte[] rawRgba = new byte[count * 4];
-
-                    IntPtr ptr = skBitmap.GetPixels();
-                    if (ptr != IntPtr.Zero && skBitmap.ByteCount >= count * 4)
-                    {
-                        byte[] raw = new byte[count * 4];
-                        Marshal.Copy(ptr, raw, 0, raw.Length);
-
-                        bool isBgra = skBitmap.ColorType == SKColorType.Bgra8888;
-                        bool hasNonOpaqueAlpha = false;
-
-                        for (int i = 0; i < count; i++)
-                        {
-                            int idx = i * 4;
-                            byte a = raw[idx + 3];
-                            rawAlpha[i] = a;
-                            if (a < 250) hasNonOpaqueAlpha = true;
-
-                            byte c0 = raw[idx];
-                            byte c1 = raw[idx + 1];
-                            byte c2 = raw[idx + 2];
-
-                            if (isBgra)
-                            {
-                                rawRgba[idx] = c2;     // R
-                                rawRgba[idx + 1] = c1; // G
-                                rawRgba[idx + 2] = c0; // B
-                                rawRgba[idx + 3] = 255; // Base RGB is 100% opaque for layer compositing and blend modes
-                            }
-                            else
-                            {
-                                rawRgba[idx] = c0;     // R
-                                rawRgba[idx + 1] = c1; // G
-                                rawRgba[idx + 2] = c2; // B
-                                rawRgba[idx + 3] = 255; // Base RGB is 100% opaque for layer compositing and blend modes
-                            }
-                        }
-
-                        meta.RawAlpha = rawAlpha;
-                        meta.HasNonUniformAlpha = hasNonOpaqueAlpha;
-                        meta.BaseRgbaImage = Image.CreateFromData(w, h, false, Image.Format.Rgba8, rawRgba);
-                    }
-                }
-
-                return meta;
-            }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[SkinExporter] Failed to decode original .vtex_c metadata for '{normPath}': {ex.Message}");
-                return null;
             }
         }
 
@@ -1793,7 +2762,6 @@ namespace DeadlockPlayground.Painter
         {
             string texPath = FormatVtexCResource(relativeColorTexturePath);
 
-            // Attempt to enrich submesh with original base textures from VPK if missing
             if (submesh != null)
             {
                 TryExtractOriginalVmatTexturesFromVpk(deadlockGamePath, submesh, baseVpkPackage);
@@ -1815,7 +2783,6 @@ namespace DeadlockPlayground.Painter
                 ? FormatVtexCResource(submesh.OriginalMaskVtex)
                 : null;
 
-            // Ensure referenced textures exist in game tree so resourcecompiler doesn't fail
             if (!string.IsNullOrEmpty(gameStagingRoot))
             {
                 if (!string.IsNullOrEmpty(normalVtex)) EnsureTextureStagedInGameTree(gameStagingRoot, normalVtex, baseVpkPackage);
@@ -1829,6 +2796,25 @@ namespace DeadlockPlayground.Painter
             sb.AppendLine("{");
             sb.AppendLine("\tshader = \"pbr.vfx\"");
             sb.AppendLine("\tF_SPECULAR = 1");
+            bool needsAlphaTest = false;
+            if (submesh?.Mesh != null && GodotObject.IsInstanceValid(submesh.Mesh))
+            {
+                var matCheck = submesh.Mesh.GetSurfaceOverrideMaterial(submesh.SurfaceIndex) ?? submesh.Mesh.Mesh?.SurfaceGetMaterial(submesh.SurfaceIndex);
+                if (matCheck is StandardMaterial3D stdM && stdM.Transparency != BaseMaterial3D.TransparencyEnum.Disabled)
+                {
+                    needsAlphaTest = true;
+                }
+                else if (matCheck is ShaderMaterial shM)
+                {
+                    var enCutout = shM.GetShaderParameter("enable_alpha_cutout");
+                    if (enCutout.VariantType == Variant.Type.Bool && enCutout.AsBool()) needsAlphaTest = true;
+                }
+            }
+            if (needsAlphaTest)
+            {
+                sb.AppendLine("\tF_ALPHA_TEST = 1");
+                sb.AppendLine("\tg_flAlphaTestReference = 0.500000");
+            }
             sb.AppendLine($"\tg_tColor = resource:\"{texPath}\"");
 
             if (!string.IsNullOrEmpty(normalVtex))
@@ -1871,6 +2857,38 @@ namespace DeadlockPlayground.Painter
             return clean;
         }
 
+        private static Package OpenSharedReadPackage(string vpkPath)
+        {
+            var pkg = new Package();
+            FileStream fs = null;
+            try
+            {
+                fs = new FileStream(vpkPath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                pkg.SetFileName(vpkPath);
+                pkg.Read(fs);
+                fs = null; // Owned and disposed by pkg.Dispose()
+                return pkg;
+            }
+            catch
+            {
+                fs?.Dispose();
+                pkg.Dispose();
+                throw;
+            }
+        }
+
+        private static Stream OpenSharedFileReadStream(string filePath)
+        {
+            try
+            {
+                return new FileStream(filePath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static void EnsureTextureStagedInGameTree(string gameStagingRoot, string vtexCInternalPath, Package baseVpkPackage)
         {
             if (string.IsNullOrEmpty(gameStagingRoot) || string.IsNullOrEmpty(vtexCInternalPath)) return;
@@ -1891,13 +2909,13 @@ namespace DeadlockPlayground.Painter
                     var entry = baseVpkPackage.FindEntry(normPath);
                     if (entry != null)
                     {
-                        baseVpkPackage.ReadEntry(entry, out byte[] bytes);
-                        File.WriteAllBytes(fullPath, bytes);
+                        using var src = baseVpkPackage.GetMemoryMappedStreamIfPossible(entry);
+                        using var dst = File.Create(fullPath);
+                        src.CopyTo(dst);
                         return;
                     }
                 }
 
-                // Place empty placeholder so resourcecompiler validates file existence in game tree
                 File.WriteAllBytes(fullPath, Array.Empty<byte>());
             }
             catch (Exception ex)
@@ -1914,7 +2932,7 @@ namespace DeadlockPlayground.Painter
             if (submesh == null) return;
             if (!string.IsNullOrEmpty(submesh.OriginalNormalVtex) && !string.IsNullOrEmpty(submesh.OriginalAoVtex))
             {
-                return; // Already populated from Godot material metadata
+                return;
             }
 
             Package pkg = baseVpkPackage;
@@ -1927,54 +2945,20 @@ namespace DeadlockPlayground.Painter
                     string vpkPath = Path.Combine(deadlockGamePath, "game", "citadel", "pak01_dir.vpk");
                     if (File.Exists(vpkPath))
                     {
-                        pkg = new Package();
-                        pkg.Read(vpkPath);
+                        pkg = OpenSharedReadPackage(vpkPath);
                         disposePkg = true;
                     }
                 }
 
                 if (pkg == null) return;
 
-                var candidates = new List<string>();
-                if (!string.IsNullOrEmpty(submesh.OriginalVmatPath)) candidates.Add(submesh.OriginalVmatPath);
-                if (!string.IsNullOrEmpty(submesh.MaterialName))
-                {
-                    candidates.Add($"materials/{submesh.MaterialName}.vmat_c");
-                    candidates.Add($"models/{submesh.MaterialName}.vmat_c");
-                }
-
-                PackageEntry foundEntry = null;
-                foreach (var c in candidates)
-                {
-                    string norm = c.Replace('\\', '/').TrimStart('/');
-                    if (!norm.EndsWith("_c")) norm += "_c";
-                    foundEntry = pkg.FindEntry(norm);
-                    if (foundEntry != null) break;
-                }
-
-                if (foundEntry == null && !string.IsNullOrEmpty(submesh.MaterialName))
-                {
-                    string targetFile = $"{submesh.MaterialName}.vmat_c";
-                    foreach (var extGroup in pkg.Entries.Values)
-                    {
-                        foreach (var entry in extGroup)
-                        {
-                            if (string.Equals(entry.FileName + "." + entry.TypeName, targetFile, StringComparison.OrdinalIgnoreCase))
-                            {
-                                foundEntry = entry;
-                                break;
-                            }
-                        }
-                        if (foundEntry != null) break;
-                    }
-                }
+                PackageEntry foundEntry = FindVmatEntryInPackage(pkg, submesh);
 
                 if (foundEntry != null)
                 {
-                    pkg.ReadEntry(foundEntry, out byte[] data);
+                    using var vmatStream = pkg.GetMemoryMappedStreamIfPossible(foundEntry);
                     using var resource = new ValveResourceFormat.Resource();
-                    using var ms = new MemoryStream(data);
-                    resource.Read(ms);
+                    resource.Read(vmatStream, leaveOpen: true, mode: ReadMode.Deferred);
 
                     if (resource.ResourceType == ResourceType.Material && resource.DataBlock is VrfMaterial vmat)
                     {
@@ -2145,17 +3129,10 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
         private static bool HasMeaningfulVpcfOverrides(string kv3Text, EmitterOverrideData ov)
         {
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return false;
-
-            // 1. Visibility toggle
             if (!ov.Visible) return true;
-
-            // 2. Custom Size scale (vanilla is 1.0f)
             if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f) return true;
-
-            // 3. Custom Alpha scale (vanilla is 1.0f)
             if (Math.Abs(ov.AlphaScale - 1.0f) > 0.01f) return true;
 
-            // 4. Constant Color / Tint
             if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
             {
                 int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
@@ -2177,8 +3154,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
                 else
                 {
-                    // If the particle has no m_ConstantColor in vanilla, it defaults to pure white [255, 255, 255].
-                    // If the user picked a different tint color, it's a modification!
                     if (r < 250 || g < 250 || b < 250)
                     {
                         return true;
@@ -2186,7 +3161,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 5. C_INIT_RandomColor
             if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
             {
                 if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
@@ -2230,7 +3204,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 6. C_OP_ColorInterpolate
             if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
             {
                 int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
@@ -2256,18 +3229,13 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
 
         private static string ApplyOverridesToVpcfKv3Text(string kv3Text, EmitterOverrideData ov)
         {
-
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
-            // 0a. Compatibilidad de versión de formato: Si el .vpcf viene de Deadlock con versión > vpcf63 (ej. vpcf64, vpcf65, vpcf66),
-            // degradar el encabezado a vpcf63 para que bin_cs2/resourcecompiler.exe pueda compilarlo sin error
-            // "RESOURCE COMPILE ERROR: No valid format conversion from 'vpcf65' to 'vpcf63'"
             kv3Text = System.Text.RegularExpressions.Regex.Replace(
                 kv3Text,
                 @"format:vpcf(6[4-9]|[7-9]\d+|\d{3,}):version\{[a-f0-9\-]+\}",
                 "format:vpcf63:version{a6e6a69e-52d3-4527-8b9c-ff3bb91aca3e}");
 
-            // 0b. Sanear propiedades exclusivas de Deadlock vpcf61+ que causan [FAIL] en bin_cs2/resourcecompiler.exe (ej. explode_warp, explode_elec)
             string[] incompatibleCs2Keys = new[]
             {
                 @"^\s*m_NamedValue\s*=\s*""""\s*\r?\n",
@@ -2297,7 +3265,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
 
             if (string.IsNullOrEmpty(kv3Text) || ov == null) return kv3Text;
 
-            // 1. Asegurar que m_ForceGenerators = [  ] esté presente (como en los .vpcf_c vanilla)
             if (!kv3Text.Contains("m_ForceGenerators"))
             {
                 int renderersIdx = kv3Text.IndexOf("m_Renderers", StringComparison.Ordinal);
@@ -2307,7 +3274,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 2. Si el usuario ocultó este emisor (Visible = false), ponemos m_nMaxParticles = 0
             if (!ov.Visible)
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(kv3Text, @"m_nMaxParticles\s*=\s*\d+"))
@@ -2322,7 +3288,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-           // 3a. m_ConstantColor + AlphaScale
             if (ov.TintColorRgba != null && ov.TintColorRgba.Length >= 3)
             {
                 int r = Math.Clamp((int)MathF.Round(ov.TintColorRgba[0] * 255f), 0, 255);
@@ -2346,7 +3311,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 3b. C_INIT_RandomColor: m_ColorMin y m_ColorMax independientes!
             if (ov.HasRandomColor && kv3Text.Contains("C_INIT_RandomColor"))
             {
                 if (ov.ColorMinRgb != null && ov.ColorMinRgb.Length >= 3)
@@ -2365,7 +3329,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 }
             }
 
-            // 3c. C_OP_ColorInterpolate: m_ColorFade independiente!
             if (ov.HasColorFade && ov.ColorFadeRgb != null && ov.ColorFadeRgb.Length >= 3 && kv3Text.Contains("C_OP_ColorInterpolate"))
             {
                 int rFade = Math.Clamp((int)MathF.Round(ov.ColorFadeRgb[0] * 255f), 0, 255);
@@ -2374,7 +3337,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                 kv3Text = System.Text.RegularExpressions.Regex.Replace(kv3Text, @"m_ColorFade\s*=\s*\[[^\]]*\]", $"m_ColorFade = [ {rFade}, {gFade}, {bFade} ]");
             }
 
-            // 4. Si cambió SizeScale, escalamos m_flConstantRadius e inyectamos/escalamos m_flRadiusScale en el Renderer
             if (Math.Abs(ov.SizeScale - 1.0f) > 0.01f)
             {
                 string scaleStr = ov.SizeScale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
@@ -2394,7 +3356,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
                         kv3Text = kv3Text.Insert(braceIdx + 1, $"\n\tm_flConstantRadius = {(5.0f * ov.SizeScale).ToString("F4", System.Globalization.CultureInfo.InvariantCulture)}");
                 }
 
-                // Inyectar m_flRadiusScale en el primer Renderer si no lo tiene, para que escale incluso cuando C_INIT_InitFloat pisa el radio
                 if (!kv3Text.Contains("m_flRadiusScale"))
                 {
                     kv3Text = System.Text.RegularExpressions.Regex.Replace(
@@ -2499,9 +3460,6 @@ $@"<!-- dmx encoding keyvalues2_noids 1 format vtex 1 -->
             return null;
         }
 
-        // =========================================================================
-        // Legacy Compatibility Methods
-        // =========================================================================
         public SkinExportResult ExportFlattenedPng(string filePath)
         {
             var result = new SkinExportResult();

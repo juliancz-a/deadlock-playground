@@ -6,15 +6,15 @@
 [ext_resource type="Texture2D" uid="uid://cx76yxkrqaobj" path="res://assets/icons/discord.svg" id="4_discord"]
 
 [node name="FeedbackDialog" type="PanelContainer" unique_id=1396289943]
-custom_minimum_size = Vector2(560, 380)
+custom_minimum_size = Vector2(580, 380)
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -280.0
+offset_left = -290.0
 offset_top = -190.0
-offset_right = 280.0
+offset_right = 290.0
 offset_bottom = 190.0
 grow_horizontal = 2
 grow_vertical = 2
@@ -40,12 +40,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"TitleLabel"
 text = "Feedback & Support"
+autowrap_mode = 3
 
 [node name="BtnClose" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1382346590]
 custom_minimum_size = Vector2(32, 28)
 layout_mode = 2
 tooltip_text = "Close"
-text = "✕"
+text = "X"
 flat = true
 
 [node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1776500648]
@@ -53,10 +54,9 @@ layout_mode = 2
 
 [node name="DescLabel" type="Label" parent="MarginContainer/VBoxContainer" unique_id=864404638]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.86, 0.9, 1)
-theme_override_font_sizes/font_size = 13
+theme_type_variation = &"BodyLabel"
 text = "Do you want to contribute to the project or need help with something?"
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="ContentBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=906346999]
 layout_mode = 2
@@ -92,18 +92,18 @@ alignment = 1
 
 [node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/VBox" unique_id=2054632920]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
-theme_override_font_sizes/font_size = 15
+theme_type_variation = &"SectionHeaderLabel"
 text = "Source Code & Contributions"
+autowrap_mode = 3
 
 [node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox/VBox" unique_id=1823734923]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.78, 0.86, 1)
-theme_override_font_sizes/font_size = 13
+theme_type_variation = &"MutedLabel"
 text = "Report issues, propose features, or view pull requests on GitHub"
+autowrap_mode = 3
 
 [node name="BtnGithub" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/GithubCard/HBox" unique_id=627695329]
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(150, 36)
 layout_mode = 2
 size_flags_vertical = 4
 text = "GitHub Repository"
@@ -141,25 +141,25 @@ alignment = 1
 
 [node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1527859074]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.92, 0.93, 0.96, 1)
-theme_override_font_sizes/font_size = 15
+theme_type_variation = &"SectionHeaderLabel"
 text = "My Discord"
+autowrap_mode = 3
 
 [node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=808491072]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.78, 0.86, 1)
-theme_override_font_sizes/font_size = 13
+theme_type_variation = &"MutedLabel"
 text = "Username: juliancz_"
+autowrap_mode = 3
 
 [node name="LblDiscordCopied" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1080933265]
 visible = false
 layout_mode = 2
-theme_override_colors/font_color = Color(0.4, 0.85, 0.5, 1)
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"BadgeLabelSuccess"
 text = "Username copied to clipboard!"
+autowrap_mode = 3
 
 [node name="BtnCopyDiscord" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=457214055]
-custom_minimum_size = Vector2(140, 32)
+custom_minimum_size = Vector2(150, 36)
 layout_mode = 2
 size_flags_vertical = 4
 text = "Copy Username"
@@ -173,6 +173,6 @@ layout_mode = 2
 alignment = 2
 
 [node name="BtnBottomClose" type="Button" parent="MarginContainer/VBoxContainer/BottomBar" unique_id=329625260]
-custom_minimum_size = Vector2(100, 28)
+custom_minimum_size = Vector2(110, 32)
 layout_mode = 2
 text = "Close"

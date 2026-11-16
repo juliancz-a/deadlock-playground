@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DeadlockPlayground.Catalog;
-using SteamDatabase.ValvePak;
+using ValvePak;
 namespace DeadlockPlayground.UI;
 
 /// <summary>
@@ -56,24 +56,7 @@ public partial class ExtraModelPickerModalUI : PanelContainer
 
     private void BuildModalLayout()
     {
-        var mainStyle = new StyleBoxFlat
-        {
-            BgColor = new Color(0.09f, 0.11f, 0.14f, 0.98f),
-            CornerRadiusTopLeft = 10,
-            CornerRadiusTopRight = 10,
-            CornerRadiusBottomLeft = 10,
-            CornerRadiusBottomRight = 10,
-            BorderWidthLeft = 1,
-            BorderWidthRight = 1,
-            BorderWidthTop = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.26f, 0.32f, 0.42f, 0.8f),
-            ContentMarginLeft = 20,
-            ContentMarginRight = 20,
-            ContentMarginTop = 16,
-            ContentMarginBottom = 16
-        };
-        AddThemeStyleboxOverride("panel", mainStyle);
+        ThemeTypeVariation = "ModalPanel";
 
         var rootVbox = new VBoxContainer
         {
@@ -91,11 +74,9 @@ public partial class ExtraModelPickerModalUI : PanelContainer
         _lblTitle = new Label
         {
             Text = "HERO ABILITY & EXTRA MODELS",
-            ThemeTypeVariation = "TitleLabel",
+            ThemeTypeVariation = "ModalTitleLabel",
             SizeFlagsHorizontal = SizeFlags.ShrinkBegin
         };
-        _lblTitle.AddThemeFontSizeOverride("font_size", 16);
-        _lblTitle.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.35f, 1.0f));
         header.AddChild(_lblTitle);
 
         _searchBar = new LineEdit
@@ -147,16 +128,16 @@ public partial class ExtraModelPickerModalUI : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
-            MaxLinesVisible = 2
+            MaxLinesVisible = 2,
+            ThemeTypeVariation = "BodyLabel"
         };
-        _lblSelectedInfo.AddThemeFontSizeOverride("font_size", 14);
-        _lblSelectedInfo.AddThemeColorOverride("font_color", new Color(0.85f, 0.88f, 0.94f, 1.0f));
         footer.AddChild(_lblSelectedInfo);
 
         _btnCancel = new Button
         {
             Text = "Cancel",
-            CustomMinimumSize = new Vector2(90, 32)
+            CustomMinimumSize = new Vector2(90, 32),
+            ThemeTypeVariation = "SecondaryButton"
         };
         footer.AddChild(_btnCancel);
 
@@ -164,9 +145,9 @@ public partial class ExtraModelPickerModalUI : PanelContainer
         {
             Text = "Load Model",
             CustomMinimumSize = new Vector2(130, 32),
-            Disabled = true
+            Disabled = true,
+            ThemeTypeVariation = "PrimaryActionButton"
         };
-        _btnSelect.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.35f, 1.0f));
         footer.AddChild(_btnSelect);
     }
 

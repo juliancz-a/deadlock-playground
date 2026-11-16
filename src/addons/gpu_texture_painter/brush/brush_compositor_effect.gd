@@ -365,7 +365,7 @@ func _render_callback(p_effect_callback_type: EffectCallbackType, p_render_data:
 			float(center.x),
 			float(center.y),
 			float(base_brush_radius),
-			float(0.0)
+			float(camera_brush.alpha_flags if "alpha_flags" in camera_brush else 0)
 		])
 
 

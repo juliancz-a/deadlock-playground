@@ -500,13 +500,10 @@ public partial class StudioUIManager : CanvasLayer
                 Name = "ModChangesButton",
                 Text = "MOD CHANGES",
                 TooltipText = "View and manage staged mod changes across heroes, extra models, and VFX",
-                CustomMinimumSize = new Vector2(110, 28),
-                FocusMode = Control.FocusModeEnum.None
+                CustomMinimumSize = new Vector2(124, 30),
+                FocusMode = Control.FocusModeEnum.None,
+                ThemeTypeVariation = "ToolbarButton"
             };
-            PlaygroundThemeHelper.MakeSecondaryButton(_btnModChanges);
-            var colus = PlaygroundThemeHelper.GetFontColus();
-            if (colus != null) _btnModChanges.AddThemeFontOverride("font", colus);
-            _btnModChanges.AddThemeFontSizeOverride("font_size", 12);
             _btnModChanges.Pressed += OpenModChangesModal;
 
             if (_btnNews != null && _btnNews.GetParent() == topBarHBox)
@@ -1067,6 +1064,7 @@ public partial class StudioUIManager : CanvasLayer
         if (prevTab == 8 && tabIndex != 8)
         {
             _tabPaint?.OnTabDeactivated();
+            _tabCharacter?.SyncSubmeshVisibilityFromScene();
             if (_paintModExportPanel != null) _paintModExportPanel.Visible = false;
             var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as DeadlockPlayground.Particles.ParticleStage3D;
             bool hasActiveParticle = stage != null && stage.HasActiveParticle;
@@ -1170,6 +1168,10 @@ public partial class StudioUIManager : CanvasLayer
         else if (tabIndex == 6)
         {
             _tabLighting?.SyncUIToScene();
+        }
+        if (tabIndex == 0 && prevTab != 8)
+        {
+            _tabCharacter?.SyncSubmeshVisibilityFromScene();
         }
         if (tabIndex != 8 && _currentSkeletonGizmoManager != null && GodotObject.IsInstanceValid(_currentSkeletonGizmoManager))
         {
@@ -1692,7 +1694,11 @@ public partial class StudioUIManager : CanvasLayer
             _loadingLogHistory.Clear();
             if (_loadingLogLabel != null) _loadingLogLabel.Text = "Initializing load...";
         }
-        if (_loadingOverlay != null) _loadingOverlay.Visible = show;
+        if (_loadingOverlay != null)
+        {
+            _loadingOverlay.Visible = show;
+            if (show) _loadingOverlay.MoveToFront();
+        }
         if (_loadingLabel != null && message != null) _loadingLabel.Text = message;
         UpdateModalsState();
     }
@@ -2011,28 +2017,12 @@ public partial class StudioUIManager : CanvasLayer
             {
                 Name = "UnsavedChangesModal",
                 Visible = false,
-                CustomMinimumSize = new Vector2(500, 220)
+                CustomMinimumSize = new Vector2(500, 220),
+                ThemeTypeVariation = "ModalPanel"
             };
             _unsavedChangesModal.SetAnchorsPreset(Control.LayoutPreset.Center);
             _unsavedChangesModal.GrowHorizontal = Control.GrowDirection.Both;
             _unsavedChangesModal.GrowVertical = Control.GrowDirection.Both;
-
-            var panelStyle = new StyleBoxFlat
-            {
-                BgColor = new Color(0.10f, 0.12f, 0.16f, 0.98f),
-                BorderWidthBottom = 2,
-                BorderWidthLeft = 2,
-                BorderWidthRight = 2,
-                BorderWidthTop = 2,
-                BorderColor = new Color(0.95f, 0.75f, 0.30f, 0.9f),
-                CornerRadiusBottomLeft = 8,
-                CornerRadiusBottomRight = 8,
-                CornerRadiusTopLeft = 8,
-                CornerRadiusTopRight = 8,
-                ShadowColor = new Color(0, 0, 0, 0.6f),
-                ShadowSize = 16
-            };
-            _unsavedChangesModal.AddThemeStyleboxOverride("panel", panelStyle);
 
             var margin = new MarginContainer();
             margin.AddThemeConstantOverride("margin_left", 24);
@@ -2045,15 +2035,11 @@ public partial class StudioUIManager : CanvasLayer
             vbox.AddThemeConstantOverride("separation", 14);
             margin.AddChild(vbox);
 
-            var colus = PlaygroundThemeHelper.GetFontColus();
-
             var titleLbl = new Label
             {
                 Text = "UNSAVED WORKSPACE CHANGES",
-                Modulate = new Color(0.95f, 0.75f, 0.30f)
+                ThemeTypeVariation = "ModalTitleLabel"
             };
-            if (colus != null) titleLbl.AddThemeFontOverride("font", colus);
-            titleLbl.AddThemeFontSizeOverride("font_size", 16);
             vbox.AddChild(titleLbl);
 
             int assetCount = ModWorkspaceSession.Instance.GetAllModifiedAssets().Count;
@@ -2061,9 +2047,9 @@ public partial class StudioUIManager : CanvasLayer
             {
                 Text = $"You have {assetCount} modified asset(s) staged in your current workspace session.\nDo you want to save your project (.dlproj) before exiting?",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart,
-                SizeFlagsVertical = Control.SizeFlags.ExpandFill
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                ThemeTypeVariation = "BodyLabel"
             };
-            bodyLbl.AddThemeFontSizeOverride("font_size", 12);
             vbox.AddChild(bodyLbl);
 
             var btnRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Alignment = BoxContainer.AlignmentMode.End };
@@ -2213,27 +2199,12 @@ public partial class StudioUIManager : CanvasLayer
     #region Update Notification System
     private void CreateUpdateNotificationUI()
     {
-        _updateNotificationPanel = new PanelContainer();
-        _updateNotificationPanel.Visible = false;
-        _updateNotificationPanel.CustomMinimumSize = new Vector2(460, 0);
-
-        var bgStyle = new StyleBoxFlat
+        _updateNotificationPanel = new PanelContainer
         {
-            BgColor = new Color(0.12f, 0.16f, 0.15f, 0.96f),
-            BorderColor = PlaygroundThemeHelper.SageGreen,
-            BorderWidthLeft = 2,
-            BorderWidthTop = 2,
-            BorderWidthRight = 2,
-            BorderWidthBottom = 2,
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8,
-            ShadowColor = new Color(0, 0, 0, 0.45f),
-            ShadowSize = 8,
-            ShadowOffset = new Vector2(0, 4)
+            Visible = false,
+            CustomMinimumSize = new Vector2(460, 0),
+            ThemeTypeVariation = "CardPanel"
         };
-        _updateNotificationPanel.AddThemeStyleboxOverride("panel", bgStyle);
 
         var margin = new MarginContainer();
         margin.AddThemeConstantOverride("margin_left", 16);
@@ -2268,17 +2239,15 @@ public partial class StudioUIManager : CanvasLayer
 
         _updateNotificationTitle = new Label
         {
-            Text = "Update Available"
+            Text = "Update Available",
+            ThemeTypeVariation = "HeaderLabel"
         };
-        PlaygroundThemeHelper.MakeHeaderLabel(_updateNotificationTitle);
-        _updateNotificationTitle.AddThemeFontSizeOverride("font_size", 14);
 
         _updateNotificationDetails = new Label
         {
-            Text = "New version available"
+            Text = "New version available",
+            ThemeTypeVariation = "MutedLabel"
         };
-        PlaygroundThemeHelper.MakeMutedLabel(_updateNotificationDetails);
-        _updateNotificationDetails.AddThemeFontSizeOverride("font_size", 12);
 
         _updateProgressBar = new ProgressBar
         {

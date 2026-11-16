@@ -8,6 +8,7 @@ Automated release pipeline orchestrator for:
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -322,6 +323,103 @@ def package_folder_to_zip(folder_path, output_zip_path, progress_callback=None):
                 
     return output_zip_path
 
+def highlights_to_markdown(highlights):
+    """Converts a list of highlight/note lines into clean Markdown, preserving headers, separators, blockquotes, and nested bullets."""
+    if not highlights:
+        return ""
+
+    out_lines = []
+    for raw in highlights:
+        if raw is None:
+            continue
+        line = raw.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            if out_lines and out_lines[-1] != "":
+                out_lines.append("")
+            continue
+
+        # Markdown headers (# through ######)
+        if re.match(r'^#{1,6}\s+', stripped):
+            if out_lines and out_lines[-1] != "":
+                out_lines.append("")
+            out_lines.append(stripped)
+            continue
+
+        # Horizontal rules / separators (---, ***, ___, ===)
+        if re.match(r'^(?:-{3,}|\*{3,}|_{3,}|={3,})$', stripped):
+            if out_lines and out_lines[-1] != "":
+                out_lines.append("")
+            out_lines.append("---")
+            out_lines.append("")
+            continue
+
+        # Blockquotes (> ...)
+        if stripped.startswith("> ") or stripped == ">":
+            out_lines.append(stripped)
+            continue
+
+        # Numbered lists (1. item)
+        if re.match(r'^\d+\.\s+', stripped):
+            indent = line[:len(line) - len(line.lstrip())]
+            out_lines.append(f"{indent}{stripped}")
+            continue
+
+        # Indented sub-bullets (  - item,   * item, etc.)
+        sub_match = re.match(r'^(\s{2,}|\t+)[-*•+]\s+(.+)$', line)
+        if sub_match:
+            out_lines.append(f"  - {sub_match.group(2).strip()}")
+            continue
+
+        # Top-level bullet or plain line
+        clean = re.sub(r'^[-*•+→]\s+', '', stripped)
+        out_lines.append(f"* {clean}")
+
+    while out_lines and out_lines[-1] == "":
+        out_lines.pop()
+
+    return "\n".join(out_lines)
+
+
+def highlights_to_plain_text(highlights):
+    """Formats highlight/note lines cleanly for GameBanana plain-text/BBCode-friendly paste."""
+    if not highlights:
+        return ""
+
+    out_lines = []
+    for raw in highlights:
+        if raw is None:
+            continue
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            if out_lines and out_lines[-1] != "":
+                out_lines.append("")
+            continue
+
+        header_match = re.match(r'^#{1,6}\s+(.+)$', stripped)
+        if header_match:
+            if out_lines and out_lines[-1] != "":
+                out_lines.append("")
+            out_lines.append(f"── {header_match.group(1).strip()} ──")
+            continue
+
+        if re.match(r'^(?:-{3,}|\*{3,}|_{3,}|={3,})$', stripped):
+            out_lines.append("----------------------------------------")
+            continue
+
+        sub_match = re.match(r'^(\s{2,}|\t+)[-*•+]\s+(.+)$', line)
+        if sub_match:
+            out_lines.append(f"  ◦ {sub_match.group(2).strip()}")
+            continue
+
+        clean = re.sub(r'^[-*•+→]\s+', '', stripped)
+        out_lines.append(f"• {clean}")
+
+    return "\n".join(out_lines)
+
+
 # ==============================================================================
 # PIPELINE WORKER EXECUTION
 # ==============================================================================
@@ -411,7 +509,8 @@ def execute_pipeline(payload):
             badge_title = "Pre-Release" if is_prerelease else "Latest Release"
             badge_color = "slate" if is_prerelease else "gold"
             
-            # Format history item
+            # Format history item (preserve Markdown headers, separators, blockquotes, and indented sub-bullets)
+            clean_highlights = [h.rstrip() for h in highlights if h and h.strip()]
             new_history_item = {
                 "version": version,
                 "date": date_str,
@@ -419,7 +518,7 @@ def execute_pipeline(payload):
                 "badge": badge_title,
                 "badgeType": badge_color,
                 "videoUrl": "",
-                "highlights": [h.strip() for h in highlights if h.strip()]
+                "highlights": clean_highlights
             }
             
             history = changelog_data.get("history", [])
@@ -432,7 +531,7 @@ def execute_pipeline(payload):
                 changelog_data["latestVersion"] = version
                 changelog_data["publishedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 changelog_data["title"] = full_title
-                changelog_data["markdown"] = markdown or f"### {full_title}\n\n" + "\n".join(f"* {h}" for h in highlights)
+                changelog_data["markdown"] = markdown or (f"### {full_title}\n\n" + highlights_to_markdown(clean_highlights))
                     
             history.insert(0, new_history_item)
             changelog_data["history"] = history
@@ -512,7 +611,7 @@ def execute_pipeline(payload):
             repo = config.get("repo_name", "deadlock-playground")
             api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
             
-            body_content = markdown if markdown else f"### Version {version} — {title}\n\n" + "\n".join(f"* {h}" for h in highlights)
+            body_content = markdown if markdown else (f"### Version {version} — {title}\n\n" + highlights_to_markdown(highlights))
             if sha256_hash:
                 body_content += f"\n\n---\n**Binary Verification:**\n* File: `{os.path.basename(final_archive)}`\n* SHA-256: `{sha256_hash}`"
                 
@@ -601,10 +700,10 @@ def execute_pipeline(payload):
             log_info("[Step 6/6] Launching GameBanana Release Assistant...", step=6, progress=95)
             # 1. Format text for GameBanana
             gb_text = f"Version {version} — {title}\n\n"
-            if highlights:
-                gb_text += "Highlights:\n" + "\n".join(f"• {h}" for h in highlights) + "\n\n"
             if markdown:
                 gb_text += markdown
+            elif highlights:
+                gb_text += highlights_to_plain_text(highlights)
                 
             # 2. Copy to clipboard
             if copy_to_clipboard(gb_text):

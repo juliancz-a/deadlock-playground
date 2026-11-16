@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using DeadlockPlayground.Catalog;
 using DeadlockPlayground.Particles.Models;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 
 namespace DeadlockPlayground.Particles;
 

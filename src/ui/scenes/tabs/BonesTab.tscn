@@ -111,6 +111,12 @@ layout_mode = 2
 button_pressed = false
 text = "Wireframe Lines"
 
+[node name="CheckLocalSpace" type="CheckBox" parent="XRayGroup" unique_id=963887858]
+layout_mode = 2
+tooltip_text = "Orient the 3D bone gizmo along each bone's own local axes instead of global world axes (L)"
+button_pressed = false
+text = "Local Bone Axes Gizmo (L)"
+
 [node name="HSeparatorIK" type="HSeparator" parent="." unique_id=1982736450]
 layout_mode = 2
 

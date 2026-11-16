@@ -96,7 +96,7 @@ public partial class ChangelogModalUI : PanelContainer
         if (_statusBadge != null)
         {
             _statusBadge.Text = "Checking...";
-            _statusBadge.AddThemeColorOverride("font_color", new Color(0.95f, 0.75f, 0.2f, 1f));
+            _statusBadge.ThemeTypeVariation = "BadgeLabelWarning";
         }
 
         try
@@ -140,17 +140,17 @@ public partial class ChangelogModalUI : PanelContainer
                     if (payload.IsFromRemote)
                     {
                         _statusBadge.Text = $"{_activeVersion} • Online";
-                        _statusBadge.AddThemeColorOverride("font_color", new Color(0.45f, 0.75f, 0.55f, 1f));
+                        _statusBadge.ThemeTypeVariation = "BadgeLabelSuccess";
                     }
                     else if (payload.IsFromCache)
                     {
                         _statusBadge.Text = $"{_activeVersion} • Cached";
-                        _statusBadge.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f, 0.8f));
+                        _statusBadge.ThemeTypeVariation = "MutedLabel";
                     }
                     else
                     {
                         _statusBadge.Text = $"{_activeVersion} • Offline";
-                        _statusBadge.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                        _statusBadge.ThemeTypeVariation = "MutedLabel";
                     }
                 }
 
@@ -169,7 +169,7 @@ public partial class ChangelogModalUI : PanelContainer
             if (_statusBadge != null)
             {
                 _statusBadge.Text = $"{_activeVersion} • Offline";
-                _statusBadge.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                _statusBadge.ThemeTypeVariation = "MutedLabel";
             }
         }
         finally
@@ -189,27 +189,162 @@ public partial class ChangelogModalUI : PanelContainer
     public static string ConvertMarkdownToBbcode(string markdown)
     {
         if (string.IsNullOrEmpty(markdown)) return "";
-        string bb = markdown;
 
-        // Headers
-        bb = Regex.Replace(bb, @"^###\s+(.+)$", "[font_size=18][b][color=#F59E0B]$1[/color][/b][/font_size]\n", RegexOptions.Multiline);
-        bb = Regex.Replace(bb, @"^####\s+(.+)$", "[font_size=15][b][color=#E0E7FF]$1[/color][/b][/font_size]", RegexOptions.Multiline);
+        string normalized = markdown.Replace("\r\n", "\n").Replace("\r", "\n");
+        string[] lines = normalized.Split('\n');
+        var sb = new System.Text.StringBuilder();
+        bool inCodeBlock = false;
 
-        // Bold & Italic
-        bb = Regex.Replace(bb, @"\*\*(.+?)\*\*", "[b]$1[/b]");
-        bb = Regex.Replace(bb, @"\*(.+?)\*", "[i]$1[/i]");
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i];
+            string trimmed = line.Trim();
 
-        // Inline Code
-        bb = Regex.Replace(bb, @"`(.+?)`", "[color=#A5B4FC][code]$1[/code][/color]");
+            // Fenced code blocks (```)
+            if (trimmed.StartsWith("```", StringComparison.Ordinal))
+            {
+                if (!inCodeBlock)
+                {
+                    inCodeBlock = true;
+                    sb.Append("[color=#A5B4FC][code]");
+                }
+                else
+                {
+                    inCodeBlock = false;
+                    sb.AppendLine("[/code][/color]");
+                }
+                continue;
+            }
 
-        // Bullet points
-        bb = Regex.Replace(bb, @"^(\s*)\*\s+", "$1• ", RegexOptions.Multiline);
-        bb = Regex.Replace(bb, @"^(\s*)-\s+", "$1  - ", RegexOptions.Multiline);
+            if (inCodeBlock)
+            {
+                sb.AppendLine(line);
+                continue;
+            }
+
+            // Blank line
+            if (trimmed.Length == 0)
+            {
+                sb.AppendLine();
+                continue;
+            }
+
+            // Gracefully unwrap accidental "* ## Header" or "- ---"
+            string unwrapped = Regex.Replace(trimmed, @"^[-*•]\s+(?=(?:#{1,6}\s+|(?:---+|===+|\*\*\*+|___+)$))", "");
+
+            // Horizontal rule / separator (---, ***, ___, ===)
+            if (Regex.IsMatch(unwrapped, @"^(?:-{3,}|={3,}|\*{3,}|_{3,})$"))
+            {
+                sb.AppendLine("[color=#3D524A]──────────────────────────────────────────────────[/color]");
+                continue;
+            }
+
+            // Headers (# to ######)
+            var headerMatch = Regex.Match(unwrapped, @"^(#{1,6})\s+(.+)$");
+            if (headerMatch.Success)
+            {
+                int level = headerMatch.Groups[1].Value.Length;
+                string title = FormatInlineMarkdownToBbcode(headerMatch.Groups[2].Value.Trim());
+                string formattedHeader = level switch
+                {
+                    1 => $"[font_size=21][b][color=#EFDEBF]{title}[/color][/b][/font_size]",
+                    2 => $"[font_size=18][b][color=#F59E0B]{title}[/color][/b][/font_size]",
+                    3 => $"[font_size=16][b][color=#F59E0B]{title}[/color][/b][/font_size]",
+                    4 => $"[font_size=14][b][color=#E0E7FF]{title}[/color][/b][/font_size]",
+                    _ => $"[font_size=13][b][color=#94A3B8]{title}[/color][/b][/font_size]"
+                };
+                sb.AppendLine(formattedHeader);
+                continue;
+            }
+
+            // Blockquote (> ...)
+            var quoteMatch = Regex.Match(trimmed, @"^>\s?(.*)$");
+            if (quoteMatch.Success)
+            {
+                string quoteText = FormatInlineMarkdownToBbcode(quoteMatch.Groups[1].Value);
+                sb.AppendLine($"[color=#94A3B8][i]│ {quoteText}[/i][/color]");
+                continue;
+            }
+
+            // Ordered list (1. item)
+            var orderedMatch = Regex.Match(line, @"^(\s*)(\d+)\.\s+(.+)$");
+            if (orderedMatch.Success)
+            {
+                int indentSpaces = orderedMatch.Groups[1].Value.Replace("\t", "  ").Length;
+                string indent = indentSpaces >= 2 ? new string(' ', Math.Min(indentSpaces, 8)) : "";
+                string num = orderedMatch.Groups[2].Value;
+                string itemText = FormatInlineMarkdownToBbcode(orderedMatch.Groups[3].Value);
+                sb.AppendLine($"{indent}[color=#F59E0B]{num}.[/color] {itemText}");
+                continue;
+            }
+
+            // Unordered list (*, -, +, •)
+            var bulletMatch = Regex.Match(line, @"^(\s*)[-*+•]\s+(.+)$");
+            if (bulletMatch.Success)
+            {
+                int indentSpaces = bulletMatch.Groups[1].Value.Replace("\t", "  ").Length;
+                string itemText = FormatInlineMarkdownToBbcode(bulletMatch.Groups[2].Value);
+                if (indentSpaces >= 2)
+                {
+                    string indent = new string(' ', Math.Min(indentSpaces + 2, 10));
+                    sb.AppendLine($"{indent}[color=#94A3B8]◦[/color] {itemText}");
+                }
+                else
+                {
+                    sb.AppendLine($"[color=#72947F]•[/color] {itemText}");
+                }
+                continue;
+            }
+
+            // Regular paragraph line
+            sb.AppendLine(FormatInlineMarkdownToBbcode(line));
+        }
+
+        if (inCodeBlock)
+        {
+            sb.Append("[/code][/color]");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string FormatInlineMarkdownToBbcode(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+
+        // Protect inline code spans so *, _, [, ] inside `code` are not parsed as formatting
+        var codeSpans = new System.Collections.Generic.List<string>();
+        string result = Regex.Replace(text, @"`([^`]+?)`", m =>
+        {
+            int idx = codeSpans.Count;
+            codeSpans.Add($"[color=#A5B4FC][code]{m.Groups[1].Value}[/code][/color]");
+            return $"\u0000CODE{idx}\u0000";
+        });
 
         // Links [text](url)
-        bb = Regex.Replace(bb, @"\[(.*?)\]\((.*?)\)", "[url=$2][color=#60A5FA]$1[/color][/url]");
+        result = Regex.Replace(result, @"\[([^\]]+?)\]\(([^)]+?)\)", "[url=$2][color=#60A5FA]$1[/color][/url]");
 
-        return bb;
+        // Bold + Italic (***text***)
+        result = Regex.Replace(result, @"\*\*\*(.+?)\*\*\*", "[b][i]$1[/i][/b]");
+
+        // Bold (**text** or __text__)
+        result = Regex.Replace(result, @"\*\*(.+?)\*\*", "[b]$1[/b]");
+        result = Regex.Replace(result, @"(?<!\w)__(.+?)__(?!\w)", "[b]$1[/b]");
+
+        // Italic (*text* or _text_ bounded by non-word chars to preserve snake_case)
+        result = Regex.Replace(result, @"\*(.+?)\*", "[i]$1[/i]");
+        result = Regex.Replace(result, @"(?<!\w)_(.+?)_(?!\w)", "[i]$1[/i]");
+
+        // Strikethrough (~~text~~)
+        result = Regex.Replace(result, @"~~(.+?)~~", "[s]$1[/s]");
+
+        // Restore inline code spans
+        for (int i = 0; i < codeSpans.Count; i++)
+        {
+            result = result.Replace($"\u0000CODE{i}\u0000", codeSpans[i]);
+        }
+
+        return result;
     }
 
     private void OnWebsiteClicked()

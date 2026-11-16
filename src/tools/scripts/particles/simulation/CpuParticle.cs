@@ -16,15 +16,37 @@ public unsafe struct CpuParticle
     public Vector3 OffsetFromCP; // Local offset retained for PositionLock
     public float Radius;
     public float BaseRadius;
+    public Vector3 Normal;
     public Color Color;
     public Color InitialColor;
     public float Alpha;
+    public float AlphaAlternate;
     public float Lifetime;
     public float Age;
-    public float Rotation; // Radians
+    public float Rotation; // Radians (Roll)
     public float RotationalVelocity;
+    public float Pitch; // Radians
+    public float Yaw;   // Radians
+    public float Roll;  // Radians
+    public float TrailLength;
+    public float ShaderExtraData1;
+    public float ShaderExtraData2;
     public int SequenceIndex;
+    public int SequenceIndex1;
+    public int ParticleId;
     public bool IsAlive;
+
+    public Vector3 EulerRotation
+    {
+        get => new(Pitch, Yaw, Roll);
+        set
+        {
+            Pitch = value.X;
+            Yaw = value.Y;
+            Roll = value.Z;
+            Rotation = value.Z;
+        }
+    }
 
     // Per-particle attribute scratch slots (0..31):
     // 1: Lifetime
@@ -113,15 +135,26 @@ public unsafe struct CpuParticle
         PrevPosition = Vector3.Zero;
         Velocity = Vector3.Zero;
         OffsetFromCP = Vector3.Zero;
+        Normal = Vector3.Up;
         Radius = 0f;
         BaseRadius = 0f;
         Color = Colors.White;
+        InitialColor = Colors.White;
         Alpha = 1f;
+        AlphaAlternate = 1f;
         Lifetime = 1f;
         Age = 0f;
         Rotation = 0f;
         RotationalVelocity = 0f;
+        Pitch = 0f;
+        Yaw = 0f;
+        Roll = 0f;
+        TrailLength = 1f;
+        ShaderExtraData1 = 0f;
+        ShaderExtraData2 = 0f;
         SequenceIndex = 0;
+        SequenceIndex1 = 0;
+        ParticleId = 0;
         IsAlive = false;
 
         fixed (float* p = _fields)

@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Godot;
-using SteamDatabase.ValvePak;
+using ValvePak;
 using ValveResourceFormat;
 using ValveResourceFormat.IO;
 using ValveResourceFormat.ResourceTypes;
@@ -475,7 +475,17 @@ namespace DeadlockPlayground.Animation
                 if (retargeter != null && secondarySkel != null)
                 {
                     var secFrame = new Frame(secondarySkel, model.FlexControllers);
-                    secFrame.Clear(secondarySkel); secFrame.FrameIndex = fi; info.VrfAnimation.DecodeFrame(secFrame);
+                    if (info.VrfAnimation.IsAdditive)
+                    {
+                        secFrame.ClearToIdentity();
+                        secFrame.FrameIndex = fi;
+                        info.VrfAnimation.DecodeFrame(secFrame);
+                        info.VrfAnimation.ComposeAdditiveOverBindPose(secFrame.Bones, secondarySkel);
+                    }
+                    else
+                    {
+                        secFrame.Clear(secondarySkel); secFrame.FrameIndex = fi; info.VrfAnimation.DecodeFrame(secFrame);
+                    }
                     var modelWorld = new System.Numerics.Matrix4x4[sk.Bones.Length];
                     retargeter.Retarget(secFrame, modelWorld);
                     g = new (System.Numerics.Vector3 P, System.Numerics.Quaternion R)[sk.Bones.Length];

@@ -74,7 +74,7 @@ theme_override_constants/separation = 6
 unique_name_in_owner = true
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_strip")
+theme_type_variation = &"CardPanel"
 
 [node name="Margin" type="MarginContainer" parent="MainVBox/HBoxContainer/ToolStripPanel" unique_id=522786279]
 layout_mode = 2
@@ -92,7 +92,7 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(32, 18)
 layout_mode = 2
 tooltip_text = "Drag Toolbar"
-text = "⋮⋮"
+text = "::"
 flat = true
 
 [node name="BtnSelect" type="Button" parent="MainVBox/HBoxContainer/ToolStripPanel/Margin/ToolButtons" unique_id=1004956251]
@@ -267,15 +267,15 @@ layout_mode = 2
 tooltip_text = "Pin Options Panel"
 toggle_mode = true
 button_pressed = true
-theme_override_font_sizes/font_size = 9
-text = "PIN"
+icon_alignment = 1
+expand_icon = true
 
 [node name="FlyoutPanel" type="PanelContainer" parent="MainVBox/HBoxContainer" unique_id=1821101042]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(260, 290)
 layout_mode = 2
 size_flags_vertical = 0
-theme_override_styles/panel = SubResource("StyleBoxFlat_flyout")
+theme_type_variation = &"CardPanel"
 
 [node name="Margin" type="MarginContainer" parent="MainVBox/HBoxContainer/FlyoutPanel" unique_id=716227215]
 layout_mode = 2
@@ -295,17 +295,15 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.9, 0.82, 0.65, 1)
-theme_override_fonts/font = ExtResource("2_colus")
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"SectionHeaderLabel"
 text = "BRUSH OPTIONS"
 
 [node name="BtnCloseFlyout" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/HeaderBar" unique_id=1438122616]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(22, 22)
+custom_minimum_size = Vector2(24, 24)
 layout_mode = 2
 tooltip_text = "Close Options Panel"
-text = "✕"
+text = "X"
 flat = true
 
 [node name="TopToolSettingsBar" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=208194811]
@@ -330,22 +328,16 @@ theme_override_constants/separation = 6
 
 [node name="LblInstructions" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/SelectOptions" unique_id=1809195692]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
-theme_override_font_sizes/font_size = 11
 text = "Click any submesh in the 3D viewport to select it as the active paint target."
 autowrap_mode = 2
 
 [node name="CurrentTargetLabel" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/SelectOptions" unique_id=139360121]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
-theme_override_font_sizes/font_size = 11
 text = "Target: None"
 
 [node name="LblTip" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/SelectOptions" unique_id=1564773587]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
-theme_override_font_sizes/font_size = 10
 text = "Tip: Hold Alt + Click while using any tool to sample/select submesh."
 autowrap_mode = 2
 
@@ -357,15 +349,11 @@ theme_override_constants/separation = 6
 
 [node name="LblEyedropperInstructions" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EyedropperOptions" unique_id=1809195693]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
-theme_override_font_sizes/font_size = 11
 text = "Click anywhere on the character (3D viewport) or 2D UV Canvas to sample the raw material albedo color."
 autowrap_mode = 2
 
 [node name="LblEyedropperTip" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EyedropperOptions" unique_id=1564773588]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.55, 0.58, 0.65, 1)
-theme_override_font_sizes/font_size = 10
 text = "Samples unlit texture data directly, ignoring 3D shadows and lighting."
 autowrap_mode = 2
 
@@ -380,8 +368,6 @@ layout_mode = 2
 [node name="LblBlend" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/BlendRow" unique_id=412836929]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Blend:"
 
 [node name="OptBlendMode" type="OptionButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/BlendRow" unique_id=779345892]
@@ -396,8 +382,6 @@ layout_mode = 2
 [node name="LblShape" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ShapeRow" unique_id=1065053852]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Shape:"
 
 [node name="OptShape" type="OptionButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/ShapeRow" unique_id=270949953]
@@ -412,8 +396,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/SizeRow" unique_id=841202319]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Size:"
 
 [node name="SliderSize" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/SizeRow" unique_id=590535112]
@@ -429,7 +411,6 @@ value = 32.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "32 px"
 horizontal_alignment = 2
 
@@ -439,8 +420,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/FlowRow" unique_id=1687203546]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Flow:"
 
 [node name="SliderFlow" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/FlowRow" unique_id=731096391]
@@ -456,7 +435,6 @@ value = 1.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "100%"
 horizontal_alignment = 2
 
@@ -466,8 +444,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/HardnessRow" unique_id=2106000486]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Hardness:"
 
 [node name="SliderHardness" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BrushOptions/HardnessRow" unique_id=644461803]
@@ -483,7 +459,6 @@ value = 0.5
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "50%"
 horizontal_alignment = 2
 
@@ -499,8 +474,6 @@ layout_mode = 2
 [node name="LblShape" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseShapeRow" unique_id=1452043849]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Shape:"
 
 [node name="OptEraseShape" type="OptionButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseShapeRow" unique_id=173897071]
@@ -515,8 +488,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseSizeRow" unique_id=902256055]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Size:"
 
 [node name="SliderEraseSize" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseSizeRow" unique_id=2058524697]
@@ -532,7 +503,6 @@ value = 32.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "32 px"
 horizontal_alignment = 2
 
@@ -542,8 +512,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseHardnessRow" unique_id=1602955281]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Hardness:"
 
 [node name="SliderEraseHardness" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseHardnessRow" unique_id=327005739]
@@ -559,7 +527,6 @@ value = 0.5
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "50%"
 horizontal_alignment = 2
 
@@ -569,8 +536,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseFlowRow" unique_id=1786336195]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Flow:"
 
 [node name="SliderEraseFlow" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/EraserOptions/EraseFlowRow" unique_id=817255539]
@@ -586,7 +551,6 @@ value = 1.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "100%"
 horizontal_alignment = 2
 
@@ -602,8 +566,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/ToleranceRow" unique_id=1667191255]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Tolerance:"
 
 [node name="SliderBucketTolerance" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/BucketFillOptions/ToleranceRow" unique_id=14395540]
@@ -620,7 +582,6 @@ value = 0.5
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "50%"
 horizontal_alignment = 2
 
@@ -642,8 +603,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/SampledColorRow" unique_id=153065765]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Target:"
 
 [node name="ColorPreview" type="ColorRect" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/SampledColorRow" unique_id=1099380728]
@@ -655,8 +614,6 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.85, 0.85, 0.9, 1)
-theme_override_font_sizes/font_size = 11
 text = "Click mesh to sample"
 
 [node name="ToleranceRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions" unique_id=1918249956]
@@ -665,8 +622,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/ToleranceRow" unique_id=1667191244]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Tolerance:"
 
 [node name="SliderTolerance" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions/ToleranceRow" unique_id=14395538]
@@ -683,7 +638,6 @@ value = 0.15
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "0.150"
 horizontal_alignment = 2
 
@@ -722,8 +676,6 @@ text = "Smooth Edges"
 
 [node name="LblWandHint" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions" unique_id=1204997737]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.55, 0.6, 0.65, 1)
-theme_override_font_sizes/font_size = 10
 text = "Shift+Click: Add | Alt+Click: Subtract"
 
 [node name="BtnClearMask" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/MagicWandOptions" unique_id=1544219745]
@@ -740,8 +692,6 @@ theme_override_constants/separation = 6
 
 [node name="LblSelectionShape" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/SelectionOptions" unique_id=153065799]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.78, 0.85, 1)
-theme_override_font_sizes/font_size = 10
 text = "SELECTION SHAPE"
 
 [node name="HBoxSelectionModes" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/SelectionOptions" unique_id=1468267399]
@@ -797,8 +747,6 @@ expand_icon = true
 
 [node name="LblSelectionHint" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/SelectionOptions" unique_id=1204997799]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.55, 0.6, 0.65, 1)
-theme_override_font_sizes/font_size = 10
 text = "Shift: Add | Alt: Subtract | Esc: Cancel"
 
 [node name="DecalOptions" type="VBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox" unique_id=1925533431]
@@ -829,8 +777,6 @@ layout_mode = 2
 [node name="LblScale" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/ScaleRow" unique_id=590252116]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Scale:"
 
 [node name="SliderDecalScale" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/ScaleRow" unique_id=1730564786]
@@ -847,7 +793,6 @@ value = 0.25
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "0.25x"
 horizontal_alignment = 2
 
@@ -857,8 +802,6 @@ layout_mode = 2
 [node name="LblRot" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/RotRow" unique_id=832821391]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Rotation:"
 
 [node name="SliderDecalRot" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions/RotRow" unique_id=126352894]
@@ -873,8 +816,7 @@ max_value = 180.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "0°"
+text = "0Â°"
 horizontal_alignment = 2
 
 [node name="DecalActionsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/DecalOptions" unique_id=2071959393]
@@ -914,8 +856,6 @@ layout_mode = 2
 [node name="LblText" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextStringRow" unique_id=375352661]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Text:"
 
 [node name="EditText" type="LineEdit" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextStringRow" unique_id=2135338874]
@@ -948,8 +888,6 @@ layout_mode = 2
 [node name="LblSize" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontSizeRow" unique_id=680867415]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Size:"
 
 [node name="SliderFontSize" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/FontSizeRow" unique_id=1606768662]
@@ -965,7 +903,6 @@ value = 64.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "64 px"
 horizontal_alignment = 2
 
@@ -975,8 +912,6 @@ layout_mode = 2
 [node name="LblCol" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextColorRow" unique_id=2129270884]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Color:"
 
 [node name="PickerTextColor" type="ColorPickerButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextColorRow" unique_id=530227921]
@@ -993,8 +928,6 @@ layout_mode = 2
 [node name="LblOutl" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineSizeRow" unique_id=1149907260]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Outline:"
 
 [node name="SliderOutlineSize" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineSizeRow" unique_id=1876146851]
@@ -1009,7 +942,6 @@ value = 4.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "4 px"
 horizontal_alignment = 2
 
@@ -1019,8 +951,6 @@ layout_mode = 2
 [node name="LblOutlCol" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineColorRow" unique_id=2011075442]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Outl Col:"
 
 [node name="PickerOutlineColor" type="ColorPickerButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/OutlineColorRow" unique_id=1018648117]
@@ -1036,8 +966,6 @@ layout_mode = 2
 [node name="LblScale" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextScaleRow" unique_id=1291525002]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Scale:"
 
 [node name="SliderTextScale" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextScaleRow" unique_id=629120126]
@@ -1054,7 +982,6 @@ value = 0.25
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "0.25x"
 horizontal_alignment = 2
 
@@ -1064,8 +991,6 @@ layout_mode = 2
 [node name="LblRot" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextRotRow" unique_id=1344015140]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Rotation:"
 
 [node name="SliderTextRot" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextRotRow" unique_id=1983524316]
@@ -1080,8 +1005,7 @@ max_value = 180.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "0°"
+text = "0Â°"
 horizontal_alignment = 2
 
 [node name="TextFlipRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions" unique_id=1558565140]
@@ -1091,8 +1015,6 @@ theme_override_constants/separation = 8
 [node name="LblFlip" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextFlipRow" unique_id=1344015141]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Flip:"
 
 [node name="BtnFlipH" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/TextOptions/TextFlipRow" unique_id=2081192843]
@@ -1141,8 +1063,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=334467508]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Shape:"
 
 [node name="BtnShapeSquare" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/ShapeTypeRow" unique_id=1305912496]
@@ -1185,8 +1105,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/FillModeRow" unique_id=153065792]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Fill Mode:"
 
 [node name="OptShapeFillMode" type="OptionButton" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/FillModeRow" unique_id=32921818]
@@ -1208,8 +1126,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/StrokeWidthRow" unique_id=153065793]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Stroke W:"
 
 [node name="SliderStrokeWidth" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/StrokeWidthRow" unique_id=14395593]
@@ -1225,7 +1141,6 @@ value = 6.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "6px"
 horizontal_alignment = 2
 
@@ -1239,8 +1154,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeWidthRow" unique_id=153065795]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Width:"
 
 [node name="SliderShapeWidth" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeWidthRow" unique_id=14395595]
@@ -1256,7 +1169,6 @@ value = 250.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "250px"
 horizontal_alignment = 2
 
@@ -1266,8 +1178,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeHeightRow" unique_id=153065796]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Height:"
 
 [node name="SliderShapeHeight" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeHeightRow" unique_id=14395596]
@@ -1283,7 +1193,6 @@ value = 250.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "250px"
 horizontal_alignment = 2
 
@@ -1293,8 +1202,6 @@ layout_mode = 2
 [node name="LblTitle" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeRotRow" unique_id=153065797]
 custom_minimum_size = Vector2(65, 0)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.72, 0.76, 1)
-theme_override_font_sizes/font_size = 11
 text = "Angle:"
 
 [node name="SliderShapeRot" type="HSlider" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions/TransformSection/ShapeRotRow" unique_id=14395597]
@@ -1309,8 +1216,7 @@ max_value = 180.0
 unique_name_in_owner = true
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
-text = "0°"
+text = "0Â°"
 horizontal_alignment = 2
 
 [node name="ShapeActionsRow" type="HBoxContainer" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/ShapeOptions" unique_id=357117981]
@@ -1337,8 +1243,6 @@ theme_override_constants/separation = 6
 
 [node name="LblCloneInstructions" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195711]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.8, 0.82, 0.86, 1)
-theme_override_font_sizes/font_size = 11
 text = "Alt + Left Click in 2D UV Canvas to set the clone source origin point."
 autowrap_mode = 2
 
@@ -1352,14 +1256,11 @@ text = "Sample All Layers"
 [node name="BtnResetCloneSource" type="Button" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195713]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 11
 text = "Reset Clone Source"
 
 [node name="LblCloneStatus" type="Label" parent="MainVBox/HBoxContainer/FlyoutPanel/Margin/VBox/CloneOptions" unique_id=1809195714]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
-theme_override_font_sizes/font_size = 10
 text = "Source: None set (Alt+Click to set)"
 autowrap_mode = 2
 

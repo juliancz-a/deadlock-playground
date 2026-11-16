@@ -8,6 +8,7 @@ render_mode blend_mix, depth_draw_always, cull_disabled, diffuse_burley, specula
 uniform sampler2D overlay_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D active_layer_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D overlay_above_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D base_atlas_texture : hint_default_transparent, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D g_tColor : source_color, filter_linear_mipmap, hint_default_white; // Base diffuse/AO
 uniform sampler2D selection_mask : hint_default_transparent, filter_linear, repeat_disable;
 uniform vec2 position_in_atlas;
@@ -21,6 +22,11 @@ uniform bool front_faces_only = true;
 uniform bool is_paint_target = true;
 uniform bool show_selection_mask = false;
 uniform bool show_stencil_pattern = true;
+uniform bool preserve_base_alpha = true;
+uniform bool has_edited_base_texture = false;
+uniform bool overlay_renders_base_texture = true;
+uniform bool enable_alpha_cutout = false;
+uniform float alpha_cutout_threshold : hint_range(0.0, 1.0) = 0.5;
 
 uniform bool smooth_bicubic = false;
 
@@ -39,8 +45,37 @@ uniform vec3 uv1_scale = vec3(1.0);
 uniform vec3 uv1_offset = vec3(0.0);
 uniform bool use_vertex_color = false;
 
+// Multi-channel interactive inspection & toggles
+uniform sampler2D roughness_texture : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D shadow_tint_texture : source_color, hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D emission_texture : source_color, hint_default_black, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D metallic_texture : hint_default_black, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D mask_preview_texture : hint_default_black, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D channel_color_override_texture : source_color, hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool use_channel_color_override = false;
+uniform bool has_roughness_texture = false;
+uniform bool has_shadow_tint_texture = false;
+uniform bool has_metallic_texture = false;
+uniform bool enable_color_map = true;
+uniform bool enable_ao = true;
+uniform bool enable_normal = true;
+uniform bool enable_roughness = true;
+uniform bool enable_shadow_map = true;
+uniform bool enable_emission = true;
+uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=SelfIllum, 7=Metalness, 8+=Masks
+uniform int active_paint_channel = 0; // 0/1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=SelfIllum, 7=Metalness, 8+=Masks
+
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
+
+vec3 overlay_linear_to_srgb(vec3 c) {
+	vec3 clamped = clamp(c, vec3(0.0), vec3(1.0));
+	return mix(
+		12.92 * clamped,
+		1.055 * pow(clamped, vec3(1.0 / 2.4)) - 0.055,
+		step(vec3(0.0031308), clamped)
+	);
+}
 
 vec3 decode_hemi_octahedron(vec2 e) {
 	vec2 t = e * 2.0 - 1.0;
@@ -190,14 +225,24 @@ vec4 sample_bilinear_smooth(sampler2D tex, vec2 uv, vec2 min_bounds, vec2 max_bo
 	return vec4(rgb, clamp(a, 0.0, 1.0));
 }
 
+vec2 wrap_mesh_uv(vec2 uv) {
+	float wx = (uv.x < 0.0 || uv.x > 1.0) ? fract(uv.x) : uv.x;
+	float wy = (uv.y < 0.0 || uv.y > 1.0) ? fract(uv.y) : uv.y;
+	return vec2(wx, wy);
+}
+
 void vertex() {
 	// Source 2 models in Deadlock often lack a dedicated UV2 stream.
 	// Fall back to primary UV coordinates so each submesh properly samples its allocated rect in the atlas.
 	v_mesh_uv = (length(UV2) > 0.0001) ? UV2 : UV;
-	v_atlas_uv = v_mesh_uv * size_in_atlas + position_in_atlas;
+	v_atlas_uv = wrap_mesh_uv(v_mesh_uv) * size_in_atlas + position_in_atlas;
 }
 
 void fragment() {
+	// Wrap per-fragment so tiled UVs outside [0, 1] (e.g. V in [-1, 0]) map accurately into the [0, 1] paint atlas.
+	vec2 wrapped_mesh_uv = wrap_mesh_uv(v_mesh_uv);
+	vec2 atlas_uv = wrapped_mesh_uv * size_in_atlas + position_in_atlas;
+
 	// Layer 21 (bit index 20) is used by camera brush to capture UVs and depths
 	bool is_camera_brush = (CAMERA_VISIBLE_LAYERS & (1u << uint(20))) != 0u;
 	if (is_camera_brush) {
@@ -224,7 +269,7 @@ void fragment() {
 		ROUGHNESS = 1.0;
 		AO = 1.0;
 		AO_LIGHT_AFFECT = 0.0;
-		EMISSION = vec3(v_atlas_uv - vec2(0.5), b);
+		EMISSION = vec3(atlas_uv - vec2(0.5), b);
 		// Alpha must be strictly 1.0 so the framebuffer data is never blended or scaled by the compositor
 		ALPHA = 1.0;
 	} else {
@@ -232,24 +277,32 @@ void fragment() {
 		vec2 half_texel = vec2(0.5) / vec2(textureSize(overlay_texture, 0));
 		vec2 min_atlas = position_in_atlas + half_texel;
 		vec2 max_atlas = position_in_atlas + size_in_atlas - half_texel;
-		vec2 clamped_uv = clamp(v_atlas_uv, min_atlas, max_atlas);
+		vec2 clamped_uv = clamp(atlas_uv, min_atlas, max_atlas);
 
 		vec4 paint = smooth_bicubic
-			? sample_bicubic_smooth(overlay_texture, v_atlas_uv, min_atlas, max_atlas)
+			? sample_bicubic_smooth(overlay_texture, atlas_uv, min_atlas, max_atlas)
 			: sample_bilinear_smooth(overlay_texture, clamped_uv, min_atlas, max_atlas);
 
 		vec4 active_paint = vec4(0.0);
 		if (active_layer_visible) {
 			active_paint = smooth_bicubic
-				? sample_bicubic_smooth(active_layer_texture, v_atlas_uv, min_atlas, max_atlas)
+				? sample_bicubic_smooth(active_layer_texture, atlas_uv, min_atlas, max_atlas)
 				: sample_bilinear_smooth(active_layer_texture, clamped_uv, min_atlas, max_atlas);
 			active_paint.a *= active_layer_opacity;
 		}
 
+		vec4 base_atlas_sample = use_channel_color_override
+			? texture(channel_color_override_texture, wrapped_mesh_uv)
+			: (has_edited_base_texture
+				? texture(base_atlas_texture, clamped_uv)
+				: texture(g_tColor, wrapped_mesh_uv));
+		vec3 raw_base_rgb = clamp(base_atlas_sample.rgb, vec3(0.0), vec3(1.0));
+		float base_alpha = clamp(base_atlas_sample.a, 0.0, 1.0);
+
 		if (active_paint.a > 0.0001) {
 			vec3 base_color = (paint.a > 0.0001)
-				? mix(texture(g_tColor, v_mesh_uv).rgb, paint.rgb, paint.a)
-				: texture(g_tColor, v_mesh_uv).rgb;
+				? mix(raw_base_rgb, paint.rgb, paint.a)
+				: raw_base_rgb;
 
 			vec3 blended_active = (blend_mode == 0)
 				? active_paint.rgb
@@ -267,7 +320,7 @@ void fragment() {
 		}
 
 		vec4 above_paint = smooth_bicubic
-			? sample_bicubic_smooth(overlay_above_texture, v_atlas_uv, min_atlas, max_atlas)
+			? sample_bicubic_smooth(overlay_above_texture, atlas_uv, min_atlas, max_atlas)
 			: sample_bilinear_smooth(overlay_above_texture, clamped_uv, min_atlas, max_atlas);
 
 		if (above_paint.a > 0.0001) {
@@ -282,9 +335,32 @@ void fragment() {
 			}
 		}
 
-		float final_alpha = clamp(paint.a, 0.0, 1.0);
+		float stroke_alpha = clamp(paint.a, 0.0, 1.0);
+		float eff_paint_a = preserve_base_alpha ? (stroke_alpha * base_alpha) : stroke_alpha;
+		float final_alpha = eff_paint_a;
 		// Straight RGB is preserved accurately by alpha-weighted filtering without division artifacts
 		vec3 final_color = clamp(paint.rgb, vec3(0.0), vec3(1.0));
+
+		if (has_edited_base_texture) {
+			float combined_alpha = (preserve_base_alpha || active_paint_channel > 1)
+				? base_alpha
+				: clamp(base_alpha + stroke_alpha * (1.0 - base_alpha), 0.0, 1.0);
+			if (enable_alpha_cutout && combined_alpha < alpha_cutout_threshold) {
+				discard;
+			}
+			if (overlay_renders_base_texture) {
+				if (active_paint_channel <= 1) {
+					final_color = mix(raw_base_rgb, final_color, eff_paint_a);
+				}
+				final_alpha = combined_alpha;
+			} else {
+				final_alpha = eff_paint_a;
+			}
+		} else if (preserve_base_alpha) {
+			if (enable_alpha_cutout && base_alpha < alpha_cutout_threshold) {
+				discard;
+			}
+		}
 
 		// Selection visuals (marching ants / stencil hatch) are editor aids: they are emitted unlit.
 		vec3 emit_col = vec3(0.0);
@@ -328,34 +404,110 @@ void fragment() {
 			}
 		}
 
-		if (final_alpha <= 0.0001) {
+		if (final_alpha <= 0.0001 && debug_view_channel == 0) {
 			discard;
 		}
 
 		// Mirror the base material's surface response so painted pixels light identically to unpainted ones.
 		vec2 base_uv = UV * uv1_scale.xy + uv1_offset.xy;
+		vec3 paint_encoded = overlay_linear_to_srgb(final_color);
 		float rough = roughness;
+		vec3 norm_preview = vec3(0.5, 0.5, 1.0);
+		float rough_preview = roughness;
 		if (use_normal_map) {
 			vec4 n_sample = texture(normal_texture, base_uv);
 			if (normal_is_source2) {
-				NORMAL_MAP = decode_hemi_octahedron(n_sample.rg) * 0.5 + 0.5;
-				rough = n_sample.b * roughness;
+				norm_preview = decode_hemi_octahedron(n_sample.rg) * 0.5 + 0.5;
+				rough_preview = n_sample.b;
+				if (enable_normal) NORMAL_MAP = norm_preview;
+				if (enable_roughness) rough = n_sample.b * roughness;
 			} else {
-				NORMAL_MAP = n_sample.rgb;
+				norm_preview = n_sample.rgb;
+				if (enable_normal) NORMAL_MAP = norm_preview;
 			}
-			NORMAL_MAP_DEPTH = normal_scale;
+			NORMAL_MAP_DEPTH = enable_normal ? normal_scale : 0.0;
 		}
+		if (has_roughness_texture) {
+			rough_preview = texture(roughness_texture, base_uv).r;
+			if (enable_roughness) rough = clamp(rough_preview * roughness, 0.02, 1.0);
+		}
+		float ao_sample = 1.0;
 		if (use_ao_texture) {
-			AO = texture(ao_texture, base_uv).r;
-			AO_LIGHT_AFFECT = ao_light_affect;
+			ao_sample = texture(ao_texture, base_uv).r;
+			AO = enable_ao ? ao_sample : 1.0;
+			AO_LIGHT_AFFECT = enable_ao ? ao_light_affect : 0.0;
+		}
+
+		// Live GPU preview of non-Color painted channels while brushing (zero CPU readback stall!)
+		float base_metallic = has_metallic_texture ? texture(metallic_texture, base_uv).r : metallic;
+		float eff_metallic = base_metallic;
+		if (active_paint_channel == 2) {
+			ao_sample = mix(ao_sample, paint_encoded.r, eff_paint_a);
+			AO = enable_ao ? ao_sample : 1.0;
+			AO_LIGHT_AFFECT = enable_ao ? max(ao_light_affect, 0.6) : 0.0;
+		} else if (active_paint_channel == 3) {
+			norm_preview = normalize(mix(norm_preview, paint_encoded, eff_paint_a));
+			if (enable_normal) {
+				NORMAL_MAP = norm_preview;
+				NORMAL_MAP_DEPTH = abs(normal_scale) > 0.001 ? normal_scale : 1.0;
+			}
+		} else if (active_paint_channel == 4) {
+			rough_preview = mix(rough_preview, paint_encoded.r, eff_paint_a);
+			if (enable_roughness) rough = clamp(rough_preview, 0.02, 1.0);
+		} else if (active_paint_channel == 7) {
+			eff_metallic = mix(base_metallic, paint_encoded.r, eff_paint_a);
 		}
 
 		vec3 v_col = (use_vertex_color && length(COLOR.rgb) > 0.001) ? COLOR.rgb : vec3(1.0);
-		ALBEDO = final_color * lit_weight * v_col;
+		vec3 base_color_map = use_channel_color_override
+			? texture(channel_color_override_texture, base_uv).rgb
+			: raw_base_rgb;
+		vec3 effective_color = (use_channel_color_override && debug_view_channel == 0)
+			? base_color_map
+			: ((has_edited_base_texture && overlay_renders_base_texture && active_paint_channel <= 1)
+				? final_color
+				: mix(base_color_map, final_color, (active_paint_channel <= 1) ? eff_paint_a : 0.0));
+		vec3 base_albedo = enable_color_map ? (effective_color * lit_weight * v_col) : vec3(0.85 * lit_weight);
+		vec3 sh_tint = has_shadow_tint_texture ? texture(shadow_tint_texture, base_uv).rgb : vec3(1.0);
+		if (active_paint_channel == 5) {
+			sh_tint = mix(sh_tint, final_color, eff_paint_a);
+			if (enable_shadow_map) {
+				base_albedo *= mix(vec3(1.0), sh_tint, 0.35);
+			}
+		}
+		vec3 emissive_sample = enable_emission ? texture(emission_texture, base_uv).rgb : vec3(0.0);
+		if (active_paint_channel == 6) {
+			emissive_sample = mix(emissive_sample, final_color, eff_paint_a);
+			if (enable_emission) emit_col += final_color * eff_paint_a;
+		}
+
+		ALBEDO = base_albedo;
 		EMISSION = emit_col;
 		ALPHA = final_alpha;
 		ROUGHNESS = rough;
-		METALLIC = metallic;
+		METALLIC = eff_metallic;
 		SPECULAR = specular;
+
+		if (debug_view_channel > 0) {
+			vec3 dbg = effective_color * v_col;
+			if (debug_view_channel == 1) dbg = enable_color_map ? (effective_color * v_col) : vec3(0.85);
+			else if (debug_view_channel == 2) dbg = vec3(enable_ao ? ao_sample : 1.0);
+			else if (debug_view_channel == 3) dbg = enable_normal ? norm_preview : vec3(0.5, 0.5, 1.0);
+			else if (debug_view_channel == 4) dbg = vec3(enable_roughness ? rough_preview : roughness);
+			else if (debug_view_channel == 5) dbg = enable_shadow_map ? sh_tint : vec3(1.0);
+			else if (debug_view_channel == 6) dbg = emissive_sample;
+			else if (debug_view_channel == 7) dbg = vec3(eff_metallic);
+			else if (debug_view_channel >= 8) {
+				float mask_base = texture(mask_preview_texture, base_uv).r;
+				dbg = vec3(mix(mask_base, paint_encoded.r, (active_paint_channel == debug_view_channel) ? eff_paint_a : 0.0));
+			}
+			ALBEDO = vec3(0.0);
+			EMISSION = dbg * lit_weight + emit_col;
+			ALPHA = 1.0;
+			AO = 1.0;
+			SPECULAR = 0.0;
+			METALLIC = 0.0;
+			ROUGHNESS = 1.0;
+		}
 	}
 }

@@ -34,6 +34,8 @@ public partial class PlayerTabUI : VBoxContainer
     private Label _labelCharge;
     private Button _btnRelease;
     private CheckBox _chkAutoLoop;
+    private OptionButton _optVfxPlaybackMode;
+    private CheckBox _chkCollideWithFloor;
     private const bool _isIdleUnderlayEnabled = false;
     private CheckBox _chkInPlaceMotion;
     private bool _isInPlaceMotionEnabled = true;
@@ -71,6 +73,7 @@ public partial class PlayerTabUI : VBoxContainer
         AnimationTransportService.Instance.LoopChanged += OnTransportLoopChanged;
         ModWorkspaceSession.Instance.OnAnimationDiscarded += OnWorkspaceAnimationDiscarded;
         ModWorkspaceSession.Instance.OnWorkspaceCleared += OnWorkspaceCleared;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
 
         if (_animSearch != null)
         {
@@ -151,6 +154,16 @@ public partial class PlayerTabUI : VBoxContainer
             };
             animGroup.AddChild(btnImportAnim);
             animGroup.MoveChild(btnImportAnim, 3);
+
+            var btnBindPose = new Button
+            {
+                Name = "BtnBindPoseRest",
+                Text = "Bind Pose (Rest A-Pose)",
+                TooltipText = "Resets the skeleton cleanly to its raw Source 2 Bind / Rest Pose (same reference A-pose used in the Model Importer)."
+            };
+            btnBindPose.Pressed += ResetAllPoses;
+            animGroup.AddChild(btnBindPose);
+            animGroup.MoveChild(btnBindPose, 4);
         }
 
         var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
@@ -165,6 +178,7 @@ public partial class PlayerTabUI : VBoxContainer
     public override void _ExitTree()
     {
         SkeletonGizmoManager.OnBonePoseChanged -= OnGizmoBonePoseChanged;
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
         AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
         AnimationTransportService.Instance.TimeChanged -= OnTransportTimeChanged;
         AnimationTransportService.Instance.LoopChanged -= OnTransportLoopChanged;
@@ -177,6 +191,14 @@ public partial class PlayerTabUI : VBoxContainer
         {
             _animStudioDock.AnimationModified -= OnAnimStudioAnimationModified;
             _animStudioDock.VisibilityToggled -= OnAnimStudioVisibilityToggled;
+        }
+    }
+
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
+    {
+        if (IsInsideTree() && _currentHeroAnimations.Count > 0)
+        {
+            PopulateAnimationTree();
         }
     }
 
@@ -508,6 +530,46 @@ public partial class PlayerTabUI : VBoxContainer
             }
         };
         actionGroup.AddChild(_chkAutoLoop);
+
+        var modeGroup = new VBoxContainer();
+        modeGroup.AddThemeConstantOverride("separation", 2);
+        modeGroup.AddChild(new Label
+        {
+            Text = "Playback Mode",
+            ThemeTypeVariation = "HeaderSmall"
+        });
+
+        _optVfxPlaybackMode = new OptionButton
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 28)
+        };
+        _optVfxPlaybackMode.AddItem("Normal", (int)VfxPlaybackMode.Normal);
+        _optVfxPlaybackMode.AddItem("Normal + Endcap", (int)VfxPlaybackMode.NormalWithEndCap);
+        _optVfxPlaybackMode.AddItem("Endcap Only", (int)VfxPlaybackMode.EndCapOnly);
+        _optVfxPlaybackMode.ItemSelected += (long idx) =>
+        {
+            if (_particleStage != null && _optVfxPlaybackMode != null)
+            {
+                var mode = (VfxPlaybackMode)_optVfxPlaybackMode.GetItemId((int)idx);
+                _particleStage.SetVfxPlaybackMode(mode);
+            }
+        };
+        modeGroup.AddChild(_optVfxPlaybackMode);
+        actionGroup.AddChild(modeGroup);
+
+        _chkCollideWithFloor = new CheckBox
+        {
+            Text = "Collide With Floor",
+            ButtonPressed = false,
+            TooltipText = "Enable particle collision against the horizontal stage floor plane (Z = 0)"
+        };
+        _chkCollideWithFloor.Toggled += (bool toggled) =>
+        {
+            _particleStage?.SetCollideWithFloor(toggled);
+        };
+        actionGroup.AddChild(_chkCollideWithFloor);
+
         _particleControlsGroup.AddChild(actionGroup);
 
         transport.AddChild(_particleControlsGroup);
@@ -577,6 +639,15 @@ public partial class PlayerTabUI : VBoxContainer
             if (_chkAutoLoop != null)
             {
                 _chkAutoLoop.SetPressedNoSignal(_particleStage.AutoChargeLoop);
+            }
+            if (_optVfxPlaybackMode != null)
+            {
+                int modeIdx = _optVfxPlaybackMode.GetItemIndex((int)_particleStage.PlaybackMode);
+                if (modeIdx >= 0) _optVfxPlaybackMode.Select(modeIdx);
+            }
+            if (_chkCollideWithFloor != null)
+            {
+                _chkCollideWithFloor.SetPressedNoSignal(_particleStage.CollideWithFloor);
             }
         }
         AnimationTransportService.Instance.SetParticleMode(true);
@@ -897,7 +968,7 @@ public partial class PlayerTabUI : VBoxContainer
 
                         if (existing != null)
                         {
-                            existing.Category = "Remapped";
+                            existing.Category = "Modified";
                             existing.Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0);
                             existing.IsLooping = stagedEntry.IsLooping;
                             existing.IsAdditive = stagedEntry.IsAdditive;
@@ -911,7 +982,7 @@ public partial class PlayerTabUI : VBoxContainer
                                 RawName = animKey,
                                 CleanName = animKey,
                                 DisplayName = DeadlockAnimLoader.FormatDisplayName(animKey),
-                                Category = "Remapped",
+                                Category = "Modified",
                                 Duration = stagedEntry.Duration > 0 ? stagedEntry.Duration : (float)(anim?.Length ?? 1.0),
                                 IsLooping = stagedEntry.IsLooping,
                                 IsAdditive = stagedEntry.IsAdditive,
@@ -961,6 +1032,7 @@ public partial class PlayerTabUI : VBoxContainer
         // Defined category order matching prompt requirements
         string[] categories = new[]
         {
+            "Modified",
             "Remapped",
             "Exported",
             "Idles & Stances",
@@ -993,11 +1065,13 @@ public partial class PlayerTabUI : VBoxContainer
             {
                 if (category == "Remapped" && string.IsNullOrEmpty(filter))
                 {
+                    bool isLight = DeadlockPlayground.Theming.ThemeManager.IsLightTheme();
                     TreeItem emptyCategory = _animTree.CreateItem(root);
                     var iconEmpty = GD.Load<Texture2D>("res://assets/at-icons/file_arrow_down.svg") ?? _iconFolder;
                     emptyCategory.SetIcon(0, iconEmpty);
                     emptyCategory.SetIconMaxWidth(0, 16);
-                    emptyCategory.SetCustomColor(0, new Color(0.31f, 0.93f, 0.69f, 0.8f));
+                    emptyCategory.SetIconModulate(0, isLight ? new Color(0.16f, 0.20f, 0.24f, 1.0f) : Colors.White);
+                    emptyCategory.SetCustomColor(0, isLight ? new Color(0.06f, 0.48f, 0.32f, 1.0f) : new Color(0.31f, 0.93f, 0.69f, 0.85f));
                     emptyCategory.SetCustomMinimumHeight(28);
                     emptyCategory.SetText(0, "Imported / Remapped (0)");
                     emptyCategory.SetSelectable(0, false);
@@ -1005,7 +1079,7 @@ public partial class PlayerTabUI : VBoxContainer
 
                     TreeItem emptyPlaceholder = _animTree.CreateItem(emptyCategory);
                     emptyPlaceholder.SetText(0, "(No imported animations yet)");
-                    emptyPlaceholder.SetCustomColor(0, new Color(0.6f, 0.6f, 0.6f, 0.7f));
+                    emptyPlaceholder.SetCustomColor(0, DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.TextSecondary)));
                     emptyPlaceholder.SetSelectable(0, false);
                 }
                 continue;
@@ -1017,20 +1091,37 @@ public partial class PlayerTabUI : VBoxContainer
                 : _iconFolder;
             categoryItem.SetIcon(0, iconCat);
             categoryItem.SetIconMaxWidth(0, 16);
-            Color catColor = category switch
-            {
-                "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
-                "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
-                "Idles & Stances" or "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
-                "Locomotion" => new Color(0.45f, 0.85f, 0.95f, 1.0f),
-                "Traversal & Zipline" => new Color(0.55f, 0.90f, 0.70f, 1.0f),
-                "Combat & Attacks" or "Combat" => new Color(0.95f, 0.55f, 0.45f, 1.0f),
-                "Abilities & Magic" or "Abilities" => new Color(0.85f, 0.60f, 0.95f, 1.0f),
-                "Reactions & Status" or "Reactions" => new Color(0.95f, 0.75f, 0.45f, 1.0f),
-                "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.95f, 0.65f, 0.85f, 1.0f),
-                "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
-                _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
-            };
+            bool isLightTheme = DeadlockPlayground.Theming.ThemeManager.IsLightTheme();
+            categoryItem.SetIconModulate(0, isLightTheme ? new Color(0.16f, 0.20f, 0.24f, 1.0f) : Colors.White);
+            Color catColor = isLightTheme
+                ? category switch
+                {
+                    "Remapped" => new Color(0.06f, 0.48f, 0.32f, 1.0f),
+                    "Exported" => new Color(0.06f, 0.42f, 0.68f, 1.0f),
+                    "Idles & Stances" or "Idle" => new Color(0.58f, 0.36f, 0.04f, 1.0f),
+                    "Locomotion" => new Color(0.07f, 0.42f, 0.62f, 1.0f),
+                    "Traversal & Zipline" => new Color(0.10f, 0.48f, 0.24f, 1.0f),
+                    "Combat & Attacks" or "Combat" => new Color(0.72f, 0.16f, 0.12f, 1.0f),
+                    "Abilities & Magic" or "Abilities" => new Color(0.46f, 0.16f, 0.65f, 1.0f),
+                    "Reactions & Status" or "Reactions" => new Color(0.66f, 0.34f, 0.04f, 1.0f),
+                    "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.68f, 0.16f, 0.45f, 1.0f),
+                    "Additive Layers" => new Color(0.14f, 0.38f, 0.72f, 1.0f),
+                    _ => new Color(0.18f, 0.20f, 0.24f, 1.0f)
+                }
+                : category switch
+                {
+                    "Remapped" => new Color(0.31f, 0.93f, 0.69f, 1.0f),
+                    "Exported" => new Color(0.34f, 0.80f, 0.95f, 1.0f),
+                    "Idles & Stances" or "Idle" => new Color(0.95f, 0.85f, 0.6f, 1.0f),
+                    "Locomotion" => new Color(0.45f, 0.85f, 0.95f, 1.0f),
+                    "Traversal & Zipline" => new Color(0.55f, 0.90f, 0.70f, 1.0f),
+                    "Combat & Attacks" or "Combat" => new Color(0.95f, 0.55f, 0.45f, 1.0f),
+                    "Abilities & Magic" or "Abilities" => new Color(0.85f, 0.60f, 0.95f, 1.0f),
+                    "Reactions & Status" or "Reactions" => new Color(0.95f, 0.75f, 0.45f, 1.0f),
+                    "Emotes & Taunts" or "Emotes & Expressions" => new Color(0.95f, 0.65f, 0.85f, 1.0f),
+                    "Additive Layers" => new Color(0.6f, 0.85f, 1.0f, 1.0f),
+                    _ => new Color(0.9f, 0.9f, 0.9f, 1.0f)
+                };
             categoryItem.SetCustomColor(0, catColor);
             categoryItem.SetCustomMinimumHeight(28);
             categoryItem.SetText(0, category == "Remapped" ? $"Imported / Remapped ({itemsInCategory.Count})" : $"{category} ({itemsInCategory.Count})");
@@ -1678,6 +1769,11 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
+    public void RestoreDefaultIdlePose()
+    {
+        AutoSelectDefaultIdle();
+    }
+
     public void ResetAllPoses()
     {
         AnimationTransportService.Instance.Stop();
@@ -1691,6 +1787,11 @@ public partial class PlayerTabUI : VBoxContainer
 
             _skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
+
+            var driver = _skeleton.GetParent()?.FindChildren("*", "Node", recursive: true, owned: false)
+                .OfType<Source2BoneConstraintDriver>()
+                .FirstOrDefault();
+            driver?.EvaluateNow(0f);
         }
     }
 

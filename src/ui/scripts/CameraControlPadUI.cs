@@ -97,21 +97,21 @@ public partial class CameraControlPadUI : PanelContainer
         _btnModeToggle = new Button
         {
             Text = "Pan",
-            CustomMinimumSize = new Vector2(76, 18),
+            CustomMinimumSize = new Vector2(94, 28),
             SizeFlagsHorizontal = Control.SizeFlags.Fill,
-            TooltipText = "Click to toggle between Pan and Orbit mode"
+            TooltipText = "Click to toggle between Pan and Orbit mode",
+            ThemeTypeVariation = "ToolbarButton"
         };
-        _btnModeToggle.AddThemeFontSizeOverride("font_size", 9);
         _btnModeToggle.Pressed += ToggleMode;
         vbox.AddChild(_btnModeToggle);
 
         // WASD Keyboard Movement Block Toggle Button
         _btnBlockWasd = new Button
         {
-            CustomMinimumSize = new Vector2(76, 18),
-            SizeFlagsHorizontal = Control.SizeFlags.Fill
+            CustomMinimumSize = new Vector2(94, 28),
+            SizeFlagsHorizontal = Control.SizeFlags.Fill,
+            ThemeTypeVariation = "ToolbarButton"
         };
-        _btnBlockWasd.AddThemeFontSizeOverride("font_size", 9);
         _btnBlockWasd.Pressed += ToggleWasdBlock;
         vbox.AddChild(_btnBlockWasd);
 
@@ -138,102 +138,70 @@ public partial class CameraControlPadUI : PanelContainer
         var btn = new Button
         {
             Text = icon,
-            CustomMinimumSize = new Vector2(24, 24),
+            CustomMinimumSize = new Vector2(30, 30),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             TooltipText = tooltip,
-            FocusMode = Control.FocusModeEnum.None
+            FocusMode = Control.FocusModeEnum.None,
+            ThemeTypeVariation = "IconButton"
         };
         return btn;
     }
 
     private void ApplyCustomStyling()
     {
-        // Completely transparent backdrop
+        // Completely transparent backdrop & subtle overlay translucency
         AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
+        Modulate = new Color(1.0f, 1.0f, 1.0f, 0.78f);
 
-        // Style the buttons
-        StylePadButton(_btnUpLeft);
-        StylePadButton(_btnUp);
-        StylePadButton(_btnUpRight);
-        StylePadButton(_btnLeft);
-        StylePadButton(_btnRight);
-        StylePadButton(_btnDownLeft);
-        StylePadButton(_btnDown);
-        StylePadButton(_btnDownRight);
-
-        // Center button accent styling
-        StyleCenterButton(_btnCenter);
+        RefreshThemeStyles();
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged += OnThemeChanged;
     }
 
-    private void StylePadButton(Button btn)
+    public override void _ExitTree()
     {
-        if (btn == null) return;
-
-        btn.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
-        btn.AddThemeColorOverride("font_hover_color", Colors.White);
-        btn.AddThemeColorOverride("font_pressed_color", PlaygroundThemeHelper.SageGreen);
-        btn.AddThemeFontSizeOverride("font_size", 10);
-
-        var normal = new StyleBoxFlat
-        {
-            BgColor = new Color(0.1843f, 0.2667f, 0.2588f, 0.65f), // Deep Teal translucent
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            BorderColor = new Color(0.2471f, 0.3647f, 0.3020f, 0.5f),
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomLeft = 4,
-            CornerRadiusBottomRight = 4
-        };
-
-        var hover = (StyleBoxFlat)normal.Duplicate();
-        hover.BgColor = PlaygroundThemeHelper.PineGreen;
-        hover.BorderColor = PlaygroundThemeHelper.SageGreen;
-
-        var pressed = (StyleBoxFlat)normal.Duplicate();
-        pressed.BgColor = PlaygroundThemeHelper.SageGreen;
-        pressed.BorderColor = PlaygroundThemeHelper.Parchment;
-
-        btn.AddThemeStyleboxOverride("normal", normal);
-        btn.AddThemeStyleboxOverride("hover", hover);
-        btn.AddThemeStyleboxOverride("pressed", pressed);
+        DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
+        base._ExitTree();
     }
 
-    private void StyleCenterButton(Button btn)
+    private void OnThemeChanged(DeadlockPlayground.Theming.ThemeProfile _)
     {
-        if (btn == null) return;
+        RefreshThemeStyles();
+    }
 
-        btn.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
-        btn.AddThemeColorOverride("font_hover_color", Colors.White);
-        btn.AddThemeColorOverride("font_pressed_color", Colors.White);
-        btn.AddThemeFontSizeOverride("font_size", 12);
-
-        var normal = new StyleBoxFlat
+    private void RefreshThemeStyles()
+    {
+        if (_btnCenter != null)
         {
-            BgColor = new Color(0.2471f, 0.3647f, 0.3020f, 0.85f), // Pine Green
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            BorderColor = PlaygroundThemeHelper.SageGreen,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomLeft = 4,
-            CornerRadiusBottomRight = 4
-        };
+            Color accent = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary));
+            var centerStyle = new StyleBoxFlat
+            {
+                BgColor = accent,
+                BorderColor = accent.Lightened(0.15f),
+                BorderWidthLeft = 1,
+                BorderWidthRight = 1,
+                BorderWidthTop = 1,
+                BorderWidthBottom = 1,
+                CornerRadiusTopLeft = 4,
+                CornerRadiusTopRight = 4,
+                CornerRadiusBottomLeft = 4,
+                CornerRadiusBottomRight = 4,
+                ContentMarginLeft = 4,
+                ContentMarginRight = 4,
+                ContentMarginTop = 4,
+                ContentMarginBottom = 4
+            };
+            _btnCenter.ThemeTypeVariation = "IconButton";
+            _btnCenter.AddThemeStyleboxOverride("normal", centerStyle);
+            _btnCenter.AddThemeStyleboxOverride("hover", centerStyle);
+            _btnCenter.AddThemeStyleboxOverride("pressed", centerStyle);
+            _btnCenter.AddThemeColorOverride("font_color", Colors.White);
+            _btnCenter.AddThemeColorOverride("font_hover_color", Colors.White);
+            _btnCenter.AddThemeColorOverride("font_pressed_color", Colors.White);
+        }
 
-        var hover = (StyleBoxFlat)normal.Duplicate();
-        hover.BgColor = PlaygroundThemeHelper.SageGreen;
-        hover.BorderColor = PlaygroundThemeHelper.Parchment;
-
-        var pressed = (StyleBoxFlat)normal.Duplicate();
-        pressed.BgColor = PlaygroundThemeHelper.Parchment;
-        pressed.BorderColor = Colors.White;
-
-        btn.AddThemeStyleboxOverride("normal", normal);
-        btn.AddThemeStyleboxOverride("hover", hover);
-        btn.AddThemeStyleboxOverride("pressed", pressed);
+        UpdateModeButtonAppearance();
+        UpdateWasdButtonAppearance();
     }
 
     public void ToggleMode()
@@ -248,32 +216,22 @@ public partial class CameraControlPadUI : PanelContainer
 
         bool isPan = _currentMode == ControlMode.Pan;
         _btnModeToggle.Text = isPan ? "Pan" : "Orbit";
+        _btnModeToggle.ThemeTypeVariation = "ToolbarButton";
 
-        var style = new StyleBoxFlat
+        if (isPan)
         {
-            BgColor = isPan ? new Color(0.1843f, 0.2667f, 0.2588f, 0.9f) : new Color(0.2471f, 0.3647f, 0.3020f, 0.9f),
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            BorderColor = isPan ? PlaygroundThemeHelper.PineGreen : PlaygroundThemeHelper.SageGreen,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomLeft = 4,
-            CornerRadiusBottomRight = 4,
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 4,
-            ContentMarginBottom = 4
-        };
-
-        var hover = (StyleBoxFlat)style.Duplicate();
-        hover.BorderColor = PlaygroundThemeHelper.Parchment;
-
-        _btnModeToggle.AddThemeStyleboxOverride("normal", style);
-        _btnModeToggle.AddThemeStyleboxOverride("hover", hover);
-        _btnModeToggle.AddThemeColorOverride("font_color", isPan ? PlaygroundThemeHelper.Parchment : PlaygroundThemeHelper.SageGreen);
-        _btnModeToggle.AddThemeFontSizeOverride("font_size", 11);
+            _btnModeToggle.RemoveThemeStyleboxOverride("normal");
+            _btnModeToggle.RemoveThemeStyleboxOverride("hover");
+            _btnModeToggle.RemoveThemeStyleboxOverride("pressed");
+            _btnModeToggle.RemoveThemeColorOverride("font_color");
+            _btnModeToggle.RemoveThemeColorOverride("font_hover_color");
+            _btnModeToggle.RemoveThemeColorOverride("font_pressed_color");
+        }
+        else
+        {
+            Color accent = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.AccentPrimary));
+            ApplyConsistentPillOverride(_btnModeToggle, accent);
+        }
     }
 
     public void ToggleWasdBlock()
@@ -287,35 +245,52 @@ public partial class CameraControlPadUI : PanelContainer
         if (_btnBlockWasd == null) return;
         bool blocked = OrbitCamera.IsKeyboardMovementBlocked;
         _btnBlockWasd.Text = blocked ? "WASD: OFF" : "WASD: ON";
-
-        var style = new StyleBoxFlat
-        {
-            BgColor = blocked ? new Color(0.28f, 0.12f, 0.12f, 0.9f) : new Color(0.1843f, 0.2667f, 0.2588f, 0.9f),
-            BorderWidthLeft = 1,
-            BorderWidthTop = 1,
-            BorderWidthRight = 1,
-            BorderWidthBottom = 1,
-            BorderColor = blocked ? new Color(0.85f, 0.35f, 0.35f, 0.8f) : PlaygroundThemeHelper.SageGreen,
-            CornerRadiusTopLeft = 4,
-            CornerRadiusTopRight = 4,
-            CornerRadiusBottomRight = 4,
-            CornerRadiusBottomLeft = 4,
-            ContentMarginLeft = 6,
-            ContentMarginRight = 6,
-            ContentMarginTop = 4,
-            ContentMarginBottom = 4
-        };
-
-        var hover = (StyleBoxFlat)style.Duplicate();
-        hover.BorderColor = PlaygroundThemeHelper.Parchment;
-
-        _btnBlockWasd.AddThemeStyleboxOverride("normal", style);
-        _btnBlockWasd.AddThemeStyleboxOverride("hover", hover);
-        _btnBlockWasd.AddThemeStyleboxOverride("pressed", style);
-        _btnBlockWasd.AddThemeColorOverride("font_color", blocked ? new Color(1.0f, 0.55f, 0.55f) : new Color(0.65f, 0.95f, 0.70f));
+        _btnBlockWasd.ThemeTypeVariation = "ToolbarButton";
         _btnBlockWasd.TooltipText = blocked
             ? "WASD Camera Movement: BLOCKED (Click to unblock). WASD keys will not move the 3D camera."
             : "WASD Camera Movement: ACTIVE (Click to block). Viewport camera can be panned with WASD.";
+
+        if (!blocked)
+        {
+            _btnBlockWasd.RemoveThemeStyleboxOverride("normal");
+            _btnBlockWasd.RemoveThemeStyleboxOverride("hover");
+            _btnBlockWasd.RemoveThemeStyleboxOverride("pressed");
+            _btnBlockWasd.RemoveThemeColorOverride("font_color");
+            _btnBlockWasd.RemoveThemeColorOverride("font_hover_color");
+            _btnBlockWasd.RemoveThemeColorOverride("font_pressed_color");
+        }
+        else
+        {
+            Color danger = DeadlockPlayground.Theming.ThemeManager.GetColor(nameof(DeadlockPlayground.Theming.ThemePaletteData.SemanticDanger));
+            ApplyConsistentPillOverride(_btnBlockWasd, danger);
+        }
+    }
+
+    private static void ApplyConsistentPillOverride(Button btn, Color bg)
+    {
+        var style = new StyleBoxFlat
+        {
+            BgColor = bg,
+            BorderColor = bg.Lightened(0.15f),
+            BorderWidthLeft = 1,
+            BorderWidthRight = 1,
+            BorderWidthTop = 1,
+            BorderWidthBottom = 1,
+            CornerRadiusTopLeft = 4,
+            CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4,
+            CornerRadiusBottomRight = 4,
+            ContentMarginLeft = 8,
+            ContentMarginRight = 8,
+            ContentMarginTop = 4,
+            ContentMarginBottom = 4
+        };
+        btn.AddThemeStyleboxOverride("normal", style);
+        btn.AddThemeStyleboxOverride("hover", style);
+        btn.AddThemeStyleboxOverride("pressed", style);
+        btn.AddThemeColorOverride("font_color", Colors.White);
+        btn.AddThemeColorOverride("font_hover_color", Colors.White);
+        btn.AddThemeColorOverride("font_pressed_color", Colors.White);
     }
 
     private void OnDirectionClicked(int dirX, int dirY)

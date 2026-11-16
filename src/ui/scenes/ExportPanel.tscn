@@ -1,19 +1,6 @@
 [gd_scene format=3 uid="uid://bmnaxn7uec4qy"]
 
 [ext_resource type="Script" uid="uid://db18cpkof7gcb" path="res://ui/scripts/ExportPanelUI.cs" id="1_export"]
-[ext_resource type="FontFile" uid="uid://dckc541uxkp3s" path="res://assets/fonts/Colus-Regular.ttf" id="2_dwmip"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
-bg_color = Color(0.0784314, 0.0862745, 0.109804, 0.941176)
-border_width_left = 1
-border_width_top = 1
-border_width_right = 1
-border_width_bottom = 1
-border_color = Color(0.282353, 0.321569, 0.419608, 0.6)
-corner_radius_top_left = 10
-corner_radius_top_right = 10
-corner_radius_bottom_right = 10
-corner_radius_bottom_left = 10
 
 [node name="ExportPanel" type="PanelContainer" unique_id=714186449 node_paths=PackedStringArray("_btnFormat1x1", "_btnFormat4x3", "_btnFormat16x9", "_btnFormat9x16", "_btnRes1080p", "_btnRes1440p", "_btnRes4K", "_checkIncludeBg", "_chkIncludeBonesWireframe", "_btnExport", "_lblDimensionPreview")]
 custom_minimum_size = Vector2(250, 0)
@@ -25,7 +12,7 @@ offset_top = 46.0
 offset_right = -16.0
 offset_bottom = 290.0
 grow_horizontal = 0
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+theme_type_variation = &"CardPanel"
 script = ExtResource("1_export")
 _btnFormat1x1 = NodePath("MarginContainer/VBoxContainer/FormatBox/GridContainer/Btn1x1")
 _btnFormat4x3 = NodePath("MarginContainer/VBoxContainer/FormatBox/GridContainer/Btn4x3")
@@ -57,8 +44,7 @@ theme_override_constants/separation = 4
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1480415954]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"SubheaderLabel"
 text = "FORMAT (ASPECT RATIO)"
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/FormatBox" unique_id=1646729911]
@@ -100,8 +86,7 @@ theme_override_constants/separation = 4
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ResBox" unique_id=571090747]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.75, 0.55, 1)
-theme_override_font_sizes/font_size = 12
+theme_type_variation = &"SubheaderLabel"
 text = "RESOLUTION PRESET"
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/ResBox" unique_id=924703207]
@@ -132,10 +117,8 @@ text = "4K"
 
 [node name="LblDimensions" type="Label" parent="MarginContainer/VBoxContainer" unique_id=1183140895]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.65, 0.7, 0.78, 1)
-theme_override_fonts/font = ExtResource("2_dwmip")
-theme_override_font_sizes/font_size = 10
-text = "1920 × 1080 px"
+theme_type_variation = &"MutedLabel"
+text = "1920 x 1080 px"
 horizontal_alignment = 1
 
 [node name="HSeparator" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=534120226]
@@ -153,13 +136,11 @@ text = "Include Background"
 [node name="ChkIncludeBonesWireframe" type="CheckBox" parent="MarginContainer/VBoxContainer/VBoxOptions" unique_id=1983746251]
 layout_mode = 2
 tooltip_text = "Renders bone gizmos, joints, and wireframe overlays in the captured export image."
-theme_override_colors/font_color = Color(0.41056433, 0.4646374, 0.4111739, 1)
-theme_override_font_sizes/font_size = 11
 text = "Include Bone & Wireframe Controls"
 autowrap_mode = 3
 
 [node name="BtnExport" type="Button" parent="MarginContainer/VBoxContainer" unique_id=2101226669]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
-theme_type_variation = &"AccentButton"
+theme_type_variation = &"PrimaryActionButton"
 text = "Export"

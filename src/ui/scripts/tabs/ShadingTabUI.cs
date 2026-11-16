@@ -483,26 +483,43 @@ public partial class ShadingTabUI : VBoxContainer
             if (mi.HasMeta("IsHiddenComposite") && mi.GetMeta("IsHiddenComposite").AsBool())
                 return;
 
+            // Skip original hero meshes replaced by a custom model or user-hidden outline shells
+            if (mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool())
+                return;
+            if (mi.HasMeta("UserHiddenOutlineShell") && mi.GetMeta("UserHiddenOutlineShell").AsBool())
+                return;
+
+            bool isCustomMesh = mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool();
             string meshNameLower = mi.Name.ToString().ToLowerInvariant();
             bool isWeapon = meshNameLower.Contains("gun") || meshNameLower.Contains("weapon") ||
-                            meshNameLower.Contains("blaster") ||
+                            meshNameLower.Contains("pistol") || meshNameLower.Contains("blaster") ||
                             meshNameLower.Contains("sword") || meshNameLower.Contains("katana") ||
                             meshNameLower.Contains("bow") || meshNameLower.Contains("shortsword") ||
                             meshNameLower.Contains("longhilt") || meshNameLower.Contains("beltscabbard");
-            bool isBuiltinOutline = meshNameLower.Contains("bodyoutline") || meshNameLower.Contains("outline");
+            bool isBuiltinOutline = meshNameLower.Contains("bodyoutline") || meshNameLower.Contains("outline") ||
+                                    (mi.HasMeta("IsOutlineShell") && mi.GetMeta("IsOutlineShell").AsBool());
 
             int surfaceCount = mi.Mesh.GetSurfaceCount();
             for (int i = 0; i < surfaceCount; i++)
             {
+                if (mi.HasMeta($"SurfaceKept_{i}") && !mi.GetMeta($"SurfaceKept_{i}").AsBool())
+                    continue;
                 Material origMat = HeroMeshHierarchy.GetAuthenticMaterial(mi, i);
                 string matPath = origMat?.ResourceName?.ToLowerInvariant() ?? "";
+                if (string.IsNullOrEmpty(matPath) && mi.HasMeta("SourceMaterialName"))
+                {
+                    matPath = mi.GetMeta("SourceMaterialName").AsString().ToLowerInvariant();
+                }
 
-                if (matPath.Contains("gun") || matPath.Contains("weapon") || matPath.Contains("blaster"))
+                if (matPath.Contains("gun") || matPath.Contains("weapon") || matPath.Contains("pistol") || matPath.Contains("blaster"))
                 {
                     isWeapon = true;
                 }
 
-                if (matPath.Contains("outline")) isBuiltinOutline = true;
+                if (matPath.Contains("outline") || (origMat != null && origMat.HasMeta("IsOutlineShell") && origMat.GetMeta("IsOutlineShell").AsBool()))
+                {
+                    isBuiltinOutline = true;
+                }
 
                 bool isGlass = matPath.Contains("glass") || matPath.Contains("lens") || matPath.Contains("specs") || matPath.Contains("spectacle")
                     || meshNameLower.Contains("glass") || meshNameLower.Contains("lens")
@@ -527,8 +544,10 @@ public partial class ShadingTabUI : VBoxContainer
                 }
 
 
-                // 1. Signature material from HeroMaterialManager
-                ShaderMaterial sigMat = HeroMaterialManager.GetSignatureMaterial(_currentHeroName, meshNameLower, i, matPath, origMat as StandardMaterial3D);
+                // 1. Signature material from HeroMaterialManager (only for authentic base hero meshes)
+                ShaderMaterial sigMat = isCustomMesh
+                    ? null
+                    : HeroMaterialManager.GetSignatureMaterial(_currentHeroName, meshNameLower, i, matPath, origMat as StandardMaterial3D);
 
                 // 2. Toon material
                 Color defaultOutlineCol = HeroMaterialManager.GetSignatureOutlineColor(_currentHeroName, matPath)
@@ -555,6 +574,11 @@ public partial class ShadingTabUI : VBoxContainer
                     }
 
                     toonMat.SetShaderParameter("metallic", stdMat.Metallic);
+                    toonMat.SetShaderParameter("has_metallic_texture", stdMat.MetallicTexture != null);
+                    if (stdMat.MetallicTexture != null)
+                    {
+                        toonMat.SetShaderParameter("metallic_texture", stdMat.MetallicTexture);
+                    }
                     toonMat.SetShaderParameter("roughness", stdMat.Roughness > 0.01f ? stdMat.Roughness : 0.65f);
                     float spec = stdMat.Metallic > 0.5f ? 0.45f : 0.30f;
                     toonMat.SetShaderParameter("specular", spec);
@@ -575,6 +599,15 @@ public partial class ShadingTabUI : VBoxContainer
                             toonMat.SetShaderParameter("emission_texture", stdMat.EmissionTexture);
                         }
                     }
+                }
+
+                global::Source2MaterialHelper.ApplyToonNprMetadata(toonMat, origMat);
+                var origChannels = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetChannelSet(origMat)
+                    ?? (origMat != null ? DeadlockPlayground.Materials.MaterialChannelDiscovery.DiscoverCustomModelChannels(origMat, meshNameLower) : null);
+                if (origChannels != null)
+                {
+                    DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(toonMat, origChannels);
+                    DeadlockPlayground.Materials.MaterialChannelDiscovery.ApplyChannelsToMaterial(toonMat, origChannels);
                 }
 
                 _characterSurfaces.Add(new SurfaceRecord
@@ -690,10 +723,14 @@ public partial class ShadingTabUI : VBoxContainer
                 );
 
                 // Allow outline on: toon material, signature material, NPR head/hair/slime shader, OR weapon submeshes
-                bool canHaveOutline = baseMat == record.ToonMaterial
+                bool isCustomWithBakedOutlines = record.Mesh.HasMeta("IsCustomImportedMesh") &&
+                                                 record.Mesh.GetMeta("IsCustomImportedMesh").AsBool() &&
+                                                 _characterSurfaces.Exists(r => r.IsBuiltinOutline && GodotObject.IsInstanceValid(r.Mesh) && r.Mesh.Visible);
+                bool canHaveOutline = !isCustomWithBakedOutlines &&
+                                   (baseMat == record.ToonMaterial
                                    || baseMat == record.SignatureMaterial
                                    || isNprStructural
-                                   || record.IsWeapon;
+                                   || record.IsWeapon);
 
                 if (enableOutline && canHaveOutline && isEligibleForOutline)
                 {

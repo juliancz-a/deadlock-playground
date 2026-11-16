@@ -71,8 +71,8 @@ corner_radius_bottom_right = 5
 corner_radius_bottom_left = 5
 
 [node name="ExportBaseTexturesModal" type="PanelContainer" unique_id=1987162601 node_paths=PackedStringArray("_headerContainer", "_lblTitle", "_lblSubtitle", "_btnClose", "_btnSelectAll", "_btnDeselectAll", "_lblCount", "_itemsContainer", "_chkIncludeUvWireframe", "_lblSelectionSummary", "_btnCancel", "_btnExport")]
-custom_minimum_size = Vector2(520, 0)
-offset_right = 520.0
+custom_minimum_size = Vector2(580, 0)
+offset_right = 580.0
 offset_bottom = 440.0
 theme = ExtResource("1_theme")
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal_root")
@@ -114,21 +114,21 @@ theme_override_constants/separation = 2
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.94, 0.98, 1)
 theme_override_fonts/font = ExtResource("3_colus")
-theme_override_font_sizes/font_size = 15
 text = "EXPORT ORIGINAL BASE TEXTURES"
+autowrap_mode = 3
 
 [node name="Subtitle" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/VBoxTitle" unique_id=1987162607]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.6, 0.7, 1)
-theme_override_font_sizes/font_size = 11
 text = "Export unpainted vanilla / mod textures for external inspection & editing"
+autowrap_mode = 3
 
 [node name="BtnClose" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar" unique_id=1987162608]
-custom_minimum_size = Vector2(26, 26)
+custom_minimum_size = Vector2(28, 28)
 layout_mode = 2
 size_flags_vertical = 0
 tooltip_text = "Close (Esc)"
-text = "✕"
+text = "X"
 
 [node name="HSeparator1" type="HSeparator" parent="MarginContainer/VBoxContainer" unique_id=1987162609]
 layout_mode = 2
@@ -140,13 +140,11 @@ theme_override_constants/separation = 8
 [node name="BtnSelectAll" type="Button" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162611]
 custom_minimum_size = Vector2(80, 24)
 layout_mode = 2
-theme_override_font_sizes/font_size = 12
 text = "Select All"
 
 [node name="BtnDeselectAll" type="Button" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162612]
 custom_minimum_size = Vector2(85, 24)
 layout_mode = 2
-theme_override_font_sizes/font_size = 12
 text = "Deselect All"
 
 [node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162613]
@@ -156,7 +154,6 @@ size_flags_horizontal = 3
 [node name="LblCount" type="Label" parent="MarginContainer/VBoxContainer/ActionsBar" unique_id=1987162614]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.72, 0.82, 1)
-theme_override_font_sizes/font_size = 12
 text = "0 texture(s) available"
 
 [node name="Scroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162615]
@@ -180,7 +177,6 @@ theme_override_constants/separation = 8
 [node name="ChkIncludeUv" type="CheckBox" parent="MarginContainer/VBoxContainer/OptionsRow" unique_id=1987162619]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.88, 0.94, 1)
-theme_override_font_sizes/font_size = 12
 text = "Include UV Wireframe Overlay (as separate _uv.png)"
 
 [node name="FooterBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer" unique_id=1987162620]
@@ -190,7 +186,6 @@ theme_override_constants/separation = 10
 [node name="LblSummary" type="Label" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162621]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 1)
-theme_override_font_sizes/font_size = 12
 text = "0 of 0 texture(s) selected"
 
 [node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162622]
@@ -200,7 +195,6 @@ size_flags_horizontal = 3
 [node name="BtnCancel" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162623]
 custom_minimum_size = Vector2(75, 28)
 layout_mode = 2
-theme_override_font_sizes/font_size = 13
 text = "Cancel"
 
 [node name="BtnExport" type="Button" parent="MarginContainer/VBoxContainer/FooterBar" unique_id=1987162624]
@@ -210,7 +204,6 @@ theme_override_colors/font_color = Color(0.92, 0.94, 0.98, 1)
 theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
 theme_override_colors/font_pressed_color = Color(0.9, 0.82, 0.65, 1)
 theme_override_fonts/font = ExtResource("3_colus")
-theme_override_font_sizes/font_size = 13
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_export_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_btn_export_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_export_pressed")
