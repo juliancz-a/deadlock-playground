@@ -398,26 +398,28 @@ namespace DeadlockPlayground.Importer
                 if (okLow && okHigh) seedsPerBone[bi].Add(i);
             }
 
-            // Multi-source Dijkstra geodesic distance per bone.
+            // Multi-source Dijkstra geodesic distance per bone (21 independent passes run in parallel).
             var G = new float[nb][];
-            for (int b = 0; b < nb; b++)
+            System.Threading.Tasks.Parallel.For(0, nb, b =>
             {
                 var dist = new float[n];
                 Array.Fill(dist, float.PositiveInfinity);
-                if (seedsPerBone[b].Count == 0) { G[b] = dist; continue; }
-                var pq = new PriorityQueue<int, float>();
+                if (seedsPerBone[b].Count == 0) { G[b] = dist; return; }
+                var pq = new PriorityQueue<int, float>(seedsPerBone[b].Count);
                 foreach (int sIdx in seedsPerBone[b]) { dist[sIdx] = 0f; pq.Enqueue(sIdx, 0f); }
                 while (pq.TryDequeue(out int u, out float du))
                 {
                     if (du > dist[u]) continue;
-                    foreach (var (v, w) in adj[u])
+                    var neighbors = adj[u];
+                    for (int ei = 0; ei < neighbors.Count; ei++)
                     {
+                        var (v, w) = neighbors[ei];
                         float nd = du + w;
                         if (nd < dist[v]) { dist[v] = nd; pq.Enqueue(v, nd); }
                     }
                 }
                 G[b] = dist;
-            }
+            });
 
             // Dense IDW weights per weld node (strictly gated by anatomical bone-chain hops to prevent coat/torso/leg bleed into hands/feet).
             float eps = 0.02f * H;
@@ -426,13 +428,14 @@ namespace DeadlockPlayground.Importer
             {
                 int primary = label[i];
                 float sum = 0f;
+                int rowOff = i * nb;
                 for (int b = 0; b < nb; b++)
                 {
                     if (!IsBoneAllowedForPrimary(primary, b)) continue;
                     float gd = G[b][i];
                     if (float.IsPositiveInfinity(gd)) continue;
                     float w = 1f / ((gd + eps) * (gd + eps));
-                    dense[i * nb + b] = w; sum += w;
+                    dense[rowOff + b] = w; sum += w;
                 }
                 if (sum <= 0f)
                 {
@@ -442,80 +445,106 @@ namespace DeadlockPlayground.Importer
                         if (!IsBoneAllowedForPrimary(primary, b)) continue;
                         float sc = CapsuleScore(weldPos[i], g.SegStart[b], g.SegEnd[b], g.Radius[b], out _);
                         float w = 1f / ((sc + 0.1f) * (sc + 0.1f) * (sc + 0.1f) * (sc + 0.1f));
-                        dense[i * nb + b] = w; sum += w;
+                        dense[rowOff + b] = w; sum += w;
                     }
                 }
-                if (sum <= 0f) { dense[i * nb + primary] = 1f; sum = 1f; }
-                for (int b = 0; b < nb; b++) dense[i * nb + b] /= sum;
+                if (sum <= 0f) { dense[rowOff + primary] = 1f; sum = 1f; }
+                for (int b = 0; b < nb; b++) dense[rowOff + b] /= sum;
             }
 
-            // 1 light global Laplacian pass + 4 targeted joint-transition smoothing passes (maxWeight < 0.85).
+            // 1 light global Laplacian pass + 4 targeted joint-transition smoothing passes (maxWeight < 0.85), double-buffered.
+            var next = new float[dense.Length];
             for (int iter = 0; iter < 5; iter++)
             {
                 bool transitionOnly = iter >= 1;
                 float selfKeep = transitionOnly ? 0.65f : 0.75f;
                 float neighborMix = 1f - selfKeep;
-                var next = new float[dense.Length];
                 for (int i = 0; i < n; i++)
                 {
-                    if (adj[i].Count == 0)
+                    int rowOff = i * nb;
+                    var neighbors = adj[i];
+                    if (neighbors.Count == 0)
                     {
-                        Array.Copy(dense, i * nb, next, i * nb, nb);
+                        Array.Copy(dense, rowOff, next, rowOff, nb);
                         continue;
                     }
                     if (transitionOnly)
                     {
                         float maxW = 0f;
                         for (int b = 0; b < nb; b++)
-                            if (dense[i * nb + b] > maxW) maxW = dense[i * nb + b];
+                            if (dense[rowOff + b] > maxW) maxW = dense[rowOff + b];
                         if (maxW >= 0.85f)
                         {
-                            Array.Copy(dense, i * nb, next, i * nb, nb);
+                            Array.Copy(dense, rowOff, next, rowOff, nb);
                             continue;
                         }
                     }
                     int primary = label[i];
                     float rowSum = 0f;
+                    float invDeg = 1f / neighbors.Count;
                     for (int b = 0; b < nb; b++)
                     {
-                        if (!IsBoneAllowedForPrimary(primary, b)) { next[i * nb + b] = 0f; continue; }
+                        if (!IsBoneAllowedForPrimary(primary, b)) { next[rowOff + b] = 0f; continue; }
                         float avg = 0f;
-                        foreach (var (v, _) in adj[i]) avg += dense[v * nb + b];
-                        avg /= adj[i].Count;
-                        float val = dense[i * nb + b] * selfKeep + avg * neighborMix;
-                        next[i * nb + b] = val;
+                        for (int ni = 0; ni < neighbors.Count; ni++)
+                            avg += dense[neighbors[ni].Item1 * nb + b];
+                        avg *= invDeg;
+                        float val = dense[rowOff + b] * selfKeep + avg * neighborMix;
+                        next[rowOff + b] = val;
                         rowSum += val;
                     }
                     if (rowSum > 1e-6f)
-                        for (int b = 0; b < nb; b++) next[i * nb + b] /= rowSum;
+                    {
+                        float invSum = 1f / rowSum;
+                        for (int b = 0; b < nb; b++) next[rowOff + b] *= invSum;
+                    }
                     else
-                        next[i * nb + primary] = 1f;
+                    {
+                        next[rowOff + primary] = 1f;
+                    }
                 }
-                dense = next;
+                (dense, next) = (next, dense);
             }
 
-            // Top-4 normalisation.
+            // Zero-allocation Top-4 normalisation.
             outBones = new List<int[]>();
             outWeights = new List<float[]>();
+            Span<int> topIdx = stackalloc int[4];
+            Span<float> topVal = stackalloc float[4];
             for (int s = 0; s < alignedVerts.Count; s++)
             {
                 int vc = alignedVerts[s].Length;
                 var bones = new int[vc * 4];
                 var weights = new float[vc * 4];
                 var map = vertToWeld[s];
-                var order = new int[nb];
                 for (int v = 0; v < vc; v++)
                 {
                     int baseIdx = map[v] * nb;
-                    for (int b = 0; b < nb; b++) order[b] = b;
-                    Array.Sort(order, (x, y) => dense[baseIdx + y].CompareTo(dense[baseIdx + x]));
+                    topIdx[0] = topIdx[1] = topIdx[2] = topIdx[3] = 0;
+                    topVal[0] = topVal[1] = topVal[2] = topVal[3] = -1f;
+                    for (int b = 0; b < nb; b++)
+                    {
+                        float w = dense[baseIdx + b];
+                        if (w <= topVal[3]) continue;
+                        int insertPos = 3;
+                        while (insertPos > 0 && w > topVal[insertPos - 1])
+                        {
+                            topVal[insertPos] = topVal[insertPos - 1];
+                            topIdx[insertPos] = topIdx[insertPos - 1];
+                            insertPos--;
+                        }
+                        topVal[insertPos] = w;
+                        topIdx[insertPos] = b;
+                    }
                     float tot = 0f;
-                    for (int k = 0; k < 4; k++) tot += dense[baseIdx + order[k]];
+                    for (int k = 0; k < 4; k++)
+                        if (topVal[k] > 0f) tot += topVal[k];
                     if (tot <= 1e-6f) { bones[v * 4] = 0; weights[v * 4] = 1f; continue; }
+                    float invTot = 1f / tot;
                     for (int k = 0; k < 4; k++)
                     {
-                        bones[v * 4 + k] = order[k];
-                        weights[v * 4 + k] = dense[baseIdx + order[k]] / tot;
+                        bones[v * 4 + k] = topVal[k] > 0f ? topIdx[k] : 0;
+                        weights[v * 4 + k] = topVal[k] > 0f ? topVal[k] * invTot : 0f;
                     }
                 }
                 outBones.Add(bones);

@@ -195,6 +195,15 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("root_scale_xyz")]
         public float[] RootScaleXyz { get; set; } = new float[] { 1f, 1f, 1f };
 
+        [JsonPropertyName("flip_x")]
+        public bool FlipX { get; set; } = false;
+
+        [JsonPropertyName("flip_y")]
+        public bool FlipY { get; set; } = false;
+
+        [JsonPropertyName("flip_z")]
+        public bool FlipZ { get; set; } = false;
+
         [JsonPropertyName("orig_deform_enabled")]
         public bool OriginalMeshDeformEnabled { get; set; } = false;
 
@@ -315,6 +324,9 @@ namespace DeadlockPlayground.Workspace
                 RootRotationDeg = new[] { o.RootRotationDeg.X, o.RootRotationDeg.Y, o.RootRotationDeg.Z },
                 RootScale = o.RootScale,
                 RootScaleXyz = new[] { o.RootScaleXYZ.X, o.RootScaleXYZ.Y, o.RootScaleXYZ.Z },
+                FlipX = o.FlipX,
+                FlipY = o.FlipY,
+                FlipZ = o.FlipZ,
                 OriginalMeshDeformEnabled = o.OriginalMeshDeformEnabled,
                 OriginalMeshDeformTargetFilter = o.OriginalMeshDeformTargetFilter ?? "hair",
                 OriginalMeshDeformBoneName = o.OriginalMeshDeformBoneName ?? "head",
@@ -451,6 +463,9 @@ namespace DeadlockPlayground.Workspace
                         RootScaleXyz[1] > 0.0001f ? RootScaleXyz[1] : 1f,
                         RootScaleXyz[2] > 0.0001f ? RootScaleXyz[2] : 1f)
                     : Vector3.One,
+                FlipX = FlipX,
+                FlipY = FlipY,
+                FlipZ = FlipZ,
                 OriginalMeshDeformEnabled = OriginalMeshDeformEnabled,
                 OriginalMeshDeformTargetFilter = string.IsNullOrWhiteSpace(OriginalMeshDeformTargetFilter) ? "hair" : OriginalMeshDeformTargetFilter,
                 OriginalMeshDeformBoneName = string.IsNullOrWhiteSpace(OriginalMeshDeformBoneName) ? "head" : OriginalMeshDeformBoneName,
@@ -503,6 +518,14 @@ namespace DeadlockPlayground.Workspace
                     new Vector3(AlignedTransformFloats[6], AlignedTransformFloats[7], AlignedTransformFloats[8]));
                 var orig = new Vector3(AlignedTransformFloats[9], AlignedTransformFloats[10], AlignedTransformFloats[11]);
                 o.AlignedTransform = new Transform3D(basis, orig);
+            }
+            else if (o.RootPosition != Vector3.Zero || o.RootRotationDeg != Vector3.Zero || MathF.Abs(o.RootScale - 1f) > 1e-4f || o.RootScaleXYZ != Vector3.One)
+            {
+                Basis rb = Basis.FromEuler(
+                    new Vector3(Mathf.DegToRad(o.RootRotationDeg.X), Mathf.DegToRad(o.RootRotationDeg.Y), Mathf.DegToRad(o.RootRotationDeg.Z)),
+                    EulerOrder.Yxz);
+                Basis sb = Basis.FromScale(o.RootScaleXYZ * o.RootScale);
+                o.AlignedTransform = new Transform3D(rb * sb, o.RootPosition);
             }
             if (SubmeshSocketOffsetPos != null)
             {

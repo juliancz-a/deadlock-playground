@@ -451,7 +451,7 @@ namespace DeadlockPlayground.Importer
                         // Deduplicate material name across submeshes sharing the same Material instance or identical (name + texture + flags)
                         string matName = null;
                         ulong matId = primaryMat != null ? primaryMat.GetInstanceId() : 0;
-                        string texHash = ComputeFastHash(albedoPng, normalPng);
+                        string texHash = ComputeFastHash(albedoPng, normalPng, roughPng, aoPng);
                         string dedupKey = !string.IsNullOrEmpty(texHash)
                             ? $"{baseSanitized}_{texHash}_{isOutlineShell}_{isTranslucent}_{isAlphaTest}"
                             : "";
@@ -792,18 +792,20 @@ namespace DeadlockPlayground.Importer
             return Math.Clamp(chosen, minVal, maxVal);
         }
 
-        private static string ComputeFastHash(byte[] a, byte[] b)
+        private static string ComputeFastHash(params byte[][] buffers)
         {
-            if (a == null || a.Length == 0) return "";
+            if (buffers == null || buffers.Length == 0 || buffers[0] == null || buffers[0].Length == 0) return "";
             using var sha = SHA256.Create();
-            byte[] h1 = sha.ComputeHash(a);
-            string s1 = Convert.ToHexString(h1, 0, 8);
-            if (b != null && b.Length > 0)
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < buffers.Length; i++)
             {
-                byte[] h2 = sha.ComputeHash(b);
-                return s1 + "_" + Convert.ToHexString(h2, 0, 4);
+                var buf = buffers[i];
+                if (buf == null || buf.Length == 0) continue;
+                byte[] h = sha.ComputeHash(buf);
+                if (sb.Length > 0) sb.Append('_');
+                sb.Append(Convert.ToHexString(h, 0, i == 0 ? 8 : 4));
             }
-            return s1;
+            return sb.ToString();
         }
 
         public static bool IsClothBoneName(string boneName)

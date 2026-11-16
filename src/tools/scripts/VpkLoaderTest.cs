@@ -56,6 +56,7 @@ public partial class VpkLoaderTest : Node3D
 
     private ValveResourceFormat.Resource _currentVrfResource;
     private Model _currentVrfModel;
+    public Model CurrentVrfModel => _currentVrfModel;
     private IFileLoader _currentFileLoader;
     public IFileLoader CurrentFileLoader => _currentFileLoader;
 

@@ -256,7 +256,7 @@ public partial class ExportModDialog : CanvasLayer
                 _isBrowsingCsdk = true;
                 if (_folderDialog != null)
                 {
-                    _folderDialog.Title = "Select CSDK12 Root Directory (Optional)";
+                    _folderDialog.Title = "Select CSDK13 Root Directory (Optional)";
                     _folderDialog.CurrentDir = !string.IsNullOrEmpty(_txtCsdkPath?.Text) && Directory.Exists(_txtCsdkPath.Text)
                         ? _txtCsdkPath.Text
                         : "C:/";
@@ -304,7 +304,7 @@ public partial class ExportModDialog : CanvasLayer
         if (_btnDownloadCsdk != null)
         {
             _btnDownloadCsdk.Pressed += () =>
-                OS.ShellOpen("https://deadlockmodding.pages.dev/modding-tools/csdk-12");
+                OS.ShellOpen("https://deadlockmodding.pages.dev/modding-tools/csdk-13");
         }
     }
 
@@ -429,7 +429,14 @@ public partial class ExportModDialog : CanvasLayer
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path.Trim()))
         {
             _isCompilerFound = true;
-            _lblCompilerStatus.Text = $"✓ Found compiler: {Path.GetFileName(path.Trim())}";
+            string trimmed = path.Trim();
+            string norm = trimmed.Replace('\\', '/');
+            bool isLegacy12 = norm.Contains("CSDK12", StringComparison.OrdinalIgnoreCase)
+                           || norm.Contains("CSDK_12", StringComparison.OrdinalIgnoreCase)
+                           || norm.Contains("/bin_cs2/", StringComparison.OrdinalIgnoreCase);
+            _lblCompilerStatus.Text = isLegacy12
+                ? $"✓ Found compiler: {Path.GetFileName(trimmed)} (Legacy CSDK12 deprecated — CSDK13 recommended)"
+                : $"✓ Found compiler: {Path.GetFileName(trimmed)}";
         }
         else
         {

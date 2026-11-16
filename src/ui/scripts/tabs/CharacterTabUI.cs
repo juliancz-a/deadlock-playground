@@ -803,6 +803,147 @@ public partial class CharacterTabUI : VBoxContainer
         };
     }
 
+    private void OnDuplicateMirrorAccessorySlotPressed(string slotId)
+    {
+        var hero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (hero == null || string.IsNullOrEmpty(slotId)) return;
+
+        if (GetActiveAccessorySlotCount(hero) >= CustomModelAutoRigger.MaxAccessorySlots)
+        {
+            GD.PrintErr($"[CharacterTabUI] Cannot duplicate/mirror accessory slot '{slotId}': limit ({CustomModelAutoRigger.MaxAccessorySlots}) reached.");
+            UpdateImportAccessoryButtonState(true);
+            return;
+        }
+
+        string heroId = GetActiveHeroId(hero);
+        var session = DeadlockPlayground.Workspace.ModWorkspaceSession.Instance;
+        DeadlockPlayground.Workspace.WorkspaceAccessoryEntry entry = null;
+        if (!string.IsNullOrEmpty(heroId) && session?.Manifest?.Heroes != null &&
+            session.Manifest.Heroes.TryGetValue(heroId, out var heroEntry))
+        {
+            entry = heroEntry.Accessories?.FirstOrDefault(a =>
+                string.Equals(a.SlotId, slotId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        string diskPath = entry?.ModelConfig != null
+            ? session.ResolveCustomModelDiskPath(entry.ModelConfig)
+            : null;
+        if (string.IsNullOrEmpty(diskPath) || !File.Exists(diskPath))
+        {
+            GD.PrintErr($"[CharacterTabUI] Cannot duplicate/mirror '{slotId}': staged source file not found.");
+            return;
+        }
+
+        var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(diskPath);
+        if (sceneRoot == null)
+        {
+            GD.PrintErr($"[CharacterTabUI] Failed to reload 3D model from '{diskPath}'.");
+            return;
+        }
+
+        try
+        {
+            var opts = BuildMirroredAccessoryOptions(entry.DisplayName, entry.ModelConfig, sceneRoot, hero);
+            string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
+            var rigRes = CustomModelAutoRigger.RigAndBind(sceneRoot, hero, opts);
+            if (!rigRes.Success)
+            {
+                GD.PrintErr($"[CharacterTabUI] Mirror & Duplicate failed: {rigRes.ErrorMessage}");
+                return;
+            }
+
+            session?.StageAccessory(heroId, displayName, opts.SlotId, opts.AccessoryName, diskPath, opts);
+            RefreshAfterModelOrAccessoryChange(hero);
+            GD.Print($"[CharacterTabUI] Duplicated & mirrored accessory '{opts.AccessoryName}' ({opts.SlotId}, Bone={opts.RigidBoneName}, FlipX={opts.FlipX}).");
+        }
+        finally
+        {
+            if (GodotObject.IsInstanceValid(sceneRoot) && sceneRoot.GetParent() == null)
+            {
+                sceneRoot.QueueFree();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clones an accessory slot's configuration into a new slot with X-mirrored geometry,
+    /// swapped L &lt;-&gt; R bone targets, and hero-X-mirrored placement.
+    /// </summary>
+    public static CustomModelAutoRigger.RiggingOptions BuildMirroredAccessoryOptions(
+        string sourceDisplayName,
+        DeadlockPlayground.Workspace.WorkspaceCustomModelEntry sourceConfig,
+        Node3D loadedScene,
+        Node3D heroNode)
+    {
+        var opts = sourceConfig.ToRiggingOptions();
+        opts.SlotId = $"acc_{Guid.NewGuid().ToString("N")[..6]}";
+        string baseName = string.IsNullOrWhiteSpace(sourceDisplayName)
+            ? (string.IsNullOrWhiteSpace(opts.AccessoryName) ? "Accessory" : opts.AccessoryName)
+            : sourceDisplayName;
+        if (baseName.EndsWith(" (L)", StringComparison.OrdinalIgnoreCase))
+            opts.AccessoryName = baseName[..^4] + " (R)";
+        else if (baseName.EndsWith(" (R)", StringComparison.OrdinalIgnoreCase))
+            opts.AccessoryName = baseName[..^4] + " (L)";
+        else if (baseName.EndsWith(" (Mirrored)", StringComparison.OrdinalIgnoreCase))
+            opts.AccessoryName = baseName[..^11];
+        else
+            opts.AccessoryName = baseName + " (Mirrored)";
+
+        opts.FlipX = !opts.FlipX;
+
+        var skel = CustomModelAutoRigger.FindSkeleton(heroNode);
+        string SwapIfValidBone(string bn)
+        {
+            if (string.IsNullOrEmpty(bn)) return bn;
+            string mir = CustomModelAutoRigger.MirrorBoneNameLtoR(bn);
+            if (!string.IsNullOrEmpty(mir) && (skel == null || skel.FindBone(mir) >= 0))
+                return mir;
+            return bn;
+        }
+        opts.RigidBoneName = SwapIfValidBone(opts.RigidBoneName);
+        opts.OriginalMeshDeformBoneName = SwapIfValidBone(opts.OriginalMeshDeformBoneName);
+        if (opts.SubmeshAttachmentSockets != null && opts.SubmeshAttachmentSockets.Count > 0)
+        {
+            var keys = opts.SubmeshAttachmentSockets.Keys.ToList();
+            foreach (var k in keys)
+                opts.SubmeshAttachmentSockets[k] = SwapIfValidBone(opts.SubmeshAttachmentSockets[k]);
+        }
+
+        Transform3D curXf = opts.AlignedTransform;
+        if (curXf == Transform3D.Identity && (opts.RootPosition != Vector3.Zero || opts.RootRotationDeg != Vector3.Zero || MathF.Abs(opts.RootScale - 1f) > 1e-4f || opts.RootScaleXYZ != Vector3.One))
+        {
+            Basis rb = Basis.FromEuler(new Vector3(Mathf.DegToRad(opts.RootRotationDeg.X), Mathf.DegToRad(opts.RootRotationDeg.Y), Mathf.DegToRad(opts.RootRotationDeg.Z)), EulerOrder.Yxz);
+            Basis sb = Basis.FromScale(opts.RootScaleXYZ * opts.RootScale);
+            curXf = new Transform3D(rb * sb, opts.RootPosition);
+        }
+
+        Vector3 localCenter = Vector3.Zero;
+        if (loadedScene != null)
+        {
+            var filter = opts.IncludedImportedSubmeshNames != null && opts.IncludedImportedSubmeshNames.Count > 0
+                ? new HashSet<string>(opts.IncludedImportedSubmeshNames, StringComparer.OrdinalIgnoreCase)
+                : null;
+            var (minV, maxV, ok) = CustomModelAutoRigger.ComputePristineModelBounds(loadedScene, filter);
+            if (ok) localCenter = (minV + maxV) * 0.5f;
+        }
+
+        Vector3 worldCenter = curXf * localCenter;
+        Vector3 mirroredWorldCenter = new Vector3(-worldCenter.X, worldCenter.Y, worldCenter.Z);
+        Vector3 mirRot = new Vector3(opts.RootRotationDeg.X, -opts.RootRotationDeg.Y, -opts.RootRotationDeg.Z);
+        Basis mirRotBasis = Basis.FromEuler(
+            new Vector3(Mathf.DegToRad(mirRot.X), Mathf.DegToRad(mirRot.Y), Mathf.DegToRad(mirRot.Z)),
+            EulerOrder.Yxz);
+        float sc = opts.RootScale > 0.0001f ? opts.RootScale : 1.0f;
+        Basis mirScaleBasis = Basis.FromScale(opts.RootScaleXYZ * sc);
+        Basis mirBasis = mirRotBasis * mirScaleBasis;
+        Vector3 mirOrigin = mirroredWorldCenter - (mirBasis * localCenter);
+
+        opts.RootRotationDeg = mirRot;
+        opts.RootPosition = mirOrigin;
+        opts.AlignedTransform = new Transform3D(mirBasis, mirOrigin);
+        return opts;
+    }
+
     public void RemoveAccessorySlotById(string slotId)
     {
         var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
@@ -864,6 +1005,7 @@ public partial class CharacterTabUI : VBoxContainer
 
         var iconEyeOpen = GD.Load<Texture2D>("res://assets/at-icons/eye.svg");
         var iconEyeClosed = GD.Load<Texture2D>("res://assets/at-icons/eye_closed.svg");
+        var iconMirror = GD.Load<Texture2D>("res://assets/at-icons/mirror_horizontally.svg");
         var iconRename = GD.Load<Texture2D>("res://assets/at-icons/pencil.svg");
         var iconEdit = GD.Load<Texture2D>("res://assets/at-icons/sliders.svg");
         var iconTrash = GD.Load<Texture2D>("res://assets/at-icons/trash.svg");
@@ -939,6 +1081,20 @@ public partial class CharacterTabUI : VBoxContainer
             if (!isVisible)
                 lblName.Modulate = new Color(0.65f, 0.65f, 0.65f, 0.8f);
             hbox.AddChild(lblName);
+
+            var btnMirrorSlot = new Button
+            {
+                CustomMinimumSize = new Vector2(28, 28),
+                Icon = iconMirror,
+                ExpandIcon = true,
+                IconAlignment = HorizontalAlignment.Center,
+                ThemeTypeVariation = "IconButton",
+                TooltipText = "Duplicate & Mirror X (L <-> R bone + flipped geometry, e.g. copy Left Sneaker to Right Foot)",
+                Disabled = entry == null || containers.Count >= CustomModelAutoRigger.MaxAccessorySlots
+            };
+            btnMirrorSlot.AddThemeConstantOverride("icon_max_width", 16);
+            btnMirrorSlot.Pressed += () => OnDuplicateMirrorAccessorySlotPressed(slotId);
+            hbox.AddChild(btnMirrorSlot);
 
             var btnRenameSlot = new Button
             {
@@ -1190,8 +1346,17 @@ public partial class CharacterTabUI : VBoxContainer
 
             if (!hasAnyAcc)
             {
-                var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
-                skeleton?.ResetBonePoses();
+                var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                             ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+                if (playerTab != null)
+                {
+                    playerTab.RestoreDefaultIdlePose();
+                }
+                else
+                {
+                    var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
+                    skeleton?.ResetBonePoses();
+                }
             }
 
             GD.Print("[CharacterTabUI] Reset base hero to original Deadlock state and removed full-character custom model.");

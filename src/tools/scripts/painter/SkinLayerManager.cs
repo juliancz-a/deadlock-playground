@@ -1489,6 +1489,13 @@ namespace DeadlockPlayground.Painter
 
         public void ClearAllAtlasManagers()
         {
+            foreach (var mesh in _meshToMaterialKey.Keys)
+            {
+                if (mesh != null && GodotObject.IsInstanceValid(mesh))
+                {
+                    mesh.MaterialOverlay = null;
+                }
+            }
             foreach (var kvp in _perMaterialAtlasManagers)
             {
                 var mgr = kvp.Value;

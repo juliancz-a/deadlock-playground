@@ -110,12 +110,12 @@ layout_mode = 2
 [node name="LblCsdk" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123423]
 custom_minimum_size = Vector2(110, 0)
 layout_mode = 2
-text = "CSDK Root (Opt):"
+text = "CSDK13 Root (Opt):"
 
 [node name="TxtCsdkPath" type="LineEdit" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123424]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "Optional root folder (auto-derived if empty)"
+placeholder_text = "Optional CSDK13 root folder (auto-derived if empty)"
 
 [node name="BtnBrowseCsdkPath" type="Button" parent="DialogPanel/Margin/VBox/HBoxCsdk" unique_id=987123425]
 layout_mode = 2
@@ -129,13 +129,13 @@ theme_override_constants/separation = 8
 [node name="LblCsdkDownload" type="Label" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123471]
 layout_mode = 2
 theme_type_variation = &"BadgeLabelWarning"
-text = "CSDK12 is needed to compile"
+text = "CSDK13 is needed to compile (CSDK12 is deprecated)"
 
 [node name="BtnDownloadCsdk" type="Button" parent="DialogPanel/Margin/VBox/HBoxCsdkDownload" unique_id=987123472]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"SecondaryButton"
-text = "  Download CSDK12  "
+text = "  Download CSDK13  "
 
 [node name="HSeparator2" type="HSeparator" parent="DialogPanel/Margin/VBox" unique_id=987123426]
 layout_mode = 2

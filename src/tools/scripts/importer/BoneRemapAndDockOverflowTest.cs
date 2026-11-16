@@ -609,6 +609,397 @@ namespace DeadlockPlayground.Tests
                     srcRolledScene.QueueFree();
                     keptHero.QueueFree();
                 }
+
+                // =========================================================================
+                // TEST 6: Apollo (fencer) Orphaned Vanilla Mesh Leak, Material Cleanup & Paint Pose Toggle
+                // =========================================================================
+                {
+                    GD.Print("[TEST 6] Apollo (fencer) Reset -> Re-import Leak, BindPose Basis & PaintTabUI Pose Toggle...");
+
+                    var fencerEntry = DeadlockHeroCatalog.GetByCodename("fencer");
+                    Check(fencerEntry != null, "Resolved Apollo (fencer) entry from DeadlockHeroCatalog");
+
+                    Node3D fencerNode = await vpkLoader.LoadHeroModelAsync(fencerEntry);
+                    Check(fencerNode != null && vpkLoader.CurrentVrfModel != null,
+                        "Loaded Apollo (fencer) from VPK and exposed VpkLoaderTest.CurrentVrfModel");
+
+                    var fencerSkel = CustomModelAutoRigger.FindSkeleton(fencerNode);
+                    Check(fencerSkel != null, $"Found Apollo skeleton ({fencerSkel?.GetBoneCount() ?? 0} bones)");
+
+                    // 6A: Verify GetOrAddSkinBindIndex repairs Basis rotation mismatch even when Origin matches
+                    var testSkin = new Skin();
+                    int armUpperR = fencerSkel.FindBone("arm_upper_R");
+                    Transform3D expectedRest = fencerSkel.GetBoneGlobalRest(armUpperR);
+                    Transform3D rotatedSameOrigin = new Transform3D(
+                        expectedRest.Basis * new Basis(Vector3.Up, Mathf.DegToRad(40f)),
+                        expectedRest.Origin);
+                    testSkin.AddBind(armUpperR, rotatedSameOrigin.AffineInverse());
+                    int repairedIdx = CustomModelAutoRigger.GetOrAddSkinBindIndex(testSkin, fencerSkel, armUpperR);
+                    Quaternion qRepaired = testSkin.GetBindPose(repairedIdx).AffineInverse().Basis.Orthonormalized().GetRotationQuaternion();
+                    Quaternion qExpected = expectedRest.Basis.Orthonormalized().GetRotationQuaternion();
+                    Check(qRepaired.AngleTo(qExpected) < 1e-3f,
+                        $"GetOrAddSkinBindIndex repaired 40deg basis mismatch on same-origin bind pose (err={qRepaired.AngleTo(qExpected):E2}rad)");
+
+                    // 6B: Import -> Paint/Hierarchy Scan -> Reset -> Re-import on real Apollo model
+                    var dummyCustom = new Node3D { Name = "DummyApolloImport" };
+                    var dummyBox = new MeshInstance3D { Name = "CustomChest", Mesh = new BoxMesh { Size = new Vector3(0.3f, 0.5f, 0.2f) } };
+                    dummyCustom.AddChild(dummyBox);
+                    Root.AddChild(dummyCustom);
+
+                    var impOpts = new CustomModelAutoRigger.RiggingOptions
+                    {
+                        Method = CustomModelAutoRigger.RiggingMethod.RigidSingleBone,
+                        RigidBoneName = "spine_3",
+                        Mode = CustomModelAutoRigger.ReplaceMode.FullReplacement
+                    };
+
+                    var firstImp = CustomModelAutoRigger.RigAndBind(dummyCustom, fencerNode, impOpts);
+                    Check(firstImp.Success, "First RigidSingleBone import onto Apollo succeeded");
+
+                    var hierarchy = new DeadlockPlayground.Painter.HeroMeshHierarchy { Name = "TestHeroMeshHierarchy" };
+                    Root.AddChild(hierarchy);
+                    hierarchy.ScanHero(fencerNode);
+
+                    // Simulate active MaterialOverlay on a vanilla node prior to reset
+                    var origMeshes = CustomModelAutoRigger.CollectOriginalHeroMeshes(fencerNode);
+                    var dummyOverlayMat = new StandardMaterial3D { AlbedoColor = Colors.Magenta };
+                    foreach (var om in origMeshes) om.MaterialOverlay = dummyOverlayMat;
+
+                    // Reset Custom Model + Clear Paint Hierarchy (what CharacterTabUI.OnResetCustomModelPressed does)
+                    CustomModelAutoRigger.RemoveCustomModelAndRestoreHero(fencerNode, includeAccessories: false);
+                    hierarchy.ScanHero(fencerNode);
+                    hierarchy.ScanHero(null);
+                    await ToSignal(this, SignalName.ProcessFrame);
+
+                    int orphanSplitNodes = fencerNode.FindChildren("*", "MeshInstance3D", true, false)
+                        .OfType<MeshInstance3D>()
+                        .Count(m => GodotObject.IsInstanceValid(m) && m.HasMeta("ParentCompositeMesh"));
+                    int staleOverlays = origMeshes.Count(om => GodotObject.IsInstanceValid(om) && om.MaterialOverlay != null);
+                    Check(orphanSplitNodes == 0 && staleOverlays == 0 && origMeshes.All(om => !GodotObject.IsInstanceValid(om) || om.Visible),
+                        $"Reset to Original Apollo left 0 orphaned _surf_* nodes ({orphanSplitNodes}), 0 stale overlays ({staleOverlays}), and all vanilla meshes visible");
+
+                    // Re-import and re-scan: ensure ZERO vanilla Apollo meshes stay stuck visible!
+                    var secondImp = CustomModelAutoRigger.RigAndBind(dummyCustom, fencerNode, impOpts);
+                    hierarchy.ScanHero(fencerNode);
+                    int visibleVanillaAfterReimport = CustomModelAutoRigger.CollectMeshes(fencerNode)
+                        .Count(m => GodotObject.IsInstanceValid(m) &&
+                                    m.Visible &&
+                                    (!m.HasMeta("IsCustomImportedMesh") || !m.GetMeta("IsCustomImportedMesh").AsBool()) &&
+                                    m.GetParent()?.Name != "Custom_Rigged_Character");
+                    int visibleCustomAfterReimport = CustomModelAutoRigger.CollectMeshes(fencerNode)
+                        .Count(m => GodotObject.IsInstanceValid(m) && m.Visible && m.HasMeta("IsCustomImportedMesh") && m.GetMeta("IsCustomImportedMesh").AsBool());
+                    Check(secondImp.Success && visibleVanillaAfterReimport == 0 && visibleCustomAfterReimport >= 1,
+                        $"Re-importing after Reset hid all vanilla Apollo geometry (visibleVanilla={visibleVanillaAfterReimport}, visibleCustom={visibleCustomAfterReimport})");
+
+                    // 6C: PaintTabUI Pose Toggle (Keep Current Pose vs Bind A-Pose)
+                    var paintTabScene = GD.Load<PackedScene>("res://ui/scenes/tabs/PaintTab.tscn");
+                    var paintTab = paintTabScene.Instantiate<PaintTabUI>();
+                    Root.AddChild(paintTab);
+                    await ToSignal(this, SignalName.ProcessFrame);
+
+                    // Put Apollo arm_upper_R into simulated idle rotation (forward +35 deg)
+                    int armUpperL = fencerSkel.FindBone("arm_upper_L");
+                    Quaternion idleRotR = new Quaternion(Vector3.Up, Mathf.DegToRad(35f)) * fencerSkel.GetBonePoseRotation(armUpperR);
+                    fencerSkel.SetBonePoseRotation(armUpperR, idleRotR);
+                    fencerSkel.ForceUpdateAllBoneTransforms();
+
+                    var paintType = typeof(PaintTabUI);
+                    const BindingFlags PFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+                    paintType.GetField("_currentHero", PFlags)?.SetValue(paintTab, fencerNode);
+                    paintTab.OnTabActivated();
+                    await ToSignal(this, SignalName.ProcessFrame);
+
+                    Quaternion poseKept = fencerSkel.GetBonePoseRotation(armUpperR);
+                    Check(poseKept.AngleTo(idleRotR) < 1e-3f,
+                        $"Entering PaintTabUI with default 'Keep Current Pose' preserved active arm rotation (diff={poseKept.AngleTo(idleRotR):E2}rad)");
+
+                    // Switch toggle ON -> Bind A-Pose (Reset)
+                    paintTab.SetUseBindPoseInPaint(true);
+                    await ToSignal(this, SignalName.ProcessFrame);
+                    Quaternion poseBind = fencerSkel.GetBonePoseRotation(armUpperR);
+                    Quaternion restRotR = fencerSkel.GetBoneRest(armUpperR).Basis.Orthonormalized().GetRotationQuaternion();
+                    Check(poseBind.AngleTo(restRotR) < 1e-3f,
+                        $"Toggling 'Bind A-Pose' in PaintTabUI reset arm_upper_R to raw BoneRest (diffFromRest={poseBind.AngleTo(restRotR):E2}rad)");
+
+                    // Switch toggle OFF -> restores cached Current Pose cleanly while still in PaintTabUI
+                    paintTab.SetUseBindPoseInPaint(false);
+                    await ToSignal(this, SignalName.ProcessFrame);
+                    Quaternion poseRestoredInPaint = fencerSkel.GetBonePoseRotation(armUpperR);
+                    Check(poseRestoredInPaint.AngleTo(idleRotR) < 1e-3f,
+                        $"Toggling back to 'Keep Current Pose' inside PaintTabUI restored idle arm rotation (diff={poseRestoredInPaint.AngleTo(idleRotR):E2}rad)");
+
+                    paintTab.OnTabDeactivated();
+                    paintTab.ClearHero();
+                    paintTab.QueueFree();
+                    hierarchy.QueueFree();
+                    dummyCustom.QueueFree();
+                }
+
+                // =========================================================================
+                // TEST 7: Geometry FlipX (Winding + Normals + Tangents) & Mirror L<->R
+                // =========================================================================
+                GD.Print("\n=== Test 7: Geometry Flip X/Y/Z, Triangle Winding & Mirror L<->R ===");
+                {
+                    Check(CustomModelAutoRigger.MirrorBoneNameLtoR("ankle_L") == "ankle_R", "MirrorBoneNameLtoR swaps ankle_L -> ankle_R");
+                    Check(CustomModelAutoRigger.MirrorBoneNameLtoR("weapon_hand_R") == "weapon_hand_L", "MirrorBoneNameLtoR swaps weapon_hand_R -> weapon_hand_L");
+                    Check(CustomModelAutoRigger.MirrorBoneNameLtoR("head") == null, "MirrorBoneNameLtoR returns null for midline head bone");
+
+                    // Build asymmetric shoe-like tetrahedron around center (0.20, 0.05, 0.00) with distinct X asymmetry
+                    Vector3[] shoeVerts =
+                    {
+                        new Vector3(0.10f, 0.00f, -0.05f),
+                        new Vector3(0.30f, 0.00f, -0.05f),
+                        new Vector3(0.28f, 0.00f,  0.15f),
+                        new Vector3(0.26f, 0.12f,  0.02f)
+                    };
+                    // Outward-facing CCW triangles for the tetrahedron
+                    int[] shoeTris =
+                    {
+                        0, 2, 1, // bottom (normal -Y)
+                        0, 1, 3, // back (normal -Z / +Y)
+                        1, 2, 3, // +X outer side
+                        2, 0, 3  // -X inner side
+                    };
+                    var st = new SurfaceTool();
+                    st.Begin(Mesh.PrimitiveType.Triangles);
+                    for (int t = 0; t < shoeTris.Length; t += 3)
+                    {
+                        Vector3 v0 = shoeVerts[shoeTris[t]];
+                        Vector3 v1 = shoeVerts[shoeTris[t + 1]];
+                        Vector3 v2 = shoeVerts[shoeTris[t + 2]];
+                        Vector3 n = (v2 - v0).Cross(v1 - v0).Normalized();
+                        // Note Godot CCW face normal: Cross(v1 - v0, v2 - v0) vs standard; pick outward relative to centroid
+                        Vector3 centroid = (shoeVerts[0] + shoeVerts[1] + shoeVerts[2] + shoeVerts[3]) * 0.25f;
+                        Vector3 faceCenter = (v0 + v1 + v2) / 3f;
+                        if (n.Dot(faceCenter - centroid) < 0f)
+                        {
+                            (v1, v2) = (v2, v1);
+                            n = -n;
+                        }
+                        st.SetNormal(n); st.SetUV(new Vector2(0, 0)); st.AddVertex(v0);
+                        st.SetNormal(n); st.SetUV(new Vector2(1, 0)); st.AddVertex(v1);
+                        st.SetNormal(n); st.SetUV(new Vector2(0, 1)); st.AddVertex(v2);
+                    }
+                    st.GenerateTangents();
+                    var shoeMesh = st.Commit();
+                    var shoeScene = new Node3D { Name = "ShoeScene" };
+                    var shoeMi = new MeshInstance3D { Name = "LeftSneaker", Mesh = shoeMesh };
+                    shoeScene.AddChild(shoeMi);
+                    Root.AddChild(shoeScene);
+
+                    var origArrays = shoeMesh.SurfaceGetArrays(0);
+                    var origVerts = origArrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                    var origNorms = origArrays[(int)Mesh.ArrayType.Normal].AsVector3Array();
+                    var origTangents = origArrays[(int)Mesh.ArrayType.Tangent].AsFloat32Array();
+                    float origTw0 = origTangents[3];
+
+                    // Apply FlipX
+                    var restore = CustomModelAutoRigger.ApplyGeometryFlipToScene(shoeScene, flipX: true, flipY: false, flipZ: false);
+                    Check(restore != null && shoeScene.HasMeta("BakedFlipMask") && shoeScene.GetMeta("BakedFlipMask").AsInt32() == 1,
+                        "ApplyGeometryFlipToScene stamped BakedFlipMask=1 for FlipX");
+
+                    var flipArrays = shoeMi.Mesh.SurfaceGetArrays(0);
+                    var flipVerts = flipArrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                    var flipNorms = flipArrays[(int)Mesh.ArrayType.Normal].AsVector3Array();
+                    var flipTangents = flipArrays[(int)Mesh.ArrayType.Tangent].AsFloat32Array();
+                    var flipIdx = flipArrays[(int)Mesh.ArrayType.Index].AsInt32Array();
+
+                    // Verify winding parity matches flipped vertex normals (signed volume parity stays outward!)
+                    Vector3 flipCentroid = Vector3.Zero;
+                    foreach (var v in flipVerts) flipCentroid += v;
+                    flipCentroid /= flipVerts.Length;
+                    bool allOutward = true;
+                    int triCount = flipIdx != null && flipIdx.Length >= 3 ? flipIdx.Length / 3 : flipVerts.Length / 3;
+                    for (int t = 0; t < triCount; t++)
+                    {
+                        int i0 = flipIdx != null ? flipIdx[t * 3] : t * 3;
+                        int i1 = flipIdx != null ? flipIdx[t * 3 + 1] : t * 3 + 1;
+                        int i2 = flipIdx != null ? flipIdx[t * 3 + 2] : t * 3 + 2;
+                        Vector3 a = flipVerts[i0], b = flipVerts[i1], c = flipVerts[i2];
+                        // Must agree with stored flipped vertex normal
+                        Vector3 storedN = (flipNorms[i0] + flipNorms[i1] + flipNorms[i2]).Normalized();
+                        Vector3 geoN = (b - a).Cross(c - a).Normalized();
+                        // Compare with original triangle normal orientation parity
+                        Vector3 oa = origVerts[t * 3], ob = origVerts[t * 3 + 1], oc = origVerts[t * 3 + 2];
+                        Vector3 oStored = (origNorms[t * 3] + origNorms[t * 3 + 1] + origNorms[t * 3 + 2]).Normalized();
+                        Vector3 oGeo = (ob - oa).Cross(oc - oa).Normalized();
+                        float origParity = MathF.Sign(oGeo.Dot(oStored));
+                        float flipParity = MathF.Sign(geoN.Dot(storedN));
+                        if (MathF.Abs(origParity - flipParity) > 0.1f)
+                        {
+                            allOutward = false;
+                            break;
+                        }
+                    }
+                    Check(allOutward, "FlipX reversed triangle winding so flipped face winding parity matches outward normals (zero inside-out culling)");
+                    Check(MathF.Abs(flipTangents[3] + origTw0) < 1e-4f, $"FlipX negated tangent binormal handedness W ({origTw0} -> {flipTangents[3]})");
+
+                    // Restore reverts mesh cleanly
+                    restore();
+                    Check(!shoeScene.HasMeta("BakedFlipMask") && shoeMi.Mesh == shoeMesh,
+                        "Restore action reverted ShoeScene back to exact unflipped Mesh and cleared BakedFlipMask");
+
+                    // Test Mirror L<->R accessory options cloning + RigAndBind with FlipX
+                    var leftCfg = new DeadlockPlayground.Workspace.WorkspaceCustomModelEntry
+                    {
+                        AccessoryName = "Cool Sneaker (L)",
+                        Method = (int)CustomModelAutoRigger.RiggingMethod.RigidSingleBone,
+                        RigidBoneName = "ankle_L",
+                        RootPosition = new[] { 0.18f, 0.06f, 0.02f },
+                        RootRotationDeg = new[] { 5f, 18f, -12f },
+                        RootScale = 1.0f,
+                        RootScaleXyz = new[] { 1f, 1f, 1f },
+                        FlipX = false,
+                        FlipY = false,
+                        FlipZ = true
+                    };
+                    var roundTrip = leftCfg.ToRiggingOptions();
+                    Check(!roundTrip.FlipX && !roundTrip.FlipY && roundTrip.FlipZ,
+                        "WorkspaceCustomModelEntry round-trips FlipX/FlipY/FlipZ");
+
+                    var mirOpts = CharacterTabUI.BuildMirroredAccessoryOptions("Cool Sneaker (L)", leftCfg, shoeScene, vpkLoader.CurrentHeroNode);
+                    Check(mirOpts.FlipX && mirOpts.FlipZ, "BuildMirroredAccessoryOptions toggled FlipX=true while keeping FlipZ=true");
+                    Check(mirOpts.AccessoryName == "Cool Sneaker (R)", $"BuildMirroredAccessoryOptions renamed '(L)' -> '{mirOpts.AccessoryName}'");
+                    Check(mirOpts.RigidBoneName == "ankle_R", $"BuildMirroredAccessoryOptions swapped ankle_L -> {mirOpts.RigidBoneName}");
+                    Check(MathF.Abs(mirOpts.RootRotationDeg.X - 5f) < 1e-3f &&
+                          MathF.Abs(mirOpts.RootRotationDeg.Y - (-18f)) < 1e-3f &&
+                          MathF.Abs(mirOpts.RootRotationDeg.Z - 12f) < 1e-3f,
+                        $"BuildMirroredAccessoryOptions mirrored Euler Yxz to ({mirOpts.RootRotationDeg.X}, {mirOpts.RootRotationDeg.Y}, {mirOpts.RootRotationDeg.Z})");
+
+                    var (_, shoeMaxPre, _) = CustomModelAutoRigger.ComputePristineModelBounds(shoeScene);
+                    var (shoeMinPre, _, _) = CustomModelAutoRigger.ComputePristineModelBounds(shoeScene);
+                    Vector3 lc = (shoeMinPre + shoeMaxPre) * 0.5f;
+                    Vector3 origWc = leftCfg.ToRiggingOptions().AlignedTransform * lc;
+                    Vector3 mirWc = mirOpts.AlignedTransform * lc;
+                    Check(MathF.Abs(mirWc.X + origWc.X) < 1e-3f && MathF.Abs(mirWc.Y - origWc.Y) < 1e-3f && MathF.Abs(mirWc.Z - origWc.Z) < 1e-3f,
+                        $"Mirrored world bounds center landed symmetrically at X=-({origWc.X:F3}) -> {mirWc.X:F3}");
+
+                    var rigMir = CustomModelAutoRigger.RigAndBind(shoeScene, vpkLoader.CurrentHeroNode, mirOpts);
+                    Check(rigMir.Success && rigMir.CustomSubmeshes.Count == 1,
+                        $"RigAndBind with FlipX+FlipZ succeeded on RigidSingleBone ankle_R (verts={rigMir.TotalVertices})");
+
+                    // 7B: Verify identical textures/materials are reused across BOTH mirrored slots AND two manually imported GLBs,
+                    // while distinct textures with generic "Material" names still never collide.
+                    static ImageTexture MakeTex(Color c)
+                    {
+                        var img = Image.CreateEmpty(4, 4, false, Image.Format.Rgba8);
+                        img.Fill(c);
+                        return ImageTexture.CreateFromImage(img);
+                    }
+                    var texSameA = MakeTex(new Color(0.8f, 0.2f, 0.1f, 1f));
+                    var texSameB = MakeTex(new Color(0.8f, 0.2f, 0.1f, 1f));
+                    var texDiffC = MakeTex(new Color(0.1f, 0.7f, 0.9f, 1f));
+
+                    Node3D BuildDummyShoe(string meshName, string matName, Texture2D tex)
+                    {
+                        var bm = new BoxMesh { Size = new Vector3(0.2f, 0.1f, 0.3f) };
+                        bm.SurfaceSetMaterial(0, new StandardMaterial3D { ResourceName = matName, AlbedoTexture = tex });
+                        var sc = new Node3D { Name = $"Scene_{meshName}" };
+                        var mi = new MeshInstance3D { Name = meshName, Mesh = bm };
+                        sc.AddChild(mi);
+                        Root.AddChild(sc);
+                        return sc;
+                    }
+
+                    var shoeA = BuildDummyShoe("LeftSneakerMesh", "Material", texSameA);
+                    var shoeB = BuildDummyShoe("RightSneakerMesh", "Material", texSameB);
+                    var hatC  = BuildDummyShoe("HatMesh", "Material", texDiffC);
+
+                    var optA = new CustomModelAutoRigger.RiggingOptions { SlotId = "acc_shoe_l", Intent = CustomModelAutoRigger.AccessoryIntent.AddAccessory, Method = CustomModelAutoRigger.RiggingMethod.RigidSingleBone, RigidBoneName = "ankle_L" };
+                    var optB = new CustomModelAutoRigger.RiggingOptions { SlotId = "acc_shoe_r", Intent = CustomModelAutoRigger.AccessoryIntent.AddAccessory, Method = CustomModelAutoRigger.RiggingMethod.RigidSingleBone, RigidBoneName = "ankle_R", FlipX = true };
+                    var optC = new CustomModelAutoRigger.RiggingOptions { SlotId = "acc_hat_c", Intent = CustomModelAutoRigger.AccessoryIntent.AddAccessory, Method = CustomModelAutoRigger.RiggingMethod.RigidSingleBone, RigidBoneName = "head" };
+
+                    CustomModelAutoRigger.RemoveAccessorySlot(vpkLoader.CurrentHeroNode, mirOpts.SlotId);
+                    var resA = CustomModelAutoRigger.RigAndBind(shoeA, vpkLoader.CurrentHeroNode, optA);
+                    var resB = CustomModelAutoRigger.RigAndBind(shoeB, vpkLoader.CurrentHeroNode, optB);
+                    var resC = CustomModelAutoRigger.RigAndBind(hatC,  vpkLoader.CurrentHeroNode, optC);
+
+                    Material matA = resA.CustomSubmeshes[0].Mesh.SurfaceGetMaterial(0);
+                    Material matB = resB.CustomSubmeshes[0].Mesh.SurfaceGetMaterial(0);
+                    Material matC = resC.CustomSubmeshes[0].Mesh.SurfaceGetMaterial(0);
+                    string sNameA = resA.CustomSubmeshes[0].GetMeta("SourceMaterialName").AsString();
+                    string sNameB = resB.CustomSubmeshes[0].GetMeta("SourceMaterialName").AsString();
+                    string sNameC = resC.CustomSubmeshes[0].GetMeta("SourceMaterialName").AsString();
+
+                    Check(ReferenceEquals(matA, matB) && sNameA == sNameB,
+                        $"Two separate accessory slots sharing identical texture pixels reused exact Material & name ('{sNameA}')");
+                    Check(!ReferenceEquals(matA, matC) && !string.Equals(sNameA, sNameC, StringComparison.OrdinalIgnoreCase),
+                        $"Distinct texture on generic 'Material' avoided collision ('{sNameA}' vs '{sNameC}')");
+
+                    var hierarchyCheck = new DeadlockPlayground.Painter.HeroMeshHierarchy();
+                    Root.AddChild(hierarchyCheck);
+                    hierarchyCheck.ScanHero(vpkLoader.CurrentHeroNode);
+                    int matchingMatGroups = hierarchyCheck.MaterialGroups.Count(g =>
+                        g.Submeshes.Any(sm => sm.Mesh == resA.CustomSubmeshes[0] || sm.Mesh == resB.CustomSubmeshes[0]));
+                    Check(matchingMatGroups == 1,
+                        $"HeroMeshHierarchy grouped both mirrored/manual sneakers into 1 MaterialGroup (count={matchingMatGroups})");
+                    hierarchyCheck.QueueFree();
+
+                    CustomModelAutoRigger.RemoveAccessorySlot(vpkLoader.CurrentHeroNode, "acc_shoe_l");
+                    CustomModelAutoRigger.RemoveAccessorySlot(vpkLoader.CurrentHeroNode, "acc_shoe_r");
+                    CustomModelAutoRigger.RemoveAccessorySlot(vpkLoader.CurrentHeroNode, "acc_hat_c");
+                    shoeA.QueueFree();
+                    shoeB.QueueFree();
+                    hatC.QueueFree();
+                    shoeScene.QueueFree();
+                }
+
+                // =========================================================================
+                // TEST 8: Parallelized CustomLandmarkWeightSolver Weight Sanity
+                // =========================================================================
+                GD.Print("\n=== Test 8: CustomLandmarkWeightSolver Geodesic Solve Verification ===");
+                {
+                    var st = new SurfaceTool();
+                    st.Begin(Mesh.PrimitiveType.Triangles);
+                    void AddSphere(Vector3 center, float rx, float ry, float rz)
+                    {
+                        var sp = new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 12, Rings = 6 };
+                        var arr = sp.SurfaceGetArrays(0);
+                        var vs = arr[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                        var idx = arr[(int)Mesh.ArrayType.Index].AsInt32Array();
+                        for (int i = 0; i < idx.Length; i++)
+                        {
+                            Vector3 v = vs[idx[i]];
+                            st.AddVertex(center + new Vector3(v.X * rx, v.Y * ry, v.Z * rz));
+                        }
+                    }
+                    AddSphere(new Vector3(0f, 1.0f, 0f), 0.18f, 0.40f, 0.12f);  // torso
+                    AddSphere(new Vector3(0f, 1.65f, 0f), 0.11f, 0.13f, 0.12f); // head
+                    AddSphere(new Vector3(0.35f, 1.15f, 0f), 0.25f, 0.06f, 0.06f); // arm L
+                    AddSphere(new Vector3(-0.35f, 1.15f, 0f), 0.25f, 0.06f, 0.06f); // arm R
+                    AddSphere(new Vector3(0.10f, 0.45f, 0f), 0.07f, 0.45f, 0.07f); // leg L
+                    AddSphere(new Vector3(-0.10f, 0.45f, 0f), 0.07f, 0.45f, 0.07f); // leg R
+
+                    var synthScene = new Node3D { Name = "LandmarkSynthScene" };
+                    var synthMi = new MeshInstance3D { Name = "Body", Mesh = st.Commit() };
+                    synthScene.AddChild(synthMi);
+                    Root.AddChild(synthScene);
+
+                    var hSkel = CustomModelAutoRigger.FindSkeleton(vpkLoader.CurrentHeroNode);
+                    var synthOpts = new CustomModelAutoRigger.RiggingOptions
+                    {
+                        Method = CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
+                        AlignedTransform = Transform3D.Identity
+                    };
+                    var synth = CustomLandmarkWeightSolver.BuildSyntheticRig(synthScene, new List<MeshInstance3D> { synthMi }, hSkel, synthOpts);
+                    Check(synth.Skeleton.GetBoneCount() == 21 && synth.VertexCount > 100,
+                        $"BuildSyntheticRig built 21-bone synthetic skeleton across {synth.VertexCount} vertices");
+
+                    var wArr = synthMi.Mesh.SurfaceGetArrays(0)[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                    bool weightsOk = wArr != null && wArr.Length == synth.VertexCount * 4;
+                    if (weightsOk)
+                    {
+                        for (int v = 0; v < synth.VertexCount; v++)
+                        {
+                            float sum = wArr[v * 4] + wArr[v * 4 + 1] + wArr[v * 4 + 2] + wArr[v * 4 + 3];
+                            if (MathF.Abs(sum - 1f) > 1e-3f) { weightsOk = false; break; }
+                        }
+                    }
+                    Check(weightsOk, "Parallel Dijkstra + double-buffered Laplacian + zero-alloc Top-4 produced normalized weights (sum == 1.0) on all vertices");
+                    synth.Restore();
+                    Check(synthMi.Skin == null, "BuildSyntheticRig.Restore() cleanly reverted test mesh skin");
+                    synthScene.QueueFree();
+                }
             }
             catch (Exception ex)
             {

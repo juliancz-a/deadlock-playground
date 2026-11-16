@@ -113,6 +113,8 @@ public partial class PaintTabUI : VBoxContainer
     private Label _lblActiveMesh;
     private OptionButton _optTargetMesh;
     private Label _lblCanvasResolution;
+    private Button _btnPaintPoseToggle;
+    private bool _useBindPoseInPaint = false;
     private Texture2D _iconPencil;
 
     // Project Save / Load (.dptex)
@@ -314,6 +316,31 @@ public partial class PaintTabUI : VBoxContainer
         _btnSaveProject = GetNodeOrNull<Button>("HeaderCard/VBox/HBoxProject/BtnSaveProject");
         _btnLoadProject = GetNodeOrNull<Button>("HeaderCard/VBox/HBoxProject/BtnLoadProject");
         _lblActiveMesh = GetNodeOrNull<Label>("HeaderCard/VBox/ActiveMeshLabel");
+
+        var headerVBox = GetNodeOrNull<VBoxContainer>("HeaderCard/VBox");
+        if (headerVBox != null && _btnPaintPoseToggle == null)
+        {
+            var poseRow = new HBoxContainer { Name = "HBoxPaintPose", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            poseRow.AddThemeConstantOverride("separation", 6);
+            var lblPose = new Label { Text = "Paint Pose:", CustomMinimumSize = new Vector2(80, 0) };
+            poseRow.AddChild(lblPose);
+
+            _btnPaintPoseToggle = new Button
+            {
+                Name = "BtnPaintPoseToggle",
+                ToggleMode = true,
+                ButtonPressed = _useBindPoseInPaint,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 28)
+            };
+            _btnPaintPoseToggle.Toggled += OnPaintPoseToggled;
+            SyncPaintPoseToggleVisuals();
+            poseRow.AddChild(_btnPaintPoseToggle);
+
+            headerVBox.AddChild(poseRow);
+            var activeMeshIdx = _lblActiveMesh != null ? _lblActiveMesh.GetIndex() : headerVBox.GetChildCount() - 1;
+            headerVBox.MoveChild(poseRow, Math.Max(0, activeMeshIdx));
+        }
 
         // Submesh Hierarchy
         _submeshListContainer = GetNodeOrNull<VBoxContainer>("SubmeshCard/VBox/ScrollContainer/SubmeshListContainer");
@@ -1387,7 +1414,10 @@ public partial class PaintTabUI : VBoxContainer
         else if (_painter != null && _painter.IsPaintingActive)
         {
             CacheCharacterPose();
-            ResetCharacterPose();
+            if (_useBindPoseInPaint)
+            {
+                ResetCharacterPose();
+            }
             if (_meshHierarchy != null)
             {
                 _meshHierarchy.IsPaintingModeActive = true;
@@ -2358,6 +2388,16 @@ public partial class PaintTabUI : VBoxContainer
     private void ClearHeroInternal(bool preserveMeshHierarchy)
     {
         FlushActiveChangesToWorkspace(true);
+        if (!preserveMeshHierarchy && _currentHero != null && GodotObject.IsInstanceValid(_currentHero))
+        {
+            foreach (Node n in _currentHero.FindChildren("*", "MeshInstance3D", recursive: true, owned: false))
+            {
+                if (n is MeshInstance3D mi && GodotObject.IsInstanceValid(mi))
+                {
+                    mi.MaterialOverlay = null;
+                }
+            }
+        }
         _currentHero = null;
         _hasCachedPose = false;
         _cachedBonePoses.Clear();
@@ -4190,11 +4230,57 @@ public partial class PaintTabUI : VBoxContainer
         if (_btnInstallCitadel != null) _btnInstallCitadel.Disabled = !hasHero;
     }
 
+    public void SetUseBindPoseInPaint(bool useBindPose)
+    {
+        if (_btnPaintPoseToggle != null)
+        {
+            _btnPaintPoseToggle.ButtonPressed = useBindPose;
+        }
+        else
+        {
+            OnPaintPoseToggled(useBindPose);
+        }
+    }
+
+    private void SyncPaintPoseToggleVisuals()
+    {
+        if (_btnPaintPoseToggle == null) return;
+        _btnPaintPoseToggle.Text = _useBindPoseInPaint ? "Bind A-Pose (Reset)" : "Keep Current Pose";
+        _btnPaintPoseToggle.TooltipText = _useBindPoseInPaint
+            ? "Resets skeleton to raw Bind A-Pose while painting (helpful when limbs overlap chest/armpits). Click to paint in your current pose instead."
+            : "Keeps your character's current pose/idle while painting so shoulders and arms stay in natural posture. Click to switch to Bind A-Pose.";
+    }
+
+    private void OnPaintPoseToggled(bool useBindPose)
+    {
+        _useBindPoseInPaint = useBindPose;
+        SyncPaintPoseToggleVisuals();
+        if (!IsTabActive || _currentHero == null || !GodotObject.IsInstanceValid(_currentHero)) return;
+
+        if (_useBindPoseInPaint)
+        {
+            if (!_hasCachedPose) CacheCharacterPose();
+            ResetCharacterPose();
+        }
+        else
+        {
+            RestoreCharacterPose(clearCache: false);
+        }
+    }
+
     public void OnTabActivated()
     {
         IsTabActive = true;
         CacheCharacterPose();
-        ResetCharacterPose();
+        if (_btnPaintPoseToggle != null)
+        {
+            _btnPaintPoseToggle.SetPressedNoSignal(_useBindPoseInPaint);
+            SyncPaintPoseToggleVisuals();
+        }
+        if (_useBindPoseInPaint)
+        {
+            ResetCharacterPose();
+        }
         var pStage = GetOrCreateParticleStage();
         bool hasParticleActive = pStage != null && pStage.HasActiveParticle;
 
@@ -4300,7 +4386,7 @@ public partial class PaintTabUI : VBoxContainer
             }
             _meshHierarchy?.SyncPreSoloFromVisibility();
 
-            RestoreCharacterPose();
+            RestoreCharacterPose(clearCache: true);
         }
     }
 
@@ -4409,7 +4495,7 @@ public partial class PaintTabUI : VBoxContainer
         }
     }
 
-    private void RestoreCharacterPose()
+    private void RestoreCharacterPose(bool clearCache = true)
     {
         if (_currentHero == null || !_hasCachedPose) return;
 
@@ -4418,7 +4504,7 @@ public partial class PaintTabUI : VBoxContainer
         {
             animPlayer.Play(_cachedAnimationName);
             animPlayer.Seek(_cachedAnimationPosition, update: true);
-            if (!_cachedAnimationPlaying)
+            if (!_cachedAnimationPlaying || IsTabActive)
             {
                 animPlayer.Pause();
             }
@@ -4440,6 +4526,11 @@ public partial class PaintTabUI : VBoxContainer
             skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.Conform(skeleton);
 
+            var constraintDriver = _currentHero.FindChildren("*", "Node", recursive: true, owned: false)
+                .OfType<DeadlockPlayground.Animation.Source2BoneConstraintDriver>()
+                .FirstOrDefault();
+            constraintDriver?.EvaluateNow(0f);
+
             Node3D heroRoot = skeleton;
             while (heroRoot != null && !heroRoot.Name.ToString().StartsWith("Hero_") && heroRoot.GetParent() is Node3D parent3D)
             {
@@ -4451,8 +4542,11 @@ public partial class PaintTabUI : VBoxContainer
             }
         }
 
-        _hasCachedPose = false;
-        _cachedBonePoses.Clear();
+        if (clearCache)
+        {
+            _hasCachedPose = false;
+            _cachedBonePoses.Clear();
+        }
     }
 
     private void ResetCharacterPose()
@@ -4470,6 +4564,11 @@ public partial class PaintTabUI : VBoxContainer
             }
             skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.Conform(skeleton);
+
+            var constraintDriver = _currentHero.FindChildren("*", "Node", recursive: true, owned: false)
+                .OfType<DeadlockPlayground.Animation.Source2BoneConstraintDriver>()
+                .FirstOrDefault();
+            constraintDriver?.EvaluateNow(0f);
         }
     }
 

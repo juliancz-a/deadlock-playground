@@ -154,6 +154,16 @@ public partial class PlayerTabUI : VBoxContainer
             };
             animGroup.AddChild(btnImportAnim);
             animGroup.MoveChild(btnImportAnim, 3);
+
+            var btnBindPose = new Button
+            {
+                Name = "BtnBindPoseRest",
+                Text = "Bind Pose (Rest A-Pose)",
+                TooltipText = "Resets the skeleton cleanly to its raw Source 2 Bind / Rest Pose (same reference A-pose used in the Model Importer)."
+            };
+            btnBindPose.Pressed += ResetAllPoses;
+            animGroup.AddChild(btnBindPose);
+            animGroup.MoveChild(btnBindPose, 4);
         }
 
         var stage = GetTree()?.Root?.FindChild("ParticleStage3D", true, false) as ParticleStage3D;
@@ -1759,6 +1769,11 @@ public partial class PlayerTabUI : VBoxContainer
         }
     }
 
+    public void RestoreDefaultIdlePose()
+    {
+        AutoSelectDefaultIdle();
+    }
+
     public void ResetAllPoses()
     {
         AnimationTransportService.Instance.Stop();
@@ -1772,6 +1787,11 @@ public partial class PlayerTabUI : VBoxContainer
 
             _skeleton.ForceUpdateAllBoneTransforms();
             ProceduralClothSolver.Conform(_skeleton, force: true, _animPlayer);
+
+            var driver = _skeleton.GetParent()?.FindChildren("*", "Node", recursive: true, owned: false)
+                .OfType<Source2BoneConstraintDriver>()
+                .FirstOrDefault();
+            driver?.EvaluateNow(0f);
         }
     }
 

@@ -116,6 +116,9 @@ namespace DeadlockPlayground.Importer
             public Vector3 RootRotationDeg { get; set; } = Vector3.Zero;
             public float RootScale { get; set; } = 1.0f;
             public Vector3 RootScaleXYZ { get; set; } = Vector3.One;
+            public bool FlipX { get; set; } = false;
+            public bool FlipY { get; set; } = false;
+            public bool FlipZ { get; set; } = false;
             public bool OriginalMeshDeformEnabled { get; set; } = false;
             public string OriginalMeshDeformTargetFilter { get; set; } = "hair";
             public string OriginalMeshDeformBoneName { get; set; } = "head";
@@ -1019,6 +1022,26 @@ namespace DeadlockPlayground.Importer
                 return result;
             }
 
+            int requestedFlipMask = (options.FlipX ? 1 : 0) | (options.FlipY ? 2 : 0) | (options.FlipZ ? 4 : 0);
+            int alreadyBakedMask = importedScene.HasMeta("BakedFlipMask") ? importedScene.GetMeta("BakedFlipMask").AsInt32() : 0;
+            Action restoreFlip = null;
+            if (requestedFlipMask != 0 && alreadyBakedMask != requestedFlipMask)
+            {
+                bool flattenSkinned = options.Method == RiggingMethod.RigidSingleBone ||
+                                      options.Preset == PosePreset.RigidSingleBone ||
+                                      options.Method == RiggingMethod.KnnSurfaceProjection ||
+                                      options.Method == RiggingMethod.LandmarkAutoRig;
+                restoreFlip = ApplyGeometryFlipToScene(
+                    importedScene,
+                    options.FlipX,
+                    options.FlipY,
+                    options.FlipZ,
+                    options.IncludedImportedSubmeshNames != null && options.IncludedImportedSubmeshNames.Count > 0
+                        ? new HashSet<string>(options.IncludedImportedSubmeshNames, StringComparer.OrdinalIgnoreCase)
+                        : null,
+                    flattenSkinned);
+            }
+
             var importedSkeleton = FindSkeleton(importedScene);
             bool hasImportedRig = importedSkeleton != null && importedMeshes.Any(m => m.Skin != null || HasSkinnedVertices(m));
 
@@ -1072,6 +1095,10 @@ namespace DeadlockPlayground.Importer
                 result.Success = false;
                 result.ErrorMessage = $"Auto-rigging failed: {ex.Message}";
                 return result;
+            }
+            finally
+            {
+                restoreFlip?.Invoke();
             }
         }
 
@@ -1344,7 +1371,7 @@ namespace DeadlockPlayground.Importer
                     newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
                     newMi.SetMeta("SourceSurfaceIndex", s);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
-                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
+                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options, heroNode);
                     if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
 
                     containerNode.AddChild(newMi);
@@ -1828,7 +1855,7 @@ namespace DeadlockPlayground.Importer
                     newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
                     newMi.SetMeta("SourceSurfaceIndex", s);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
-                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
+                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options, heroNode);
                     if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
 
                     containerNode.AddChild(newMi);
@@ -1999,7 +2026,7 @@ namespace DeadlockPlayground.Importer
                     newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
                     newMi.SetMeta("SourceSurfaceIndex", s);
                     newMi.SetMeta("OriginalMaterial_0", surfMat);
-                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options);
+                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options, heroNode);
 
                     containerNode.AddChild(newMi);
                     newMi.Skeleton = newMi.GetPathTo(skeleton);
@@ -5434,7 +5461,7 @@ namespace DeadlockPlayground.Importer
         /// Computes an aligned Transform3D in hero space that normalizes an accessory's imported bounds
         /// and snaps its pivot directly onto a target skeleton bone in rest pose.
         /// </summary>
-        public static Transform3D ComputeAutoFitTransformToBone(Node3D importedScene, Skeleton3D heroSkeleton, string boneName)
+        public static Transform3D ComputeAutoFitTransformToBone(Node3D importedScene, Skeleton3D heroSkeleton, string boneName, HashSet<string> includedMeshNames = null)
         {
             if (importedScene == null || heroSkeleton == null) return Transform3D.Identity;
 
@@ -5442,31 +5469,7 @@ namespace DeadlockPlayground.Importer
             if (bIdx < 0) bIdx = FindBoneAny(heroSkeleton, "head", "spine_3", "pelvis", "weapon_hand_R", "hand_R");
             if (bIdx < 0) bIdx = 0;
 
-            var meshes = CollectMeshes(importedScene);
-            Vector3 minV = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            Vector3 maxV = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-            bool anyVert = false;
-
-            foreach (var mi in meshes)
-            {
-                if (mi?.Mesh == null) continue;
-                Transform3D rel = ComputeTransformRelativeToRoot(mi, importedScene);
-                for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
-                {
-                    var arrays = mi.Mesh.SurfaceGetArrays(s);
-                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
-                    var verts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
-                    if (verts == null) continue;
-                    foreach (var v in verts)
-                    {
-                        Vector3 rv = rel * v;
-                        minV = new Vector3(Mathf.Min(minV.X, rv.X), Mathf.Min(minV.Y, rv.Y), Mathf.Min(minV.Z, rv.Z));
-                        maxV = new Vector3(Mathf.Max(maxV.X, rv.X), Mathf.Max(maxV.Y, rv.Y), Mathf.Max(maxV.Z, rv.Z));
-                        anyVert = true;
-                    }
-                }
-            }
-
+            var (minV, maxV, anyVert) = ComputePristineModelBounds(importedScene, includedMeshNames);
             if (!anyVert) return Transform3D.Identity;
 
             Vector3 size = maxV - minV;
@@ -5477,6 +5480,8 @@ namespace DeadlockPlayground.Importer
                 string lowerBone = boneName?.ToLowerInvariant() ?? "";
                 float desiredMax = lowerBone.Contains("head") ? 0.30f
                                  : (lowerBone.Contains("hand") || lowerBone.Contains("weapon")) ? 0.35f
+                                 : (lowerBone.Contains("ankle") || lowerBone.Contains("foot") || lowerBone.Contains("ball") || lowerBone.Contains("toe")) ? 0.28f
+                                 : (lowerBone.Contains("leg_lower") || lowerBone.Contains("arm_lower")) ? 0.32f
                                  : (lowerBone.Contains("spine") || lowerBone.Contains("pelvis")) ? 0.48f
                                  : 0.34f;
                 if (maxDim > desiredMax * 1.8f || maxDim < desiredMax * 0.25f)
@@ -5499,6 +5504,234 @@ namespace DeadlockPlayground.Importer
 
             Vector3 origin = boneLocalOrigin - (pivotLocal * scale);
             return new Transform3D(Basis.Identity.Scaled(new Vector3(scale, scale, scale)), origin);
+        }
+
+        /// <summary>
+        /// Swaps a symmetrical bone or submesh identifier between Left and Right sides (e.g. ankle_L <-> ankle_R).
+        /// Returns null when the identifier is midline or has no symmetric counterpart.
+        /// </summary>
+        public static string MirrorBoneNameLtoR(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            if (name.EndsWith("_L", StringComparison.Ordinal)) return name[..^2] + "_R";
+            if (name.EndsWith("_R", StringComparison.Ordinal)) return name[..^2] + "_L";
+            if (name.EndsWith(".L", StringComparison.Ordinal)) return name[..^2] + ".R";
+            if (name.EndsWith(".R", StringComparison.Ordinal)) return name[..^2] + ".L";
+            if (name.Contains("_L_", StringComparison.Ordinal)) return name.Replace("_L_", "_R_");
+            if (name.Contains("_R_", StringComparison.Ordinal)) return name.Replace("_R_", "_L_");
+            if (name.Contains("Left", StringComparison.Ordinal)) return name.Replace("Left", "Right");
+            if (name.Contains("Right", StringComparison.Ordinal)) return name.Replace("Right", "Left");
+            if (name.Contains("left", StringComparison.Ordinal)) return name.Replace("left", "right");
+            if (name.Contains("right", StringComparison.Ordinal)) return name.Replace("right", "left");
+            return null;
+        }
+
+        /// <summary>
+        /// Non-destructively mirrors all mesh surfaces in <paramref name="scene"/> across the active model bounds center
+        /// along the requested axes, transforming normals and tangents (including binormal handedness W) and reversing
+        /// triangle winding whenever an odd number of axes is flipped so front-face culling never turns inside out.
+        /// Returns an Action that restores all original Mesh/Skin/metadata references.
+        /// </summary>
+        public static Action ApplyGeometryFlipToScene(
+            Node3D scene,
+            bool flipX,
+            bool flipY,
+            bool flipZ,
+            HashSet<string> boundsFilterNames = null,
+            bool flattenSkinnedToRest = true)
+        {
+            int mask = (flipX ? 1 : 0) | (flipY ? 2 : 0) | (flipZ ? 4 : 0);
+            if (scene == null || !GodotObject.IsInstanceValid(scene) || mask == 0)
+                return null;
+
+            var (minV, maxV, boundsOk) = ComputePristineModelBounds(scene, boundsFilterNames);
+            if (!boundsOk && boundsFilterNames != null)
+                (minV, maxV, boundsOk) = ComputePristineModelBounds(scene, null);
+            Vector3 sceneCenter = boundsOk ? (minV + maxV) * 0.5f : Vector3.Zero;
+
+            Vector3 flipSigns = new Vector3(flipX ? -1f : 1f, flipY ? -1f : 1f, flipZ ? -1f : 1f);
+            bool reverseWinding = flipX ^ flipY ^ flipZ;
+
+            Transform3D flipInScene = new Transform3D(Basis.FromScale(flipSigns), Vector3.Zero);
+            flipInScene = new Transform3D(Basis.Identity, sceneCenter) * flipInScene * new Transform3D(Basis.Identity, -sceneCenter);
+
+            var backups = new List<(MeshInstance3D Mi, Mesh Mesh, Skin Skin, Material OverrideMat)>();
+            Skeleton3D fallbackSkel = FindSkeleton(scene);
+            var meshes = CollectMeshes(scene);
+
+            foreach (var mi in meshes)
+            {
+                if (mi?.Mesh == null) continue;
+                Mesh origMesh = mi.Mesh;
+                Skin origSkin = mi.Skin;
+                backups.Add((mi, origMesh, origSkin, mi.MaterialOverride));
+
+                Transform3D relToScene = ComputeTransformRelativeToRoot(mi, scene);
+                Transform3D sceneToLocal = MathF.Abs(relToScene.Basis.Determinant()) > 1e-8f
+                    ? relToScene.AffineInverse()
+                    : Transform3D.Identity;
+                Transform3D localFlip = sceneToLocal * flipInScene * relToScene;
+                Basis localNormFlip = sceneToLocal.Basis * Basis.FromScale(flipSigns) * relToScene.Basis;
+
+                bool miHasSkel = origSkin != null && origSkin.GetBindCount() > 0 && fallbackSkel != null;
+                bool useRestBake = miHasSkel && flattenSkinnedToRest;
+
+                var newMesh = new ArrayMesh();
+                for (int s = 0; s < origMesh.GetSurfaceCount(); s++)
+                {
+                    var arrays = origMesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Vertex) continue;
+
+                    var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (rawVerts == null || rawVerts.Length == 0) continue;
+
+                    int vCount = rawVerts.Length;
+                    var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
+                    var rawTangents = arrays.Count > (int)Mesh.ArrayType.Tangent && arrays[(int)Mesh.ArrayType.Tangent].VariantType == Variant.Type.PackedFloat32Array
+                        ? arrays[(int)Mesh.ArrayType.Tangent].AsFloat32Array()
+                        : null;
+                    var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
+                    var rawUvs2 = arrays.Count > (int)Mesh.ArrayType.TexUV2 ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV2]) : null;
+                    var rawColors = arrays.Count > (int)Mesh.ArrayType.Color && arrays[(int)Mesh.ArrayType.Color].VariantType == Variant.Type.PackedColorArray
+                        ? arrays[(int)Mesh.ArrayType.Color].AsColorArray()
+                        : null;
+                    var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+
+                    var outVerts = new Vector3[vCount];
+                    Vector3[] outNorms = (rawNorms != null && rawNorms.Length == vCount) ? new Vector3[vCount] : null;
+                    float[] outTangents = (rawTangents != null && rawTangents.Length == vCount * 4) ? new float[vCount * 4] : null;
+
+                    if (useRestBake && rawBones != null && rawWeights != null)
+                    {
+                        EvaluateMeshSurfaceInTargetSpace(mi, scene, flipInScene, fallbackSkel, rawVerts, rawNorms, rawBones, rawWeights, out var sceneVerts, out var sceneNorms);
+                        for (int i = 0; i < vCount; i++)
+                        {
+                            outVerts[i] = sceneToLocal * sceneVerts[i];
+                            if (outNorms != null)
+                            {
+                                Vector3 ln = sceneToLocal.Basis * sceneNorms[i];
+                                outNorms[i] = ln.LengthSquared() > 1e-8f ? ln.Normalized() : Vector3.Up;
+                            }
+                            if (outTangents != null)
+                            {
+                                int ti = i * 4;
+                                Vector3 lt = localNormFlip * new Vector3(rawTangents[ti], rawTangents[ti + 1], rawTangents[ti + 2]);
+                                lt = lt.LengthSquared() > 1e-8f ? lt.Normalized() : Vector3.Right;
+                                outTangents[ti] = lt.X;
+                                outTangents[ti + 1] = lt.Y;
+                                outTangents[ti + 2] = lt.Z;
+                                outTangents[ti + 3] = reverseWinding ? -rawTangents[ti + 3] : rawTangents[ti + 3];
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < vCount; i++)
+                        {
+                            outVerts[i] = localFlip * rawVerts[i];
+                            if (outNorms != null)
+                            {
+                                Vector3 ln = localNormFlip * rawNorms[i];
+                                outNorms[i] = ln.LengthSquared() > 1e-8f ? ln.Normalized() : Vector3.Up;
+                            }
+                            if (outTangents != null)
+                            {
+                                int ti = i * 4;
+                                Vector3 lt = localNormFlip * new Vector3(rawTangents[ti], rawTangents[ti + 1], rawTangents[ti + 2]);
+                                lt = lt.LengthSquared() > 1e-8f ? lt.Normalized() : Vector3.Right;
+                                outTangents[ti] = lt.X;
+                                outTangents[ti + 1] = lt.Y;
+                                outTangents[ti + 2] = lt.Z;
+                                outTangents[ti + 3] = reverseWinding ? -rawTangents[ti + 3] : rawTangents[ti + 3];
+                            }
+                        }
+                    }
+
+                    int[] outIndices = rawIndices;
+                    if (reverseWinding)
+                    {
+                        if (rawIndices != null && rawIndices.Length >= 3)
+                        {
+                            outIndices = (int[])rawIndices.Clone();
+                            for (int t = 0; t + 2 < outIndices.Length; t += 3)
+                            {
+                                (outIndices[t + 1], outIndices[t + 2]) = (outIndices[t + 2], outIndices[t + 1]);
+                            }
+                        }
+                        else if (vCount >= 3)
+                        {
+                            int triVerts = vCount - (vCount % 3);
+                            outIndices = new int[triVerts];
+                            for (int t = 0; t + 2 < triVerts; t += 3)
+                            {
+                                outIndices[t] = t;
+                                outIndices[t + 1] = t + 2;
+                                outIndices[t + 2] = t + 1;
+                            }
+                        }
+                    }
+
+                    var newArrays = new Godot.Collections.Array();
+                    newArrays.Resize((int)Mesh.ArrayType.Max);
+                    newArrays[(int)Mesh.ArrayType.Vertex] = outVerts;
+                    if (outNorms != null) newArrays[(int)Mesh.ArrayType.Normal] = outNorms;
+                    if (outTangents != null) newArrays[(int)Mesh.ArrayType.Tangent] = outTangents;
+                    if (rawUvs != null && rawUvs.Length == vCount) newArrays[(int)Mesh.ArrayType.TexUV] = rawUvs;
+                    if (rawUvs2 != null && rawUvs2.Length == vCount) newArrays[(int)Mesh.ArrayType.TexUV2] = rawUvs2;
+                    if (rawColors != null && rawColors.Length == vCount) newArrays[(int)Mesh.ArrayType.Color] = rawColors;
+                    if (outIndices != null && outIndices.Length > 0) newArrays[(int)Mesh.ArrayType.Index] = outIndices;
+                    if (!useRestBake && rawBones != null && rawWeights != null)
+                    {
+                        newArrays[(int)Mesh.ArrayType.Bones] = rawBones;
+                        newArrays[(int)Mesh.ArrayType.Weights] = rawWeights;
+                    }
+
+                    var prim = (origMesh as ArrayMesh)?.SurfaceGetPrimitiveType(s) ?? Mesh.PrimitiveType.Triangles;
+                    newMesh.AddSurfaceFromArrays(prim, newArrays);
+                    Material mat = origMesh.SurfaceGetMaterial(s);
+                    if (mat != null) newMesh.SurfaceSetMaterial(newMesh.GetSurfaceCount() - 1, mat);
+                }
+
+                mi.Mesh = newMesh;
+                if (useRestBake)
+                {
+                    mi.Skin = null;
+                }
+                else if (miHasSkel && MathF.Abs(localFlip.Basis.Determinant()) > 1e-8f)
+                {
+                    Transform3D localFlipInv = localFlip.AffineInverse();
+                    Transform3D skelToScene = ComputeTransformRelativeToRoot(fallbackSkel, scene);
+                    Transform3D flipInSkel = skelToScene.AffineInverse() * flipInScene * skelToScene;
+                    var dupSkin = (Skin)origSkin.Duplicate();
+                    int skelBoneCount = fallbackSkel.GetBoneCount();
+                    for (int bi = 0; bi < origSkin.GetBindCount(); bi++)
+                    {
+                        int boneIdx = ResolveSkinBindBone(origSkin, bi, fallbackSkel);
+                        Transform3D gRest = (boneIdx >= 0 && boneIdx < skelBoneCount) ? fallbackSkel.GetBoneGlobalRest(boneIdx) : Transform3D.Identity;
+                        Transform3D gRestInv = MathF.Abs(gRest.Basis.Determinant()) > 1e-8f ? gRest.AffineInverse() : Transform3D.Identity;
+                        dupSkin.SetBindPose(bi, gRestInv * flipInSkel * gRest * origSkin.GetBindPose(bi) * localFlipInv);
+                    }
+                    mi.Skin = dupSkin;
+                }
+            }
+
+            scene.SetMeta("BakedFlipMask", mask);
+            return () =>
+            {
+                if (GodotObject.IsInstanceValid(scene))
+                {
+                    scene.RemoveMeta("BakedFlipMask");
+                }
+                foreach (var (mi, origMesh, origSkin, origOverride) in backups)
+                {
+                    if (!GodotObject.IsInstanceValid(mi)) continue;
+                    mi.Mesh = origMesh;
+                    mi.Skin = origSkin;
+                    mi.MaterialOverride = origOverride;
+                }
+            };
         }
 
         private static void ApplyReplacementMode(Node3D heroNode, List<MeshInstance3D> customMeshes, RiggingOptions options, Node3D slotContainer = null)
@@ -7134,7 +7367,12 @@ namespace DeadlockPlayground.Importer
                     Transform3D currentInv = skin.GetBindPose(b);
                     Transform3D currentPose = currentInv.AffineInverse();
 
-                    if (currentPose.Origin.DistanceTo(restGlobal.Origin) > 0.01f ||
+                    bool originMismatch = currentPose.Origin.DistanceTo(restGlobal.Origin) > 0.01f;
+                    Quaternion qCur = currentPose.Basis.Orthonormalized().GetRotationQuaternion();
+                    Quaternion qRest = restGlobal.Basis.Orthonormalized().GetRotationQuaternion();
+                    bool basisMismatch = qCur.AngleTo(qRest) > 0.01f;
+
+                    if (originMismatch || basisMismatch ||
                         float.IsNaN(currentInv.Origin.X) || currentInv == Transform3D.Identity)
                     {
                         skin.SetBindPose(b, expectedInv);
@@ -7274,7 +7512,6 @@ namespace DeadlockPlayground.Importer
                 existing.QueueFree();
             }
             RecomputeHeroReplacementVisibility(heroNode);
-            new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
         }
 
         public static void RemoveCustomModelAndRestoreHero(Node3D heroNode, bool includeAccessories = true)
@@ -7312,37 +7549,58 @@ namespace DeadlockPlayground.Importer
                     mi.GetParent()?.RemoveChild(mi);
                     mi.QueueFree();
                 }
+                else if (mi.HasMeta("ParentCompositeMesh"))
+                {
+                    // Remove any orphaned split submeshes before recomputing clean vanilla state
+                    mi.MaterialOverlay = null;
+                    mi.Visible = false;
+                    mi.GetParent()?.RemoveChild(mi);
+                    mi.QueueFree();
+                }
+            }
+
+            // 2. Restore authentic Deadlock hero submeshes cleanly
+            var heroMeshes = CollectOriginalHeroMeshes(heroNode);
+            foreach (var mi in heroMeshes)
+            {
+                mi.MaterialOverlay = null;
+                if (mi.HasMeta("IsHiddenComposite")) mi.RemoveMeta("IsHiddenComposite");
+                if (mi.HasMeta("GeneratedSubmeshes")) mi.RemoveMeta("GeneratedSubmeshes");
+
+                if (includeAccessories)
+                {
+                    mi.Visible = true;
+                    if (mi.HasMeta("UserVisibility")) mi.SetMeta("UserVisibility", true);
+                    if (mi.HasMeta("UserHiddenByCustomModel")) mi.RemoveMeta("UserHiddenByCustomModel");
+                    int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
+                    for (int s = 0; s < surfCount; s++)
+                    {
+                        if (mi.HasMeta($"SurfaceKept_{s}")) mi.RemoveMeta($"SurfaceKept_{s}");
+                        Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
+                        if (origMat != null) mi.SetSurfaceOverrideMaterial(s, origMat);
+                        else if (mi.GetSurfaceOverrideMaterial(s) != null && mi.GetSurfaceOverrideMaterial(s).HasMeta("IsHiddenSurfaceMaterial"))
+                            mi.SetSurfaceOverrideMaterial(s, null);
+                    }
+                }
+                else
+                {
+                    // Clear stale per-surface custom flags before RecomputeHeroReplacementVisibility re-evaluates remaining accessories
+                    int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
+                    for (int s = 0; s < surfCount; s++)
+                    {
+                        if (mi.HasMeta($"SurfaceKept_{s}")) mi.RemoveMeta($"SurfaceKept_{s}");
+                    }
+                }
             }
 
             if (!includeAccessories)
             {
                 RecomputeHeroReplacementVisibility(heroNode);
-                new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
                 return;
             }
 
-            // 2. Restore all authentic Deadlock hero submeshes to full visibility
-            var heroMeshes = CollectOriginalHeroMeshes(heroNode);
-            foreach (var mi in heroMeshes)
-            {
-                mi.Visible = true;
-                if (mi.HasMeta("UserVisibility")) mi.SetMeta("UserVisibility", true);
-                if (mi.HasMeta("UserHiddenByCustomModel")) mi.RemoveMeta("UserHiddenByCustomModel");
-                if (mi.HasMeta("IsHiddenComposite")) mi.RemoveMeta("IsHiddenComposite");
-                int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
-                for (int s = 0; s < surfCount; s++)
-                {
-                    if (mi.HasMeta($"SurfaceKept_{s}")) mi.RemoveMeta($"SurfaceKept_{s}");
-                    Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
-                    if (origMat != null) mi.SetSurfaceOverrideMaterial(s, origMat);
-                    else if (mi.GetSurfaceOverrideMaterial(s) != null && mi.GetSurfaceOverrideMaterial(s).HasMeta("IsHiddenSurfaceMaterial"))
-                        mi.SetSurfaceOverrideMaterial(s, null);
-                }
-            }
-
-            // 3. Restore any original hero deformations and re-scan hero hierarchy
+            // 3. Restore any original hero deformations cleanly
             RecomputeHeroDeformations(heroNode);
-            new DeadlockPlayground.Painter.HeroMeshHierarchy().ScanHero(heroNode);
         }
 
         /// <summary>
@@ -7834,7 +8092,7 @@ namespace DeadlockPlayground.Importer
             return false;
         }
 
-        private static void ConfigureRiggedSubmeshMetadata(MeshInstance3D newMi, MeshInstance3D srcMi, Material surfMat, RiggingOptions options)
+        private static void ConfigureRiggedSubmeshMetadata(MeshInstance3D newMi, MeshInstance3D srcMi, Material surfMat, RiggingOptions options, Node3D heroNode = null)
         {
             if (newMi == null || srcMi == null) return;
 
@@ -7860,32 +8118,6 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            string matName = surfMat?.ResourceName;
-            if (string.IsNullOrWhiteSpace(matName) && srcMi.HasMeta("SourceMaterialName"))
-            {
-                matName = srcMi.GetMeta("SourceMaterialName").AsString();
-            }
-            if (!string.IsNullOrWhiteSpace(matName))
-            {
-                if (!string.IsNullOrWhiteSpace(options?.SlotId) &&
-                    !matName.StartsWith(options.SlotId, StringComparison.OrdinalIgnoreCase))
-                {
-                    matName = $"{options.SlotId}_{matName}";
-                }
-                newMi.SetMeta("SourceMaterialName", matName);
-                if (surfMat != null && string.IsNullOrWhiteSpace(surfMat.ResourceName) == false)
-                {
-                    surfMat.ResourceName = matName;
-                }
-            }
-
-            if (options?.SubmeshReplacementMap != null &&
-                options.SubmeshReplacementMap.TryGetValue(srcName, out string repTarget) &&
-                !string.IsNullOrWhiteSpace(repTarget))
-            {
-                newMi.SetMeta("ReplacesHeroSubmesh", repTarget);
-            }
-
             if (surfMat is StandardMaterial3D stdMat)
             {
                 stdMat.SetMeta("IsOutlineShell", isOutline);
@@ -7898,6 +8130,260 @@ namespace DeadlockPlayground.Importer
                     stdMat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
                 }
             }
+
+            if (options?.SubmeshReplacementMap != null &&
+                options.SubmeshReplacementMap.TryGetValue(srcName, out string repTarget) &&
+                !string.IsNullOrWhiteSpace(repTarget))
+            {
+                newMi.SetMeta("ReplacesHeroSubmesh", repTarget);
+            }
+
+            string rawMatName = surfMat?.ResourceName;
+            if (string.IsNullOrWhiteSpace(rawMatName) && srcMi.HasMeta("SourceMaterialName"))
+            {
+                rawMatName = srcMi.GetMeta("SourceMaterialName").AsString();
+            }
+            if (string.IsNullOrWhiteSpace(rawMatName))
+            {
+                rawMatName = $"{srcName}_mat";
+            }
+
+            ResolveAndReuseSharedCustomMaterial(heroNode, newMi, surfMat, rawMatName, isOutline, options);
+        }
+
+        private static bool IsNodeOrAncestorQueuedForDeletion(Node node)
+        {
+            Node cur = node;
+            while (cur != null)
+            {
+                if (!GodotObject.IsInstanceValid(cur) || cur.IsQueuedForDeletion())
+                    return true;
+                cur = cur.GetParent();
+            }
+            return false;
+        }
+
+        private static void ResolveAndReuseSharedCustomMaterial(
+            Node3D heroNode,
+            MeshInstance3D newMi,
+            Material surfMat,
+            string rawMatName,
+            bool isOutline,
+            RiggingOptions options)
+        {
+            if (newMi == null || surfMat == null) return;
+
+            string contentSig = ComputeMaterialContentSignature(surfMat, isOutline);
+            surfMat.SetMeta("MaterialContentSignature", contentSig);
+
+            // Reuse any existing live custom material on the hero whose textures + material flags match cleanly
+            // (covers both 1-click Mirror L <-> R cloning and manually adding a second model sharing the same textures).
+            var usedNamesWithOtherSig = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (heroNode != null && GodotObject.IsInstanceValid(heroNode))
+            {
+                foreach (var container in CollectCustomContainers(heroNode))
+                {
+                    if (!GodotObject.IsInstanceValid(container) || container.IsQueuedForDeletion()) continue;
+                    string myContainerName = GetContainerNameForSlot(options?.SlotId);
+                    bool isPendingReplacementSlot = !string.IsNullOrWhiteSpace(options?.SlotId) &&
+                                                    string.Equals(container.Name.ToString(), myContainerName, StringComparison.OrdinalIgnoreCase) &&
+                                                    container.IsQueuedForDeletion();
+                    if (isPendingReplacementSlot) continue;
+
+                    foreach (var existingMi in CollectMeshes(container))
+                    {
+                        if (existingMi == null || existingMi == newMi || IsNodeOrAncestorQueuedForDeletion(existingMi))
+                            continue;
+                        if (existingMi.Mesh == null || existingMi.Mesh.GetSurfaceCount() == 0)
+                            continue;
+
+                        Material existingMat = existingMi.Mesh.SurfaceGetMaterial(0)
+                            ?? (existingMi.HasMeta("OriginalMaterial_0") ? existingMi.GetMeta("OriginalMaterial_0").AsGodotObject() as Material : null);
+                        if (existingMat == null) continue;
+
+                        bool existingOutline = existingMi.HasMeta("IsOutlineShell") && existingMi.GetMeta("IsOutlineShell").AsBool();
+                        string existingSig = existingMat.HasMeta("MaterialContentSignature")
+                            ? existingMat.GetMeta("MaterialContentSignature").AsString()
+                            : ComputeMaterialContentSignature(existingMat, existingOutline);
+
+                        string existingName = existingMi.HasMeta("SourceMaterialName")
+                            ? existingMi.GetMeta("SourceMaterialName").AsString()
+                            : existingMat.ResourceName;
+
+                        if (string.Equals(existingSig, contentSig, StringComparison.Ordinal))
+                        {
+                            if (newMi.Mesh is ArrayMesh am && am.GetSurfaceCount() > 0)
+                            {
+                                am.SurfaceSetMaterial(0, existingMat);
+                            }
+                            newMi.SetMeta("OriginalMaterial_0", existingMat);
+
+                            string sharedName = !string.IsNullOrWhiteSpace(existingName) ? existingName : rawMatName;
+                            newMi.SetMeta("SourceMaterialName", sharedName);
+                            if (string.IsNullOrWhiteSpace(existingMat.ResourceName))
+                            {
+                                existingMat.ResourceName = sharedName;
+                            }
+                            GD.Print($"[CustomModelAutoRigger] Reused shared material '{sharedName}' ({contentSig}) on '{newMi.Name}'.");
+                            return;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(existingName))
+                        {
+                            usedNamesWithOtherSig.Add(existingName);
+                        }
+                    }
+                }
+            }
+
+            string finalName = rawMatName.Trim();
+            if (usedNamesWithOtherSig.Contains(finalName))
+            {
+                string shortHash = contentSig.Length >= 10 ? contentSig.Substring(4, 6) : contentSig;
+                finalName = $"{finalName}_{shortHash}";
+            }
+
+            newMi.SetMeta("SourceMaterialName", finalName);
+            surfMat.ResourceName = finalName;
+            surfMat.SetMeta("MaterialName", finalName);
+        }
+
+        private static ulong FnvMixBytes(ulong h, byte[] data)
+        {
+            if (data == null) return h ^ 0x9e3779b97f4a7c15UL;
+            unchecked
+            {
+                for (int i = 0; i < data.Length; i++)
+                {
+                    h ^= data[i];
+                    h *= 1099511628211UL;
+                }
+            }
+            return h;
+        }
+
+        private static ulong FnvMixInt(ulong h, int v)
+        {
+            unchecked
+            {
+                h ^= (byte)(v & 0xFF); h *= 1099511628211UL;
+                h ^= (byte)((v >> 8) & 0xFF); h *= 1099511628211UL;
+                h ^= (byte)((v >> 16) & 0xFF); h *= 1099511628211UL;
+                h ^= (byte)((v >> 24) & 0xFF); h *= 1099511628211UL;
+            }
+            return h;
+        }
+
+        private static ulong FnvMixString(ulong h, string s)
+        {
+            if (string.IsNullOrEmpty(s)) return FnvMixInt(h, 0);
+            unchecked
+            {
+                h = FnvMixInt(h, s.Length);
+                for (int i = 0; i < s.Length; i++)
+                {
+                    char ch = s[i];
+                    h ^= (byte)(ch & 0xFF); h *= 1099511628211UL;
+                    h ^= (byte)(ch >> 8); h *= 1099511628211UL;
+                }
+            }
+            return h;
+        }
+
+        private static ulong HashMaterialTextureContent(Texture2D tex, ulong h)
+        {
+            if (tex == null) return FnvMixInt(h, 0);
+            h = FnvMixInt(h, 1);
+
+            if (tex.HasMeta("_CachedTexHash64"))
+            {
+                ulong cached = unchecked((ulong)tex.GetMeta("_CachedTexHash64").AsInt64());
+                return FnvMixInt(FnvMixInt(h, (int)(cached & 0xFFFFFFFF)), (int)(cached >> 32));
+            }
+
+            ulong th = 14695981039346656037UL;
+            string rp = tex.ResourcePath;
+            if (!string.IsNullOrWhiteSpace(rp) && !rp.Contains("::", StringComparison.Ordinal))
+            {
+                th = FnvMixString(th, rp.Replace('\\', '/').ToLowerInvariant());
+            }
+
+            Image img = tex.GetImage();
+            if (img != null && !img.IsEmpty())
+            {
+                th = FnvMixInt(th, img.GetWidth());
+                th = FnvMixInt(th, img.GetHeight());
+                th = FnvMixInt(th, (int)img.GetFormat());
+                th = FnvMixBytes(th, img.GetData());
+            }
+            else
+            {
+                th = FnvMixInt(th, tex.GetWidth());
+                th = FnvMixInt(th, tex.GetHeight());
+            }
+
+            tex.SetMeta("_CachedTexHash64", unchecked((long)th));
+            return FnvMixInt(FnvMixInt(h, (int)(th & 0xFFFFFFFF)), (int)(th >> 32));
+        }
+
+        /// <summary>
+        /// Computes a deterministic 64-bit content signature over a material's texture pixel payloads
+        /// and rendering flags so identical materials reuse one shared Material/Atlas/VMAT across slots.
+        /// </summary>
+        public static string ComputeMaterialContentSignature(Material mat, bool isOutline = false)
+        {
+            ulong h = 14695981039346656037UL;
+            h = FnvMixInt(h, isOutline ? 1 : 0);
+
+            if (mat is StandardMaterial3D stdMat)
+            {
+                h = FnvMixInt(h, 101);
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.R * 255f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.G * 255f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.B * 255f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.A * 255f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Metallic * 1000f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Roughness * 1000f));
+                h = FnvMixInt(h, (int)stdMat.Transparency);
+                h = FnvMixInt(h, stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ? Mathf.RoundToInt(stdMat.AlphaScissorThreshold * 1000f) : 0);
+                h = FnvMixInt(h, (int)stdMat.CullMode);
+                h = FnvMixInt(h, (int)stdMat.ShadingMode);
+                h = FnvMixInt(h, stdMat.EmissionEnabled ? 1 : 0);
+                if (stdMat.EmissionEnabled)
+                {
+                    h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Emission.R * 255f));
+                    h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Emission.G * 255f));
+                    h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Emission.B * 255f));
+                    h = FnvMixInt(h, Mathf.RoundToInt(stdMat.EmissionEnergyMultiplier * 1000f));
+                }
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Uv1Scale.X * 1000f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Uv1Scale.Y * 1000f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Uv1Offset.X * 1000f));
+                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Uv1Offset.Y * 1000f));
+
+                h = HashMaterialTextureContent(stdMat.AlbedoTexture, h);
+                h = HashMaterialTextureContent(stdMat.EmissionTexture, h);
+                h = HashMaterialTextureContent(stdMat.NormalTexture, h);
+                h = HashMaterialTextureContent(stdMat.RoughnessTexture, h);
+                h = HashMaterialTextureContent(stdMat.MetallicTexture, h);
+                h = HashMaterialTextureContent(stdMat.AOTexture, h);
+            }
+            else if (mat is ShaderMaterial shMat)
+            {
+                h = FnvMixInt(h, 202);
+                h = FnvMixString(h, shMat.Shader?.ResourcePath ?? "");
+                h = HashMaterialTextureContent(shMat.GetShaderParameter("albedo_texture").As<Texture2D>(), h);
+                h = HashMaterialTextureContent(shMat.GetShaderParameter("normal_texture").As<Texture2D>(), h);
+                h = HashMaterialTextureContent(shMat.GetShaderParameter("roughness_texture").As<Texture2D>(), h);
+                h = HashMaterialTextureContent(shMat.GetShaderParameter("ao_texture").As<Texture2D>(), h);
+            }
+            else if (mat != null)
+            {
+                h = FnvMixString(h, mat.ResourcePath);
+                h = FnvMixString(h, mat.ResourceName);
+            }
+
+            return $"sig_{h:x16}";
         }
 
         private readonly struct SocketBakeMeta

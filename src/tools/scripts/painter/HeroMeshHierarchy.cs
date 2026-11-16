@@ -1630,12 +1630,46 @@ namespace DeadlockPlayground.Painter
             {
                 if (node != null && GodotObject.IsInstanceValid(node))
                 {
+                    node.MaterialOverlay = null;
                     node.Visible = false;
                     node.GetParent()?.RemoveChild(node);
                     node.QueueFree();
                 }
             }
             _generatedSubmeshNodes.Clear();
+
+            // Also purge any stray ParentCompositeMesh orphans on HeroRoot left by external/prior scans
+            if (HeroRoot != null && GodotObject.IsInstanceValid(HeroRoot))
+            {
+                var orphanSubmeshes = new List<MeshInstance3D>();
+                var compositeParents = new List<MeshInstance3D>();
+                foreach (Node child in HeroRoot.FindChildren("*", "MeshInstance3D", recursive: true, owned: false))
+                {
+                    if (child is not MeshInstance3D mi || !GodotObject.IsInstanceValid(mi)) continue;
+                    if (mi.HasMeta("ParentCompositeMesh"))
+                    {
+                        orphanSubmeshes.Add(mi);
+                    }
+                    else if (mi.HasMeta("IsHiddenComposite") || mi.HasMeta("GeneratedSubmeshes"))
+                    {
+                        compositeParents.Add(mi);
+                    }
+                }
+                foreach (var orphan in orphanSubmeshes)
+                {
+                    orphan.MaterialOverlay = null;
+                    orphan.Visible = false;
+                    orphan.GetParent()?.RemoveChild(orphan);
+                    orphan.QueueFree();
+                }
+                foreach (var cp in compositeParents)
+                {
+                    if (!_hiddenOriginalNodes.Contains(cp))
+                    {
+                        _hiddenOriginalNodes.Add(cp);
+                    }
+                }
+            }
 
             foreach (var orig in _hiddenOriginalNodes)
             {
@@ -1644,7 +1678,8 @@ namespace DeadlockPlayground.Painter
                     bool hiddenByCustom = orig.HasMeta("UserHiddenByCustomModel") && orig.GetMeta("UserHiddenByCustomModel").AsBool();
                     bool userVis = !orig.HasMeta("UserVisibility") || orig.GetMeta("UserVisibility").AsBool();
                     orig.Visible = !hiddenByCustom && userVis;
-                    if (orig.Visible && orig.Mesh != null)
+                    orig.MaterialOverlay = null;
+                    if (orig.Mesh != null)
                     {
                         int surfCount = orig.Mesh.GetSurfaceCount();
                         bool anyHiddenSurf = false;
@@ -1656,7 +1691,7 @@ namespace DeadlockPlayground.Painter
                                 break;
                             }
                         }
-                        if (anyHiddenSurf)
+                        if (orig.Visible && anyHiddenSurf)
                         {
                             var hiddenMat = DeadlockPlayground.Importer.CustomModelAutoRigger.CreateHiddenSurfaceMaterial();
                             for (int s = 0; s < surfCount; s++)
@@ -1665,6 +1700,21 @@ namespace DeadlockPlayground.Painter
                                 if (!isKept)
                                 {
                                     orig.SetSurfaceOverrideMaterial(s, hiddenMat);
+                                }
+                                else if (orig.HasMeta($"OriginalMaterial_{s}"))
+                                {
+                                    orig.SetSurfaceOverrideMaterial(s, orig.GetMeta($"OriginalMaterial_{s}").As<Material>());
+                                }
+                            }
+                        }
+                        else if (!anyHiddenSurf)
+                        {
+                            for (int s = 0; s < surfCount; s++)
+                            {
+                                Material cur = orig.GetSurfaceOverrideMaterial(s);
+                                if (cur != null && cur.HasMeta("IsHiddenSurfaceMaterial") && orig.HasMeta($"OriginalMaterial_{s}"))
+                                {
+                                    orig.SetSurfaceOverrideMaterial(s, orig.GetMeta($"OriginalMaterial_{s}").As<Material>());
                                 }
                             }
                         }
