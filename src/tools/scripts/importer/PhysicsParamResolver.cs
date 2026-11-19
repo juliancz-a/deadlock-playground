@@ -157,6 +157,10 @@ namespace DeadlockPlayground.Importer
             public readonly float StrayRadiusMeters;
             /// <summary>Exact Source 2 <c>FeModel.AnimationForceAttraction</c> (0.000..0.900) for Verlet PBD cloth.</summary>
             public readonly float GoalForce;
+            /// <summary>Per-bone <c>goal_damping</c> (0.000..0.500) honored in both export and preview.</summary>
+            public readonly float GoalDamping;
+            /// <summary>Normalized UI Damping slider (0..1) for perceptible preview damping.</summary>
+            public readonly float Damping01;
             /// <summary>Exact Source 2 <c>FeModel.NodeIntegrator.PointDamping</c> (0.000..0.750) for Verlet PBD cloth.</summary>
             public readonly float PointDamping;
             /// <summary>Exact Source 2 <c>cloth_bend_stiffness$0</c> (0.05..1.00) for 2-hop bend constraints.</summary>
@@ -177,6 +181,8 @@ namespace DeadlockPlayground.Importer
                 float collisionRadiusMeters,
                 float strayRadiusMeters,
                 float goalForce,
+                float goalDamping,
+                float damping01,
                 float pointDamping,
                 float bendStiffness,
                 float friction,
@@ -190,6 +196,8 @@ namespace DeadlockPlayground.Importer
                 CollisionRadiusMeters = collisionRadiusMeters;
                 StrayRadiusMeters = strayRadiusMeters;
                 GoalForce = goalForce;
+                GoalDamping = goalDamping;
+                Damping01 = damping01;
                 PointDamping = pointDamping;
                 BendStiffness = bendStiffness;
                 Friction = friction;
@@ -387,6 +395,8 @@ namespace DeadlockPlayground.Importer
                 collisionRadiusMeters: colMeters,
                 strayRadiusMeters: strayMeters,
                 goalForce: cloth.GoalForce,
+                goalDamping: cloth.GoalDamping,
+                damping01: Mathf.Clamp(ch?.Damping ?? 0.25f, 0f, 1f),
                 pointDamping: pointDamping,
                 bendStiffness: cloth.BendStiffness,
                 friction: cloth.Friction,

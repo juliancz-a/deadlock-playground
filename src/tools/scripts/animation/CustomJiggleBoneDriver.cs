@@ -34,6 +34,8 @@ namespace DeadlockPlayground.Animation
 
             // Source 2 resolved parameters (directly from PhysicsParamResolver)
             public float GoalForce;
+            public float GoalDamping;
+            public float Damping01 = 0.25f;
             public float PointDamping;
             public float BendStiffness = 0.35f;
             public float Friction = 0.15f;
@@ -41,6 +43,9 @@ namespace DeadlockPlayground.Animation
             public float JiggleOmega = 14f;
             public float JiggleDampRatio = 0.55f;
             public float AngleLimitRad = Mathf.DegToRad(22f);
+            public float ClothHingeLimitRad = Mathf.DegToRad(35f);
+            public int ExtrudeForwardAxis;
+            public float ExtrudeTwistDeg;
             public float ColRadiusMeters = 0.024f;
             public float StrayRadiusMeters = -1f; // < 0 = disabled / unlimited
             public bool IsBackSideOfTorso;
@@ -51,6 +56,7 @@ namespace DeadlockPlayground.Animation
             // Verlet / Jiggle simulation state (world space)
             public Vector3 TipWorldPos;
             public Vector3 PrevTipWorldPos;
+            public Vector3 RenderPrevTipWorldPos; // for smooth sub-frame interpolation on >60Hz monitors
             public Vector3 Velocity; // used by JiggleBone semi-implicit spring
 
             // Pure un-simulated animated pose captured once per frame (zero compounding parent curl)
@@ -328,19 +334,8 @@ namespace DeadlockPlayground.Animation
                     bool simJoint = jov?.Simulate ?? true;
                     var prevP = PhysicsParamResolver.ResolvePreviewBone(def, t, jov, count);
 
+                    // 1:1 parity with Source 2 export: strictly follow def.PlanarizeBackBarrier (never silently force on).
                     bool isBackSide = def.PlanarizeBackBarrier;
-                    if (!isBackSide && def.Simulation != SimulationKind.Jiggle)
-                    {
-                        int spineIdx = _skeleton.FindBone("spine_2");
-                        if (spineIdx < 0) spineIdx = _skeleton.FindBone("spine_3");
-                        if (spineIdx >= 0)
-                        {
-                            Vector3 spineOrigin = _skeleton.GetBoneGlobalRest(spineIdx).Origin;
-                            Vector3 boneTipHero = _skeleton.GetBoneGlobalRest(bIdx) * (aimLocal * boneLen);
-                            if (boneTipHero.Z < spineOrigin.Z - 0.03f && boneTipHero.Y >= spineOrigin.Y - 0.55f)
-                                isBackSide = true;
-                        }
-                    }
 
                     int parentSkelIdx = _skeleton.GetBoneParent(bIdx);
                     int chainParentLocal = boneIdxToLocal.TryGetValue(parentSkelIdx, out int cpIdx) ? cpIdx : -1;
@@ -360,6 +355,8 @@ namespace DeadlockPlayground.Animation
                         BoneLength = boneLen,
                         Simulate = simJoint,
                         GoalForce = prevP.GoalForce,
+                        GoalDamping = prevP.GoalDamping,
+                        Damping01 = prevP.Damping01,
                         PointDamping = prevP.PointDamping,
                         BendStiffness = prevP.BendStiffness,
                         Friction = prevP.Friction,
@@ -369,6 +366,9 @@ namespace DeadlockPlayground.Animation
                         AngleLimitRad = def.Simulation == SimulationKind.Jiggle
                             ? Mathf.DegToRad(Mathf.Clamp(prevP.JiggleAngleLimitDeg, 6f, 85f))
                             : Mathf.DegToRad(140f),
+                        ClothHingeLimitRad = Mathf.DegToRad(Mathf.Clamp(def.AngleLimitDeg > 1f ? def.AngleLimitDeg : 35f, 5f, 140f)),
+                        ExtrudeForwardAxis = def.ExtrudeForwardAxis,
+                        ExtrudeTwistDeg = def.ExtrudeTwistDeg,
                         ColRadiusMeters = prevP.CollisionRadiusMeters,
                         StrayRadiusMeters = prevP.StrayRadiusMeters,
                         IsBackSideOfTorso = isBackSide,
@@ -425,6 +425,8 @@ namespace DeadlockPlayground.Animation
                     st.Simulate = jov?.Simulate ?? true;
                     var prevP = PhysicsParamResolver.ResolvePreviewBone(match, t, jov, count);
                     st.GoalForce = prevP.GoalForce;
+                    st.GoalDamping = prevP.GoalDamping;
+                    st.Damping01 = prevP.Damping01;
                     st.PointDamping = prevP.PointDamping;
                     st.BendStiffness = prevP.BendStiffness;
                     st.Friction = prevP.Friction;
@@ -433,7 +435,11 @@ namespace DeadlockPlayground.Animation
                     st.JiggleDampRatio = prevP.JiggleDampRatio;
                     st.ColRadiusMeters = prevP.CollisionRadiusMeters;
                     st.StrayRadiusMeters = prevP.StrayRadiusMeters;
-                    st.IsBackSideOfTorso = match.PlanarizeBackBarrier || st.IsBackSideOfTorso;
+                    // 1:1 parity: unchecking PlanarizeBackBarrier turns it off immediately!
+                    st.IsBackSideOfTorso = match.PlanarizeBackBarrier;
+                    st.ClothHingeLimitRad = Mathf.DegToRad(Mathf.Clamp(match.AngleLimitDeg > 1f ? match.AngleLimitDeg : 35f, 5f, 140f));
+                    st.ExtrudeForwardAxis = match.ExtrudeForwardAxis;
+                    st.ExtrudeTwistDeg = match.ExtrudeTwistDeg;
                     st.AngleLimitRad = match.Simulation == SimulationKind.Jiggle
                         ? Mathf.DegToRad(Mathf.Clamp(prevP.JiggleAngleLimitDeg, 6f, 85f))
                         : Mathf.DegToRad(140f);
@@ -624,17 +630,21 @@ namespace DeadlockPlayground.Animation
             BuildWorldCapsules(skelGlobal, boneCount);
             CaptureAnimatedTargetsAndInitialize(skelGlobal, boneCount);
 
-            // 60 Hz fixed-substep accumulator (matches Source 2 Rubikon 60 Hz cloth tick)
+            // 60 Hz fixed-substep accumulator with sub-frame render interpolation (zero stutter on >60Hz monitors)
             _simAccumulator = MathF.Min(_simAccumulator + Math.Clamp(dt, 0f, 0.066f), FixedDt * MaxSubstepsPerFrame);
             int substeps = 0;
             while (_simAccumulator >= FixedDt - 1e-5f && substeps < MaxSubstepsPerFrame)
             {
-                _simAccumulator -= FixedDt;
+                foreach (var ch in _chains)
+                    foreach (var st in ch.Bones)
+                        st.RenderPrevTipWorldPos = st.TipWorldPos;
+
+                _simAccumulator = MathF.Max(0f, _simAccumulator - FixedDt);
                 StepFixedSubstep();
                 substeps++;
             }
-            // If called with a tiny dt < FixedDt before any substep accumulated, still commit poses cleanly
-            CommitFinalBonePoses(skelGlobal, boneCount);
+            float renderAlpha = _simAccumulator <= 1e-4f ? 1.0f : Mathf.Clamp(_simAccumulator / FixedDt, 0f, 1f);
+            CommitFinalBonePoses(skelGlobal, boneCount, renderAlpha);
         }
 
         private void BuildWorldCapsules(Transform3D skelGlobal, int boneCount)
@@ -748,6 +758,7 @@ namespace DeadlockPlayground.Animation
                     {
                         st.TipWorldPos = st.AnimTipWorld;
                         st.PrevTipWorldPos = st.AnimTipWorld;
+                        st.RenderPrevTipWorldPos = st.AnimTipWorld;
                         st.Velocity = Vector3.Zero;
                         st.Initialized = true;
                         st.InitialAnchorDist = float.MaxValue;
@@ -901,23 +912,25 @@ namespace DeadlockPlayground.Animation
 
         private void StepClothVerletSubstep(JiggleBoneState st)
         {
-            // Exact Source 2 NodeIntegrator.PointDamping + Valve VelocitySmoothRate (0.10) baseline
-            float totalDamp = st.PointDamping + 0.10f * 6.0f; // 0.60/s baseline smooth damping + user PointDamping
+            // Responsive, perceptible damping in preview honoring both UI Damping (0..1) and per-bone GoalDamping:
+            // Damping=0 -> 2.2/s (lively drape), Damping=0.35 -> 5.5/s (calm settle ~1s), Damping=1.0 -> 11.7/s.
+            float totalDamp = 2.2f + st.Damping01 * 9.5f + st.GoalDamping * 6.0f;
             float dampFactor = MathF.Exp(-totalDamp * FixedDt);
             Vector3 vel = (st.TipWorldPos - st.PrevTipWorldPos) * dampFactor;
 
-            // Cap extreme velocities (> 12 m/s) to prevent teleport bursts
+            // Cap extreme velocities (> 12 m/s) to prevent teleport bursts; sleep micro-jitter cleanly
             float maxStep = 12.0f * FixedDt;
             float velSq = vel.LengthSquared();
             if (velSq > maxStep * maxStep)
                 vel *= maxStep / MathF.Sqrt(velSq);
-            else if (velSq < 1e-8f)
+            else if (velSq < 2e-7f)
                 vel = Vector3.Zero;
 
             st.PrevTipWorldPos = st.TipWorldPos;
             st.TipWorldPos += vel + new Vector3(0f, -st.GravityMetersPerSecSq, 0f) * (FixedDt * FixedDt);
 
-            // Source 2 AnimationForceAttraction (GoalForce): direct per-substep position pull toward pure AnimTipWorld
+            // Source 2 AnimationForceAttraction (GoalForce): damped position pull toward pure AnimTipWorld.
+            // Shift PrevTipWorldPos by 78% of the pull so pose-return glides calmly into rest instead of overshooting!
             float effGoal = st.GoalForce;
             if (effGoal > 1e-5f)
             {
@@ -926,7 +939,11 @@ namespace DeadlockPlayground.Animation
                     effGoal *= 0.12f;
                 }
                 float pullAlpha = Mathf.Clamp(effGoal * 0.35f, 0f, 0.85f);
-                st.TipWorldPos = st.TipWorldPos.Lerp(st.AnimTipWorld, pullAlpha);
+                Vector3 nextPos = st.TipWorldPos.Lerp(st.AnimTipWorld, pullAlpha);
+                Vector3 pullDelta = nextPos - st.TipWorldPos;
+                st.TipWorldPos = nextPos;
+                float dampCarry = Mathf.Clamp(0.78f + st.GoalDamping * 0.40f, 0.78f, 0.98f);
+                st.PrevTipWorldPos += pullDelta * dampCarry;
             }
         }
 
@@ -1005,11 +1022,12 @@ namespace DeadlockPlayground.Animation
             return false;
         }
 
-        private void CommitFinalBonePoses(Transform3D skelGlobal, int boneCount)
+        private void CommitFinalBonePoses(Transform3D skelGlobal, int boneCount, float renderAlpha)
         {
             foreach (var chain in _chains)
             {
                 bool isJiggle = chain.Simulation == SimulationKind.Jiggle;
+                bool isClothHinge = chain.Simulation == SimulationKind.Cloth;
                 for (int i = 0; i < chain.Bones.Count; i++)
                 {
                     var st = chain.Bones[i];
@@ -1042,25 +1060,40 @@ namespace DeadlockPlayground.Animation
                     Transform3D targetSkelPose = parentGlobalPose * st.RestLocal;
                     Vector3 curHeadWorld = skelGlobal * targetSkelPose.Origin;
                     Vector3 curRestTipWorld = skelGlobal * (targetSkelPose * (st.AimAxisLocal * st.BoneLength));
+                    Vector3 interpTipWorld = renderAlpha >= 0.999f
+                        ? st.TipWorldPos
+                        : st.RenderPrevTipWorldPos.Lerp(st.TipWorldPos, renderAlpha);
 
-                    Quaternion finalRot = ApplyBonePoseFromTip(skelGlobal, parentGlobalPose, curHeadWorld, curRestTipWorld, st, isJiggle);
+                    Quaternion finalRot = ApplyBonePoseFromTip(skelGlobal, parentGlobalPose, curHeadWorld, curRestTipWorld, interpTipWorld, st, isJiggle, isClothHinge);
                     Transform3D localCommitted = new Transform3D(new Basis(finalRot).Scaled(st.RestScale), st.RestLocal.Origin);
                     st.CommittedGlobalPose = parentGlobalPose * localCommitted;
                 }
             }
         }
 
+        private static Vector3 GetExtrudeForwardAxisLocal(int axisIndex) => axisIndex switch
+        {
+            1 => Vector3.Up,
+            2 => Vector3.Back,
+            3 => Vector3.Left,
+            4 => Vector3.Down,
+            5 => Vector3.Forward,
+            _ => Vector3.Right
+        };
+
         private Quaternion ApplyBonePoseFromTip(
             Transform3D skelGlobal,
             Transform3D parentGlobalPose,
             Vector3 curHeadWorld,
             Vector3 curRestTipWorld,
+            Vector3 targetTipWorld,
             JiggleBoneState st,
-            bool enforceTightAngleLimit)
+            bool enforceTightAngleLimit,
+            bool enforceClothHinge)
         {
             Quaternion restRot = st.RestLocal.Basis.Orthonormalized().GetRotationQuaternion();
             Vector3 restDirWorld = (curRestTipWorld - curHeadWorld).Normalized();
-            Vector3 curDirWorld = (st.TipWorldPos - curHeadWorld).Normalized();
+            Vector3 curDirWorld = (targetTipWorld - curHeadWorld).Normalized();
             if (restDirWorld.LengthSquared() <= 0.5f || curDirWorld.LengthSquared() <= 0.5f) return restRot;
 
             _skeleton.SetBonePosePosition(st.BoneIdx, st.RestLocal.Origin);
@@ -1072,6 +1105,35 @@ namespace DeadlockPlayground.Animation
                 Basis skelToParent = (skelGlobal.Basis * parentGlobalPose.Basis).Orthonormalized().Inverse();
                 Vector3 restDirLocal = (skelToParent * restDirWorld).Normalized();
                 Vector3 curDirLocal = (skelToParent * curDirWorld).Normalized();
+
+                // ClothChain hinge constraint: when Simulation == Cloth and ClothHingeLimitRad < 135°,
+                // limit out-of-plane swing perpendicular to the extruded ribbon plane (ExtrudeForwardAxis + ExtrudeTwistDeg).
+                if (enforceClothHinge && st.ClothHingeLimitRad < Mathf.DegToRad(135f))
+                {
+                    Vector3 fwdLocal = (st.RestLocal.Basis.Orthonormalized() * GetExtrudeForwardAxisLocal(st.ExtrudeForwardAxis)).Normalized();
+                    if (MathF.Abs(fwdLocal.Dot(restDirLocal)) > 0.95f)
+                    {
+                        fwdLocal = MathF.Abs(restDirLocal.Y) < 0.9f ? Vector3.Up : Vector3.Right;
+                    }
+                    // Ribbon plane normal = cross(restDir, forwardAxis), rotated around restDir by ExtrudeTwistDeg
+                    Vector3 planeNormal = restDirLocal.Cross(fwdLocal).Normalized();
+                    if (MathF.Abs(st.ExtrudeTwistDeg) > 0.01f)
+                    {
+                        planeNormal = (new Quaternion(restDirLocal, Mathf.DegToRad(st.ExtrudeTwistDeg)) * planeNormal).Normalized();
+                    }
+                    // Decompose curDirLocal into in-plane component and out-of-plane elevation angle
+                    float outComp = curDirLocal.Dot(planeNormal);
+                    Vector3 inPlane = curDirLocal - planeNormal * outComp;
+                    float inPlaneLen = inPlane.Length();
+                    float outAngle = MathF.Asin(Mathf.Clamp(MathF.Abs(outComp), 0f, 1f));
+                    if (outAngle > st.ClothHingeLimitRad && inPlaneLen > 1e-5f)
+                    {
+                        float sinMax = MathF.Sin(st.ClothHingeLimitRad);
+                        float cosMax = MathF.Cos(st.ClothHingeLimitRad);
+                        curDirLocal = ((inPlane / inPlaneLen) * cosMax + planeNormal * (MathF.Sign(outComp) * sinMax)).Normalized();
+                    }
+                }
+
                 float localDot = Mathf.Clamp(restDirLocal.Dot(curDirLocal), -1f, 1f);
                 float angle = MathF.Acos(localDot);
                 float maxAllowedRad = enforceTightAngleLimit ? st.AngleLimitRad : Mathf.DegToRad(140f);
@@ -1106,6 +1168,27 @@ namespace DeadlockPlayground.Animation
             }
         }
 
+        /// <summary>
+        /// Pushes <paramref name="st"/> out of a collider WITHOUT injecting outward bounce velocity:
+        /// shifts both <c>TipWorldPos</c> and <c>PrevTipWorldPos</c> along the outward normal, zeroes
+        /// inward normal velocity, and applies tangential Coulomb friction.
+        /// </summary>
+        private static void PushTipOutOfCollider(JiggleBoneState st, Vector3 normal, float pushDistance)
+        {
+            Vector3 corr = normal * pushDistance;
+            st.TipWorldPos += corr;
+            // Shift PrevTipWorldPos by the same normal push so resting on a back/prop collider NEVER injects bounce velocity!
+            st.PrevTipWorldPos += corr;
+            // Cancel any remaining inward normal velocity (inelastic resting contact, bounciness = 0.0)
+            Vector3 vel = st.TipWorldPos - st.PrevTipWorldPos;
+            float vn = vel.Dot(normal);
+            if (vn < 0f)
+            {
+                st.PrevTipWorldPos += normal * vn;
+            }
+            ApplyContactFriction(st, normal);
+        }
+
         private void ResolveBodyCapsuleCollisions(
             Vector3 boneHeadWorld,
             JiggleBoneState st,
@@ -1135,8 +1218,7 @@ namespace DeadlockPlayground.Animation
                     if (signedBack < capRad + effMargin)
                     {
                         float penBack = MathF.Min(0.15f, (capRad + effMargin) - signedBack);
-                        st.TipWorldPos += wc.BackWorld * (penBack / effT);
-                        ApplyContactFriction(st, wc.BackWorld);
+                        PushTipOutOfCollider(st, wc.BackWorld, penBack / effT);
                         continue;
                     }
                 }
@@ -1148,8 +1230,7 @@ namespace DeadlockPlayground.Animation
                     if (signedOut < capRad + effMargin)
                     {
                         float penOut = MathF.Min(0.15f, (capRad + effMargin) - signedOut);
-                        st.TipWorldPos += wc.OutwardWorld * (penOut / effT);
-                        ApplyContactFriction(st, wc.OutwardWorld);
+                        PushTipOutOfCollider(st, wc.OutwardWorld, penOut / effT);
                         continue;
                     }
                 }
@@ -1161,8 +1242,7 @@ namespace DeadlockPlayground.Animation
                 if (dist < minAllowed)
                 {
                     float pen = MathF.Min(0.15f, minAllowed - dist);
-                    st.TipWorldPos += normal * (pen / effT);
-                    ApplyContactFriction(st, normal);
+                    PushTipOutOfCollider(st, normal, pen / effT);
                 }
             }
 
@@ -1171,26 +1251,25 @@ namespace DeadlockPlayground.Animation
             {
                 var wb = _worldBoxesCache[b];
                 Vector3 ext = wb.HalfExtents + new Vector3(effMargin, effMargin, effMargin);
-                // Test both bone tip (t=1.0) and lower span (t=0.75) against the OBB
-                for (int si = 0; si < 2; si++)
+                // Sample bone midpoint (t=0.50), lower span (t=0.75), and tip (t=1.00) so long bones cannot tunnel through thin prop boxes
+                for (int si = 0; si < 3; si++)
                 {
-                    float sampleT = si == 0 ? 1.0f : 0.75f;
+                    float sampleT = si == 0 ? 1.0f : (si == 1 ? 0.75f : 0.50f);
                     Vector3 sampleWorld = boneHeadWorld.Lerp(st.TipWorldPos, sampleT);
                     Vector3 lp = wb.BoxWorldInv * sampleWorld;
                     if (MathF.Abs(lp.X) >= ext.X || MathF.Abs(lp.Y) >= ext.Y || MathF.Abs(lp.Z) >= ext.Z)
                         continue;
 
-                    if (wb.PlanarizeBackOnly && st.IsBackSideOfTorso)
+                    if (wb.PlanarizeBackOnly)
                     {
-                        // One-sided back ramp: push strictly toward BackWorld so capes slide over the prop
+                        // One-sided back ramp: push strictly toward BackWorld so capes slide over the prop even without chain Back Barrier
                         Vector3 backLocal = (wb.BoxWorldInv.Basis * wb.BackWorld).Normalized();
                         float projHalf = MathF.Abs(backLocal.X) * ext.X + MathF.Abs(backLocal.Y) * ext.Y + MathF.Abs(backLocal.Z) * ext.Z;
                         float signedBack = lp.Dot(backLocal);
                         float penBack = MathF.Min(0.18f, projHalf - signedBack);
                         if (penBack > 0f)
                         {
-                            st.TipWorldPos += wb.BackWorld * (penBack / sampleT);
-                            ApplyContactFriction(st, wb.BackWorld);
+                            PushTipOutOfCollider(st, wb.BackWorld, penBack / sampleT);
                         }
                         continue;
                     }
@@ -1217,8 +1296,7 @@ namespace DeadlockPlayground.Animation
                         localNormal = new Vector3(0f, 0f, lp.Z >= 0f ? 1f : -1f);
                     }
                     Vector3 worldNormal = (wb.BoxWorld.Basis * localNormal).Normalized();
-                    st.TipWorldPos += worldNormal * (MathF.Min(0.18f, pen) / sampleT);
-                    ApplyContactFriction(st, worldNormal);
+                    PushTipOutOfCollider(st, worldNormal, MathF.Min(0.18f, pen) / sampleT);
                 }
             }
         }

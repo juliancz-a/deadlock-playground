@@ -57,6 +57,20 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderSelStrayRadius;
         private CheckBox _chkSelStrayUnlimited;
         private CheckBox _chkSelPlanarizeBack;
+        private CheckBox _chkSelOpenSheet;
+        private CheckBox _chkSelAnchorFreeRotate;
+        private HSlider _sliderSelFriction;
+        private Label _lblValFriction;
+        private HSlider _sliderSelTwistRelax;
+        private Label _lblValTwistRelax;
+        private HSlider _sliderSelAngleLimit;
+        private Label _lblValAngleLimit;
+        private VBoxContainer _boxClothExtrudeSection;
+        private HSlider _sliderSelExtrudeRadius;
+        private Label _lblValExtrudeRadius;
+        private OptionButton _optSelExtrudeAxis;
+        private HSlider _sliderSelExtrudeTwist;
+        private Label _lblValExtrudeTwist;
         private Label _lblValStiffRoot;
         private Label _lblValStiffTip;
         private Label _lblValDamping;
@@ -829,6 +843,144 @@ namespace DeadlockPlayground.UI
                 }
             };
             sliderStack.AddChild(_chkSelPlanarizeBack);
+
+            _chkSelOpenSheet = new CheckBox
+            {
+                Text = "Open Sheet (Cape / Curtain — uncheck for 360° Skirt)",
+                ButtonPressed = true,
+                TooltipText = "When checked, ProxyCloth stays an open sheet (cape/back hair). Uncheck for closed 360° wrap-around skirts/dresses."
+            };
+            ImporterStyle.ApplyFontSize(_chkSelOpenSheet, ImporterStyle.FontHint);
+            _chkSelOpenSheet.Toggled += (on) =>
+            {
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.OpenSheet = on;
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            sliderStack.AddChild(_chkSelOpenSheet);
+
+            _chkSelAnchorFreeRotate = new CheckBox
+            {
+                Text = "Free Collar / Nape Hinge (cloth_anchor_free_rotate)",
+                ButtonPressed = false,
+                TooltipText = "Lets hair/cape roots hinge freely at the collar/nape instead of being levered rigidly by head or spine pitch."
+            };
+            ImporterStyle.ApplyFontSize(_chkSelAnchorFreeRotate, ImporterStyle.FontHint);
+            _chkSelAnchorFreeRotate.Toggled += (on) =>
+            {
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.AnchorFreeRotate = on;
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            sliderStack.AddChild(_chkSelAnchorFreeRotate);
+
+            (_sliderSelFriction, _lblValFriction) = AddExplainedSlider(
+                sliderStack,
+                "Surface Friction",
+                "Tangential sliding resistance against body/prop colliders (0.0 = slippery silk, 0.15 = Valve default, 0.6 = heavy wool).",
+                0.0, 1.0, 0.02, "F2",
+                (v) =>
+                {
+                    if (_lblValFriction != null) _lblValFriction.Text = $"{v:F2}";
+                    if (!_isUpdatingChainInspector && _selectedChain != null)
+                    {
+                        _selectedChain.Friction = (float)v;
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            (_sliderSelAngleLimit, _lblValAngleLimit) = AddExplainedSlider(
+                sliderStack,
+                "Angle / Hinge Limit (°)",
+                "Jiggle: max cone deflection (6–60°). Cloth Chain: stiff_hinge_angle out-of-plane swing limit (5–140°).",
+                5.0, 140.0, 1.0, "F0",
+                (v) =>
+                {
+                    if (_lblValAngleLimit != null) _lblValAngleLimit.Text = $"{v:F0}°";
+                    if (!_isUpdatingChainInspector && _selectedChain != null)
+                    {
+                        _selectedChain.AngleLimitDeg = (float)v;
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            (_sliderSelTwistRelax, _lblValTwistRelax) = AddExplainedSlider(
+                sliderStack,
+                "Twist Relaxation (ClothChain)",
+                "Torsion spring strength resisting axial twisting along ClothChain strands (0.0–2.0, default 1.0).",
+                0.0, 2.0, 0.05, "F2",
+                (v) =>
+                {
+                    if (_lblValTwistRelax != null) _lblValTwistRelax.Text = $"{v:F2}";
+                    if (!_isUpdatingChainInspector && _selectedChain != null)
+                    {
+                        _selectedChain.TwistRelax = (float)v;
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            // ClothChain-only Extrude / Hinge Plane settings (matching Blender / Source 2 ClothChain)
+            _boxClothExtrudeSection = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            _boxClothExtrudeSection.AddThemeConstantOverride("separation", 6);
+            var lblExtHdr = new Label { Text = "ClothChain Ribbon Extrude & Hinge Plane:" };
+            ImporterStyle.ApplyFontSize(lblExtHdr, ImporterStyle.FontHint);
+            _accentLabels.Add(lblExtHdr);
+            _boxClothExtrudeSection.AddChild(lblExtHdr);
+
+            var extAxisRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            extAxisRow.AddThemeConstantOverride("separation", 6);
+            extAxisRow.AddChild(new Label { Text = "Extrude Axis:", CustomMinimumSize = new Vector2(96, 0) });
+            _optSelExtrudeAxis = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optSelExtrudeAxis);
+            _optSelExtrudeAxis.AddItem("X (Default)", 0);
+            _optSelExtrudeAxis.AddItem("Y", 1);
+            _optSelExtrudeAxis.AddItem("Z", 2);
+            _optSelExtrudeAxis.ItemSelected += idx =>
+            {
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.ExtrudeForwardAxis = (int)idx;
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            extAxisRow.AddChild(_optSelExtrudeAxis);
+            _boxClothExtrudeSection.AddChild(extAxisRow);
+
+            (_sliderSelExtrudeTwist, _lblValExtrudeTwist) = AddExplainedSlider(
+                _boxClothExtrudeSection,
+                "Extrude Twist (°)",
+                "Rotates the ClothChain ribbon & hinge plane around the bone axis (e.g. 90° like Blender extrude twist).",
+                -180.0, 180.0, 5.0, "F0",
+                (v) =>
+                {
+                    if (_lblValExtrudeTwist != null) _lblValExtrudeTwist.Text = $"{v:F0}°";
+                    if (!_isUpdatingChainInspector && _selectedChain != null)
+                    {
+                        _selectedChain.ExtrudeTwistDeg = (float)v;
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            (_sliderSelExtrudeRadius, _lblValExtrudeRadius) = AddExplainedSlider(
+                _boxClothExtrudeSection,
+                "Ribbon Extrude Radius (in)",
+                "Half-width of the Source 2 ClothChain extruded ribbon in inches (default 1.0 in; widen to 2–4 in for ribbons/sashes).",
+                0.2, 6.0, 0.1, "F1",
+                (v) =>
+                {
+                    if (_lblValExtrudeRadius != null) _lblValExtrudeRadius.Text = $"{v:F1} in";
+                    if (!_isUpdatingChainInspector && _selectedChain != null)
+                    {
+                        _selectedChain.ExtrudeRadiusInches = (float)v;
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            sliderStack.AddChild(_boxClothExtrudeSection);
 
             inspBox.AddChild(sliderStack);
 
@@ -1908,6 +2060,23 @@ namespace DeadlockPlayground.UI
                 if (_lblValColRadius != null) _lblValColRadius.Text = $"{_selectedChain.CollisionRadiusTipInches:F1} in";
                 if (_lblValStrayRadius != null) _lblValStrayRadius.Text = strayUnlim ? "Unlimited (-1)" : $"{_selectedChain.StrayRadiusInches:F1} in";
                 _chkSelPlanarizeBack?.SetPressedNoSignal(_selectedChain.PlanarizeBackBarrier);
+                _chkSelOpenSheet?.SetPressedNoSignal(_selectedChain.OpenSheet);
+                _chkSelAnchorFreeRotate?.SetPressedNoSignal(_selectedChain.AnchorFreeRotate);
+                _sliderSelFriction?.SetValueNoSignal(_selectedChain.Friction);
+                if (_lblValFriction != null) _lblValFriction.Text = $"{_selectedChain.Friction:F2}";
+                _sliderSelAngleLimit?.SetValueNoSignal(_selectedChain.AngleLimitDeg);
+                if (_lblValAngleLimit != null) _lblValAngleLimit.Text = $"{_selectedChain.AngleLimitDeg:F0}°";
+                _sliderSelTwistRelax?.SetValueNoSignal(_selectedChain.TwistRelax);
+                if (_lblValTwistRelax != null) _lblValTwistRelax.Text = $"{_selectedChain.TwistRelax:F2}";
+
+                bool isClothChain = _selectedChain.Simulation == SimulationKind.Cloth;
+                if (_boxClothExtrudeSection != null) _boxClothExtrudeSection.Visible = isClothChain;
+                _optSelExtrudeAxis?.Select(Math.Clamp(_selectedChain.ExtrudeForwardAxis, 0, 5) % 3);
+                _sliderSelExtrudeTwist?.SetValueNoSignal(_selectedChain.ExtrudeTwistDeg);
+                if (_lblValExtrudeTwist != null) _lblValExtrudeTwist.Text = $"{_selectedChain.ExtrudeTwistDeg:F0}°";
+                _sliderSelExtrudeRadius?.SetValueNoSignal(_selectedChain.ExtrudeRadiusInches);
+                if (_lblValExtrudeRadius != null) _lblValExtrudeRadius.Text = $"{_selectedChain.ExtrudeRadiusInches:F1} in";
+
                 _selectedChainJointIndex = -1;
                 RefreshChainJointListUI();
             }
@@ -2361,6 +2530,10 @@ namespace DeadlockPlayground.UI
                     SimulationKind.Cloth => "Cloth Chain: independent flexible bone strand with body-capsule deflection (best for ponytails, tails, ribbons).",
                     _ => "Jiggle Bounce: tight rigid rotational bounce with zero hair/capsule collision (best for glutes, breasts, ears, pouches)."
                 };
+            }
+            if (_boxClothExtrudeSection != null)
+            {
+                _boxClothExtrudeSection.Visible = (kind == SimulationKind.Cloth);
             }
         }
 
@@ -2890,6 +3063,9 @@ namespace DeadlockPlayground.UI
                 ch.AnchorFreeRotate = _selectedChain.AnchorFreeRotate;
                 ch.OpenSheet = _selectedChain.OpenSheet;
                 ch.Friction = _selectedChain.Friction;
+                ch.ExtrudeRadiusInches = _selectedChain.ExtrudeRadiusInches;
+                ch.ExtrudeForwardAxis = _selectedChain.ExtrudeForwardAxis;
+                ch.ExtrudeTwistDeg = _selectedChain.ExtrudeTwistDeg;
                 count++;
             }
             if (anyPolicyChanged) MarkRemapStaleAndRefresh();

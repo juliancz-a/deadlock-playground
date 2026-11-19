@@ -449,6 +449,9 @@ namespace DeadlockPlayground.Workspace
                         AnchorFreeRotate = c.AnchorFreeRotate,
                         OpenSheet = c.OpenSheet,
                         Friction = c.Friction,
+                        ExtrudeRadiusInches = c.ExtrudeRadiusInches,
+                        ExtrudeForwardAxis = c.ExtrudeForwardAxis,
+                        ExtrudeTwistDeg = c.ExtrudeTwistDeg,
                         IsSynthetic = c.IsSynthetic,
                         SlotId = c.SlotId,
                         TargetMeshName = c.TargetMeshName,
@@ -762,6 +765,9 @@ namespace DeadlockPlayground.Workspace
                         AnchorFreeRotate = ce.AnchorFreeRotate ?? false,
                         OpenSheet = ce.OpenSheet ?? true,
                         Friction = ce.Friction ?? 0.15f,
+                        ExtrudeRadiusInches = ce.ExtrudeRadiusInches ?? 1.0f,
+                        ExtrudeForwardAxis = ce.ExtrudeForwardAxis ?? 0,
+                        ExtrudeTwistDeg = ce.ExtrudeTwistDeg ?? 0.0f,
                         IsSynthetic = ce.IsSynthetic,
                         SlotId = ce.SlotId ?? "",
                         TargetMeshName = ce.TargetMeshName ?? "",
@@ -850,6 +856,9 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("anchor_free_rotate")] public bool? AnchorFreeRotate { get; set; }
         [JsonPropertyName("open_sheet")] public bool? OpenSheet { get; set; }
         [JsonPropertyName("friction")] public float? Friction { get; set; }
+        [JsonPropertyName("extrude_radius")] public float? ExtrudeRadiusInches { get; set; }
+        [JsonPropertyName("extrude_axis")] public int? ExtrudeForwardAxis { get; set; }
+        [JsonPropertyName("extrude_twist")] public float? ExtrudeTwistDeg { get; set; }
         [JsonPropertyName("is_synthetic")] public bool IsSynthetic { get; set; } = false;
         [JsonPropertyName("slot_id")] public string SlotId { get; set; } = "";
         [JsonPropertyName("target_mesh")] public string TargetMeshName { get; set; } = "";

@@ -3570,10 +3570,21 @@ namespace DeadlockPlayground.Importer
                 }
                 sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tbend_spring = 1.0");
                 if (k > 0) sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\ttorsion_spring = {FmtKvFloat(rp.Torsion)}");
+                float extrudeRad = Mathf.Clamp(ch.ExtrudeRadiusInches > 0.05f ? ch.ExtrudeRadiusInches : 1.0f, 0.2f, 6.0f);
+                // CSDK13 ClothChain requires a string: "x", "y", "z" or "" (default is X)
+                string extrudeAxisStr = (Math.Clamp(ch.ExtrudeForwardAxis, 0, 5) % 3) switch
+                {
+                    1 => "Y",
+                    2 => "Z",
+                    _ => "X"
+                };
+                float extrudeTwist = Mathf.Clamp(ch.ExtrudeTwistDeg, -180f, 180f);
                 sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tstiff_hinge = 1.0");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tstiff_hinge_angle = {FmtKvFloat(hingeAngle)}");
                 sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\textrude_sides = 2");
-                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\textrude_radius = 1.0");
+                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_radius = {FmtKvFloat(extrudeRad)}");
+                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_forward_axis = \"{extrudeAxisStr}\"");
+                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_twist = {FmtKvFloat(extrudeTwist)}");
                 sb.AppendLine("\t\t\t\t\t\t\t\t\t\t},");
             }
 
@@ -3737,9 +3748,9 @@ namespace DeadlockPlayground.Importer
                 return (p - (a + ab * t)).Length();
             }
 
-            // Optional inner-thigh bridge capsule (closes the X=0 gap between leg_upper_L/R for long
-            // back hair): add it ONLY if no dynamic cloth node spawns inside it at bind pose!
-            if (boneParentByName.ContainsKey("pelvis") && srcWorldByName != null &&
+            // Optional inner-thigh bridge capsule: only add when no pelvis capsule was already fitted
+            // (avoids duplicate pelvis capsules on models like Venator) and no dynamic cloth node spawns inside it.
+            if (!bonesCovered.Contains("pelvis") && boneParentByName.ContainsKey("pelvis") && srcWorldByName != null &&
                 srcWorldByName.TryGetValue("pelvis", out var pelXf))
             {
                 Vector3 bridgeW0 = pelXf.Pos + new Vector3(0f, 0f, -6.5f);
@@ -3954,7 +3965,7 @@ namespace DeadlockPlayground.Importer
                     pw.AppendLine("\t\t\t\t\t\tcloth_collision_layer1 = true");
                     pw.AppendLine("\t\t\t\t\t\tcloth_collision_layer2 = true");
                     pw.AppendLine("\t\t\t\t\t\tcloth_collision_layer3 = true");
-                    pw.AppendLine("\t\t\t\t\t\tcloth_collision_priority = 0");
+                    pw.AppendLine("\t\t\t\t\t\tcloth_collision_priority = 1");
                     pw.AppendLine("\t\t\t\t\t\tvertex_map = \"planarize_wrap\"");
                     pw.AppendLine("\t\t\t\t\t\tinverted_collision = false");
                     pw.AppendLine("\t\t\t\t\t\tplanarize = true");

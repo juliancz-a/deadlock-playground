@@ -104,6 +104,12 @@ namespace DeadlockPlayground.Importer
         public bool OpenSheet { get; set; } = true;
         /// <summary>Sliding friction (<c>cloth_friction$0</c>, 0.0..1.0; Valve uses 0.10..0.20).</summary>
         public float Friction { get; set; } = 0.15f;
+        /// <summary>Source 2 <c>ClothChain</c> ribbon half-width in inches (<c>extrude_radius</c>, 0.2..6.0 in; default 1.0).</summary>
+        public float ExtrudeRadiusInches { get; set; } = 1.0f;
+        /// <summary>Source 2 <c>ClothChain</c> hinge/extrude forward axis (<c>extrude_forward_axis</c>): 0=+X (Default), 1=+Y, 2=+Z, 3=-X, 4=-Y, 5=-Z.</summary>
+        public int ExtrudeForwardAxis { get; set; } = 0;
+        /// <summary>Source 2 <c>ClothChain</c> hinge/extrude plane twist in degrees (<c>extrude_twist</c>, -180..+180; e.g. 90° like Blender).</summary>
+        public float ExtrudeTwistDeg { get; set; } = 0.0f;
         public bool IsSynthetic { get; set; } = false;
         public string SlotId { get; set; } = "";
         /// <summary>Optional per-joint overrides keyed by source or appended bone name.</summary>
@@ -178,6 +184,9 @@ namespace DeadlockPlayground.Importer
                 AnchorFreeRotate = AnchorFreeRotate,
                 OpenSheet = OpenSheet,
                 Friction = Friction,
+                ExtrudeRadiusInches = ExtrudeRadiusInches,
+                ExtrudeForwardAxis = ExtrudeForwardAxis,
+                ExtrudeTwistDeg = ExtrudeTwistDeg,
                 IsSynthetic = IsSynthetic,
                 SlotId = SlotId,
                 TargetMeshName = TargetMeshName,

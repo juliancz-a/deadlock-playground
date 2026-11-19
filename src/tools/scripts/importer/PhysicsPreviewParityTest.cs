@@ -48,6 +48,7 @@ namespace DeadlockPlayground.Tests
                 TestProxyClothOpenSheetVsClosedSkirt();
                 TestPlanarizedTorsoBackBarrier();
                 TestCustomPropBoxColliderAndJsonRoundTrip();
+                TestRestingCollisionZeroJitterAndClothHinge();
             }
             catch (Exception ex)
             {
@@ -147,7 +148,7 @@ namespace DeadlockPlayground.Tests
         {
             var (root, skel, driver) = BuildTestRig("spine_3", new Vector3(0, 1.3f, 0), 1, 3, new Vector3(0, 0, -1), 0.12f, false);
             Root.AddChild(root);
-            driver.RegisterChains("cape", MakeChainDefs("spine_3", 1, 3, SimulationKind.Cloth, 0.05f, 0.0f, 0.1f, 1.5f));
+            driver.RegisterChains("cape", MakeChainDefs("spine_3", 1, 3, SimulationKind.Cloth, 0.05f, 0.0f, 0.1f, 1.5f, angleLimitDeg: 140f));
 
             driver.SetPausedForEditing(true);
             for (int f = 0; f < 60; f++) driver.StepSimulation(1f / 60f);
@@ -177,8 +178,8 @@ namespace DeadlockPlayground.Tests
             Root.AddChild(rootLoose);
             Root.AddChild(rootStiff);
 
-            drvLoose.RegisterChains("loose", MakeChainDefs("spine_3", 1, 3, SimulationKind.Cloth, 0.05f, 0.0f, 0.25f, 1.0f));
-            drvStiff.RegisterChains("stiff", MakeChainDefs("spine_3", 1, 3, SimulationKind.Cloth, 0.95f, 0.85f, 0.25f, 1.0f));
+            drvLoose.RegisterChains("loose", MakeChainDefs("spine_3", 1, 3, SimulationKind.Cloth, 0.05f, 0.0f, 0.25f, 1.0f, angleLimitDeg: 140f));
+            drvStiff.RegisterChains("stiff", MakeChainDefs("spine_3", 1, 3, SimulationKind.Cloth, 0.95f, 0.85f, 0.25f, 1.0f, angleLimitDeg: 140f));
 
             for (int f = 0; f < 120; f++)
             {
@@ -326,7 +327,7 @@ namespace DeadlockPlayground.Tests
             // 2. Verify a hanging cape strand is cleanly deflected behind the back-prop box (Z <= -0.30m)
             var (root, skel, driver) = BuildTestRig("spine_2", new Vector3(0, 1.2f, 0), 1, 2, new Vector3(0, -1, 0), 0.16f, false);
             Root.AddChild(root);
-            driver.RegisterChains("cape", MakeChainDefs("spine_2", 1, 2, SimulationKind.Cloth, 0.15f, 0.0f, 0.2f, 1.0f, openSheet: true, planarizeBack: true));
+            driver.RegisterChains("cape", MakeChainDefs("spine_2", 1, 2, SimulationKind.ProxyCloth, 0.15f, 0.0f, 0.2f, 1.0f, openSheet: true, planarizeBack: true));
             driver.RegisterCollisionCapsules(new[] { boxDef });
 
             for (int f = 0; f < 60; f++) driver.StepSimulation(1f / 60f);
@@ -339,6 +340,55 @@ namespace DeadlockPlayground.Tests
             Check(tipWorld.Z < -0.26f, $"Custom Back-Prop ClothShapeBox deflects cape cleanly over prop back face (tipZ={tipWorld.Z:F3}m)");
 
             root.QueueFree();
+        }
+
+        private void TestRestingCollisionZeroJitterAndClothHinge()
+        {
+            // 1. Resting cape on torso capsule settles with near-zero frame-to-frame jitter (no collision energy injection)
+            var (root, skel, driver) = BuildTestRig("spine_2", new Vector3(0, 1.2f, 0), 1, 2, new Vector3(0, -1, 0), 0.16f, false);
+            Root.AddChild(root);
+            var defs = MakeChainDefs("spine_2", 1, 2, SimulationKind.Cloth, 0.25f, 0.05f, 0.35f, 1.0f, planarizeBack: true, angleLimitDeg: 140f);
+            driver.RegisterChains("cape_rest", defs);
+            driver.RegisterCollisionCapsules(new[]
+            {
+                new BodyCollisionCapsuleDef
+                {
+                    BoneName = "spine_2",
+                    Enabled = true,
+                    Point0Local = new Vector3(0, -0.20f, 0),
+                    Point1Local = new Vector3(0, 0.20f, 0),
+                    Radius0Meters = 0.16f,
+                    Radius1Meters = 0.16f
+                }
+            });
+
+            for (int f = 0; f < 120; f++) driver.StepSimulation(1f / 60f);
+            int b0 = skel.FindBone("strand_0_0");
+            Quaternion prevQ = skel.GetBonePoseRotation(b0);
+            float maxJitterDeg = 0f;
+            for (int f = 0; f < 30; f++)
+            {
+                driver.StepSimulation(1f / 60f);
+                Quaternion curQ = skel.GetBonePoseRotation(b0);
+                float deltaDeg = Mathf.RadToDeg(curQ.AngleTo(prevQ));
+                if (deltaDeg > maxJitterDeg) maxJitterDeg = deltaDeg;
+                prevQ = curQ;
+            }
+            Check(maxJitterDeg < 0.20f, $"Cape resting against torso capsule settles without collision bounce jitter (maxJitter={maxJitterDeg:F3} deg/frame)");
+
+            // 2. ClothChain hinge limit clamps out-of-plane gravity droop when ribbon plane is horizontal (ExtrudeForwardAxis=0, Twist=0, AngleLimit=15°)
+            var (rootH, skelH, drvH) = BuildTestRig("spine_3", new Vector3(0, 1.3f, 0), 1, 2, new Vector3(0, 0, -1), 0.14f, false);
+            Root.AddChild(rootH);
+            var hingeDefs = MakeChainDefs("spine_3", 1, 2, SimulationKind.Cloth, 0.05f, 0.0f, 0.30f, 1.0f, angleLimitDeg: 15f);
+            hingeDefs[0].ExtrudeForwardAxis = 0; // +X -> ribbon plane is XZ (horizontal), normal = Y, so vertical gravity droop is out-of-plane!
+            hingeDefs[0].ExtrudeTwistDeg = 0f;
+            drvH.RegisterChains("hinge", hingeDefs);
+            for (int f = 0; f < 90; f++) drvH.StepSimulation(1f / 60f);
+            float hingeAngleDeg = Mathf.RadToDeg(skelH.GetBonePoseRotation(skelH.FindBone("strand_0_0")).AngleTo(Quaternion.Identity));
+            Check(hingeAngleDeg <= 16.5f, $"ClothChain hinge constraint limits out-of-plane swing to AngleLimitDeg=15 (got {hingeAngleDeg:F1} deg)");
+
+            root.QueueFree();
+            rootH.QueueFree();
         }
     }
 }
