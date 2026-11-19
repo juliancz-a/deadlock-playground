@@ -244,8 +244,11 @@ public partial class OrbitCamera : Node3D
             {
                 for (int i = 0; i < windows.Count; i++)
                 {
-                    if (windows[i] is Window win && win != rootWin && win.Visible)
+                    if (windows[i] is Window win && win != rootWin && win.Visible && !win.IsQueuedForDeletion())
                     {
+                        // Ignore Godot's internal tooltip PopupPanel windows (which can linger briefly when a modal closes)
+                        if (win is PopupPanel && !win.Exclusive)
+                            continue;
                         return;
                     }
                 }

@@ -109,13 +109,35 @@ namespace DeadlockPlayground.UI
         private Label _lblSelectedColliderTitle;
         private Label _lblSelectedColliderBoneHint;
         private HSlider _sliderColRadiusScale;
+        private HSlider _sliderColOffsetX;
+        private HSlider _sliderColOffsetY;
         private HSlider _sliderColOffsetZ;
         private HSlider _sliderColRadius0;
         private HSlider _sliderColRadius1;
         private Label _lblValColRadiusScale;
+        private Label _lblValColOffsetX;
+        private Label _lblValColOffsetY;
         private Label _lblValColOffsetZ;
         private Label _lblValColRadius0;
         private Label _lblValColRadius1;
+        private VBoxContainer _boxColCapsuleControls;
+        private VBoxContainer _boxColBoxControls;
+        private HBoxContainer _rowColParentBone;
+        private OptionButton _optColParentBone;
+        private HSlider _sliderColBoxW;
+        private HSlider _sliderColBoxH;
+        private HSlider _sliderColBoxD;
+        private Label _lblValColBoxW;
+        private Label _lblValColBoxH;
+        private Label _lblValColBoxD;
+        private HSlider _sliderColRotX;
+        private HSlider _sliderColRotY;
+        private HSlider _sliderColRotZ;
+        private Label _lblValColRotX;
+        private Label _lblValColRotY;
+        private Label _lblValColRotZ;
+        private CheckBox _chkColPlanarizeBack;
+        private Button _btnDeleteCustomCol;
         private bool _isUpdatingColliderInspector;
 
         // Collapsible Add-Clothing-Chain Tool controls
@@ -1103,6 +1125,28 @@ namespace DeadlockPlayground.UI
                 }
             };
             colActionRow.AddChild(_btnShowCollidersInCard);
+
+            var btnAddPropBox = new Button
+            {
+                Text = "+ Add Prop Box",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(126, 32),
+                TooltipText = "Add an independent 3-axis ClothShapeBox collider (ideal for backpacks, shields, quivers, or large back props that a cape must drape over)."
+            };
+            SetButtonIcon(btnAddPropBox, "res://assets/at-icons/plus.svg", 15, StatusTone.Info);
+            btnAddPropBox.Pressed += () => OnAddCustomColliderPressed(ColliderShapeKind.Box);
+            colActionRow.AddChild(btnAddPropBox);
+
+            var btnAddCustomCap = new Button
+            {
+                Text = "+ Add Capsule",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(118, 32),
+                TooltipText = "Add an extra custom ClothShapeCapsule collider attached to any hero bone."
+            };
+            SetButtonIcon(btnAddCustomCap, "res://assets/at-icons/plus.svg", 15);
+            btnAddCustomCap.Pressed += () => OnAddCustomColliderPressed(ColliderShapeKind.Capsule);
+            colActionRow.AddChild(btnAddCustomCap);
             colBody.AddChild(colActionRow);
 
             var colListScroll = new ScrollContainer
@@ -1132,11 +1176,32 @@ namespace DeadlockPlayground.UI
             _secondaryLabels.Add(_lblSelectedColliderBoneHint);
             colInspBox.AddChild(_lblSelectedColliderBoneHint);
 
+            // Parent bone picker (for user-added custom prop boxes & capsules)
+            _rowColParentBone = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            _rowColParentBone.AddThemeConstantOverride("separation", 6);
+            _rowColParentBone.AddChild(new Label { Text = "Attach Bone:", CustomMinimumSize = new Vector2(88, 0) });
+            _optColParentBone = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optColParentBone);
+            _optColParentBone.ItemSelected += idx =>
+            {
+                if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                string bn = _optColParentBone.GetItemText((int)idx);
+                if (!string.IsNullOrWhiteSpace(bn))
+                {
+                    _selectedCollider.BoneName = bn;
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                    RefreshBodyCollidersPanel();
+                }
+            };
+            _rowColParentBone.AddChild(_optColParentBone);
+            colInspBox.AddChild(_rowColParentBone);
+
             (_sliderColRadiusScale, _lblValColRadiusScale) = AddExplainedSlider(
                 colInspBox,
-                "Radius Scale",
-                "Thickens or slims this capsule uniformly. Increase if hair tips still poke through while crouching.",
-                0.50, 1.80, 0.02, "F2",
+                "Uniform Scale",
+                "Uniformly scales this collider's radius or box dimensions.",
+                0.50, 2.00, 0.02, "F2",
                 (v) =>
                 {
                     if (_lblValColRadiusScale != null) _lblValColRadiusScale.Text = $"{v:F2}x";
@@ -1146,11 +1211,41 @@ namespace DeadlockPlayground.UI
                     ApplyBodyCollidersLiveToDriver();
                 });
 
+            (_sliderColOffsetX, _lblValColOffsetX) = AddExplainedSlider(
+                colInspBox,
+                "Offset X (Left / Right, m)",
+                "Shifts the collider left (-) or right (+) in parent bone space.",
+                -0.50, 0.50, 0.005, "F3",
+                (v) =>
+                {
+                    if (_lblValColOffsetX != null) _lblValColOffsetX.Text = $"{v:+0.000;-0.000;0.000} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var off = _selectedCollider.LocalOffsetMeters;
+                    _selectedCollider.LocalOffsetMeters = new Vector3((float)v, off.Y, off.Z);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColOffsetY, _lblValColOffsetY) = AddExplainedSlider(
+                colInspBox,
+                "Offset Y (Up / Down, m)",
+                "Shifts the collider up (+) or down (-) in parent bone space.",
+                -0.50, 0.50, 0.005, "F3",
+                (v) =>
+                {
+                    if (_lblValColOffsetY != null) _lblValColOffsetY.Text = $"{v:+0.000;-0.000;0.000} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var off = _selectedCollider.LocalOffsetMeters;
+                    _selectedCollider.LocalOffsetMeters = new Vector3(off.X, (float)v, off.Z);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
             (_sliderColOffsetZ, _lblValColOffsetZ) = AddExplainedSlider(
                 colInspBox,
-                "Back / Forward Offset (m)",
-                "Shifts the capsule center forward (+) or backward (-) to hug thick jackets, hoods, or backpacks.",
-                -0.10, 0.10, 0.002, "F3",
+                "Offset Z (Back / Forward, m)",
+                "Shifts the collider backward (-) or forward (+) to hug backpacks, hoods, or back props.",
+                -0.50, 0.50, 0.005, "F3",
                 (v) =>
                 {
                     if (_lblValColOffsetZ != null) _lblValColOffsetZ.Text = $"{v:+0.000;-0.000;0.000} m";
@@ -1161,11 +1256,16 @@ namespace DeadlockPlayground.UI
                     ApplyBodyCollidersLiveToDriver();
                 });
 
+            // Capsule-only radius sliders
+            _boxColCapsuleControls = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxColCapsuleControls.AddThemeConstantOverride("separation", 6);
+            colInspBox.AddChild(_boxColCapsuleControls);
+
             (_sliderColRadius0, _lblValColRadius0) = AddExplainedSlider(
-                colInspBox,
+                _boxColCapsuleControls,
                 "Base Radius 0 (m)",
-                "Width of the lower/start end of the tapered capsule before Radius Scale.",
-                0.03, 0.30, 0.002, "F3",
+                "Width of the lower/start end of the tapered capsule before Uniform Scale.",
+                0.03, 0.35, 0.002, "F3",
                 (v) =>
                 {
                     if (_lblValColRadius0 != null) _lblValColRadius0.Text = $"{v:F3} m";
@@ -1176,10 +1276,10 @@ namespace DeadlockPlayground.UI
                 });
 
             (_sliderColRadius1, _lblValColRadius1) = AddExplainedSlider(
-                colInspBox,
+                _boxColCapsuleControls,
                 "Top Radius 1 (m)",
-                "Width of the upper/tip end of the tapered capsule before Radius Scale.",
-                0.03, 0.30, 0.002, "F3",
+                "Width of the upper/tip end of the tapered capsule before Uniform Scale.",
+                0.03, 0.35, 0.002, "F3",
                 (v) =>
                 {
                     if (_lblValColRadius1 != null) _lblValColRadius1.Text = $"{v:F3} m";
@@ -1188,6 +1288,115 @@ namespace DeadlockPlayground.UI
                     _selectedCollider.IsUserEdited = true;
                     ApplyBodyCollidersLiveToDriver();
                 });
+
+            // Box-only 3-axis dimensions + rotation + planarize back barrier
+            _boxColBoxControls = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            _boxColBoxControls.AddThemeConstantOverride("separation", 6);
+            colInspBox.AddChild(_boxColBoxControls);
+
+            (_sliderColBoxW, _lblValColBoxW) = AddExplainedSlider(
+                _boxColBoxControls,
+                "Box Width X (m)",
+                "Full left-to-right width of the ClothShapeBox collider.",
+                0.04, 0.90, 0.01, "F2",
+                (v) =>
+                {
+                    if (_lblValColBoxW != null) _lblValColBoxW.Text = $"{v:F2} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var h = _selectedCollider.BoxHalfExtentsMeters;
+                    _selectedCollider.BoxHalfExtentsMeters = new Vector3((float)v * 0.5f, h.Y, h.Z);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColBoxH, _lblValColBoxH) = AddExplainedSlider(
+                _boxColBoxControls,
+                "Box Height Y (m)",
+                "Full bottom-to-top height of the ClothShapeBox collider.",
+                0.04, 0.90, 0.01, "F2",
+                (v) =>
+                {
+                    if (_lblValColBoxH != null) _lblValColBoxH.Text = $"{v:F2} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var h = _selectedCollider.BoxHalfExtentsMeters;
+                    _selectedCollider.BoxHalfExtentsMeters = new Vector3(h.X, (float)v * 0.5f, h.Z);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColBoxD, _lblValColBoxD) = AddExplainedSlider(
+                _boxColBoxControls,
+                "Box Depth Z (m)",
+                "Full front-to-back thickness of the ClothShapeBox collider.",
+                0.04, 0.90, 0.01, "F2",
+                (v) =>
+                {
+                    if (_lblValColBoxD != null) _lblValColBoxD.Text = $"{v:F2} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var h = _selectedCollider.BoxHalfExtentsMeters;
+                    _selectedCollider.BoxHalfExtentsMeters = new Vector3(h.X, h.Y, (float)v * 0.5f);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColRotX, _lblValColRotX) = AddExplainedSlider(
+                _boxColBoxControls,
+                "Tilt Pitch X (°)",
+                "Tilts the box forward/backward to match a sloped backpack, shield, or quiver.",
+                -90, 90, 1, "F0",
+                (v) =>
+                {
+                    if (_lblValColRotX != null) _lblValColRotX.Text = $"{v:F0}°";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var r = _selectedCollider.LocalRotationDeg;
+                    _selectedCollider.LocalRotationDeg = new Vector3((float)v, r.Y, r.Z);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColRotY, _lblValColRotY) = AddExplainedSlider(
+                _boxColBoxControls,
+                "Turn Yaw Y (°)",
+                "Rotates the box left/right around the vertical axis.",
+                -90, 90, 1, "F0",
+                (v) =>
+                {
+                    if (_lblValColRotY != null) _lblValColRotY.Text = $"{v:F0}°";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var r = _selectedCollider.LocalRotationDeg;
+                    _selectedCollider.LocalRotationDeg = new Vector3(r.X, (float)v, r.Z);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColRotZ, _lblValColRotZ) = AddExplainedSlider(
+                _boxColBoxControls,
+                "Roll Z (°)",
+                "Rolls the box sideways (great for diagonal swords, staves, or quivers on the back).",
+                -90, 90, 1, "F0",
+                (v) =>
+                {
+                    if (_lblValColRotZ != null) _lblValColRotZ.Text = $"{v:F0}°";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var r = _selectedCollider.LocalRotationDeg;
+                    _selectedCollider.LocalRotationDeg = new Vector3(r.X, r.Y, (float)v);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            _chkColPlanarizeBack = new CheckBox
+            {
+                Text = "One-Sided Back Ramp (planarize = true)",
+                TooltipText = "Pushes back-draping capes strictly behind this prop box so they slide smoothly over it instead of snapping forward into the chest."
+            };
+            _chkColPlanarizeBack.Toggled += on =>
+            {
+                if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                _selectedCollider.PlanarizeBackOnly = on;
+                _selectedCollider.IsUserEdited = true;
+                ApplyBodyCollidersLiveToDriver();
+            };
+            _boxColBoxControls.AddChild(_chkColPlanarizeBack);
 
             var colBtnRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             colBtnRow.AddThemeConstantOverride("h_separation", 6);
@@ -1212,6 +1421,17 @@ namespace DeadlockPlayground.UI
             };
             btnResetCol.Pressed += OnResetSelectedColliderPressed;
             colBtnRow.AddChild(btnResetCol);
+
+            _btnDeleteCustomCol = new Button
+            {
+                Text = "Delete Collider",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(124, 30),
+                Visible = false,
+                TooltipText = "Remove this user-added custom prop collider."
+            };
+            _btnDeleteCustomCol.Pressed += OnDeleteSelectedCustomColliderPressed;
+            colBtnRow.AddChild(_btnDeleteCustomCol);
 
             colInspBox.AddChild(colBtnRow);
             colBody.AddChild(_boxColliderInspector);
@@ -2288,10 +2508,11 @@ namespace DeadlockPlayground.UI
                 };
                 row.AddChild(chk);
 
-                string tag = cap.IsUserEdited ? " · Edited" : "";
+                string shapeTag = cap.Shape == ColliderShapeKind.Box ? "[Box] " : "";
+                string tag = cap.IsCustomCollider ? " · Custom" : (cap.IsUserEdited ? " · Edited" : "");
                 var btn = new Button
                 {
-                    Text = $"{cap.DisplayName}  ({cap.BoneName}{tag})",
+                    Text = $"{shapeTag}{cap.DisplayName}  ({cap.BoneName}{tag})",
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                     ClipText = true,
                     Alignment = HorizontalAlignment.Left,
@@ -2326,23 +2547,155 @@ namespace DeadlockPlayground.UI
             _isUpdatingColliderInspector = true;
             try
             {
-                _lblSelectedColliderTitle.Text = $"Capsule: {_selectedCollider.DisplayName}";
-                _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Effective R0={_selectedCollider.EffectiveRadius0:F3}m, R1={_selectedCollider.EffectiveRadius1:F3}m";
+                bool isBox = _selectedCollider.Shape == ColliderShapeKind.Box;
+                _lblSelectedColliderTitle.Text = isBox
+                    ? $"Prop Box: {_selectedCollider.DisplayName}"
+                    : $"Capsule: {_selectedCollider.DisplayName}";
+
+                if (isBox)
+                {
+                    Vector3 full = _selectedCollider.EffectiveBoxHalfExtents * 2.0f;
+                    _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Size {full.X:F2} × {full.Y:F2} × {full.Z:F2} m";
+                }
+                else
+                {
+                    _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Effective R0={_selectedCollider.EffectiveRadius0:F3}m, R1={_selectedCollider.EffectiveRadius1:F3}m";
+                }
+
+                if (_boxColCapsuleControls != null) _boxColCapsuleControls.Visible = !isBox;
+                if (_boxColBoxControls != null) _boxColBoxControls.Visible = isBox;
+                if (_btnDeleteCustomCol != null) _btnDeleteCustomCol.Visible = _selectedCollider.IsCustomCollider;
+
+                if (_rowColParentBone != null && _optColParentBone != null)
+                {
+                    _rowColParentBone.Visible = _selectedCollider.IsCustomCollider;
+                    if (_selectedCollider.IsCustomCollider)
+                    {
+                        _optColParentBone.Clear();
+                        var candidates = new List<string> { "spine_2", "spine_3", "spine_1", "pelvis", "neck_0", "head", "arm_upper_L", "arm_upper_R", "leg_upper_L", "leg_upper_R" };
+                        if (_previewHeroSkeleton != null && GodotObject.IsInstanceValid(_previewHeroSkeleton))
+                        {
+                            int bc = _previewHeroSkeleton.GetBoneCount();
+                            for (int bi = 0; bi < bc; bi++)
+                            {
+                                string bn = _previewHeroSkeleton.GetBoneName(bi);
+                                if (!string.IsNullOrWhiteSpace(bn) && !candidates.Contains(bn, StringComparer.OrdinalIgnoreCase))
+                                    candidates.Add(bn);
+                            }
+                        }
+                        int selIdx = 0;
+                        for (int i = 0; i < candidates.Count; i++)
+                        {
+                            _optColParentBone.AddItem(candidates[i]);
+                            if (candidates[i].Equals(_selectedCollider.BoneName, StringComparison.OrdinalIgnoreCase))
+                                selIdx = i;
+                        }
+                        if (_optColParentBone.ItemCount > 0) _optColParentBone.Select(selIdx);
+                    }
+                }
 
                 _sliderColRadiusScale.SetValueNoSignal(_selectedCollider.RadiusScale);
+                _sliderColOffsetX?.SetValueNoSignal(_selectedCollider.LocalOffsetMeters.X);
+                _sliderColOffsetY?.SetValueNoSignal(_selectedCollider.LocalOffsetMeters.Y);
                 _sliderColOffsetZ.SetValueNoSignal(_selectedCollider.LocalOffsetMeters.Z);
                 _sliderColRadius0.SetValueNoSignal(_selectedCollider.Radius0Meters);
                 _sliderColRadius1.SetValueNoSignal(_selectedCollider.Radius1Meters);
 
                 if (_lblValColRadiusScale != null) _lblValColRadiusScale.Text = $"{_selectedCollider.RadiusScale:F2}x";
+                if (_lblValColOffsetX != null) _lblValColOffsetX.Text = $"{_selectedCollider.LocalOffsetMeters.X:+0.000;-0.000;0.000} m";
+                if (_lblValColOffsetY != null) _lblValColOffsetY.Text = $"{_selectedCollider.LocalOffsetMeters.Y:+0.000;-0.000;0.000} m";
                 if (_lblValColOffsetZ != null) _lblValColOffsetZ.Text = $"{_selectedCollider.LocalOffsetMeters.Z:+0.000;-0.000;0.000} m";
                 if (_lblValColRadius0 != null) _lblValColRadius0.Text = $"{_selectedCollider.Radius0Meters:F3} m";
                 if (_lblValColRadius1 != null) _lblValColRadius1.Text = $"{_selectedCollider.Radius1Meters:F3} m";
+
+                if (isBox)
+                {
+                    Vector3 full = _selectedCollider.BoxHalfExtentsMeters * 2.0f;
+                    _sliderColBoxW?.SetValueNoSignal(full.X);
+                    _sliderColBoxH?.SetValueNoSignal(full.Y);
+                    _sliderColBoxD?.SetValueNoSignal(full.Z);
+                    if (_lblValColBoxW != null) _lblValColBoxW.Text = $"{full.X:F2} m";
+                    if (_lblValColBoxH != null) _lblValColBoxH.Text = $"{full.Y:F2} m";
+                    if (_lblValColBoxD != null) _lblValColBoxD.Text = $"{full.Z:F2} m";
+
+                    _sliderColRotX?.SetValueNoSignal(_selectedCollider.LocalRotationDeg.X);
+                    _sliderColRotY?.SetValueNoSignal(_selectedCollider.LocalRotationDeg.Y);
+                    _sliderColRotZ?.SetValueNoSignal(_selectedCollider.LocalRotationDeg.Z);
+                    if (_lblValColRotX != null) _lblValColRotX.Text = $"{_selectedCollider.LocalRotationDeg.X:F0}°";
+                    if (_lblValColRotY != null) _lblValColRotY.Text = $"{_selectedCollider.LocalRotationDeg.Y:F0}°";
+                    if (_lblValColRotZ != null) _lblValColRotZ.Text = $"{_selectedCollider.LocalRotationDeg.Z:F0}°";
+
+                    _chkColPlanarizeBack?.SetPressedNoSignal(_selectedCollider.PlanarizeBackOnly);
+                }
             }
             finally
             {
                 _isUpdatingColliderInspector = false;
             }
+        }
+
+        private void OnAddCustomColliderPressed(ColliderShapeKind shape)
+        {
+            string defaultBone = "spine_2";
+            if (_previewHeroSkeleton != null && GodotObject.IsInstanceValid(_previewHeroSkeleton))
+            {
+                if (_previewHeroSkeleton.FindBone(defaultBone) < 0)
+                {
+                    if (_previewHeroSkeleton.FindBone("spine_3") >= 0) defaultBone = "spine_3";
+                    else if (_previewHeroSkeleton.FindBone("pelvis") >= 0) defaultBone = "pelvis";
+                    else if (_previewHeroSkeleton.GetBoneCount() > 0) defaultBone = _previewHeroSkeleton.GetBoneName(0);
+                }
+            }
+
+            int customNum = _bodyCollisionCapsules.Count(c => c.IsCustomCollider) + 1;
+            var newCol = shape == ColliderShapeKind.Box
+                ? new BodyCollisionCapsuleDef
+                {
+                    ColliderId = $"box_{Guid.NewGuid().ToString("N")[..6]}",
+                    Shape = ColliderShapeKind.Box,
+                    IsCustomCollider = true,
+                    BoneName = defaultBone,
+                    DisplayName = $"Back Prop Box {customNum}",
+                    LocalOffsetMeters = new Vector3(0f, 0f, -0.18f),
+                    BoxHalfExtentsMeters = new Vector3(0.14f, 0.16f, 0.09f),
+                    LocalRotationDeg = Vector3.Zero,
+                    PlanarizeBackOnly = true,
+                    Enabled = true,
+                    IsUserEdited = true
+                }
+                : new BodyCollisionCapsuleDef
+                {
+                    ColliderId = $"cap_{Guid.NewGuid().ToString("N")[..6]}",
+                    Shape = ColliderShapeKind.Capsule,
+                    IsCustomCollider = true,
+                    BoneName = defaultBone,
+                    DisplayName = $"Custom Capsule {customNum}",
+                    Point0Local = new Vector3(0f, -0.10f, 0f),
+                    Point1Local = new Vector3(0f, 0.10f, 0f),
+                    Radius0Meters = 0.10f,
+                    Radius1Meters = 0.10f,
+                    LocalOffsetMeters = new Vector3(0f, 0f, -0.16f),
+                    Enabled = true,
+                    IsUserEdited = true
+                };
+
+            _bodyCollisionCapsules.Add(newCol);
+            _selectedCollider = newCol;
+            if (!_showColliders && _btnToggleColliders != null) _btnToggleColliders.ButtonPressed = true;
+            ApplyBodyCollidersLiveToDriver();
+            RefreshBodyCollidersPanel();
+            SetBottomStatus($"Added '{newCol.DisplayName}' on '{newCol.BoneName}'. Adjust Width/Height/Depth & Offset to wrap the prop.", StatusTone.Success);
+        }
+
+        private void OnDeleteSelectedCustomColliderPressed()
+        {
+            if (_selectedCollider == null || !_selectedCollider.IsCustomCollider) return;
+            string removedName = _selectedCollider.DisplayName;
+            _bodyCollisionCapsules.Remove(_selectedCollider);
+            _selectedCollider = _bodyCollisionCapsules.FirstOrDefault();
+            ApplyBodyCollidersLiveToDriver();
+            RefreshBodyCollidersPanel();
+            SetBottomStatus($"Deleted custom collider '{removedName}'.", StatusTone.Info);
         }
 
         private void ApplyBodyCollidersLiveToDriver()
@@ -2359,7 +2712,15 @@ namespace DeadlockPlayground.UI
             }
             if (_selectedCollider != null && _lblSelectedColliderBoneHint != null)
             {
-                _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Effective R0={_selectedCollider.EffectiveRadius0:F3}m, R1={_selectedCollider.EffectiveRadius1:F3}m";
+                if (_selectedCollider.Shape == ColliderShapeKind.Box)
+                {
+                    Vector3 full = _selectedCollider.EffectiveBoxHalfExtents * 2.0f;
+                    _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Size {full.X:F2} × {full.Y:F2} × {full.Z:F2} m";
+                }
+                else
+                {
+                    _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Effective R0={_selectedCollider.EffectiveRadius0:F3}m, R1={_selectedCollider.EffectiveRadius1:F3}m";
+                }
             }
             _collidersDirty = true;
             if (_showColliders) RedrawColliderWireframe();

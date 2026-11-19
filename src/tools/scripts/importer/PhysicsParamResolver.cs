@@ -15,7 +15,7 @@ namespace DeadlockPlayground.Importer
     public static class PhysicsParamResolver
     {
         public const float StandardGravityInchesPerSecSq = 360.0f;
-        public const float StandardGravityMetersPerSecSq = 9.81f;
+        public const float StandardGravityMetersPerSecSq = 360.0f * 0.0254f; // 9.144 m/s² (exact Source 2 360 in/s²)
 
         /// <summary>
         /// Valve 8/8 hero baseline for global <c>ClothParams</c> (verified via <c>tools/fe_model_dump</c>).
@@ -155,19 +155,47 @@ namespace DeadlockPlayground.Importer
             public readonly float GravityMetersPerSecSq;
             public readonly float CollisionRadiusMeters;
             public readonly float StrayRadiusMeters;
+            /// <summary>Exact Source 2 <c>FeModel.AnimationForceAttraction</c> (0.000..0.900) for Verlet PBD cloth.</summary>
+            public readonly float GoalForce;
+            /// <summary>Exact Source 2 <c>FeModel.NodeIntegrator.PointDamping</c> (0.000..0.750) for Verlet PBD cloth.</summary>
+            public readonly float PointDamping;
+            /// <summary>Exact Source 2 <c>cloth_bend_stiffness$0</c> (0.05..1.00) for 2-hop bend constraints.</summary>
+            public readonly float BendStiffness;
+            /// <summary>Exact Source 2 <c>cloth_friction$0</c> (0.00..1.00) for tangential capsule friction.</summary>
+            public readonly float Friction;
+            /// <summary>Semi-implicit JiggleBone angular frequency ω (rad/s) derived from <see cref="ResolveJiggleNode"/>.</summary>
+            public readonly float JiggleOmega;
+            /// <summary>Semi-implicit JiggleBone damping ratio ζ derived from <see cref="ResolveJiggleNode"/>.</summary>
+            public readonly float JiggleDampRatio;
+            /// <summary>Hard JiggleBone cone limit in degrees from <see cref="ResolveJiggleNode"/>.</summary>
+            public readonly float JiggleAngleLimitDeg;
 
             public ResolvedPreviewBoneParams(
                 float springK,
                 float dampK,
                 float gravityMetersPerSecSq,
                 float collisionRadiusMeters,
-                float strayRadiusMeters)
+                float strayRadiusMeters,
+                float goalForce,
+                float pointDamping,
+                float bendStiffness,
+                float friction,
+                float jiggleOmega,
+                float jiggleDampRatio,
+                float jiggleAngleLimitDeg)
             {
                 SpringK = springK;
                 DampK = dampK;
                 GravityMetersPerSecSq = gravityMetersPerSecSq;
                 CollisionRadiusMeters = collisionRadiusMeters;
                 StrayRadiusMeters = strayRadiusMeters;
+                GoalForce = goalForce;
+                PointDamping = pointDamping;
+                BendStiffness = bendStiffness;
+                Friction = friction;
+                JiggleOmega = jiggleOmega;
+                JiggleDampRatio = jiggleDampRatio;
+                JiggleAngleLimitDeg = jiggleAngleLimitDeg;
             }
         }
 
@@ -321,35 +349,50 @@ namespace DeadlockPlayground.Importer
         }
 
         /// <summary>
-        /// Resolves Godot live preview (<c>CustomJiggleBoneDriver</c>) spring/damping/gravity parameters
-        /// so <c>Stiffness = 0</c> hangs freely under true gravity (<c>9.81 * g</c>) and moving any slider
-        /// produces a visible, monotonic change matching Source 2 export semantics.
+        /// Resolves Godot live preview (<c>CustomJiggleBoneDriver</c>) parameters directly from
+        /// Source 2 <c>FeModel</c> / <c>FeJiggleBone</c> semantics so the 60 Hz Verlet PBD cloth
+        /// solver and semi-implicit Jiggle solver closely match in-game Source 2 behavior.
         /// </summary>
         public static ResolvedPreviewBoneParams ResolvePreviewBone(
             BoneChainDef ch,
             float t,
-            BoneJointOverride jov = null)
+            BoneJointOverride jov = null,
+            int chainBoneCount = 1)
         {
             const float InchesToMeters = 0.0254f;
             var cloth = ResolveClothNode(ch, t, isPinned: false, jov: jov);
+            var jig = ResolveJiggleNode(ch, t, Math.Max(1, chainBoneCount));
 
             bool isJiggle = ch?.Simulation == SimulationKind.Jiggle;
-            // For Cloth / ProxyCloth: gentle structural drape floor (14f) keeps multi-strand sheets
-            // from collapsing flat into a vertical needle (since preview lacks FeModel's 2900+ stretch rods),
-            // while still responding visibly to both Stiffness and Gravity sliders.
-            float springK = isJiggle
-                ? (45f + Mathf.Lerp(ch.StiffnessRoot, ch.StiffnessTip, t) * 240f)
-                : (14f + cloth.GoalForce * 220f);
-            float dampK = isJiggle
-                ? (5.0f + Mathf.Clamp(ch.Damping, 0f, 1f) * 20f)
-                : (3.0f + Mathf.Clamp(ch?.Damping ?? 0.25f, 0f, 1f) * 16f);
+            float pointDamping = ResolveCompiledPointDamping(ch?.Damping ?? 0.25f);
 
-            // Source 2 FeJiggleBone has ZERO gravity — match that in preview so bust/buttocks don't droop!
+            // Semi-implicit JiggleBone frequency/damping mapped directly from Source 2 ResolveJiggleNode:
+            // stiffness 20..800 -> omega = sqrt(stiffness) ≈ 4.5..28.3 rad/s
+            // damping 1..30 -> zeta = damping / (2 * omega) clamped to [0.18, 1.15] so high stiffness never rings or explodes.
+            float jiggleOmega = MathF.Sqrt(MathF.Max(20f, jig.Stiffness));
+            float jiggleDampRatio = Mathf.Clamp(jig.Damping / MathF.Max(2f, 0.7f * jiggleOmega), 0.18f, 1.15f);
+
+            float springK = isJiggle ? (jiggleOmega * jiggleOmega) : (cloth.GoalForce * 220f);
+            float dampK = isJiggle ? (2f * jiggleDampRatio * jiggleOmega) : pointDamping;
+
+            // Source 2 FeJiggleBone has ZERO gravity — match that in preview so bust/buttocks don't droop.
             float gravMeters = isJiggle ? 0.0f : (StandardGravityMetersPerSecSq * cloth.GravityScale);
             float colMeters = MathF.Max(0.005f, cloth.CollisionRadiusInches * InchesToMeters);
             float strayMeters = cloth.StrayRadiusInches < 0f ? -1.0f : cloth.StrayRadiusInches * InchesToMeters;
 
-            return new ResolvedPreviewBoneParams(springK, dampK, gravMeters, colMeters, strayMeters);
+            return new ResolvedPreviewBoneParams(
+                springK: springK,
+                dampK: dampK,
+                gravityMetersPerSecSq: gravMeters,
+                collisionRadiusMeters: colMeters,
+                strayRadiusMeters: strayMeters,
+                goalForce: cloth.GoalForce,
+                pointDamping: pointDamping,
+                bendStiffness: cloth.BendStiffness,
+                friction: cloth.Friction,
+                jiggleOmega: jiggleOmega,
+                jiggleDampRatio: jiggleDampRatio,
+                jiggleAngleLimitDeg: jig.AngleLimitDeg);
         }
     }
 }

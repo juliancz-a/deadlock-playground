@@ -193,12 +193,24 @@ namespace DeadlockPlayground.Importer
     }
 
     /// <summary>
-    /// Mesh-fitted body collision capsule shared identically by the Godot preview jiggle solver
-    /// (CustomJiggleBoneDriver) and the Source 2 exporter (CustomModelExporter ClothShapeCapsule).
-    /// Stored in the owning bone's Godot rest-pose local space in meters.
+    /// Geometry primitive for a cloth body/prop collider (maps to Source 2 <c>ClothShapeCapsule</c> or <c>ClothShapeBox</c>).
+    /// </summary>
+    public enum ColliderShapeKind
+    {
+        Capsule = 0,
+        Box = 1
+    }
+
+    /// <summary>
+    /// Mesh-fitted body or user-added custom prop collision shape shared identically by the Godot preview
+    /// cloth solver (<c>CustomJiggleBoneDriver</c>) and the Source 2 exporter (<c>CustomModelExporter</c>
+    /// <c>ClothShapeCapsule</c> / <c>ClothShapeBox</c>). Stored in the owning bone's Godot rest-pose local space in meters.
     /// </summary>
     public sealed class BodyCollisionCapsuleDef
     {
+        public string ColliderId { get; set; } = "";
+        public ColliderShapeKind Shape { get; set; } = ColliderShapeKind.Capsule;
+        public bool IsCustomCollider { get; set; } = false;
         public string BoneName { get; set; } = "";
         public string DisplayName { get; set; } = "";
         public Godot.Vector3 Point0Local { get; set; } = Godot.Vector3.Zero;
@@ -207,6 +219,12 @@ namespace DeadlockPlayground.Importer
         public float Radius1Meters { get; set; } = 0.11f;
         public float RadiusScale { get; set; } = 1.0f;
         public Godot.Vector3 LocalOffsetMeters { get; set; } = Godot.Vector3.Zero;
+        /// <summary>Half-extents (X=Width/2, Y=Height/2, Z=Depth/2) in bone-local meters when <see cref="Shape"/> is <see cref="ColliderShapeKind.Box"/>.</summary>
+        public Godot.Vector3 BoxHalfExtentsMeters { get; set; } = new Godot.Vector3(0.13f, 0.15f, 0.08f);
+        /// <summary>Bone-local Euler rotation in degrees (Pitch X, Yaw Y, Roll Z) when <see cref="Shape"/> is <see cref="ColliderShapeKind.Box"/>.</summary>
+        public Godot.Vector3 LocalRotationDeg { get; set; } = Godot.Vector3.Zero;
+        /// <summary>When true, acts as a one-sided back barrier (<c>planarize = true</c> in Source 2) so capes slide over the back of a prop without snapping inside.</summary>
+        public bool PlanarizeBackOnly { get; set; } = false;
         public bool Enabled { get; set; } = true;
         public bool IsUserEdited { get; set; } = false;
 
@@ -214,11 +232,18 @@ namespace DeadlockPlayground.Importer
         public Godot.Vector3 EffectivePoint1 => Point1Local + LocalOffsetMeters;
         public float EffectiveRadius0 => MathF.Max(0.02f, Radius0Meters * RadiusScale);
         public float EffectiveRadius1 => MathF.Max(0.02f, Radius1Meters * RadiusScale);
+        public Godot.Vector3 EffectiveBoxHalfExtents => new Godot.Vector3(
+            MathF.Max(0.015f, BoxHalfExtentsMeters.X * RadiusScale),
+            MathF.Max(0.015f, BoxHalfExtentsMeters.Y * RadiusScale),
+            MathF.Max(0.015f, BoxHalfExtentsMeters.Z * RadiusScale));
 
         public BodyCollisionCapsuleDef Clone()
         {
             return new BodyCollisionCapsuleDef
             {
+                ColliderId = ColliderId,
+                Shape = Shape,
+                IsCustomCollider = IsCustomCollider,
                 BoneName = BoneName,
                 DisplayName = DisplayName,
                 Point0Local = Point0Local,
@@ -227,6 +252,9 @@ namespace DeadlockPlayground.Importer
                 Radius1Meters = Radius1Meters,
                 RadiusScale = RadiusScale,
                 LocalOffsetMeters = LocalOffsetMeters,
+                BoxHalfExtentsMeters = BoxHalfExtentsMeters,
+                LocalRotationDeg = LocalRotationDeg,
+                PlanarizeBackOnly = PlanarizeBackOnly,
                 Enabled = Enabled,
                 IsUserEdited = IsUserEdited
             };

@@ -92,12 +92,20 @@ namespace DeadlockPlayground.Importer
                 return result;
 
             var existingByBone = new Dictionary<string, BodyCollisionCapsuleDef>(StringComparer.OrdinalIgnoreCase);
+            var existingCustom = new List<BodyCollisionCapsuleDef>();
             if (existing != null)
             {
                 foreach (var c in existing)
                 {
-                    if (c != null && !string.IsNullOrWhiteSpace(c.BoneName))
+                    if (c == null || string.IsNullOrWhiteSpace(c.BoneName)) continue;
+                    if (c.IsCustomCollider || c.Shape == ColliderShapeKind.Box)
+                    {
+                        existingCustom.Add(c.Clone());
+                    }
+                    else
+                    {
                         existingByBone[c.BoneName] = c;
+                    }
                 }
             }
 
@@ -311,6 +319,12 @@ namespace DeadlockPlayground.Importer
             if (physicsChains != null && physicsChains.Count > 0)
             {
                 ApplyClothBindPoseClearance(skeleton, result, physicsChains);
+            }
+
+            // Preserve user-added custom prop colliders (Boxes / extra Capsules) across Auto-Fit
+            if (!forceResetEdits && existingCustom.Count > 0)
+            {
+                result.AddRange(existingCustom);
             }
 
             return result;
@@ -558,6 +572,9 @@ namespace DeadlockPlayground.Importer
 
         private sealed class CapsuleDto
         {
+            [JsonPropertyName("id")] public string Id { get; set; } = "";
+            [JsonPropertyName("shape")] public int Shape { get; set; } = 0;
+            [JsonPropertyName("custom")] public bool Custom { get; set; } = false;
             [JsonPropertyName("bone")] public string Bone { get; set; } = "";
             [JsonPropertyName("label")] public string Label { get; set; } = "";
             [JsonPropertyName("p0")] public float[] P0 { get; set; }
@@ -566,6 +583,9 @@ namespace DeadlockPlayground.Importer
             [JsonPropertyName("r1")] public float R1 { get; set; }
             [JsonPropertyName("scale")] public float Scale { get; set; } = 1.0f;
             [JsonPropertyName("off")] public float[] Off { get; set; }
+            [JsonPropertyName("boxHalf")] public float[] BoxHalf { get; set; }
+            [JsonPropertyName("rotDeg")] public float[] RotDeg { get; set; }
+            [JsonPropertyName("planarizeBack")] public bool PlanarizeBack { get; set; } = false;
             [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
             [JsonPropertyName("edited")] public bool Edited { get; set; }
         }
@@ -579,6 +599,9 @@ namespace DeadlockPlayground.Importer
                 if (c == null || string.IsNullOrWhiteSpace(c.BoneName)) continue;
                 dtos.Add(new CapsuleDto
                 {
+                    Id = c.ColliderId ?? "",
+                    Shape = (int)c.Shape,
+                    Custom = c.IsCustomCollider,
                     Bone = c.BoneName,
                     Label = c.DisplayName,
                     P0 = new[] { c.Point0Local.X, c.Point0Local.Y, c.Point0Local.Z },
@@ -587,6 +610,9 @@ namespace DeadlockPlayground.Importer
                     R1 = c.Radius1Meters,
                     Scale = c.RadiusScale,
                     Off = new[] { c.LocalOffsetMeters.X, c.LocalOffsetMeters.Y, c.LocalOffsetMeters.Z },
+                    BoxHalf = new[] { c.BoxHalfExtentsMeters.X, c.BoxHalfExtentsMeters.Y, c.BoxHalfExtentsMeters.Z },
+                    RotDeg = new[] { c.LocalRotationDeg.X, c.LocalRotationDeg.Y, c.LocalRotationDeg.Z },
+                    PlanarizeBack = c.PlanarizeBackOnly,
                     Enabled = c.Enabled,
                     Edited = c.IsUserEdited
                 });
@@ -607,6 +633,9 @@ namespace DeadlockPlayground.Importer
                     if (d == null || string.IsNullOrWhiteSpace(d.Bone)) continue;
                     list.Add(new BodyCollisionCapsuleDef
                     {
+                        ColliderId = d.Id ?? "",
+                        Shape = d.Shape == (int)ColliderShapeKind.Box ? ColliderShapeKind.Box : ColliderShapeKind.Capsule,
+                        IsCustomCollider = d.Custom,
                         BoneName = d.Bone,
                         DisplayName = d.Label ?? d.Bone,
                         Point0Local = d.P0 is { Length: >= 3 } ? new Vector3(d.P0[0], d.P0[1], d.P0[2]) : Vector3.Zero,
@@ -615,6 +644,11 @@ namespace DeadlockPlayground.Importer
                         Radius1Meters = d.R1 > 0.005f ? d.R1 : 0.10f,
                         RadiusScale = d.Scale > 0.01f ? d.Scale : 1.0f,
                         LocalOffsetMeters = d.Off is { Length: >= 3 } ? new Vector3(d.Off[0], d.Off[1], d.Off[2]) : Vector3.Zero,
+                        BoxHalfExtentsMeters = d.BoxHalf is { Length: >= 3 }
+                            ? new Vector3(MathF.Max(0.015f, d.BoxHalf[0]), MathF.Max(0.015f, d.BoxHalf[1]), MathF.Max(0.015f, d.BoxHalf[2]))
+                            : new Vector3(0.13f, 0.15f, 0.08f),
+                        LocalRotationDeg = d.RotDeg is { Length: >= 3 } ? new Vector3(d.RotDeg[0], d.RotDeg[1], d.RotDeg[2]) : Vector3.Zero,
+                        PlanarizeBackOnly = d.PlanarizeBack,
                         Enabled = d.Enabled,
                         IsUserEdited = d.Edited
                     });

@@ -534,9 +534,58 @@ namespace DeadlockPlayground.UI
                     ? new Color(0.48f, 0.52f, 0.58f, 0.25f)
                     : (isSel
                         ? new Color(1.0f, 0.85f, 0.22f, 0.96f)
-                        : new Color(0.20f, 0.90f, 0.96f, 0.65f));
+                        : (cap.Shape == ColliderShapeKind.Box
+                            ? new Color(0.98f, 0.58f, 0.20f, 0.78f)
+                            : new Color(0.20f, 0.90f, 0.96f, 0.65f)));
 
                 Transform3D boneWorld = skelGlobal * _previewHeroSkeleton.GetBoneGlobalPose(bIdx);
+
+                void EmitLine(Vector3 a, Vector3 b)
+                {
+                    im.SurfaceSetColor(col);
+                    im.SurfaceAddVertex(a);
+                    im.SurfaceSetColor(col);
+                    im.SurfaceAddVertex(b);
+                }
+
+                if (cap.Shape == ColliderShapeKind.Box)
+                {
+                    Basis rotLocal = Basis.FromEuler(new Vector3(
+                        Mathf.DegToRad(cap.LocalRotationDeg.X),
+                        Mathf.DegToRad(cap.LocalRotationDeg.Y),
+                        Mathf.DegToRad(cap.LocalRotationDeg.Z)));
+                    Basis boxBasis = (boneWorld.Basis.Orthonormalized() * rotLocal).Orthonormalized();
+                    Vector3 boxCenter = boneWorld * cap.LocalOffsetMeters;
+                    float worldScale = (boneWorld.Basis.X.Length() + boneWorld.Basis.Y.Length() + boneWorld.Basis.Z.Length()) / 3f;
+                    if (worldScale < 0.01f) worldScale = 1.0f;
+                    Vector3 h = cap.EffectiveBoxHalfExtents * worldScale;
+
+                    Vector3 hx = boxBasis.X * h.X;
+                    Vector3 hy = boxBasis.Y * h.Y;
+                    Vector3 hz = boxBasis.Z * h.Z;
+
+                    Vector3 c000 = boxCenter - hx - hy - hz;
+                    Vector3 c100 = boxCenter + hx - hy - hz;
+                    Vector3 c010 = boxCenter - hx + hy - hz;
+                    Vector3 c110 = boxCenter + hx + hy - hz;
+                    Vector3 c001 = boxCenter - hx - hy + hz;
+                    Vector3 c101 = boxCenter + hx - hy + hz;
+                    Vector3 c011 = boxCenter - hx + hy + hz;
+                    Vector3 c111 = boxCenter + hx + hy + hz;
+
+                    // 12 edges of oriented box
+                    EmitLine(c000, c100); EmitLine(c010, c110); EmitLine(c001, c101); EmitLine(c011, c111);
+                    EmitLine(c000, c010); EmitLine(c100, c110); EmitLine(c001, c011); EmitLine(c101, c111);
+                    EmitLine(c000, c001); EmitLine(c100, c101); EmitLine(c010, c011); EmitLine(c110, c111);
+                    // Diagonal X on back face (-Z) when PlanarizeBackOnly is enabled
+                    if (cap.PlanarizeBackOnly)
+                    {
+                        EmitLine(c000, c110);
+                        EmitLine(c100, c010);
+                    }
+                    continue;
+                }
+
                 Vector3 wp0 = boneWorld * cap.EffectivePoint0;
                 Vector3 wp1 = boneWorld * cap.EffectivePoint1;
                 float r0 = cap.EffectiveRadius0;
@@ -548,14 +597,6 @@ namespace DeadlockPlayground.UI
                 Vector3 refVec = Mathf.Abs(axis.Dot(Vector3.Up)) < 0.92f ? Vector3.Up : Vector3.Right;
                 Vector3 tangent = axis.Cross(refVec).Normalized();
                 Vector3 binormal = axis.Cross(tangent).Normalized();
-
-                void EmitLine(Vector3 a, Vector3 b)
-                {
-                    im.SurfaceSetColor(col);
-                    im.SurfaceAddVertex(a);
-                    im.SurfaceSetColor(col);
-                    im.SurfaceAddVertex(b);
-                }
 
                 void EmitRing(Vector3 center, float radius)
                 {

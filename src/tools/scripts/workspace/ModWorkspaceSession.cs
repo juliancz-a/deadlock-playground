@@ -1211,7 +1211,18 @@ namespace DeadlockPlayground.Workspace
                     }
                 }
 
-                if (heroEntry.Assets.Count == 0 && heroEntry.CustomModel == null)
+                if (heroEntry.Accessories != null && heroEntry.Accessories.Count > 0)
+                {
+                    int removedAcc = heroEntry.Accessories.RemoveAll(acc =>
+                        acc?.ModelConfig == null ||
+                        string.IsNullOrEmpty(acc.ModelConfig.RelativeModelPath) ||
+                        !File.Exists(Path.Combine(SessionDir, acc.ModelConfig.RelativeModelPath)));
+                    if (removedAcc > 0)
+                        changed = true;
+                }
+
+                bool hasAccessories = heroEntry.Accessories != null && heroEntry.Accessories.Count > 0;
+                if (heroEntry.Assets.Count == 0 && heroEntry.CustomModel == null && !hasAccessories)
                 {
                     emptyHeroes.Add(heroId);
                     changed = true;

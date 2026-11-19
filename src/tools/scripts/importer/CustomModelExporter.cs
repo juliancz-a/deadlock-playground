@@ -95,10 +95,19 @@ namespace DeadlockPlayground.Importer
             public class ClothCollisionCapsuleDef
             {
                 public string ParentBone { get; set; } = "";
+                public ColliderShapeKind Shape { get; set; } = ColliderShapeKind.Capsule;
+                public bool IsCustomCollider { get; set; } = false;
+                public bool PlanarizeBackOnly { get; set; } = false;
                 public Vector3 Point0 { get; set; }
                 public float Radius0 { get; set; }
                 public Vector3 Point1 { get; set; }
                 public float Radius1 { get; set; }
+                /// <summary>Half-extents in Godot meters (input) or full dimensions in Source 2 inches (converted) when <see cref="Shape"/> is <see cref="ColliderShapeKind.Box"/>.</summary>
+                public Vector3 BoxDimensions { get; set; }
+                /// <summary>World-space orthonormal basis of the box in Godot hero space (used to derive exact Source 2 bone-local Euler angles).</summary>
+                public Basis BoxWorldBasis { get; set; } = Basis.Identity;
+                /// <summary>Resolved Source 2 bone-local Euler angles [Pitch, Yaw, Roll] in degrees.</summary>
+                public Vector3 BoxAnglesDeg { get; set; }
             }
 
             public string HeroCodename { get; set; } = "hero";
@@ -330,14 +339,37 @@ namespace DeadlockPlayground.Importer
                         int bIdx = skeleton.FindBone(cap.BoneName);
                         if (bIdx < 0) continue;
                         Transform3D bRest = skeleton.GetBoneGlobalRest(bIdx);
-                        bundle.CustomFittedWorldCapsules.Add(new CustomModelExportBundle.ClothCollisionCapsuleDef
+                        if (cap.Shape == ColliderShapeKind.Box)
                         {
-                            ParentBone = cap.BoneName,
-                            Point0 = bRest * cap.EffectivePoint0,
-                            Radius0 = cap.EffectiveRadius0,
-                            Point1 = bRest * cap.EffectivePoint1,
-                            Radius1 = cap.EffectiveRadius1
-                        });
+                            Basis rotLocal = Basis.FromEuler(new Vector3(
+                                Mathf.DegToRad(cap.LocalRotationDeg.X),
+                                Mathf.DegToRad(cap.LocalRotationDeg.Y),
+                                Mathf.DegToRad(cap.LocalRotationDeg.Z)));
+                            bundle.CustomFittedWorldCapsules.Add(new CustomModelExportBundle.ClothCollisionCapsuleDef
+                            {
+                                ParentBone = cap.BoneName,
+                                Shape = ColliderShapeKind.Box,
+                                IsCustomCollider = true,
+                                PlanarizeBackOnly = cap.PlanarizeBackOnly,
+                                Point0 = bRest * cap.LocalOffsetMeters,
+                                BoxDimensions = cap.EffectiveBoxHalfExtents * 2.0f,
+                                BoxWorldBasis = (bRest.Basis.Orthonormalized() * rotLocal).Orthonormalized()
+                            });
+                        }
+                        else
+                        {
+                            bundle.CustomFittedWorldCapsules.Add(new CustomModelExportBundle.ClothCollisionCapsuleDef
+                            {
+                                ParentBone = cap.BoneName,
+                                Shape = ColliderShapeKind.Capsule,
+                                IsCustomCollider = cap.IsCustomCollider,
+                                PlanarizeBackOnly = cap.PlanarizeBackOnly,
+                                Point0 = bRest * cap.EffectivePoint0,
+                                Radius0 = cap.EffectiveRadius0,
+                                Point1 = bRest * cap.EffectivePoint1,
+                                Radius1 = cap.EffectiveRadius1
+                            });
+                        }
                     }
                 }
             }
@@ -3576,17 +3608,52 @@ namespace DeadlockPlayground.Importer
                     if (!srcWorldByName.TryGetValue(wc.ParentBone, out var bXf)) continue;
 
                     var qInv = System.Numerics.Quaternion.Inverse(bXf.Rot);
+                    if (wc.Shape == ColliderShapeKind.Box)
+                    {
+                        Vector3 originSrcLocal = RotateVecBySysQuat(qInv, GodotToSourcePosition(wc.Point0) - bXf.Pos);
+                        // Convert box orthonormal world axes from Godot -> Source 2 bone-local to get exact QAngle [Pitch, Yaw, Roll]
+                        Vector3 axX = RotateVecBySysQuat(qInv, GodotToSourcePosition(wc.BoxWorldBasis.X)).Normalized();
+                        Vector3 axY = RotateVecBySysQuat(qInv, GodotToSourcePosition(wc.BoxWorldBasis.Y)).Normalized();
+                        Vector3 axZ = RotateVecBySysQuat(qInv, GodotToSourcePosition(wc.BoxWorldBasis.Z)).Normalized();
+                        // Ensure right-handed orthonormal frame and extract Source 2 QAngle (Z-Y-X: Yaw around Z, Pitch around Y, Roll around X)
+                        if (axX.Cross(axY).Dot(axZ) < 0f) axZ = -axZ;
+                        float pitchRad = MathF.Asin(Mathf.Clamp(-axX.Z, -1f, 1f));
+                        float yawRad = MathF.Atan2(axX.Y, axX.X);
+                        float rollRad = MathF.Atan2(axY.Z, axZ.Z);
+                        capsules.Add(new CustomModelExportBundle.ClothCollisionCapsuleDef
+                        {
+                            ParentBone = wc.ParentBone,
+                            Shape = ColliderShapeKind.Box,
+                            IsCustomCollider = true,
+                            PlanarizeBackOnly = wc.PlanarizeBackOnly,
+                            Point0 = originSrcLocal,
+                            BoxDimensions = new Vector3(
+                                MathF.Max(1.0f, wc.BoxDimensions.X * MetersToInches),
+                                MathF.Max(1.0f, wc.BoxDimensions.Y * MetersToInches),
+                                MathF.Max(1.0f, wc.BoxDimensions.Z * MetersToInches)),
+                            BoxAnglesDeg = new Vector3(
+                                Mathf.RadToDeg(pitchRad),
+                                Mathf.RadToDeg(yawRad),
+                                Mathf.RadToDeg(rollRad))
+                        });
+                        // Custom prop boxes do not replace the bone's standard body capsule
+                        continue;
+                    }
+
                     Vector3 p0SrcW = GodotToSourcePosition(wc.Point0);
                     Vector3 p1SrcW = GodotToSourcePosition(wc.Point1);
                     capsules.Add(new CustomModelExportBundle.ClothCollisionCapsuleDef
                     {
                         ParentBone = wc.ParentBone,
+                        Shape = ColliderShapeKind.Capsule,
+                        IsCustomCollider = wc.IsCustomCollider,
+                        PlanarizeBackOnly = wc.PlanarizeBackOnly,
                         Point0 = RotateVecBySysQuat(qInv, p0SrcW - bXf.Pos),
                         Radius0 = MathF.Max(0.5f, wc.Radius0 * MetersToInches),
                         Point1 = RotateVecBySysQuat(qInv, p1SrcW - bXf.Pos),
                         Radius1 = MathF.Max(0.5f, wc.Radius1 * MetersToInches)
                     });
-                    bonesCovered.Add(wc.ParentBone);
+                    if (!wc.IsCustomCollider) bonesCovered.Add(wc.ParentBone);
                 }
             }
 
@@ -3714,6 +3781,7 @@ namespace DeadlockPlayground.Importer
             {
                 foreach (var cap in capsules)
                 {
+                    if (cap.IsCustomCollider || cap.Shape == ColliderShapeKind.Box) continue;
                     if (!srcWorldByName.TryGetValue(cap.ParentBone, out var capXf)) continue;
                     Vector3 p0W = capXf.Pos + RotateVecBySysQuat(capXf.Rot, cap.Point0);
                     Vector3 p1W = capXf.Pos + RotateVecBySysQuat(capXf.Rot, cap.Point1);
@@ -3765,6 +3833,55 @@ namespace DeadlockPlayground.Importer
             int idx = 0;
             foreach (var cap in capsules)
             {
+                if (cap.Shape == ColliderShapeKind.Box)
+                {
+                    var bsb = new StringBuilder();
+                    bsb.AppendLine("\t\t\t\t\t{");
+                    bsb.AppendLine("\t\t\t\t\t\t_class = \"ClothShapeBox\"");
+                    bsb.AppendLine($"\t\t\t\t\t\tname = \"{EscapeKvString(cap.ParentBone)}_clothBox_{idx}\"");
+                    bsb.AppendLine($"\t\t\t\t\t\tparent_bone = \"{EscapeKvString(cap.ParentBone)}\"");
+                    bsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer0 = true");
+                    bsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer1 = true");
+                    bsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer2 = true");
+                    bsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer3 = true");
+                    bsb.AppendLine("\t\t\t\t\t\tcloth_collision_priority = 2");
+                    bsb.AppendLine("\t\t\t\t\t\tvertex_map = \"\"");
+                    bsb.AppendLine("\t\t\t\t\t\tinverted_collision = false");
+                    bsb.AppendLine("\t\t\t\t\t\tplanarize = false");
+                    bsb.AppendLine("\t\t\t\t\t\tbounciness = 0.0");
+                    bsb.AppendLine($"\t\t\t\t\t\tdimensions = [ {FmtKvFloat(cap.BoxDimensions.X)}, {FmtKvFloat(cap.BoxDimensions.Y)}, {FmtKvFloat(cap.BoxDimensions.Z)} ]");
+                    bsb.AppendLine($"\t\t\t\t\t\torigin = [ {FmtKvFloat(cap.Point0.X)}, {FmtKvFloat(cap.Point0.Y)}, {FmtKvFloat(cap.Point0.Z)} ]");
+                    bsb.AppendLine($"\t\t\t\t\t\tangles = [ {FmtKvFloat(cap.BoxAnglesDeg.X)}, {FmtKvFloat(cap.BoxAnglesDeg.Y)}, {FmtKvFloat(cap.BoxAnglesDeg.Z)} ]");
+                    bsb.Append("\t\t\t\t\t}");
+                    result.Add(bsb.ToString());
+                    idx++;
+
+                    if (cap.PlanarizeBackOnly && hasPlanarizeBackMap)
+                    {
+                        var pbsb = new StringBuilder();
+                        pbsb.AppendLine("\t\t\t\t\t{");
+                        pbsb.AppendLine("\t\t\t\t\t\t_class = \"ClothShapeBox\"");
+                        pbsb.AppendLine($"\t\t\t\t\t\tname = \"{EscapeKvString(cap.ParentBone)}_clothBox_plane_{idx}\"");
+                        pbsb.AppendLine($"\t\t\t\t\t\tparent_bone = \"{EscapeKvString(cap.ParentBone)}\"");
+                        pbsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer0 = true");
+                        pbsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer1 = true");
+                        pbsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer2 = true");
+                        pbsb.AppendLine("\t\t\t\t\t\tcloth_collision_layer3 = true");
+                        pbsb.AppendLine("\t\t\t\t\t\tcloth_collision_priority = 2");
+                        pbsb.AppendLine("\t\t\t\t\t\tvertex_map = \"planarize_back\"");
+                        pbsb.AppendLine("\t\t\t\t\t\tinverted_collision = false");
+                        pbsb.AppendLine("\t\t\t\t\t\tplanarize = true");
+                        pbsb.AppendLine("\t\t\t\t\t\tbounciness = 0.0");
+                        pbsb.AppendLine($"\t\t\t\t\t\tdimensions = [ {FmtKvFloat(cap.BoxDimensions.X)}, {FmtKvFloat(cap.BoxDimensions.Y)}, {FmtKvFloat(cap.BoxDimensions.Z)} ]");
+                        pbsb.AppendLine($"\t\t\t\t\t\torigin = [ {FmtKvFloat(cap.Point0.X)}, {FmtKvFloat(cap.Point0.Y)}, {FmtKvFloat(cap.Point0.Z)} ]");
+                        pbsb.AppendLine($"\t\t\t\t\t\tangles = [ {FmtKvFloat(cap.BoxAnglesDeg.X)}, {FmtKvFloat(cap.BoxAnglesDeg.Y)}, {FmtKvFloat(cap.BoxAnglesDeg.Z)} ]");
+                        pbsb.Append("\t\t\t\t\t}");
+                        result.Add(pbsb.ToString());
+                        idx++;
+                    }
+                    continue;
+                }
+
                 bool isUpperArm = cap.ParentBone.Equals("arm_upper_L", StringComparison.OrdinalIgnoreCase) ||
                                   cap.ParentBone.Equals("arm_upper_R", StringComparison.OrdinalIgnoreCase);
                 int priority = isUpperArm ? 0 : 1;

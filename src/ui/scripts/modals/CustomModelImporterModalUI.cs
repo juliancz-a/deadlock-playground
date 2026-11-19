@@ -6204,7 +6204,7 @@ namespace DeadlockPlayground.UI
             };
             hiddenBacking.AddChild(_sliderPaintStrength);
 
-            _chkPaintMirror = new CheckBox { Text = "Mirror L <-> R Brush", ButtonPressed = true };
+            _chkPaintMirror = new CheckBox { Text = "Mirror L <-> R Brush", ButtonPressed = false };
             _chkPaintMirror.Toggled += _ =>
             {
                 UpdateResetBoneButtonLabel();
@@ -6589,13 +6589,27 @@ namespace DeadlockPlayground.UI
 
         private void SetPreviewPhysicsPausedForWeightPaint(bool paused)
         {
-            if (_previewHeroSkeleton == null || !GodotObject.IsInstanceValid(_previewHeroSkeleton)) return;
-            foreach (Node ch in _previewHeroSkeleton.GetChildren())
+            // CustomJiggleBoneDriver is attached to _previewHeroClone (heroRoot), not _previewHeroSkeleton;
+            // scan both _previewHeroClone and _previewHeroSkeleton recursively so it is always found.
+            void PauseDriversInSubtree(Node root)
             {
-                if (ch is DeadlockPlayground.Animation.CustomJiggleBoneDriver driver && GodotObject.IsInstanceValid(driver))
+                if (root == null || !GodotObject.IsInstanceValid(root)) return;
+                if (root is DeadlockPlayground.Animation.CustomJiggleBoneDriver driver)
                 {
                     driver.SetPausedForEditing(paused);
                 }
+                foreach (Node ch in root.GetChildren())
+                {
+                    PauseDriversInSubtree(ch);
+                }
+            }
+
+            PauseDriversInSubtree(_previewHeroClone);
+            PauseDriversInSubtree(_previewHeroSkeleton);
+
+            if (_previewConstraintDriver != null && GodotObject.IsInstanceValid(_previewConstraintDriver))
+            {
+                _previewConstraintDriver.SetProcess(!paused);
             }
         }
 
@@ -6783,9 +6797,10 @@ namespace DeadlockPlayground.UI
             {
                 Text = "Mirror",
                 ToggleMode = true,
-                ButtonPressed = true,
+                ButtonPressed = false,
                 CustomMinimumSize = new Vector2(58, 24),
-                ThemeTypeVariation = "ToolbarButton"
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Mirror L <-> R weight brushstrokes across X (disabled by default for cloth/physics bones)."
             };
             _hudBtnMirror.Toggled += on =>
             {
@@ -8617,10 +8632,19 @@ namespace DeadlockPlayground.UI
             var result = CustomModelAutoRigger.RigAndBind(_liveImportedScene, _liveHeroNode, options);
             if (result.Success)
             {
-                // Live hero visibility for all stacked slots & replaced surfaces has already been updated by RecomputeHeroReplacementVisibility
-                EmitSignal(SignalName.RiggingConfirmed);
-                CleanupPreviewResources();
-                QueueFree();
+                Visible = false;
+                Input.MouseMode = Input.MouseModeEnum.Visible;
+                GetViewport()?.GuiReleaseFocus();
+                try
+                {
+                    // Live hero visibility for all stacked slots & replaced surfaces has already been updated by RecomputeHeroReplacementVisibility
+                    EmitSignal(SignalName.RiggingConfirmed);
+                }
+                finally
+                {
+                    CleanupPreviewResources();
+                    QueueFree();
+                }
             }
             else
             {
@@ -8632,6 +8656,9 @@ namespace DeadlockPlayground.UI
         {
             _liveRigDebounceTimer?.Stop();
             _hasBakedPreviewTransform = false;
+            Visible = false;
+            Input.MouseMode = Input.MouseModeEnum.Visible;
+            GetViewport()?.GuiReleaseFocus();
             // If live imported scene is not parented to anything, clean it up
             if (_liveImportedScene != null && GodotObject.IsInstanceValid(_liveImportedScene) && _liveImportedScene.GetParent() == null)
             {
