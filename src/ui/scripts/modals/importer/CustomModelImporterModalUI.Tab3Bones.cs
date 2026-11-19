@@ -1,0 +1,2673 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Godot;
+using DeadlockPlayground.Importer;
+using DeadlockPlayground.Theming;
+
+namespace DeadlockPlayground.UI
+{
+    public partial class CustomModelImporterModalUI
+    {
+        // Phase 2 & 5 Tab 3: Decluttered Segmented Sub-Views (Remap | Physics & Chains | Disable & Prune)
+        private Label _lblRemapSyncBadge;
+        private Label _lblRemapDiffSummary;
+        private CheckBox _chkKeepUnweightedBones;
+        private CheckBox _chkPreserveClothingChains;
+        private CheckBox _chkPhysicsMasterTab3;
+        private Button _btnFilterUnmappedOnly;
+        private Button _btnFilterWeightedOnly;
+        private Button _btnFilterShowControls;
+
+        // Sub-view navigation (0 = Remap, 1 = Physics & Chains, 2 = Disable / Prune)
+        private Button _btnSubTabRemap;
+        private Button _btnSubTabPhysics;
+        private Button _btnSubTabDisable;
+        private Control _boxSubViewRemap;
+        private Control _boxSubViewPhysics;
+        private Control _boxSubViewDisable;
+
+        // Physics sub-view pill switcher (0 = Chains & Tuning, 1 = Body Colliders)
+        private Button _btnPhysTabChains;
+        private Button _btnPhysTabColliders;
+        private Control _boxPhysicsChainsPane;
+        private Control _boxPhysicsCollidersPane;
+
+        // Compact Master-Detail Physics Chains Controls
+        private VBoxContainer _boxClothingChainsList;
+        private Label _lblClothingChainSummary;
+        private LineEdit _txtChainSearch;
+        private OptionButton _optChainCategoryFilter;
+        private BoneChainDef _selectedChain;
+        private PanelContainer _boxChainInspector;
+        private Label _lblSelectedChainTitle;
+        private OptionButton _optSelChainPolicy;
+        private OptionButton _optSelChainAnchor;
+        private OptionButton _optSelChainSim;
+        private readonly Button[] _chainSimSegButtons = new Button[3];
+        private Label _lblSelChainSimHint;
+        private Control _boxTab3WeightPaintHost;
+        private HFlowContainer _boxTab3WeightBoneChips;
+        private Button _btnChainWeightPaintToggle;
+        private HSlider _sliderSelStiffRoot;
+        private HSlider _sliderSelStiffTip;
+        private HSlider _sliderSelDamping;
+        private HSlider _sliderSelGravity;
+        private HSlider _sliderSelColRadius;
+        private HSlider _sliderSelStrayRadius;
+        private CheckBox _chkSelStrayUnlimited;
+        private CheckBox _chkSelPlanarizeBack;
+        private Label _lblValStiffRoot;
+        private Label _lblValStiffTip;
+        private Label _lblValDamping;
+        private Label _lblValGravity;
+        private Label _lblValColRadius;
+        private Label _lblValStrayRadius;
+        private bool _isUpdatingChainInspector;
+        private readonly HashSet<string> _collapsedPhysicsGroups = new(StringComparer.OrdinalIgnoreCase);
+
+        // Per-Child Bone Override Editor (inside Chain Inspector)
+        private VBoxContainer _boxChainJointList;
+        private PanelContainer _boxJointOverrideEditor;
+        private Label _lblSelectedJointTitle;
+        private CheckBox _chkJointSimulate;
+        private HSlider _sliderJointGoal;
+        private HSlider _sliderJointDamp;
+        private HSlider _sliderJointColRad;
+        private CheckBox _chkJointStrayUnlimited;
+        private HSlider _sliderJointStray;
+        private Label _lblValJointGoal;
+        private Label _lblValJointDamp;
+        private Label _lblValJointColRad;
+        private Label _lblValJointStray;
+        private int _selectedChainJointIndex = -1;
+        private bool _isUpdatingJointEditor;
+
+        // Physics Stress Test (Look Up / Crouch / Walk Backwards)
+        private float _stressHeadPitchDeg = 0f;
+        private float _stressCrouchLeanDeg = 0f;
+        private float _stressCurHeadPitchDeg = 0f;
+        private float _stressCurCrouchLeanDeg = 0f;
+        private bool _stressWalkBackShake = false;
+        private float _stressShakePhase = 0f;
+        private bool _stressPoseWasActive = false;
+        private Vector3 _stressSavedHeroPos = Vector3.Zero;
+        private bool _stressHasSavedHeroPos = false;
+        private HSlider _sliderStressHeadPitch;
+        private Label _lblValStressHeadPitch;
+        private HSlider _sliderStressCrouchLean;
+        private Label _lblValStressCrouchLean;
+        private Button _btnStressWalkShake;
+
+        // Mesh-Fitted Body Colliders (anti-clipping capsules)
+        private readonly List<BodyCollisionCapsuleDef> _bodyCollisionCapsules = new();
+        private BodyCollisionCapsuleDef _selectedCollider;
+        private VBoxContainer _boxBodyCollidersList;
+        private Label _lblBodyCollidersSummary;
+        private Button _btnShowCollidersInCard;
+        private PanelContainer _boxColliderInspector;
+        private Label _lblSelectedColliderTitle;
+        private Label _lblSelectedColliderBoneHint;
+        private HSlider _sliderColRadiusScale;
+        private HSlider _sliderColOffsetZ;
+        private HSlider _sliderColRadius0;
+        private HSlider _sliderColRadius1;
+        private Label _lblValColRadiusScale;
+        private Label _lblValColOffsetZ;
+        private Label _lblValColRadius0;
+        private Label _lblValColRadius1;
+        private bool _isUpdatingColliderInspector;
+
+        // Collapsible Add-Clothing-Chain Tool controls
+        private Button _btnToggleAddSynthetic;
+        private VBoxContainer _boxAddSyntheticBody;
+        private LineEdit _txtNewChainName;
+        private OptionButton _optNewChainMesh;
+        private OptionButton _optNewChainAnchor;
+        private SpinBox _spinNewChainSegs;
+        private SpinBox _spinNewChainLen;
+        private SpinBox _spinNewChainRadius;
+        private HSlider _sliderNewChainStiffRoot;
+        private HSlider _sliderNewChainStiffTip;
+        private HSlider _sliderNewChainDamping;
+
+        // Disable / Prune Skeleton Picker controls
+        private LineEdit _txtDisableBoneSearch;
+        private OptionButton _optDisableBoneFilter;
+        private VBoxContainer _boxSourceBoneDisableList;
+        private VBoxContainer _boxDisabledBonesList;
+        private Label _lblDisabledBonesEmpty;
+
+        private readonly HashSet<string> _disabledSourceBones = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<BoneChainDef> _boneChains = new();
+        private RigAnalysis _lastRigAnalysis;
+        private HashSet<int> _lastWeightedSrcBones = new();
+
+        private Control BuildTab3Bones()
+        {
+            var scroll = new ScrollContainer
+            {
+                Name = "3. Bones",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+
+            var margin = new MarginContainer();
+            margin.AddThemeConstantOverride("margin_left", 10);
+            margin.AddThemeConstantOverride("margin_top", 10);
+            margin.AddThemeConstantOverride("margin_right", 10);
+            margin.AddThemeConstantOverride("margin_bottom", 12);
+            margin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            scroll.AddChild(margin);
+
+            var vBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            vBox.AddThemeConstantOverride("separation", 10);
+            margin.AddChild(vBox);
+
+            // Segmented Sub-View Switcher (Remap first by default)
+            var segRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            segRow.AddThemeConstantOverride("separation", 6);
+
+            _btnSubTabRemap = new Button
+            {
+                Text = "Remap",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = true,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 32),
+                TooltipText = "Map imported skeleton bones to Deadlock core skeleton joints."
+            };
+            SetButtonIcon(_btnSubTabRemap, "res://assets/at-icons/bone.svg", 16);
+            _btnSubTabRemap.Pressed += () => SetBonesSubView(0);
+
+            _btnSubTabPhysics = new Button
+            {
+                Text = "Physics (0)",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 32),
+                TooltipText = "Enable, freeze, or tune extra hair, skirt, and cape jiggle chains."
+            };
+            SetButtonIcon(_btnSubTabPhysics, "res://assets/at-icons/signal_wave.svg", 16);
+            _btnSubTabPhysics.Pressed += () => SetBonesSubView(1);
+
+            _btnSubTabDisable = new Button
+            {
+                Text = "Prune (0)",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 36),
+                TooltipText = "Search and disable specific source bones or prune unweighted helpers without using the viewport."
+            };
+            SetButtonIcon(_btnSubTabDisable, "res://assets/at-icons/scissors.svg", 18);
+            _btnSubTabDisable.Pressed += () => SetBonesSubView(2);
+
+            segRow.AddChild(_btnSubTabRemap);
+            segRow.AddChild(_btnSubTabPhysics);
+            segRow.AddChild(_btnSubTabDisable);
+            vBox.AddChild(segRow);
+
+            // =========================================================
+            // SUB-VIEW 0: HUMANOID BONE REMAP
+            // =========================================================
+            var remapSubBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            remapSubBox.AddThemeConstantOverride("separation", 8);
+            _boxSubViewRemap = remapSubBox;
+            vBox.AddChild(remapSubBox);
+
+            var (remapCard, remapBody) = CreateInspectorCard("Bone Remapping", "Manual remaps override auto-detection across Pre-Rigged, Landmark, and KNN modes.");
+            remapSubBox.AddChild(remapCard);
+
+            var statusRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            statusRow.AddThemeConstantOverride("separation", 8);
+            _lblMappingSummary = new Label
+            {
+                Text = "Mapped: 0 / 0 slots",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            _secondaryLabels.Add(_lblMappingSummary);
+            statusRow.AddChild(_lblMappingSummary);
+
+            _lblRemapSyncBadge = new Label
+            {
+                Text = "Applied",
+                HorizontalAlignment = HorizontalAlignment.Right,
+                TooltipText = "Indicates whether current bone remap & chain edits match the 3D preview."
+            };
+            _lblRemapSyncBadge.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.SemanticSuccess)));
+            statusRow.AddChild(_lblRemapSyncBadge);
+            remapBody.AddChild(statusRow);
+
+            _lblRemapDiffSummary = new Label
+            {
+                Text = "Diff: 0 user overrides | 0 unmapped core",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            ImporterStyle.ApplyHintStyle(_lblRemapDiffSummary);
+            _secondaryLabels.Add(_lblRemapDiffSummary);
+            remapBody.AddChild(_lblRemapDiffSummary);
+
+            var actionsFlow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            actionsFlow.AddThemeConstantOverride("h_separation", 6);
+            actionsFlow.AddThemeConstantOverride("v_separation", 6);
+
+            _btnAutoMapBones = new Button
+            {
+                Text = "Auto-Map Bones",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(124, 30),
+                TooltipText = "Re-runs HumanoidBoneMapper + RigBoneClassifier across all core slots."
+            };
+            SetButtonIcon(_btnAutoMapBones, "res://assets/at-icons/sparkles.svg", 16);
+            _btnAutoMapBones.Pressed += OnAutoMapBonesPressed;
+            actionsFlow.AddChild(_btnAutoMapBones);
+
+            _btnMirrorBones = new Button
+            {
+                Text = "Mirror L <-> R",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(114, 30),
+                TooltipText = "Mirrors mapped Left limb/finger assignments to Right source bones (or vice versa)."
+            };
+            SetButtonIcon(_btnMirrorBones, "res://assets/at-icons/mirror_horizontally.svg", 16);
+            _btnMirrorBones.Pressed += OnMirrorBonesPressed;
+            actionsFlow.AddChild(_btnMirrorBones);
+
+            _btnClearUnmatchedBones = new Button
+            {
+                Text = "Clear Unmatched",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(122, 30),
+                TooltipText = "Clears duplicate conflicts and restores auto-detected assignments."
+            };
+            SetButtonIcon(_btnClearUnmatchedBones, "res://assets/at-icons/eraser.svg", 16);
+            _btnClearUnmatchedBones.Pressed += OnClearUnmatchedBonesPressed;
+            actionsFlow.AddChild(_btnClearUnmatchedBones);
+            remapBody.AddChild(actionsFlow);
+
+            var searchHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            searchHBox.AddThemeConstantOverride("separation", 6);
+            _txtBoneSearch = new LineEdit
+            {
+                PlaceholderText = "Search target or source bone...",
+                ClearButtonEnabled = true,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Filter bone mapping slots by target slot name, canonical name, or mapped source bone."
+            };
+            _txtBoneSearch.TextChanged += (_) => ApplyBoneMappingFilter();
+            searchHBox.AddChild(_txtBoneSearch);
+
+            _btnFilterIssuesOnly = new Button
+            {
+                Text = "Only mismatches",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(130, 34),
+                TooltipText = "Show only duplicate conflicts, mismatches, or missing core bones."
+            };
+            SetButtonIcon(_btnFilterIssuesOnly, "res://assets/at-icons/filter.svg", 16);
+            _btnFilterIssuesOnly.Toggled += (_) => ApplyBoneMappingFilter();
+            searchHBox.AddChild(_btnFilterIssuesOnly);
+            remapBody.AddChild(searchHBox);
+
+            var filterRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            filterRow.AddThemeConstantOverride("h_separation", 6);
+            filterRow.AddThemeConstantOverride("v_separation", 4);
+            _btnFilterUnmappedOnly = new Button { Text = "Unmapped Only", ThemeTypeVariation = "ToolbarButton", ToggleMode = true, CustomMinimumSize = new Vector2(104, 26) };
+            _btnFilterWeightedOnly = new Button { Text = "Has Weights Only", ThemeTypeVariation = "ToolbarButton", ToggleMode = true, CustomMinimumSize = new Vector2(114, 26) };
+            _btnFilterShowControls = new Button { Text = "Show Controls", ThemeTypeVariation = "ToolbarButton", ToggleMode = true, CustomMinimumSize = new Vector2(102, 26) };
+            _btnFilterUnmappedOnly.Toggled += (_) => ApplyBoneMappingFilter();
+            _btnFilterWeightedOnly.Toggled += (_) => ApplyBoneMappingFilter();
+            _btnFilterShowControls.Toggled += (_) => AnalyzeModelRigStatus();
+            filterRow.AddChild(_btnFilterUnmappedOnly);
+            filterRow.AddChild(_btnFilterWeightedOnly);
+            filterRow.AddChild(_btnFilterShowControls);
+            remapBody.AddChild(filterRow);
+
+            _boxPreRiggedMapping = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = true };
+            _boxPreRiggedMapping.AddThemeConstantOverride("separation", 8);
+            _boxBoneMappingContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxBoneMappingContainer.AddThemeConstantOverride("separation", 8);
+            _boxPreRiggedMapping.AddChild(_boxBoneMappingContainer);
+            remapSubBox.AddChild(_boxPreRiggedMapping);
+
+            // =========================================================
+            // SUB-VIEW 1: PHYSICS & BODY COLLIDERS (DECLUTTERED SWITCHER)
+            // =========================================================
+            var physSubBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            physSubBox.AddThemeConstantOverride("separation", 10);
+            _boxSubViewPhysics = physSubBox;
+            vBox.AddChild(physSubBox);
+
+            var physSwitchBar = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            physSwitchBar.AddThemeConstantOverride("separation", 6);
+            _btnPhysTabChains = new Button
+            {
+                Text = "Chains & Tuning",
+                ToggleMode = true,
+                ButtonPressed = true,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 34),
+                ThemeTypeVariation = "ToolbarButton"
+            };
+            _btnPhysTabColliders = new Button
+            {
+                Text = "Body Colliders",
+                ToggleMode = true,
+                ButtonPressed = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 34),
+                ThemeTypeVariation = "ToolbarButton"
+            };
+            _btnPhysTabChains.Pressed += () => SetPhysicsSubView(0);
+            _btnPhysTabColliders.Pressed += () => SetPhysicsSubView(1);
+            physSwitchBar.AddChild(_btnPhysTabChains);
+            physSwitchBar.AddChild(_btnPhysTabColliders);
+            physSubBox.AddChild(physSwitchBar);
+
+            // Physics Stress Test card (accessible in both Chains & Body Colliders views!)
+            var (stressCard, stressBody) = CreateInspectorCard(
+                "Physics Stress Test (Look Up / Crouch / Walk Back)",
+                "Test extreme in-game poses & backward-walk inertia live while tuning chains or body colliders.",
+                collapsible: true,
+                startExpanded: false);
+            physSubBox.AddChild(stressCard);
+
+            var stressPresetRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            stressPresetRow.AddThemeConstantOverride("h_separation", 6);
+            stressPresetRow.AddThemeConstantOverride("v_separation", 6);
+
+            var btnStressReset = new Button { Text = "Normal", CustomMinimumSize = new Vector2(74, 30), ThemeTypeVariation = "ToolbarButton" };
+            btnStressReset.Pressed += () => SetPhysicsStressTestPose(0f, 0f, false);
+
+            var btnStressLookUp = new Button { Text = "Look Up (+65°)", CustomMinimumSize = new Vector2(118, 30), ThemeTypeVariation = "ToolbarButton" };
+            btnStressLookUp.Pressed += () => SetPhysicsStressTestPose(65f, 0f, _stressWalkBackShake);
+
+            var btnStressCrouchUp = new Button { Text = "Crouch + Look Up", CustomMinimumSize = new Vector2(134, 30), ThemeTypeVariation = "ToolbarButton" };
+            btnStressCrouchUp.Pressed += () => SetPhysicsStressTestPose(65f, 38f, _stressWalkBackShake);
+
+            var btnStressLookDown = new Button { Text = "Look Down (-45°)", CustomMinimumSize = new Vector2(126, 30), ThemeTypeVariation = "ToolbarButton" };
+            btnStressLookDown.Pressed += () => SetPhysicsStressTestPose(-45f, 0f, _stressWalkBackShake);
+
+            _btnStressWalkShake = new Button
+            {
+                Text = "Walk Back / Shake",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(136, 30),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Oscillates the hero forward & backward so you can preview backward-walk hair inertia and torso collision live."
+            };
+            _btnStressWalkShake.Toggled += (on) =>
+            {
+                _stressWalkBackShake = on;
+                if (!on && _stressHasSavedHeroPos && _previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+                {
+                    _previewHeroClone.Position = _stressSavedHeroPos;
+                    _stressHasSavedHeroPos = false;
+                }
+            };
+
+            stressPresetRow.AddChild(btnStressReset);
+            stressPresetRow.AddChild(btnStressLookUp);
+            stressPresetRow.AddChild(btnStressCrouchUp);
+            stressPresetRow.AddChild(btnStressLookDown);
+            stressPresetRow.AddChild(_btnStressWalkShake);
+            stressBody.AddChild(stressPresetRow);
+
+            (_sliderStressHeadPitch, _lblValStressHeadPitch) = AddExplainedSlider(
+                stressBody,
+                "Head Pitch (Look Down ↔ Up)",
+                "Pitches head (70%) + neck_0 (30%) up or down on top of Bind Pose or any playing animation.",
+                -60.0, 75.0, 1.0, "F0",
+                (v) =>
+                {
+                    _stressHeadPitchDeg = (float)v;
+                    if (_lblValStressHeadPitch != null) _lblValStressHeadPitch.Text = $"{v:+0;-0;0}°";
+                });
+            _sliderStressHeadPitch.SetValueNoSignal(0.0);
+            if (_lblValStressHeadPitch != null) _lblValStressHeadPitch.Text = "0°";
+
+            (_sliderStressCrouchLean, _lblValStressCrouchLean) = AddExplainedSlider(
+                stressBody,
+                "Crouch Forward Lean",
+                "Leans spine_1..3 forward to test extreme ~100° crouch + look-up folds against upper-back capsules.",
+                0.0, 50.0, 1.0, "F0",
+                (v) =>
+                {
+                    _stressCrouchLeanDeg = (float)v;
+                    if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = $"{v:F0}°";
+                });
+            _sliderStressCrouchLean.SetValueNoSignal(0.0);
+            if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = "0°";
+
+            var chainsPane = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = true };
+            chainsPane.AddThemeConstantOverride("separation", 8);
+            _boxPhysicsChainsPane = chainsPane;
+            physSubBox.AddChild(chainsPane);
+
+            var (chainCard, chainBody) = CreateInspectorCard("Physics & Secondary Bone Chains", "Toggle physics globally or per chain. Click any row below to edit its anchor & spring.");
+            chainsPane.AddChild(chainCard);
+
+            _chkPhysicsMasterTab3 = new CheckBox
+            {
+                Text = "Enable Custom Physics Simulation (All Chains)",
+                ButtonPressed = true,
+                TooltipText = "Master switch for all custom hair/cloth physics simulation in viewport & export."
+            };
+            _chkPhysicsMasterTab3.Toggled += (on) =>
+            {
+                if (_chkEnableCustomPhysics != null && _chkEnableCustomPhysics.ButtonPressed != on)
+                    _chkEnableCustomPhysics.SetPressedNoSignal(on);
+                UpdateRigPhysicsLinkText();
+                MarkRemapStaleAndRefresh();
+                RefreshClothingChainsPanel();
+            };
+            chainBody.AddChild(_chkPhysicsMasterTab3);
+
+            _chkPreserveClothingChains = new CheckBox
+            {
+                Text = "Auto-preserve multi-bone cloth & hair chains on load",
+                ButtonPressed = true,
+                TooltipText = "When checked, multi-bone hair/skirt/cape chains default to Jiggle Physics (1-bone bangs stay locked to head)."
+            };
+            _chkPreserveClothingChains.Toggled += (_) => MarkRemapStaleAndRefresh();
+            chainBody.AddChild(_chkPreserveClothingChains);
+
+            _lblClothingChainSummary = new Label { Text = "No extra clothing/accessory chains detected.", AutowrapMode = TextServer.AutowrapMode.WordSmart };
+            ImporterStyle.ApplyHintStyle(_lblClothingChainSummary);
+            _secondaryLabels.Add(_lblClothingChainSummary);
+            chainBody.AddChild(_lblClothingChainSummary);
+
+            // Filter & Bulk Action Bar
+            var chainFilterRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            chainFilterRow.AddThemeConstantOverride("separation", 6);
+            _txtChainSearch = new LineEdit { PlaceholderText = "Search chains (hair, skirt, ribbon)...", ClearButtonEnabled = true, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _txtChainSearch.TextChanged += (_) => RefreshClothingChainsPanel();
+            chainFilterRow.AddChild(_txtChainSearch);
+
+            _optChainCategoryFilter = new OptionButton { CustomMinimumSize = new Vector2(115, 28) };
+            ConfigureOptionButton(_optChainCategoryFilter, 115);
+            _optChainCategoryFilter.AddItem("All Categories", 0);
+            _optChainCategoryFilter.AddItem("Hair", 1);
+            _optChainCategoryFilter.AddItem("Cloth & Skirt", 2);
+            _optChainCategoryFilter.AddItem("Accessories", 3);
+            _optChainCategoryFilter.ItemSelected += (_) => RefreshClothingChainsPanel();
+            chainFilterRow.AddChild(_optChainCategoryFilter);
+            chainBody.AddChild(chainFilterRow);
+
+            var bulkPhysRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            bulkPhysRow.AddThemeConstantOverride("h_separation", 6);
+            bulkPhysRow.AddThemeConstantOverride("v_separation", 4);
+
+            void AddBulkChainBtn(string txt, string tip, Action action)
+            {
+                var b = new Button { Text = txt, ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(82, 26), TooltipText = tip };
+                b.Pressed += () => { action(); MarkRemapStaleAndRefresh(); RefreshClothingChainsPanel(); };
+                bulkPhysRow.AddChild(b);
+            }
+            AddBulkChainBtn("Auto-Detect Modes", "Automatically classify each chain as Cloth Chain, Proxy Sheet, Jiggle Bounce, or Static", () =>
+            {
+                RigBoneClassifier.ApplyRecommendedPhysicsModes(_boneChains, _chkPhysicsMasterTab3?.ButtonPressed ?? true, resetTuningValues: true);
+            });
+            AddBulkChainBtn("Physics All", "Enable physics simulation on all visible chains", () => ApplyPolicyToFilteredChains(ChainPolicy.PreservePhysicsChain));
+            AddBulkChainBtn("Static All", "Merge all visible chains statically onto their anchor bones", () => ApplyPolicyToFilteredChains(ChainPolicy.CollapseToNearestCore));
+            AddBulkChainBtn("Freeze Hair", "Lock all hair chains static to head while keeping cloth physics", () =>
+            {
+                foreach (var c in _boneChains)
+                    if (c.Name.Contains("hair", StringComparison.OrdinalIgnoreCase) || c.RootSourceBone.Contains("hair", StringComparison.OrdinalIgnoreCase))
+                        c.Policy = ChainPolicy.CollapseToNearestCore;
+            });
+            chainBody.AddChild(bulkPhysRow);
+
+            // Compact Scrollable Chain List (bounded height so inspector stays visible!)
+            var chainListScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(0, 210),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+            _boxClothingChainsList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxClothingChainsList.AddThemeConstantOverride("separation", 4);
+            chainListScroll.AddChild(_boxClothingChainsList);
+            chainBody.AddChild(chainListScroll);
+
+            // Single Shared Chain Inspector Drawer
+            _boxChainInspector = new PanelContainer { ThemeTypeVariation = "CardPanel", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            var inspBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            inspBox.AddThemeConstantOverride("separation", 6);
+            _boxChainInspector.AddChild(inspBox);
+
+            _lblSelectedChainTitle = new Label { Text = "Selected Chain: --" };
+            ImporterStyle.ApplyFontSize(_lblSelectedChainTitle, ImporterStyle.FontBody);
+            _accentLabels.Add(_lblSelectedChainTitle);
+            inspBox.AddChild(_lblSelectedChainTitle);
+
+            var polRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            polRow.AddThemeConstantOverride("separation", 6);
+            polRow.AddChild(new Label { Text = "Policy:", CustomMinimumSize = new Vector2(54, 0) });
+            _optSelChainPolicy = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optSelChainPolicy);
+            _optSelChainPolicy.AddItem("Simulate Physics", (int)ChainPolicy.PreservePhysicsChain);
+            _optSelChainPolicy.AddItem("Static (Merge to Parent)", (int)ChainPolicy.CollapseToNearestCore);
+            _optSelChainPolicy.ItemSelected += (idx) =>
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null) return;
+                _selectedChain.Policy = (ChainPolicy)_optSelChainPolicy.GetItemId((int)idx);
+                MarkRemapStaleAndRefresh();
+                RefreshClothingChainsPanel();
+            };
+            polRow.AddChild(_optSelChainPolicy);
+            inspBox.AddChild(polRow);
+
+            // Hidden compatibility OptionButton backed by the prominent 3-way segmented Physics Type bar below
+            _optSelChainSim = new OptionButton { Visible = false };
+            _optSelChainSim.AddItem("Cloth Chain", (int)SimulationKind.Cloth);
+            _optSelChainSim.AddItem("Proxy Sheet", (int)SimulationKind.ProxyCloth);
+            _optSelChainSim.AddItem("Jiggle Bounce", (int)SimulationKind.Jiggle);
+            _optSelChainSim.ItemSelected += (idx) =>
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null) return;
+                SetSelectedChainSimulationKind((SimulationKind)_optSelChainSim.GetItemId((int)idx));
+            };
+            inspBox.AddChild(_optSelChainSim);
+
+            var simHeaderRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            var lblSimHdr = new Label { Text = "Physics Type:", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ImporterStyle.ApplyFontSize(lblSimHdr, ImporterStyle.FontBody);
+            _accentLabels.Add(lblSimHdr);
+            simHeaderRow.AddChild(lblSimHdr);
+            inspBox.AddChild(simHeaderRow);
+
+            var simSegRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            simSegRow.AddThemeConstantOverride("separation", 6);
+            (string label, SimulationKind kind, string tip)[] simOpts =
+            {
+                ("Proxy Sheet", SimulationKind.ProxyCloth, "Stitches adjacent hair/skirt strands into a continuous Source 2 cloth sheet with cross-strand stabilization."),
+                ("Cloth Chain", SimulationKind.Cloth, "Independent hanging chain (ponytails, ribbons, ropes) with Source 2 ClothChain collision."),
+                ("Jiggle Bounce", SimulationKind.Jiggle, "Compact rigid rotational bounce (breasts, glutes, ears, pouches) with zero hair/capsule collision.")
+            };
+            for (int si = 0; si < simOpts.Length; si++)
+            {
+                var (sLbl, sKind, sTip) = simOpts[si];
+                var btnSim = new Button
+                {
+                    Text = sLbl,
+                    ToggleMode = true,
+                    ThemeTypeVariation = "ToolbarButton",
+                    CustomMinimumSize = new Vector2(0, 36),
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    TooltipText = sTip
+                };
+                ImporterStyle.ApplyFontSize(btnSim, ImporterStyle.FontHint);
+                btnSim.Pressed += () =>
+                {
+                    if (_isUpdatingChainInspector || _selectedChain == null) return;
+                    SetSelectedChainSimulationKind(sKind);
+                };
+                _chainSimSegButtons[si] = btnSim;
+                simSegRow.AddChild(btnSim);
+            }
+            inspBox.AddChild(simSegRow);
+
+            _lblSelChainSimHint = new Label
+            {
+                Text = "Select a Physics Type to choose how this chain simulates in-game.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            ImporterStyle.ApplyHintStyle(_lblSelChainSimHint);
+            _secondaryLabels.Add(_lblSelChainSimHint);
+            inspBox.AddChild(_lblSelChainSimHint);
+
+            var ancRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ancRow.AddThemeConstantOverride("separation", 6);
+            ancRow.AddChild(new Label { Text = "Anchor:", CustomMinimumSize = new Vector2(54, 0) });
+            _optSelChainAnchor = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optSelChainAnchor);
+            _optSelChainAnchor.ItemSelected += (idx) =>
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null) return;
+                _selectedChain.AnchorHeroBone = _optSelChainAnchor.GetItemText((int)idx);
+                MarkRemapStaleAndRefresh();
+            };
+            ancRow.AddChild(_optSelChainAnchor);
+            inspBox.AddChild(ancRow);
+
+            // Quick Weight Paint action + docked Weight Paint Editor right at the TOP of the Chain Inspector
+            var topWeightRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            topWeightRow.AddThemeConstantOverride("h_separation", 6);
+            topWeightRow.AddThemeConstantOverride("v_separation", 6);
+            _btnChainWeightPaintToggle = new Button
+            {
+                Text = "Edit Bone Weights (Heatmap)",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(198, 34),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                ThemeTypeVariation = "PrimaryActionButton",
+                TooltipText = "Open the 3D Weight Paint brush & heatmap right here to refine this chain's bone weights without scrolling."
+            };
+            SetButtonIcon(_btnChainWeightPaintToggle, "res://assets/at-icons/brush.svg", 18);
+            _btnChainWeightPaintToggle.Toggled += (open) => ToggleChainWeightPaintInPhysics(open);
+            topWeightRow.AddChild(_btnChainWeightPaintToggle);
+
+            var btnPinCollar = new Button
+            {
+                Text = "Pin Collar / Root Rigid",
+                CustomMinimumSize = new Vector2(168, 34),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Pins the root/collar bone rigidly (Simulate = false) across this chain & sibling chains of the same type so capes/skirts don't bend sharply at the attachment seam."
+            };
+            btnPinCollar.Pressed += OnPinCollarRootRigidPressed;
+            topWeightRow.AddChild(btnPinCollar);
+            inspBox.AddChild(topWeightRow);
+
+            // Shared Bone Weight Editor host docked right below the button (reuses _boxWeightPaintSection in-place!)
+            var tab3WeightHost = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            tab3WeightHost.AddThemeConstantOverride("separation", 6);
+            _boxTab3WeightPaintHost = tab3WeightHost;
+            var quickLinksLbl = new Label { Text = "Quick-Pick Chain Bone to Paint:", AutowrapMode = TextServer.AutowrapMode.WordSmart };
+            ImporterStyle.ApplyHintStyle(quickLinksLbl);
+            _secondaryLabels.Add(quickLinksLbl);
+            tab3WeightHost.AddChild(quickLinksLbl);
+            _boxTab3WeightBoneChips = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxTab3WeightBoneChips.AddThemeConstantOverride("h_separation", 6);
+            _boxTab3WeightBoneChips.AddThemeConstantOverride("v_separation", 4);
+            tab3WeightHost.AddChild(_boxTab3WeightBoneChips);
+            inspBox.AddChild(tab3WeightHost);
+
+            var sliderStack = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            sliderStack.AddThemeConstantOverride("separation", 8);
+
+            (_sliderSelStiffRoot, _lblValStiffRoot) = AddExplainedSlider(
+                sliderStack,
+                "Root Stiffness",
+                "Root pull toward animated pose (0.00 = free hinge, 1.00 = 0.90 goalF; Valve hair/skirts use ~0.45–0.65).",
+                0.00, 1.00, 0.02, "F2",
+                (v) =>
+                {
+                    float gf = PhysicsParamResolver.ResolveRootGoalForce((float)v);
+                    if (_lblValStiffRoot != null) _lblValStiffRoot.Text = $"{v:F2} (gF {gf:F2})";
+                    if (!_isUpdatingChainInspector && _selectedChain != null)
+                    {
+                        _selectedChain.StiffnessRoot = (float)v;
+                        if (_lblValStiffTip != null)
+                        {
+                            float tf = PhysicsParamResolver.ResolveTipGoalForce(_selectedChain.StiffnessTip, gf);
+                            _lblValStiffTip.Text = $"{_selectedChain.StiffnessTip:F2} (gF {tf:F3})";
+                        }
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            (_sliderSelStiffTip, _lblValStiffTip) = AddExplainedSlider(
+                sliderStack,
+                "Tip Stiffness",
+                "Hem/tip pull toward animated pose (0.00 = 0.000 goalF like Valve chrono/wraith/yamato so skirts & hair hang under gravity).",
+                0.00, 1.00, 0.02, "F2",
+                (v) =>
+                {
+                    float rf = PhysicsParamResolver.ResolveRootGoalForce(_selectedChain?.StiffnessRoot ?? 0.55f);
+                    float tf = PhysicsParamResolver.ResolveTipGoalForce((float)v, rf);
+                    if (_lblValStiffTip != null) _lblValStiffTip.Text = $"{v:F2} (gF {tf:F3})";
+                    if (!_isUpdatingChainInspector && _selectedChain != null) { _selectedChain.StiffnessTip = (float)v; ApplyChainParamsLiveToDriver(); }
+                });
+
+            (_sliderSelDamping, _lblValDamping) = AddExplainedSlider(
+                sliderStack,
+                "Damping / Air Drag",
+                "Compiled Source 2 PointDamping (0.00 = Valve default 0.000, 1.00 = 0.750) that calms whipping without underwater lag.",
+                0.00, 1.00, 0.02, "F2",
+                (v) =>
+                {
+                    float pd = PhysicsParamResolver.ResolveCompiledPointDamping((float)v);
+                    if (_lblValDamping != null) _lblValDamping.Text = $"{v:F2} (pDamp {pd:F2})";
+                    if (!_isUpdatingChainInspector && _selectedChain != null) { _selectedChain.Damping = (float)v; ApplyChainParamsLiveToDriver(); }
+                });
+
+            (_sliderSelGravity, _lblValGravity) = AddExplainedSlider(
+                sliderStack,
+                "Gravity",
+                "Downward pull (1.0 = 360 in/s² standard, 1.5–3.0 = heavy skirt/dress like Valve's Yamato at 3.0).",
+                0.0, 3.5, 0.05, "F2",
+                (v) =>
+                {
+                    if (_lblValGravity != null) _lblValGravity.Text = $"{v:F2} ({v * 360.0:F0})";
+                    if (!_isUpdatingChainInspector && _selectedChain != null) { _selectedChain.Gravity = (float)v; ApplyChainParamsLiveToDriver(); }
+                });
+
+            (_sliderSelColRadius, _lblValColRadius) = AddExplainedSlider(
+                sliderStack,
+                "Tip Collision Radius (in)",
+                "Thickens the lower collision sphere on this chain/sheet so tips stay clear of legs & body seams in-game and in preview.",
+                0.0, 6.0, 0.1, "F1",
+                (v) =>
+                {
+                    if (_lblValColRadius != null) _lblValColRadius.Text = $"{v:F1} in";
+                    if (!_isUpdatingChainInspector && _selectedChain != null) { _selectedChain.CollisionRadiusTipInches = (float)v; ApplyChainParamsLiveToDriver(); }
+                });
+
+            _chkSelStrayUnlimited = new CheckBox
+            {
+                Text = "Unlimited / Disabled Stray Leash (-1) — Recommended for Hair & Capes",
+                ButtonPressed = true,
+                TooltipText = "Matches Valve's Yamato/Wraith: disables AnimStrayRadius so looking upward never overrides body collision capsules."
+            };
+            ImporterStyle.ApplyFontSize(_chkSelStrayUnlimited, ImporterStyle.FontHint);
+            _chkSelStrayUnlimited.Toggled += (on) =>
+            {
+                if (_sliderSelStrayRadius != null) _sliderSelStrayRadius.Editable = !on;
+                if (_lblValStrayRadius != null)
+                    _lblValStrayRadius.Text = on ? "Unlimited (-1)" : $"{(_sliderSelStrayRadius?.Value ?? 40.0):F1} in";
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.StrayRadiusInches = on ? -1.0f : (float)(_sliderSelStrayRadius?.Value ?? 40.0);
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            sliderStack.AddChild(_chkSelStrayUnlimited);
+
+            (_sliderSelStrayRadius, _lblValStrayRadius) = AddExplainedSlider(
+                sliderStack,
+                "Max Swing / Stray Leash (in)",
+                "Optional max distance from animated pose (20–220 in for long hair like Vindicta, or disable above so look-up never clips).",
+                1.5, 220.0, 1.0, "F1",
+                (v) =>
+                {
+                    bool unlim = _chkSelStrayUnlimited?.ButtonPressed ?? false;
+                    if (_lblValStrayRadius != null) _lblValStrayRadius.Text = unlim ? "Unlimited (-1)" : $"{v:F1} in";
+                    if (!_isUpdatingChainInspector && _selectedChain != null && !unlim)
+                    {
+                        _selectedChain.StrayRadiusInches = (float)v;
+                        ApplyChainParamsLiveToDriver();
+                    }
+                });
+
+            _chkSelPlanarizeBack = new CheckBox
+            {
+                Text = "One-Sided Back Barrier (CollisionPlanes) — Stops Hair/Capes Clipping Chest",
+                ButtonPressed = false,
+                TooltipText = "Emits a CSDK13 ClothVertexMap + planarized spine_2/spine_3 barrier (matching Valve's Unicorn ponytail) so long hair & capes cannot flip into the chest."
+            };
+            ImporterStyle.ApplyFontSize(_chkSelPlanarizeBack, ImporterStyle.FontHint);
+            _chkSelPlanarizeBack.Toggled += (on) =>
+            {
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.PlanarizeBackBarrier = on;
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            sliderStack.AddChild(_chkSelPlanarizeBack);
+
+            inspBox.AddChild(sliderStack);
+
+            // Per-Child Bone Overrides Section (allows configuring root AND every child bone individually)
+            var jointSectionHeader = new Label
+            {
+                Text = "Chain Bones — Per-Child Overrides (click any child bone to tune):",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            ImporterStyle.ApplyFontSize(jointSectionHeader, ImporterStyle.FontHint);
+            _accentLabels.Add(jointSectionHeader);
+            inspBox.AddChild(jointSectionHeader);
+
+            var jointScroll = new ScrollContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 96),
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+            _boxChainJointList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxChainJointList.AddThemeConstantOverride("separation", 3);
+            jointScroll.AddChild(_boxChainJointList);
+            inspBox.AddChild(jointScroll);
+
+            _boxJointOverrideEditor = new PanelContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                ThemeTypeVariation = "SubPanelContainer",
+                Visible = false
+            };
+            var jointEdBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            jointEdBox.AddThemeConstantOverride("separation", 6);
+            _boxJointOverrideEditor.AddChild(jointEdBox);
+
+            var jointHdrRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            jointHdrRow.AddThemeConstantOverride("separation", 6);
+            _lblSelectedJointTitle = new Label { Text = "Joint:", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ImporterStyle.ApplyFontSize(_lblSelectedJointTitle, ImporterStyle.FontHint);
+            _accentLabels.Add(_lblSelectedJointTitle);
+            var btnResetJoint = new Button
+            {
+                Text = "Reset to Curve",
+                CustomMinimumSize = new Vector2(118, 28),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Clear custom overrides on this bone so it inherits the chain's root-to-tip curve."
+            };
+            btnResetJoint.Pressed += ResetSelectedChainJointOverride;
+            jointHdrRow.AddChild(_lblSelectedJointTitle);
+            jointHdrRow.AddChild(btnResetJoint);
+            jointEdBox.AddChild(jointHdrRow);
+
+            _chkJointSimulate = new CheckBox
+            {
+                Text = "Simulate this bone (uncheck to pin/freeze rigid)",
+                ButtonPressed = true
+            };
+            ImporterStyle.ApplyFontSize(_chkJointSimulate, ImporterStyle.FontHint);
+            _chkJointSimulate.Toggled += (on) =>
+            {
+                if (_isUpdatingJointEditor) return;
+                var jov = GetOrCreateSelectedJointOverride();
+                if (jov == null) return;
+                jov.Simulate = on;
+                ApplyChainParamsLiveToDriver();
+                RefreshChainJointListUI();
+            };
+            jointEdBox.AddChild(_chkJointSimulate);
+
+            (_sliderJointGoal, _lblValJointGoal) = AddExplainedSlider(
+                jointEdBox,
+                "Bone Goal Strength",
+                "0.0 = free hanging cloth/hair, 0.95 = tightly follows animation.",
+                0.0, 0.99, 0.01, "F2",
+                (v) =>
+                {
+                    if (_lblValJointGoal != null) _lblValJointGoal.Text = $"{v:F2}";
+                    if (_isUpdatingJointEditor) return;
+                    var jov = GetOrCreateSelectedJointOverride();
+                    if (jov == null) return;
+                    jov.GoalStrength = (float)v;
+                    ApplyChainParamsLiveToDriver();
+                    RefreshChainJointListUI();
+                });
+
+            (_sliderJointDamp, _lblValJointDamp) = AddExplainedSlider(
+                jointEdBox,
+                "Bone Goal Damping",
+                "Keep near 0.00 on lower hair tips so tips don't pull into the torso during look-up/dash.",
+                0.0, 0.50, 0.01, "F2",
+                (v) =>
+                {
+                    if (_lblValJointDamp != null) _lblValJointDamp.Text = $"{v:F2}";
+                    if (_isUpdatingJointEditor) return;
+                    var jov = GetOrCreateSelectedJointOverride();
+                    if (jov == null) return;
+                    jov.GoalDamping = (float)v;
+                    ApplyChainParamsLiveToDriver();
+                    RefreshChainJointListUI();
+                });
+
+            (_sliderJointColRad, _lblValJointColRad) = AddExplainedSlider(
+                jointEdBox,
+                "Bone Collision Radius (in)",
+                "Per-bone collision sphere radius against body capsules.",
+                0.0, 8.0, 0.1, "F1",
+                (v) =>
+                {
+                    if (_lblValJointColRad != null) _lblValJointColRad.Text = $"{v:F1} in";
+                    if (_isUpdatingJointEditor) return;
+                    var jov = GetOrCreateSelectedJointOverride();
+                    if (jov == null) return;
+                    jov.CollisionRadiusInches = (float)v;
+                    ApplyChainParamsLiveToDriver();
+                    RefreshChainJointListUI();
+                });
+
+            _chkJointStrayUnlimited = new CheckBox
+            {
+                Text = "Unlimited Stray on this bone (-1)",
+                ButtonPressed = true
+            };
+            ImporterStyle.ApplyFontSize(_chkJointStrayUnlimited, ImporterStyle.FontHint);
+            _chkJointStrayUnlimited.Toggled += (on) =>
+            {
+                if (_sliderJointStray != null) _sliderJointStray.Editable = !on;
+                if (_lblValJointStray != null)
+                    _lblValJointStray.Text = on ? "Unlimited (-1)" : $"{(_sliderJointStray?.Value ?? 40.0):F1} in";
+                if (_isUpdatingJointEditor) return;
+                var jov = GetOrCreateSelectedJointOverride();
+                if (jov == null) return;
+                jov.StrayRadiusInches = on ? -1.0f : (float)(_sliderJointStray?.Value ?? 40.0);
+                ApplyChainParamsLiveToDriver();
+                RefreshChainJointListUI();
+            };
+            jointEdBox.AddChild(_chkJointStrayUnlimited);
+
+            (_sliderJointStray, _lblValJointStray) = AddExplainedSlider(
+                jointEdBox,
+                "Bone Stray Radius (in)",
+                "Per-bone max drift from animated pose (disabled when Unlimited is checked).",
+                1.5, 220.0, 1.0, "F1",
+                (v) =>
+                {
+                    bool unlim = _chkJointStrayUnlimited?.ButtonPressed ?? false;
+                    if (_lblValJointStray != null) _lblValJointStray.Text = unlim ? "Unlimited (-1)" : $"{v:F1} in";
+                    if (_isUpdatingJointEditor || unlim) return;
+                    var jov = GetOrCreateSelectedJointOverride();
+                    if (jov == null) return;
+                    jov.StrayRadiusInches = (float)v;
+                    ApplyChainParamsLiveToDriver();
+                    RefreshChainJointListUI();
+                });
+
+            inspBox.AddChild(_boxJointOverrideEditor);
+
+            var twinRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            twinRow.AddThemeConstantOverride("h_separation", 6);
+            twinRow.AddThemeConstantOverride("v_separation", 6);
+            var btnCopyTwin = new Button { Text = "Copy to L/R Twin", CustomMinimumSize = new Vector2(124, 30), ThemeTypeVariation = "ToolbarButton" };
+            btnCopyTwin.Pressed += CopySelectedChainToMirrorTwin;
+            var btnApplyCat = new Button { Text = "Apply to Same Category", CustomMinimumSize = new Vector2(154, 30), ThemeTypeVariation = "ToolbarButton" };
+            btnApplyCat.Pressed += ApplySelectedChainToCategory;
+            twinRow.AddChild(btnCopyTwin);
+            twinRow.AddChild(btnApplyCat);
+            inspBox.AddChild(twinRow);
+
+            chainBody.AddChild(_boxChainInspector);
+
+            // Collapsible Add-Synthetic-Chain Card (collapsed by default)
+            var (synCard, synBody) = CreateInspectorCard("Custom / Synthetic Physics Chain");
+            chainsPane.AddChild(synCard);
+
+            _btnToggleAddSynthetic = new Button
+            {
+                Text = "▸ Add Synthetic Clothing Chain Tool",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                Alignment = HorizontalAlignment.Left
+            };
+            synBody.AddChild(_btnToggleAddSynthetic);
+
+            _boxAddSyntheticBody = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            _boxAddSyntheticBody.AddThemeConstantOverride("separation", 6);
+            synBody.AddChild(_boxAddSyntheticBody);
+
+            _btnToggleAddSynthetic.Toggled += (open) =>
+            {
+                _boxAddSyntheticBody.Visible = open;
+                _btnToggleAddSynthetic.Text = open ? "▾ Hide Synthetic Clothing Chain Tool" : "▸ Add Synthetic Clothing Chain Tool";
+            };
+
+            var addRow1 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            addRow1.AddThemeConstantOverride("separation", 6);
+            _txtNewChainName = new LineEdit { PlaceholderText = "Chain name (e.g. cape_center)", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _optNewChainAnchor = new OptionButton { CustomMinimumSize = new Vector2(120, 0) };
+            ConfigureOptionButton(_optNewChainAnchor, 120);
+            foreach (string anchor in new[] { "spine_3", "pelvis", "head", "neck_0", "hand_L", "hand_R" })
+                _optNewChainAnchor.AddItem(anchor);
+            addRow1.AddChild(_txtNewChainName);
+            addRow1.AddChild(_optNewChainAnchor);
+            _boxAddSyntheticBody.AddChild(addRow1);
+
+            var addRow2 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            addRow2.AddThemeConstantOverride("separation", 6);
+            addRow2.AddChild(new Label { Text = "Mesh:", CustomMinimumSize = new Vector2(42, 0) });
+            _optNewChainMesh = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optNewChainMesh);
+            _optNewChainMesh.AddItem("All Active Submeshes", 0);
+            addRow2.AddChild(_optNewChainMesh);
+            _boxAddSyntheticBody.AddChild(addRow2);
+
+            var addGrid = new GridContainer { Columns = 3, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            addGrid.AddThemeConstantOverride("h_separation", 6);
+            _spinNewChainSegs = CreateCoordSpinBox(2, 10, 1, "Seg"); _spinNewChainSegs.Value = 4;
+            _spinNewChainLen = CreateCoordSpinBox(0.1, 2.0, 0.05, "Len"); _spinNewChainLen.Value = 0.55;
+            _spinNewChainRadius = CreateCoordSpinBox(0.05, 1.0, 0.02, "Rad"); _spinNewChainRadius.Value = 0.25;
+            addGrid.AddChild(_spinNewChainSegs); addGrid.AddChild(_spinNewChainLen); addGrid.AddChild(_spinNewChainRadius);
+            _boxAddSyntheticBody.AddChild(addGrid);
+
+            var physGrid = new GridContainer { Columns = 3, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            physGrid.AddThemeConstantOverride("h_separation", 6);
+            _sliderNewChainStiffRoot = new HSlider { MinValue = 0.05, MaxValue = 0.98, Step = 0.05, Value = 0.85, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _sliderNewChainStiffTip = new HSlider { MinValue = 0.05, MaxValue = 0.98, Step = 0.05, Value = 0.25, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _sliderNewChainDamping = new HSlider { MinValue = 0.05, MaxValue = 0.95, Step = 0.05, Value = 0.35, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            physGrid.AddChild(new Label { Text = "Root Stiff" }); physGrid.AddChild(new Label { Text = "Tip Stiff" }); physGrid.AddChild(new Label { Text = "Damping" });
+            physGrid.AddChild(_sliderNewChainStiffRoot); physGrid.AddChild(_sliderNewChainStiffTip); physGrid.AddChild(_sliderNewChainDamping);
+            _boxAddSyntheticBody.AddChild(physGrid);
+
+            var btnAddChain = new Button
+            {
+                Text = "+ Add Clothing Chain to Rig",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(0, 32)
+            };
+            SetButtonIcon(btnAddChain, "res://assets/at-icons/sparkles.svg", 16, StatusTone.Success);
+            btnAddChain.Pressed += OnAddSyntheticClothingChainPressed;
+            _boxAddSyntheticBody.AddChild(btnAddChain);
+
+            // Physics Sub-View B: Body Colliders (Anti-Clipping Capsules)
+            var colPane = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            colPane.AddThemeConstantOverride("separation", 8);
+            _boxPhysicsCollidersPane = colPane;
+            physSubBox.AddChild(colPane);
+
+            var (colCard, colBody) = CreateInspectorCard(
+                "Body Collision Capsules",
+                "Mesh-fitted capsules keep hair, skirts, and coats from clipping through the body when crouching or running — active in both live preview and Source 2 exports.");
+            colPane.AddChild(colCard);
+
+            _lblBodyCollidersSummary = new Label
+            {
+                Text = "Capsules auto-fit from your rigged mesh after the first rig pass.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            ImporterStyle.ApplyHintStyle(_lblBodyCollidersSummary);
+            _secondaryLabels.Add(_lblBodyCollidersSummary);
+            colBody.AddChild(_lblBodyCollidersSummary);
+
+            var colActionRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            colActionRow.AddThemeConstantOverride("h_separation", 6);
+            colActionRow.AddThemeConstantOverride("v_separation", 6);
+
+            var btnAutoFitCols = new Button
+            {
+                Text = "Auto-Fit from Mesh",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(142, 32),
+                TooltipText = "Recompute every capsule radius & position cleanly from the rigged mesh silhouette (clears manual edits)."
+            };
+            SetButtonIcon(btnAutoFitCols, "res://assets/at-icons/sparkles.svg", 16, StatusTone.Success);
+            btnAutoFitCols.Pressed += OnAutoFitCollidersPressed;
+            colActionRow.AddChild(btnAutoFitCols);
+
+            _btnShowCollidersInCard = new Button
+            {
+                Text = "Show in 3D Viewport",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = _showColliders,
+                CustomMinimumSize = new Vector2(148, 32),
+                TooltipText = "Toggle 3D capsule wireframes on/off (synced with the top Colliders toolbar button)."
+            };
+            SetButtonIcon(_btnShowCollidersInCard, "res://assets/at-icons/eye.svg", 16);
+            _btnShowCollidersInCard.Toggled += (on) =>
+            {
+                if (_btnToggleColliders != null && _btnToggleColliders.ButtonPressed != on)
+                    _btnToggleColliders.ButtonPressed = on;
+                else
+                {
+                    _showColliders = on;
+                    if (_collidersDebugMesh != null) _collidersDebugMesh.Visible = on;
+                    if (on) { _collidersDirty = true; RedrawColliderWireframe(); }
+                }
+            };
+            colActionRow.AddChild(_btnShowCollidersInCard);
+            colBody.AddChild(colActionRow);
+
+            var colListScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(0, 200),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+            _boxBodyCollidersList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxBodyCollidersList.AddThemeConstantOverride("separation", 4);
+            colListScroll.AddChild(_boxBodyCollidersList);
+            colBody.AddChild(colListScroll);
+
+            // Selected Collider Inspector Drawer
+            _boxColliderInspector = new PanelContainer { ThemeTypeVariation = "CardPanel", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            var colInspBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            colInspBox.AddThemeConstantOverride("separation", 8);
+            _boxColliderInspector.AddChild(colInspBox);
+
+            _lblSelectedColliderTitle = new Label { Text = "Selected Capsule: --" };
+            ImporterStyle.ApplyFontSize(_lblSelectedColliderTitle, ImporterStyle.FontBody);
+            _accentLabels.Add(_lblSelectedColliderTitle);
+            colInspBox.AddChild(_lblSelectedColliderTitle);
+
+            _lblSelectedColliderBoneHint = new Label { Text = "Bone: --", AutowrapMode = TextServer.AutowrapMode.WordSmart };
+            ImporterStyle.ApplyHintStyle(_lblSelectedColliderBoneHint);
+            _secondaryLabels.Add(_lblSelectedColliderBoneHint);
+            colInspBox.AddChild(_lblSelectedColliderBoneHint);
+
+            (_sliderColRadiusScale, _lblValColRadiusScale) = AddExplainedSlider(
+                colInspBox,
+                "Radius Scale",
+                "Thickens or slims this capsule uniformly. Increase if hair tips still poke through while crouching.",
+                0.50, 1.80, 0.02, "F2",
+                (v) =>
+                {
+                    if (_lblValColRadiusScale != null) _lblValColRadiusScale.Text = $"{v:F2}x";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    _selectedCollider.RadiusScale = (float)v;
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColOffsetZ, _lblValColOffsetZ) = AddExplainedSlider(
+                colInspBox,
+                "Back / Forward Offset (m)",
+                "Shifts the capsule center forward (+) or backward (-) to hug thick jackets, hoods, or backpacks.",
+                -0.10, 0.10, 0.002, "F3",
+                (v) =>
+                {
+                    if (_lblValColOffsetZ != null) _lblValColOffsetZ.Text = $"{v:+0.000;-0.000;0.000} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    var off = _selectedCollider.LocalOffsetMeters;
+                    _selectedCollider.LocalOffsetMeters = new Vector3(off.X, off.Y, (float)v);
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColRadius0, _lblValColRadius0) = AddExplainedSlider(
+                colInspBox,
+                "Base Radius 0 (m)",
+                "Width of the lower/start end of the tapered capsule before Radius Scale.",
+                0.03, 0.30, 0.002, "F3",
+                (v) =>
+                {
+                    if (_lblValColRadius0 != null) _lblValColRadius0.Text = $"{v:F3} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    _selectedCollider.Radius0Meters = (float)v;
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            (_sliderColRadius1, _lblValColRadius1) = AddExplainedSlider(
+                colInspBox,
+                "Top Radius 1 (m)",
+                "Width of the upper/tip end of the tapered capsule before Radius Scale.",
+                0.03, 0.30, 0.002, "F3",
+                (v) =>
+                {
+                    if (_lblValColRadius1 != null) _lblValColRadius1.Text = $"{v:F3} m";
+                    if (_isUpdatingColliderInspector || _selectedCollider == null) return;
+                    _selectedCollider.Radius1Meters = (float)v;
+                    _selectedCollider.IsUserEdited = true;
+                    ApplyBodyCollidersLiveToDriver();
+                });
+
+            var colBtnRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            colBtnRow.AddThemeConstantOverride("h_separation", 6);
+            colBtnRow.AddThemeConstantOverride("v_separation", 6);
+
+            var btnMirrorCol = new Button
+            {
+                Text = "Mirror L <-> R",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(124, 30),
+                TooltipText = "Copy size & offset symmetrically to the opposite left/right bone capsule."
+            };
+            btnMirrorCol.Pressed += OnMirrorSelectedColliderPressed;
+            colBtnRow.AddChild(btnMirrorCol);
+
+            var btnResetCol = new Button
+            {
+                Text = "Reset Capsule",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(124, 30),
+                TooltipText = "Reset this capsule back to the auto-fitted mesh dimensions."
+            };
+            btnResetCol.Pressed += OnResetSelectedColliderPressed;
+            colBtnRow.AddChild(btnResetCol);
+
+            colInspBox.AddChild(colBtnRow);
+            colBody.AddChild(_boxColliderInspector);
+
+            // =========================================================
+            // SUB-VIEW 2: DISABLE / PRUNE SPECIFIC BONES IN UI
+            // =========================================================
+            var disSubBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            disSubBox.AddThemeConstantOverride("separation", 8);
+            _boxSubViewDisable = disSubBox;
+            vBox.AddChild(disSubBox);
+
+            var (pruneCard, pruneBody) = CreateInspectorCard("Pruning & Export Filter");
+            disSubBox.AddChild(pruneCard);
+
+            _chkKeepUnweightedBones = new CheckBox
+            {
+                Text = "Keep unweighted control/helper bones",
+                ButtonPressed = false,
+                TooltipText = "By default, only bones that carry skin weights (or have weighted descendants) are exported."
+            };
+            _chkKeepUnweightedBones.Toggled += (_) => MarkRemapStaleAndRefresh();
+            pruneBody.AddChild(_chkKeepUnweightedBones);
+
+            var (disCard, disBody) = CreateInspectorCard("Disable Specific Bones", "Search and disable any source bone here (collapses weights cleanly onto its parent). Also synced with 3D viewport right-click.");
+            disSubBox.AddChild(disCard);
+
+            _lblDisabledBonesEmpty = new Label { Text = "No bones disabled.", AutowrapMode = TextServer.AutowrapMode.WordSmart };
+            ImporterStyle.ApplyHintStyle(_lblDisabledBonesEmpty);
+            _secondaryLabels.Add(_lblDisabledBonesEmpty);
+            disBody.AddChild(_lblDisabledBonesEmpty);
+
+            _boxDisabledBonesList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxDisabledBonesList.AddThemeConstantOverride("separation", 4);
+            disBody.AddChild(_boxDisabledBonesList);
+
+            disBody.AddChild(new HSeparator());
+
+            var disSearchRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            disSearchRow.AddThemeConstantOverride("separation", 6);
+            _txtDisableBoneSearch = new LineEdit { PlaceholderText = "Search source bones (e.g. hair, skirt, ribbon)...", ClearButtonEnabled = true, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _txtDisableBoneSearch.TextChanged += (_) => RefreshSourceBoneDisableBrowser();
+            disSearchRow.AddChild(_txtDisableBoneSearch);
+
+            _optDisableBoneFilter = new OptionButton { CustomMinimumSize = new Vector2(115, 28) };
+            ConfigureOptionButton(_optDisableBoneFilter, 115);
+            _optDisableBoneFilter.AddItem("Weighted Only", 0);
+            _optDisableBoneFilter.AddItem("Hair & Cloth", 1);
+            _optDisableBoneFilter.AddItem("Disabled Only", 2);
+            _optDisableBoneFilter.AddItem("All Bones", 3);
+            _optDisableBoneFilter.Select(0);
+            _optDisableBoneFilter.ItemSelected += (_) => RefreshSourceBoneDisableBrowser();
+            disSearchRow.AddChild(_optDisableBoneFilter);
+            disBody.AddChild(disSearchRow);
+
+            var disScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(0, 260),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+            _boxSourceBoneDisableList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            _boxSourceBoneDisableList.AddThemeConstantOverride("separation", 3);
+            disScroll.AddChild(_boxSourceBoneDisableList);
+            disBody.AddChild(disScroll);
+
+            return scroll;
+        }
+
+        private void SetBonesSubView(int viewIdx)
+        {
+            if (_btnSubTabRemap != null) _btnSubTabRemap.SetPressedNoSignal(viewIdx == 0);
+            if (_btnSubTabPhysics != null) _btnSubTabPhysics.SetPressedNoSignal(viewIdx == 1);
+            if (_btnSubTabDisable != null) _btnSubTabDisable.SetPressedNoSignal(viewIdx == 2);
+
+            if (_boxSubViewRemap != null) _boxSubViewRemap.Visible = viewIdx == 0;
+            if (_boxSubViewPhysics != null) _boxSubViewPhysics.Visible = viewIdx == 1;
+            if (_boxSubViewDisable != null) _boxSubViewDisable.Visible = viewIdx == 2;
+
+            if (viewIdx == 1) RefreshClothingChainsPanel();
+            else
+            {
+                if (_btnChainWeightPaintToggle != null && _btnChainWeightPaintToggle.ButtonPressed)
+                    _btnChainWeightPaintToggle.ButtonPressed = false;
+                if (IsTab3PhysicsPaintHostActive() && _btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
+                    _btnWeightPaintMode.ButtonPressed = false;
+                if (viewIdx == 2) RefreshSourceBoneDisableBrowser();
+            }
+        }
+
+        private void MarkRemapStaleAndRefresh()
+        {
+            if (_lblRemapSyncBadge != null)
+            {
+                _lblRemapSyncBadge.Text = ImporterMemoryGuard.LightMode ? "Stale (Click Update)" : "Updating...";
+                _lblRemapSyncBadge.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.SemanticWarning)));
+            }
+            UpdateBoneMappingValidationBadges();
+            RefreshBoneTabDiffSummary();
+            if (!ImporterMemoryGuard.LightMode) TriggerRealtimeRigUpdate();
+        }
+
+        private void MarkRemapAppliedBadge()
+        {
+            if (_lblRemapSyncBadge != null)
+            {
+                _lblRemapSyncBadge.Text = "Applied";
+                _lblRemapSyncBadge.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.SemanticSuccess)));
+            }
+            RefreshBoneTabDiffSummary();
+        }
+
+        private void RefreshBoneTabDiffSummary()
+        {
+            if (_lblRemapDiffSummary == null) return;
+            int overridden = 0;
+            int unmappedCore = 0;
+            foreach (var row in _boneRowsByCanonical.Values)
+            {
+                _userBoneRemap.TryGetValue(row.CanonicalName, out string cur);
+                _autoMappedSnapshot.TryGetValue(row.CanonicalName, out string auto);
+                if (!string.IsNullOrEmpty(cur) && !string.Equals(cur, auto ?? "", StringComparison.OrdinalIgnoreCase))
+                    overridden++;
+                if (string.IsNullOrEmpty(cur) && row.IsRequiredCore)
+                    unmappedCore++;
+            }
+            _lblRemapDiffSummary.Text = $"Diff: {overridden} override(s) | {unmappedCore} unmapped core | {_disabledSourceBones.Count} disabled";
+            if (_btnSubTabPhysics != null)
+            {
+                int physActive = _boneChains.Count(c => c.Policy == ChainPolicy.PreservePhysicsChain);
+                _btnSubTabPhysics.Text = $"Physics ({physActive}/{_boneChains.Count})";
+            }
+            if (_btnSubTabDisable != null)
+            {
+                _btnSubTabDisable.Text = $"Prune ({_disabledSourceBones.Count})";
+            }
+        }
+
+        private IEnumerable<BoneChainDef> EnumerateFilteredChains()
+        {
+            string q = _txtChainSearch?.Text?.Trim() ?? "";
+            int cat = _optChainCategoryFilter?.Selected ?? 0;
+            foreach (var ch in _boneChains)
+            {
+                if (ch == null) continue;
+                string hay = (ch.Name + " " + ch.RootSourceBone + " " + ch.Category).ToLowerInvariant();
+                if (!string.IsNullOrEmpty(q) && !hay.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+                bool isHair = hay.Contains("hair") || hay.Contains("bang") || hay.Contains("tail");
+                bool isCloth = ch.Category == "Clothing & Hair" && !isHair;
+                bool isAcc = ch.Category == "Accessory" || (!isHair && !isCloth);
+                if (cat == 1 && !isHair) continue;
+                if (cat == 2 && !isCloth) continue;
+                if (cat == 3 && !isAcc) continue;
+                yield return ch;
+            }
+        }
+
+        private void ApplyPolicyToFilteredChains(ChainPolicy policy)
+        {
+            foreach (var ch in EnumerateFilteredChains())
+                ch.Policy = policy;
+        }
+
+        private void RefreshClothingChainsPanel()
+        {
+            if (_boxClothingChainsList == null) return;
+            foreach (Node ch in _boxClothingChainsList.GetChildren()) ch.QueueFree();
+
+            if (_optNewChainMesh != null)
+            {
+                _optNewChainMesh.Clear();
+                _optNewChainMesh.AddItem("All Active Submeshes", 0);
+                foreach (var chk in _importedSubmeshCheckboxes)
+                {
+                    if (chk.HasMeta("SubmeshName"))
+                        _optNewChainMesh.AddItem(chk.GetMeta("SubmeshName").AsString());
+                }
+            }
+
+            if (_btnSubTabPhysics != null)
+            {
+                int physCount = _boneChains.Count(c => c.Policy == ChainPolicy.PreservePhysicsChain);
+                _btnSubTabPhysics.Text = $"Physics ({physCount}/{_boneChains.Count})";
+            }
+
+            if (_boneChains.Count == 0)
+            {
+                if (_lblClothingChainSummary != null)
+                    _lblClothingChainSummary.Text = "No extra clothing, hair, or accessory chains detected.";
+                if (_boxChainInspector != null) _boxChainInspector.Visible = false;
+                return;
+            }
+
+            bool masterOn = _chkPhysicsMasterTab3?.ButtonPressed ?? true;
+            int preservedCount = _boneChains.Count(c => c.Policy == ChainPolicy.PreservePhysicsChain);
+            if (_lblClothingChainSummary != null)
+            {
+                _lblClothingChainSummary.Text = masterOn
+                    ? $"{_boneChains.Count} chain(s) detected ({preservedCount} with physics active)."
+                    : $"Global physics OFF — all {_boneChains.Count} chains locked rigid.";
+            }
+
+            var filtered = EnumerateFilteredChains().ToList();
+            if (_selectedChain != null && !_boneChains.Contains(_selectedChain)) _selectedChain = null;
+            if (_selectedChain == null && filtered.Count > 0) _selectedChain = filtered[0];
+
+            // Build 2-level collapsible groups sorted sensibly (Head/Hair, Chest/Upper, Pelvis/Cloth, Other)
+            static (string Key, string Label, int SortOrder) ClassifyPhysicsTreeGroup(BoneChainDef ch)
+            {
+                string anchor = (ch?.AnchorHeroBone ?? "").ToLowerInvariant();
+                string nameLow = (ch?.Name ?? ch?.RootSourceBone ?? "").ToLowerInvariant();
+                bool isHair = nameLow.Contains("hair") || nameLow.Contains("bang") || nameLow.Contains("braid") || nameLow.Contains("ponytail") || nameLow.Contains("strand");
+                if (anchor.Contains("head") || anchor.Contains("neck") || isHair || nameLow.Contains("ear") || nameLow.Contains("hat") || nameLow.Contains("face"))
+                {
+                    return isHair
+                        ? ("head::hair", "Head → Hair Chains", 0)
+                        : ("head::acc", "Head → Ears, Face & Headgear", 1);
+                }
+                if (anchor.Contains("spine_2") || anchor.Contains("spine_3") || anchor.Contains("chest") ||
+                    nameLow.Contains("breast") || nameLow.Contains("boob") || nameLow.Contains("hoodie") ||
+                    nameLow.Contains("ribbon") || nameLow.Contains("scarf") || nameLow.Contains("cape") || nameLow.Contains("cloak"))
+                {
+                    return ("chest::cloth", "Chest → Hoodie, Cape, Breast & Ribbons", 2);
+                }
+                if (anchor.Contains("pelvis") || anchor.Contains("spine_0") || anchor.Contains("spine_1") ||
+                    nameLow.Contains("skirt") || nameLow.Contains("coat") || nameLow.Contains("butt") || nameLow.Contains("tail"))
+                {
+                    return ("pelvis::cloth", "Pelvis → Skirt, Coat & Tails", 3);
+                }
+                if (anchor.Contains("arm") || anchor.Contains("hand") || anchor.Contains("clavicle"))
+                {
+                    return ("limbs::upper", "Arms → Sleeves & Bracers", 4);
+                }
+                if (anchor.Contains("leg") || anchor.Contains("ankle") || anchor.Contains("thigh"))
+                {
+                    return ("limbs::lower", "Legs → Holsters & Straps", 5);
+                }
+                string cleanAnchor = string.IsNullOrEmpty(ch?.AnchorHeroBone) ? "Root" : ch.AnchorHeroBone.ToUpperInvariant();
+                return ($"other::{cleanAnchor}", $"{cleanAnchor} → Accessories", 6);
+            }
+
+            var grouped = filtered
+                .Select(c => (Chain: c, Group: ClassifyPhysicsTreeGroup(c)))
+                .GroupBy(x => x.Group.Key, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.First().Group.SortOrder)
+                .ThenBy(g => g.First().Group.Label, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var grp in grouped)
+            {
+                string grpKey = grp.Key;
+                string grpLabel = grp.First().Group.Label;
+                var grpChains = grp.Select(x => x.Chain)
+                    .OrderByDescending(c => IsRigidHubChain(c))
+                    .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var toggleableChains = grpChains.Where(c => !IsRigidHubChain(c)).ToList();
+                if (toggleableChains.Count == 0) toggleableChains = grpChains;
+                int grpPhysCount = toggleableChains.Count(c => c.Policy == ChainPolicy.PreservePhysicsChain);
+                bool grpAllOn = toggleableChains.Count > 0 && grpPhysCount == toggleableChains.Count;
+                bool isCollapsed = _collapsedPhysicsGroups.Contains(grpKey);
+
+                var grpPanel = new PanelContainer
+                {
+                    ThemeTypeVariation = "SubPanelContainer",
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                var grpVBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                grpVBox.AddThemeConstantOverride("separation", 3);
+                grpPanel.AddChild(grpVBox);
+
+                var hdrRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                hdrRow.AddThemeConstantOverride("separation", 6);
+
+                var btnChevron = new Button
+                {
+                    Text = isCollapsed ? "▸" : "▾",
+                    ThemeTypeVariation = "ToolbarButton",
+                    CustomMinimumSize = new Vector2(24, 26),
+                    TooltipText = isCollapsed ? "Expand chain group" : "Collapse chain group"
+                };
+                string capturedKey = grpKey;
+                btnChevron.Pressed += () =>
+                {
+                    if (_collapsedPhysicsGroups.Contains(capturedKey))
+                        _collapsedPhysicsGroups.Remove(capturedKey);
+                    else
+                        _collapsedPhysicsGroups.Add(capturedKey);
+                    RefreshClothingChainsPanel();
+                };
+                hdrRow.AddChild(btnChevron);
+
+                var chkGroupPhys = new CheckBox
+                {
+                    ButtonPressed = grpAllOn,
+                    TooltipText = $"Toggle Jiggle Physics for all chains in '{grpLabel}'"
+                };
+                chkGroupPhys.Toggled += (on) =>
+                {
+                    var targetPolicy = on ? ChainPolicy.PreservePhysicsChain : ChainPolicy.CollapseToNearestCore;
+                    foreach (var c in toggleableChains)
+                        c.Policy = targetPolicy;
+                    MarkRemapStaleAndRefresh();
+                    RefreshClothingChainsPanel();
+                };
+                hdrRow.AddChild(chkGroupPhys);
+
+                var btnGroupHdr = new Button
+                {
+                    Text = $"{grpLabel}   ({grpPhysCount}/{toggleableChains.Count} Jiggle)",
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    ClipText = true,
+                    Alignment = HorizontalAlignment.Left,
+                    TooltipText = "Click to expand or collapse this group."
+                };
+                btnGroupHdr.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.AccentPrimary)));
+                btnGroupHdr.Pressed += () =>
+                {
+                    if (_collapsedPhysicsGroups.Contains(capturedKey))
+                        _collapsedPhysicsGroups.Remove(capturedKey);
+                    else
+                        _collapsedPhysicsGroups.Add(capturedKey);
+                    RefreshClothingChainsPanel();
+                };
+                hdrRow.AddChild(btnGroupHdr);
+                grpVBox.AddChild(hdrRow);
+
+                if (!isCollapsed)
+                {
+                    var childrenIndent = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                    childrenIndent.AddThemeConstantOverride("margin_left", 20);
+                    childrenIndent.AddThemeConstantOverride("margin_top", 2);
+                    childrenIndent.AddThemeConstantOverride("margin_bottom", 4);
+                    var childrenVBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                    childrenVBox.AddThemeConstantOverride("separation", 3);
+                    childrenIndent.AddChild(childrenVBox);
+                    grpVBox.AddChild(childrenIndent);
+
+                    foreach (var chain in grpChains)
+                    {
+                        var rowBtn = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                        rowBtn.AddThemeConstantOverride("separation", 6);
+
+                        bool isHub = IsRigidHubChain(chain);
+                        bool isPhys = chain.Policy == ChainPolicy.PreservePhysicsChain;
+                        var chkPhys = new CheckBox
+                        {
+                            ButtonPressed = isPhys,
+                            Disabled = isHub,
+                            TooltipText = isHub
+                                ? "Weighted hub bone — remains rigid so branching child tails pivot cleanly."
+                                : "Enable jiggle physics for this chain (uncheck to lock rigid to anchor)."
+                        };
+                        chkPhys.Toggled += (on) =>
+                        {
+                            chain.Policy = on ? ChainPolicy.PreservePhysicsChain : ChainPolicy.CollapseToNearestCore;
+                            _selectedChain = chain;
+                            _selectedViewportBoneName = chain.RootSourceBone;
+                            MarkRemapStaleAndRefresh();
+                            RefreshClothingChainsPanel();
+                            UpdateSelectedBoneBadge();
+                            if (_showBones) RedrawBoneWireframe();
+                        };
+                        rowBtn.AddChild(chkPhys);
+
+                        string simTag = chain.Simulation switch
+                        {
+                            SimulationKind.ProxyCloth => "Proxy",
+                            SimulationKind.Cloth => "Cloth",
+                            _ => "Jiggle"
+                        };
+                        string badge = isHub
+                            ? "Rigid Hub"
+                            : chain.Policy switch
+                            {
+                                ChainPolicy.PreservePhysicsChain => masterOn ? simTag : "Paused",
+                                _ => "Static"
+                            };
+                        int bCount = chain.SourceBoneNames?.Count ?? 0;
+                        string prefix = isHub ? "◈ " : "└ ";
+                        var btnSelect = new Button
+                        {
+                            Text = $"{prefix}{chain.Name}  [{badge} · {bCount}b]",
+                            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                            ClipText = true,
+                            Alignment = HorizontalAlignment.Left,
+                            ToggleMode = true,
+                            ButtonPressed = ReferenceEquals(chain, _selectedChain),
+                            TooltipText = $"Root: {chain.RootSourceBone} | Anchor: {chain.AnchorHeroBone} | Bones: {bCount} | Category: {chain.Category}\nClick to inspect spring settings and highlight in 3D viewport."
+                        };
+                        btnSelect.Pressed += () =>
+                        {
+                            _selectedChain = chain;
+                            string firstBone = chain.AppendedHeroBoneNames?.FirstOrDefault() ?? chain.RootSourceBone;
+                            _selectedViewportBoneName = firstBone;
+                            RefreshClothingChainsPanel();
+                            UpdateSelectedBoneBadge();
+                            if (_showBones) RedrawBoneWireframe();
+                            SyncActiveWeightPaintToBone(firstBone);
+                        };
+                        rowBtn.AddChild(btnSelect);
+                        childrenVBox.AddChild(rowBtn);
+                    }
+                }
+
+                _boxClothingChainsList.AddChild(grpPanel);
+            }
+
+            SyncSharedChainInspector();
+        }
+
+        private void SyncSharedChainInspector()
+        {
+            if (_boxChainInspector == null) return;
+            if (_selectedChain == null)
+            {
+                _boxChainInspector.Visible = false;
+                return;
+            }
+            _boxChainInspector.Visible = true;
+            _isUpdatingChainInspector = true;
+            try
+            {
+                _lblSelectedChainTitle.Text = $"Selected: {_selectedChain.Name} ({_selectedChain.SourceBoneNames.Count} bones)";
+                int polTargetId = _selectedChain.Policy == ChainPolicy.PreservePhysicsChain
+                    ? (int)ChainPolicy.PreservePhysicsChain
+                    : (int)ChainPolicy.CollapseToNearestCore;
+                for (int i = 0; i < _optSelChainPolicy.ItemCount; i++)
+                {
+                    if (_optSelChainPolicy.GetItemId(i) == polTargetId)
+                    {
+                        _optSelChainPolicy.Select(i);
+                        break;
+                    }
+                }
+                for (int i = 0; i < _optSelChainSim.ItemCount; i++)
+                {
+                    if (_optSelChainSim.GetItemId(i) == (int)_selectedChain.Simulation)
+                    {
+                        _optSelChainSim.Select(i);
+                        break;
+                    }
+                }
+                SyncPhysicsTypeSegmentedUI(_selectedChain.Simulation);
+                RefreshChainPaintQuickBones();
+                _optSelChainAnchor.Clear();
+                var anchors = GetHeroSocketBoneNames();
+                int selA = 0;
+                for (int a = 0; a < anchors.Count; a++)
+                {
+                    _optSelChainAnchor.AddItem(anchors[a], a);
+                    if (string.Equals(anchors[a], _selectedChain.AnchorHeroBone, StringComparison.OrdinalIgnoreCase)) selA = a;
+                }
+                _optSelChainAnchor.Select(selA);
+
+                _sliderSelStiffRoot.SetValueNoSignal(_selectedChain.StiffnessRoot);
+                _sliderSelStiffTip.SetValueNoSignal(_selectedChain.StiffnessTip);
+                _sliderSelDamping.SetValueNoSignal(_selectedChain.Damping);
+                _sliderSelGravity.SetValueNoSignal(_selectedChain.Gravity);
+                _sliderSelColRadius.SetValueNoSignal(_selectedChain.CollisionRadiusTipInches);
+                bool strayUnlim = _selectedChain.StrayRadiusInches < 0f;
+                _chkSelStrayUnlimited?.SetPressedNoSignal(strayUnlim);
+                if (_sliderSelStrayRadius != null)
+                {
+                    _sliderSelStrayRadius.Editable = !strayUnlim;
+                    _sliderSelStrayRadius.SetValueNoSignal(strayUnlim ? 40.0 : _selectedChain.StrayRadiusInches);
+                }
+                float rfDisp = PhysicsParamResolver.ResolveRootGoalForce(_selectedChain.StiffnessRoot);
+                float tfDisp = PhysicsParamResolver.ResolveTipGoalForce(_selectedChain.StiffnessTip, rfDisp);
+                float pdDisp = PhysicsParamResolver.ResolveCompiledPointDamping(_selectedChain.Damping);
+                if (_lblValStiffRoot != null) _lblValStiffRoot.Text = $"{_selectedChain.StiffnessRoot:F2} (gF {rfDisp:F2})";
+                if (_lblValStiffTip != null) _lblValStiffTip.Text = $"{_selectedChain.StiffnessTip:F2} (gF {tfDisp:F3})";
+                if (_lblValDamping != null) _lblValDamping.Text = $"{_selectedChain.Damping:F2} (pDamp {pdDisp:F2})";
+                if (_lblValGravity != null) _lblValGravity.Text = $"{_selectedChain.Gravity:F2} ({_selectedChain.Gravity * 360f:F0})";
+                if (_lblValColRadius != null) _lblValColRadius.Text = $"{_selectedChain.CollisionRadiusTipInches:F1} in";
+                if (_lblValStrayRadius != null) _lblValStrayRadius.Text = strayUnlim ? "Unlimited (-1)" : $"{_selectedChain.StrayRadiusInches:F1} in";
+                _chkSelPlanarizeBack?.SetPressedNoSignal(_selectedChain.PlanarizeBackBarrier);
+                _selectedChainJointIndex = -1;
+                RefreshChainJointListUI();
+            }
+            finally
+            {
+                _isUpdatingChainInspector = false;
+            }
+        }
+
+        private List<string> GetActiveChainBoneNames(BoneChainDef ch)
+        {
+            if (ch == null) return new List<string>();
+            if (ch.SourceBoneNames != null && ch.SourceBoneNames.Count > 0) return ch.SourceBoneNames;
+            return ch.AppendedHeroBoneNames ?? new List<string>();
+        }
+
+        private BoneJointOverride GetOrCreateSelectedJointOverride()
+        {
+            if (_selectedChain == null) return null;
+            var bones = GetActiveChainBoneNames(_selectedChain);
+            if (_selectedChainJointIndex < 0 || _selectedChainJointIndex >= bones.Count) return null;
+            return _selectedChain.GetOrCreateJointOverride(bones[_selectedChainJointIndex]);
+        }
+
+        private void RefreshChainJointListUI()
+        {
+            if (_boxChainJointList == null) return;
+            foreach (Node ch in _boxChainJointList.GetChildren()) ch.QueueFree();
+
+            if (_selectedChain == null)
+            {
+                if (_boxJointOverrideEditor != null) _boxJointOverrideEditor.Visible = false;
+                return;
+            }
+
+            var bones = GetActiveChainBoneNames(_selectedChain);
+            if (bones.Count == 0)
+            {
+                if (_boxJointOverrideEditor != null) _boxJointOverrideEditor.Visible = false;
+                return;
+            }
+
+            if (_selectedChainJointIndex >= bones.Count) _selectedChainJointIndex = -1;
+
+            for (int i = 0; i < bones.Count; i++)
+            {
+                int idx = i;
+                string bName = bones[i];
+                string appName = (_selectedChain.AppendedHeroBoneNames != null && i < _selectedChain.AppendedHeroBoneNames.Count)
+                    ? _selectedChain.AppendedHeroBoneNames[i]
+                    : bName;
+                var ov = _selectedChain.FindJointOverride(bName, appName);
+                bool hasOv = ov != null && ov.HasAnyOverride;
+                bool isPinned = ov?.Simulate.HasValue == true && !ov.Simulate.Value;
+                string roleTag = i == 0 ? "Root" : $"Child {i}";
+                string statusTag = isPinned ? " [Pinned]" : (hasOv ? " ★ Custom" : "");
+                string indent = i == 0 ? "" : "└ ";
+
+                var btn = new Button
+                {
+                    Text = $"{indent}{bName}  ({roleTag}){statusTag}",
+                    Alignment = HorizontalAlignment.Left,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    CustomMinimumSize = new Vector2(0, 28),
+                    ThemeTypeVariation = (idx == _selectedChainJointIndex) ? "PrimaryActionButton" : "ToolbarButton"
+                };
+                ImporterStyle.ApplyFontSize(btn, ImporterStyle.FontHint);
+                btn.Pressed += () => SelectChainJoint(idx);
+                _boxChainJointList.AddChild(btn);
+            }
+
+            UpdateSelectedJointEditorUI();
+        }
+
+        private void SelectChainJoint(int jointIdx)
+        {
+            if (_selectedChain == null) return;
+            var bones = GetActiveChainBoneNames(_selectedChain);
+            if (jointIdx < 0 || jointIdx >= bones.Count) return;
+
+            _selectedChainJointIndex = jointIdx;
+            string highlightBone = (_selectedChain.AppendedHeroBoneNames != null && jointIdx < _selectedChain.AppendedHeroBoneNames.Count)
+                ? _selectedChain.AppendedHeroBoneNames[jointIdx]
+                : bones[jointIdx];
+            _selectedViewportBoneName = highlightBone;
+            UpdateSelectedBoneBadge();
+            RedrawBoneWireframeColorCoded();
+            RefreshChainJointListUI();
+            SyncActiveWeightPaintToBone(highlightBone);
+        }
+
+        private void SyncActiveWeightPaintToBone(string boneName)
+        {
+            if (!IsWeightPaintActive() || string.IsNullOrWhiteSpace(boneName) || _optPaintBone == null) return;
+            PopulatePaintBoneDropdown();
+            for (int i = 0; i < _optPaintBone.ItemCount; i++)
+            {
+                if (_optPaintBone.GetItemText(i).Equals(boneName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _optPaintBone.Select(i);
+                    RefreshWeightPaintHeatmap();
+                    return;
+                }
+            }
+        }
+
+        private void UpdateSelectedJointEditorUI()
+        {
+            if (_boxJointOverrideEditor == null) return;
+            if (_selectedChain == null)
+            {
+                _boxJointOverrideEditor.Visible = false;
+                return;
+            }
+
+            var bones = GetActiveChainBoneNames(_selectedChain);
+            if (_selectedChainJointIndex < 0 || _selectedChainJointIndex >= bones.Count)
+            {
+                _boxJointOverrideEditor.Visible = false;
+                return;
+            }
+
+            _boxJointOverrideEditor.Visible = true;
+            _isUpdatingJointEditor = true;
+            try
+            {
+                int k = _selectedChainJointIndex;
+                string bName = bones[k];
+                string appName = (_selectedChain.AppendedHeroBoneNames != null && k < _selectedChain.AppendedHeroBoneNames.Count)
+                    ? _selectedChain.AppendedHeroBoneNames[k]
+                    : bName;
+                var ov = _selectedChain.FindJointOverride(bName, appName);
+
+                float t = bones.Count > 1 ? k / (float)(bones.Count - 1) : 0f;
+                float taper = MathF.Pow(1.0f - t, 1.85f);
+                float defRootGoal = Mathf.Clamp(0.55f + 0.30f * _selectedChain.StiffnessRoot, 0.30f, 0.85f);
+                float defTipGoal = Mathf.Clamp(_selectedChain.StiffnessTip * 0.28f, 0.0f, defRootGoal);
+                float defGoal = Mathf.Lerp(defTipGoal, defRootGoal, taper);
+                float defDamp = Mathf.Clamp(_selectedChain.Damping * 0.12f, 0.0f, 0.18f) * (1.0f - t * 0.88f);
+                float defCol = Mathf.Lerp(Mathf.Min(1.6f, _selectedChain.CollisionRadiusTipInches * 0.72f), _selectedChain.CollisionRadiusTipInches, t);
+                float defStray = _selectedChain.StrayRadiusInches;
+
+                bool sim = ov?.Simulate ?? true;
+                float goal = ov?.GoalStrength ?? defGoal;
+                float damp = ov?.GoalDamping ?? defDamp;
+                float col = ov?.CollisionRadiusInches ?? defCol;
+                float stray = ov?.StrayRadiusInches ?? defStray;
+                bool strayUnlim = stray < 0f;
+
+                if (_lblSelectedJointTitle != null)
+                    _lblSelectedJointTitle.Text = $"Bone: {bName} ({(k == 0 ? "Root" : $"Child {k}")})";
+                _chkJointSimulate?.SetPressedNoSignal(sim);
+                _sliderJointGoal?.SetValueNoSignal(goal);
+                if (_lblValJointGoal != null) _lblValJointGoal.Text = $"{goal:F2}";
+                _sliderJointDamp?.SetValueNoSignal(damp);
+                if (_lblValJointDamp != null) _lblValJointDamp.Text = $"{damp:F2}";
+                _sliderJointColRad?.SetValueNoSignal(col);
+                if (_lblValJointColRad != null) _lblValJointColRad.Text = $"{col:F1} in";
+                _chkJointStrayUnlimited?.SetPressedNoSignal(strayUnlim);
+                if (_sliderJointStray != null)
+                {
+                    _sliderJointStray.Editable = !strayUnlim;
+                    _sliderJointStray.SetValueNoSignal(strayUnlim ? 40.0 : stray);
+                }
+                if (_lblValJointStray != null) _lblValJointStray.Text = strayUnlim ? "Unlimited (-1)" : $"{stray:F1} in";
+            }
+            finally
+            {
+                _isUpdatingJointEditor = false;
+            }
+        }
+
+        private void ResetSelectedChainJointOverride()
+        {
+            if (_selectedChain == null || _selectedChain.JointOverrides == null) return;
+            var bones = GetActiveChainBoneNames(_selectedChain);
+            if (_selectedChainJointIndex < 0 || _selectedChainJointIndex >= bones.Count) return;
+            string bName = bones[_selectedChainJointIndex];
+            _selectedChain.JointOverrides.RemoveAll(j => j != null && string.Equals(j.BoneName, bName, StringComparison.OrdinalIgnoreCase));
+            ApplyChainParamsLiveToDriver();
+            RefreshChainJointListUI();
+        }
+
+        private void SetPhysicsStressTestPose(float headPitchDeg, float crouchLeanDeg, bool walkShake)
+        {
+            _stressHeadPitchDeg = headPitchDeg;
+            _stressCrouchLeanDeg = crouchLeanDeg;
+            _stressWalkBackShake = walkShake;
+            _sliderStressHeadPitch?.SetValueNoSignal(headPitchDeg);
+            if (_lblValStressHeadPitch != null) _lblValStressHeadPitch.Text = $"{headPitchDeg:+0;-0;0}°";
+            _sliderStressCrouchLean?.SetValueNoSignal(crouchLeanDeg);
+            if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = $"{crouchLeanDeg:F0}°";
+            _btnStressWalkShake?.SetPressedNoSignal(walkShake);
+            if (!walkShake && _stressHasSavedHeroPos && _previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+            {
+                _previewHeroClone.Position = _stressSavedHeroPos;
+                _stressHasSavedHeroPos = false;
+            }
+        }
+
+        /// <summary>
+        /// Applies procedural Look Up / Crouch Forward Lean / Backward-Walk oscillation in _Process
+        /// so artists can stress-test hair/cloth physics and body capsules live without launching Deadlock.
+        /// Returns true if any stress-test pose or motion is currently active.
+        /// </summary>
+        private bool ApplyPhysicsStressTestInProcess(double delta)
+        {
+            if (_previewHeroSkeleton == null || !GodotObject.IsInstanceValid(_previewHeroSkeleton)) return false;
+
+            // Smoothly sweep current stress pose toward target (~240 deg/s) so preset clicks behave
+            // like real mouse look / crouch transitions instead of teleporting hair through the chest.
+            float stepDeg = MathF.Max(1f, (float)delta * 240f);
+            _stressCurHeadPitchDeg = Mathf.MoveToward(_stressCurHeadPitchDeg, _stressHeadPitchDeg, stepDeg);
+            _stressCurCrouchLeanDeg = Mathf.MoveToward(_stressCurCrouchLeanDeg, _stressCrouchLeanDeg, stepDeg);
+
+            bool anyActive = MathF.Abs(_stressHeadPitchDeg) > 0.25f ||
+                             MathF.Abs(_stressCrouchLeanDeg) > 0.25f ||
+                             MathF.Abs(_stressCurHeadPitchDeg) > 0.25f ||
+                             MathF.Abs(_stressCurCrouchLeanDeg) > 0.25f ||
+                             _stressWalkBackShake;
+
+            if (!anyActive)
+            {
+                if (_stressPoseWasActive)
+                {
+                    _stressPoseWasActive = false;
+                    if (_stressHasSavedHeroPos && _previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+                    {
+                        _previewHeroClone.Position = _stressSavedHeroPos;
+                        _stressHasSavedHeroPos = false;
+                    }
+                    if (!(_previewAnimPlayer?.IsPlaying() ?? false))
+                    {
+                        ResetStressTestBonesToRest();
+                        if (_showColliders) RedrawColliderWireframe();
+                        if (_showBones) RedrawBoneWireframeColorCoded();
+                    }
+                }
+                return false;
+            }
+
+            _stressPoseWasActive = true;
+            bool animPlaying = _previewAnimPlayer?.IsPlaying() ?? false;
+
+            // 1. Optional backward-walk / dash oscillation along hero Z axis
+            if (_previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+            {
+                if (_stressWalkBackShake)
+                {
+                    if (!_stressHasSavedHeroPos)
+                    {
+                        _stressSavedHeroPos = _previewHeroClone.Position;
+                        _stressHasSavedHeroPos = true;
+                    }
+                    _stressShakePhase += (float)delta * 3.8f;
+                    // Smooth back-and-forth surge (~0.45 m) to induce backward-walk inertial swing
+                    float zOff = MathF.Sin(_stressShakePhase) * 0.45f;
+                    _previewHeroClone.Position = _stressSavedHeroPos + new Vector3(0f, 0f, zOff);
+                }
+            }
+
+            // 2. Apply procedural forward crouch lean (spine_1..3) and head/neck pitch (positive = look up)
+            Godot.Animation activeAnim = null;
+            if (animPlaying && _previewAnimPlayer != null && !string.IsNullOrEmpty(_previewAnimPlayer.CurrentAnimation) &&
+                _previewAnimPlayer.HasAnimation(_previewAnimPlayer.CurrentAnimation))
+            {
+                activeAnim = _previewAnimPlayer.GetAnimation(_previewAnimPlayer.CurrentAnimation);
+            }
+
+            bool AnimHasRotationTrack(string boneName)
+            {
+                if (activeAnim == null) return false;
+                int tc = activeAnim.GetTrackCount();
+                string suffix = ":" + boneName;
+                for (int t = 0; t < tc; t++)
+                {
+                    if (activeAnim.TrackGetType(t) != Godot.Animation.TrackType.Rotation3D) continue;
+                    string path = activeAnim.TrackGetPath(t).ToString();
+                    if (path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                return false;
+            }
+
+            int FindBoneCI(params string[] names)
+            {
+                foreach (string nm in names)
+                {
+                    int exact = _previewHeroSkeleton.FindBone(nm);
+                    if (exact >= 0) return exact;
+                }
+                int bc = _previewHeroSkeleton.GetBoneCount();
+                for (int i = 0; i < bc; i++)
+                {
+                    string bn = _previewHeroSkeleton.GetBoneName(i);
+                    foreach (string nm in names)
+                    {
+                        if (bn.Equals(nm, StringComparison.OrdinalIgnoreCase)) return i;
+                    }
+                }
+                return -1;
+            }
+
+            void ApplyHeroPitchToBone(float degAroundHeroRight, params string[] boneNames)
+            {
+                int bIdx = FindBoneCI(boneNames);
+                if (bIdx < 0) return;
+
+                string resolvedName = _previewHeroSkeleton.GetBoneName(bIdx);
+                int pIdx = _previewHeroSkeleton.GetBoneParent(bIdx);
+                Basis parentGlobalBasis = (pIdx >= 0)
+                    ? _previewHeroSkeleton.GetBoneGlobalPose(pIdx).Basis.Orthonormalized()
+                    : Basis.Identity;
+
+                bool keyedByAnim = animPlaying && AnimHasRotationTrack(resolvedName);
+                Quaternion baseRot = keyedByAnim
+                    ? _previewHeroSkeleton.GetBonePoseRotation(bIdx)
+                    : _previewHeroSkeleton.GetBoneRest(bIdx).Basis.Orthonormalized().GetRotationQuaternion();
+
+                if (MathF.Abs(degAroundHeroRight) < 0.05f)
+                {
+                    if (!keyedByAnim) _previewHeroSkeleton.SetBonePoseRotation(bIdx, baseRot);
+                    return;
+                }
+
+                // In Godot hero space (+Z forward, +Y up, +X hero left), rotating around +X by +angle pitches DOWN (forward lean),
+                // and rotating by -angle pitches UP (looking upward).
+                Vector3 localAxis = (parentGlobalBasis.Inverse() * Vector3.Right).Normalized();
+                if (localAxis.LengthSquared() < 0.5f) return;
+                Quaternion deltaQ = new Quaternion(localAxis, Mathf.DegToRad(degAroundHeroRight));
+                _previewHeroSkeleton.SetBonePoseRotation(bIdx, (deltaQ * baseRot).Normalized());
+            }
+
+            ApplyHeroPitchToBone(_stressCurCrouchLeanDeg * 0.30f, "spine_1");
+            ApplyHeroPitchToBone(_stressCurCrouchLeanDeg * 0.35f, "spine_2");
+            ApplyHeroPitchToBone(_stressCurCrouchLeanDeg * 0.35f, "spine_3");
+            // Positive _stressCurHeadPitchDeg = Look Up => negative rotation around +X
+            ApplyHeroPitchToBone(-_stressCurHeadPitchDeg * 0.30f, "neck_0", "neck");
+            ApplyHeroPitchToBone(-_stressCurHeadPitchDeg * 0.70f, "head");
+            return true;
+        }
+
+        private void ResetStressTestBonesToRest()
+        {
+            if (_previewHeroSkeleton == null || !GodotObject.IsInstanceValid(_previewHeroSkeleton)) return;
+            string[] stressBones = { "spine_1", "spine_2", "spine_3", "neck_0", "head" };
+            foreach (string bn in stressBones)
+            {
+                int bIdx = _previewHeroSkeleton.FindBone(bn);
+                if (bIdx < 0) continue;
+                _previewHeroSkeleton.SetBonePoseRotation(bIdx, _previewHeroSkeleton.GetBoneRest(bIdx).Basis.Orthonormalized().GetRotationQuaternion());
+            }
+        }
+
+        private void ApplyChainParamsLiveToDriver()
+        {
+            if (_previewHeroClone == null || !GodotObject.IsInstanceValid(_previewHeroClone)) return;
+            var driver = _previewHeroClone.FindChild("CustomJiggleBoneDriver", false, false) as DeadlockPlayground.Animation.CustomJiggleBoneDriver;
+            driver?.UpdateChainParametersInPlace(_boneChains);
+        }
+
+        private (HSlider Slider, Label ValueLabel) AddExplainedSlider(
+            Control parent,
+            string title,
+            string explanation,
+            double min,
+            double max,
+            double step,
+            string format,
+            Action<double> onChanged)
+        {
+            var block = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            block.AddThemeConstantOverride("separation", 2);
+
+            var hdr = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            hdr.AddThemeConstantOverride("separation", 6);
+            var lblTitle = new Label
+            {
+                Text = title,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                ClipText = true,
+                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+            };
+            ImporterStyle.ApplyFontSize(lblTitle, ImporterStyle.FontHint);
+            hdr.AddChild(lblTitle);
+
+            var lblVal = new Label
+            {
+                Text = min.ToString(format),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                CustomMinimumSize = new Vector2(68, 0)
+            };
+            ImporterStyle.ApplyFontSize(lblVal, ImporterStyle.FontHint);
+            _accentLabels.Add(lblVal);
+            hdr.AddChild(lblVal);
+            block.AddChild(hdr);
+
+            var slider = new HSlider
+            {
+                MinValue = min,
+                MaxValue = max,
+                Step = step,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 22)
+            };
+            slider.ValueChanged += (v) => onChanged?.Invoke(v);
+            block.AddChild(slider);
+
+            var lblHint = new Label { Text = explanation };
+            ImporterStyle.ApplyHintStyle(lblHint, wrap: true);
+            _secondaryLabels.Add(lblHint);
+            block.AddChild(lblHint);
+
+            parent.AddChild(block);
+            return (slider, lblVal);
+        }
+
+        private void SetSelectedChainSimulationKind(SimulationKind kind)
+        {
+            if (_selectedChain == null) return;
+            _selectedChain.Simulation = kind;
+            for (int i = 0; i < _optSelChainSim.ItemCount; i++)
+            {
+                if (_optSelChainSim.GetItemId(i) == (int)kind)
+                {
+                    _optSelChainSim.Select(i);
+                    break;
+                }
+            }
+            SyncPhysicsTypeSegmentedUI(kind);
+            ApplyChainParamsLiveToDriver();
+            RefreshClothingChainsPanel();
+        }
+
+        private void SyncPhysicsTypeSegmentedUI(SimulationKind kind)
+        {
+            SimulationKind[] order = { SimulationKind.ProxyCloth, SimulationKind.Cloth, SimulationKind.Jiggle };
+            for (int i = 0; i < _chainSimSegButtons.Length && i < order.Length; i++)
+            {
+                var b = _chainSimSegButtons[i];
+                if (b == null) continue;
+                bool active = order[i] == kind;
+                b.SetPressedNoSignal(active);
+                b.ThemeTypeVariation = active ? "ImporterPrimaryButton" : "ToolbarButton";
+            }
+            if (_lblSelChainSimHint != null)
+            {
+                _lblSelChainSimHint.Text = kind switch
+                {
+                    SimulationKind.ProxyCloth => "Proxy Sheet: stitches neighbor strands into one smooth fabric sheet (best for multi-strand back hair, skirts, capes).",
+                    SimulationKind.Cloth => "Cloth Chain: independent flexible bone strand with body-capsule deflection (best for ponytails, tails, ribbons).",
+                    _ => "Jiggle Bounce: tight rigid rotational bounce with zero hair/capsule collision (best for glutes, breasts, ears, pouches)."
+                };
+            }
+        }
+
+        private void ToggleChainWeightPaintInPhysics(bool open)
+        {
+            if (open)
+            {
+                if (_selectedChain == null)
+                {
+                    _btnChainWeightPaintToggle?.SetPressedNoSignal(false);
+                    return;
+                }
+                string boneToInspect = _selectedChain.AppendedHeroBoneNames?.FirstOrDefault() ?? _selectedChain.RootSourceBone;
+                InspectWeightsForBone(boneToInspect);
+            }
+            else
+            {
+                if (_btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
+                    _btnWeightPaintMode.ButtonPressed = false;
+                if (_boxTab3WeightPaintHost != null)
+                    _boxTab3WeightPaintHost.Visible = false;
+            }
+        }
+
+        private void RefreshChainPaintQuickBones()
+        {
+            if (_boxTab3WeightBoneChips == null) return;
+            foreach (Node child in _boxTab3WeightBoneChips.GetChildren()) child.QueueFree();
+            if (_selectedChain == null) return;
+
+            var names = new List<string>();
+            if (!string.IsNullOrWhiteSpace(_selectedChain.AnchorHeroBone))
+                names.Add(_selectedChain.AnchorHeroBone);
+            var chainBones = _selectedChain.AppendedHeroBoneNames != null && _selectedChain.AppendedHeroBoneNames.Count > 0
+                ? _selectedChain.AppendedHeroBoneNames
+                : _selectedChain.SourceBoneNames;
+            foreach (string bn in chainBones)
+            {
+                if (!string.IsNullOrWhiteSpace(bn) && !names.Contains(bn, StringComparer.OrdinalIgnoreCase))
+                    names.Add(bn);
+            }
+
+            foreach (string bn in names)
+            {
+                var btn = new Button
+                {
+                    Text = bn,
+                    ThemeTypeVariation = "ToolbarButton",
+                    CustomMinimumSize = new Vector2(0, 28)
+                };
+                ImporterStyle.ApplyFontSize(btn, ImporterStyle.FontHint);
+                string capName = bn;
+                btn.Pressed += () =>
+                {
+                    PopulatePaintBoneDropdown();
+                    if (_btnWeightPaintMode != null && !_btnWeightPaintMode.ButtonPressed)
+                        _btnWeightPaintMode.ButtonPressed = true;
+                    SelectPaintBoneByName(capName);
+                };
+                _boxTab3WeightBoneChips.AddChild(btn);
+            }
+        }
+
+        private void SetPhysicsSubView(int index)
+        {
+            if (_boxPhysicsChainsPane != null) _boxPhysicsChainsPane.Visible = (index == 0);
+            if (_boxPhysicsCollidersPane != null) _boxPhysicsCollidersPane.Visible = (index == 1);
+            if (_btnPhysTabChains != null) _btnPhysTabChains.SetPressedNoSignal(index == 0);
+            if (_btnPhysTabColliders != null) _btnPhysTabColliders.SetPressedNoSignal(index == 1);
+            if (index != 0)
+            {
+                if (_btnChainWeightPaintToggle != null && _btnChainWeightPaintToggle.ButtonPressed)
+                    _btnChainWeightPaintToggle.ButtonPressed = false;
+                if (IsTab3PhysicsPaintHostActive() && _btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
+                    _btnWeightPaintMode.ButtonPressed = false;
+            }
+            if (index == 1)
+            {
+                if (_btnShowCollidersInCard != null) _btnShowCollidersInCard.SetPressedNoSignal(_showColliders);
+                if (!_showColliders && _bodyCollisionCapsules.Count > 0 && _btnToggleColliders != null)
+                {
+                    _btnToggleColliders.ButtonPressed = true;
+                }
+                RefreshBodyCollidersPanel();
+            }
+        }
+
+        private void SyncBodyCollidersFromRigResult(List<BodyCollisionCapsuleDef> fitted)
+        {
+            if (fitted == null || fitted.Count == 0) return;
+            string prevSel = _selectedCollider?.BoneName;
+            _bodyCollisionCapsules.Clear();
+            foreach (var cap in fitted)
+            {
+                if (cap != null) _bodyCollisionCapsules.Add(cap.Clone());
+            }
+            _selectedCollider = !string.IsNullOrEmpty(prevSel)
+                ? _bodyCollisionCapsules.FirstOrDefault(c => c.BoneName.Equals(prevSel, StringComparison.OrdinalIgnoreCase))
+                : _bodyCollisionCapsules.FirstOrDefault();
+            if (_selectedCollider == null && _bodyCollisionCapsules.Count > 0)
+                _selectedCollider = _bodyCollisionCapsules[0];
+        }
+
+        private void RefreshBodyCollidersPanel()
+        {
+            if (_boxBodyCollidersList == null) return;
+            foreach (Node ch in _boxBodyCollidersList.GetChildren()) ch.QueueFree();
+
+            if (_btnShowCollidersInCard != null) _btnShowCollidersInCard.SetPressedNoSignal(_showColliders);
+
+            if (_bodyCollisionCapsules.Count == 0)
+            {
+                if (_lblBodyCollidersSummary != null)
+                    _lblBodyCollidersSummary.Text = "No body capsules fitted yet. Click 'Auto-Fit from Mesh' after rigging.";
+                if (_boxColliderInspector != null) _boxColliderInspector.Visible = false;
+                return;
+            }
+
+            int activeCount = _bodyCollisionCapsules.Count(c => c.Enabled);
+            if (_lblBodyCollidersSummary != null)
+                _lblBodyCollidersSummary.Text = $"{activeCount} / {_bodyCollisionCapsules.Count} capsules active in preview & Source 2 export.";
+
+            if (_selectedCollider != null && !_bodyCollisionCapsules.Contains(_selectedCollider))
+                _selectedCollider = null;
+            if (_selectedCollider == null)
+                _selectedCollider = _bodyCollisionCapsules[0];
+
+            foreach (var cap in _bodyCollisionCapsules)
+            {
+                var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                row.AddThemeConstantOverride("separation", 6);
+
+                var chk = new CheckBox
+                {
+                    ButtonPressed = cap.Enabled,
+                    TooltipText = $"Enable / disable collider on {cap.BoneName}"
+                };
+                chk.Toggled += (on) =>
+                {
+                    cap.Enabled = on;
+                    cap.IsUserEdited = true;
+                    _selectedCollider = cap;
+                    ApplyBodyCollidersLiveToDriver();
+                    RefreshBodyCollidersPanel();
+                };
+                row.AddChild(chk);
+
+                string tag = cap.IsUserEdited ? " · Edited" : "";
+                var btn = new Button
+                {
+                    Text = $"{cap.DisplayName}  ({cap.BoneName}{tag})",
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    ClipText = true,
+                    Alignment = HorizontalAlignment.Left,
+                    ToggleMode = true,
+                    ButtonPressed = ReferenceEquals(cap, _selectedCollider),
+                    CustomMinimumSize = new Vector2(0, 30),
+                    TooltipText = $"Click to inspect & resize '{cap.DisplayName}' ({cap.BoneName})."
+                };
+                btn.Pressed += () =>
+                {
+                    _selectedCollider = cap;
+                    RefreshBodyCollidersPanel();
+                    _collidersDirty = true;
+                    if (_showColliders) RedrawColliderWireframe();
+                };
+                row.AddChild(btn);
+                _boxBodyCollidersList.AddChild(row);
+            }
+
+            SyncColliderInspector();
+        }
+
+        private void SyncColliderInspector()
+        {
+            if (_boxColliderInspector == null) return;
+            if (_selectedCollider == null)
+            {
+                _boxColliderInspector.Visible = false;
+                return;
+            }
+            _boxColliderInspector.Visible = true;
+            _isUpdatingColliderInspector = true;
+            try
+            {
+                _lblSelectedColliderTitle.Text = $"Capsule: {_selectedCollider.DisplayName}";
+                _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Effective R0={_selectedCollider.EffectiveRadius0:F3}m, R1={_selectedCollider.EffectiveRadius1:F3}m";
+
+                _sliderColRadiusScale.SetValueNoSignal(_selectedCollider.RadiusScale);
+                _sliderColOffsetZ.SetValueNoSignal(_selectedCollider.LocalOffsetMeters.Z);
+                _sliderColRadius0.SetValueNoSignal(_selectedCollider.Radius0Meters);
+                _sliderColRadius1.SetValueNoSignal(_selectedCollider.Radius1Meters);
+
+                if (_lblValColRadiusScale != null) _lblValColRadiusScale.Text = $"{_selectedCollider.RadiusScale:F2}x";
+                if (_lblValColOffsetZ != null) _lblValColOffsetZ.Text = $"{_selectedCollider.LocalOffsetMeters.Z:+0.000;-0.000;0.000} m";
+                if (_lblValColRadius0 != null) _lblValColRadius0.Text = $"{_selectedCollider.Radius0Meters:F3} m";
+                if (_lblValColRadius1 != null) _lblValColRadius1.Text = $"{_selectedCollider.Radius1Meters:F3} m";
+            }
+            finally
+            {
+                _isUpdatingColliderInspector = false;
+            }
+        }
+
+        private void ApplyBodyCollidersLiveToDriver()
+        {
+            if (_previewHeroSkeleton != null && GodotObject.IsInstanceValid(_previewHeroSkeleton))
+            {
+                _previewHeroSkeleton.SetMeta(BodyColliderAutoFitter.SkeletonMetaKey,
+                    BodyColliderAutoFitter.SerializeToJson(_bodyCollisionCapsules));
+            }
+            if (_previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+            {
+                var driver = _previewHeroClone.FindChild("CustomJiggleBoneDriver", false, false) as DeadlockPlayground.Animation.CustomJiggleBoneDriver;
+                driver?.RegisterCollisionCapsules(_bodyCollisionCapsules);
+            }
+            if (_selectedCollider != null && _lblSelectedColliderBoneHint != null)
+            {
+                _lblSelectedColliderBoneHint.Text = $"Bone: {_selectedCollider.BoneName} • Effective R0={_selectedCollider.EffectiveRadius0:F3}m, R1={_selectedCollider.EffectiveRadius1:F3}m";
+            }
+            _collidersDirty = true;
+            if (_showColliders) RedrawColliderWireframe();
+        }
+
+        private void OnAutoFitCollidersPressed()
+        {
+            if (_previewHeroSkeleton == null || !GodotObject.IsInstanceValid(_previewHeroSkeleton))
+            {
+                ExecuteLiveRigUpdate();
+                return;
+            }
+            var meshes = new List<MeshInstance3D>();
+            CollectSkinnedSubmeshes(_previewRiggedContainer ?? _previewHeroClone, meshes);
+            if (meshes.Count == 0)
+            {
+                ExecuteLiveRigUpdate();
+                return;
+            }
+            string prevSel = _selectedCollider?.BoneName;
+            var fitted = BodyColliderAutoFitter.FitFromRiggedMeshes(
+                _previewHeroSkeleton, meshes, null, forceResetEdits: true, physicsChains: _boneChains);
+            _bodyCollisionCapsules.Clear();
+            _bodyCollisionCapsules.AddRange(fitted);
+            _selectedCollider = !string.IsNullOrEmpty(prevSel)
+                ? _bodyCollisionCapsules.FirstOrDefault(c => c.BoneName.Equals(prevSel, StringComparison.OrdinalIgnoreCase))
+                : _bodyCollisionCapsules.FirstOrDefault();
+            ApplyBodyCollidersLiveToDriver();
+            RefreshBodyCollidersPanel();
+            SetBottomStatus($"Auto-fitted {_bodyCollisionCapsules.Count} body collision capsules from mesh silhouette.", StatusTone.Success);
+        }
+
+        private void OnResetSelectedColliderPressed()
+        {
+            if (_selectedCollider == null || _previewHeroSkeleton == null) return;
+            var meshes = new List<MeshInstance3D>();
+            CollectSkinnedSubmeshes(_previewRiggedContainer ?? _previewHeroClone, meshes);
+            var fresh = BodyColliderAutoFitter.FitFromRiggedMeshes(
+                _previewHeroSkeleton, meshes, null, forceResetEdits: true, physicsChains: _boneChains);
+            var match = fresh.FirstOrDefault(c => c.BoneName.Equals(_selectedCollider.BoneName, StringComparison.OrdinalIgnoreCase));
+            if (match == null) return;
+            _selectedCollider.Point0Local = match.Point0Local;
+            _selectedCollider.Point1Local = match.Point1Local;
+            _selectedCollider.Radius0Meters = match.Radius0Meters;
+            _selectedCollider.Radius1Meters = match.Radius1Meters;
+            _selectedCollider.RadiusScale = 1.0f;
+            _selectedCollider.LocalOffsetMeters = Vector3.Zero;
+            _selectedCollider.Enabled = true;
+            _selectedCollider.IsUserEdited = false;
+            ApplyBodyCollidersLiveToDriver();
+            RefreshBodyCollidersPanel();
+            SetBottomStatus($"Reset collider '{_selectedCollider.DisplayName}' to auto-fitted size.", StatusTone.Info);
+        }
+
+        private void OnMirrorSelectedColliderPressed()
+        {
+            if (_selectedCollider == null) return;
+            if (!BodyColliderAutoFitter.TryMirrorSideCapsule(_bodyCollisionCapsules, _selectedCollider, _previewHeroSkeleton, out var twin) || twin == null)
+            {
+                SetBottomStatus("Mirror L <-> R applies to symmetric left/right capsules (clavicles & upper arms).", StatusTone.Info);
+                return;
+            }
+            ApplyBodyCollidersLiveToDriver();
+            RefreshBodyCollidersPanel();
+            SetBottomStatus($"Mirrored '{_selectedCollider.BoneName}' -> '{twin.BoneName}'.", StatusTone.Success);
+        }
+
+        private static void CollectSkinnedSubmeshes(Node root, List<MeshInstance3D> output)
+        {
+            if (root == null || !GodotObject.IsInstanceValid(root)) return;
+            if (root is MeshInstance3D mi && mi.Mesh != null && mi.Skin != null)
+                output.Add(mi);
+            foreach (Node ch in root.GetChildren())
+                CollectSkinnedSubmeshes(ch, output);
+        }
+
+        private void CopySelectedChainToMirrorTwin()
+        {
+            if (_selectedChain == null) return;
+            string n = _selectedChain.RootSourceBone;
+            string twin = null;
+            if (n.Contains("left", StringComparison.OrdinalIgnoreCase))
+                twin = n.Replace("left", "right", StringComparison.OrdinalIgnoreCase);
+            else if (n.Contains("right", StringComparison.OrdinalIgnoreCase))
+                twin = n.Replace("right", "left", StringComparison.OrdinalIgnoreCase);
+            else if (n.EndsWith("_L", StringComparison.OrdinalIgnoreCase))
+                twin = n[..^2] + "_R";
+            else if (n.EndsWith("_R", StringComparison.OrdinalIgnoreCase))
+                twin = n[..^2] + "_L";
+            else if (n.EndsWith(".l", StringComparison.OrdinalIgnoreCase))
+                twin = n[..^2] + (n.EndsWith(".L") ? ".R" : ".r");
+            else if (n.EndsWith(".r", StringComparison.OrdinalIgnoreCase))
+                twin = n[..^2] + (n.EndsWith(".R") ? ".L" : ".l");
+
+            if (string.IsNullOrEmpty(twin)) return;
+            var target = _boneChains.FirstOrDefault(c => string.Equals(c.RootSourceBone, twin, StringComparison.OrdinalIgnoreCase));
+            if (target == null) return;
+
+            bool policyChanged = target.Policy != _selectedChain.Policy;
+            target.Policy = _selectedChain.Policy;
+            target.Simulation = _selectedChain.Simulation;
+            target.StiffnessRoot = _selectedChain.StiffnessRoot;
+            target.StiffnessTip = _selectedChain.StiffnessTip;
+            target.Damping = _selectedChain.Damping;
+            target.Gravity = _selectedChain.Gravity;
+            target.CollisionRadiusTipInches = _selectedChain.CollisionRadiusTipInches;
+            target.StrayRadiusInches = _selectedChain.StrayRadiusInches;
+            target.TwistRelax = _selectedChain.TwistRelax;
+            target.AngleLimitDeg = _selectedChain.AngleLimitDeg;
+            if (policyChanged) MarkRemapStaleAndRefresh();
+            else ApplyChainParamsLiveToDriver();
+            RefreshClothingChainsPanel();
+            SetBottomStatus($"Copied settings from '{_selectedChain.RootSourceBone}' to '{target.RootSourceBone}'.", StatusTone.Success);
+        }
+
+        private void OnPinCollarRootRigidPressed()
+        {
+            if (_selectedChain == null) return;
+            int updated = 0;
+            // Determine target toggle state from selected chain's root bone
+            var selBones = GetActiveChainBoneNames(_selectedChain);
+            if (selBones.Count == 0) return;
+            var selRootOv = _selectedChain.FindJointOverride(selBones[0]);
+            bool pinRigid = !(selRootOv?.Simulate.HasValue == true && !selRootOv.Simulate.Value);
+
+            foreach (var ch in _boneChains)
+            {
+                if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain) continue;
+                if (ch.Simulation != _selectedChain.Simulation) continue;
+                if (!string.Equals(ch.Category, _selectedChain.Category, StringComparison.OrdinalIgnoreCase)) continue;
+                var bones = GetActiveChainBoneNames(ch);
+                if (bones.Count < 2) continue;
+                var ov = ch.GetOrCreateJointOverride(bones[0]);
+                ov.Simulate = !pinRigid;
+                updated++;
+            }
+            ApplyChainParamsLiveToDriver();
+            RefreshChainJointListUI();
+            SetBottomStatus(pinRigid
+                ? $"Pinned root/collar bone rigid on {updated} chain(s) so attachment seam won't bend."
+                : $"Unpinned root/collar bone on {updated} chain(s).", StatusTone.Success);
+        }
+
+        private void ApplySelectedChainToCategory()
+        {
+            if (_selectedChain == null) return;
+            int count = 0;
+            bool anyPolicyChanged = false;
+            foreach (var ch in _boneChains)
+            {
+                if (ch == _selectedChain) continue;
+                if (!string.Equals(ch.Category, _selectedChain.Category, StringComparison.OrdinalIgnoreCase)) continue;
+                // Protect Jiggle chains (bust/buttocks/props) from being accidentally converted to ProxyCloth
+                // when applying hair/skirt settings across the shared 'Clothing & Hair' category.
+                if (ch.Simulation != _selectedChain.Simulation) continue;
+                if (ch.Policy != _selectedChain.Policy) anyPolicyChanged = true;
+                ch.Policy = _selectedChain.Policy;
+                ch.StiffnessRoot = _selectedChain.StiffnessRoot;
+                ch.StiffnessTip = _selectedChain.StiffnessTip;
+                ch.Damping = _selectedChain.Damping;
+                ch.Gravity = _selectedChain.Gravity;
+                ch.CollisionRadiusTipInches = _selectedChain.CollisionRadiusTipInches;
+                ch.StrayRadiusInches = _selectedChain.StrayRadiusInches;
+                ch.TwistRelax = _selectedChain.TwistRelax;
+                ch.AngleLimitDeg = _selectedChain.AngleLimitDeg;
+                ch.PlanarizeBackBarrier = _selectedChain.PlanarizeBackBarrier;
+                ch.AnchorFreeRotate = _selectedChain.AnchorFreeRotate;
+                ch.OpenSheet = _selectedChain.OpenSheet;
+                ch.Friction = _selectedChain.Friction;
+                count++;
+            }
+            if (anyPolicyChanged) MarkRemapStaleAndRefresh();
+            else ApplyChainParamsLiveToDriver();
+            RefreshClothingChainsPanel();
+            SetBottomStatus($"Applied physics settings to {count} '{_selectedChain.Category}' chain(s).", StatusTone.Success);
+        }
+
+        private void OnAddSyntheticClothingChainPressed()
+        {
+            string name = string.IsNullOrWhiteSpace(_txtNewChainName?.Text) ? $"cloth_chain_{_boneChains.Count + 1}" : _txtNewChainName.Text.Trim();
+            string anchor = _optNewChainAnchor != null && _optNewChainAnchor.Selected >= 0 ? _optNewChainAnchor.GetItemText(_optNewChainAnchor.Selected) : "spine_3";
+            string meshFilter = (_optNewChainMesh != null && _optNewChainMesh.Selected > 0) ? _optNewChainMesh.GetItemText(_optNewChainMesh.Selected) : "";
+
+            Vector3 originHero = Vector3.Zero;
+            if (_previewHeroSkeleton != null)
+            {
+                int bIdx = _previewHeroSkeleton.FindBone(anchor);
+                if (bIdx >= 0) originHero = _previewHeroSkeleton.GetBoneGlobalRest(bIdx).Origin;
+            }
+
+            var chain = new BoneChainDef
+            {
+                ChainId = $"syn_{Guid.NewGuid().ToString("N")[..6]}",
+                Name = name,
+                Category = "Clothing & Hair",
+                RootSourceBone = name,
+                AnchorHeroBone = anchor,
+                Policy = ChainPolicy.PreservePhysicsChain,
+                Simulation = SimulationKind.Jiggle,
+                StiffnessRoot = (float)(_sliderNewChainStiffRoot?.Value ?? 0.85),
+                StiffnessTip = (float)(_sliderNewChainStiffTip?.Value ?? 0.25),
+                Damping = (float)(_sliderNewChainDamping?.Value ?? 0.35),
+                IsSynthetic = true,
+                SlotId = _accessorySlotId ?? "",
+                TargetMeshName = meshFilter,
+                SyntheticOriginHeroSpace = originHero,
+                SyntheticDirectionHeroSpace = new Vector3(0f, -1f, 0f),
+                SyntheticLengthMeters = (float)(_spinNewChainLen?.Value ?? 0.55),
+                SyntheticInfluenceRadius = (float)(_spinNewChainRadius?.Value ?? 0.25),
+                SyntheticSegmentCount = (int)(_spinNewChainSegs?.Value ?? 4)
+            };
+            _boneChains.Add(chain);
+            _selectedChain = chain;
+            RefreshClothingChainsPanel();
+            MarkRemapStaleAndRefresh();
+            SetBottomStatus($"Added synthetic clothing chain '{name}' anchored to '{anchor}'.", StatusTone.Success);
+        }
+
+        public void ToggleBoneDisabled(string boneName)
+        {
+            if (string.IsNullOrWhiteSpace(boneName)) return;
+            if (_disabledSourceBones.Contains(boneName))
+                _disabledSourceBones.Remove(boneName);
+            else
+                _disabledSourceBones.Add(boneName);
+
+            RefreshDisabledBonesList();
+            RefreshSourceBoneDisableBrowser();
+            MarkRemapStaleAndRefresh();
+            if (_showBones) RedrawBoneWireframe();
+        }
+
+        private void RefreshDisabledBonesList()
+        {
+            if (_btnSubTabDisable != null)
+                _btnSubTabDisable.Text = $"Prune ({_disabledSourceBones.Count})";
+
+            if (_boxDisabledBonesList == null) return;
+            foreach (Node ch in _boxDisabledBonesList.GetChildren()) ch.QueueFree();
+
+            bool empty = _disabledSourceBones.Count == 0;
+            if (_lblDisabledBonesEmpty != null) _lblDisabledBonesEmpty.Visible = empty;
+            if (empty) return;
+
+            foreach (string bName in _disabledSourceBones.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList())
+            {
+                var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                row.AddChild(new Label { Text = bName, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, ClipText = true });
+                var btnEnable = new Button { Text = "Re-Enable", CustomMinimumSize = new Vector2(88, 26) };
+                string captured = bName;
+                btnEnable.Pressed += () => ToggleBoneDisabled(captured);
+                row.AddChild(btnEnable);
+                _boxDisabledBonesList.AddChild(row);
+            }
+        }
+
+        private void RefreshSourceBoneDisableBrowser()
+        {
+            if (_boxSourceBoneDisableList == null) return;
+            foreach (Node ch in _boxSourceBoneDisableList.GetChildren()) ch.QueueFree();
+
+            var srcSkel = GetValidSourceSkeleton();
+            if (srcSkel == null) return;
+
+            string q = _txtDisableBoneSearch?.Text?.Trim() ?? "";
+            int mode = _optDisableBoneFilter?.Selected ?? 0; // 0=Weighted, 1=Hair&Cloth, 2=Disabled, 3=All
+            int total = srcSkel.GetBoneCount();
+            int shown = 0;
+            const int maxRows = 120;
+
+            for (int b = 0; b < total && shown < maxRows; b++)
+            {
+                string bName = srcSkel.GetBoneName(b);
+                bool weighted = _lastWeightedSrcBones.Contains(b);
+                bool disabled = _disabledSourceBones.Contains(bName);
+                string low = bName.ToLowerInvariant();
+                bool isHairCloth = low.Contains("hair") || low.Contains("skirt") || low.Contains("cape") ||
+                                   low.Contains("ribbon") || low.Contains("hood") || low.Contains("coat") || low.Contains("tail");
+
+                if (mode == 0 && !weighted) continue;
+                if (mode == 1 && !isHairCloth) continue;
+                if (mode == 2 && !disabled) continue;
+                if (!string.IsNullOrEmpty(q) && !bName.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                row.AddThemeConstantOverride("separation", 6);
+                var lbl = new Label
+                {
+                    Text = bName + (weighted ? "" : " [empty]"),
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    ClipText = true,
+                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+                };
+                if (disabled) lbl.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.SemanticDanger)));
+                row.AddChild(lbl);
+
+                var btn = new Button
+                {
+                    Text = disabled ? "Re-Enable" : "Disable",
+                    CustomMinimumSize = new Vector2(82, 24),
+                    TooltipText = "Collapses weights from this bone onto its parent bone."
+                };
+                string captured = bName;
+                btn.Pressed += () => ToggleBoneDisabled(captured);
+                row.AddChild(btn);
+                _boxSourceBoneDisableList.AddChild(row);
+                shown++;
+            }
+        }
+    }
+}

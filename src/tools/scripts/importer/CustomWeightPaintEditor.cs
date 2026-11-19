@@ -57,6 +57,21 @@ namespace DeadlockPlayground.Importer
             if (string.IsNullOrEmpty(boneName)) return null;
             if (boneName.EndsWith("_L")) return boneName.Substring(0, boneName.Length - 2) + "_R";
             if (boneName.EndsWith("_R")) return boneName.Substring(0, boneName.Length - 2) + "_L";
+            if (boneName.EndsWith("_l")) return boneName.Substring(0, boneName.Length - 2) + "_r";
+            if (boneName.EndsWith("_r")) return boneName.Substring(0, boneName.Length - 2) + "_l";
+            if (boneName.EndsWith(".L")) return boneName.Substring(0, boneName.Length - 2) + ".R";
+            if (boneName.EndsWith(".R")) return boneName.Substring(0, boneName.Length - 2) + ".L";
+            if (boneName.EndsWith(".l")) return boneName.Substring(0, boneName.Length - 2) + ".r";
+            if (boneName.EndsWith(".r")) return boneName.Substring(0, boneName.Length - 2) + ".l";
+
+            int idxL = boneName.LastIndexOf("_l_", StringComparison.Ordinal);
+            if (idxL >= 0) return boneName.Substring(0, idxL) + "_r_" + boneName.Substring(idxL + 3);
+            int idxR = boneName.LastIndexOf("_r_", StringComparison.Ordinal);
+            if (idxR >= 0) return boneName.Substring(0, idxR) + "_l_" + boneName.Substring(idxR + 3);
+            int idxUpperL = boneName.LastIndexOf("_L_", StringComparison.Ordinal);
+            if (idxUpperL >= 0) return boneName.Substring(0, idxUpperL) + "_R_" + boneName.Substring(idxUpperL + 3);
+            int idxUpperR = boneName.LastIndexOf("_R_", StringComparison.Ordinal);
+            if (idxUpperR >= 0) return boneName.Substring(0, idxUpperR) + "_L_" + boneName.Substring(idxUpperR + 3);
             return null;
         }
 
@@ -332,11 +347,17 @@ namespace DeadlockPlayground.Importer
             int mirrorBindIdx,
             int mirrorFallbackBindIdx)
         {
-            bool anyChanged = ApplyHalfBrush(surfaces, hitPointWorld, mode, radius, strength, targetBindIdx, fallbackBindIdx);
-            if (mirrorLR && mirrorBindIdx >= 0)
+            // When subtracting with Mirror L/R ON near the centerline (e.g. a cape), exclude the mirror bone
+            // from receiving redistributed weight so the mirrored pass doesn't bounce weight right back.
+            int excludeForPrimary = (mode == BrushMode.Subtract && mirrorLR && mirrorBindIdx >= 0 && mirrorBindIdx != targetBindIdx)
+                ? mirrorBindIdx
+                : -1;
+            bool anyChanged = ApplyHalfBrush(surfaces, hitPointWorld, mode, radius, strength, targetBindIdx, fallbackBindIdx, excludeForPrimary);
+            if (mirrorLR && mirrorBindIdx >= 0 && mirrorBindIdx != targetBindIdx)
             {
                 Vector3 mirroredPt = new Vector3(-hitPointWorld.X, hitPointWorld.Y, hitPointWorld.Z);
-                if (ApplyHalfBrush(surfaces, mirroredPt, mode, radius, strength, mirrorBindIdx, mirrorFallbackBindIdx >= 0 ? mirrorFallbackBindIdx : fallbackBindIdx))
+                int excludeForMirror = (mode == BrushMode.Subtract) ? targetBindIdx : -1;
+                if (ApplyHalfBrush(surfaces, mirroredPt, mode, radius, strength, mirrorBindIdx, mirrorFallbackBindIdx >= 0 ? mirrorFallbackBindIdx : fallbackBindIdx, excludeForMirror))
                     anyChanged = true;
             }
             return anyChanged;
@@ -349,7 +370,8 @@ namespace DeadlockPlayground.Importer
             float radius,
             float strength,
             int targetBindIdx,
-            int fallbackBindIdx)
+            int fallbackBindIdx,
+            int excludeReceiverBindIdx = -1)
         {
             if (targetBindIdx < 0 || radius <= 0.001f || strength <= 0.0001f) return false;
             float rSq = radius * radius;
@@ -421,8 +443,10 @@ namespace DeadlockPlayground.Importer
                         else if (mode == BrushMode.Subtract)
                         {
                             float remove = cur * alpha;
-                            float next = MathF.Max(0f, cur - remove);
-                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx);
+                            float next = cur - remove;
+                            // Snap tiny residual weights cleanly to 0 so erased bones don't leave ghost weights
+                            if (next < 0.015f) next = 0f;
+                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, excludeReceiverBindIdx, capAmplification: true);
                         }
                     }
 
@@ -451,23 +475,43 @@ namespace DeadlockPlayground.Importer
             return any;
         }
 
-        private static void ScaleOthers(Dictionary<int, float> dict, int targetBone, float newTargetW, int fallbackBone)
+        private static void ScaleOthers(Dictionary<int, float> dict, int targetBone, float newTargetW, int fallbackBone, int excludeReceiverBone = -1, bool capAmplification = false)
         {
+            float lockedExcludedW = (excludeReceiverBone >= 0 && excludeReceiverBone != targetBone && dict.TryGetValue(excludeReceiverBone, out float ew))
+                ? ew
+                : 0f;
+
             float othersSum = 0f;
             foreach (var kv in dict)
-                if (kv.Key != targetBone) othersSum += kv.Value;
+                if (kv.Key != targetBone && kv.Key != excludeReceiverBone) othersSum += kv.Value;
 
-            float desiredOthers = MathF.Max(0f, 1f - newTargetW);
-            var keys = dict.Keys.Where(k => k != targetBone).ToList();
+            float desiredOthers = MathF.Max(0f, 1f - newTargetW - lockedExcludedW);
+            var keys = dict.Keys.Where(k => k != targetBone && k != excludeReceiverBone).ToList();
             if (othersSum > 1e-5f)
             {
                 float ratio = desiredOthers / othersSum;
-                foreach (int k in keys) dict[k] *= ratio;
+                if (capAmplification && ratio > 1.75f)
+                {
+                    // Prevent tiny residual weights on previously erased sibling bones from exploding back to 1.0!
+                    // Scale existing significant bones modestly and route the remaining freed weight to the parent/fallback bone.
+                    float cappedRatio = 1.75f;
+                    foreach (int k in keys) dict[k] *= cappedRatio;
+                    float leftover = MathF.Max(0f, desiredOthers - othersSum * cappedRatio);
+                    if (leftover > 1e-5f)
+                    {
+                        int receiver = (fallbackBone >= 0 && fallbackBone != targetBone && fallbackBone != excludeReceiverBone) ? fallbackBone : 0;
+                        dict[receiver] = dict.GetValueOrDefault(receiver, 0f) + leftover;
+                    }
+                }
+                else
+                {
+                    foreach (int k in keys) dict[k] *= ratio;
+                }
             }
             else if (desiredOthers > 1e-5f)
             {
-                int receiver = fallbackBone >= 0 && fallbackBone != targetBone ? fallbackBone : 0;
-                dict[receiver] = desiredOthers;
+                int receiver = (fallbackBone >= 0 && fallbackBone != targetBone && fallbackBone != excludeReceiverBone) ? fallbackBone : 0;
+                dict[receiver] = dict.GetValueOrDefault(receiver, 0f) + desiredOthers;
             }
 
             if (newTargetW > 0.0001f) dict[targetBone] = newTargetW;
@@ -1335,6 +1379,188 @@ void fragment() {{
                 }
             }
             return changedAny;
+        }
+
+        /// <summary>
+        /// Eyedropper helper: finds the strongest weighted bone on <paramref name="hitSurface"/> nearest to <paramref name="hitPoint"/>.
+        /// </summary>
+        public static bool PickStrongestBoneAtPoint(
+            SurfaceState hitSurface,
+            Vector3 hitPoint,
+            Skeleton3D skeleton,
+            Skin skin,
+            out string boneName,
+            out float weight)
+        {
+            boneName = null;
+            weight = 0f;
+            if (hitSurface == null || skeleton == null || skin == null || hitSurface.PosedVerts == null)
+                return false;
+
+            int bestV = -1;
+            float bestDistSq = float.MaxValue;
+            var verts = hitSurface.PosedVerts;
+            for (int v = 0; v < verts.Length; v++)
+            {
+                float dSq = verts[v].DistanceSquaredTo(hitPoint);
+                if (dSq < bestDistSq)
+                {
+                    bestDistSq = dSq;
+                    bestV = v;
+                }
+            }
+            if (bestV < 0) return false;
+
+            int bestBind = -1;
+            float bestW = 0f;
+            int off = bestV * 4;
+            for (int k = 0; k < 4; k++)
+            {
+                float w = hitSurface.Weights[off + k];
+                if (w > bestW)
+                {
+                    bestW = w;
+                    bestBind = hitSurface.SkinBones[off + k];
+                }
+            }
+            if (bestBind < 0 || bestBind >= skin.GetBindCount() || bestW <= 0.001f)
+                return false;
+
+            string bn = skin.GetBindName(bestBind).ToString();
+            if (string.IsNullOrEmpty(bn))
+            {
+                int sb = skin.GetBindBone(bestBind);
+                if (sb >= 0 && sb < skeleton.GetBoneCount()) bn = skeleton.GetBoneName(sb);
+            }
+            if (string.IsNullOrEmpty(bn)) return false;
+
+            boneName = bn;
+            weight = bestW;
+            return true;
+        }
+
+        /// <summary>
+        /// Returns every bone name actually weighted (&gt; 0.005) across <paramref name="surfaces"/> with its vertex count.
+        /// </summary>
+        public static Dictionary<string, int> CollectWeightedBones(
+            List<SurfaceState> surfaces,
+            Skeleton3D skeleton,
+            Skin skin)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (surfaces == null || surfaces.Count == 0 || skeleton == null) return counts;
+
+            foreach (var s in surfaces)
+            {
+                var curSkin = s?.MeshInstance?.Skin ?? skin;
+                if (s == null || curSkin == null || s.SkinBones == null || s.Weights == null) continue;
+                int bindCount = curSkin.GetBindCount();
+                var bindNames = new string[bindCount];
+                for (int bi = 0; bi < bindCount; bi++)
+                {
+                    string bn = curSkin.GetBindName(bi).ToString();
+                    if (string.IsNullOrEmpty(bn))
+                    {
+                        int sb = curSkin.GetBindBone(bi);
+                        if (sb >= 0 && sb < skeleton.GetBoneCount()) bn = skeleton.GetBoneName(sb);
+                    }
+                    bindNames[bi] = bn ?? "";
+                }
+
+                int vc = s.Weights.Length / 4;
+                for (int v = 0; v < vc; v++)
+                {
+                    int off = v * 4;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (s.Weights[off + k] <= 0.005f) continue;
+                        int bi = s.SkinBones[off + k];
+                        if (bi >= 0 && bi < bindCount && !string.IsNullOrEmpty(bindNames[bi]))
+                        {
+                            counts[bindNames[bi]] = counts.GetValueOrDefault(bindNames[bi]) + 1;
+                        }
+                    }
+                }
+            }
+            return counts;
+        }
+
+        /// <summary>
+        /// Runs a 1-click Laplacian smoothing pass across all vertices of <paramref name="surfaces"/>
+        /// for <paramref name="targetBindIdx"/> (great for removing harsh creases on capes/skirts).
+        /// </summary>
+        public static bool SmoothAllVerticesForBone(List<SurfaceState> surfaces, int targetBindIdx, float strength = 0.45f)
+        {
+            if (surfaces == null || targetBindIdx < 0) return false;
+            float alpha = Mathf.Clamp(strength, 0.05f, 0.85f);
+            bool any = false;
+
+            foreach (var s in surfaces)
+            {
+                if (s == null || s.Neighbors == null || s.WeldClusters == null || s.Weights == null) continue;
+                int vCount = s.Weights.Length / 4;
+                var snapB = (int[])s.SkinBones.Clone();
+                var snapW = (float[])s.Weights.Clone();
+                var visited = new bool[vCount];
+
+                for (int v = 0; v < vCount; v++)
+                {
+                    if (visited[v]) continue;
+                    var cluster = s.WeldClusters[v];
+                    foreach (int c in cluster) visited[c] = true;
+
+                    var nbrs = s.Neighbors[v];
+                    if (nbrs == null || nbrs.Length == 0) continue;
+
+                    int baseOff = v * 4;
+                    float curW = 0f;
+                    var dict = new Dictionary<int, float>();
+                    int fallback = 0;
+                    float bestOther = -1f;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        int bi = snapB[baseOff + k];
+                        float w = snapW[baseOff + k];
+                        if (bi < 0 || w <= 1e-4f) continue;
+                        dict[bi] = dict.GetValueOrDefault(bi) + w;
+                        if (bi == targetBindIdx) curW += w;
+                        else if (w > bestOther) { bestOther = w; fallback = bi; }
+                    }
+
+                    float nbrSum = 0f;
+                    foreach (int nb in nbrs)
+                    {
+                        int nOff = nb * 4;
+                        for (int k = 0; k < 4; k++)
+                            if (snapB[nOff + k] == targetBindIdx) nbrSum += snapW[nOff + k];
+                    }
+                    float nbrAvg = nbrSum / nbrs.Length;
+                    if (MathF.Abs(nbrAvg - curW) < 1e-4f) continue;
+
+                    float nextW = Mathf.Clamp(Mathf.Lerp(curW, nbrAvg, alpha), 0f, 1f);
+                    if (nextW < 0.005f) nextW = 0f;
+                    ScaleOthers(dict, targetBindIdx, nextW, fallback);
+
+                    var top = dict.Where(kv => kv.Value > 1e-4f).OrderByDescending(kv => kv.Value).Take(4).ToList();
+                    float sum = top.Sum(kv => kv.Value);
+                    if (sum <= 1e-6f) continue;
+                    int[] outB = new int[4];
+                    float[] outW = new float[4];
+                    for (int k = 0; k < top.Count; k++) { outB[k] = top[k].Key; outW[k] = top[k].Value / sum; }
+
+                    foreach (int c in cluster)
+                    {
+                        int cOff = c * 4;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            s.SkinBones[cOff + k] = outB[k];
+                            s.Weights[cOff + k] = outW[k];
+                        }
+                    }
+                    any = true;
+                }
+            }
+            return any;
         }
     }
 }

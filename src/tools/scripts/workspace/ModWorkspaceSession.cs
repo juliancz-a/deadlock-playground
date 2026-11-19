@@ -285,6 +285,57 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("kept_part_transforms")]
         public Dictionary<string, WorkspaceKeptPartTransformEntry> KeptOriginalPartTransforms { get; set; }
 
+        [JsonPropertyName("rig_family_override")]
+        public int? RigFamilyOverride { get; set; }
+
+        [JsonPropertyName("keep_unweighted_bones")]
+        public bool KeepUnweightedBones { get; set; } = false;
+
+        [JsonPropertyName("enable_custom_physics")]
+        public bool EnableCustomPhysics { get; set; } = true;
+
+        [JsonPropertyName("preserve_source_clothing_chains")]
+        public bool PreserveSourceClothingChains { get; set; } = true;
+
+        [JsonPropertyName("disabled_source_bones")]
+        public List<string> DisabledSourceBones { get; set; }
+
+        [JsonPropertyName("bone_chains")]
+        public List<WorkspaceBoneChainEntry> BoneChains { get; set; }
+
+        [JsonPropertyName("body_collision_capsules")]
+        public List<WorkspaceBodyColliderEntry> BodyCollisionCapsules { get; set; }
+
+        [JsonPropertyName("accessory_bone_mode")]
+        public int AccessoryBoneMode { get; set; } = 0;
+
+        [JsonPropertyName("finger_rig_mode")]
+        public int FingerMode { get; set; } = 1;
+
+        [JsonPropertyName("finger_landmarks")]
+        public Dictionary<string, float[]> FingerLandmarks { get; set; }
+
+        [JsonPropertyName("generate_finger_metacarpals")]
+        public bool GenerateFingerMetacarpals { get; set; } = false;
+
+        [JsonPropertyName("generate_wrist_twist")]
+        public bool GenerateWristTwist { get; set; } = false;
+
+        [JsonPropertyName("bind_symmetry")]
+        public bool BindSymmetry { get; set; } = true;
+
+        [JsonPropertyName("fit_spine")]
+        public bool FitSpine { get; set; } = true;
+
+        [JsonPropertyName("conform_to_skeleton")]
+        public bool ConformToSkeleton { get; set; } = true;
+
+        [JsonPropertyName("loose_meshes_rigid")]
+        public bool LooseMeshesRigid { get; set; } = false;
+
+        [JsonPropertyName("extra_twist_bones")]
+        public bool ExtraTwistBones { get; set; } = false;
+
         public static WorkspaceCustomModelEntry FromRiggingOptions(
             string relativeModelPath,
             string originalFileName,
@@ -353,8 +404,102 @@ namespace DeadlockPlayground.Workspace
                 LeftHandSnapOffsetDeg = new[] { o.LeftHandSnapOffsetDeg.X, o.LeftHandSnapOffsetDeg.Y, o.LeftHandSnapOffsetDeg.Z },
                 RightHandSnapOffsetDeg = new[] { o.RightHandSnapOffsetDeg.X, o.RightHandSnapOffsetDeg.Y, o.RightHandSnapOffsetDeg.Z },
                 LeftHandSnapScale = o.LeftHandSnapScale > 0.001f ? o.LeftHandSnapScale : 1.0f,
-                RightHandSnapScale = o.RightHandSnapScale > 0.001f ? o.RightHandSnapScale : 1.0f
+                RightHandSnapScale = o.RightHandSnapScale > 0.001f ? o.RightHandSnapScale : 1.0f,
+                RigFamilyOverride = o.RigFamilyOverride.HasValue ? (int)o.RigFamilyOverride.Value : null,
+                KeepUnweightedBones = o.KeepUnweightedBones,
+                EnableCustomPhysics = o.EnableCustomPhysics,
+                PreserveSourceClothingChains = o.PreserveSourceClothingChains,
+                DisabledSourceBones = o.DisabledSourceBones != null && o.DisabledSourceBones.Count > 0 ? new List<string>(o.DisabledSourceBones) : null,
+                AccessoryBoneMode = (int)o.AccessoryBoneMode,
+                FingerMode = (int)o.FingerMode,
+                GenerateFingerMetacarpals = o.GenerateFingerMetacarpals,
+                GenerateWristTwist = o.GenerateWristTwist,
+                BindSymmetry = o.BindSymmetry,
+                FitSpine = o.FitSpine,
+                ConformToSkeleton = o.ConformToSkeleton,
+                LooseMeshesRigid = o.LooseMeshesRigid,
+                ExtraTwistBones = o.ExtraTwistBones
             };
+
+            if (o.BoneChains != null && o.BoneChains.Count > 0)
+            {
+                entry.BoneChains = new List<WorkspaceBoneChainEntry>();
+                foreach (var c in o.BoneChains)
+                {
+                    if (c == null) continue;
+                    entry.BoneChains.Add(new WorkspaceBoneChainEntry
+                    {
+                        ChainId = c.ChainId,
+                        Name = c.Name,
+                        Category = c.Category,
+                        RootSourceBone = c.RootSourceBone,
+                        SourceBoneNames = c.SourceBoneNames != null ? new List<string>(c.SourceBoneNames) : new(),
+                        AnchorHeroBone = c.AnchorHeroBone,
+                        Policy = (int)c.Policy,
+                        Simulation = (int)c.Simulation,
+                        StiffnessRoot = c.StiffnessRoot,
+                        StiffnessTip = c.StiffnessTip,
+                        Damping = c.Damping,
+                        Gravity = c.Gravity,
+                        CollisionRadiusTipInches = c.CollisionRadiusTipInches,
+                        StrayRadiusInches = c.StrayRadiusInches,
+                        TwistRelax = c.TwistRelax,
+                        AngleLimitDeg = c.AngleLimitDeg,
+                        PlanarizeBackBarrier = c.PlanarizeBackBarrier,
+                        AnchorFreeRotate = c.AnchorFreeRotate,
+                        OpenSheet = c.OpenSheet,
+                        Friction = c.Friction,
+                        IsSynthetic = c.IsSynthetic,
+                        SlotId = c.SlotId,
+                        TargetMeshName = c.TargetMeshName,
+                        SyntheticOrigin = new[] { c.SyntheticOriginHeroSpace.X, c.SyntheticOriginHeroSpace.Y, c.SyntheticOriginHeroSpace.Z },
+                        SyntheticDirection = new[] { c.SyntheticDirectionHeroSpace.X, c.SyntheticDirectionHeroSpace.Y, c.SyntheticDirectionHeroSpace.Z },
+                        SyntheticLength = c.SyntheticLengthMeters,
+                        SyntheticRadius = c.SyntheticInfluenceRadius,
+                        SyntheticSegments = c.SyntheticSegmentCount,
+                        JointOverrides = (c.JointOverrides != null && c.JointOverrides.Count > 0)
+                            ? c.JointOverrides.FindAll(j => j != null && j.HasAnyOverride).ConvertAll(j => new WorkspaceBoneJointOverrideEntry
+                            {
+                                BoneName = j.BoneName,
+                                Simulate = j.Simulate,
+                                GoalStrength = j.GoalStrength,
+                                GoalDamping = j.GoalDamping,
+                                CollisionRadiusInches = j.CollisionRadiusInches,
+                                StrayRadiusInches = j.StrayRadiusInches
+                            })
+                            : null
+                    });
+                }
+            }
+
+            if (o.BodyCollisionCapsules != null && o.BodyCollisionCapsules.Count > 0)
+            {
+                entry.BodyCollisionCapsules = new List<WorkspaceBodyColliderEntry>();
+                foreach (var cap in o.BodyCollisionCapsules)
+                {
+                    if (cap == null || string.IsNullOrWhiteSpace(cap.BoneName)) continue;
+                    entry.BodyCollisionCapsules.Add(new WorkspaceBodyColliderEntry
+                    {
+                        BoneName = cap.BoneName,
+                        DisplayName = cap.DisplayName,
+                        P0 = new[] { cap.Point0Local.X, cap.Point0Local.Y, cap.Point0Local.Z },
+                        R0 = cap.Radius0Meters,
+                        P1 = new[] { cap.Point1Local.X, cap.Point1Local.Y, cap.Point1Local.Z },
+                        R1 = cap.Radius1Meters,
+                        RadiusScale = cap.RadiusScale,
+                        Off = new[] { cap.LocalOffsetMeters.X, cap.LocalOffsetMeters.Y, cap.LocalOffsetMeters.Z },
+                        Enabled = cap.Enabled,
+                        IsUserEdited = cap.IsUserEdited
+                    });
+                }
+            }
+
+            if (o.FingerLandmarks != null && o.FingerLandmarks.Count > 0)
+            {
+                entry.FingerLandmarks = new Dictionary<string, float[]>();
+                foreach (var kv in o.FingerLandmarks)
+                    entry.FingerLandmarks[kv.Key] = new[] { kv.Value.X, kv.Value.Y, kv.Value.Z };
+            }
 
             if (o.KeptOriginalPartTransforms != null && o.KeptOriginalPartTransforms.Count > 0)
             {
@@ -580,8 +725,164 @@ namespace DeadlockPlayground.Workspace
                     o.OriginalMeshDeformSculpts[kv.Key] = map;
                 }
             }
+            if (RigFamilyOverride.HasValue)
+                o.RigFamilyOverride = (DeadlockPlayground.Importer.RigFamily)RigFamilyOverride.Value;
+            o.KeepUnweightedBones = KeepUnweightedBones;
+            o.EnableCustomPhysics = EnableCustomPhysics;
+            o.PreserveSourceClothingChains = PreserveSourceClothingChains;
+            if (DisabledSourceBones != null)
+            {
+                foreach (var b in DisabledSourceBones)
+                    if (!string.IsNullOrWhiteSpace(b)) o.DisabledSourceBones.Add(b);
+            }
+            if (BoneChains != null)
+            {
+                foreach (var ce in BoneChains)
+                {
+                    if (ce == null) continue;
+                    o.BoneChains.Add(new DeadlockPlayground.Importer.BoneChainDef
+                    {
+                        ChainId = ce.ChainId ?? "",
+                        Name = ce.Name ?? "",
+                        Category = ce.Category ?? "Clothing & Hair",
+                        RootSourceBone = ce.RootSourceBone ?? "",
+                        SourceBoneNames = ce.SourceBoneNames != null ? new List<string>(ce.SourceBoneNames) : new(),
+                        AnchorHeroBone = ce.AnchorHeroBone ?? "spine_3",
+                        Policy = (DeadlockPlayground.Importer.ChainPolicy)ce.Policy,
+                        Simulation = (DeadlockPlayground.Importer.SimulationKind)ce.Simulation,
+                        StiffnessRoot = ce.StiffnessRoot,
+                        StiffnessTip = ce.StiffnessTip,
+                        Damping = ce.Damping,
+                        Gravity = ce.Gravity,
+                        CollisionRadiusTipInches = ce.CollisionRadiusTipInches > 0.1f ? ce.CollisionRadiusTipInches : 2.4f,
+                        StrayRadiusInches = (ce.StrayRadiusInches < 0f) ? -1.0f : (ce.StrayRadiusInches > 0.2f ? ce.StrayRadiusInches : -1.0f),
+                        TwistRelax = ce.TwistRelax >= 0f ? ce.TwistRelax : 1.0f,
+                        AngleLimitDeg = ce.AngleLimitDeg > 1f ? ce.AngleLimitDeg : 35.0f,
+                        PlanarizeBackBarrier = ce.PlanarizeBackBarrier ?? false,
+                        AnchorFreeRotate = ce.AnchorFreeRotate ?? false,
+                        OpenSheet = ce.OpenSheet ?? true,
+                        Friction = ce.Friction ?? 0.15f,
+                        IsSynthetic = ce.IsSynthetic,
+                        SlotId = ce.SlotId ?? "",
+                        TargetMeshName = ce.TargetMeshName ?? "",
+                        SyntheticOriginHeroSpace = (ce.SyntheticOrigin != null && ce.SyntheticOrigin.Length == 3)
+                            ? new Vector3(ce.SyntheticOrigin[0], ce.SyntheticOrigin[1], ce.SyntheticOrigin[2])
+                            : Vector3.Zero,
+                        SyntheticDirectionHeroSpace = (ce.SyntheticDirection != null && ce.SyntheticDirection.Length == 3)
+                            ? new Vector3(ce.SyntheticDirection[0], ce.SyntheticDirection[1], ce.SyntheticDirection[2])
+                            : new Vector3(0, -1, 0),
+                        SyntheticLengthMeters = ce.SyntheticLength > 0.01f ? ce.SyntheticLength : 0.45f,
+                        SyntheticInfluenceRadius = ce.SyntheticRadius > 0.01f ? ce.SyntheticRadius : 0.22f,
+                        SyntheticSegmentCount = ce.SyntheticSegments > 0 ? ce.SyntheticSegments : 4,
+                        JointOverrides = (ce.JointOverrides != null && ce.JointOverrides.Count > 0)
+                            ? ce.JointOverrides.FindAll(j => j != null).ConvertAll(j => new DeadlockPlayground.Importer.BoneJointOverride
+                            {
+                                BoneName = j.BoneName ?? "",
+                                Simulate = j.Simulate,
+                                GoalStrength = j.GoalStrength,
+                                GoalDamping = j.GoalDamping,
+                                CollisionRadiusInches = j.CollisionRadiusInches,
+                                StrayRadiusInches = j.StrayRadiusInches
+                            })
+                            : new List<DeadlockPlayground.Importer.BoneJointOverride>()
+                    });
+                }
+            }
+            o.AccessoryBoneMode = (DeadlockPlayground.Importer.AccessoryBoneMode)AccessoryBoneMode;
+            o.FingerMode = (DeadlockPlayground.Importer.FingerRigMode)FingerMode;
+            o.GenerateFingerMetacarpals = GenerateFingerMetacarpals;
+            o.GenerateWristTwist = GenerateWristTwist;
+            o.BindSymmetry = BindSymmetry;
+            o.FitSpine = FitSpine;
+            o.ConformToSkeleton = ConformToSkeleton;
+            o.LooseMeshesRigid = LooseMeshesRigid;
+            o.ExtraTwistBones = ExtraTwistBones;
+            if (BodyCollisionCapsules != null)
+            {
+                foreach (var cap in BodyCollisionCapsules)
+                {
+                    if (cap == null || string.IsNullOrWhiteSpace(cap.BoneName)) continue;
+                    o.BodyCollisionCapsules.Add(new DeadlockPlayground.Importer.BodyCollisionCapsuleDef
+                    {
+                        BoneName = cap.BoneName,
+                        DisplayName = cap.DisplayName ?? cap.BoneName,
+                        Point0Local = cap.P0 is { Length: >= 3 } ? new Vector3(cap.P0[0], cap.P0[1], cap.P0[2]) : Vector3.Zero,
+                        Radius0Meters = cap.R0 > 0.005f ? cap.R0 : 0.10f,
+                        Point1Local = cap.P1 is { Length: >= 3 } ? new Vector3(cap.P1[0], cap.P1[1], cap.P1[2]) : Vector3.Zero,
+                        Radius1Meters = cap.R1 > 0.005f ? cap.R1 : 0.10f,
+                        RadiusScale = cap.RadiusScale > 0.01f ? cap.RadiusScale : 1.0f,
+                        LocalOffsetMeters = cap.Off is { Length: >= 3 } ? new Vector3(cap.Off[0], cap.Off[1], cap.Off[2]) : Vector3.Zero,
+                        Enabled = cap.Enabled,
+                        IsUserEdited = cap.IsUserEdited
+                    });
+                }
+            }
+            if (FingerLandmarks != null)
+            {
+                o.FingerLandmarks = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in FingerLandmarks)
+                    if (kv.Value != null && kv.Value.Length == 3)
+                        o.FingerLandmarks[kv.Key] = new Vector3(kv.Value[0], kv.Value[1], kv.Value[2]);
+            }
             return o;
         }
+    }
+
+    public class WorkspaceBoneChainEntry
+    {
+        [JsonPropertyName("chain_id")] public string ChainId { get; set; } = "";
+        [JsonPropertyName("name")] public string Name { get; set; } = "";
+        [JsonPropertyName("category")] public string Category { get; set; } = "Clothing & Hair";
+        [JsonPropertyName("root_source_bone")] public string RootSourceBone { get; set; } = "";
+        [JsonPropertyName("source_bones")] public List<string> SourceBoneNames { get; set; } = new();
+        [JsonPropertyName("anchor_hero_bone")] public string AnchorHeroBone { get; set; } = "spine_3";
+        [JsonPropertyName("policy")] public int Policy { get; set; } = 0;
+        [JsonPropertyName("simulation")] public int Simulation { get; set; } = 0;
+        [JsonPropertyName("stiffness_root")] public float StiffnessRoot { get; set; } = 0.80f;
+        [JsonPropertyName("stiffness_tip")] public float StiffnessTip { get; set; } = 0.25f;
+        [JsonPropertyName("damping")] public float Damping { get; set; } = 0.35f;
+        [JsonPropertyName("gravity")] public float Gravity { get; set; } = 1.0f;
+        [JsonPropertyName("col_radius_tip")] public float CollisionRadiusTipInches { get; set; } = 2.4f;
+        [JsonPropertyName("stray_radius")] public float StrayRadiusInches { get; set; } = 12.0f;
+        [JsonPropertyName("twist_relax")] public float TwistRelax { get; set; } = 1.0f;
+        [JsonPropertyName("angle_limit_deg")] public float AngleLimitDeg { get; set; } = 35.0f;
+        [JsonPropertyName("planarize_back")] public bool? PlanarizeBackBarrier { get; set; }
+        [JsonPropertyName("anchor_free_rotate")] public bool? AnchorFreeRotate { get; set; }
+        [JsonPropertyName("open_sheet")] public bool? OpenSheet { get; set; }
+        [JsonPropertyName("friction")] public float? Friction { get; set; }
+        [JsonPropertyName("is_synthetic")] public bool IsSynthetic { get; set; } = false;
+        [JsonPropertyName("slot_id")] public string SlotId { get; set; } = "";
+        [JsonPropertyName("target_mesh")] public string TargetMeshName { get; set; } = "";
+        [JsonPropertyName("synthetic_origin")] public float[] SyntheticOrigin { get; set; }
+        [JsonPropertyName("synthetic_direction")] public float[] SyntheticDirection { get; set; }
+        [JsonPropertyName("synthetic_length")] public float SyntheticLength { get; set; } = 0.45f;
+        [JsonPropertyName("synthetic_radius")] public float SyntheticRadius { get; set; } = 0.22f;
+        [JsonPropertyName("synthetic_segments")] public int SyntheticSegments { get; set; } = 4;
+        [JsonPropertyName("joint_overrides")] public List<WorkspaceBoneJointOverrideEntry> JointOverrides { get; set; }
+    }
+
+    public class WorkspaceBoneJointOverrideEntry
+    {
+        [JsonPropertyName("bone_name")] public string BoneName { get; set; } = "";
+        [JsonPropertyName("simulate")] public bool? Simulate { get; set; }
+        [JsonPropertyName("goal_strength")] public float? GoalStrength { get; set; }
+        [JsonPropertyName("goal_damping")] public float? GoalDamping { get; set; }
+        [JsonPropertyName("col_radius")] public float? CollisionRadiusInches { get; set; }
+        [JsonPropertyName("stray_radius")] public float? StrayRadiusInches { get; set; }
+    }
+
+    public class WorkspaceBodyColliderEntry
+    {
+        [JsonPropertyName("bone")] public string BoneName { get; set; } = "";
+        [JsonPropertyName("label")] public string DisplayName { get; set; } = "";
+        [JsonPropertyName("p0")] public float[] P0 { get; set; }
+        [JsonPropertyName("r0")] public float R0 { get; set; } = 0.10f;
+        [JsonPropertyName("p1")] public float[] P1 { get; set; }
+        [JsonPropertyName("r1")] public float R1 { get; set; } = 0.10f;
+        [JsonPropertyName("scale")] public float RadiusScale { get; set; } = 1.0f;
+        [JsonPropertyName("off")] public float[] Off { get; set; }
+        [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+        [JsonPropertyName("edited")] public bool IsUserEdited { get; set; }
     }
 
     public class WorkspaceAssetEntry

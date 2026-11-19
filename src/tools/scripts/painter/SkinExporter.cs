@@ -423,13 +423,28 @@ var actuallyPaintedNonCustomKeys = new HashSet<string>(StringComparer.OrdinalIgn
                     resolvedHeroVmdlPath = $"models/heroes/{config.HeroCodename}/{config.HeroCodename}.vmdl_c";
                 }
 
+                // Resolve active custom physics/jiggle chains from the hero's CustomJiggleBoneDriver (or skeleton metadata)
+                IEnumerable<BoneChainDef> exportedPhysicsChains = null;
+                Node walk = skeleton?.GetParent() ?? firstMesh?.GetParent();
+                while (walk != null && GodotObject.IsInstanceValid(walk))
+                {
+                    var jiggleDriver = walk.FindChild("CustomJiggleBoneDriver", false, false) as DeadlockPlayground.Animation.CustomJiggleBoneDriver;
+                    if (jiggleDriver != null && GodotObject.IsInstanceValid(jiggleDriver))
+                    {
+                        exportedPhysicsChains = jiggleDriver.GetActiveChainDefinitions();
+                        break;
+                    }
+                    walk = walk.GetParent();
+                }
+
                 preExtractedCustomBundle = CustomModelExporter.BuildExportBundle(
                     preExtractedCustomMeshes,
                     skeleton,
                     config.HeroCodename,
                     heroModelVpkPath: resolvedHeroVmdlPath,
                     compilerExe: config.ResourceCompilerPath,
-                    deadlockGamePath: config.DeadlockGamePath
+                    deadlockGamePath: config.DeadlockGamePath,
+                    preservedChains: exportedPhysicsChains
                 );
 
                 // Register kept visible vanilla props & split composite surfaces (e.g. shotgun, crossbow, stake)

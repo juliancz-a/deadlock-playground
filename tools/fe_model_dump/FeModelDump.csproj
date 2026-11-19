@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>fe_model_dump</AssemblyName>
+    <RootNamespace>FeModelDump</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ValveResourceFormat" Version="21.1.7798" />
+    <PackageReference Include="ValvePak" Version="7.2.0.221" />
+  </ItemGroup>
+</Project>
+

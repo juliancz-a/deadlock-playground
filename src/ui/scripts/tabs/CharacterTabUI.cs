@@ -593,6 +593,99 @@ public partial class CharacterTabUI : VBoxContainer
         RefreshAccessorySlotsList();
     }
 
+    /// <summary>
+    /// Runs a free-RAM pre-check (ImporterMemoryGuard), asks the user "Continue in Light Mode" vs "Cancel"
+    /// if memory is tight, and parses the 3D scene asynchronously with a progress bar overlay.
+    /// </summary>
+    private async void LoadSceneForImporterModalAsync(string path, Node3D hero, Action<Node3D> onSceneReady)
+    {
+        var report = ImporterMemoryGuard.Evaluate(path, hero);
+        bool forceLightMode = false;
+
+        if (report.Verdict == ImporterMemoryGuard.Verdict.Critical || report.Verdict == ImporterMemoryGuard.Verdict.LowMemory)
+        {
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            var dlg = new ConfirmationDialog
+            {
+                Title = report.Verdict == ImporterMemoryGuard.Verdict.Critical ? "Critical Low Memory Warning" : "Low Memory — Light Mode Recommended",
+                DialogText = report.Message,
+                OkButtonText = "Continue in Light Mode",
+                CancelButtonText = "Cancel",
+                Exclusive = false
+            };
+            dlg.Confirmed += () => { tcs.TrySetResult(true); dlg.QueueFree(); };
+            dlg.Canceled += () => { tcs.TrySetResult(false); dlg.QueueFree(); };
+            GetTree()?.Root?.AddChild(dlg);
+            dlg.PopupCentered(new Vector2I(540, 240));
+
+            bool proceed = await tcs.Task;
+            if (!proceed) return;
+            forceLightMode = true;
+            ImporterMemoryGuard.LightMode = true;
+        }
+
+        // Progress overlay
+        var overlay = new CanvasLayer { Layer = 115 };
+        var backdrop = new ColorRect { Color = new Color(0, 0, 0, 0.45f) };
+        backdrop.SetAnchorsPreset(LayoutPreset.FullRect);
+        overlay.AddChild(backdrop);
+
+        var center = new CenterContainer();
+        center.SetAnchorsPreset(LayoutPreset.FullRect);
+        overlay.AddChild(center);
+
+        var panel = new PanelContainer { CustomMinimumSize = new Vector2(420, 110), ThemeTypeVariation = "ModalPanel" };
+        var box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", 8);
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 16);
+        margin.AddThemeConstantOverride("margin_right", 16);
+        margin.AddThemeConstantOverride("margin_top", 14);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
+        margin.AddChild(box);
+        panel.AddChild(margin);
+        center.AddChild(panel);
+
+        var lblStage = new Label { Text = "Loading 3D model..." };
+        var bar = new ProgressBar { MinValue = 0, MaxValue = 100, Value = 10, CustomMinimumSize = new Vector2(0, 22) };
+        box.AddChild(lblStage);
+        box.AddChild(bar);
+        GetTree()?.Root?.AddChild(overlay);
+
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+        var (scene, userMessage, _) = await ImporterMemoryGuard.LoadSceneGuardedAsync(
+            path,
+            hero,
+            onProgress: (p, msg) =>
+            {
+                if (GodotObject.IsInstanceValid(bar)) bar.Value = p * 100.0;
+                if (GodotObject.IsInstanceValid(lblStage)) lblStage.Text = msg;
+            },
+            allowCriticalInLightMode: forceLightMode);
+
+        if (GodotObject.IsInstanceValid(overlay)) overlay.QueueFree();
+
+        if (scene == null)
+        {
+            if (!string.IsNullOrEmpty(userMessage))
+                ShowImporterNotice("Model Import Failed", userMessage);
+            GD.PrintErr($"[CharacterTabUI] Could not parse 3D scene from '{path}'.");
+            return;
+        }
+
+        onSceneReady?.Invoke(scene);
+    }
+
+    private void ShowImporterNotice(string title, string message)
+    {
+        var dlg = new AcceptDialog { Title = title, DialogText = message, Exclusive = false };
+        dlg.Confirmed += () => dlg.QueueFree();
+        dlg.Canceled += () => dlg.QueueFree();
+        GetTree()?.Root?.AddChild(dlg);
+        dlg.PopupCentered(new Vector2I(520, 220));
+    }
+
     private void OnCustomModelFileSelected(string filePath)
     {
         var intent = _pendingFileDialogIntent;
@@ -613,51 +706,46 @@ public partial class CharacterTabUI : VBoxContainer
             return;
         }
 
-        var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(filePath);
-        if (sceneRoot == null)
+        LoadSceneForImporterModalAsync(filePath, hero, sceneRoot =>
         {
-            GD.PrintErr($"[CharacterTabUI] Could not parse 3D scene from '{filePath}'.");
-            return;
-        }
+            var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
+            oldModal?.QueueFree();
 
-        // Open Self-Contained Custom Model Importer Modal (CanvasLayer 110 with isolated SubViewport)
-        var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
-        oldModal?.QueueFree();
+            var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
+            GetTree()?.Root?.AddChild(modal);
 
-        var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
-        GetTree()?.Root?.AddChild(modal);
-
-        modal.Open(hero, sceneRoot, filePath, null, intent, slotId);
-        modal.RiggingConfirmed += () =>
-        {
-            var opts = modal.LastRiggingOptions;
-            var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
-            if (activeHero == null) return;
-
-            if (opts != null && !string.IsNullOrEmpty(opts.SlotId))
+            modal.Open(hero, sceneRoot, filePath, null, intent, slotId);
+            modal.RiggingConfirmed += () =>
             {
-                string heroId = GetActiveHeroId(activeHero);
-                string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
-                string accName = !string.IsNullOrWhiteSpace(opts.AccessoryName)
-                    ? opts.AccessoryName
-                    : Path.GetFileNameWithoutExtension(filePath);
+                var opts = modal.LastRiggingOptions;
+                var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+                if (activeHero == null) return;
 
-                DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.StageAccessory(
-                    heroId, displayName, opts.SlotId, accName, filePath, opts);
-                RefreshAfterModelOrAccessoryChange(activeHero);
-                GD.Print($"[CharacterTabUI] Accessory/outfit slot '{accName}' ({opts.SlotId}) bound and staged!");
-            }
-            else
-            {
-                _lastImportedOptions = opts;
-                _lastImportedFilePath = filePath;
-                _lastImportedScene = sceneRoot;
-                _hasCustomModelApplied = true;
-                RegisterCustomModelInWorkspace(filePath, opts);
-                RefreshAfterModelOrAccessoryChange(activeHero);
-                GD.Print("[CharacterTabUI] Custom model rigging confirmed and bound successfully!");
-            }
-        };
+                if (opts != null && !string.IsNullOrEmpty(opts.SlotId))
+                {
+                    string heroId = GetActiveHeroId(activeHero);
+                    string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
+                    string accName = !string.IsNullOrWhiteSpace(opts.AccessoryName)
+                        ? opts.AccessoryName
+                        : Path.GetFileNameWithoutExtension(filePath);
+
+                    DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.StageAccessory(
+                        heroId, displayName, opts.SlotId, accName, filePath, opts);
+                    RefreshAfterModelOrAccessoryChange(activeHero);
+                    GD.Print($"[CharacterTabUI] Accessory/outfit slot '{accName}' ({opts.SlotId}) bound and staged!");
+                }
+                else
+                {
+                    _lastImportedOptions = opts;
+                    _lastImportedFilePath = filePath;
+                    _lastImportedScene = sceneRoot;
+                    _hasCustomModelApplied = true;
+                    RegisterCustomModelInWorkspace(filePath, opts);
+                    RefreshAfterModelOrAccessoryChange(activeHero);
+                    GD.Print("[CharacterTabUI] Custom model rigging confirmed and bound successfully!");
+                }
+            };
+        });
     }
 
     private void OnEditCustomModelPressed()
@@ -675,54 +763,46 @@ public partial class CharacterTabUI : VBoxContainer
             return;
         }
 
-        // Re-generate pristine scene root from file to avoid any mutations from previous riggings
-        var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(_lastImportedFilePath);
-        if (sceneRoot == null)
+        LoadSceneForImporterModalAsync(_lastImportedFilePath, hero, sceneRoot =>
         {
-            GD.PrintErr($"[CharacterTabUI] Could not reload 3D scene from '{_lastImportedFilePath}'.");
-            return;
-        }
-
-        // Temporarily hide current custom model container so preview in modal is isolated
-        var existingContainer = hero.FindChild("Custom_Rigged_Character", true, false) as Node3D;
-        if (existingContainer != null)
-        {
-            existingContainer.Visible = false;
-        }
-
-        // Open modal with cached options
-        var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
-        oldModal?.QueueFree();
-
-        var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
-        GetTree()?.Root?.AddChild(modal);
-
-        modal.Open(hero, sceneRoot, _lastImportedFilePath, _lastImportedOptions,
-            CustomModelImporterModalUI.ImportWorkflowIntent.FullCharacter, null);
-
-        modal.ModalCancelled += () =>
-        {
-            // Restore visibility if cancelled
-            if (existingContainer != null && GodotObject.IsInstanceValid(existingContainer))
+            var existingContainer = hero.FindChild("Custom_Rigged_Character", true, false) as Node3D;
+            if (existingContainer != null)
             {
-                existingContainer.Visible = true;
+                existingContainer.Visible = false;
             }
-        };
 
-        modal.RiggingConfirmed += () =>
-        {
-            _lastImportedOptions = modal.LastRiggingOptions;
-            _lastImportedScene = sceneRoot;
-            _hasCustomModelApplied = true;
+            var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
+            oldModal?.QueueFree();
 
-            var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
-            if (activeHero != null)
+            var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
+            GetTree()?.Root?.AddChild(modal);
+
+            modal.Open(hero, sceneRoot, _lastImportedFilePath, _lastImportedOptions,
+                CustomModelImporterModalUI.ImportWorkflowIntent.FullCharacter, null);
+
+            modal.ModalCancelled += () =>
             {
-                RegisterCustomModelInWorkspace(_lastImportedFilePath, _lastImportedOptions);
-                RefreshAfterModelOrAccessoryChange(activeHero);
-                GD.Print("[CharacterTabUI] Custom model re-rigged and updated successfully!");
-            }
-        };
+                if (existingContainer != null && GodotObject.IsInstanceValid(existingContainer))
+                {
+                    existingContainer.Visible = true;
+                }
+            };
+
+            modal.RiggingConfirmed += () =>
+            {
+                _lastImportedOptions = modal.LastRiggingOptions;
+                _lastImportedScene = sceneRoot;
+                _hasCustomModelApplied = true;
+
+                var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+                if (activeHero != null)
+                {
+                    RegisterCustomModelInWorkspace(_lastImportedFilePath, _lastImportedOptions);
+                    RefreshAfterModelOrAccessoryChange(activeHero);
+                    GD.Print("[CharacterTabUI] Custom model re-rigged and updated successfully!");
+                }
+            };
+        });
     }
 
     private void OnEditAccessorySlotPressed(string slotId)
@@ -749,58 +829,54 @@ public partial class CharacterTabUI : VBoxContainer
             return;
         }
 
-        var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(diskPath);
-        if (sceneRoot == null)
+        LoadSceneForImporterModalAsync(diskPath, hero, sceneRoot =>
         {
-            GD.PrintErr($"[CharacterTabUI] Could not reload accessory 3D scene from '{diskPath}'.");
-            return;
-        }
-
-        string containerName = CustomModelAutoRigger.GetContainerNameForSlot(slotId);
-        var existingContainer = hero.FindChild(containerName, true, false) as Node3D;
-        bool prevVis = existingContainer == null || existingContainer.Visible;
-        if (existingContainer != null)
-        {
-            existingContainer.Visible = false;
-        }
-
-        var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
-        oldModal?.QueueFree();
-
-        var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
-        GetTree()?.Root?.AddChild(modal);
-
-        var initialOpts = entry.ModelConfig.ToRiggingOptions();
-        initialOpts.SlotId = slotId;
-        initialOpts.AccessoryName = entry.DisplayName;
-
-        modal.Open(hero, sceneRoot, diskPath, initialOpts,
-            CustomModelImporterModalUI.ImportWorkflowIntent.AccessoryAddOrReplace, slotId);
-
-        modal.ModalCancelled += () =>
-        {
-            if (existingContainer != null && GodotObject.IsInstanceValid(existingContainer))
+            string containerName = CustomModelAutoRigger.GetContainerNameForSlot(slotId);
+            var existingContainer = hero.FindChild(containerName, true, false) as Node3D;
+            bool prevVis = existingContainer == null || existingContainer.Visible;
+            if (existingContainer != null)
             {
-                existingContainer.Visible = prevVis;
+                existingContainer.Visible = false;
             }
-        };
 
-        modal.RiggingConfirmed += () =>
-        {
-            var opts = modal.LastRiggingOptions;
-            var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
-            if (activeHero == null || opts == null) return;
+            var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
+            oldModal?.QueueFree();
 
-            string activeHeroId = GetActiveHeroId(activeHero);
-            string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? activeHeroId;
-            string accName = !string.IsNullOrWhiteSpace(opts.AccessoryName)
-                ? opts.AccessoryName
-                : entry.DisplayName;
+            var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
+            GetTree()?.Root?.AddChild(modal);
 
-            session?.StageAccessory(activeHeroId, displayName, slotId, accName, diskPath, opts);
-            RefreshAfterModelOrAccessoryChange(activeHero);
-            GD.Print($"[CharacterTabUI] Accessory slot '{accName}' ({slotId}) updated successfully!");
-        };
+            var initialOpts = entry.ModelConfig.ToRiggingOptions();
+            initialOpts.SlotId = slotId;
+            initialOpts.AccessoryName = entry.DisplayName;
+
+            modal.Open(hero, sceneRoot, diskPath, initialOpts,
+                CustomModelImporterModalUI.ImportWorkflowIntent.AccessoryAddOrReplace, slotId);
+
+            modal.ModalCancelled += () =>
+            {
+                if (existingContainer != null && GodotObject.IsInstanceValid(existingContainer))
+                {
+                    existingContainer.Visible = prevVis;
+                }
+            };
+
+            modal.RiggingConfirmed += () =>
+            {
+                var opts = modal.LastRiggingOptions;
+                var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+                if (activeHero == null || opts == null) return;
+
+                string activeHeroId = GetActiveHeroId(activeHero);
+                string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? activeHeroId;
+                string accName = !string.IsNullOrWhiteSpace(opts.AccessoryName)
+                    ? opts.AccessoryName
+                    : entry.DisplayName;
+
+                session?.StageAccessory(activeHeroId, displayName, slotId, accName, diskPath, opts);
+                RefreshAfterModelOrAccessoryChange(activeHero);
+                GD.Print($"[CharacterTabUI] Accessory slot '{accName}' ({slotId}) updated successfully!");
+            };
+        });
     }
 
     private void OnDuplicateMirrorAccessorySlotPressed(string slotId)
