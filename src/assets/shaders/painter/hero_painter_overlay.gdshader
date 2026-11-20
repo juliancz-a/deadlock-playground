@@ -65,6 +65,16 @@ uniform bool enable_emission = true;
 uniform int debug_view_channel = 0; // 0=Combined, 1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=SelfIllum, 7=Metalness, 8+=Masks
 uniform int active_paint_channel = 0; // 0/1=Color, 2=AO, 3=Normal, 4=Roughness, 5=Shadow, 6=SelfIllum, 7=Metalness, 8+=Masks
 
+// Live Material Parameter Overrides (synced from PaintTabUI.MaterialParams.cs)
+uniform vec4 param_color_tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float param_vertex_color_strength : hint_range(0.0, 1.0) = 1.0;
+uniform vec3 param_albedo_csb = vec3(1.0, 1.0, 1.0); // x=Contrast, y=Saturation, z=Brightness
+uniform bool param_has_self_illum_override = false;
+uniform bool param_has_self_illum_mask = false;
+uniform vec4 param_self_illum_tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float param_self_illum_scale = 0.0;
+uniform float param_self_illum_albedo_factor = 0.0;
+
 varying vec2 v_atlas_uv;
 varying vec2 v_mesh_uv;
 
@@ -458,7 +468,7 @@ void fragment() {
 			eff_metallic = mix(base_metallic, paint_encoded.r, eff_paint_a);
 		}
 
-		vec3 v_col = (use_vertex_color && length(COLOR.rgb) > 0.001) ? COLOR.rgb : vec3(1.0);
+		vec3 v_col = (use_vertex_color && length(COLOR.rgb) > 0.001) ? mix(vec3(1.0), COLOR.rgb, param_vertex_color_strength) : vec3(1.0);
 		vec3 base_color_map = use_channel_color_override
 			? texture(channel_color_override_texture, base_uv).rgb
 			: raw_base_rgb;
@@ -468,6 +478,11 @@ void fragment() {
 				? final_color
 				: mix(base_color_map, final_color, (active_paint_channel <= 1) ? eff_paint_a : 0.0));
 		vec3 base_albedo = enable_color_map ? (effective_color * lit_weight * v_col) : vec3(0.85 * lit_weight);
+		base_albedo *= param_color_tint.rgb;
+		float csb_lum = dot(base_albedo, vec3(0.2126, 0.7152, 0.0722));
+		base_albedo = mix(vec3(csb_lum), base_albedo, param_albedo_csb.y);
+		base_albedo = ((base_albedo - vec3(0.5)) * param_albedo_csb.x + vec3(0.5)) * param_albedo_csb.z;
+		base_albedo = clamp(base_albedo, vec3(0.0), vec3(1.0));
 		vec3 sh_tint = has_shadow_tint_texture ? texture(shadow_tint_texture, base_uv).rgb : vec3(1.0);
 		if (active_paint_channel == 5) {
 			sh_tint = mix(sh_tint, final_color, eff_paint_a);
@@ -479,6 +494,13 @@ void fragment() {
 		if (active_paint_channel == 6) {
 			emissive_sample = mix(emissive_sample, final_color, eff_paint_a);
 			if (enable_emission) emit_col += final_color * eff_paint_a;
+		}
+		if (param_has_self_illum_override && enable_emission && param_self_illum_scale > 0.001) {
+			float si_mask_val = param_has_self_illum_mask
+				? max(emissive_sample.r, max(emissive_sample.g, emissive_sample.b))
+				: 1.0;
+			vec3 si_col = mix(param_self_illum_tint.rgb, base_albedo * param_self_illum_tint.rgb, param_self_illum_albedo_factor);
+			emit_col += si_col * (si_mask_val * param_self_illum_scale);
 		}
 
 		ALBEDO = base_albedo;

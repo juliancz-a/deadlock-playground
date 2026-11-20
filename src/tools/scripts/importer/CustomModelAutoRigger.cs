@@ -1379,7 +1379,7 @@ namespace DeadlockPlayground.Importer
 
                     var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
-                    var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
+                    var rawUvs = ResolvePrimaryUvsForSurface(srcMesh, srcMi, s, arrays);
                     var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
                     var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
                     var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
@@ -1863,7 +1863,7 @@ namespace DeadlockPlayground.Importer
 
                     var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
-                    var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
+                    var rawUvs = ResolvePrimaryUvsForSurface(srcMesh, srcMi, s, arrays);
                     var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
                     var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
                     var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
@@ -2285,7 +2285,7 @@ namespace DeadlockPlayground.Importer
 
                     var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
-                    var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
+                    var rawUvs = ResolvePrimaryUvsForSurface(srcMesh, srcMi, s, arrays);
                     var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
                     var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
                     var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
@@ -8187,6 +8187,7 @@ namespace DeadlockPlayground.Importer
                     {
                         byte[] rawGlb = File.ReadAllBytes(filePath);
                         byte[] patchedGlb = PreprocessGlbBytesForUnlitAndEmissiveMaterials(rawGlb);
+                        var glbManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.ParseGlbManifest(patchedGlb);
                         var gltfDoc = new GltfDocument();
                         var gltfState = new GltfState();
                         if (gltfDoc.AppendFromBuffer(patchedGlb, baseDir, gltfState) == Error.Ok)
@@ -8194,7 +8195,6 @@ namespace DeadlockPlayground.Importer
                             importedScene = gltfDoc.GenerateScene(gltfState);
                             if (importedScene != null)
                             {
-                                var glbManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.ParseGlbManifest(rawGlb);
                                 DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterGlbManifest(importedScene, glbManifest);
                             }
                         }
@@ -8294,6 +8294,7 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
+            var materialsUsingTexCoord1 = new HashSet<int>();
             bool modified = false;
             for (int i = 0; i < materialsArr.Count; i++)
             {
@@ -8319,6 +8320,18 @@ namespace DeadlockPlayground.Importer
                 {
                     pbr = new System.Text.Json.Nodes.JsonObject();
                     matObj["pbrMetallicRoughness"] = pbr;
+                    modified = true;
+                }
+
+                // 0. If baseColorTexture uses texCoord == 1 (UV2), record the material so its mesh primitives
+                //    promote TEXCOORD_1 -> TEXCOORD_0 (since Godot StandardMaterial3D and Source 2 SMD only sample UV0).
+                if (pbr["baseColorTexture"] is System.Text.Json.Nodes.JsonObject bcTexObj &&
+                    bcTexObj["texCoord"] != null &&
+                    bcTexObj["texCoord"].GetValue<int>() == 1)
+                {
+                    bcTexObj["texCoord"] = 0;
+                    bcTexObj["wasTexCoord1"] = true;
+                    materialsUsingTexCoord1.Add(i);
                     modified = true;
                 }
 
@@ -8371,6 +8384,33 @@ namespace DeadlockPlayground.Importer
                             Math.Clamp(eb, 0f, 1f),
                             a);
                         modified = true;
+                    }
+                }
+            }
+
+            // Promote TEXCOORD_1 -> TEXCOORD_0 on any mesh primitive whose material specified baseColorTexture.texCoord == 1
+            if (materialsUsingTexCoord1.Count > 0 && rootNode["meshes"] is System.Text.Json.Nodes.JsonArray meshesForUv)
+            {
+                foreach (var meshNode in meshesForUv)
+                {
+                    if (meshNode is not System.Text.Json.Nodes.JsonObject meshObj) continue;
+                    if (meshObj["primitives"] is not System.Text.Json.Nodes.JsonArray prims) continue;
+                    foreach (var prim in prims)
+                    {
+                        if (prim is not System.Text.Json.Nodes.JsonObject pObj || pObj["material"] == null) continue;
+                        int matIdx = pObj["material"].GetValue<int>();
+                        if (!materialsUsingTexCoord1.Contains(matIdx)) continue;
+                        if (pObj["attributes"] is System.Text.Json.Nodes.JsonObject attrs &&
+                            attrs["TEXCOORD_1"] != null &&
+                            attrs["TEXCOORD_0"] != null)
+                        {
+                            int tc0 = attrs["TEXCOORD_0"].GetValue<int>();
+                            int tc1 = attrs["TEXCOORD_1"].GetValue<int>();
+                            attrs["TEXCOORD_0"] = tc1;
+                            attrs["TEXCOORD_1"] = tc0;
+                            pObj["swappedTexCoord1To0"] = true;
+                            modified = true;
+                        }
                     }
                 }
             }
@@ -8537,6 +8577,15 @@ namespace DeadlockPlayground.Importer
                         }
 
                         stdMat.SetMeta("IsOutlineShell", isOutline);
+                        if (!stdMat.HasMeta("SourceTransparencyMode"))
+                        {
+                            stdMat.SetMeta("SourceTransparencyMode", (int)stdMat.Transparency);
+                            stdMat.SetMeta("SourceAlphaScissorThreshold", stdMat.AlphaScissorThreshold);
+                        }
+                        if (!stdMat.HasMeta("SourceCullMode"))
+                        {
+                            stdMat.SetMeta("SourceCullMode", (int)stdMat.CullMode);
+                        }
 
                         if (isOutline)
                         {
@@ -8567,9 +8616,39 @@ namespace DeadlockPlayground.Importer
                             matchedSlot,
                             externalTexturePool);
                         DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(mat, discovered);
+
+                        if (mat is StandardMaterial3D stdMeta)
+                        {
+                            if (discovered.IsSourceTranslucent)
+                            {
+                                stdMeta.SetMeta("SourceTransparencyMode", (int)BaseMaterial3D.TransparencyEnum.Alpha);
+                            }
+                            else if (discovered.IsSourceAlphaTest)
+                            {
+                                stdMeta.SetMeta("SourceTransparencyMode", (int)BaseMaterial3D.TransparencyEnum.AlphaScissor);
+                                stdMeta.SetMeta("SourceAlphaScissorThreshold", discovered.SourceAlphaCutoff);
+                            }
+                            if (matchedSlot != null && matchedSlot.BaseColorTexCoord == 1)
+                            {
+                                stdMeta.SetMeta("UseTexCoord1", true);
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        private static Vector2[] ResolvePrimaryUvsForSurface(Mesh srcMesh, MeshInstance3D srcMi, int surfaceIdx, Godot.Collections.Array arrays)
+        {
+            if (arrays == null) return null;
+            Material mat = srcMesh?.SurfaceGetMaterial(surfaceIdx) ?? srcMi?.GetSurfaceOverrideMaterial(surfaceIdx) ?? srcMi?.MaterialOverride;
+            bool preferUv2 = mat != null && mat.HasMeta("UseTexCoord1") && mat.GetMeta("UseTexCoord1").AsBool();
+            if (preferUv2 && arrays.Count > (int)Mesh.ArrayType.TexUV2)
+            {
+                var uv2 = GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV2]);
+                if (uv2 != null && uv2.Length > 0) return uv2;
+            }
+            return arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
         }
 
         private static List<Texture2D> CollectSiblingExternalTextures(Node3D sceneRoot)
@@ -8667,6 +8746,27 @@ namespace DeadlockPlayground.Importer
             if (surfMat is StandardMaterial3D stdMat)
             {
                 stdMat.SetMeta("IsOutlineShell", isOutline);
+                if (!stdMat.HasMeta("SourceTransparencyMode"))
+                {
+                    stdMat.SetMeta("SourceTransparencyMode", (int)stdMat.Transparency);
+                    stdMat.SetMeta("SourceAlphaScissorThreshold", stdMat.AlphaScissorThreshold);
+                }
+                if (!stdMat.HasMeta("SourceCullMode"))
+                {
+                    stdMat.SetMeta("SourceCullMode", (int)stdMat.CullMode);
+                }
+                if (stdMat.HasMeta("SourceTransparencyMode"))
+                {
+                    newMi.SetMeta("SourceTransparencyMode", stdMat.GetMeta("SourceTransparencyMode").AsInt32());
+                }
+                if (stdMat.HasMeta("SourceAlphaScissorThreshold"))
+                {
+                    newMi.SetMeta("SourceAlphaScissorThreshold", stdMat.GetMeta("SourceAlphaScissorThreshold").AsSingle());
+                }
+                if (stdMat.HasMeta("SourceCullMode"))
+                {
+                    newMi.SetMeta("SourceCullMode", stdMat.GetMeta("SourceCullMode").AsInt32());
+                }
                 if (isOutline)
                 {
                     if (stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled)
@@ -8883,15 +8983,27 @@ namespace DeadlockPlayground.Importer
 
             if (mat is StandardMaterial3D stdMat)
             {
+                float effAlpha = stdMat.HasMeta("OrigAlbedoAlpha")
+                    ? stdMat.GetMeta("OrigAlbedoAlpha").AsSingle()
+                    : stdMat.AlbedoColor.A;
+                var effTransp = stdMat.HasMeta("OrigTransparency")
+                    ? (BaseMaterial3D.TransparencyEnum)stdMat.GetMeta("OrigTransparency").AsInt32()
+                    : (stdMat.HasMeta("SourceTransparencyMode") && stdMat.Transparency == BaseMaterial3D.TransparencyEnum.Disabled
+                        ? (BaseMaterial3D.TransparencyEnum)stdMat.GetMeta("SourceTransparencyMode").AsInt32()
+                        : stdMat.Transparency);
+                float effScissor = stdMat.HasMeta("OrigAlphaScissorThreshold")
+                    ? stdMat.GetMeta("OrigAlphaScissorThreshold").AsSingle()
+                    : stdMat.AlphaScissorThreshold;
+
                 h = FnvMixInt(h, 101);
                 h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.R * 255f));
                 h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.G * 255f));
                 h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.B * 255f));
-                h = FnvMixInt(h, Mathf.RoundToInt(stdMat.AlbedoColor.A * 255f));
+                h = FnvMixInt(h, Mathf.RoundToInt(effAlpha * 255f));
                 h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Metallic * 1000f));
                 h = FnvMixInt(h, Mathf.RoundToInt(stdMat.Roughness * 1000f));
-                h = FnvMixInt(h, (int)stdMat.Transparency);
-                h = FnvMixInt(h, stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ? Mathf.RoundToInt(stdMat.AlphaScissorThreshold * 1000f) : 0);
+                h = FnvMixInt(h, (int)effTransp);
+                h = FnvMixInt(h, effTransp == BaseMaterial3D.TransparencyEnum.AlphaScissor ? Mathf.RoundToInt(effScissor * 1000f) : 0);
                 h = FnvMixInt(h, (int)stdMat.CullMode);
                 h = FnvMixInt(h, (int)stdMat.ShadingMode);
                 h = FnvMixInt(h, stdMat.EmissionEnabled ? 1 : 0);
@@ -9533,7 +9645,7 @@ namespace DeadlockPlayground.Importer
                     if (arrays == null || arrays.Count == 0) continue;
                     var rawVerts = GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
-                    var rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
+                    var rawUvs = ResolvePrimaryUvsForSurface(srcMesh, srcMi, s, arrays);
                     var rawIndices = arrays.Count > (int)Mesh.ArrayType.Index ? GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
                     var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
                     var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;

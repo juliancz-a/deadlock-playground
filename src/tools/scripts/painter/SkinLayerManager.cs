@@ -318,19 +318,15 @@ namespace DeadlockPlayground.Painter
             if (_materialContexts.TryGetValue(matKey, out foundCtx) && foundCtx != null)
                 return true;
 
-            string stem = ExtractMaterialStem(matKey);
             string reqSuffix = ExtractChannelSuffix(matKey);
-            if (!string.IsNullOrEmpty(stem))
+            foreach (var kvp in _materialContexts)
             {
-                foreach (var kvp in _materialContexts)
-                {
-                    if (kvp.Value == null) continue;
-                    if (!string.Equals(ExtractMaterialStem(kvp.Key), stem, StringComparison.OrdinalIgnoreCase)) continue;
-                    string ctxSuffix = ExtractChannelSuffix(kvp.Key);
-                    if (!string.Equals(reqSuffix, ctxSuffix, StringComparison.OrdinalIgnoreCase)) continue;
-                    foundCtx = kvp.Value;
-                    return true;
-                }
+                if (kvp.Value == null) continue;
+                if (!AreMaterialKeysEquivalent(kvp.Key, matKey)) continue;
+                string ctxSuffix = ExtractChannelSuffix(kvp.Key);
+                if (!string.Equals(reqSuffix, ctxSuffix, StringComparison.OrdinalIgnoreCase)) continue;
+                foundCtx = kvp.Value;
+                return true;
             }
             return false;
         }
@@ -342,11 +338,9 @@ namespace DeadlockPlayground.Painter
             int h = CanvasSize.Y > 0 ? CanvasSize.Y : 2048;
             byte[] srcBuffer = _baseAtlasBuffer;
 
-            string activeStem = ExtractMaterialStem(_activeMaterialKey);
-            string reqStem = ExtractMaterialStem(matKey);
             bool isCurrentActive = string.IsNullOrEmpty(matKey) ||
                 string.Equals(matKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase) ||
-                (ActiveTextureChannel == MaterialTextureChannel.Color && !string.IsNullOrEmpty(reqStem) && string.Equals(reqStem, activeStem, StringComparison.OrdinalIgnoreCase));
+                (ActiveTextureChannel == MaterialTextureChannel.Color && AreMaterialKeysEquivalent(matKey, _activeMaterialKey));
 
             if (!isCurrentActive && TryFindMaterialContext(matKey, out var ctx) && ctx?.BaseAtlasBuffer != null)
             {
@@ -402,21 +396,17 @@ namespace DeadlockPlayground.Painter
             if (string.IsNullOrEmpty(matKey)) matKey = _activeMaterialKey;
             if (!string.IsNullOrEmpty(matKey) && string.Equals(matKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase))
             {
-                if (HasBaseAlphaEdits || !PreserveBaseAlpha) return true;
+                if (HasBaseAlphaEdits || EnableAlphaTransparency || !PreserveBaseAlpha) return true;
             }
             if (!string.IsNullOrEmpty(matKey) && _materialContexts.TryGetValue(matKey, out var ctx) && ctx != null)
             {
-                if (ctx.HasBaseAlphaEdits || !ctx.PreserveBaseAlpha) return true;
+                if (ctx.HasBaseAlphaEdits || ctx.EnableAlphaTransparency || !ctx.PreserveBaseAlpha) return true;
             }
-            string stem = ExtractMaterialStem(matKey);
-            if (!string.IsNullOrEmpty(stem))
+            foreach (var kvp in _materialContexts)
             {
-                foreach (var kvp in _materialContexts)
+                if (kvp.Value != null && AreMaterialKeysEquivalent(kvp.Key, matKey))
                 {
-                    if (kvp.Value != null && string.Equals(ExtractMaterialStem(kvp.Key), stem, StringComparison.Ordinal))
-                    {
-                        if (kvp.Value.HasBaseAlphaEdits || !kvp.Value.PreserveBaseAlpha) return true;
-                    }
+                    if (kvp.Value.HasBaseAlphaEdits || kvp.Value.EnableAlphaTransparency || !kvp.Value.PreserveBaseAlpha) return true;
                 }
             }
             return false;
@@ -433,15 +423,11 @@ namespace DeadlockPlayground.Painter
             {
                 if (ctx.HasBaseTextureEdits || ctx.HasBaseAlphaEdits) return true;
             }
-            string stem = ExtractMaterialStem(matKey);
-            if (!string.IsNullOrEmpty(stem))
+            foreach (var kvp in _materialContexts)
             {
-                foreach (var kvp in _materialContexts)
+                if (kvp.Value != null && AreMaterialKeysEquivalent(kvp.Key, matKey))
                 {
-                    if (kvp.Value != null && string.Equals(ExtractMaterialStem(kvp.Key), stem, StringComparison.Ordinal))
-                    {
-                        if (kvp.Value.HasBaseTextureEdits || kvp.Value.HasBaseAlphaEdits) return true;
-                    }
+                    if (kvp.Value.HasBaseTextureEdits || kvp.Value.HasBaseAlphaEdits) return true;
                 }
             }
             return false;
@@ -804,6 +790,33 @@ namespace DeadlockPlayground.Painter
             return file;
         }
 
+        internal static bool AreMaterialKeysEquivalent(string keyA, string keyB)
+        {
+            string a = StripChannelSuffix(keyA)?.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
+            string b = StripChannelSuffix(keyB)?.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+            if (string.Equals(a, b, StringComparison.Ordinal)) return true;
+
+            static string StripVmatExt(string s)
+            {
+                if (s.EndsWith(".vmat_c", StringComparison.Ordinal)) return s[..^7];
+                if (s.EndsWith(".vmat", StringComparison.Ordinal)) return s[..^5];
+                return s;
+            }
+
+            string aNoExt = StripVmatExt(a);
+            string bNoExt = StripVmatExt(b);
+            if (string.Equals(aNoExt, bNoExt, StringComparison.Ordinal)) return true;
+
+            // If BOTH keys carry explicit directory paths (common on modded heroes with custom folders
+            // like materials/mod/head/diffuse.vmat_c vs materials/mod/body/diffuse.vmat_c), never merge by bare stem.
+            if (aNoExt.Contains('/') && bNoExt.Contains('/')) return false;
+
+            string stemA = ExtractMaterialStem(aNoExt);
+            string stemB = ExtractMaterialStem(bNoExt);
+            return !string.IsNullOrEmpty(stemA) && string.Equals(stemA, stemB, StringComparison.Ordinal);
+        }
+
         public bool HasPaintStrokes(string matKey = null)
         {
             if (string.IsNullOrEmpty(matKey)) matKey = _activeMaterialKey;
@@ -815,24 +828,20 @@ namespace DeadlockPlayground.Painter
             {
                 return _currentContext.HasPaintStrokes;
             }
-            string stem = ExtractMaterialStem(matKey);
-            if (!string.IsNullOrEmpty(stem))
+            string reqSuffix = ExtractChannelSuffix(matKey);
+            if (_currentContext != null && string.IsNullOrEmpty(reqSuffix) && string.IsNullOrEmpty(ExtractChannelSuffix(_activeMaterialKey))
+                && AreMaterialKeysEquivalent(_activeMaterialKey, matKey))
             {
-                string reqSuffix = ExtractChannelSuffix(matKey);
-                if (_currentContext != null && string.IsNullOrEmpty(reqSuffix) && string.IsNullOrEmpty(ExtractChannelSuffix(_activeMaterialKey))
-                    && string.Equals(ExtractMaterialStem(_activeMaterialKey), stem, StringComparison.Ordinal))
-                {
-                    if (_currentContext.HasPaintStrokes) return true;
-                }
-                foreach (var kvp in _materialContexts)
-                {
-                    if (kvp.Value == null) continue;
-                    if (!string.Equals(ExtractMaterialStem(kvp.Key), stem, StringComparison.Ordinal)) continue;
-                    string ctxSuffix = ExtractChannelSuffix(kvp.Key);
-                    if (!string.IsNullOrEmpty(reqSuffix) && !string.Equals(reqSuffix, ctxSuffix, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (string.IsNullOrEmpty(reqSuffix) && !string.IsNullOrEmpty(ctxSuffix)) continue;
-                    if (kvp.Value.HasPaintStrokes) return true;
-                }
+                if (_currentContext.HasPaintStrokes) return true;
+            }
+            foreach (var kvp in _materialContexts)
+            {
+                if (kvp.Value == null) continue;
+                if (!AreMaterialKeysEquivalent(kvp.Key, matKey)) continue;
+                string ctxSuffix = ExtractChannelSuffix(kvp.Key);
+                if (!string.IsNullOrEmpty(reqSuffix) && !string.Equals(reqSuffix, ctxSuffix, StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.IsNullOrEmpty(reqSuffix) && !string.IsNullOrEmpty(ctxSuffix)) continue;
+                if (kvp.Value.HasPaintStrokes) return true;
             }
             return false;
         }
@@ -1527,7 +1536,16 @@ namespace DeadlockPlayground.Painter
             {
                 if (mesh != null && GodotObject.IsInstanceValid(mesh))
                 {
+                    SyncPass1MaterialBaseOverride(mesh, false, null, false, out _);
                     mesh.MaterialOverlay = null;
+                }
+            }
+            foreach (var reg in _registeredSubmeshes)
+            {
+                if (reg != null && GodotObject.IsInstanceValid(reg))
+                {
+                    SyncPass1MaterialBaseOverride(reg, false, null, false, out _);
+                    reg.MaterialOverlay = null;
                 }
             }
             foreach (var kvp in _perMaterialAtlasManagers)
@@ -3517,9 +3535,13 @@ namespace DeadlockPlayground.Painter
                             ? (hasEdBase ? (colorCtx.BakedColorOverrideTexture ?? colorCtx.BakedEditedBaseTexture) : null)
                             : (hasEdBase ? GetBaseTextureResource() : null);
                         bool baseResReady = IsTextureRenderReady(baseResTex);
-                        bool enableCutout = isNonColorChannel
+                        bool baseHasSourceAlpha = (checkMat is StandardMaterial3D checkStd &&
+                            (checkStd.Transparency != BaseMaterial3D.TransparencyEnum.Disabled ||
+                             (checkStd.HasMeta("OrigTransparency") && checkStd.GetMeta("OrigTransparency").AsInt32() != (int)BaseMaterial3D.TransparencyEnum.Disabled) ||
+                             (checkStd.HasMeta("SourceTransparencyMode") && checkStd.GetMeta("SourceTransparencyMode").AsInt32() != (int)BaseMaterial3D.TransparencyEnum.Disabled)));
+                        bool enableCutout = baseHasSourceAlpha || (isNonColorChannel
                             ? (colorCtx != null && (colorCtx.EnableAlphaTransparency || colorCtx.HasBaseAlphaEdits))
-                            : (EnableAlphaTransparency || HasBaseAlphaEdits);
+                            : (EnableAlphaTransparency || HasBaseAlphaEdits));
                         SyncPass1MaterialBaseOverride(mesh, hasEdBase && baseResReady, baseResTex, enableCutout, out bool overlayRendersBase);
                         mat.SetShaderParameter("has_edited_base_texture", hasEdBase && baseResReady);
                         mat.SetShaderParameter("overlay_renders_base_texture", overlayRendersBase);
@@ -3655,7 +3677,11 @@ namespace DeadlockPlayground.Painter
                                     ?? inactiveCtx.BakedColorOverrideTexture)
                                 : null;
                             bool inactBaseReady = IsTextureRenderReady(inactBaseTex);
-                            bool inactCutout = inactiveCtx != null && (inactiveCtx.EnableAlphaTransparency || inactiveCtx.HasBaseAlphaEdits);
+                            bool inactBaseHasSourceAlpha = (checkMat is StandardMaterial3D inactStd &&
+                                (inactStd.Transparency != BaseMaterial3D.TransparencyEnum.Disabled ||
+                                 (inactStd.HasMeta("OrigTransparency") && inactStd.GetMeta("OrigTransparency").AsInt32() != (int)BaseMaterial3D.TransparencyEnum.Disabled) ||
+                                 (inactStd.HasMeta("SourceTransparencyMode") && inactStd.GetMeta("SourceTransparencyMode").AsInt32() != (int)BaseMaterial3D.TransparencyEnum.Disabled)));
+                            bool inactCutout = inactBaseHasSourceAlpha || (inactiveCtx != null && (inactiveCtx.EnableAlphaTransparency || inactiveCtx.HasBaseAlphaEdits));
                             SyncPass1MaterialBaseOverride(mesh, inactHasEdBase && inactBaseReady, inactBaseTex, inactCutout, out bool inactOverlayRendersBase);
 
                             mat.SetShaderParameter("overlay_texture", compReady ? inactiveCompositeTex : (Texture2D)null);
@@ -3902,13 +3928,27 @@ namespace DeadlockPlayground.Painter
             return null;
         }
 
-        public void RestoreMaterialContext(string materialKey, Vector2I canvasSize, List<SkinLayer> layers, int activeLayerIndex, bool isActiveTarget)
+        public void RestoreMaterialContext(
+            string materialKey,
+            Vector2I canvasSize,
+            List<SkinLayer> layers,
+            int activeLayerIndex,
+            bool isActiveTarget,
+            Image editedBaseImage = null,
+            bool hasBaseTextureEdits = false,
+            bool hasBaseAlphaEdits = false,
+            bool enableAlphaTransparency = false)
         {
             if (string.IsNullOrEmpty(materialKey)) materialKey = "body";
             string normKey = materialKey.ToLowerInvariant().Trim();
 
             Node atlasMgr = null;
             _perMaterialAtlasManagers.TryGetValue(normKey, out atlasMgr);
+            if (atlasMgr == null)
+            {
+                string baseKeyOnly = StripChannelSuffix(normKey);
+                _perMaterialAtlasManagers.TryGetValue(baseKeyOnly, out atlasMgr);
+            }
 
             int w = canvasSize.X > 0 ? canvasSize.X : 2048;
             int h = canvasSize.Y > 0 ? canvasSize.Y : 2048;
@@ -3959,6 +3999,27 @@ namespace DeadlockPlayground.Painter
             ctx.UndoStack.Clear();
             ctx.RedoStack.Clear();
             ctx.HasPaintStrokes = true;
+            ctx.HasBaseTextureEdits = hasBaseTextureEdits || (editedBaseImage != null && !editedBaseImage.IsEmpty());
+            ctx.HasBaseAlphaEdits = hasBaseAlphaEdits;
+            ctx.EnableAlphaTransparency = enableAlphaTransparency;
+
+            byte[] restoredBaseBuffer = null;
+            if (editedBaseImage != null && !editedBaseImage.IsEmpty())
+            {
+                restoredBaseBuffer = ProjectFileManager.ImageToLayerGpuData(editedBaseImage, w, h);
+                ctx.BaseAtlasBuffer = restoredBaseBuffer;
+                ctx.BakedEditedBaseTexture = ImageTexture.CreateFromImage(editedBaseImage);
+
+                // Upload restored edited base texture to this material's GPU base_texture_rid
+                if (rd != null && atlasMgr != null && GodotObject.IsInstanceValid(atlasMgr))
+                {
+                    var baseRidVal = atlasMgr.Get("base_texture_rid");
+                    if (baseRidVal.VariantType == Variant.Type.Rid && baseRidVal.AsRid().IsValid && rd.TextureIsValid(baseRidVal.AsRid()))
+                    {
+                        rd.TextureUpdate(baseRidVal.AsRid(), 0, restoredBaseBuffer);
+                    }
+                }
+            }
 
             bool matchesActive = isActiveTarget || (!string.IsNullOrEmpty(_activeMaterialKey) && string.Equals(normKey, _activeMaterialKey, StringComparison.OrdinalIgnoreCase));
 
@@ -3970,11 +4031,32 @@ namespace DeadlockPlayground.Painter
                 _layers.AddRange(ctx.Layers);
                 _activeLayerIndex = ctx.ActiveLayerIndex;
                 _activeMaterialKey = normKey;
+                HasBaseTextureEdits = ctx.HasBaseTextureEdits;
+                HasBaseAlphaEdits = ctx.HasBaseAlphaEdits;
+                EnableAlphaTransparency = ctx.EnableAlphaTransparency;
                 if (atlasMgr != null) _activeAtlasManager = atlasMgr;
                 _otherLayersDirty = true;
-                _hasPopulatedBaseAtlasBuffer = false;
-                RebuildBaseAtlasBuffer(MaterialTextureChannel.Color);
-                ctx.BaseAtlasBuffer = _hasPopulatedBaseAtlasBuffer ? _baseAtlasBuffer : null;
+                if (restoredBaseBuffer != null && restoredBaseBuffer.Length == bufferLen)
+                {
+                    _baseAtlasBuffer = restoredBaseBuffer;
+                    _hasPopulatedBaseAtlasBuffer = true;
+                    EnsureBaseLayer();
+                    if (_baseLayer != null)
+                    {
+                        _baseLayer.GpuData = _baseAtlasBuffer;
+                        if (ctx.BakedEditedBaseTexture != null) _baseLayer.Texture = ctx.BakedEditedBaseTexture;
+                    }
+                }
+                else
+                {
+                    _hasPopulatedBaseAtlasBuffer = false;
+                    RebuildBaseAtlasBuffer(MaterialTextureChannel.Color);
+                    ctx.BaseAtlasBuffer = _hasPopulatedBaseAtlasBuffer ? _baseAtlasBuffer : null;
+                }
+                if (ctx.EnableAlphaTransparency)
+                {
+                    Update3DMaterialTransparency(true);
+                }
                 UpdateActiveLayerBinding();
                 RecompositeGpuLayers();
             }
@@ -3984,9 +4066,10 @@ namespace DeadlockPlayground.Painter
                 {
                     // Poblar BaseAtlasBuffer para este material inactivo así los BlendModes (Multiply, Color, Overlay) se ven bien!
                     MeshInstance3D matMesh = null;
+                    string baseNorm = StripChannelSuffix(normKey);
                     foreach (var kv in _meshToMaterialKey)
                     {
-                        if (string.Equals(kv.Value, normKey, StringComparison.OrdinalIgnoreCase) && kv.Key != null && GodotObject.IsInstanceValid(kv.Key))
+                        if (AreMaterialKeysEquivalent(kv.Value, baseNorm) && kv.Key != null && GodotObject.IsInstanceValid(kv.Key))
                         {
                             matMesh = kv.Key;
                             break;
@@ -3998,15 +4081,18 @@ namespace DeadlockPlayground.Painter
                         var prevAtlas = _activeAtlasManager;
                         var prevBase = _baseAtlasBuffer;
                         var prevPop = _hasPopulatedBaseAtlasBuffer;
+                        var prevMatKey = _activeMaterialKey;
 
                         _targetMesh = matMesh;
                         _activeAtlasManager = atlasMgr;
+                        _activeMaterialKey = normKey;
                         _baseAtlasBuffer = null;
                         RebuildBaseAtlasBuffer(MaterialTextureChannel.Color, matMesh);
                         ctx.BaseAtlasBuffer = _hasPopulatedBaseAtlasBuffer ? _baseAtlasBuffer : null;
 
                         _targetMesh = prevTarget;
                         _activeAtlasManager = prevAtlas;
+                        _activeMaterialKey = prevMatKey;
                         _baseAtlasBuffer = prevBase;
                         _hasPopulatedBaseAtlasBuffer = prevPop;
                     }
@@ -4154,6 +4240,7 @@ namespace DeadlockPlayground.Painter
 
                 HasBaseTextureEdits = false;
                 HasBaseAlphaEdits = false;
+                EnableAlphaTransparency = false;
                 _pristineBaseAtlasBuffer = null;
                 EnsureBaseLayer();
                 AddNewLayer("Paint Layer 1");
@@ -4164,6 +4251,7 @@ namespace DeadlockPlayground.Painter
                     CanvasSize = CanvasSize,
                     Layers = new List<SkinLayer>(_layers),
                     ActiveLayerIndex = 0,
+                    EnableAlphaTransparency = false,
                     UndoStack = new List<LayerPaintSnapshot>(_undoStack),
                     RedoStack = new List<LayerPaintSnapshot>(_redoStack)
                 };
@@ -7169,8 +7257,7 @@ namespace DeadlockPlayground.Painter
             string activeBaseKey = StripChannelSuffix(_activeMaterialKey);
             bool isTargetActiveMaterial = !string.IsNullOrEmpty(cleanColorKey) &&
                 !string.IsNullOrEmpty(activeBaseKey) &&
-                (string.Equals(cleanColorKey, activeBaseKey, StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(ExtractMaterialStem(cleanColorKey), ExtractMaterialStem(activeBaseKey), StringComparison.OrdinalIgnoreCase));
+                AreMaterialKeysEquivalent(cleanColorKey, activeBaseKey);
 
             // 1. If this is the currently active material AND we are currently on the Color channel, sync GPU->CPU and bake directly from layers
             if (isTargetActiveMaterial && ActiveTextureChannel == MaterialTextureChannel.Color)
@@ -7236,7 +7323,14 @@ namespace DeadlockPlayground.Painter
                 }
             }
 
-            // 3. Fallback to active manager
+            // 3. Do NOT fall back to BakeCompositeImage() (which returns the currently ACTIVE material's atlas!)
+            // when a specific non-active material was requested and has no paint context. Falling back to the active
+            // material duplicates one material's texture onto every other unedited material during multi-material VPK export!
+            if (!string.IsNullOrEmpty(cleanColorKey) && !isTargetActiveMaterial)
+            {
+                return null;
+            }
+
             return BakeCompositeImage();
         }
 
@@ -7485,8 +7579,12 @@ namespace DeadlockPlayground.Painter
                         int count = bufferLen / 8;
                         float op = layer.Opacity;
                         LayerBlendMode mode = layer.BlendMode;
-                        bool baseHasValidCutout = HasBaseAlphaEdits || EnableAlphaTransparency || HasMeaningfulAlphaCutout(_baseAtlasBuffer, bufferLen);
-                        bool clipLayer = (PreserveBaseAlpha || layer.ClipToBaseAlpha) && baseHasValidCutout && hBase != null && !IsStandaloneTextureMode;
+                        // CRITICAL: In Source 2 Deadlock, g_tColor.a often stores Metalness (0 on cloth/skin, >0 on metallic trim)
+                        // rather than alpha cutout transparency. Do NOT infer cutout clipping from non-uniform base alpha alone,
+                        // or painting on non-metallic cloth (like Vindicta's dress) gets multiplied by baseA = 0 and silently discarded!
+                        // Only clip paint layers to baseA when alpha transparency/erasing was explicitly enabled or ClipToBaseAlpha is set.
+                        bool baseHasExplicitCutout = HasBaseAlphaEdits || EnableAlphaTransparency;
+                        bool clipLayer = ((PreserveBaseAlpha && baseHasExplicitCutout) || layer.ClipToBaseAlpha) && hBase != null && !IsStandaloneTextureMode;
 
                         for (int i = 0; i < count; i++)
                         {
@@ -7780,9 +7878,7 @@ namespace DeadlockPlayground.Painter
                 string normCtxKey = key.Replace('\\', '/');
                 if (string.Equals(normCtxKey, normKey, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(normCtxKey, "particle:" + normKey, StringComparison.OrdinalIgnoreCase) ||
-                    normCtxKey.EndsWith("/" + normKey, StringComparison.OrdinalIgnoreCase) ||
-                    normKey.EndsWith("/" + normCtxKey, StringComparison.OrdinalIgnoreCase) ||
-                    (!string.IsNullOrEmpty(targetStem) && string.Equals(ExtractMaterialStem(normCtxKey), targetStem, StringComparison.Ordinal)))
+                    AreMaterialKeysEquivalent(normCtxKey, normKey))
                 {
                     matchingKeys.Add(key);
                 }

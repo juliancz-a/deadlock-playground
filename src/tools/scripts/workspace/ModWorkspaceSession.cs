@@ -1018,6 +1018,60 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("channel_active_layer_indices")]
         public Dictionary<string, int> ChannelActiveLayerIndices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        [JsonPropertyName("base_texture_png_rel_path")]
+        public string BaseTexturePngRelPath { get; set; } = "";
+
+        [JsonPropertyName("has_base_texture_edits")]
+        public bool HasBaseTextureEdits { get; set; } = false;
+
+        [JsonPropertyName("has_base_alpha_edits")]
+        public bool HasBaseAlphaEdits { get; set; } = false;
+
+        [JsonPropertyName("enable_alpha_transparency")]
+        public bool EnableAlphaTransparency { get; set; } = false;
+
+        [JsonPropertyName("param_overrides")]
+        public WorkspaceMaterialParamOverrides ParamOverrides { get; set; } = null;
+    }
+
+    public class WorkspaceMaterialParamOverrides
+    {
+        [JsonPropertyName("color_tint_rgb")]
+        public float[] ColorTintRgb { get; set; } = null;
+
+        [JsonPropertyName("vertex_color_strength")]
+        public float? VertexColorStrength { get; set; } = null;
+
+        [JsonPropertyName("self_illum_tint_rgb")]
+        public float[] SelfIllumTintRgb { get; set; } = null;
+
+        [JsonPropertyName("self_illum_scale")]
+        public float? SelfIllumScale { get; set; } = null;
+
+        [JsonPropertyName("self_illum_albedo_factor")]
+        public float? SelfIllumAlbedoFactor { get; set; } = null;
+
+        [JsonPropertyName("albedo_contrast")]
+        public float? AlbedoContrast { get; set; } = null;
+
+        [JsonPropertyName("albedo_saturation")]
+        public float? AlbedoSaturation { get; set; } = null;
+
+        [JsonPropertyName("albedo_brightness")]
+        public float? AlbedoBrightness { get; set; } = null;
+
+        public bool HasAnyOverride()
+        {
+            return (ColorTintRgb != null && ColorTintRgb.Length >= 3) ||
+                   VertexColorStrength.HasValue ||
+                   (SelfIllumTintRgb != null && SelfIllumTintRgb.Length >= 3) ||
+                   SelfIllumScale.HasValue ||
+                   SelfIllumAlbedoFactor.HasValue ||
+                   AlbedoContrast.HasValue ||
+                   AlbedoSaturation.HasValue ||
+                   AlbedoBrightness.HasValue;
+        }
     }
 
     public class WorkspaceLayerEntry
@@ -2091,12 +2145,19 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 return (Image)memSan.Duplicate();
             }
 
-            string vtexBase = Path.GetFileName(normKey);
-            foreach (var kvp in _stagedImagesInMemory)
+            // Only allow bare-filename lookup when the caller passed a path without directories;
+            // otherwise modded textures with identical filenames in different folders (e.g. head/color.vtex_c
+            // vs dress/color.vtex_c) would collide and return the wrong material's texture.
+            bool hasDir = normKey.Contains('/');
+            if (!hasDir)
             {
-                if (string.Equals(Path.GetFileName(kvp.Key), vtexBase, StringComparison.OrdinalIgnoreCase) && kvp.Value != null && !kvp.Value.IsEmpty())
+                string vtexBase = Path.GetFileName(normKey);
+                foreach (var kvp in _stagedImagesInMemory)
                 {
-                    return (Image)kvp.Value.Duplicate();
+                    if (string.Equals(Path.GetFileName(kvp.Key), vtexBase, StringComparison.OrdinalIgnoreCase) && kvp.Value != null && !kvp.Value.IsEmpty())
+                    {
+                        return (Image)kvp.Value.Duplicate();
+                    }
                 }
             }
 
@@ -2596,6 +2657,103 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
             return list;
         }
 
+        public void StageMaterialParamOverrides(
+            string heroId,
+            string heroDisplayName,
+            string assetCategory,
+            string ownerAssetPath,
+            string materialPath,
+            string materialDisplayName,
+            WorkspaceMaterialParamOverrides overrides)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(materialPath)) return;
+
+            try
+            {
+                bool hasAny = overrides != null && overrides.HasAnyOverride();
+                if (!hasAny)
+                {
+                    if (Manifest.Heroes.TryGetValue(heroId, out var hDel))
+                    {
+                        foreach (var a in hDel.Assets)
+                        {
+                            var m = a.Materials.FirstOrDefault(x => string.Equals(x.MaterialPath, materialPath, StringComparison.OrdinalIgnoreCase));
+                            if (m != null)
+                            {
+                                m.ParamOverrides = null;
+                                if (m.Textures.Count == 0 && m.Layers.Count == 0 && (m.ChannelLayers == null || m.ChannelLayers.Count == 0))
+                                    a.Materials.Remove(m);
+                            }
+                        }
+                        SaveManifest();
+                        HasUnsavedChanges = true;
+                        OnWorkspaceChanged?.Invoke();
+                    }
+                    return;
+                }
+
+                if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry))
+                {
+                    heroEntry = new WorkspaceHeroEntry
+                    {
+                        HeroId = heroId,
+                        DisplayName = !string.IsNullOrEmpty(heroDisplayName) ? heroDisplayName : heroId
+                    };
+                    Manifest.Heroes[heroId] = heroEntry;
+                }
+
+                string assetVpkPath = !string.IsNullOrEmpty(ownerAssetPath) ? ownerAssetPath : materialPath;
+                var assetEntry = heroEntry.Assets.FirstOrDefault(a => string.Equals(a.VpkPath, assetVpkPath, StringComparison.OrdinalIgnoreCase));
+                if (assetEntry == null)
+                {
+                    assetEntry = new WorkspaceAssetEntry
+                    {
+                        VpkPath = assetVpkPath,
+                        Category = assetCategory,
+                        DisplayName = !string.IsNullOrEmpty(ownerAssetPath) ? Path.GetFileNameWithoutExtension(ownerAssetPath) : materialDisplayName,
+                        OwnerAssetPath = ownerAssetPath
+                    };
+                    heroEntry.Assets.Add(assetEntry);
+                }
+
+                var matEntry = assetEntry.Materials.FirstOrDefault(m => string.Equals(m.MaterialPath, materialPath, StringComparison.OrdinalIgnoreCase));
+                if (matEntry == null)
+                {
+                    matEntry = new WorkspaceMaterialEntry
+                    {
+                        MaterialPath = materialPath,
+                        DisplayName = !string.IsNullOrEmpty(materialDisplayName) ? materialDisplayName : Path.GetFileName(materialPath)
+                    };
+                    assetEntry.Materials.Add(matEntry);
+                }
+
+                matEntry.ParamOverrides = overrides;
+                Manifest.LastActiveHeroId = heroId;
+                Manifest.LastActiveAssetType = assetCategory;
+                Manifest.LastActiveAssetPath = assetVpkPath;
+                SaveManifest();
+                HasUnsavedChanges = true;
+                OnWorkspaceChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ModWorkspaceSession] Error staging material param overrides: {ex.Message}");
+            }
+        }
+
+        public WorkspaceMaterialParamOverrides GetMaterialParamOverrides(string heroId, string materialPath)
+        {
+            if (string.IsNullOrEmpty(heroId) || string.IsNullOrEmpty(materialPath)) return null;
+            if (!Manifest.Heroes.TryGetValue(heroId, out var hero) || hero?.Assets == null) return null;
+            foreach (var asset in hero.Assets)
+            {
+                var m = asset.Materials?.FirstOrDefault(x => string.Equals(x.MaterialPath, materialPath, StringComparison.OrdinalIgnoreCase));
+                if (m?.ParamOverrides != null && m.ParamOverrides.HasAnyOverride())
+                    return m.ParamOverrides;
+            }
+            return null;
+        }
+
         public void StageRawLayerImage(string layerKey, string fileName, Image layerImg)
         {
             if (layerImg == null || layerImg.IsEmpty()) return;
@@ -2647,6 +2805,20 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
 
                         foreach (var mat in asset.Materials)
                         {
+                            if (!string.IsNullOrEmpty(mat.BaseTexturePngRelPath))
+                            {
+                                string fullBaseDisk = Path.Combine(SessionDir, mat.BaseTexturePngRelPath);
+                                if (!File.Exists(fullBaseDisk))
+                                {
+                                    string fn = Path.GetFileName(mat.BaseTexturePngRelPath).ToLowerInvariant();
+                                    if (_stagedImagesInMemory.TryGetValue(fn, out var bMem) && bMem != null && !bMem.IsEmpty())
+                                    {
+                                        Directory.CreateDirectory(Path.GetDirectoryName(fullBaseDisk));
+                                        bMem.SavePng(fullBaseDisk);
+                                    }
+                                }
+                            }
+
                             if (mat.Layers == null) continue;
                             foreach (var le in mat.Layers)
                             {

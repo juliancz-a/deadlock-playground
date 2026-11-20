@@ -346,6 +346,7 @@ public partial class PaintTabUI : VBoxContainer
         _submeshListContainer = GetNodeOrNull<VBoxContainer>("SubmeshCard/VBox/ScrollContainer/SubmeshListContainer");
         _btnShowAllMeshes = GetNodeOrNull<Button>("SubmeshCard/VBox/HBoxActions/BtnShowAll");
         _btnHideAccMeshes = GetNodeOrNull<Button>("SubmeshCard/VBox/HBoxActions/BtnHideAcc");
+        InitMaterialParamsPanel();
 
         // Layers
         _btnAddLayer = GetNodeOrNull<Button>("LayersCard/VBox/HBoxToolbar/BtnAddLayer");
@@ -1054,14 +1055,19 @@ public partial class PaintTabUI : VBoxContainer
 
         try
         {
-            // 1. Purgar estado sucio en memoria ANTES de descomprimir o recargar el héroe,
+            // 1. Purgar estado sucio, atlas GPU, caché de parámetros VMAT y cualquier addon VPK previo ANTES de cargar el .dpp
             _lastRegisteredDirtyMatKey = null;
             _flushedMaterialKeys.Clear();
+            _vanillaVmatDefaultsCache.Clear();
             if (_meshHierarchy?.Submeshes != null)
             {
                 foreach (var sm in _meshHierarchy.Submeshes)
                     sm.IsDirty = false;
             }
+            _layerManager?.CleanupHeroAtlas();
+
+            var prevLoader = GetVpkLoader();
+            prevLoader?.ReleaseAddonFileLocks();
             _layerManager?.ClearAllLayers();
 
             // 2. Descomprimir el proyecto limpio en el workspace
@@ -1846,6 +1852,30 @@ public partial class PaintTabUI : VBoxContainer
                                             mE.ActiveLayerIndex = activeIdx;
                                             mE.Width = baked.GetWidth();
                                             mE.Height = baked.GetHeight();
+
+                                            bool hasBaseEdits = _layerManager.HasEditedBaseTextureForMaterial(chCtxKey);
+                                            bool hasAlphaEdits = _layerManager.HasEditedAlphaForMaterial(chCtxKey);
+                                            mE.HasBaseTextureEdits = hasBaseEdits;
+                                            mE.HasBaseAlphaEdits = hasAlphaEdits;
+                                            mE.EnableAlphaTransparency = _layerManager.EnableAlphaTransparency &&
+                                                string.Equals(_layerManager.ActiveMaterialKey, chCtxKey, StringComparison.OrdinalIgnoreCase);
+
+                                            if (hasBaseEdits || hasAlphaEdits)
+                                            {
+                                                var baseImg = _layerManager.ExportBaseTextureToImage(chCtxKey);
+                                                if (baseImg != null && !baseImg.IsEmpty())
+                                                {
+                                                    string baseKey = $"{vtexPath}__base";
+                                                    string baseFileName = ModWorkspaceSession.Instance.SanitizePathToFileName(baseKey, ".png");
+                                                    string baseRelPath = Path.Combine("textures", baseFileName).Replace('\\', '/');
+                                                    ModWorkspaceSession.Instance.StageRawLayerImage(baseKey, baseFileName, baseImg);
+                                                    mE.BaseTexturePngRelPath = baseRelPath;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                mE.BaseTexturePngRelPath = "";
+                                            }
                                         }
                                         else if (stagedLayers.Count > 0)
                                         {
@@ -1909,6 +1939,7 @@ public partial class PaintTabUI : VBoxContainer
                     if (vtexBase.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
                         vtexBase = Path.GetFileNameWithoutExtension(vtexBase);
 
+                    // Pass 1: Strict exact-path match (prevents modded/custom-named materials from colliding)
                     var targetSubmesh = _meshHierarchy.Submeshes.FirstOrDefault(s =>
                     {
                         if (string.Equals(s.OriginalColorVtexCPath, cleanVtexPath, StringComparison.OrdinalIgnoreCase)) return true;
@@ -1932,8 +1963,10 @@ public partial class PaintTabUI : VBoxContainer
                             if (sVmat.Equals(normVtex, StringComparison.OrdinalIgnoreCase)) return true;
                             string vmatBase = Path.GetFileNameWithoutExtension(sVmat);
                             if (vmatBase.Equals(vtexBase, StringComparison.OrdinalIgnoreCase) ||
-                                vtexBase.StartsWith(vmatBase, StringComparison.OrdinalIgnoreCase) ||
-                                vmatBase.StartsWith(vtexBase, StringComparison.OrdinalIgnoreCase))
+                                vtexBase.StartsWith(vmatBase + "_", StringComparison.OrdinalIgnoreCase) ||
+                                vtexBase.StartsWith(vmatBase + ".", StringComparison.OrdinalIgnoreCase) ||
+                                vmatBase.StartsWith(vtexBase + "_", StringComparison.OrdinalIgnoreCase) ||
+                                vmatBase.StartsWith(vtexBase + ".", StringComparison.OrdinalIgnoreCase))
                                 return true;
                         }
 
@@ -1945,15 +1978,38 @@ public partial class PaintTabUI : VBoxContainer
                             if (colorBase.Equals(vtexBase, StringComparison.OrdinalIgnoreCase)) return true;
                         }
 
-                        if (!string.IsNullOrEmpty(s.DisplayName))
-                        {
-                            string dispClean = s.DisplayName.Replace(" ", "_").ToLowerInvariant();
-                            if (vtexBase.ToLowerInvariant().Contains(dispClean) || dispClean.Contains(vtexBase.ToLowerInvariant()))
-                                return true;
-                        }
-
                         return false;
                     });
+
+                    // Pass 2: Boundary-aware filename/stem fallback (never raw StartsWith or DisplayName substring)
+                    if (targetSubmesh == null)
+                    {
+                        targetSubmesh = _meshHierarchy.Submeshes.FirstOrDefault(s =>
+                        {
+                            string sColor = s.OriginalColorVtexCPath?.Replace('\\', '/')?.Trim('/');
+                            if (!string.IsNullOrEmpty(sColor))
+                            {
+                                string colorBase = Path.GetFileNameWithoutExtension(sColor);
+                                if (colorBase.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    colorBase = Path.GetFileNameWithoutExtension(colorBase);
+                                if (colorBase.Equals(vtexBase, StringComparison.OrdinalIgnoreCase)) return true;
+                            }
+
+                            string sVmat = s.OriginalVmatPath?.Replace('\\', '/')?.Trim('/');
+                            if (!string.IsNullOrEmpty(sVmat))
+                            {
+                                string vmatBase = Path.GetFileNameWithoutExtension(sVmat);
+                                if (vmatBase.EndsWith("_c", StringComparison.OrdinalIgnoreCase))
+                                    vmatBase = Path.GetFileNameWithoutExtension(vmatBase);
+                                if (vmatBase.Equals(vtexBase, StringComparison.OrdinalIgnoreCase) ||
+                                    vtexBase.StartsWith(vmatBase + "_", StringComparison.OrdinalIgnoreCase) ||
+                                    vtexBase.StartsWith(vmatBase + ".", StringComparison.OrdinalIgnoreCase))
+                                    return true;
+                            }
+
+                            return false;
+                        });
+                    }
 
                     if (targetSubmesh != null && targetSubmesh.Mesh != null)
                     {
@@ -2044,11 +2100,97 @@ public partial class PaintTabUI : VBoxContainer
                             restoredLayers.Add(restoredLayer);
                         }
 
+                        Image editedBaseImg = null;
+                        bool restoredHasBaseEdits = false;
+                        bool restoredHasAlphaEdits = false;
+                        bool restoredEnableAlphaTrans = false;
+
+                        if (ch == MaterialTextureChannel.Color)
+                        {
+                            // 1. Explicit edited base texture saved by newer .dpp projects
+                            if (matEntry != null && (matEntry.HasBaseTextureEdits || matEntry.HasBaseAlphaEdits || !string.IsNullOrEmpty(matEntry.BaseTexturePngRelPath)))
+                            {
+                                string baseKey = $"{vtexPath}__base";
+                                editedBaseImg = session.GetStagedTexture(baseKey);
+                                if ((editedBaseImg == null || editedBaseImg.IsEmpty()) && !string.IsNullOrEmpty(matEntry.BaseTexturePngRelPath))
+                                {
+                                    string fullBasePath = Path.Combine(session.SessionDir, matEntry.BaseTexturePngRelPath);
+                                    if (File.Exists(fullBasePath))
+                                    {
+                                        editedBaseImg = Image.LoadFromFile(fullBasePath);
+                                    }
+                                }
+                                if (editedBaseImg != null && !editedBaseImg.IsEmpty())
+                                {
+                                    restoredHasBaseEdits = true;
+                                    restoredHasAlphaEdits = matEntry.HasBaseAlphaEdits;
+                                    restoredEnableAlphaTrans = matEntry.EnableAlphaTransparency;
+                                }
+                            }
+
+                            // 2. Backwards-compatible recovery for legacy .dpp projects (where imported PNG retextures
+                            //    were baked into textures/<vtex>.png while __layer_0.png remained blank or sparse)
+                            if (editedBaseImg == null && savedLayers != null && savedLayers.Count > 0 && stagedImg != null && !stagedImg.IsEmpty())
+                            {
+                                bool allLayersBlank = restoredLayers.All(l => l.IsBlank());
+                                bool baseDiffersFromVanilla = false;
+                                if (!allLayersBlank)
+                                {
+                                    var vanillaTex = targetSubmesh.Channels?.GetChannel(MaterialTextureChannel.Color)?.OriginalTexture
+                                                  ?? targetSubmesh.Channels?.GetChannel(MaterialTextureChannel.Color)?.Texture;
+                                    var vanillaImg = vanillaTex?.GetImage();
+                                    baseDiffersFromVanilla = DoesStagedBaseDifferFromVanilla(stagedImg, vanillaImg, restoredLayers, w, h);
+                                }
+
+                                if (allLayersBlank || baseDiffersFromVanilla)
+                                {
+                                    editedBaseImg = (Image)stagedImg.Duplicate();
+                                    restoredHasBaseEdits = true;
+                                    GD.Print($"[PaintTabUI] Recovered imported base retexture for '{targetSubmesh.DisplayName}' from staged composite PNG (allLayersBlank={allLayersBlank}, baseDiffers={baseDiffersFromVanilla}).");
+                                }
+                            }
+
+                            if (editedBaseImg != null && !editedBaseImg.IsEmpty())
+                            {
+                                var editedTex = ImageTexture.CreateFromImage(editedBaseImg);
+                                foreach (var sub in _meshHierarchy.Submeshes)
+                                {
+                                    if (sub.Mesh != null && SkinLayerManager.AreMaterialKeysEquivalent(_layerManager.GetMaterialKey(sub.Mesh, sub.SurfaceIndex), baseMatKey))
+                                    {
+                                        if (sub.Channels != null)
+                                        {
+                                            var cEntry = sub.Channels.GetChannel(MaterialTextureChannel.Color);
+                                            if (cEntry == null)
+                                            {
+                                                cEntry = new ChannelMapEntry { Channel = MaterialTextureChannel.Color, IsPresent = true, IsEnabled = true };
+                                                sub.Channels.SetChannel(MaterialTextureChannel.Color, cEntry);
+                                            }
+                                            cEntry.Texture = editedTex;
+                                            cEntry.OriginalTexture = editedTex;
+                                            cEntry.SourceImage = editedBaseImg;
+                                            cEntry.IsPresent = true;
+                                            cEntry.IsDefaultFallback = false;
+                                            cEntry.IsDirty = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         bool isActiveTarget = string.Equals(_layerManager.ActiveMaterialKey, chCtxKey, StringComparison.OrdinalIgnoreCase);
                         int activeIdx = savedActiveIdx == SkinLayerManager.BaseTextureLayerIndex
                             ? SkinLayerManager.BaseTextureLayerIndex
                             : Math.Clamp(savedActiveIdx, 0, Math.Max(0, restoredLayers.Count - 1));
-                        _layerManager.RestoreMaterialContext(chCtxKey, new Vector2I(w, h), restoredLayers, activeIdx, isActiveTarget);
+                        _layerManager.RestoreMaterialContext(
+                            chCtxKey,
+                            new Vector2I(w, h),
+                            restoredLayers,
+                            activeIdx,
+                            isActiveTarget,
+                            editedBaseImage: editedBaseImg,
+                            hasBaseTextureEdits: restoredHasBaseEdits,
+                            hasBaseAlphaEdits: restoredHasAlphaEdits,
+                            enableAlphaTransparency: restoredEnableAlphaTrans);
                         _flushedMaterialKeys.Add(chCtxKey);
 
                         anyRestored = true;
@@ -2087,10 +2229,81 @@ public partial class PaintTabUI : VBoxContainer
                 uvCanvas?.QueueCanvasRedraw();
                 GD.Print($"[PaintTabUI] Restored staged textures and layers for '{heroId}' from workspace session.");
             }
+            RestoreMaterialParamOverridesFromWorkspace(heroId);
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[PaintTabUI] Error restoring staged textures: {ex.Message}");
+        }
+    }
+
+    private static bool DoesStagedBaseDifferFromVanilla(Image stagedImg, Image vanillaImg, List<SkinLayer> layers, int w, int h)
+    {
+        if (stagedImg == null || stagedImg.IsEmpty() || vanillaImg == null || vanillaImg.IsEmpty()) return false;
+        try
+        {
+            using var sCopy = (Image)stagedImg.Duplicate();
+            if (sCopy.IsCompressed()) sCopy.Decompress();
+            if (sCopy.HasMipmaps()) sCopy.ClearMipmaps();
+            if (sCopy.GetFormat() != Image.Format.Rgba8) sCopy.Convert(Image.Format.Rgba8);
+
+            using var vCopy = (Image)vanillaImg.Duplicate();
+            if (vCopy.IsCompressed()) vCopy.Decompress();
+            if (vCopy.HasMipmaps()) vCopy.ClearMipmaps();
+            if (vCopy.GetFormat() != Image.Format.Rgba8) vCopy.Convert(Image.Format.Rgba8);
+
+            int sw = sCopy.GetWidth(), sh = sCopy.GetHeight();
+            int vw = vCopy.GetWidth(), vh = vCopy.GetHeight();
+            if (sw <= 0 || sh <= 0 || vw <= 0 || vh <= 0) return false;
+
+            const int grid = 48;
+            int transparentChecked = 0;
+            int differing = 0;
+
+            for (int gy = 0; gy < grid; gy++)
+            {
+                float fy = (gy + 0.5f) / grid;
+                int ly = Math.Clamp((int)(fy * h), 0, Math.Max(0, h - 1));
+                int sy = Math.Clamp((int)(fy * sh), 0, sh - 1);
+                int vy = Math.Clamp((int)(fy * vh), 0, vh - 1);
+
+                for (int gx = 0; gx < grid; gx++)
+                {
+                    float fx = (gx + 0.5f) / grid;
+                    int lx = Math.Clamp((int)(fx * w), 0, Math.Max(0, w - 1));
+
+                    bool paintedByLayer = false;
+                    if (layers != null && w > 0 && h > 0)
+                    {
+                        int byteOff = (ly * w + lx) * 8 + 6;
+                        foreach (var l in layers)
+                        {
+                            if (l == null || !l.IsVisible || l.GpuData == null || byteOff + 1 >= l.GpuData.Length) continue;
+                            Half aHalf = BitConverter.ToHalf(l.GpuData, byteOff);
+                            if ((float)aHalf > 0.02f)
+                            {
+                                paintedByLayer = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (paintedByLayer) continue;
+
+                    transparentChecked++;
+                    int sx = Math.Clamp((int)(fx * sw), 0, sw - 1);
+                    int vx = Math.Clamp((int)(fx * vw), 0, vw - 1);
+                    Color sc = sCopy.GetPixel(sx, sy);
+                    Color vc = vCopy.GetPixel(vx, vy);
+                    float diff = MathF.Abs(sc.R - vc.R) + MathF.Abs(sc.G - vc.G) + MathF.Abs(sc.B - vc.B);
+                    if (diff > 0.15f) differing++;
+                }
+            }
+
+            return transparentChecked >= 32 && differing > transparentChecked * 0.05f;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -2409,6 +2622,7 @@ public partial class PaintTabUI : VBoxContainer
         _cachedPaintSoloedSubmesh = null;
         _materialGroupRows.Clear();
         _submeshRows.Clear();
+        _vanillaVmatDefaultsCache.Clear();
         _flushedMaterialKeys.Clear();
         _lastRegisteredDirtyMatKey = null;
         if (_submeshListContainer != null)
@@ -2471,6 +2685,7 @@ public partial class PaintTabUI : VBoxContainer
         _painter?.SetTargetMesh(mesh, surfaceIndex);
         UpdateCanvasResolutionLabel();
         NotifyUvCanvasChannelBar();
+        RefreshMaterialParamsForTarget(mesh, surfaceIndex);
     }
 
     private void NotifyUvCanvasChannelBar()

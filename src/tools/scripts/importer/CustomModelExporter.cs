@@ -502,12 +502,28 @@ namespace DeadlockPlayground.Importer
                                 }
                             }
 
+                            // If SkinLayerManager.SyncPass1MaterialBaseOverride temporarily hid Pass 1 by setting
+                            // AlbedoColor.A = 0.0f and AlphaScissorThreshold = 1.0f while storing OrigAlbedoAlpha / OrigTransparency,
+                            // restore the authentic original alpha and transparency enum for export!
+                            if (stdMat.HasMeta("OrigAlbedoAlpha"))
+                            {
+                                float origA = stdMat.GetMeta("OrigAlbedoAlpha").AsSingle();
+                                albedoTint = new Color(albedoTint.R, albedoTint.G, albedoTint.B, origA);
+                            }
+
+                            var effTransp = stdMat.HasMeta("OrigTransparency")
+                                ? (BaseMaterial3D.TransparencyEnum)stdMat.GetMeta("OrigTransparency").AsInt32()
+                                : (stdMat.HasMeta("SourceTransparencyMode") && stdMat.Transparency == BaseMaterial3D.TransparencyEnum.Disabled
+                                    ? (BaseMaterial3D.TransparencyEnum)stdMat.GetMeta("SourceTransparencyMode").AsInt32()
+                                    : stdMat.Transparency);
+
                             roughScalar = Mathf.Clamp(stdMat.Roughness, 0.05f, 1.0f);
                             metalScalar = Mathf.Clamp(stdMat.Metallic, 0.0f, 1.0f);
-                            isTranslucent = stdMat.Transparency == BaseMaterial3D.TransparencyEnum.Alpha;
-                            isAlphaTest = stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
-                                          stdMat.Transparency == BaseMaterial3D.TransparencyEnum.AlphaHash;
-                            isDoubleSided = !isOutlineShell && stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled;
+                            isTranslucent = effTransp == BaseMaterial3D.TransparencyEnum.Alpha;
+                            isAlphaTest = effTransp == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
+                                          effTransp == BaseMaterial3D.TransparencyEnum.AlphaHash;
+                            isDoubleSided = !isOutlineShell && (stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled ||
+                                                                (stdMat.HasMeta("SourceCullMode") && (BaseMaterial3D.CullModeEnum)stdMat.GetMeta("SourceCullMode").AsInt32() == BaseMaterial3D.CullModeEnum.Disabled));
                             // Do not force F_SELF_ILLUM on regular character/prop meshes just because the source glTF
                             // used KHR_materials_unlit (ShadingMode=Unshaded); Deadlock pbr.vfx should still shade and
                             // shadow-receive them unless they are inverted-hull ink outline shells or carry a SelfIllum mask.
@@ -524,11 +540,54 @@ namespace DeadlockPlayground.Importer
                             normalPng = ExtractShaderTexturePngPowerOfTwo(sMat, "normal_texture", "texture_normal", "g_tNormal");
                             roughPng = ExtractShaderTexturePngPowerOfTwo(sMat, "roughness_texture", "texture_roughness");
                             aoPng = ExtractShaderTexturePngPowerOfTwo(sMat, "ao_texture", "texture_ambient_occlusion", "g_tAmbientOcclusion");
+
+                            var scVar = sMat.HasMeta("OrigAlphaScissorThreshold")
+                                ? sMat.GetMeta("OrigAlphaScissorThreshold")
+                                : sMat.GetShaderParameter("alpha_scissor_threshold");
+                            if (scVar.VariantType == Variant.Type.Float && scVar.AsSingle() > 0.01f)
+                            {
+                                isAlphaTest = true;
+                            }
+                            var coVar = sMat.GetShaderParameter("enable_alpha_cutout");
+                            if (coVar.VariantType == Variant.Type.Bool && coVar.AsBool())
+                            {
+                                isAlphaTest = true;
+                            }
+                        }
+
+                        if (!isTranslucent && !isAlphaTest && meshInst.HasMeta("SourceTransparencyMode"))
+                        {
+                            var meshSrcTransp = (BaseMaterial3D.TransparencyEnum)meshInst.GetMeta("SourceTransparencyMode").AsInt32();
+                            if (meshSrcTransp == BaseMaterial3D.TransparencyEnum.Alpha)
+                                isTranslucent = true;
+                            else if (meshSrcTransp == BaseMaterial3D.TransparencyEnum.AlphaScissor || meshSrcTransp == BaseMaterial3D.TransparencyEnum.AlphaHash)
+                                isAlphaTest = true;
+                        }
+                        if (!isOutlineShell && !isDoubleSided && meshInst.HasMeta("SourceCullMode") &&
+                            (BaseMaterial3D.CullModeEnum)meshInst.GetMeta("SourceCullMode").AsInt32() == BaseMaterial3D.CullModeEnum.Disabled)
+                        {
+                            isDoubleSided = true;
                         }
 
                         // Check multi-channel registry & live GPU Texture Painter edits (handles ORM-unpacked AO,
                         // external tier-2 maps like _shadow/_ao/_rough, and live per-channel brush/imported edits)
                         var chSet = primaryMat != null ? MaterialChannelDiscovery.TryGetChannelSet(primaryMat) : null;
+                        if (chSet == null && origMetaMat != null)
+                        {
+                            chSet = MaterialChannelDiscovery.TryGetChannelSet(origMetaMat);
+                        }
+                        if (chSet != null)
+                        {
+                            if (!isTranslucent && !isAlphaTest)
+                            {
+                                if (chSet.IsSourceTranslucent) isTranslucent = true;
+                                else if (chSet.IsSourceAlphaTest) isAlphaTest = true;
+                            }
+                            if (!isOutlineShell && !isDoubleSided && chSet.IsSourceDoubleSided)
+                            {
+                                isDoubleSided = true;
+                            }
+                        }
                         var lm = SkinLayerManager.Instance;
                         SubmeshNodeInfo matchedSubInfo = lm?.MeshHierarchy?.Submeshes?.FirstOrDefault(smInfo =>
                             smInfo != null && smInfo.Mesh == meshInst && smInfo.SurfaceIndex == s);
@@ -957,8 +1016,8 @@ namespace DeadlockPlayground.Importer
             int h = img.GetHeight();
             if (w * h == 0) return false;
             uniformColor = img.GetPixel(0, 0);
-            int stepX = Math.Max(1, w / 16);
-            int stepY = Math.Max(1, h / 16);
+            int stepX = Math.Max(1, w / 32);
+            int stepY = Math.Max(1, h / 32);
             for (int y = 0; y < h; y += stepY)
             {
                 for (int x = 0; x < w; x += stepX)
@@ -972,6 +1031,10 @@ namespace DeadlockPlayground.Importer
                         return false;
                     }
                 }
+            }
+            if ((w > 64 || h > 64) && img.DetectAlpha() != Image.AlphaMode.None)
+            {
+                return false;
             }
             return true;
         }
@@ -5067,6 +5130,20 @@ namespace DeadlockPlayground.Importer
                     : CreateSolidColorPngBytes(64, 64, sub.AlbedoTint);
                 File.WriteAllBytes(colorPngFull, albedoBytes);
 
+                // Source 2's pbr.vfx material compiler reads the RED channel (.r) of TextureTranslucency
+                // (not the .a alpha channel!) when packing g_tColor.a into the compiled .vtex_c.
+                // Therefore, for any translucent or alpha-tested material, we must extract the alpha channel
+                // of albedoBytes into a dedicated grayscale mask PNG ({matName}_trans.png where R=G=B=A).
+                string transMaskPngRel = colorPngRel;
+                if (sub.IsTranslucent || sub.IsAlphaTest)
+                {
+                    string transPngFile = $"{matName}_trans.png";
+                    string transPngFull = Path.Combine(contentMatDir, transPngFile);
+                    byte[] transBytes = ExtractAlphaChannelAsGrayscalePngBytes(albedoBytes, sub.AlbedoTint.A);
+                    File.WriteAllBytes(transPngFull, transBytes);
+                    transMaskPngRel = $"{materialsFolderRel}/{transPngFile}";
+                }
+
                 string normalPngRel = defaultNormalRel;
                 if (sub.NormalPngBytes != null && sub.NormalPngBytes.Length > 0)
                 {
@@ -5140,7 +5217,8 @@ namespace DeadlockPlayground.Importer
                     sub.IsOutlineShell,
                     hasCustomSelfIllum,
                     hasCustomTintMask,
-                    defaultBlackMaskRel);
+                    defaultBlackMaskRel,
+                    transMaskPngRel);
                 File.WriteAllText(vmatFull, vmatContent, new UTF8Encoding(false));
                 writtenVmatPaths.Add(vmatFull);
 
@@ -5148,6 +5226,46 @@ namespace DeadlockPlayground.Importer
             }
 
             return matMap;
+        }
+
+        private static byte[] ExtractAlphaChannelAsGrayscalePngBytes(byte[] rgbaPngBytes, float tintAlpha = 1.0f)
+        {
+            float clampedTintA = Math.Clamp(tintAlpha, 0f, 1f);
+            if (rgbaPngBytes == null || rgbaPngBytes.Length == 0)
+            {
+                return CreateSolidColorPngBytes(64, 64, new Color(clampedTintA, clampedTintA, clampedTintA, 1f));
+            }
+
+            using var srcImg = new Image();
+            if (srcImg.LoadPngFromBuffer(rgbaPngBytes) != Error.Ok || srcImg.IsEmpty())
+            {
+                return CreateSolidColorPngBytes(64, 64, new Color(clampedTintA, clampedTintA, clampedTintA, 1f));
+            }
+
+            if (srcImg.GetFormat() != Image.Format.Rgba8)
+            {
+                srcImg.Convert(Image.Format.Rgba8);
+            }
+
+            int w = srcImg.GetWidth();
+            int h = srcImg.GetHeight();
+            byte[] raw = srcImg.GetData();
+            bool applyTint = clampedTintA < 0.999f;
+            for (int i = 0; i + 3 < raw.Length; i += 4)
+            {
+                byte a = raw[i + 3];
+                if (applyTint)
+                {
+                    a = (byte)Math.Clamp((int)MathF.Round(a * clampedTintA), 0, 255);
+                }
+                raw[i] = a;
+                raw[i + 1] = a;
+                raw[i + 2] = a;
+                raw[i + 3] = 255;
+            }
+
+            using var maskImg = Image.CreateFromData(w, h, false, Image.Format.Rgba8, raw);
+            return maskImg.SavePngToBuffer();
         }
 
         public static string GenerateDeadlockPbrVmat(
@@ -5166,10 +5284,14 @@ namespace DeadlockPlayground.Importer
             bool isOutlineShell = false,
             bool hasCustomSelfIllum = false,
             bool hasCustomTintMask = false,
-            string blackMaskRel = null)
+            string blackMaskRel = null,
+            string translucencyMaskPngRel = null)
         {
             var ic = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
+            string effectiveTransMaskRel = !string.IsNullOrEmpty(translucencyMaskPngRel)
+                ? translucencyMaskPngRel
+                : colorTexturePngRel;
             sb.AppendLine("// THIS FILE IS AUTO-GENERATED BY DEADLOCK PLAYGROUND");
             sb.AppendLine();
             sb.AppendLine("Layer0");
@@ -5201,16 +5323,16 @@ namespace DeadlockPlayground.Importer
             {
                 sb.AppendLine("\t//---- Translucent ----");
                 sb.AppendLine("\tF_TRANSLUCENT 1");
-                sb.AppendLine($"\tTextureTranslucency1 \"{colorTexturePngRel}\"");
-                sb.AppendLine($"\tTextureTranslucency \"{colorTexturePngRel}\"");
+                sb.AppendLine($"\tTextureTranslucency1 \"{effectiveTransMaskRel}\"");
+                sb.AppendLine($"\tTextureTranslucency \"{effectiveTransMaskRel}\"");
                 sb.AppendLine();
             }
             else if (isAlphaTest)
             {
                 sb.AppendLine("\t//---- Alpha Test ----");
                 sb.AppendLine("\tF_ALPHA_TEST 1");
-                sb.AppendLine($"\tTextureTranslucency1 \"{colorTexturePngRel}\"");
-                sb.AppendLine($"\tTextureTranslucency \"{colorTexturePngRel}\"");
+                sb.AppendLine($"\tTextureTranslucency1 \"{effectiveTransMaskRel}\"");
+                sb.AppendLine($"\tTextureTranslucency \"{effectiveTransMaskRel}\"");
                 sb.AppendLine();
             }
             sb.AppendLine("\t//---- Color ----");
