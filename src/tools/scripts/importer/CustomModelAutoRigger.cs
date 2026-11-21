@@ -9599,8 +9599,10 @@ namespace DeadlockPlayground.Importer
                         OpenSheet = true,
                         SlotId = slotKey
                     };
-                    // Pin collar/root bone rigidly on multi-bone cloth/cape strands so it doesn't bend sharply at the shoulders
-                    if (!isRigidHub && orderedBones.Count >= 2 && chain.Simulation != SimulationKind.Jiggle)
+                    // Pin collar/root bone rigidly ONLY on 3+ bone cloth/cape strands (where bone 0 is a short collar).
+                    // On 2-bone chains, bone 0 spans the upper 75% of the garment and Source 2 already inserts a synthetic
+                    // static shoulder anchor, so pinning bone 0 would freeze 75% of the cape in Godot preview.
+                    if (!isRigidHub && orderedBones.Count >= 3 && chain.Simulation != SimulationKind.Jiggle)
                     {
                         var rootOv = chain.GetOrCreateJointOverride(srcNames[orderedBones[0]]);
                         rootOv.Simulate = false;

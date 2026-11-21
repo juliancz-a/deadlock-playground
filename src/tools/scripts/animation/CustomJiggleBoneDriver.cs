@@ -64,9 +64,13 @@ namespace DeadlockPlayground.Animation
             public Transform3D CommittedGlobalPose;
             public Vector3 AnimHeadWorld;
             public Vector3 AnimTipWorld;
+            public Vector3 PrevAnimTipWorld;
+            public Vector3 SubstepAnimDelta;
             public float CurWorldBoneLength;
             public bool Initialized;
             public float InitialAnchorDist;
+            /// <summary>Per-collider rest-pose clearance cap (matching deadlockrigs <c>allow</c>) so cloth starting close to thighs/torso never pops on frame 1.</summary>
+            public readonly Dictionary<int, float> RestCapsuleAllowances = new();
         }
 
         private sealed class ActiveChain
@@ -201,14 +205,36 @@ namespace DeadlockPlayground.Animation
             ProcessPriority = 55;
         }
 
+        public static CustomJiggleBoneDriver FindOn(Node heroRoot)
+        {
+            if (heroRoot == null || !GodotObject.IsInstanceValid(heroRoot)) return null;
+            foreach (Node child in heroRoot.GetChildren())
+            {
+                if (child is CustomJiggleBoneDriver drv && GodotObject.IsInstanceValid(drv))
+                    return drv;
+            }
+            return null;
+        }
+
         public static CustomJiggleBoneDriver GetOrAttach(Node3D heroRoot, Skeleton3D skeleton)
         {
             if (heroRoot == null || !GodotObject.IsInstanceValid(heroRoot)) return null;
-            var existing = heroRoot.FindChild("CustomJiggleBoneDriver", false, false) as CustomJiggleBoneDriver;
-            if (existing != null && GodotObject.IsInstanceValid(existing))
+            var existing = FindOn(heroRoot);
+            if (existing != null)
             {
                 existing._skeleton = skeleton;
                 return existing;
+            }
+            // Strip any stale script-less stub Node named "CustomJiggleBoneDriver" (e.g. cloned from _liveHeroNode on .dpp load)
+            // so Godot does not auto-rename the real driver to "@CustomJiggleBoneDriver@...".
+            foreach (Node child in heroRoot.GetChildren())
+            {
+                if (child is not CustomJiggleBoneDriver &&
+                    string.Equals(child.Name.ToString(), "CustomJiggleBoneDriver", StringComparison.OrdinalIgnoreCase))
+                {
+                    heroRoot.RemoveChild(child);
+                    child.QueueFree();
+                }
             }
             var driver = new CustomJiggleBoneDriver { Name = "CustomJiggleBoneDriver", _skeleton = skeleton };
             heroRoot.AddChild(driver);
@@ -285,12 +311,39 @@ namespace DeadlockPlayground.Animation
                 float prevBoneLen = 0.08f;
                 var boneIdxToLocal = new Dictionary<int, int>();
 
+                // Count active (simulating) bones so short chains (e.g. 2-bone capes or chains with a pinned root)
+                // sample the StiffnessRoot -> StiffnessTip curve across their simulating span instead of collapsing to t=1.0 (goalF≈0).
+                int simTotal = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    if (_skeleton.FindBone(names[i]) < 0) continue;
+                    string sn = (def.SourceBoneNames != null && i < def.SourceBoneNames.Count) ? def.SourceBoneNames[i] : names[i];
+                    if (def.FindJointOverride(names[i], sn)?.Simulate ?? true) simTotal++;
+                }
+                int simCursor = 0;
+
                 for (int i = 0; i < count; i++)
                 {
                     int bIdx = _skeleton.FindBone(names[i]);
                     if (bIdx < 0) continue;
 
-                    float t = count > 1 ? i / (float)(count - 1) : 0f;
+                    string srcName = (def.SourceBoneNames != null && i < def.SourceBoneNames.Count) ? def.SourceBoneNames[i] : names[i];
+                    var jov = def.FindJointOverride(names[i], srcName);
+                    bool simJoint = jov?.Simulate ?? true;
+                    float t;
+                    if (!simJoint)
+                    {
+                        t = 0f;
+                    }
+                    else
+                    {
+                        t = simTotal <= 1
+                            ? 0.42f
+                            : (simTotal <= 3
+                                ? (simCursor + 0.5f) / simTotal
+                                : simCursor / (float)(simTotal - 1));
+                        simCursor++;
+                    }
                     Transform3D restLocal = _skeleton.GetBoneRest(bIdx);
                     Vector3 restScale = restLocal.Basis.Scale;
 
@@ -329,9 +382,6 @@ namespace DeadlockPlayground.Animation
                             : Mathf.Clamp(restLocal.Origin.Length(), 0.05f, 0.14f);
                     }
 
-                    string srcName = (def.SourceBoneNames != null && i < def.SourceBoneNames.Count) ? def.SourceBoneNames[i] : names[i];
-                    var jov = def.FindJointOverride(names[i], srcName);
-                    bool simJoint = jov?.Simulate ?? true;
                     var prevP = PhysicsParamResolver.ResolvePreviewBone(def, t, jov, count);
 
                     // 1:1 parity with Source 2 export: strictly follow def.PlanarizeBackBarrier (never silently force on).
@@ -417,12 +467,34 @@ namespace DeadlockPlayground.Animation
                 active.Definition = match.Clone();
 
                 int count = active.Bones.Count;
+                int simTotal = 0;
                 for (int i = 0; i < count; i++)
                 {
-                    float t = count > 1 ? i / (float)(count - 1) : 0f;
+                    var st = active.Bones[i];
+                    var jov = match.FindJointOverride(st.BoneName, st.SourceBoneName);
+                    if (jov?.Simulate ?? true) simTotal++;
+                }
+                int simCursor = 0;
+
+                for (int i = 0; i < count; i++)
+                {
                     var st = active.Bones[i];
                     var jov = match.FindJointOverride(st.BoneName, st.SourceBoneName);
                     st.Simulate = jov?.Simulate ?? true;
+                    float t;
+                    if (!st.Simulate)
+                    {
+                        t = 0f;
+                    }
+                    else
+                    {
+                        t = simTotal <= 1
+                            ? 0.42f
+                            : (simTotal <= 3
+                                ? (simCursor + 0.5f) / simTotal
+                                : simCursor / (float)(simTotal - 1));
+                        simCursor++;
+                    }
                     var prevP = PhysicsParamResolver.ResolvePreviewBone(match, t, jov, count);
                     st.GoalForce = prevP.GoalForce;
                     st.GoalDamping = prevP.GoalDamping;
@@ -474,63 +546,91 @@ namespace DeadlockPlayground.Animation
             {
                 if (grp.Count < 2) continue;
 
-                bool forceOpenSheet = false;
-                Vector3 center = Vector3.Zero;
-                int centerSamples = 0;
+                // Partition into downward-hanging vs. upward-pointing chains (matching CustomModelExporter.WriteProceduralClothProxyDmx)
+                // so upward hood/collar bones sharing an anchor with a downward cape never stitch together.
+                var downGrp = new List<ActiveChain>();
+                var upGrp = new List<ActiveChain>();
                 foreach (var ch in grp)
                 {
-                    if (ch.Definition?.OpenSheet == true) forceOpenSheet = true;
-                    if (ch.AnchorBoneIdx >= 0 && ch.AnchorBoneIdx < _skeleton.GetBoneCount())
-                    {
-                        center = _skeleton.GetBoneGlobalRest(ch.AnchorBoneIdx).Origin;
-                        centerSamples = 1;
-                    }
-                    else if (centerSamples == 0 || centerSamples > 1)
-                    {
-                        center += _skeleton.GetBoneGlobalRest(ch.Bones[0].BoneIdx).Origin;
-                        centerSamples++;
-                    }
-                }
-                if (centerSamples > 1) center /= centerSamples;
-
-                var ordered = new List<(ActiveChain Chain, float Angle)>(grp.Count);
-                foreach (var ch in grp)
-                {
-                    Vector3 rp = _skeleton.GetBoneGlobalRest(ch.Bones[0].BoneIdx).Origin;
-                    Vector3 d = rp - center;
-                    ordered.Add((ch, MathF.Atan2(d.X, d.Z)));
-                }
-                ordered.Sort((a, b) => a.Angle.CompareTo(b.Angle));
-
-                bool closeLoop = !forceOpenSheet && ordered.Count >= 4;
-                if (closeLoop)
-                {
-                    float maxGap = 0f;
-                    for (int i = 0; i < ordered.Count; i++)
-                    {
-                        float gap = ordered[(i + 1) % ordered.Count].Angle - ordered[i].Angle;
-                        if (gap < 0f) gap += Mathf.Tau;
-                        if (gap > maxGap) maxGap = gap;
-                    }
-                    if (maxGap > Mathf.DegToRad(135f)) closeLoop = false;
+                    Vector3 rPos = _skeleton.GetBoneGlobalRest(ch.Bones[0].BoneIdx).Origin;
+                    var lastB = ch.Bones[ch.Bones.Count - 1];
+                    Vector3 tPos = _skeleton.GetBoneGlobalRest(lastB.BoneIdx) * (lastB.AimAxisLocal * lastB.BoneLength);
+                    if (tPos.Y - rPos.Y > 0.10f)
+                        upGrp.Add(ch);
+                    else
+                        downGrp.Add(ch);
                 }
 
-                int pairCount = closeLoop ? ordered.Count : ordered.Count - 1;
-                for (int i = 0; i < pairCount; i++)
+                foreach (var subGrp in new[] { downGrp, upGrp })
                 {
-                    var chA = ordered[i].Chain;
-                    var chB = ordered[(i + 1) % ordered.Count].Chain;
-                    int segs = Math.Min(chA.Bones.Count, chB.Bones.Count);
-                    for (int k = 0; k < segs; k++)
-                    {
-                        // Horizontal structural rod (matches FeModel StretchRods across adjacent strands)
-                        AddProxyLinkIfValid(chA.Bones[k], chB.Bones[k], stiffness: 0.65f);
+                    if (subGrp.Count < 2) continue;
 
-                        // Diagonal shear rods (matches FeModel quad shear stiffness so skirts/capes hold woven sheet shape)
-                        if (k + 1 < segs)
+                    bool forceOpenSheet = false;
+                    Vector3 center = Vector3.Zero;
+                    int centerSamples = 0;
+                    foreach (var ch in subGrp)
+                    {
+                        if (ch.Definition?.OpenSheet == true) forceOpenSheet = true;
+                        if (ch.AnchorBoneIdx >= 0 && ch.AnchorBoneIdx < _skeleton.GetBoneCount())
                         {
-                            AddProxyLinkIfValid(chA.Bones[k], chB.Bones[k + 1], stiffness: 0.32f);
-                            AddProxyLinkIfValid(chA.Bones[k + 1], chB.Bones[k], stiffness: 0.32f);
+                            center = _skeleton.GetBoneGlobalRest(ch.AnchorBoneIdx).Origin;
+                            centerSamples = 1;
+                        }
+                        else if (centerSamples == 0 || centerSamples > 1)
+                        {
+                            center += _skeleton.GetBoneGlobalRest(ch.Bones[0].BoneIdx).Origin;
+                            centerSamples++;
+                        }
+                    }
+                    if (centerSamples > 1) center /= centerSamples;
+
+                    var ordered = new List<(ActiveChain Chain, float Angle, Vector3 Dir)>(subGrp.Count);
+                    foreach (var ch in subGrp)
+                    {
+                        Vector3 rp = _skeleton.GetBoneGlobalRest(ch.Bones[0].BoneIdx).Origin;
+                        var lastB = ch.Bones[ch.Bones.Count - 1];
+                        Vector3 tp = _skeleton.GetBoneGlobalRest(lastB.BoneIdx) * (lastB.AimAxisLocal * lastB.BoneLength);
+                        Vector3 chDir = tp - rp;
+                        chDir = chDir.LengthSquared() > 1e-6f ? chDir.Normalized() : Vector3.Down;
+                        Vector3 d = rp - center;
+                        ordered.Add((ch, MathF.Atan2(d.X, d.Z), chDir));
+                    }
+                    ordered.Sort((a, b) => a.Angle.CompareTo(b.Angle));
+
+                    bool closeLoop = !forceOpenSheet && ordered.Count >= 4;
+                    if (closeLoop)
+                    {
+                        float maxGap = 0f;
+                        for (int i = 0; i < ordered.Count; i++)
+                        {
+                            float gap = ordered[(i + 1) % ordered.Count].Angle - ordered[i].Angle;
+                            if (gap < 0f) gap += Mathf.Tau;
+                            if (gap > maxGap) maxGap = gap;
+                        }
+                        if (maxGap > Mathf.DegToRad(135f)) closeLoop = false;
+                    }
+
+                    int pairCount = closeLoop ? ordered.Count : ordered.Count - 1;
+                    for (int i = 0; i < pairCount; i++)
+                    {
+                        var itemA = ordered[i];
+                        var itemB = ordered[(i + 1) % ordered.Count];
+                        if (itemA.Dir.Dot(itemB.Dir) < 0.35f) continue;
+
+                        var chA = itemA.Chain;
+                        var chB = itemB.Chain;
+                        int segs = Math.Min(chA.Bones.Count, chB.Bones.Count);
+                        for (int k = 0; k < segs; k++)
+                        {
+                            // Horizontal structural rod (matches FeModel StretchRods across adjacent strands)
+                            AddProxyLinkIfValid(chA.Bones[k], chB.Bones[k], stiffness: 0.65f);
+
+                            // Diagonal shear rods (matches FeModel quad shear stiffness so skirts/capes hold woven sheet shape)
+                            if (k + 1 < segs)
+                            {
+                                AddProxyLinkIfValid(chA.Bones[k], chB.Bones[k + 1], stiffness: 0.32f);
+                                AddProxyLinkIfValid(chA.Bones[k + 1], chB.Bones[k], stiffness: 0.32f);
+                            }
                         }
                     }
                 }
@@ -632,6 +732,20 @@ namespace DeadlockPlayground.Animation
 
             // 60 Hz fixed-substep accumulator with sub-frame render interpolation (zero stutter on >60Hz monitors)
             _simAccumulator = MathF.Min(_simAccumulator + Math.Clamp(dt, 0f, 0.066f), FixedDt * MaxSubstepsPerFrame);
+            int plannedSubsteps = Math.Min(MaxSubstepsPerFrame, (int)MathF.Floor((_simAccumulator + 1e-5f) / FixedDt));
+            if (plannedSubsteps > 0)
+            {
+                float invSteps = 1.0f / plannedSubsteps;
+                foreach (var ch in _chains)
+                {
+                    foreach (var st in ch.Bones)
+                    {
+                        Vector3 dAnim = st.AnimTipWorld - st.PrevAnimTipWorld;
+                        // Ignore teleport jumps (> 1.2 m in a single frame)
+                        st.SubstepAnimDelta = dAnim.LengthSquared() < 1.44f ? dAnim * invSteps : Vector3.Zero;
+                    }
+                }
+            }
             int substeps = 0;
             while (_simAccumulator >= FixedDt - 1e-5f && substeps < MaxSubstepsPerFrame)
             {
@@ -643,6 +757,9 @@ namespace DeadlockPlayground.Animation
                 StepFixedSubstep();
                 substeps++;
             }
+            foreach (var ch in _chains)
+                foreach (var st in ch.Bones)
+                    st.PrevAnimTipWorld = st.AnimTipWorld;
             float renderAlpha = _simAccumulator <= 1e-4f ? 1.0f : Mathf.Clamp(_simAccumulator / FixedDt, 0f, 1f);
             CommitFinalBonePoses(skelGlobal, boneCount, renderAlpha);
         }
@@ -758,18 +875,20 @@ namespace DeadlockPlayground.Animation
                     {
                         st.TipWorldPos = st.AnimTipWorld;
                         st.PrevTipWorldPos = st.AnimTipWorld;
+                        st.PrevAnimTipWorld = st.AnimTipWorld;
                         st.RenderPrevTipWorldPos = st.AnimTipWorld;
+                        st.SubstepAnimDelta = Vector3.Zero;
                         st.Velocity = Vector3.Zero;
                         st.Initialized = true;
                         st.InitialAnchorDist = float.MaxValue;
-                        if (chain.AnchorBoneIdx >= 0)
+                        st.RestCapsuleAllowances.Clear();
+                        foreach (var wc in _worldCapsulesCache)
                         {
-                            foreach (var wc in _worldCapsulesCache)
-                            {
-                                if (wc.BoneIdx != chain.AnchorBoneIdx) continue;
-                                ComputeClosestTaperedCapsule(st.AnimTipWorld, wc.A, wc.B, wc.Radius0, wc.Radius1, out float dist, out _, out _);
-                                if (dist < st.InitialAnchorDist) st.InitialAnchorDist = dist;
-                            }
+                            ComputeClosestTaperedCapsule(st.AnimTipWorld, wc.A, wc.B, wc.Radius0, wc.Radius1, out float dist, out _, out _);
+                            if (wc.BoneIdx == chain.AnchorBoneIdx && dist < st.InitialAnchorDist)
+                                st.InitialAnchorDist = dist;
+                            if (!st.RestCapsuleAllowances.TryGetValue(wc.BoneIdx, out float prevAllow) || dist < prevAllow)
+                                st.RestCapsuleAllowances[wc.BoneIdx] = dist;
                         }
                     }
                 }
@@ -912,39 +1031,42 @@ namespace DeadlockPlayground.Animation
 
         private void StepClothVerletSubstep(JiggleBoneState st)
         {
-            // Responsive, perceptible damping in preview honoring both UI Damping (0..1) and per-bone GoalDamping:
-            // Damping=0 -> 2.2/s (lively drape), Damping=0.35 -> 5.5/s (calm settle ~1s), Damping=1.0 -> 11.7/s.
-            float totalDamp = 2.2f + st.Damping01 * 9.5f + st.GoalDamping * 6.0f;
+            // Valve-matched air damping: tiny 0.25/s stabilizer at Damping=0 (matching Valve's PointDamping=0.000)
+            // up to ~7.75/s at Damping=1.0 so low-damping cloth/hair swings freely and high damping calms it clearly.
+            float totalDamp = 0.25f + st.Damping01 * 7.5f + st.GoalDamping * 4.0f;
             float dampFactor = MathF.Exp(-totalDamp * FixedDt);
-            Vector3 vel = (st.TipWorldPos - st.PrevTipWorldPos) * dampFactor;
+
+            float effGoal = st.GoalForce;
+            if (effGoal > 1e-5f && st.IsBackSideOfTorso && IsPointInsideTorsoBarrier(st.AnimTipWorld, st.ColRadiusMeters))
+            {
+                effGoal *= 0.12f;
+            }
+
+            // Time-step-consistent velocity integration:
+            // High-goal roots gently track animated velocity vg without injecting artificial 60Hz overdamping.
+            Vector3 vg = st.SubstepAnimDelta;
+            Vector3 rawVel = (st.TipWorldPos - st.PrevTipWorldPos) * dampFactor;
+            float velFollow = 1.0f - MathF.Exp(-effGoal * 2.5f * FixedDt);
+            Vector3 vel = rawVel + (vg - rawVel) * velFollow;
 
             // Cap extreme velocities (> 12 m/s) to prevent teleport bursts; sleep micro-jitter cleanly
             float maxStep = 12.0f * FixedDt;
             float velSq = vel.LengthSquared();
             if (velSq > maxStep * maxStep)
                 vel *= maxStep / MathF.Sqrt(velSq);
-            else if (velSq < 2e-7f)
+            else if (velSq < 1e-8f)
                 vel = Vector3.Zero;
 
-            st.PrevTipWorldPos = st.TipWorldPos;
-            st.TipWorldPos += vel + new Vector3(0f, -st.GravityMetersPerSecSq, 0f) * (FixedDt * FixedDt);
+            // Source 2 FeModel spring goal attraction + gravity acceleration:
+            // effGoal in [0..0.90] maps to spring acceleration k = effGoal * 180 s^-2 (k * dt^2 <= 0.045, unconditionally stable),
+            // so loose presets (Chains/Keys, Ponytail, Cape) swing & drape freely while stiff presets (Geist Dress, Short Hair) hold shape.
+            Vector3 goalAccel = effGoal > 1e-5f
+                ? (st.AnimTipWorld - st.TipWorldPos) * (effGoal * 180.0f)
+                : Vector3.Zero;
+            Vector3 totalAccel = goalAccel + new Vector3(0f, -st.GravityMetersPerSecSq, 0f);
 
-            // Source 2 AnimationForceAttraction (GoalForce): damped position pull toward pure AnimTipWorld.
-            // Shift PrevTipWorldPos by 78% of the pull so pose-return glides calmly into rest instead of overshooting!
-            float effGoal = st.GoalForce;
-            if (effGoal > 1e-5f)
-            {
-                if (st.IsBackSideOfTorso && IsPointInsideTorsoBarrier(st.AnimTipWorld, st.ColRadiusMeters))
-                {
-                    effGoal *= 0.12f;
-                }
-                float pullAlpha = Mathf.Clamp(effGoal * 0.35f, 0f, 0.85f);
-                Vector3 nextPos = st.TipWorldPos.Lerp(st.AnimTipWorld, pullAlpha);
-                Vector3 pullDelta = nextPos - st.TipWorldPos;
-                st.TipWorldPos = nextPos;
-                float dampCarry = Mathf.Clamp(0.78f + st.GoalDamping * 0.40f, 0.78f, 0.98f);
-                st.PrevTipWorldPos += pullDelta * dampCarry;
-            }
+            st.PrevTipWorldPos = st.TipWorldPos;
+            st.TipWorldPos += vel + totalAccel * (FixedDt * FixedDt);
         }
 
         private void StepJiggleSubstep(JiggleBoneState st)
@@ -1238,6 +1360,13 @@ namespace DeadlockPlayground.Animation
                 float minAllowed = isAnchorCapsule
                     ? MathF.Min(capRad + effMargin * 0.5f, st.InitialAnchorDist - 0.002f)
                     : capRad + effMargin;
+
+                // Per-node rest-pose capsule allowance (matching deadlockrigs): if this bone started closer
+                // to this capsule than capRad + effMargin at bind pose, cap minAllowed so skirts/hair never pop on frame 1.
+                if (!isAnchorCapsule && st.RestCapsuleAllowances.TryGetValue(wc.BoneIdx, out float restAllow) && restAllow < minAllowed)
+                {
+                    minAllowed = MathF.Max(capRad * 0.82f, restAllow - 0.002f);
+                }
 
                 if (dist < minAllowed)
                 {

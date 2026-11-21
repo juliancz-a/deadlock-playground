@@ -928,6 +928,23 @@ namespace DeadlockPlayground.UI
             };
             tbRow1.AddChild(_btnToggleColliders);
 
+            _btnStressTestPopover = new Button
+            {
+                Text = "Stress Test",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(106, 32),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                TooltipText = "Open floating Look Up / Crouch / Walk Back physics stress-test controls"
+            };
+            SetButtonIcon(_btnStressTestPopover, "res://assets/at-icons/signal_wave.svg", 16);
+            _btnStressTestPopover.Toggled += (open) =>
+            {
+                if (_boxStressTestPopover != null) _boxStressTestPopover.Visible = open;
+            };
+            tbRow1.AddChild(_btnStressTestPopover);
+
             foreach (string camPreset in new[] { "Front", "Side", "3/4", "Frame" })
             {
                 var btnCam = new Button
@@ -1302,6 +1319,7 @@ namespace DeadlockPlayground.UI
             SetupPreviewInputHandling();
             BuildSelectedBoneBadgeOverlay(viewportPanel);
             BuildWeightPaintViewportHud(viewportPanel);
+            BuildStressTestViewportPopover(viewportPanel);
 
             // Right Side: Tabbed Configuration Inspector
             var rightPanel = new PanelContainer
@@ -3059,7 +3077,8 @@ namespace DeadlockPlayground.UI
 
                 if (cType.Contains("SkeletonGizmo") || cType.Contains("BoneLayer") || cType.Contains("CharacterIK") ||
                     cName.StartsWith("@") || lower.Contains("gizmo") || lower.Contains("picker") ||
-                    lower.Contains("handle") || lower.Contains("tipvisual") || lower.Contains("polevisual"))
+                    lower.Contains("handle") || lower.Contains("tipvisual") || lower.Contains("polevisual") ||
+                    lower == "customjigglebonedriver" || lower == "source2boneconstraintdriver")
                 {
                     toRemove.Add(child);
                     continue;
@@ -5369,7 +5388,9 @@ namespace DeadlockPlayground.UI
             }
         }
 
-        private void SnapAccessoryToSelectedBone()
+        private void SnapAccessoryToSelectedBone() => SnapAccessoryToSelectedBone(preserveCurrentScale: false);
+
+        private void SnapAccessoryToSelectedBone(bool preserveCurrentScale)
         {
             if (_liveImportedScene == null || _previewHeroSkeleton == null || _previewModelRoot == null) return;
             _previewHeroSkeleton.ResetBonePoses();
@@ -5377,26 +5398,39 @@ namespace DeadlockPlayground.UI
             Transform3D fit = CustomModelAutoRigger.ComputeAutoFitTransformToBone(
                 _previewModelInstance ?? _liveImportedScene, _previewHeroSkeleton, boneName, GetActiveImportedSubmeshFilter());
 
-            Vector3 scaleVec = fit.Basis.Scale;
-            float scale = MathF.Max(0.0005f, scaleVec.X);
+            float fitScale = MathF.Max(0.0005f, fit.Basis.Scale.X);
+            float scale = preserveCurrentScale ? MathF.Max(0.0005f, (float)_spinScale.Value) : fitScale;
             Vector3 eulerRad = fit.Basis.Orthonormalized().GetEuler();
 
-            _spinScale.SetValueNoSignal(Math.Round(scale, 4));
-            _sliderScale.SetValueNoSignal(Math.Round(scale, 4));
-            _spinPosX.SetValueNoSignal(Math.Round(fit.Origin.X, 3));
-            _spinPosY.SetValueNoSignal(Math.Round(fit.Origin.Y, 3));
-            _spinPosZ.SetValueNoSignal(Math.Round(fit.Origin.Z, 3));
+            int bIdx = _previewHeroSkeleton.FindBone(boneName);
+            if (bIdx < 0) bIdx = _previewHeroSkeleton.FindBone("head");
+            Vector3 boneOrigin = bIdx >= 0
+                ? _previewHeroSkeleton.Transform * _previewHeroSkeleton.GetBoneGlobalRest(bIdx).Origin
+                : Vector3.Zero;
+
+            Vector3 targetOrigin = fit.Origin;
+            if (preserveCurrentScale && bIdx >= 0 && fitScale > 1e-5f)
+            {
+                // Preserve user's chosen Uniform Scale while still centering the accessory cleanly on the selected bone
+                targetOrigin = boneOrigin + (fit.Origin - boneOrigin) * (scale / fitScale);
+            }
+
+            if (!preserveCurrentScale)
+            {
+                _spinScale.SetValueNoSignal(Math.Round(scale, 4));
+                _sliderScale.SetValueNoSignal(Math.Round(scale, 4));
+            }
+            _spinPosX.SetValueNoSignal(Math.Round(targetOrigin.X, 3));
+            _spinPosY.SetValueNoSignal(Math.Round(targetOrigin.Y, 3));
+            _spinPosZ.SetValueNoSignal(Math.Round(targetOrigin.Z, 3));
             _spinRotPitch.SetValueNoSignal(Math.Round(Mathf.RadToDeg(eulerRad.X), 1));
             _spinRotYaw.SetValueNoSignal(Math.Round(Mathf.RadToDeg(eulerRad.Y), 1));
             _spinRotRoll.SetValueNoSignal(Math.Round(Mathf.RadToDeg(eulerRad.Z), 1));
 
             ApplyTransformToPreviewModel(immediate: true);
 
-            int bIdx = _previewHeroSkeleton.FindBone(boneName);
-            if (bIdx < 0) bIdx = _previewHeroSkeleton.FindBone("head");
             if (bIdx >= 0)
             {
-                Vector3 boneOrigin = _previewHeroSkeleton.Transform * _previewHeroSkeleton.GetBoneGlobalRest(bIdx).Origin;
                 _orbitTarget = boneOrigin;
                 bool closeZoom = boneName.Contains("head", StringComparison.OrdinalIgnoreCase) ||
                                  boneName.Contains("ankle", StringComparison.OrdinalIgnoreCase) ||
@@ -5409,7 +5443,9 @@ namespace DeadlockPlayground.UI
                 UpdateCamera();
             }
 
-            SetBottomStatus($"Auto-fitted accessory to bone '{boneName}' (Scale={scale:F3}x).", StatusTone.Success);
+            SetBottomStatus(preserveCurrentScale
+                ? $"Snapped accessory to bone '{boneName}' (kept Scale={scale:F3}x)."
+                : $"Auto-fitted accessory to bone '{boneName}' (Scale={scale:F3}x).", StatusTone.Success);
         }
 
         public void AutoFitToHero()
@@ -5797,8 +5833,7 @@ namespace DeadlockPlayground.UI
         private bool IsBindPoseView() => _optTestAnim == null || _optTestAnim.Selected <= 0;
         private bool IsTab3PhysicsPaintHostActive() =>
             _rightTabs != null && _rightTabs.CurrentTab == 2 &&
-            _boxSubViewPhysics != null && _boxSubViewPhysics.Visible &&
-            _boxPhysicsChainsPane != null && _boxPhysicsChainsPane.Visible &&
+            _boxSubViewWeights != null && _boxSubViewWeights.Visible &&
             _boxTab3WeightPaintHost != null && _boxWeightPaintSection != null &&
             _boxWeightPaintSection.GetParent() == _boxTab3WeightPaintHost;
         private bool IsWeightPaintActive() =>
@@ -5825,10 +5860,6 @@ namespace DeadlockPlayground.UI
                 if (_boxWeightPaintControls != null && (_btnWeightPaintMode?.ButtonPressed ?? false))
                     _boxWeightPaintControls.Visible = true;
             }
-            else if (_boxTab3WeightPaintHost != null)
-            {
-                _boxTab3WeightPaintHost.Visible = false;
-            }
         }
 
         private void SetHeroGhostEnabled(bool enabled)
@@ -5844,6 +5875,20 @@ namespace DeadlockPlayground.UI
 
         private void OnRightTabChanged(long tabIdx)
         {
+            if (tabIdx != 2 && _wasInCollidersSubView)
+            {
+                _wasInCollidersSubView = false;
+                if (_showColliders)
+                {
+                    if (_btnToggleColliders != null) _btnToggleColliders.ButtonPressed = false;
+                    else
+                    {
+                        _showColliders = false;
+                        if (_collidersDebugMesh != null) _collidersDebugMesh.Visible = false;
+                    }
+                    if (_btnShowCollidersInCard != null) _btnShowCollidersInCard.SetPressedNoSignal(false);
+                }
+            }
             if (tabIdx == 1)
             {
                 HostWeightPaintSectionIn(_boxTab2WeightPaintHost);
@@ -5852,7 +5897,7 @@ namespace DeadlockPlayground.UI
             }
             else if (tabIdx == 2)
             {
-                if (_boxSubViewPhysics != null && _boxSubViewPhysics.Visible && _boxPhysicsChainsPane != null && _boxPhysicsChainsPane.Visible && (_btnWeightPaintMode?.ButtonPressed ?? false))
+                if (_boxSubViewWeights != null && _boxSubViewWeights.Visible)
                 {
                     HostWeightPaintSectionIn(_boxTab3WeightPaintHost);
                 }
@@ -8313,10 +8358,10 @@ namespace DeadlockPlayground.UI
             if (_btnStraightenWeapon != null) _btnStraightenWeapon.Visible = isFullCharacter;
             if (_btnAutoFit != null) _btnAutoFit.Visible = isFullCharacter;
             if (_boxReplaceModeSection != null) _boxReplaceModeSection.Visible = isFullCharacter;
-            if (_btnPhysTabColliders != null)
+            if (_btnSubTabColliders != null)
             {
                 // Keep Body Colliders accessible in Accessory mode too so physics capes/skirts/hair can adapt hero colliders
-                _btnPhysTabColliders.Visible = true;
+                _btnSubTabColliders.Visible = true;
             }
 
             if (_optGizmoTarget != null)

@@ -274,7 +274,7 @@ namespace DeadlockPlayground.UI
             _selectedChain = chain;
             if (_rightTabs != null && _rightTabs.GetTabCount() > 2)
                 _rightTabs.CurrentTab = 2; // 3_ Bones
-            SetBonesSubView(1); // Physics
+            SetBonesSubView(2); // Physics
             MarkRemapStaleAndRefresh();
             RefreshClothingChainsPanel();
             UpdateSelectedBoneBadge();
@@ -299,8 +299,7 @@ namespace DeadlockPlayground.UI
             bool inBonesTab = _rightTabs != null && _rightTabs.CurrentTab == 2;
             if (inBonesTab)
             {
-                SetBonesSubView(1);
-                SetPhysicsSubView(0);
+                SetBonesSubView(1); // Dedicated Weights workspace
                 HostWeightPaintSectionIn(_boxTab3WeightPaintHost);
             }
             else
@@ -315,6 +314,142 @@ namespace DeadlockPlayground.UI
                 _btnWeightPaintMode.ButtonPressed = true;
             SelectPaintBoneByName(boneName);
             RefreshChainPaintQuickBones();
+        }
+
+        private Button _btnStressTestPopover;
+        private PanelContainer _boxStressTestPopover;
+
+        private void BuildStressTestViewportPopover(Control viewportPanel)
+        {
+            if (viewportPanel == null) return;
+
+            var overlayMargin = new MarginContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            overlayMargin.AddThemeConstantOverride("margin_left", 10);
+            overlayMargin.AddThemeConstantOverride("margin_right", 10);
+            overlayMargin.AddThemeConstantOverride("margin_top", 10);
+            overlayMargin.AddThemeConstantOverride("margin_bottom", 10);
+            viewportPanel.AddChild(overlayMargin);
+
+            _boxStressTestPopover = new PanelContainer
+            {
+                ThemeTypeVariation = "InspectorSectionPanel",
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+                CustomMinimumSize = new Vector2(310, 0),
+                Visible = false,
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+            overlayMargin.AddChild(_boxStressTestPopover);
+
+            var pad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            pad.AddThemeConstantOverride("margin_left", 10);
+            pad.AddThemeConstantOverride("margin_right", 10);
+            pad.AddThemeConstantOverride("margin_top", 8);
+            pad.AddThemeConstantOverride("margin_bottom", 10);
+            _boxStressTestPopover.AddChild(pad);
+
+            var stressBody = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            stressBody.AddThemeConstantOverride("separation", 6);
+            pad.AddChild(stressBody);
+
+            var hdr = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            hdr.AddThemeConstantOverride("separation", 6);
+            var lblTitle = new Label
+            {
+                Text = "Physics Stress Test",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            ImporterStyle.ApplyFontSize(lblTitle, ImporterStyle.FontBody);
+            _accentLabels.Add(lblTitle);
+            hdr.AddChild(lblTitle);
+
+            var btnClose = new Button
+            {
+                Text = "×",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(26, 26),
+                TooltipText = "Close stress test popover"
+            };
+            btnClose.Pressed += () =>
+            {
+                if (_btnStressTestPopover != null) _btnStressTestPopover.ButtonPressed = false;
+                else if (_boxStressTestPopover != null) _boxStressTestPopover.Visible = false;
+            };
+            hdr.AddChild(btnClose);
+            stressBody.AddChild(hdr);
+
+            var stressPresetRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            stressPresetRow.AddThemeConstantOverride("h_separation", 6);
+            stressPresetRow.AddThemeConstantOverride("v_separation", 6);
+
+            var btnStressReset = new Button { Text = "Normal", CustomMinimumSize = new Vector2(68, 28), ThemeTypeVariation = "ToolbarButton" };
+            btnStressReset.Pressed += () => SetPhysicsStressTestPose(0f, 0f, false);
+
+            var btnStressLookUp = new Button { Text = "Look Up (+65°)", CustomMinimumSize = new Vector2(110, 28), ThemeTypeVariation = "ToolbarButton" };
+            btnStressLookUp.Pressed += () => SetPhysicsStressTestPose(65f, 0f, _stressWalkBackShake);
+
+            var btnStressCrouchUp = new Button { Text = "Crouch + Up", CustomMinimumSize = new Vector2(102, 28), ThemeTypeVariation = "ToolbarButton" };
+            btnStressCrouchUp.Pressed += () => SetPhysicsStressTestPose(65f, 38f, _stressWalkBackShake);
+
+            var btnStressLookDown = new Button { Text = "Look Down (-45°)", CustomMinimumSize = new Vector2(118, 28), ThemeTypeVariation = "ToolbarButton" };
+            btnStressLookDown.Pressed += () => SetPhysicsStressTestPose(-45f, 0f, _stressWalkBackShake);
+
+            _btnStressWalkShake = new Button
+            {
+                Text = "Walk Back / Shake",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(128, 28),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Oscillates the hero forward & backward to preview hair/cloth inertia and torso collision live."
+            };
+            _btnStressWalkShake.Toggled += (on) =>
+            {
+                _stressWalkBackShake = on;
+                if (!on && _stressHasSavedHeroPos && _previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+                {
+                    _previewHeroClone.Position = _stressSavedHeroPos;
+                    _stressHasSavedHeroPos = false;
+                }
+            };
+
+            stressPresetRow.AddChild(btnStressReset);
+            stressPresetRow.AddChild(btnStressLookUp);
+            stressPresetRow.AddChild(btnStressCrouchUp);
+            stressPresetRow.AddChild(btnStressLookDown);
+            stressPresetRow.AddChild(_btnStressWalkShake);
+            stressBody.AddChild(stressPresetRow);
+
+            (_sliderStressHeadPitch, _lblValStressHeadPitch) = AddExplainedSlider(
+                stressBody,
+                "Head Pitch (Down ↔ Up)",
+                "Pitches head (70%) + neck_0 (30%) on top of Bind Pose or playing animation.",
+                -60.0, 75.0, 1.0, "F0",
+                (v) =>
+                {
+                    _stressHeadPitchDeg = (float)v;
+                    if (_lblValStressHeadPitch != null) _lblValStressHeadPitch.Text = $"{v:+0;-0;0}°";
+                });
+            _sliderStressHeadPitch.SetValueNoSignal(0.0);
+            if (_lblValStressHeadPitch != null) _lblValStressHeadPitch.Text = "0°";
+
+            (_sliderStressCrouchLean, _lblValStressCrouchLean) = AddExplainedSlider(
+                stressBody,
+                "Crouch Forward Lean",
+                "Leans spine_1..3 forward to test extreme ~100° crouch + look-up folds.",
+                0.0, 50.0, 1.0, "F0",
+                (v) =>
+                {
+                    _stressCrouchLeanDeg = (float)v;
+                    if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = $"{v:F0}°";
+                });
+            _sliderStressCrouchLean.SetValueNoSignal(0.0);
+            if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = "0°";
         }
 
         private void SelectPaintBoneByName(string boneName)

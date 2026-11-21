@@ -84,6 +84,14 @@ namespace DeadlockPlayground.Importer
         public string AnchorHeroBone { get; set; } = "spine_3";
         public ChainPolicy Policy { get; set; } = ChainPolicy.PreservePhysicsChain;
         public SimulationKind Simulation { get; set; } = SimulationKind.Jiggle;
+        /// <summary>Valve-backed preset ID from <see cref="PhysicsPresetCatalog"/> (or <c>"custom"</c> for manual/legacy chains).</summary>
+        public string PresetId { get; set; } = PhysicsPresetCatalog.CustomId;
+        /// <summary>Macro looseness/flow slider (0 = firmer, 0.5 = exact Valve preset, 1 = looser).</summary>
+        public float MacroLooseness { get; set; } = 0.50f;
+        /// <summary>Macro collision margin multiplier (0.5..2.0, 1.0 = exact Valve preset).</summary>
+        public float MacroCollisionScale { get; set; } = 1.0f;
+        /// <summary>Root-to-tip goal taper exponent <c>Pow(1 - t, GoalTaperPower)</c> (default 1.85).</summary>
+        public float GoalTaperPower { get; set; } = 1.85f;
         public float StiffnessRoot { get; set; } = 0.80f;
         public float StiffnessTip { get; set; } = 0.15f;
         public float Damping { get; set; } = 0.35f;
@@ -172,6 +180,10 @@ namespace DeadlockPlayground.Importer
                 AnchorHeroBone = AnchorHeroBone,
                 Policy = Policy,
                 Simulation = Simulation,
+                PresetId = PresetId,
+                MacroLooseness = MacroLooseness,
+                MacroCollisionScale = MacroCollisionScale,
+                GoalTaperPower = GoalTaperPower,
                 StiffnessRoot = StiffnessRoot,
                 StiffnessTip = StiffnessTip,
                 Damping = Damping,

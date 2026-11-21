@@ -139,7 +139,7 @@ namespace DeadlockPlayground.UI
             var accRigBtnRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             accRigBtnRow.AddThemeConstantOverride("separation", 8);
             var btnJumpPhys = new Button { Text = "Configure Physics Chains →", ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(0, 36), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            btnJumpPhys.Pressed += () => { if (_rightTabs != null && _rightTabs.GetTabCount() > 2) _rightTabs.CurrentTab = 2; SetBonesSubView(1); };
+            btnJumpPhys.Pressed += () => { if (_rightTabs != null && _rightTabs.GetTabCount() > 2) _rightTabs.CurrentTab = 2; SetBonesSubView(2); };
             var btnEnableSkin = new Button { Text = "Use Full-Body Skinning", ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(0, 36), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             btnEnableSkin.Pressed += () =>
             {
@@ -298,7 +298,7 @@ namespace DeadlockPlayground.UI
                 if (_rightTabs != null && _rightTabs.GetTabCount() > 2)
                 {
                     _rightTabs.CurrentTab = 2;
-                    SetBonesSubView(1);
+                    SetBonesSubView(2);
                 }
             };
             statusBody.AddChild(_btnRigPhysicsLink);

@@ -144,7 +144,7 @@ namespace DeadlockPlayground.UI
                 TooltipText = "Normalizes model size and snaps it onto the selected bone in 3D space."
             };
             SetButtonIcon(_btnAccSnapBone, "res://assets/at-icons/magnet.svg", 18, StatusTone.Warning);
-            _btnAccSnapBone.Pressed += SnapAccessoryToSelectedBone;
+            _btnAccSnapBone.Pressed += () => SnapAccessoryToSelectedBone(preserveCurrentScale: true);
             accToolsRow.AddChild(_btnAccSnapBone);
 
             _btnAccGizmoToggle = new Button

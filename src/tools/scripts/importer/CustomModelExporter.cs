@@ -1453,8 +1453,18 @@ namespace DeadlockPlayground.Importer
                     string smdFullPath = Path.Combine(contentModelDir, smdFileName);
                     string smdRelPath = $"{modelFolderRel}/{smdFileName}";
 
-                    progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing Source 2 bind-pose SMD '{smdFileName}' ({bundle.Submeshes.Count} surface(s))..."));
-                    WriteSourceSpaceSmd(smdFullPath, bundle, bundle.Submeshes, targetSkeletonBones);
+                    // Merge kept composite vanilla surfaces (e.g. Doorman's gun/weapon split out of the hero's
+                    // main body mesh) directly into the primary RenderMeshFile so they stay inside the hero's
+                    // single body mesh and never disappear under Deadlock's online server-side BodyGroupList!
+                    var unifiedPrimarySubmeshes = new List<CustomModelExportBundle.SubmeshData>(bundle.Submeshes.Count + bundle.PreservedVanillaSubmeshes.Count);
+                    unifiedPrimarySubmeshes.AddRange(bundle.Submeshes);
+                    if (bundle.PreservedVanillaSubmeshes.Count > 0)
+                    {
+                        unifiedPrimarySubmeshes.AddRange(bundle.PreservedVanillaSubmeshes);
+                    }
+
+                    progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 bind-pose SMD '{smdFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
+                    WriteSourceSpaceSmd(smdFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
 
                     string animBindFileName = $"{modelBaseName}_anim_bind.smd";
                     string animBindFullPath = Path.Combine(contentModelDir, animBindFileName);
@@ -1464,16 +1474,6 @@ namespace DeadlockPlayground.Importer
                     {
                         (customSmdMeshName, smdRelPath)
                     };
-
-                    if (bundle.PreservedVanillaSubmeshes.Count > 0)
-                    {
-                        string keptSmdFileName = $"{modelBaseName}_kept_props.smd";
-                        string keptSmdFullPath = Path.Combine(contentModelDir, keptSmdFileName);
-                        string keptSmdRelPath = $"{modelFolderRel}/{keptSmdFileName}";
-                        progress?.Report(new ExportProgressReport(0.41f, $"[INFO] Writing preserved vanilla props SMD '{keptSmdFileName}' ({bundle.PreservedVanillaSubmeshes.Count} surface(s))..."));
-                        WriteSourceSpaceSmd(keptSmdFullPath, bundle, bundle.PreservedVanillaSubmeshes, targetSkeletonBones);
-                        customRenderMeshes.Add(($"{modelBaseName}_kept_props", keptSmdRelPath));
-                    }
 
                     // Hybrid physics export: ProxyCloth chains stitch into a single-sided ClothProxyMeshFile DMX sheet,
                     // while ClothChain & compact Jiggle chains compile natively as Softbody ClothChain nodes alongside
@@ -2516,7 +2516,12 @@ namespace DeadlockPlayground.Importer
 
                     if (cls == "BodyGroupList")
                     {
-                        string patchedBg = PatchBodyGroupListBlock(blockText, validMeshNames);
+                        string primaryBodyForBg = DetectPrimaryBodyGroupMeshName(decompiledVmdlText, hero);
+                        var auxBodyMeshes = customRenderMeshes
+                            .Select(m => m.MeshName)
+                            .Where(mn => !string.Equals(mn, primaryBodyForBg, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        string patchedBg = PatchBodyGroupListBlock(blockText, validMeshNames, primaryBodyForBg, auxBodyMeshes);
                         outSb.AppendLine("\t\t\t" + patchedBg.TrimStart() + ",");
                         continue;
                     }
@@ -2631,9 +2636,16 @@ namespace DeadlockPlayground.Importer
 
         /// <summary>
         /// Filters BodyGroupChoice.meshes arrays inside BodyGroupList so only meshes present in
-        /// RenderMeshList remain, while keeping all BodyGroup and BodyGroupChoice names intact!
+        /// RenderMeshList remain, while keeping all BodyGroup and BodyGroupChoice names intact,
+        /// and injects any auxiliary body-attached custom meshes (e.g. accessory SMDs) into every
+        /// BodyGroupChoice that includes <paramref name="primaryBodyMeshName"/> so online server-side
+        /// bodygroups never hide them (while keeping empty choices like <c>bodyoff</c> empty).
         /// </summary>
-        private static string PatchBodyGroupListBlock(string bodyGroupBlock, HashSet<string> validMeshNames)
+        private static string PatchBodyGroupListBlock(
+            string bodyGroupBlock,
+            HashSet<string> validMeshNames,
+            string primaryBodyMeshName = null,
+            List<string> auxiliaryBodyMeshes = null)
         {
             return Regex.Replace(
                 bodyGroupBlock,
@@ -2642,12 +2654,30 @@ namespace DeadlockPlayground.Importer
                 {
                     string inner = match.Groups[1].Value;
                     var kept = new List<string>();
+                    var keptSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    bool containsPrimaryBody = false;
                     foreach (Match qm in Regex.Matches(inner, @"""([^""]+)"""))
                     {
                         string mName = qm.Groups[1].Value;
                         if (validMeshNames.Contains(mName))
                         {
-                            kept.Add($"\"{mName}\"");
+                            if (keptSet.Add(mName))
+                                kept.Add($"\"{mName}\"");
+                            if (!string.IsNullOrEmpty(primaryBodyMeshName) &&
+                                string.Equals(mName, primaryBodyMeshName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                containsPrimaryBody = true;
+                            }
+                        }
+                    }
+                    if (containsPrimaryBody && auxiliaryBodyMeshes != null)
+                    {
+                        foreach (string aux in auxiliaryBodyMeshes)
+                        {
+                            if (!string.IsNullOrEmpty(aux) && validMeshNames.Contains(aux) && keptSet.Add(aux))
+                            {
+                                kept.Add($"\"{aux}\"");
+                            }
                         }
                     }
                     if (kept.Count == 0)
@@ -4433,15 +4463,19 @@ namespace DeadlockPlayground.Importer
 
             if (proxyDesignated.Count > 0)
             {
-                var groups = chainsForProxy.GroupBy(c => $"{c.SlotId ?? ""}::{c.AnchorHeroBone ?? ""}", StringComparer.OrdinalIgnoreCase);
-                foreach (var grp in groups)
+                // Group by (SlotId, AnchorHeroBone) and then split upward-pointing chains (e.g. hoods/collars, tip.Z > root.Z + 4 in)
+                // from downward-hanging chains (capes/skirts/hair) so opposite-direction chains are NEVER stitched into a 90-inch zig-zag sheet!
+                var rawGroups = chainsForProxy.GroupBy(c => $"{c.SlotId ?? ""}::{c.AnchorHeroBone ?? ""}", StringComparer.OrdinalIgnoreCase);
+                foreach (var rawGrp in rawGroups)
                 {
-                    var built = new List<(BoneChainDef Ch, List<System.Numerics.Vector3> Pos, List<int> JointIdx, List<bool> Pin, int PinBi, float Angle)>();
-                    bool isHeadGroup = grp.Any(c =>
+                    bool isHeadGroup = rawGrp.Any(c =>
                         (c.AnchorHeroBone ?? "").Equals("head", StringComparison.OrdinalIgnoreCase) ||
                         (c.AnchorHeroBone ?? "").Equals("neck_0", StringComparison.OrdinalIgnoreCase));
 
-                    foreach (var ch in grp)
+                    var downwardBuilt = new List<(BoneChainDef Ch, List<System.Numerics.Vector3> Pos, List<int> JointIdx, List<bool> Pin, int PinBi, float Angle)>();
+                    var upwardBuilt = new List<(BoneChainDef Ch, List<System.Numerics.Vector3> Pos, List<int> JointIdx, List<bool> Pin, int PinBi, float Angle)>();
+
+                    foreach (var ch in rawGrp)
                     {
                         if (!TryBuildStrandRows(ch, out var rp, out var rj, out var rpin, out int pinBi))
                             continue;
@@ -4452,27 +4486,36 @@ namespace DeadlockPlayground.Importer
                             EmitRibbonStrip(ch, rp, rj, rpin);
                             continue;
                         }
-                        built.Add((ch, rp, rj, rpin, pinBi, 0f));
+                        var rootP = rp[Math.Min(1, rp.Count - 1)];
+                        var tipP = rp[^1];
+                        bool pointsUpward = (tipP.Z - rootP.Z) > 4.0f;
+                        if (pointsUpward)
+                            upwardBuilt.Add((ch, rp, rj, rpin, pinBi, 0f));
+                        else
+                            downwardBuilt.Add((ch, rp, rj, rpin, pinBi, 0f));
                     }
-                    if (built.Count == 0) continue;
 
-                    if (built.Count == 1)
+                    foreach (var built in new[] { downwardBuilt, upwardBuilt })
                     {
-                        EmitRibbonStrip(built[0].Ch, built[0].Pos, built[0].JointIdx, built[0].Pin);
-                        continue;
-                    }
-                    if (built.Count == 2)
-                    {
-                        // Avoid bridging across opposite left/right hip tails (>12 in apart at mid/root)
-                        var p0 = built[0].Pos[Math.Min(1, built[0].Pos.Count - 1)];
-                        var p1 = built[1].Pos[Math.Min(1, built[1].Pos.Count - 1)];
-                        if ((p0 - p1).Length() > 12.0f)
+                        if (built.Count == 0) continue;
+
+                        if (built.Count == 1)
                         {
                             EmitRibbonStrip(built[0].Ch, built[0].Pos, built[0].JointIdx, built[0].Pin);
-                            EmitRibbonStrip(built[1].Ch, built[1].Pos, built[1].JointIdx, built[1].Pin);
                             continue;
                         }
-                    }
+                        if (built.Count == 2)
+                        {
+                            // Avoid bridging across opposite left/right hip tails (>12 in apart at mid/root)
+                            var p0 = built[0].Pos[Math.Min(1, built[0].Pos.Count - 1)];
+                            var p1 = built[1].Pos[Math.Min(1, built[1].Pos.Count - 1)];
+                            if ((p0 - p1).Length() > 12.0f)
+                            {
+                                EmitRibbonStrip(built[0].Ch, built[0].Pos, built[0].JointIdx, built[0].Pin);
+                                EmitRibbonStrip(built[1].Ch, built[1].Pos, built[1].JointIdx, built[1].Pin);
+                                continue;
+                            }
+                        }
 
                     // Order multi-strand proxy sheets radially in Source 2 XY around the anchor bone origin
                     // using mid-strand positions (where strands are well-separated) and relative angle around
@@ -4613,10 +4656,21 @@ namespace DeadlockPlayground.Importer
                     for (int c = 0; c < quadCols; c++)
                     {
                         int cNext = (c + 1) % built.Count;
-                        // Skip stitching across large lateral gaps (> 16 in at root) to prevent cross-head/cross-back rods
+                        // Skip stitching across large lateral gaps (> 16 in at root, > 28 in at mid, > 34 in at tip)
+                        // or divergent strand directions (Dot < 0.35) to prevent cross-back / sky-to-hem rods!
                         var rootA = built[c].Pos[Math.Min(1, built[c].Pos.Count - 1)];
                         var rootB = built[cNext].Pos[Math.Min(1, built[cNext].Pos.Count - 1)];
-                        if ((rootA - rootB).Length() > 16.0f) continue;
+                        var midA = built[c].Pos[built[c].Pos.Count / 2];
+                        var midB = built[cNext].Pos[built[cNext].Pos.Count / 2];
+                        var tipA = built[c].Pos[^1];
+                        var tipB = built[cNext].Pos[^1];
+                        if ((rootA - rootB).Length() > 16.0f || (midA - midB).Length() > 28.0f || (tipA - tipB).Length() > 34.0f)
+                            continue;
+                        var dirA = tipA - rootA;
+                        var dirB = tipB - rootB;
+                        if (dirA.LengthSquared() > 1e-4f && dirB.LengthSquared() > 1e-4f &&
+                            System.Numerics.Vector3.Dot(System.Numerics.Vector3.Normalize(dirA), System.Numerics.Vector3.Normalize(dirB)) < 0.35f)
+                            continue;
 
                         int baseA = colStartVerts[c];
                         int baseB = colStartVerts[cNext];
@@ -4635,6 +4689,7 @@ namespace DeadlockPlayground.Importer
                         }
                     }
                     emittedStrips += built.Count;
+                    }
                 }
             }
             else

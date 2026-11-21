@@ -437,6 +437,10 @@ namespace DeadlockPlayground.Workspace
                         AnchorHeroBone = c.AnchorHeroBone,
                         Policy = (int)c.Policy,
                         Simulation = (int)c.Simulation,
+                        PresetId = c.PresetId,
+                        MacroLooseness = c.MacroLooseness,
+                        MacroCollisionScale = c.MacroCollisionScale,
+                        GoalTaperPower = c.GoalTaperPower,
                         StiffnessRoot = c.StiffnessRoot,
                         StiffnessTip = c.StiffnessTip,
                         Damping = c.Damping,
@@ -753,6 +757,10 @@ namespace DeadlockPlayground.Workspace
                         AnchorHeroBone = ce.AnchorHeroBone ?? "spine_3",
                         Policy = (DeadlockPlayground.Importer.ChainPolicy)ce.Policy,
                         Simulation = (DeadlockPlayground.Importer.SimulationKind)ce.Simulation,
+                        PresetId = string.IsNullOrWhiteSpace(ce.PresetId) ? DeadlockPlayground.Importer.PhysicsPresetCatalog.CustomId : ce.PresetId,
+                        MacroLooseness = ce.MacroLooseness ?? 0.50f,
+                        MacroCollisionScale = ce.MacroCollisionScale ?? 1.0f,
+                        GoalTaperPower = ce.GoalTaperPower ?? 1.85f,
                         StiffnessRoot = ce.StiffnessRoot,
                         StiffnessTip = ce.StiffnessTip,
                         Damping = ce.Damping,
@@ -844,6 +852,10 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("anchor_hero_bone")] public string AnchorHeroBone { get; set; } = "spine_3";
         [JsonPropertyName("policy")] public int Policy { get; set; } = 0;
         [JsonPropertyName("simulation")] public int Simulation { get; set; } = 0;
+        [JsonPropertyName("preset_id")] public string PresetId { get; set; }
+        [JsonPropertyName("macro_looseness")] public float? MacroLooseness { get; set; }
+        [JsonPropertyName("macro_collision_scale")] public float? MacroCollisionScale { get; set; }
+        [JsonPropertyName("goal_taper_power")] public float? GoalTaperPower { get; set; }
         [JsonPropertyName("stiffness_root")] public float StiffnessRoot { get; set; } = 0.80f;
         [JsonPropertyName("stiffness_tip")] public float StiffnessTip { get; set; } = 0.25f;
         [JsonPropertyName("damping")] public float Damping { get; set; } = 0.35f;

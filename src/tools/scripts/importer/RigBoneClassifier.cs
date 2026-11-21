@@ -1432,15 +1432,9 @@ namespace DeadlockPlayground.Importer
 
                 if (IsGluteJiggleName(nm))
                 {
-                    ch.Simulation = SimulationKind.Jiggle;
                     if (resetTuningValues)
                     {
-                        ch.StiffnessRoot = 0.94f;
-                        ch.StiffnessTip = 0.84f;
-                        ch.Damping = 0.65f;
-                        ch.Gravity = 0.0f;
-                        ch.CollisionRadiusTipInches = 0.5f;
-                        ch.StrayRadiusInches = 1.5f;
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, PhysicsPresetCatalog.RigidJiggleId, resetMacros: true);
                         ch.AngleLimitDeg = 14.0f;
                         // On 2-bone buttroot -> butt chains, pin the root rigidly so seated/crouched
                         // poses don't double-lever two stacked Rigid FeJiggleBones.
@@ -1450,105 +1444,98 @@ namespace DeadlockPlayground.Importer
                             rootOv.Simulate = false;
                         }
                     }
+                    else
+                    {
+                        ch.Simulation = SimulationKind.Jiggle;
+                        ch.PresetId = PhysicsPresetCatalog.RigidJiggleId;
+                    }
                 }
                 else if (IsBustJiggleName(nm))
                 {
-                    ch.Simulation = SimulationKind.Jiggle;
                     if (resetTuningValues)
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, PhysicsPresetCatalog.RigidJiggleId, resetMacros: true);
+                    else
                     {
-                        ch.StiffnessRoot = 0.90f;
-                        ch.StiffnessTip = 0.72f;
-                        ch.Damping = 0.55f;
-                        ch.Gravity = 0.0f;
-                        ch.CollisionRadiusTipInches = 0.5f;
-                        ch.StrayRadiusInches = 2.5f;
-                        ch.AngleLimitDeg = 20.0f;
+                        ch.Simulation = SimulationKind.Jiggle;
+                        ch.PresetId = PhysicsPresetCatalog.RigidJiggleId;
                     }
                 }
                 else if (boneCount >= 2 && IsBackHairSheetCandidate(ch) && backHairCount >= 3)
                 {
-                    ch.Simulation = SimulationKind.ProxyCloth;
-                    ch.PlanarizeBackBarrier = true;
-                    ch.AnchorFreeRotate = true;
-                    ch.OpenSheet = true;
+                    string hairPreset = boneCount <= 3 ? PhysicsPresetCatalog.MediumHairId : PhysicsPresetCatalog.LongFlowingHairId;
                     if (resetTuningValues)
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, hairPreset, resetMacros: true);
+                    else
                     {
-                        // Valve-matched (yamato/wraith/unicorn): moderate root, near-zero tip goalF (~0.001)
-                        ch.StiffnessRoot = 0.55f;
-                        ch.StiffnessTip = 0.05f;
-                        ch.Damping = 0.25f;
-                        ch.Gravity = 1.0f;
-                        ch.Friction = 0.15f;
-                        ch.CollisionRadiusTipInches = 2.0f;
-                        ch.StrayRadiusInches = -1.0f;
+                        ch.Simulation = SimulationKind.ProxyCloth;
+                        ch.PresetId = hairPreset;
                     }
                 }
-                else if (boneCount >= 2 && IsSheetClothName(nm) && (torsoSheetCount >= 2 || HasAnyToken(nm, "skirt", "cape", "cloak", "dress")))
+                else if (boneCount >= 2 && IsSheetClothName(nm) && (torsoSheetCount >= 2 || HasAnyToken(nm, "skirt", "cape", "cloak", "dress", "coat")))
                 {
-                    ch.Simulation = SimulationKind.ProxyCloth;
-                    bool isWrapSkirt = HasAnyToken(nm, "skirt", "dress", "gown", "kimono");
-                    ch.OpenSheet = !isWrapSkirt;
-                    ch.PlanarizeBackBarrier = HasAnyToken(nm, "cape", "cloak", "mantle");
-                    ch.AnchorFreeRotate = false;
+                    string clothPreset;
+                    if (HasAnyToken(nm, "cape", "cloak", "mantle"))
+                        clothPreset = PhysicsPresetCatalog.CapeCloakId;
+                    else if (HasAnyToken(nm, "coat", "coattail", "trench"))
+                        clothPreset = PhysicsPresetCatalog.TrenchcoatLongCoatId;
+                    else if (HasAnyToken(nm, "gown", "dress"))
+                        clothPreset = PhysicsPresetCatalog.StructuredDressGownId;
+                    else
+                        clothPreset = PhysicsPresetCatalog.HeavySkirtDressId;
+
                     if (resetTuningValues)
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, clothPreset, resetMacros: true);
+                    else
                     {
-                        // Valve-matched (chrono/yamato/wraith): low tip goalF (~0.001) + stronger gravity so skirts hang down
-                        ch.StiffnessRoot = 0.45f;
-                        ch.StiffnessTip = 0.04f;
-                        ch.Damping = 0.22f;
-                        ch.Gravity = isWrapSkirt ? 1.5f : 1.0f;
-                        ch.Friction = 0.15f;
-                        ch.CollisionRadiusTipInches = isWrapSkirt ? 1.8f : 2.4f;
-                        ch.StrayRadiusInches = -1.0f;
+                        ch.Simulation = SimulationKind.ProxyCloth;
+                        ch.PresetId = clothPreset;
                     }
                 }
                 else if (boneCount >= 2 && !IsSoftAnatomyJiggleName(nm) && !IsStandaloneStrandName(nm) && (anchor.Contains("pelvis") || anchor.Contains("spine_0")) && torsoSheetCount >= 3)
                 {
-                    ch.Simulation = SimulationKind.ProxyCloth;
-                    ch.OpenSheet = false;
-                    ch.PlanarizeBackBarrier = false;
-                    ch.AnchorFreeRotate = false;
                     if (resetTuningValues)
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, PhysicsPresetCatalog.HeavySkirtDressId, resetMacros: true);
+                    else
                     {
-                        ch.StiffnessRoot = 0.45f;
-                        ch.StiffnessTip = 0.04f;
-                        ch.Damping = 0.22f;
-                        ch.Gravity = 1.5f;
-                        ch.Friction = 0.15f;
-                        ch.CollisionRadiusTipInches = 1.8f;
-                        ch.StrayRadiusInches = -1.0f;
+                        ch.Simulation = SimulationKind.ProxyCloth;
+                        ch.PresetId = PhysicsPresetCatalog.HeavySkirtDressId;
                     }
                 }
                 else if (boneCount == 1 || IsSoftAnatomyJiggleName(nm))
                 {
-                    ch.Simulation = SimulationKind.Jiggle;
                     if (resetTuningValues)
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, PhysicsPresetCatalog.RigidJiggleId, resetMacros: true);
+                    else
                     {
-                        ch.StiffnessRoot = 0.88f;
-                        ch.StiffnessTip = 0.65f;
-                        ch.Damping = 0.50f;
-                        ch.Gravity = 0.40f;
-                        ch.CollisionRadiusTipInches = 0.8f;
-                        ch.StrayRadiusInches = 4.0f;
-                        ch.AngleLimitDeg = 28.0f;
+                        ch.Simulation = SimulationKind.Jiggle;
+                        ch.PresetId = PhysicsPresetCatalog.RigidJiggleId;
                     }
                 }
                 else
                 {
-                    ch.Simulation = SimulationKind.Cloth;
+                    string chainPreset;
                     bool isHeadChain = anchor.Contains("head") || anchor.Contains("neck");
-                    ch.PlanarizeBackBarrier = isHeadChain && !HasAnyToken(nm, "front", "bang", "fringe", "earring");
-                    ch.AnchorFreeRotate = isHeadChain;
-                    ch.OpenSheet = true;
+                    if (HasAnyToken(nm, "ponytail", "pigtail", "twintail", "braid") && boneCount >= 4)
+                        chainPreset = PhysicsPresetCatalog.UltraLongPonytailId;
+                    else if (isHeadChain && HasAnyToken(nm, "front", "bang", "fringe", "tuft"))
+                        chainPreset = PhysicsPresetCatalog.ShortHairBangsId;
+                    else if (isHeadChain && HasAnyToken(nm, "earring", "pendant", "key", "chain", "charm", "necklace"))
+                        chainPreset = PhysicsPresetCatalog.ChainsKeysJewelryId;
+                    else if (isHeadChain)
+                        chainPreset = boneCount <= 3 ? PhysicsPresetCatalog.ShortHairBangsId : PhysicsPresetCatalog.LongFlowingHairId;
+                    else if (HasAnyToken(nm, "tail"))
+                        chainPreset = PhysicsPresetCatalog.TailFlexibleId;
+                    else if (HasAnyToken(nm, "chain", "key", "pendant", "charm", "necklace", "earring"))
+                        chainPreset = PhysicsPresetCatalog.ChainsKeysJewelryId;
+                    else
+                        chainPreset = PhysicsPresetCatalog.ScarfRibbonSashId;
+
                     if (resetTuningValues)
+                        PhysicsPresetCatalog.ApplyPresetToChain(ch, chainPreset, resetMacros: true);
+                    else
                     {
-                        ch.StiffnessRoot = isHeadChain ? 0.50f : 0.55f;
-                        ch.StiffnessTip = isHeadChain ? 0.04f : 0.05f;
-                        ch.Damping = 0.25f;
-                        ch.Gravity = 1.0f;
-                        ch.Friction = 0.15f;
-                        ch.CollisionRadiusTipInches = isHeadChain ? 1.8f : 1.6f;
-                        ch.StrayRadiusInches = -1.0f;
+                        ch.Simulation = SimulationKind.Cloth;
+                        ch.PresetId = chainPreset;
                     }
                 }
             }

@@ -267,10 +267,11 @@ namespace DeadlockPlayground.Importer
             float torsion = Mathf.Clamp(ch?.TwistRelax ?? 1.0f, 0f, 2.0f);
             float freeRot = (ch?.AnchorFreeRotate == true) ? 1.0f : 0.0f;
 
-            // Valve-matched exponential goal taper: drops quickly past root so mid/tip drape naturally under gravity.
+            // Valve-matched configurable goal taper (e.g., 0.65 for Geist's structured dress, 2.6 for Yamato's kimono, 1.85 default).
             float rootForce = ResolveRootGoalForce(sRoot);
             float tipForce = ResolveTipGoalForce(sTip, rootForce);
-            float taper = MathF.Pow(1.0f - t, 1.85f);
+            float taperPower = Mathf.Clamp(ch?.GoalTaperPower ?? 1.85f, 0.30f, 4.0f);
+            float taper = MathF.Pow(1.0f - t, taperPower);
             float goalForce;
             float goalInput;
             if (isPinned)
