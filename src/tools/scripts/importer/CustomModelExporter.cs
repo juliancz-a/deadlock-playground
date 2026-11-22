@@ -4628,36 +4628,15 @@ namespace DeadlockPlayground.Importer
                         built[i] = (st.Ch, newPos, newJoint, newPin, st.PinBi, st.Angle);
                     }
 
-                    var colStartVerts = new List<int>(built.Count);
-                    var colRowCounts = new List<int>(built.Count);
-                    for (int i = 0; i < built.Count; i++)
-                    {
-                        var st = built[i];
-                        colStartVerts.Add(positions.Count);
-                        colRowCounts.Add(st.Pos.Count);
-                        float u = built.Count > 1 ? i / (float)(built.Count - 1) : 0f;
-                        for (int r = 0; r < st.Pos.Count; r++)
-                        {
-                            var radial = st.Pos[r] - center;
-                            radial.Z = 0f;
-                            var nrm = radial.LengthSquared() > 0.01f
-                                ? System.Numerics.Vector3.Normalize(radial)
-                                : new System.Numerics.Vector3(0, 1, 0);
-                            float t = st.Pos.Count > 1 ? r / (float)(st.Pos.Count - 1) : 0f;
-                            // Avoid overlapping column root verts all on pinParentBi; place row 0 slightly toward strand column 1
-                            var vPos = (r == 0 && st.Pos.Count > 1)
-                                ? System.Numerics.Vector3.Lerp(st.Pos[0], st.Pos[1], 0.15f)
-                                : st.Pos[r];
-                            PushClothVertex(st.Ch, vPos, nrm, u, t, st.Pin[r], st.JointIdx[r]);
-                        }
-                    }
-
+                    // 1. Pre-check which adjacent strand pairs can be cleanly stitched so we NEVER emit
+                    //    unreferenced loose vertices (which resourcecompiler.exe strips, breaking $cloth_m0p* indices
+                    //    or triggering "No position data found in mesh custom_cloth_proxy_shape" when 0 faces emit!).
                     int quadCols = closeLoop ? built.Count : built.Count - 1;
+                    var validPairs = new List<(int C, int CNext)>(Math.Max(1, quadCols));
+                    var colStitched = new bool[built.Count];
                     for (int c = 0; c < quadCols; c++)
                     {
                         int cNext = (c + 1) % built.Count;
-                        // Skip stitching across large lateral gaps (> 16 in at root, > 28 in at mid, > 34 in at tip)
-                        // or divergent strand directions (Dot < 0.35) to prevent cross-back / sky-to-hem rods!
                         var rootA = built[c].Pos[Math.Min(1, built[c].Pos.Count - 1)];
                         var rootB = built[cNext].Pos[Math.Min(1, built[cNext].Pos.Count - 1)];
                         var midA = built[c].Pos[built[c].Pos.Count / 2];
@@ -4671,13 +4650,48 @@ namespace DeadlockPlayground.Importer
                         if (dirA.LengthSquared() > 1e-4f && dirB.LengthSquared() > 1e-4f &&
                             System.Numerics.Vector3.Dot(System.Numerics.Vector3.Normalize(dirA), System.Numerics.Vector3.Normalize(dirB)) < 0.35f)
                             continue;
+                        validPairs.Add((c, cNext));
+                        colStitched[c] = true;
+                        colStitched[cNext] = true;
+                    }
 
+                    // 2. Push sheet column vertices ONLY for stitched strands, and emit standalone ribbon strips
+                    //    for any wide-spaced / divergent strands so 100% of vertices belong to real triangles!
+                    var colStartVerts = new int[built.Count];
+                    var colRowCounts = new int[built.Count];
+                    for (int i = 0; i < built.Count; i++)
+                    {
+                        var st = built[i];
+                        if (!colStitched[i])
+                        {
+                            colStartVerts[i] = -1;
+                            EmitRibbonStrip(st.Ch, st.Pos, st.JointIdx, st.Pin);
+                            continue;
+                        }
+                        colStartVerts[i] = positions.Count;
+                        colRowCounts[i] = st.Pos.Count;
+                        float u = built.Count > 1 ? i / (float)(built.Count - 1) : 0f;
+                        for (int r = 0; r < st.Pos.Count; r++)
+                        {
+                            var radial = st.Pos[r] - center;
+                            radial.Z = 0f;
+                            var nrm = radial.LengthSquared() > 0.01f
+                                ? System.Numerics.Vector3.Normalize(radial)
+                                : new System.Numerics.Vector3(0, 1, 0);
+                            float t = st.Pos.Count > 1 ? r / (float)(st.Pos.Count - 1) : 0f;
+                            var vPos = (r == 0 && st.Pos.Count > 1)
+                                ? System.Numerics.Vector3.Lerp(st.Pos[0], st.Pos[1], 0.15f)
+                                : st.Pos[r];
+                            PushClothVertex(st.Ch, vPos, nrm, u, t, st.Pin[r], st.JointIdx[r]);
+                        }
+                    }
+
+                    foreach (var (c, cNext) in validPairs)
+                    {
                         int baseA = colStartVerts[c];
                         int baseB = colStartVerts[cNext];
-                        int rowsA = colRowCounts[c];
-                        int rowsB = colRowCounts[cNext];
-                        int minRows = Math.Min(rowsA, rowsB);
-
+                        if (baseA < 0 || baseB < 0) continue;
+                        int minRows = Math.Min(colRowCounts[c], colRowCounts[cNext]);
                         for (int r = 0; r < minRows - 1; r++)
                         {
                             int a0 = baseA + r;
@@ -4688,7 +4702,7 @@ namespace DeadlockPlayground.Importer
                             faceIndices.Add(b0); faceIndices.Add(b1); faceIndices.Add(a1); faceIndices.Add(-1);
                         }
                     }
-                    emittedStrips += built.Count;
+                    if (validPairs.Count > 0) emittedStrips += validPairs.Count;
                     }
                 }
             }
@@ -4701,8 +4715,12 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            if (emittedStrips == 0 || positions.Count < 6)
+            if (emittedStrips == 0 || positions.Count < 6 || faceIndices.Count < 4)
+            {
+                bundle.PlanarizeBackProxyNodes.Clear();
+                bundle.PlanarizeWrapProxyNodes.Clear();
                 return false;
+            }
 
             var vertexData = new Datamodel.Element(dm, "bind", null, "DmeVertexData");
             var vFmt = new Datamodel.StringArray

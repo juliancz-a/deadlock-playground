@@ -12,6 +12,8 @@ namespace DeadlockPlayground.UI
         private Button _btnTab1AdvancedToggle;
         private VBoxContainer _boxTab1Advanced;
         private OptionButton _optAccBoneMode;
+        private Button _btnPreviewOriginalPose;
+        private bool _showOriginalPoseInTab1 = false;
 
         private Control BuildTab1ImportAndPlace()
         {
@@ -397,6 +399,24 @@ namespace DeadlockPlayground.UI
             SetButtonIcon(_btnResetTransform, "res://assets/at-icons/arrow_counterclockwise.svg", 22);
             _btnResetTransform.Pressed += () => { _userModifiedTransform = true; ResetTransform(); };
             fitHBox.AddChild(_btnResetTransform);
+
+            _btnPreviewOriginalPose = new Button
+            {
+                Text = "Original Pose",
+                ToggleMode = true,
+                ButtonPressed = false,
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(124, 34),
+                TooltipText = "Toggle between the unposed original imported mesh (A-Pose / T-Pose) and the rigged hero preview to gauge height & proportions accurately."
+            };
+            SetButtonIcon(_btnPreviewOriginalPose, "res://assets/at-icons/eye.svg", 18);
+            _btnPreviewOriginalPose.Toggled += (on) =>
+            {
+                _showOriginalPoseInTab1 = on;
+                _btnPreviewOriginalPose.ThemeTypeVariation = on ? "ImporterPrimaryButton" : "ToolbarButton";
+                ApplyLandmarkPreviewState();
+            };
+            fitHBox.AddChild(_btnPreviewOriginalPose);
             tBody.AddChild(fitHBox);
 
             tBody.AddChild(new Label { Text = "Uniform Scale Factor:" });

@@ -188,11 +188,13 @@ namespace DeadlockPlayground.Importer
 
             float zMid = ZAt(Yf(0.55f));
             float pelvisY = hipY + 0.02f * H;
+            float chinY = Yf(0.885f);
             var head = new Vector3(cx, headY, ZAt(headY, 0.05f));
+            var chin = new Vector3(cx, chinY, ZAt(chinY, 0.03f));
             var neck = new Vector3(cx, neckY, ZAt(neckY));
             var pelvis = new Vector3(cx, pelvisY, zMid);
             var chest = new Vector3(cx, Mathf.Lerp(pelvisY, neckY, 0.6f), ZAt(Mathf.Lerp(pelvisY, neckY, 0.6f)));
-            pins["Head"] = head; pins["Neck"] = neck; pins["Chest"] = chest; pins["Pelvis"] = pelvis;
+            pins["Chin"] = chin; pins["Head"] = head; pins["Neck"] = neck; pins["Chest"] = chest; pins["Pelvis"] = pelvis;
 
             // +X side is labelled "L" initially; the rig builder auto-swaps against the hero skeleton.
             foreach (int sign in new[] { 1, -1 })
@@ -229,6 +231,8 @@ namespace DeadlockPlayground.Importer
                     wrist = new Vector3(cx + sign * Math.Max(0.02f * H, wo - 0.03f * H), Yf(0.47f), ZAt(Yf(0.47f)));
                 }
                 pins["Shoulder" + sfx] = shoulder; pins["Elbow" + sfx] = elbow; pins["Wrist" + sfx] = wrist;
+                Vector3 armDir = (wrist - elbow).LengthSquared() > 1e-6f ? (wrist - elbow).Normalized() : new Vector3(sign, 0f, 0f);
+                pins["HandTip" + sfx] = wrist + armDir * (0.095f * H);
             }
             return pins;
         }
@@ -462,6 +466,7 @@ namespace DeadlockPlayground.Importer
                 for (int i = 0; i < n; i++)
                 {
                     int rowOff = i * nb;
+                    int primary = label[i];
                     var neighbors = adj[i];
                     if (neighbors.Count == 0)
                     {
@@ -479,7 +484,6 @@ namespace DeadlockPlayground.Importer
                             continue;
                         }
                     }
-                    int primary = label[i];
                     float rowSum = 0f;
                     float invDeg = 1f / neighbors.Count;
                     for (int b = 0; b < nb; b++)
@@ -577,9 +581,19 @@ namespace DeadlockPlayground.Importer
             if (primary == candidate) return true;
             var pSpec = specs[primary];
             var cSpec = specs[candidate];
-            // Fingers only blend with their own immediate parent/child (hop <= 1) so adjacent fingers never bleed!
+            // Fingers only blend with their own immediate parent/child (hop <= 1) so adjacent fingers never bleed;
+            // allow hand <-> finger_*_0 (hop == 2 through metacarpal) so the knuckle seam never forms a hard cliff!
             if (pSpec.Role == ReferenceBoneRole.Finger || cSpec.Role == ReferenceBoneRole.Finger)
-                return hopDist[primary, candidate] <= 1;
+            {
+                if (hopDist[primary, candidate] <= 1) return true;
+                if (hopDist[primary, candidate] == 2)
+                {
+                    bool pIsHand = pSpec.Name.StartsWith("hand_", StringComparison.OrdinalIgnoreCase);
+                    bool cIsHand = cSpec.Name.StartsWith("hand_", StringComparison.OrdinalIgnoreCase);
+                    if (pIsHand || cIsHand) return true;
+                }
+                return false;
+            }
             // Cloth chains only blend along their own chain + parent bone (hop <= 1)
             if (pSpec.Role == ReferenceBoneRole.Cloth || cSpec.Role == ReferenceBoneRole.Cloth)
                 return hopDist[primary, candidate] <= 1;
@@ -596,6 +610,7 @@ namespace DeadlockPlayground.Importer
             List<int[]> indices,
             List<ReferenceRigDef.ResolvedBoneSpec> specs,
             float H,
+            float? chinPlaneY,
             out List<int[]> outBones,
             out List<float[]> outWeights)
         {
@@ -697,6 +712,27 @@ namespace DeadlockPlayground.Importer
                 if (okLow && okHigh) seedsPerBone[bi].Add(i);
             }
 
+            // Safety guarantee: ensure no short finger phalanx or metacarpal ends up with 0 Dijkstra seeds
+            // (which would set G[b] = +Infinity and collapse the entire phalanx onto its neighbor on low-poly hands!).
+            for (int b = 0; b < nb; b++)
+            {
+                if (seedsPerBone[b].Count > 0) continue;
+                var sp = specs[b];
+                // First try any vertex already labeled for this bone
+                for (int i = 0; i < n; i++)
+                    if (label[i] == b) seedsPerBone[b].Add(i);
+                if (seedsPerBone[b].Count > 0) continue;
+                // Fallback: seed with the single closest vertex to this bone segment
+                float bestDist = float.MaxValue;
+                int bestIdx = -1;
+                for (int i = 0; i < n; i++)
+                {
+                    float sc = CapsuleScore(weldPos[i], sp.SegStart, sp.SegEnd, sp.Radius, out _);
+                    if (sc < bestDist) { bestDist = sc; bestIdx = i; }
+                }
+                if (bestIdx >= 0) seedsPerBone[b].Add(bestIdx);
+            }
+
             var G = new float[nb][];
             System.Threading.Tasks.Parallel.For(0, nb, b =>
             {
@@ -731,7 +767,24 @@ namespace DeadlockPlayground.Importer
                 {
                     if (!IsBoneAllowedForSpec(specs, hopDist, primary, b)) continue;
                     float gd = G[b][i];
-                    if (float.IsPositiveInfinity(gd)) continue;
+                    if (float.IsPositiveInfinity(gd))
+                    {
+                        // Disconnected overlapping shell fallback (e.g. shorts/underwear mesh over thigh skin):
+                        // if an allowed Core neighbor bone has no geodesic path onto this shell, use Euclidean
+                        // distance to its bone segment so both shells receive matching pelvis<->thigh weights
+                        // and move in lockstep instead of tearing apart at the glute/hip seam!
+                        if (specs[primary].Role == ReferenceBoneRole.Core && specs[b].Role == ReferenceBoneRole.Core)
+                        {
+                            Vector3 ab = specs[b].SegEnd - specs[b].SegStart;
+                            float len2 = ab.LengthSquared();
+                            float ct = len2 < 1e-10f ? 0f : Mathf.Clamp((weldPos[i] - specs[b].SegStart).Dot(ab) / len2, 0f, 1f);
+                            gd = (weldPos[i] - (specs[b].SegStart + ab * ct)).Length();
+                        }
+                        else
+                        {
+                            continue;
+                        }
+                    }
                     float w = 1f / ((gd + localEps) * (gd + localEps));
                     dense[rowOff + b] = w; sum += w;
                 }
@@ -758,6 +811,13 @@ namespace DeadlockPlayground.Importer
                 for (int i = 0; i < n; i++)
                 {
                     int rowOff = i * nb;
+                    int primary = label[i];
+                    // Keep finger joints crisp: stop Laplacian smoothing on fingers after 2 passes so adjacent fingers never web!
+                    if (iter >= 2 && specs[primary].Role == ReferenceBoneRole.Finger)
+                    {
+                        Array.Copy(dense, rowOff, next, rowOff, nb);
+                        continue;
+                    }
                     var neighbors = adj[i];
                     if (neighbors.Count == 0)
                     {
@@ -775,7 +835,6 @@ namespace DeadlockPlayground.Importer
                             continue;
                         }
                     }
-                    int primary = label[i];
                     float rowSum = 0f;
                     float invDeg = 1f / neighbors.Count;
                     for (int b = 0; b < nb; b++)
@@ -800,6 +859,37 @@ namespace DeadlockPlayground.Importer
                     }
                 }
                 (dense, next) = (next, dense);
+            }
+
+            // Chin Plane Gate: prevent neck_0 from deforming or pulling any vertices on the chin, jaw, or head!
+            // Everything at/above chinPlaneY transfers 100% of neck_0 weight cleanly to head; a 1.2cm band strictly
+            // below chinPlaneY transitions smoothly into the throat so neck_0 bends naturally underneath the jaw.
+            int idxNeck = specs.FindIndex(b => b.Name.Equals("neck_0", StringComparison.OrdinalIgnoreCase));
+            int idxHead = specs.FindIndex(b => b.Name.Equals("head", StringComparison.OrdinalIgnoreCase));
+            if (chinPlaneY.HasValue && idxNeck >= 0 && idxHead >= 0)
+            {
+                float cy = chinPlaneY.Value;
+                float band = MathF.Max(0.008f, 0.012f * H);
+                for (int i = 0; i < n; i++)
+                {
+                    float vy = weldPos[i].Y;
+                    if (vy <= cy - band) continue;
+                    int rowOff = i * nb;
+                    float wNeck = dense[rowOff + idxNeck];
+                    if (wNeck <= 1e-5f) continue;
+                    if (vy >= cy)
+                    {
+                        dense[rowOff + idxHead] += wNeck;
+                        dense[rowOff + idxNeck] = 0f;
+                    }
+                    else
+                    {
+                        float t = (vy - (cy - band)) / band; // 0 at bottom of band -> 1 at chinY
+                        float shift = wNeck * t;
+                        dense[rowOff + idxHead] += shift;
+                        dense[rowOff + idxNeck] = wNeck - shift;
+                    }
+                }
             }
 
             outBones = new List<int[]>();
@@ -974,16 +1064,17 @@ namespace DeadlockPlayground.Importer
                 alignedVerts.Add(av);
                 indices.Add(sd.Indices);
             }
-            SolveWeightsModular(alignedVerts, indices, specs, H, out var bonesPer, out var weightsPer);
+            float? chinPlaneY = pinsAligned.TryGetValue("Chin", out var chinAligned) ? chinAligned.Y : (float?)null;
+            SolveWeightsModular(alignedVerts, indices, specs, H, chinPlaneY, out var bonesPer, out var weightsPer);
 
             // Build modular skeleton in scene space (identity transform under the scene root).
             var skel = new Skeleton3D { Name = "LandmarkSyntheticSkeleton" };
             scene.AddChild(skel);
-            var globalRest = new Transform3D[specs.Count];
+            var globalRest = new List<Transform3D>(specs.Count + 12);
             for (int b = 0; b < specs.Count; b++)
             {
                 skel.AddBone(specs[b].Name);
-                globalRest[b] = new Transform3D(Basis.Identity, Ainv * specs[b].Origin);
+                globalRest.Add(new Transform3D(Basis.Identity, Ainv * specs[b].Origin));
             }
             for (int b = 0; b < specs.Count; b++)
             {
@@ -991,6 +1082,28 @@ namespace DeadlockPlayground.Importer
                 if (parent >= 0) skel.SetBoneParent(b, parent);
                 Transform3D local = parent >= 0 ? globalRest[parent].AffineInverse() * globalRest[b] : globalRest[b];
                 skel.SetBoneRest(b, local);
+            }
+            // Append zero-weight fingertip leaf bones (finger_{name}_end_{L|R}) so BuildFingerSegmentRegistration
+            // computes exact distal phalanx orientation & snaps fingers cleanly into Deadlock's grip pose!
+            var hasChildBone = new bool[specs.Count];
+            for (int b = 0; b < specs.Count; b++)
+                if (specs[b].ParentIndex >= 0 && specs[b].ParentIndex < specs.Count)
+                    hasChildBone[specs[b].ParentIndex] = true;
+            for (int b = 0; b < specs.Count; b++)
+            {
+                if (specs[b].Role != ReferenceBoneRole.Finger || hasChildBone[b]) continue;
+                // e.g. "finger_index_2_L" -> "finger_index_end_L"
+                var parts = specs[b].Name.Split('_');
+                if (parts.Length >= 4)
+                {
+                    string leafName = $"{parts[0]}_{parts[1]}_end_{parts[^1]}";
+                    int leafIdx = skel.GetBoneCount();
+                    skel.AddBone(leafName);
+                    skel.SetBoneParent(leafIdx, b);
+                    var leafGlobal = new Transform3D(Basis.Identity, Ainv * specs[b].SegEnd);
+                    globalRest.Add(leafGlobal);
+                    skel.SetBoneRest(leafIdx, globalRest[b].AffineInverse() * leafGlobal);
+                }
             }
             skel.ResetBonePoses();
 
@@ -1012,11 +1125,13 @@ namespace DeadlockPlayground.Importer
                     Policy = ChainPolicy.PreservePhysicsChain
                 };
                 string anchorLower = (chainDef.AnchorHeroBone ?? "").ToLowerInvariant();
-                string recPreset = anchorLower.Contains("head") || anchorLower.Contains("neck")
-                    ? PhysicsPresetCatalog.LongFlowingHairId
-                    : (anchorLower.Contains("pelvis") || anchorLower.Contains("leg")
-                        ? PhysicsPresetCatalog.HeavySkirtDressId
-                        : PhysicsPresetCatalog.CapeCloakId);
+                string recPreset = ordered.Count == 1
+                    ? PhysicsPresetCatalog.RigidJiggleId
+                    : (anchorLower.Contains("head") || anchorLower.Contains("neck")
+                        ? PhysicsPresetCatalog.LongFlowingHairId
+                        : (anchorLower.Contains("pelvis") || anchorLower.Contains("leg")
+                            ? PhysicsPresetCatalog.HeavySkirtDressId
+                            : PhysicsPresetCatalog.CapeCloakId));
                 PhysicsPresetCatalog.ApplyPresetToChain(chainDef, recPreset, resetMacros: true);
                 authoredChains.Add(chainDef);
             }

@@ -388,6 +388,29 @@ namespace DeadlockPlayground.UI
                     }
                 }
 
+                if (IsPinEditActive())
+                {
+                    if (key.CtrlPressed && key.Keycode == Key.Z)
+                    {
+                        if (key.ShiftPressed) RedoReferenceRigEdit();
+                        else UndoReferenceRigEdit();
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
+                    if (key.CtrlPressed && key.Keycode == Key.Y)
+                    {
+                        RedoReferenceRigEdit();
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
+                    if (_isGuidedPinPlacement && _guidedCurrentStepPlaced && (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter))
+                    {
+                        AdvanceGuidedPinStep();
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
+                }
+
                 if (IsWeightPaintActive())
                 {
                     if (key.CtrlPressed && key.Keycode == Key.Z)
@@ -1278,13 +1301,53 @@ namespace DeadlockPlayground.UI
                 _boneLegendRow.AddChild(chk);
                 return chk;
             }
-            _chkBoneFilterCore = AddLegendFilterCheck("Core", new Color(0.25f, 0.88f, 0.98f), "Show/hide Wraith/hero core skeleton bones");
-            _chkBoneFilterFingers = AddLegendFilterCheck("Fingers", new Color(0.30f, 0.95f, 0.45f), "Show/hide finger phalanx bones");
+            _chkBoneFilterCore = AddLegendFilterCheck("Core", new Color(0.25f, 0.88f, 0.98f), "Show/hide character core skeleton bones");
+            _chkBoneFilterFingers = AddLegendFilterCheck("Fingers", new Color(1.0f, 0.80f, 0.25f), "Show/hide finger phalanx bones");
             _chkBoneFilterPhysics = AddLegendFilterCheck("Clothing/Jiggle", new Color(1.0f, 0.82f, 0.18f), "Show/hide imported clothing, hair, and jiggle physics bones");
             _chkBoneFilterAccessory = AddLegendFilterCheck("Accessory", new Color(0.95f, 0.35f, 0.90f), "Show/hide accessory attachment chain bones");
             _chkBoneFilterDisabled = AddLegendFilterCheck("Disabled", new Color(0.95f, 0.25f, 0.25f), "Show/hide disabled (right-clicked) bones");
-            _chkBoneFilterVanilla = AddLegendFilterCheck("Vanilla Hero", new Color(0.58f, 0.70f, 0.74f), "Show/hide unused vanilla Deadlock hero skeleton bones (ghost overlay)");
-            _chkBoneFilterVanilla.SetPressedNoSignal(false);
+            _chkBoneFilterVanilla = new CheckBox { ButtonPressed = false, Visible = false };
+            _boneLegendRow.AddChild(_chkBoneFilterVanilla);
+
+            // Explicit 3-way separator: Modded Only (default) | Vanilla Hero | Both
+            var srcSep = new VSeparator { CustomMinimumSize = new Vector2(2, 18), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            _boneLegendRow.AddChild(srcSep);
+            string[] srcModes = { "Modded", "Vanilla", "Both" };
+            string[] srcTips =
+            {
+                "Show ONLY bones belonging to your modded/custom character (default).",
+                "Show ONLY the original vanilla Deadlock hero skeleton.",
+                "Show modded bones on top of dimmed vanilla hero bones."
+            };
+            for (int sm = 0; sm < 3; sm++)
+            {
+                int capturedMode = sm;
+                var b = new Button
+                {
+                    Text = srcModes[sm],
+                    ToggleMode = true,
+                    ButtonPressed = sm == 0,
+                    ThemeTypeVariation = sm == 0 ? "ImporterPrimaryButton" : "ToolbarButton",
+                    CustomMinimumSize = new Vector2(58, 22),
+                    TooltipText = srcTips[sm],
+                    FocusMode = Control.FocusModeEnum.None
+                };
+                ImporterStyle.ApplyFontSize(b, ImporterStyle.FontHint);
+                b.Pressed += () =>
+                {
+                    _boneSourceFilterMode = capturedMode;
+                    for (int k = 0; k < 3; k++)
+                    {
+                        if (_boneSourceFilterBtns[k] == null) continue;
+                        bool act = k == capturedMode;
+                        _boneSourceFilterBtns[k].SetPressedNoSignal(act);
+                        _boneSourceFilterBtns[k].ThemeTypeVariation = act ? "ImporterPrimaryButton" : "ToolbarButton";
+                    }
+                    if (_showBones) RedrawBoneWireframe();
+                };
+                _boneSourceFilterBtns[sm] = b;
+                _boneLegendRow.AddChild(b);
+            }
             tbVBox.AddChild(_boneLegendRow);
 
             // 2. 3D Preview Viewport Panel (occupies all remaining space below toolbar)
@@ -1608,12 +1671,14 @@ namespace DeadlockPlayground.UI
                 {
                     if (mb.ButtonIndex == MouseButton.WheelUp)
                     {
+                        _isGuidedCameraLocked = false;
                         _orbitDist = Mathf.Max(0.25f, _orbitDist * 0.90f);
                         UpdateCamera();
                         GetViewport().SetInputAsHandled();
                     }
                     else if (mb.ButtonIndex == MouseButton.WheelDown)
                     {
+                        _isGuidedCameraLocked = false;
                         _orbitDist = Mathf.Min(12f, _orbitDist * 1.10f);
                         UpdateCamera();
                         GetViewport().SetInputAsHandled();
@@ -1622,6 +1687,17 @@ namespace DeadlockPlayground.UI
                     {
                         if (mb.Pressed)
                         {
+                            // During 1-by-1 guided reference bone placement, block accidental left-drag orbit
+                            // until the user explicitly moves the view (Middle-drag, Right-pan, or Scroll).
+                            if (mb.ButtonIndex == MouseButton.Left && _isGuidedPinPlacement && _isGuidedCameraLocked)
+                            {
+                                _isOrbiting = false;
+                                _isPanning = false;
+                                GetViewport().SetInputAsHandled();
+                                return;
+                            }
+                            if (mb.ButtonIndex == MouseButton.Middle)
+                                _isGuidedCameraLocked = false;
                             if (mb.ShiftPressed || mb.ButtonIndex == MouseButton.Right)
                             {
                                 _isPanning = true;
@@ -1641,6 +1717,7 @@ namespace DeadlockPlayground.UI
                     }
                     else if (mb.ButtonIndex == MouseButton.Right)
                     {
+                        if (mb.Pressed) _isGuidedCameraLocked = false;
                         _isPanning = mb.Pressed;
                         _lastMousePos = mb.Position;
                         GetViewport().SetInputAsHandled();
@@ -1882,7 +1959,14 @@ namespace DeadlockPlayground.UI
             }
             if (method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig)
             {
-                EnsureLandmarkPins(false);
+                if (!_userMovedLandmarkPins && (_referenceRig == null || _referenceRig.Joints.Count == 0))
+                {
+                    StartGuidedOneByOnePinPlacement(clearExisting: true);
+                }
+                else
+                {
+                    EnsureLandmarkPins(false);
+                }
             }
             if (_previewWorldRoot != null && GodotObject.IsInstanceValid(_previewWorldRoot))
             {
@@ -2118,6 +2202,25 @@ namespace DeadlockPlayground.UI
             _userMovedLandmarkPins = false;
             _pinsDirtyNeedsRigRebuild = false;
             _lastPinBadgeStateKey = "";
+            _refRigUndoStack.Clear();
+            _refRigRedoStack.Clear();
+            _isGuidedPinPlacement = false;
+            _guidedPinStep = 0;
+            _guidedPlacedPinKeys.Clear();
+            _showOriginalPoseInTab1 = false;
+            if (_btnPreviewOriginalPose != null)
+            {
+                _btnPreviewOriginalPose.SetPressedNoSignal(false);
+                _btnPreviewOriginalPose.ThemeTypeVariation = "ToolbarButton";
+            }
+            _referenceRig = new ReferenceRigDef();
+            _boneSourceFilterMode = 0;
+            for (int k = 0; k < 3; k++)
+            {
+                if (_boneSourceFilterBtns[k] == null) continue;
+                _boneSourceFilterBtns[k].SetPressedNoSignal(k == 0);
+                _boneSourceFilterBtns[k].ThemeTypeVariation = k == 0 ? "ImporterPrimaryButton" : "ToolbarButton";
+            }
             _previewFlipRestore = null;
             _btnFlipX?.SetPressedNoSignal(false);
             _btnFlipY?.SetPressedNoSignal(false);
@@ -2221,6 +2324,11 @@ namespace DeadlockPlayground.UI
                 }
                 // 7. CRITICAL REQUIREMENT 3: Automatic First-Frame World-Space Auto-Fit Height & Camera Frame!
                 AutoFitToHero();
+                if (fullSrcSkeleton == null || fullSrcSkeleton.GetBoneCount() == 0)
+                {
+                    StartGuidedOneByOnePinPlacement(clearExisting: true);
+                }
+                UpdateTab2SectionVisibility();
             }
 
             RefreshPresetsDropdown();
@@ -5645,7 +5753,10 @@ namespace DeadlockPlayground.UI
 
         private void ApplyScaleChangeKeepingCenter(bool immediate = false)
         {
-            if (!_suppressScalePivotCompensation && _previewModelRoot != null && _accLocalBoundsCenter != Vector3.Zero)
+            // Center-pivot compensation is strictly for floating Accessories (hats/props).
+            // For Full Character imports, keep the Y-axis offset locked to the floor so rescaling never floats or sinks the character!
+            if (_workflowIntent == ImportWorkflowIntent.AccessoryAddOrReplace &&
+                !_suppressScalePivotCompensation && _previewModelRoot != null && _accLocalBoundsCenter != Vector3.Zero)
             {
                 Vector3 oldWorldCenter = _previewModelRoot.Transform * _accLocalBoundsCenter;
                 Transform3D newBasisOnly = BuildCurrentAlignedTransform();
@@ -5764,9 +5875,40 @@ namespace DeadlockPlayground.UI
         private ReferenceRigDef _referenceRig = new();
         private bool _isEditReferenceBonesMode = true;
         private bool _isGizmoEditingRefJoint = false;
+        private bool _isGuidedPinPlacement = false;
+        private int _guidedPinStep = 0; // 0=Chin, 1=Neck, 2=Shoulder, 3=Wrist, 4=HandTip, 5=Pelvis, 6=Ankle
+        private readonly HashSet<string> _guidedPlacedPinKeys = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly string[] GuidedPinStepLabels =
+        {
+            "Step 1/7: Click on the CHIN tip",
+            "Step 2/7: Click on the NECK base",
+            "Step 3/7: Click on a SHOULDER (mirrors L↔R)",
+            "Step 4/7: Click on a WRIST (computes Elbow & mirrors)",
+            "Step 5/7: Click on a HAND TIP (middle fingertip, mirrors)",
+            "Step 6/7: Click on the PELVIS / GROIN center",
+            "Step 7/7: Click on an ANKLE (computes Hip/Knee & mirrors)"
+        };
+        private sealed class RefRigUndoSnapshot
+        {
+            public ReferenceRigDef Rig;
+            public bool GuidedMode;
+            public int GuidedStep;
+            public HashSet<string> GuidedPlacedKeys;
+        }
+        private readonly List<RefRigUndoSnapshot> _refRigUndoStack = new();
+        private readonly List<RefRigUndoSnapshot> _refRigRedoStack = new();
+        private bool _guidedCurrentStepPlaced = false;
+        private bool _isGuidedCameraLocked = false;
+        private Button _btnRefHudGuidedPlace;
+        private Button _btnRefHudGuidedPrev;
+        private Button _btnRefHudGuidedNext;
+        private Button _btnRefHudUndo;
+        private Button _btnRefHudRedo;
+        private Button _btnRefHudBind;
         private Vector2 _pinPressScreenPos;
         private bool _pinDragExceededThreshold = false;
         private PanelContainer _refRigViewportHud;
+        private PanelContainer _refRigViewportBottomHud;
         private Label _lblRefHudSelectedBone;
         private Button _btnRefHudMirror;
         private readonly Button[] _hudSpineBtns = new Button[4];
@@ -6518,19 +6660,35 @@ namespace DeadlockPlayground.UI
             if (_referenceRig == null) return result;
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            bool filterGuided = _isGuidedPinPlacement && _guidedPlacedPinKeys.Count > 0;
+            bool IsAllowed(string key) => !filterGuided || _guidedPlacedPinKeys.Contains(key);
+
+            // Chin landmark replaces Head (with fallback if legacy Head exists without Chin)
+            if (_referenceRig.Joints.TryGetValue("Chin", out var chinPos) && IsAllowed("Chin") && seen.Add("Chin"))
+                result.Add(("Chin", chinPos, ReferenceBoneRole.Core));
+            else if (!_referenceRig.Joints.ContainsKey("Chin") && _referenceRig.Joints.TryGetValue("Head", out var headPos) && IsAllowed("Head") && seen.Add("Head"))
+                result.Add(("Head", headPos, ReferenceBoneRole.Core));
+
             foreach (string name in CustomLandmarkWeightSolver.PinNames)
             {
+                if (name == "Head") continue; // superseded by Chin
                 if (name == "Neck" && !_referenceRig.HasNeck) continue;
-                if (_referenceRig.Joints.TryGetValue(name, out var p) && seen.Add(name))
+                if (IsAllowed(name) && _referenceRig.Joints.TryGetValue(name, out var p) && seen.Add(name))
                     result.Add((name, p, ReferenceBoneRole.Core));
             }
-            if (_referenceRig.HasToes)
+            // Auto-Rig Pro–style HandTipL / HandTipR markers
+            foreach (string hk in new[] { "HandTipL", "HandTipR" })
+            {
+                if (IsAllowed(hk) && _referenceRig.Joints.TryGetValue(hk, out var htp) && seen.Add(hk))
+                    result.Add((hk, htp, ReferenceBoneRole.Core));
+            }
+            if (!filterGuided && _referenceRig.HasToes)
             {
                 foreach (string tk in new[] { "ToeL", "ToeR" })
                     if (_referenceRig.Joints.TryGetValue(tk, out var tp) && seen.Add(tk))
                         result.Add((tk, tp, ReferenceBoneRole.Core));
             }
-            if (_referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers)
+            if (!filterGuided && _referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers)
             {
                 int ph = Math.Clamp(_referenceRig.PhalanxCount, 2, 3);
                 foreach (string side in new[] { "L", "R" })
@@ -6547,7 +6705,7 @@ namespace DeadlockPlayground.UI
                     }
                 }
             }
-            if (_referenceRig.ClothChains != null)
+            if (!filterGuided && _referenceRig.ClothChains != null)
             {
                 foreach (var cc in _referenceRig.ClothChains)
                 {
@@ -6563,35 +6721,337 @@ namespace DeadlockPlayground.UI
             return result;
         }
 
+        private void PushReferenceRigUndoSnapshot()
+        {
+            if (_referenceRig == null) return;
+            _refRigUndoStack.Add(new RefRigUndoSnapshot
+            {
+                Rig = _referenceRig.Clone(),
+                GuidedMode = _isGuidedPinPlacement,
+                GuidedStep = _guidedPinStep,
+                GuidedPlacedKeys = new HashSet<string>(_guidedPlacedPinKeys, StringComparer.OrdinalIgnoreCase)
+            });
+            if (_refRigUndoStack.Count > 40) _refRigUndoStack.RemoveAt(0);
+            _refRigRedoStack.Clear();
+            SyncReferenceRigViewportHud();
+        }
+
+        private void UndoReferenceRigEdit()
+        {
+            if (_refRigUndoStack.Count == 0 || _referenceRig == null) return;
+            _refRigRedoStack.Add(new RefRigUndoSnapshot
+            {
+                Rig = _referenceRig.Clone(),
+                GuidedMode = _isGuidedPinPlacement,
+                GuidedStep = _guidedPinStep,
+                GuidedPlacedKeys = new HashSet<string>(_guidedPlacedPinKeys, StringComparer.OrdinalIgnoreCase)
+            });
+            var snap = _refRigUndoStack[^1];
+            _refRigUndoStack.RemoveAt(_refRigUndoStack.Count - 1);
+            ApplyReferenceRigUndoSnapshot(snap);
+            SetBottomStatus("Undid reference rig change.", StatusTone.Info);
+        }
+
+        private void RedoReferenceRigEdit()
+        {
+            if (_refRigRedoStack.Count == 0 || _referenceRig == null) return;
+            _refRigUndoStack.Add(new RefRigUndoSnapshot
+            {
+                Rig = _referenceRig.Clone(),
+                GuidedMode = _isGuidedPinPlacement,
+                GuidedStep = _guidedPinStep,
+                GuidedPlacedKeys = new HashSet<string>(_guidedPlacedPinKeys, StringComparer.OrdinalIgnoreCase)
+            });
+            var snap = _refRigRedoStack[^1];
+            _refRigRedoStack.RemoveAt(_refRigRedoStack.Count - 1);
+            ApplyReferenceRigUndoSnapshot(snap);
+            SetBottomStatus("Redid reference rig change.", StatusTone.Info);
+        }
+
+        private bool IsGuidedStepPlaced(int step)
+        {
+            return step switch
+            {
+                0 => _guidedPlacedPinKeys.Contains("Chin"),
+                1 => _guidedPlacedPinKeys.Contains("Neck"),
+                2 => _guidedPlacedPinKeys.Contains("ShoulderL") || _guidedPlacedPinKeys.Contains("ShoulderR"),
+                3 => _guidedPlacedPinKeys.Contains("WristL") || _guidedPlacedPinKeys.Contains("WristR"),
+                4 => _guidedPlacedPinKeys.Contains("HandTipL") || _guidedPlacedPinKeys.Contains("HandTipR"),
+                5 => _guidedPlacedPinKeys.Contains("Pelvis"),
+                6 => _guidedPlacedPinKeys.Contains("AnkleL") || _guidedPlacedPinKeys.Contains("AnkleR"),
+                _ => false
+            };
+        }
+
+        private void ApplyReferenceRigUndoSnapshot(RefRigUndoSnapshot snap)
+        {
+            if (snap == null) return;
+            _referenceRig = snap.Rig.Clone();
+            _landmarkPins = new Dictionary<string, Vector3>(_referenceRig.Joints, StringComparer.OrdinalIgnoreCase);
+            _isGuidedPinPlacement = snap.GuidedMode;
+            _guidedPinStep = snap.GuidedStep;
+            _guidedPlacedPinKeys.Clear();
+            if (snap.GuidedPlacedKeys != null)
+                foreach (var k in snap.GuidedPlacedKeys) _guidedPlacedPinKeys.Add(k);
+            _guidedCurrentStepPlaced = IsGuidedStepPlaced(_guidedPinStep);
+            _pinsDirtyNeedsRigRebuild = true;
+            SyncReferenceRigControlsFromDef();
+            RefreshPinVisuals();
+            UpdateActivePinBadge();
+            UpdatePinProgressChip();
+        }
+
         private void AttachGizmoToSelectedReferenceJoint()
         {
-            if (_previewGizmo == null || !GodotObject.IsInstanceValid(_previewGizmo)) return;
-            if (!IsPinEditActive() || string.IsNullOrEmpty(_selectedPin) || !TryGetReferenceJointPosition(_selectedPin, out var localPos))
+            // Keep 3D Gizmo hidden during Reference Bone editing — direct click-drag + 1-by-1 Smart placement is much cleaner.
+            if (_previewGizmo != null && GodotObject.IsInstanceValid(_previewGizmo))
             {
-                if (_isGizmoEditingRefJoint)
+                if (IsPinEditActive())
+                {
+                    _isGizmoEditingRefJoint = false;
+                    _previewGizmo.Visible = false;
+                }
+                else if (_isGizmoEditingRefJoint)
                 {
                     _isGizmoEditingRefJoint = false;
                     UpdateGizmoTargetTransform();
                 }
-                return;
             }
-            _isGizmoUpdatingFromUI = true;
-            _isGizmoEditingRefJoint = true;
-            if (_gizmoDummyTarget == null || !GodotObject.IsInstanceValid(_gizmoDummyTarget))
-                _gizmoDummyTarget = new Node3D { Name = "GizmoDummyTarget" };
-            if (_previewWorldRoot != null && _gizmoDummyTarget.GetParent() != _previewWorldRoot)
+            SyncReferenceRigViewportHud();
+        }
+
+        private bool TryRaycastPreviewModelSurface(Vector2 screenPos, out Vector3 hitModelSpace)
+        {
+            hitModelSpace = Vector3.Zero;
+            if (_previewCamera == null || _liveImportedScene == null || !GodotObject.IsInstanceValid(_liveImportedScene))
+                return false;
+
+            Transform3D xf = BuildCurrentAlignedTransform();
+            Vector3 rayOrig = _previewCamera.ProjectRayOrigin(screenPos);
+            Vector3 rayDir = _previewCamera.ProjectRayNormal(screenPos);
+
+            // Raycast against all triangles of active imported meshes to find front & back hits,
+            // then place the joint cleanly at the midpoint depth inside the limb!
+            var meshes = FilterActiveImportedMeshes(CustomModelAutoRigger.CollectMeshes(_liveImportedScene));
+            float tNear = float.MaxValue;
+            float tFar = float.MinValue;
+            int hitCount = 0;
+
+            foreach (var mi in meshes)
             {
-                _gizmoDummyTarget.GetParent()?.RemoveChild(_gizmoDummyTarget);
-                _previewWorldRoot.AddChild(_gizmoDummyTarget);
+                if (mi?.Mesh == null) continue;
+                Transform3D mWorld = xf * CustomModelAutoRigger.ComputeTransformRelativeToRoot(mi, _liveImportedScene);
+                for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+                {
+                    var arrays = mi.Mesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count == 0) continue;
+                    var verts = CustomModelAutoRigger.GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
+                    if (verts == null || verts.Length < 3) continue;
+                    var idx = arrays.Count > (int)Mesh.ArrayType.Index ? CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
+                    int triCount = idx != null && idx.Length >= 3 ? idx.Length / 3 : verts.Length / 3;
+                    for (int ti = 0; ti < triCount; ti++)
+                    {
+                        int i0 = idx != null ? idx[ti * 3] : ti * 3;
+                        int i1 = idx != null ? idx[ti * 3 + 1] : ti * 3 + 1;
+                        int i2 = idx != null ? idx[ti * 3 + 2] : ti * 3 + 2;
+                        Vector3 v0 = mWorld * verts[i0];
+                        Vector3 v1 = mWorld * verts[i1];
+                        Vector3 v2 = mWorld * verts[i2];
+
+                        // Möller–Trumbore ray-triangle intersection
+                        Vector3 e1 = v1 - v0, e2 = v2 - v0;
+                        Vector3 pvec = rayDir.Cross(e2);
+                        float det = e1.Dot(pvec);
+                        if (MathF.Abs(det) < 1e-7f) continue;
+                        float invDet = 1f / det;
+                        Vector3 tvec = rayOrig - v0;
+                        float u = tvec.Dot(pvec) * invDet;
+                        if (u < 0f || u > 1f) continue;
+                        Vector3 qvec = tvec.Cross(e1);
+                        float v = rayDir.Dot(qvec) * invDet;
+                        if (v < 0f || u + v > 1f) continue;
+                        float t = e2.Dot(qvec) * invDet;
+                        if (t > 0.01f)
+                        {
+                            if (t < tNear) tNear = t;
+                            if (t > tFar && t < tNear + 0.45f) tFar = t;
+                            hitCount++;
+                        }
+                    }
+                }
             }
-            _gizmoDummyTarget.Position = BuildCurrentAlignedTransform() * localPos;
-            _gizmoDummyTarget.RotationDegrees = Vector3.Zero;
-            _previewGizmo.Mode = Gizmo3D.ToolMode.Move;
-            _previewGizmo.Size = 52;
-            if (!_previewGizmo.IsSelected(_gizmoDummyTarget))
-                _previewGizmo.Select(_gizmoDummyTarget);
-            _previewGizmo.Visible = true;
-            _isGizmoUpdatingFromUI = false;
+
+            if (hitCount > 0)
+            {
+                float tMid = tFar > tNear ? (tNear + tFar) * 0.5f : tNear;
+                Vector3 hitWorld = rayOrig + rayDir * tMid;
+                hitModelSpace = xf.AffineInverse() * hitWorld;
+                return true;
+            }
+            return false;
+        }
+
+        private void StartGuidedOneByOnePinPlacement(bool clearExisting = false)
+        {
+            _referenceRig ??= new ReferenceRigDef();
+            if (clearExisting)
+            {
+                _referenceRig.Joints.Clear();
+                _landmarkPins.Clear();
+            }
+            else if (_referenceRig.Joints.Count == 0)
+            {
+                EnsureReferenceRigInitialized(false);
+            }
+            _isEditReferenceBonesMode = true;
+            _isGuidedPinPlacement = true;
+            _isGuidedCameraLocked = true;
+            _guidedPinStep = 0;
+            _guidedCurrentStepPlaced = false;
+            _guidedPlacedPinKeys.Clear();
+            _selectedPin = null;
+            _draggingPin = null;
+            SetCameraPreset("Front");
+            SetTab2SubView(1); // Auto-switch Tab 2 sub-nav to 'Reference Rig'
+            SyncEditBindButtonVisuals();
+            ApplyLandmarkPreviewState();
+            RefreshPinVisuals();
+            SyncReferenceRigViewportHud();
+            SetBottomStatus(GuidedPinStepLabels[0] + " — click mesh to place/adjust, then click Next → (view locked until Middle/Right move)", StatusTone.Info);
+        }
+
+        private void PreviousGuidedPinStep()
+        {
+            if (!_isGuidedPinPlacement || _guidedPinStep <= 0) return;
+            PushReferenceRigUndoSnapshot();
+            _guidedPinStep--;
+            _guidedCurrentStepPlaced = IsGuidedStepPlaced(_guidedPinStep);
+            SyncReferenceRigViewportHud();
+            SetBottomStatus(GuidedPinStepLabels[_guidedPinStep] + " — click/drag to adjust, then Next →", StatusTone.Info);
+        }
+
+        private void AdvanceGuidedPinStep()
+        {
+            if (!_isGuidedPinPlacement || !IsGuidedStepPlaced(_guidedPinStep)) return;
+            PushReferenceRigUndoSnapshot();
+            _guidedPinStep++;
+            _guidedCurrentStepPlaced = IsGuidedStepPlaced(_guidedPinStep);
+
+            if (_guidedPinStep >= GuidedPinStepLabels.Length)
+            {
+                _isGuidedPinPlacement = false;
+                _isGuidedCameraLocked = false;
+                _guidedPinStep = 0;
+                _guidedPlacedPinKeys.Clear();
+                _referenceRig.EnsureDefaultJoints();
+                if (_referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers)
+                    SnapReferenceFingersToCurrentMesh();
+                SetBottomStatus("All 7 smart pins placed! Fine-tune any joint by dragging, or click Bind.", StatusTone.Success);
+            }
+            else
+            {
+                SetBottomStatus(GuidedPinStepLabels[_guidedPinStep] + " — click mesh to place/adjust, then click Next →", StatusTone.Info);
+            }
+            RefreshPinVisuals();
+            SyncReferenceRigViewportHud();
+        }
+
+        private void ApplyGuidedPinClick(Vector3 localPos)
+        {
+            _referenceRig ??= new ReferenceRigDef();
+            PushReferenceRigUndoSnapshot();
+
+            float cx = _referenceRig.Joints.TryGetValue("Pelvis", out var pelCur)
+                ? pelCur.X
+                : (_referenceRig.Joints.TryGetValue("Chin", out var chinCur) ? chinCur.X : localPos.X);
+
+            void SetJointSilent(string key, Vector3 pos, bool mirror)
+            {
+                SetReferenceJointPosition(key, pos, applyMirror: mirror);
+                if (mirror)
+                {
+                    string mir = ReferenceRigDef.MirrorJointKey(key);
+                    if (!string.IsNullOrEmpty(mir))
+                    {
+                        Vector3 mirPos = new Vector3(2f * cx - pos.X, pos.Y, pos.Z);
+                        _referenceRig.Joints[mir] = mirPos;
+                        _landmarkPins[mir] = mirPos;
+                    }
+                }
+            }
+
+            void PlaceGuided(string key, Vector3 pos, bool mirror)
+            {
+                SetJointSilent(key, pos, mirror);
+                _guidedPlacedPinKeys.Add(key);
+                if (mirror)
+                {
+                    string mir = ReferenceRigDef.MirrorJointKey(key);
+                    if (!string.IsNullOrEmpty(mir)) _guidedPlacedPinKeys.Add(mir);
+                }
+            }
+
+            switch (_guidedPinStep)
+            {
+                case 0: // Chin
+                    cx = localPos.X;
+                    PlaceGuided("Chin", localPos, mirror: false);
+                    _referenceRig.Joints["Head"] = localPos + Vector3.Up * 0.08f;
+                    break;
+                case 1: // Neck
+                    PlaceGuided("Neck", localPos, mirror: false);
+                    if (_referenceRig.Joints.TryGetValue("Pelvis", out var p0))
+                        SetJointSilent("Chest", p0.Lerp(localPos, 0.60f), mirror: false);
+                    break;
+                case 2: // Shoulder (auto-mirror)
+                {
+                    string side = localPos.X >= cx ? "L" : "R";
+                    PlaceGuided("Shoulder" + side, localPos, mirror: true);
+                    break;
+                }
+                case 3: // Wrist (auto-computes Elbow silently; only Wrist pin is shown during 1-by-1!)
+                {
+                    string side = localPos.X >= cx ? "L" : "R";
+                    PlaceGuided("Wrist" + side, localPos, mirror: true);
+                    if (_referenceRig.Joints.TryGetValue("Shoulder" + side, out var sh))
+                        SetJointSilent("Elbow" + side, sh.Lerp(localPos, 0.50f), mirror: true);
+                    break;
+                }
+                case 4: // HandTip (middle fingertip, auto-mirrors)
+                {
+                    string side = localPos.X >= cx ? "L" : "R";
+                    PlaceGuided("HandTip" + side, localPos, mirror: true);
+                    break;
+                }
+                case 5: // Pelvis (auto-computes Chest silently)
+                    PlaceGuided("Pelvis", localPos, mirror: false);
+                    if (_referenceRig.Joints.TryGetValue("Neck", out var nk))
+                        SetJointSilent("Chest", localPos.Lerp(nk, 0.60f), mirror: false);
+                    break;
+                case 6: // Ankle (auto-computes Hip & Knee silently with clean pelvis/hip separation)
+                {
+                    string side = localPos.X >= cx ? "L" : "R";
+                    PlaceGuided("Ankle" + side, localPos, mirror: true);
+                    if (_referenceRig.Joints.TryGetValue("Pelvis", out var pel))
+                    {
+                        float legLen = MathF.Max(0.15f, MathF.Abs(pel.Y - localPos.Y));
+                        float sign = localPos.X >= pel.X ? 1f : -1f;
+                        float hipOffsetX = MathF.Max(MathF.Abs(localPos.X - pel.X) * 0.88f, legLen * 0.13f);
+                        Vector3 hip = new Vector3(pel.X + sign * hipOffsetX, pel.Y - legLen * 0.09f, pel.Z);
+                        SetJointSilent("Hip" + side, hip, mirror: true);
+                        SetJointSilent("Knee" + side, hip.Lerp(localPos, 0.50f), mirror: true);
+                    }
+                    break;
+                }
+            }
+
+            _guidedCurrentStepPlaced = IsGuidedStepPlaced(_guidedPinStep);
+            _userMovedLandmarkPins = true;
+            _pinsDirtyNeedsRigRebuild = true;
+
+            string stepName = _guidedPinStep < GuidedPinStepLabels.Length ? GuidedPinStepLabels[_guidedPinStep] : "";
+            SetBottomStatus($"{stepName} — drag pin to refine or click Next → (Enter).", StatusTone.Success);
+            RefreshPinVisuals();
             SyncReferenceRigViewportHud();
         }
 
@@ -6601,7 +7061,8 @@ namespace DeadlockPlayground.UI
                 return new Color(0.96f, 0.32f, 0.90f); // Magenta: Cloth chain
             if (role == ReferenceBoneRole.Finger || (name != null && name.StartsWith("finger_", StringComparison.OrdinalIgnoreCase)))
                 return new Color(1.0f, 0.80f, 0.22f); // Gold: Fingers
-            if (name == "Head") return new Color(0.25f, 0.92f, 1f);
+            if (name == "Chin" || name == "Head") return new Color(0.25f, 0.95f, 1f);
+            if (name != null && name.StartsWith("HandTip", StringComparison.OrdinalIgnoreCase)) return new Color(0.45f, 1.0f, 0.65f);
             if (name != null && name.EndsWith("L") && name != "Pelvis") return new Color(0.30f, 0.68f, 1f);
             if (name != null && name.EndsWith("R")) return new Color(1f, 0.58f, 0.20f);
             return new Color(0.25f, 0.88f, 0.98f);
@@ -6609,8 +7070,9 @@ namespace DeadlockPlayground.UI
 
         private void RefreshPinVisuals()
         {
-            bool show = IsPinEditActive() && (_chkShowPins?.ButtonPressed ?? true) &&
-                        _referenceRig != null && _referenceRig.Joints.Count >= CustomLandmarkWeightSolver.PinNames.Length &&
+            bool hasPinsToDraw = _referenceRig != null &&
+                                 (_isGuidedPinPlacement ? _guidedPlacedPinKeys.Count > 0 : _referenceRig.Joints.Count > 0);
+            bool show = IsPinEditActive() && (_chkShowPins?.ButtonPressed ?? true) && hasPinsToDraw &&
                         _previewWorldRoot != null && GodotObject.IsInstanceValid(_previewWorldRoot);
 
             foreach (var kv in _pinSpheres)
@@ -6633,41 +7095,58 @@ namespace DeadlockPlayground.UI
 
             Transform3D xf = BuildCurrentAlignedTransform();
             var activeJoints = CollectActiveReferenceJoints();
+            var ringShader = GetJointRingShader();
+
             foreach (var (name, localPos, role) in activeJoints)
             {
-                float baseRadius = role == ReferenceBoneRole.Finger ? 0.0075f : (role == ReferenceBoneRole.Cloth ? 0.015f : 0.022f);
-                if (!_pinSpheres.TryGetValue(name, out var sphere) || !GodotObject.IsInstanceValid(sphere))
+                float quadSize = role == ReferenceBoneRole.Finger ? 0.022f : (role == ReferenceBoneRole.Cloth ? 0.042f : 0.056f);
+                if (!_pinSpheres.TryGetValue(name, out var marker) || !GodotObject.IsInstanceValid(marker))
                 {
-                    var mat = new StandardMaterial3D
+                    Material mat;
+                    if (ringShader != null)
                     {
-                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                        AlbedoColor = PinColor(name, role),
-                        NoDepthTest = true,
-                        RenderPriority = 100
-                    };
-                    sphere = new MeshInstance3D
+                        var sm = new ShaderMaterial { Shader = ringShader, RenderPriority = 100 };
+                        sm.SetShaderParameter("ring_color", PinColor(name, role));
+                        sm.SetShaderParameter("is_selected", 0.0f);
+                        mat = sm;
+                    }
+                    else
+                    {
+                        mat = new StandardMaterial3D
+                        {
+                            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                            AlbedoColor = PinColor(name, role),
+                            NoDepthTest = true,
+                            RenderPriority = 100
+                        };
+                    }
+                    marker = new MeshInstance3D
                     {
                         Name = "RefJoint_" + name.Replace("::", "_"),
-                        Mesh = new SphereMesh { Radius = baseRadius, Height = baseRadius * 2f, RadialSegments = 10, Rings = 6, Material = mat },
+                        Mesh = new QuadMesh { Size = new Vector2(quadSize, quadSize), Material = mat },
                         Layers = 1u // never Visual Layer 21 (CameraBrush)
                     };
-                    _previewWorldRoot.AddChild(sphere);
-                    _pinSpheres[name] = sphere;
+                    _previewWorldRoot.AddChild(marker);
+                    _pinSpheres[name] = marker;
                 }
                 bool inMulti = _selectedPins.Contains(name);
                 bool isLit = inMulti || name == active || (mirrorActive != null && name == mirrorActive);
                 float s = (name == active || (mirrorActive != null && name == mirrorActive))
-                    ? 1.50f
-                    : (inMulti ? 1.35f : 1f);
-                sphere.Scale = new Vector3(s, s, s);
-                sphere.Position = xf * localPos;
-                if (sphere.Mesh is SphereMesh sm && sm.Material is StandardMaterial3D sphereMat)
+                    ? 1.35f
+                    : (inMulti ? 1.25f : 1f);
+                marker.Scale = new Vector3(s, s, s);
+                marker.Position = xf * localPos;
+                if (marker.Mesh is QuadMesh qm && qm.Material is ShaderMaterial smMat)
+                {
+                    smMat.SetShaderParameter("ring_color", PinColor(name, role));
+                    smMat.SetShaderParameter("is_selected", isLit ? 1.0f : 0.0f);
+                }
+                else if (marker.Mesh is PrimitiveMesh pm && pm.Material is StandardMaterial3D stdMat)
                 {
                     Color targetCol = isLit ? Colors.White : PinColor(name, role);
-                    if (!sphereMat.AlbedoColor.IsEqualApprox(targetCol))
-                        sphereMat.AlbedoColor = targetCol;
+                    if (!stdMat.AlbedoColor.IsEqualApprox(targetCol)) stdMat.AlbedoColor = targetCol;
                 }
-                sphere.Visible = true;
+                marker.Visible = true;
             }
 
             if (_pinSkeletonLines == null || !GodotObject.IsInstanceValid(_pinSkeletonLines))
@@ -6690,34 +7169,50 @@ namespace DeadlockPlayground.UI
             var im = (ImmediateMesh)_pinSkeletonLines.Mesh;
             im.ClearSurfaces();
 
-            // Draw modular resolved bone sticks (shows exact spine count, fingers, toes, and cloth chains!)
-            float h = 1.7f;
-            if (_referenceRig.Joints.TryGetValue("Head", out var hp) && _referenceRig.Joints.TryGetValue("AnkleL", out var al))
-                h = MathF.Max(0.2f, MathF.Abs((xf * hp).Y - (xf * al).Y) / 0.88f);
-            var specs = _referenceRig.BuildResolvedBones(xf, h, 1f);
-            if (specs.Count > 0)
+            // During progressive 1-by-1 placement, only draw lines once core anchors exist; otherwise draw full modular bones
+            bool drawFullRig = !_isGuidedPinPlacement && _referenceRig.Joints.ContainsKey("Pelvis") && _referenceRig.Joints.ContainsKey("AnkleL");
+            if (drawFullRig)
             {
-                im.SurfaceBegin(Mesh.PrimitiveType.Lines);
-                foreach (var sp in specs)
+                float h = 1.7f;
+                if ((_referenceRig.Joints.TryGetValue("Chin", out var hp) || _referenceRig.Joints.TryGetValue("Head", out hp)) &&
+                    _referenceRig.Joints.TryGetValue("AnkleL", out var al))
+                    h = MathF.Max(0.2f, MathF.Abs((xf * hp).Y - (xf * al).Y) / 0.84f);
+                var specs = _referenceRig.BuildResolvedBones(xf, h, 1f);
+                if (specs.Count > 0)
                 {
-                    Color col = PinColor(sp.HeadJointKey, sp.Role);
-                    if (!string.IsNullOrEmpty(active) && (sp.HeadJointKey == active || sp.TailJointKey == active))
-                        col = Colors.White;
-                    im.SurfaceSetColor(col); im.SurfaceAddVertex(sp.SegStart);
-                    im.SurfaceSetColor(col); im.SurfaceAddVertex(sp.SegEnd);
-                    if (sp.ParentIndex >= 0 && sp.ParentIndex < specs.Count && sp.Role == ReferenceBoneRole.Cloth)
+                    im.SurfaceBegin(Mesh.PrimitiveType.Lines);
+                    foreach (var sp in specs)
                     {
-                        var par = specs[sp.ParentIndex];
-                        if (par.Role != ReferenceBoneRole.Cloth)
+                        Color col = PinColor(sp.HeadJointKey, sp.Role);
+                        if (!string.IsNullOrEmpty(active) && (sp.HeadJointKey == active || sp.TailJointKey == active))
+                            col = Colors.White;
+                        im.SurfaceSetColor(col); im.SurfaceAddVertex(sp.SegStart);
+                        im.SurfaceSetColor(col); im.SurfaceAddVertex(sp.SegEnd);
+                        if (sp.ParentIndex >= 0 && sp.ParentIndex < specs.Count && sp.Role == ReferenceBoneRole.Cloth)
                         {
-                            im.SurfaceSetColor(new Color(0.96f, 0.32f, 0.90f, 0.45f)); im.SurfaceAddVertex(par.Origin);
-                            im.SurfaceSetColor(new Color(0.96f, 0.32f, 0.90f, 0.45f)); im.SurfaceAddVertex(sp.SegStart);
+                            var par = specs[sp.ParentIndex];
+                            if (par.Role != ReferenceBoneRole.Cloth)
+                            {
+                                im.SurfaceSetColor(new Color(0.96f, 0.32f, 0.90f, 0.45f)); im.SurfaceAddVertex(par.Origin);
+                                im.SurfaceSetColor(new Color(0.96f, 0.32f, 0.90f, 0.45f)); im.SurfaceAddVertex(sp.SegStart);
+                            }
                         }
                     }
+                    // Also draw subtle guide line from Wrist -> HandTip
+                    foreach (string side in new[] { "L", "R" })
+                    {
+                        if (_referenceRig.Joints.TryGetValue("Wrist" + side, out var wr) &&
+                            _referenceRig.Joints.TryGetValue("HandTip" + side, out var ht))
+                        {
+                            Color hc = new Color(0.45f, 1.0f, 0.65f, 0.70f);
+                            im.SurfaceSetColor(hc); im.SurfaceAddVertex(xf * wr);
+                            im.SurfaceSetColor(hc); im.SurfaceAddVertex(xf * ht);
+                        }
+                    }
+                    im.SurfaceEnd();
                 }
-                im.SurfaceEnd();
             }
-            _pinSkeletonLines.Visible = true;
+            _pinSkeletonLines.Visible = drawFullRig;
         }
 
         private string PickPinUnderCursor(Vector2 pos)
@@ -6739,27 +7234,35 @@ namespace DeadlockPlayground.UI
         private bool HandlePinInput(InputEvent @event)
         {
             if (!IsPinEditActive() || !(_chkShowPins?.ButtonPressed ?? true) ||
-                _referenceRig == null || _referenceRig.Joints.Count < CustomLandmarkWeightSolver.PinNames.Length || _previewCamera == null)
-                return false;
-
-            // Let Gizmo3D own clicks/drags on its own axis arrows (eliminates gizmo fighting with pin drag!)
-            if (_isGizmoEditingRefJoint && (_previewGizmo?.Editing ?? false))
+                _referenceRig == null || (!_isGuidedPinPlacement && _referenceRig.Joints.Count == 0) || _previewCamera == null)
                 return false;
 
             if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
             {
                 if (mb.Pressed)
                 {
-                    // If a joint is already selected with the 3D gizmo active, only intercept clicks that hit a *different* joint
-                    // so clicking/dragging the gizmo arrows near the selected joint passes straight through to Gizmo3D!
+                    // Guided 1-by-1 Smart pin placement mode (Auto-Rig Pro style):
+                    // If clicking directly on an already-placed pin, allow dragging to fine-tune it;
+                    // otherwise raycast the mesh to place/reposition the current step's landmark!
+                    if (_isGuidedPinPlacement)
+                    {
+                        string hitExisting = PickPinUnderCursor(mb.Position);
+                        if (hitExisting == null)
+                        {
+                            if (TryRaycastPreviewModelSurface(mb.Position, out Vector3 hitLocal))
+                            {
+                                ApplyGuidedPinClick(hitLocal);
+                                _isOrbiting = false; _isPanning = false;
+                                GetViewport().SetInputAsHandled();
+                                return true;
+                            }
+                            return false;
+                        }
+                    }
+
                     string best = PickPinUnderCursor(mb.Position);
                     if (best != null)
                     {
-                        if (_isGizmoEditingRefJoint && best == _selectedPin && !mb.ShiftPressed)
-                        {
-                            // Let Gizmo3D handle arrow grabs on the already-selected joint
-                            return false;
-                        }
                         if (mb.ShiftPressed)
                         {
                             if (mb.DoubleClick) SelectAllPins();
@@ -6789,6 +7292,7 @@ namespace DeadlockPlayground.UI
                 }
                 else if (!mb.Pressed && _draggingPin != null)
                 {
+                    string releasedPin = _draggingPin;
                     bool moved = _pinDragExceededThreshold;
                     _draggingPin = null;
                     _pinDragExceededThreshold = false;
@@ -6796,6 +7300,16 @@ namespace DeadlockPlayground.UI
                     AttachGizmoToSelectedReferenceJoint();
                     if (moved)
                     {
+                        // If the user adjusted Wrist or HandTip after 1-by-1 finished, automatically re-snap fingers to match!
+                        // Dragging individual finger_* joints never re-snaps so manual per-joint tweaks are preserved.
+                        if (!_isGuidedPinPlacement &&
+                            _referenceRig != null &&
+                            _referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers &&
+                            (releasedPin.StartsWith("Wrist", StringComparison.OrdinalIgnoreCase) ||
+                             releasedPin.StartsWith("HandTip", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            SnapReferenceFingersToCurrentMesh();
+                        }
                         _pinsDirtyNeedsRigRebuild = true;
                         SetRigChipStatus("Reference Rig Modified — Click Bind / Re-Bind", StatusTone.Warning);
                     }
@@ -6815,6 +7329,7 @@ namespace DeadlockPlayground.UI
                             GetViewport().SetInputAsHandled();
                             return true;
                         }
+                        PushReferenceRigUndoSnapshot();
                         _pinDragExceededThreshold = true;
                     }
                     Transform3D xf = BuildCurrentAlignedTransform();
@@ -6935,8 +7450,8 @@ namespace DeadlockPlayground.UI
                 _strokeDirty = false;
                 if (_btnChainWeightPaintToggle != null && _btnChainWeightPaintToggle.ButtonPressed)
                     _btnChainWeightPaintToggle.SetPressedNoSignal(false);
-                if (_boxTab3WeightPaintHost != null)
-                    _boxTab3WeightPaintHost.Visible = false;
+                // Keep _boxTab3WeightPaintHost visible so the "Paint Bone Weights (Heatmap)" toggle button
+                // remains accessible inside Tab 3 -> Weights after exiting weight paint mode!
                 if (_paintBrushRing != null && GodotObject.IsInstanceValid(_paintBrushRing)) _paintBrushRing.Visible = false;
                 foreach (var s in _paintSurfaces)
                     CustomWeightPaintEditor.RefreshSurfaceHeatmap(s, -1, -1, false, null);
@@ -7785,11 +8300,12 @@ namespace DeadlockPlayground.UI
         {
             bool pinEdit = IsPinEditActive();
             bool paintMode = IsWeightPaintActive();
+            bool tab1OriginalPose = _showOriginalPoseInTab1 && _rightTabs != null && _rightTabs.CurrentTab == 0;
 
             if (_previewModelRoot != null && GodotObject.IsInstanceValid(_previewModelRoot))
             {
                 bool riggedValid = _previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer);
-                if (pinEdit)
+                if (pinEdit || tab1OriginalPose)
                 {
                     if (riggedValid) _previewRiggedContainer.Visible = false;
                     _previewModelRoot.Transform = BuildCurrentAlignedTransform();
@@ -7809,10 +8325,19 @@ namespace DeadlockPlayground.UI
 
             RefreshViewportShadingAndWireframes();
             RefreshPinVisuals();
+            if (_showBones) RedrawBoneWireframe();
             if (_refRigViewportHud != null && GodotObject.IsInstanceValid(_refRigViewportHud))
             {
                 _refRigViewportHud.Visible = pinEdit;
                 if (pinEdit) SyncReferenceRigViewportHud();
+            }
+            if (_refRigViewportBottomHud != null && GodotObject.IsInstanceValid(_refRigViewportBottomHud))
+            {
+                _refRigViewportBottomHud.Visible = pinEdit;
+            }
+            if (pinEdit && _boxSelectedBoneBadge != null && GodotObject.IsInstanceValid(_boxSelectedBoneBadge))
+            {
+                _boxSelectedBoneBadge.Visible = false;
             }
         }
 
@@ -8069,6 +8594,13 @@ namespace DeadlockPlayground.UI
             var fingerMode = _optFingerRigMode != null && _optFingerRigMode.Selected >= 0
                 ? (FingerRigMode)_optFingerRigMode.GetItemId(_optFingerRigMode.Selected)
                 : ((_chkKeepFingersRigid?.ButtonPressed ?? false) ? FingerRigMode.RigidHand : FingerRigMode.DeadlockFingerBones);
+            bool keepFingersRigid = (_chkKeepFingersRigid?.ButtonPressed ?? false) || fingerMode == FingerRigMode.RigidHand;
+            if (method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig && _referenceRig != null)
+            {
+                bool articulated = _referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
+                fingerMode = articulated ? FingerRigMode.DeadlockFingerBones : FingerRigMode.RigidHand;
+                keepFingersRigid = !articulated;
+            }
             var accBoneMode = _optAccBoneMode != null && _optAccBoneMode.Selected >= 0
                 ? (AccessoryBoneMode)_optAccBoneMode.GetItemId(_optAccBoneMode.Selected)
                 : AccessoryBoneMode.RigidToOneBone;
@@ -8119,7 +8651,7 @@ namespace DeadlockPlayground.UI
                 SubmeshSocketScale = new Dictionary<string, float>(_submeshSocketScale),
                 IncludeBakedOutlineShells = _chkIncludeBakedOutlines?.ButtonPressed ?? true,
                 SubmeshIsOutlineShell = new Dictionary<string, bool>(_submeshIsOutlineShell, StringComparer.OrdinalIgnoreCase),
-                KeepFingersRigidOnHand = (_chkKeepFingersRigid?.ButtonPressed ?? false) || fingerMode == FingerRigMode.RigidHand,
+                KeepFingersRigidOnHand = keepFingersRigid,
                 RigFamilyOverride = rigFamilyOverride,
                 KeepUnweightedBones = _chkKeepUnweightedBones?.ButtonPressed ?? false,
                 EnableCustomPhysics = _chkEnableCustomPhysics?.ButtonPressed ?? _chkPhysicsMasterTab3?.ButtonPressed ?? true,

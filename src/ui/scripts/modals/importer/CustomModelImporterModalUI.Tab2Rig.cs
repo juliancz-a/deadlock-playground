@@ -485,13 +485,18 @@ namespace DeadlockPlayground.UI
             ImporterStyle.ApplyFontSize(_btnAutoPlaceAllMarkers, ImporterStyle.FontHint);
             _btnAutoPlaceAllMarkers.Pressed += () =>
             {
+                PushReferenceRigUndoSnapshot();
+                _isGuidedPinPlacement = false;
+                _guidedPlacedPinKeys.Clear();
                 _selectedPin = null; _hoveredPin = null; _draggingPin = null;
                 _selectedPins.Clear();
                 EnsureReferenceRigInitialized(true);
+                _userMovedLandmarkPins = true;
                 UpdateActivePinBadge();
                 RefreshPinVisuals();
+                SyncReferenceRigViewportHud();
                 UpdatePinProgressChip();
-                SetRigChipStatus("Reference Rig Reset — Click Bind / Re-Bind", StatusTone.Info);
+                SetRigChipStatus("Auto-Placed Reference Rig — Drag joints or click Bind", StatusTone.Info);
             };
             utilRow.AddChild(_btnAutoPlaceAllMarkers);
 
@@ -573,7 +578,16 @@ namespace DeadlockPlayground.UI
 
             var clothOptRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             clothOptRow.AddThemeConstantOverride("separation", 6);
-            _spinRefClothSegments = new SpinBox { MinValue = 2, MaxValue = 6, Step = 1, Value = 3, Prefix = "Segs:", CustomMinimumSize = new Vector2(92, 32) };
+            _spinRefClothSegments = new SpinBox
+            {
+                MinValue = 1,
+                MaxValue = 6,
+                Step = 1,
+                Value = 2,
+                Prefix = "Bones:",
+                CustomMinimumSize = new Vector2(100, 32),
+                TooltipText = "Number of bones in chain (1 = single jiggle bone with 0 mid-joints, 2–6 = bendable cloth/hair chain)."
+            };
             _optRefClothDir = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, CustomMinimumSize = new Vector2(0, 32) };
             ConfigureOptionButton(_optRefClothDir);
             _optRefClothDir.AddItem("Hang Down (-Y)", 0);
@@ -938,7 +952,12 @@ namespace DeadlockPlayground.UI
             }
             SyncEditBindButtonVisuals();
             ExecuteLiveRigUpdate();
-            SetBottomStatus("Bound mesh to modular Reference Rig. Test animations or refine in Tab 3 (Weights & Physics).", StatusTone.Success);
+            // Auto-advance Tab 2 sub-nav to Pose Fit so the user naturally sees the next step after binding!
+            if (GetCurrentRiggingMethod() == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig)
+            {
+                SetTab2SubView(3);
+            }
+            SetBottomStatus("Bound mesh to modular Reference Rig. Adjust Pose Fit or refine in Tab 3 (Weights & Physics).", StatusTone.Success);
         }
 
         private void OnAddReferenceClothChainPressed()
@@ -1100,45 +1119,134 @@ namespace DeadlockPlayground.UI
             SetBottomStatus("Snapped finger joints to hand mesh geometry.", StatusTone.Success);
         }
 
+        private static ImageTexture _hudChkUncheckedTex;
+        private static ImageTexture _hudChkCheckedTex;
+        private static StyleBoxFlat _hudSubtleActiveStyle;
+        private static StyleBoxFlat _hudFloatingPanelStyle;
+
+        private static (ImageTexture Unchecked, ImageTexture Checked) GetHudCheckboxTextures()
+        {
+            if (_hudChkUncheckedTex == null || _hudChkCheckedTex == null)
+            {
+                const int sz = 14;
+                var imgOff = Image.CreateEmpty(sz, sz, false, Image.Format.Rgba8);
+                var imgOn = Image.CreateEmpty(sz, sz, false, Image.Format.Rgba8);
+                Color bgOff = new Color(0.08f, 0.10f, 0.09f, 0.96f);
+                Color borderOff = new Color(0.46f, 0.56f, 0.52f, 0.95f);
+                Color bgOn = new Color(0.42f, 0.64f, 0.54f, 1.0f);
+                Color borderOn = new Color(0.62f, 0.84f, 0.72f, 1.0f);
+                Color checkCol = new Color(0.06f, 0.09f, 0.08f, 1.0f);
+
+                for (int y = 0; y < sz; y++)
+                {
+                    for (int x = 0; x < sz; x++)
+                    {
+                        bool corner = (x == 0 || x == sz - 1) && (y == 0 || y == sz - 1);
+                        if (corner)
+                        {
+                            imgOff.SetPixel(x, y, Colors.Transparent);
+                            imgOn.SetPixel(x, y, Colors.Transparent);
+                            continue;
+                        }
+                        bool edge = x == 0 || y == 0 || x == sz - 1 || y == sz - 1;
+                        imgOff.SetPixel(x, y, edge ? borderOff : bgOff);
+                        imgOn.SetPixel(x, y, edge ? borderOn : bgOn);
+                    }
+                }
+                // Draw crisp 2px checkmark on checked icon
+                (int X, int Y)[] mark =
+                {
+                    (3, 7), (4, 8), (5, 9), (6, 8), (7, 7), (8, 6), (9, 5), (10, 4),
+                    (3, 8), (4, 9), (5, 10), (6, 9), (7, 8), (8, 7), (9, 6), (10, 5)
+                };
+                foreach (var (mx, my) in mark)
+                    if (mx >= 1 && mx < sz - 1 && my >= 1 && my < sz - 1) imgOn.SetPixel(mx, my, checkCol);
+
+                _hudChkUncheckedTex = ImageTexture.CreateFromImage(imgOff);
+                _hudChkCheckedTex = ImageTexture.CreateFromImage(imgOn);
+            }
+            return (_hudChkUncheckedTex, _hudChkCheckedTex);
+        }
+
+        private static StyleBoxFlat GetHudSubtleActiveStyle()
+        {
+            if (_hudSubtleActiveStyle == null)
+            {
+                _hudSubtleActiveStyle = new StyleBoxFlat
+                {
+                    BgColor = new Color(0.17f, 0.27f, 0.23f, 0.96f),
+                    BorderColor = new Color(0.48f, 0.69f, 0.59f, 0.95f),
+                    BorderWidthLeft = 1,
+                    BorderWidthRight = 1,
+                    BorderWidthTop = 1,
+                    BorderWidthBottom = 1,
+                    CornerRadiusTopLeft = 5,
+                    CornerRadiusTopRight = 5,
+                    CornerRadiusBottomLeft = 5,
+                    CornerRadiusBottomRight = 5,
+                    ContentMarginLeft = 6,
+                    ContentMarginRight = 6,
+                    ContentMarginTop = 2,
+                    ContentMarginBottom = 2
+                };
+            }
+            return _hudSubtleActiveStyle;
+        }
+
+        private static StyleBoxFlat GetHudFloatingPanelStyle()
+        {
+            if (_hudFloatingPanelStyle == null)
+            {
+                _hudFloatingPanelStyle = new StyleBoxFlat
+                {
+                    BgColor = new Color(0.06f, 0.08f, 0.07f, 0.86f),
+                    BorderColor = new Color(0.28f, 0.35f, 0.32f, 0.78f),
+                    BorderWidthLeft = 1,
+                    BorderWidthRight = 1,
+                    BorderWidthTop = 1,
+                    BorderWidthBottom = 1,
+                    CornerRadiusTopLeft = 8,
+                    CornerRadiusTopRight = 8,
+                    CornerRadiusBottomLeft = 8,
+                    CornerRadiusBottomRight = 8
+                };
+            }
+            return _hudFloatingPanelStyle;
+        }
+
+        private static void ApplyHudSubtleToggleVisual(Button btn, bool active)
+        {
+            if (btn == null) return;
+            btn.SetPressedNoSignal(active);
+            btn.ThemeTypeVariation = "ToolbarButton";
+            if (active)
+            {
+                var st = GetHudSubtleActiveStyle();
+                btn.AddThemeStyleboxOverride("normal", st);
+                btn.AddThemeStyleboxOverride("pressed", st);
+                btn.AddThemeStyleboxOverride("hover", st);
+                btn.AddThemeStyleboxOverride("hover_pressed", st);
+                btn.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
+                btn.AddThemeColorOverride("font_pressed_color", PlaygroundThemeHelper.Parchment);
+            }
+            else
+            {
+                btn.RemoveThemeStyleboxOverride("normal");
+                btn.RemoveThemeStyleboxOverride("pressed");
+                btn.RemoveThemeStyleboxOverride("hover");
+                btn.RemoveThemeStyleboxOverride("hover_pressed");
+                btn.RemoveThemeColorOverride("font_color");
+                btn.RemoveThemeColorOverride("font_pressed_color");
+            }
+        }
+
         private void BuildReferenceRigViewportHud(Control viewportPanel)
         {
             if (viewportPanel == null) return;
 
-            var overlayMargin = new MarginContainer
-            {
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-                MouseFilter = Control.MouseFilterEnum.Ignore
-            };
-            overlayMargin.AddThemeConstantOverride("margin_left", 10);
-            overlayMargin.AddThemeConstantOverride("margin_right", 10);
-            overlayMargin.AddThemeConstantOverride("margin_top", 10);
-            overlayMargin.AddThemeConstantOverride("margin_bottom", 10);
-            viewportPanel.AddChild(overlayMargin);
+            var (texUnchecked, texChecked) = GetHudCheckboxTextures();
 
-            var hud = new PanelContainer
-            {
-                Visible = false,
-                ThemeTypeVariation = "InspectorSectionPanel",
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
-                MouseFilter = Control.MouseFilterEnum.Stop
-            };
-            overlayMargin.AddChild(hud);
-            _refRigViewportHud = hud;
-
-            var innerPad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            innerPad.AddThemeConstantOverride("margin_left", 10);
-            innerPad.AddThemeConstantOverride("margin_right", 10);
-            innerPad.AddThemeConstantOverride("margin_top", 6);
-            innerPad.AddThemeConstantOverride("margin_bottom", 6);
-            hud.AddChild(innerPad);
-
-            var root = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            root.AddThemeConstantOverride("separation", 6);
-            innerPad.AddChild(root);
-
-            Button MakeHudBtn(string text, int minW, int minH = 28, bool toggle = false, bool pressed = false, string variation = "ToolbarButton", string tip = "")
+            Button MakeHudBtn(string text, int minW, int minH = 26, bool toggle = false, bool pressed = false, string variation = "ToolbarButton", string tip = "")
             {
                 var btn = new Button
                 {
@@ -1148,77 +1256,228 @@ namespace DeadlockPlayground.UI
                     ThemeTypeVariation = variation,
                     CustomMinimumSize = new Vector2(minW, minH),
                     SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                    FocusMode = Control.FocusModeEnum.None,
                     TooltipText = tip
                 };
                 ImporterStyle.ApplyFontSize(btn, ImporterStyle.FontHint);
                 return btn;
             }
 
-            CheckBox MakeHudChk(string text, bool pressed)
+            CheckBox MakeHudCheckBox(string text, bool pressed, string tip = "")
             {
-                var c = new CheckBox
+                var chk = new CheckBox
                 {
                     Text = text,
                     ButtonPressed = pressed,
-                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                    FocusMode = Control.FocusModeEnum.None,
+                    TooltipText = tip
                 };
-                ImporterStyle.ApplyFontSize(c, ImporterStyle.FontHint);
-                return c;
+                chk.AddThemeIconOverride("unchecked", texUnchecked);
+                chk.AddThemeIconOverride("checked", texChecked);
+                chk.AddThemeConstantOverride("h_separation", 5);
+                chk.AddThemeColorOverride("font_color", new Color(0.84f, 0.87f, 0.84f));
+                chk.AddThemeColorOverride("font_pressed_color", PlaygroundThemeHelper.Parchment);
+                ImporterStyle.ApplyFontSize(chk, ImporterStyle.FontHint);
+                return chk;
             }
 
-            // Row 1: Selected Bone Name + X-Mirror + Hand Focus + Quick Bind
+            VSeparator MakeHudSep() => new VSeparator
+            {
+                CustomMinimumSize = new Vector2(2, 18),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+            };
+
+            // =========================================================
+            // 1. TOP SLIM BAR (Frosted translucent floating bar, clear logical groups)
+            // =========================================================
+            var topOverlayMargin = new MarginContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            topOverlayMargin.AddThemeConstantOverride("margin_left", 8);
+            topOverlayMargin.AddThemeConstantOverride("margin_right", 8);
+            topOverlayMargin.AddThemeConstantOverride("margin_top", 8);
+            topOverlayMargin.AddThemeConstantOverride("margin_bottom", 8);
+            viewportPanel.AddChild(topOverlayMargin);
+
+            var topHud = new PanelContainer
+            {
+                Visible = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+            topHud.AddThemeStyleboxOverride("panel", GetHudFloatingPanelStyle());
+            topOverlayMargin.AddChild(topHud);
+            _refRigViewportHud = topHud;
+
+            var topPad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            topPad.AddThemeConstantOverride("margin_left", 10);
+            topPad.AddThemeConstantOverride("margin_right", 8);
+            topPad.AddThemeConstantOverride("margin_top", 5);
+            topPad.AddThemeConstantOverride("margin_bottom", 5);
+            topHud.AddChild(topPad);
+
             var row1 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             row1.AddThemeConstantOverride("separation", 6);
+            topPad.AddChild(row1);
 
+            // Left: Step Prompt + Prev/Next right beside it!
             _lblRefHudSelectedBone = new Label
             {
-                Text = "Bone: Click a joint to move",
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                Text = "Drag any joint to adjust",
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                ClipText = true,
-                TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis
+                AutowrapMode = TextServer.AutowrapMode.Off
             };
-            ImporterStyle.ApplyFontSize(_lblRefHudSelectedBone, ImporterStyle.FontBody);
+            ImporterStyle.ApplyFontSize(_lblRefHudSelectedBone, ImporterStyle.FontHint);
             _lblRefHudSelectedBone.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
             row1.AddChild(_lblRefHudSelectedBone);
 
-            _btnRefHudMirror = MakeHudBtn("X-Mirror", 72, 28, toggle: true, pressed: true);
+            _btnRefHudGuidedPrev = MakeHudBtn("← Prev", 56, 26, tip: "Go back to the previous landmark step.");
+            _btnRefHudGuidedPrev.Visible = false;
+            _btnRefHudGuidedPrev.Pressed += PreviousGuidedPinStep;
+            row1.AddChild(_btnRefHudGuidedPrev);
+
+            _btnRefHudGuidedNext = MakeHudBtn("Next →", 66, 26, variation: "ImporterPrimaryButton", tip: "Confirm this landmark and advance to the next step (Enter).");
+            _btnRefHudGuidedNext.Visible = false;
+            _btnRefHudGuidedNext.Pressed += AdvanceGuidedPinStep;
+            row1.AddChild(_btnRefHudGuidedNext);
+
+            var spacer = new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            row1.AddChild(spacer);
+
+            // Group A: History (Undo / Redo)
+            _btnRefHudUndo = MakeHudBtn("", 26, 26, tip: "Undo last reference rig edit (Ctrl+Z)");
+            SetButtonIcon(_btnRefHudUndo, "res://assets/at-icons/undo.svg", 14);
+            _btnRefHudUndo.Disabled = true;
+            _btnRefHudUndo.Pressed += UndoReferenceRigEdit;
+            row1.AddChild(_btnRefHudUndo);
+
+            _btnRefHudRedo = MakeHudBtn("", 26, 26, tip: "Redo reference rig edit (Ctrl+Y / Ctrl+Shift+Z)");
+            SetButtonIcon(_btnRefHudRedo, "res://assets/at-icons/redo.svg", 14);
+            _btnRefHudRedo.Disabled = true;
+            _btnRefHudRedo.Pressed += RedoReferenceRigEdit;
+            row1.AddChild(_btnRefHudRedo);
+
+            row1.AddChild(MakeHudSep());
+
+            // Group B: Placement Mode
+            _btnRefHudGuidedPlace = MakeHudBtn("1-by-1", 56, 26, toggle: true, pressed: false, tip: "Auto-Rig Pro Smart mode: click 7 landmarks (Chin, Neck, Shoulder, Wrist, Hand Tip, Pelvis, Ankle) directly on the mesh.");
+            _btnRefHudGuidedPlace.Toggled += (on) =>
+            {
+                if (on) StartGuidedOneByOnePinPlacement(clearExisting: true);
+                else { _isGuidedPinPlacement = false; _guidedPlacedPinKeys.Clear(); EnsureReferenceRigInitialized(false); RefreshPinVisuals(); SyncReferenceRigViewportHud(); }
+            };
+            row1.AddChild(_btnRefHudGuidedPlace);
+
+            var btnHudAutoPlace = MakeHudBtn("Auto-Pin", 64, 26, tip: "Automatically estimate all reference pins from the mesh silhouette.");
+            btnHudAutoPlace.Pressed += () =>
+            {
+                PushReferenceRigUndoSnapshot();
+                _isGuidedPinPlacement = false;
+                _guidedPlacedPinKeys.Clear();
+                EnsureReferenceRigInitialized(true);
+                _userMovedLandmarkPins = true;
+                RefreshPinVisuals();
+                SyncReferenceRigViewportHud();
+                SetBottomStatus("Auto-placed all reference pins from mesh silhouette.", StatusTone.Info);
+            };
+            row1.AddChild(btnHudAutoPlace);
+
+            _btnRefHudMirror = MakeHudBtn("Mirror", 52, 26, toggle: true, pressed: true, tip: "Mirror L↔R joint edits across X.");
             _btnRefHudMirror.Toggled += (on) =>
             {
                 if (_chkMirrorPins != null && _chkMirrorPins.ButtonPressed != on) _chkMirrorPins.ButtonPressed = on;
                 if (_btnMirrorPinsToggle != null) _btnMirrorPinsToggle.SetPressedNoSignal(on);
+                ApplyHudSubtleToggleVisual(_btnRefHudMirror, on);
             };
             row1.AddChild(_btnRefHudMirror);
 
-            var btnHudFL = MakeHudBtn("Hand L", 60, 28);
-            var btnHudFR = MakeHudBtn("Hand R", 60, 28);
-            var btnHudReset = MakeHudBtn("View", 50, 28);
-            var btnHudBind = MakeHudBtn("Bind", 64, 28, variation: "ImporterPrimaryButton");
+            row1.AddChild(MakeHudSep());
+
+            // Group C: Camera Focus
+            var btnHudFL = MakeHudBtn("Hand L", 54, 26, tip: "Focus camera on Left Hand.");
+            var btnHudFR = MakeHudBtn("Hand R", 54, 26, tip: "Focus camera on Right Hand.");
+            var btnHudCenter = MakeHudBtn("Center", 56, 26, tip: "Re-center camera on character (Front view).");
             btnHudFL.Pressed += () => FocusCameraOnReferenceHand(true);
             btnHudFR.Pressed += () => FocusCameraOnReferenceHand(false);
-            btnHudReset.Pressed += () => SetCameraPreset("Front");
-            btnHudBind.Pressed += OnBindReferenceRigPressed;
+            btnHudCenter.Pressed += () => SetCameraPreset("Front");
             row1.AddChild(btnHudFL);
             row1.AddChild(btnHudFR);
-            row1.AddChild(btnHudReset);
-            row1.AddChild(btnHudBind);
-            root.AddChild(row1);
+            row1.AddChild(btnHudCenter);
 
-            // Row 2: Compact Spine (1-4) + Neck/Clav/Toes + Hands (Mitten | Fingers) — wraps cleanly, zero vertical stretching!
-            var row2 = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            row2.AddThemeConstantOverride("h_separation", 6);
-            row2.AddThemeConstantOverride("v_separation", 4);
+            row1.AddChild(MakeHudSep());
 
-            var lblSp = new Label { Text = "Spine:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            ImporterStyle.ApplyHintStyle(lblSp);
+            // Group D: Primary Action (Bind — highlighted green only once placement is ready!)
+            _btnRefHudBind = MakeHudBtn("Bind", 58, 26, variation: "ImporterPrimaryButton", tip: "Compute geodesic weights and bind the character to Deadlock.");
+            _btnRefHudBind.Pressed += OnBindReferenceRigPressed;
+            row1.AddChild(_btnRefHudBind);
+
+            // =========================================================
+            // 2. BOTTOM FLOATING PILL BAR (Centered auto-width, translucent, clear checkboxes)
+            // =========================================================
+            var bottomOverlayMargin = new MarginContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            bottomOverlayMargin.AddThemeConstantOverride("margin_left", 12);
+            bottomOverlayMargin.AddThemeConstantOverride("margin_right", 12);
+            bottomOverlayMargin.AddThemeConstantOverride("margin_top", 8);
+            bottomOverlayMargin.AddThemeConstantOverride("margin_bottom", 10);
+            viewportPanel.AddChild(bottomOverlayMargin);
+
+            var bottomHud = new PanelContainer
+            {
+                Visible = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkEnd,
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+            bottomHud.AddThemeStyleboxOverride("panel", GetHudFloatingPanelStyle());
+            bottomOverlayMargin.AddChild(bottomHud);
+            _refRigViewportBottomHud = bottomHud;
+
+            var botPad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter };
+            botPad.AddThemeConstantOverride("margin_left", 12);
+            botPad.AddThemeConstantOverride("margin_right", 12);
+            botPad.AddThemeConstantOverride("margin_top", 6);
+            botPad.AddThemeConstantOverride("margin_bottom", 6);
+            bottomHud.AddChild(botPad);
+
+            var botRoot = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter };
+            botRoot.AddThemeConstantOverride("separation", 5);
+            botPad.AddChild(botRoot);
+
+            var lblBotExplain = new Label
+            {
+                Text = "Reference Rig Options — Configure spine segments, optional limbs & fingers before clicking Bind",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                AutowrapMode = TextServer.AutowrapMode.Off,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter
+            };
+            ImporterStyle.ApplyHintStyle(lblBotExplain, wrap: false);
+            botRoot.AddChild(lblBotExplain);
+
+            // Bottom Row A: Spine (1-4) | [✓] Neck [✓] Clav [ ] Toes | [Mitten | Fingers]
+            var row2 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter };
+            row2.AddThemeConstantOverride("separation", 6);
+
+            var lblSp = new Label { Text = "Spine:", AutowrapMode = TextServer.AutowrapMode.Off, SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(lblSp, wrap: false);
             row2.AddChild(lblSp);
             for (int sc = 1; sc <= 4; sc++)
             {
                 int cap = sc;
-                var b = MakeHudBtn(sc.ToString(), 28, 26, toggle: true, pressed: sc == 4);
+                var b = MakeHudBtn(sc.ToString(), 24, 24, toggle: true, pressed: sc == 4);
                 b.Pressed += () =>
                 {
                     if (_isSyncingRefRigUi) return;
+                    PushReferenceRigUndoSnapshot();
                     _referenceRig.SpineCount = cap;
                     SyncReferenceRigControlsFromDef();
                     RefreshPinVisuals();
@@ -1228,30 +1487,36 @@ namespace DeadlockPlayground.UI
                 row2.AddChild(b);
             }
 
-            _hudChkNeck = MakeHudChk("Neck", true);
-            _hudChkClav = MakeHudChk("Clav", true);
-            _hudChkToes = MakeHudChk("Toes", false);
-            _hudChkNeck.Toggled += (on) => { if (!_isSyncingRefRigUi) { _referenceRig.HasNeck = on; RefreshPinVisuals(); _pinsDirtyNeedsRigRebuild = true; } };
-            _hudChkClav.Toggled += (on) => { if (!_isSyncingRefRigUi) { _referenceRig.HasClavicles = on; RefreshPinVisuals(); _pinsDirtyNeedsRigRebuild = true; } };
-            _hudChkToes.Toggled += (on) => { if (!_isSyncingRefRigUi) { _referenceRig.HasToes = on; _referenceRig.EnsureDefaultJoints(); RefreshPinVisuals(); _pinsDirtyNeedsRigRebuild = true; } };
+            row2.AddChild(MakeHudSep());
+
+            _hudChkNeck = MakeHudCheckBox("Neck", true, "Include/exclude neck_0 bone");
+            _hudChkClav = MakeHudCheckBox("Clav", true, "Include/exclude clavicle L/R bones");
+            _hudChkToes = MakeHudCheckBox("Toes", false, "Include/exclude toe L/R bones");
+            _hudChkNeck.Toggled += (on) => { if (!_isSyncingRefRigUi) { PushReferenceRigUndoSnapshot(); _referenceRig.HasNeck = on; SyncReferenceRigViewportHud(); RefreshPinVisuals(); _pinsDirtyNeedsRigRebuild = true; } };
+            _hudChkClav.Toggled += (on) => { if (!_isSyncingRefRigUi) { PushReferenceRigUndoSnapshot(); _referenceRig.HasClavicles = on; SyncReferenceRigViewportHud(); RefreshPinVisuals(); _pinsDirtyNeedsRigRebuild = true; } };
+            _hudChkToes.Toggled += (on) => { if (!_isSyncingRefRigUi) { PushReferenceRigUndoSnapshot(); _referenceRig.HasToes = on; if (!_isGuidedPinPlacement && _referenceRig.Joints.Count > 0) _referenceRig.EnsureDefaultJoints(); SyncReferenceRigViewportHud(); RefreshPinVisuals(); _pinsDirtyNeedsRigRebuild = true; } };
             row2.AddChild(_hudChkNeck);
             row2.AddChild(_hudChkClav);
             row2.AddChild(_hudChkToes);
 
-            var sep = new VSeparator { CustomMinimumSize = new Vector2(2, 20), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            row2.AddChild(sep);
+            row2.AddChild(MakeHudSep());
 
             string[] hModes = { "Mitten", "Fingers" };
             for (int i = 0; i < 2; i++)
             {
                 int idx = i;
-                var b = MakeHudBtn(hModes[i], 64, 26, toggle: true, pressed: i == 0);
+                var b = MakeHudBtn(hModes[i], 56, 24, toggle: true, pressed: i == 1);
                 b.Pressed += () =>
                 {
                     if (_isSyncingRefRigUi) return;
+                    PushReferenceRigUndoSnapshot();
                     _referenceRig.FingerMode = (ReferenceFingerRigMode)idx;
-                    EnsureReferenceRigInitialized(false);
-                    if (idx == 1) SnapReferenceFingersToCurrentMesh();
+                    bool hasWrists = _referenceRig.Joints.ContainsKey("WristL") || _referenceRig.Joints.ContainsKey("WristR");
+                    if (!_isGuidedPinPlacement && hasWrists)
+                    {
+                        _referenceRig.EnsureDefaultJoints();
+                        if (idx == 1) SnapReferenceFingersToCurrentMesh();
+                    }
                     SyncReferenceRigControlsFromDef();
                     RefreshPinVisuals();
                     _pinsDirtyNeedsRigRebuild = true;
@@ -1259,11 +1524,11 @@ namespace DeadlockPlayground.UI
                 _hudFingerModeBtns[i] = b;
                 row2.AddChild(b);
             }
-            root.AddChild(row2);
+            botRoot.AddChild(row2);
 
-            // Row 3 (shown only when Fingers is active): Individual finger toggles + Phalanges + Snap to Mesh
-            _hudFingerSubRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
-            _hudFingerSubRow.AddThemeConstantOverride("separation", 6);
+            // Bottom Row B (shown only when Fingers is active AND 1-by-1 placement is complete)
+            _hudFingerSubRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter, Visible = false };
+            _hudFingerSubRow.AddThemeConstantOverride("separation", 8);
             (string lbl, Action<bool> set)[] fDefs =
             {
                 ("Thumb",  v => _referenceRig.EnableThumb = v),
@@ -1275,25 +1540,30 @@ namespace DeadlockPlayground.UI
             for (int fi = 0; fi < fDefs.Length; fi++)
             {
                 var setter = fDefs[fi].set;
-                var fc = MakeHudChk(fDefs[fi].lbl, true);
+                var fc = MakeHudCheckBox(fDefs[fi].lbl, true, $"Enable/disable {fDefs[fi].lbl} finger bones");
                 fc.Toggled += (on) =>
                 {
                     if (_isSyncingRefRigUi) return;
+                    PushReferenceRigUndoSnapshot();
                     setter(on);
-                    _referenceRig.EnsureDefaultJoints();
+                    if (!_isGuidedPinPlacement && (_referenceRig.Joints.ContainsKey("WristL") || _referenceRig.Joints.ContainsKey("WristR")))
+                        _referenceRig.EnsureDefaultJoints();
+                    SyncReferenceRigViewportHud();
                     RefreshPinVisuals();
                     _pinsDirtyNeedsRigRebuild = true;
                 };
                 _hudFingerChecks[fi] = fc;
                 _hudFingerSubRow.AddChild(fc);
             }
+            _hudFingerSubRow.AddChild(MakeHudSep());
             for (int p = 0; p < 2; p++)
             {
                 int phCount = p == 0 ? 2 : 3;
-                var pb = MakeHudBtn($"{phCount}j", 32, 26, toggle: true, pressed: phCount == 3, tip: $"{phCount} phalanx joints per finger");
+                var pb = MakeHudBtn($"{phCount}j", 28, 24, toggle: true, pressed: phCount == 3, tip: $"{phCount} phalanx joints per finger");
                 pb.Pressed += () =>
                 {
                     if (_isSyncingRefRigUi) return;
+                    PushReferenceRigUndoSnapshot();
                     _referenceRig.PhalanxCount = phCount;
                     SnapReferenceFingersToCurrentMesh();
                     SyncReferenceRigControlsFromDef();
@@ -1301,10 +1571,10 @@ namespace DeadlockPlayground.UI
                 _hudPhalanxBtns[p] = pb;
                 _hudFingerSubRow.AddChild(pb);
             }
-            var btnSnapFingers = MakeHudBtn("Snap to Mesh", 96, 26, tip: "Auto-snaps all enabled finger joints into the 3D hand mesh.");
-            btnSnapFingers.Pressed += SnapReferenceFingersToCurrentMesh;
+            var btnSnapFingers = MakeHudBtn("Snap Fingers", 86, 24, tip: "Auto-snaps all enabled finger joints into the 3D hand mesh using Wrist + Hand Tip.");
+            btnSnapFingers.Pressed += () => { PushReferenceRigUndoSnapshot(); SnapReferenceFingersToCurrentMesh(); };
             _hudFingerSubRow.AddChild(btnSnapFingers);
-            root.AddChild(_hudFingerSubRow);
+            botRoot.AddChild(_hudFingerSubRow);
         }
 
         private void SyncReferenceRigViewportHud()
@@ -1313,11 +1583,41 @@ namespace DeadlockPlayground.UI
                 return;
             if (_lblRefHudSelectedBone != null)
             {
-                string sel = _selectedPin ?? _hoveredPin;
-                _lblRefHudSelectedBone.Text = string.IsNullOrEmpty(sel) ? "Bone: Click a joint to move" : $"Bone: {sel}";
+                if (_isGuidedPinPlacement && _guidedPinStep >= 0 && _guidedPinStep < GuidedPinStepLabels.Length)
+                {
+                    _lblRefHudSelectedBone.Text = "▸ " + GuidedPinStepLabels[_guidedPinStep];
+                    ImporterStyle.ApplyFontSize(_lblRefHudSelectedBone, ImporterStyle.FontBody);
+                    _lblRefHudSelectedBone.AddThemeColorOverride("font_color", new Color(1.0f, 0.86f, 0.36f));
+                }
+                else
+                {
+                    string sel = _selectedPin ?? _hoveredPin;
+                    _lblRefHudSelectedBone.Text = string.IsNullOrEmpty(sel) ? "Drag any joint to adjust" : $"Bone: {sel}";
+                    ImporterStyle.ApplyFontSize(_lblRefHudSelectedBone, ImporterStyle.FontHint);
+                    _lblRefHudSelectedBone.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
+                }
             }
-            if (_btnRefHudMirror != null)
-                _btnRefHudMirror.SetPressedNoSignal(_chkMirrorPins?.ButtonPressed ?? true);
+            ApplyHudSubtleToggleVisual(_btnRefHudGuidedPlace, _isGuidedPinPlacement);
+            if (_btnRefHudGuidedPrev != null)
+            {
+                _btnRefHudGuidedPrev.Visible = _isGuidedPinPlacement;
+                _btnRefHudGuidedPrev.Disabled = _guidedPinStep <= 0;
+            }
+            if (_btnRefHudGuidedNext != null)
+            {
+                _btnRefHudGuidedNext.Visible = _isGuidedPinPlacement;
+                bool isLast = _guidedPinStep >= GuidedPinStepLabels.Length - 1;
+                _btnRefHudGuidedNext.Text = isLast ? "Done ✓" : "Next →";
+                _btnRefHudGuidedNext.Disabled = !IsGuidedStepPlaced(_guidedPinStep);
+            }
+            // Only ONE primary green CTA at a time: Next during 1-by-1, Bind once placement is complete!
+            if (_btnRefHudBind != null)
+            {
+                _btnRefHudBind.ThemeTypeVariation = _isGuidedPinPlacement ? "ToolbarButton" : "ImporterPrimaryButton";
+            }
+            if (_btnRefHudUndo != null) _btnRefHudUndo.Disabled = _refRigUndoStack.Count == 0;
+            if (_btnRefHudRedo != null) _btnRefHudRedo.Disabled = _refRigRedoStack.Count == 0;
+            ApplyHudSubtleToggleVisual(_btnRefHudMirror, _chkMirrorPins?.ButtonPressed ?? true);
 
             bool prev = _isSyncingRefRigUi;
             _isSyncingRefRigUi = true;
@@ -1325,40 +1625,25 @@ namespace DeadlockPlayground.UI
             {
                 for (int i = 0; i < _hudSpineBtns.Length; i++)
                 {
-                    bool act = (i + 1) == _referenceRig.SpineCount;
-                    if (_hudSpineBtns[i] != null)
-                    {
-                        _hudSpineBtns[i].SetPressedNoSignal(act);
-                        _hudSpineBtns[i].ThemeTypeVariation = act ? "ImporterPrimaryButton" : "ToolbarButton";
-                    }
+                    ApplyHudSubtleToggleVisual(_hudSpineBtns[i], (i + 1) == _referenceRig.SpineCount);
                 }
                 _hudChkNeck?.SetPressedNoSignal(_referenceRig.HasNeck);
                 _hudChkClav?.SetPressedNoSignal(_referenceRig.HasClavicles);
                 _hudChkToes?.SetPressedNoSignal(_referenceRig.HasToes);
                 for (int i = 0; i < _hudFingerModeBtns.Length; i++)
                 {
-                    bool act = i == (int)_referenceRig.FingerMode;
-                    if (_hudFingerModeBtns[i] != null)
-                    {
-                        _hudFingerModeBtns[i].SetPressedNoSignal(act);
-                        _hudFingerModeBtns[i].ThemeTypeVariation = act ? "ImporterPrimaryButton" : "ToolbarButton";
-                    }
+                    ApplyHudSubtleToggleVisual(_hudFingerModeBtns[i], i == (int)_referenceRig.FingerMode);
                 }
                 if (_hudFingerSubRow != null)
-                    _hudFingerSubRow.Visible = _referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
-                if (_hudFingerChecks[0] != null) _hudFingerChecks[0].SetPressedNoSignal(_referenceRig.EnableThumb);
-                if (_hudFingerChecks[1] != null) _hudFingerChecks[1].SetPressedNoSignal(_referenceRig.EnableIndex);
-                if (_hudFingerChecks[2] != null) _hudFingerChecks[2].SetPressedNoSignal(_referenceRig.EnableMiddle);
-                if (_hudFingerChecks[3] != null) _hudFingerChecks[3].SetPressedNoSignal(_referenceRig.EnableRing);
-                if (_hudFingerChecks[4] != null) _hudFingerChecks[4].SetPressedNoSignal(_referenceRig.EnablePinky);
+                    _hudFingerSubRow.Visible = !_isGuidedPinPlacement && _referenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
+                _hudFingerChecks[0]?.SetPressedNoSignal(_referenceRig.EnableThumb);
+                _hudFingerChecks[1]?.SetPressedNoSignal(_referenceRig.EnableIndex);
+                _hudFingerChecks[2]?.SetPressedNoSignal(_referenceRig.EnableMiddle);
+                _hudFingerChecks[3]?.SetPressedNoSignal(_referenceRig.EnableRing);
+                _hudFingerChecks[4]?.SetPressedNoSignal(_referenceRig.EnablePinky);
                 for (int p = 0; p < _hudPhalanxBtns.Length; p++)
                 {
-                    bool act = (p == 0 ? 2 : 3) == _referenceRig.PhalanxCount;
-                    if (_hudPhalanxBtns[p] != null)
-                    {
-                        _hudPhalanxBtns[p].SetPressedNoSignal(act);
-                        _hudPhalanxBtns[p].ThemeTypeVariation = act ? "ImporterPrimaryButton" : "ToolbarButton";
-                    }
+                    ApplyHudSubtleToggleVisual(_hudPhalanxBtns[p], (p == 0 ? 2 : 3) == _referenceRig.PhalanxCount);
                 }
             }
             finally

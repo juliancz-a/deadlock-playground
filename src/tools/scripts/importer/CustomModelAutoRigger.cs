@@ -258,10 +258,16 @@ namespace DeadlockPlayground.Importer
             public Quaternion RotationHandTotal { get; set; } = Quaternion.Identity;
             /// <summary>Uniform scale around wrist pivot Ct applied to hand + fingers.</summary>
             public float HandScale { get; set; } = 1.0f;
+            /// <summary>Counter-twist helper bones (e.g. arm_upper_L_TWIST, arm_lower_L_TWIST) that must evaluate with upper/lower arm segments instead of falling through to hand.</summary>
+            public HashSet<int> UpperTwistBones { get; set; }
+            public HashSet<int> LowerTwistBones { get; set; }
 
             public bool AppliesTo(int targetBoneIdx, Skeleton3D targetSkeleton)
             {
                 if (targetBoneIdx == TargetUpperBone || targetBoneIdx == TargetLowerBone || targetBoneIdx == TargetHandBone)
+                    return true;
+                if ((UpperTwistBones != null && UpperTwistBones.Contains(targetBoneIdx)) ||
+                    (LowerTwistBones != null && LowerTwistBones.Contains(targetBoneIdx)))
                     return true;
 
                 if (Fingers != null && Fingers.AppliesTo(targetBoneIdx))
@@ -281,7 +287,7 @@ namespace DeadlockPlayground.Importer
 
             public (Vector3 pos, Quaternion rot) Evaluate(int targetBoneIdx, Skeleton3D targetSkeleton, Vector3 vHero)
             {
-                if (targetBoneIdx == TargetUpperBone)
+                if (targetBoneIdx == TargetUpperBone || (UpperTwistBones != null && UpperTwistBones.Contains(targetBoneIdx)))
                 {
                     Vector3 d = vHero - As;
                     float proj = d.Dot(UnitSourceUpper);
@@ -289,7 +295,7 @@ namespace DeadlockPlayground.Importer
                     return (At + RotationUpper * dScaled, RotationUpper);
                 }
 
-                if (targetBoneIdx == TargetLowerBone)
+                if (targetBoneIdx == TargetLowerBone || (LowerTwistBones != null && LowerTwistBones.Contains(targetBoneIdx)))
                 {
                     Vector3 d = vHero - Bs;
                     float proj = d.Dot(UnitSourceLower);
@@ -354,10 +360,15 @@ namespace DeadlockPlayground.Importer
             public float LengthTargetCalf { get; set; }
             public float SigmaCalf { get; set; }
             public Quaternion RotationCalf { get; set; }
+            public HashSet<int> ThighTwistBones { get; set; }
+            public HashSet<int> CalfTwistBones { get; set; }
 
             public bool AppliesTo(int targetBoneIdx, Skeleton3D targetSkeleton)
             {
                 if (targetBoneIdx == TargetThighBone || targetBoneIdx == TargetCalfBone || targetBoneIdx == TargetAnkleBone)
+                    return true;
+                if ((ThighTwistBones != null && ThighTwistBones.Contains(targetBoneIdx)) ||
+                    (CalfTwistBones != null && CalfTwistBones.Contains(targetBoneIdx)))
                     return true;
 
                 if (targetSkeleton != null && targetBoneIdx >= 0 && targetBoneIdx < targetSkeleton.GetBoneCount())
@@ -374,7 +385,7 @@ namespace DeadlockPlayground.Importer
 
             public (Vector3 pos, Quaternion rot) Evaluate(int targetBoneIdx, Skeleton3D targetSkeleton, Vector3 vHero)
             {
-                if (targetBoneIdx == TargetThighBone)
+                if (targetBoneIdx == TargetThighBone || (ThighTwistBones != null && ThighTwistBones.Contains(targetBoneIdx)))
                 {
                     Vector3 d = vHero - As;
                     float proj = d.Dot(UnitSourceThigh);
@@ -382,7 +393,7 @@ namespace DeadlockPlayground.Importer
                     return (At + RotationThigh * dScaled, RotationThigh);
                 }
 
-                if (targetBoneIdx == TargetCalfBone)
+                if (targetBoneIdx == TargetCalfBone || (CalfTwistBones != null && CalfTwistBones.Contains(targetBoneIdx)))
                 {
                     Vector3 d = vHero - Bs;
                     float proj = d.Dot(UnitSourceCalf);
@@ -1117,7 +1128,32 @@ namespace DeadlockPlayground.Importer
                             }
                         }
                         GD.Print($"[CustomModelAutoRigger] Modular Auto-Rig: synthetic skeleton with {synth.Skeleton.GetBoneCount()} bones, {synth.VertexCount} vertices weighted.");
-                        result = RigPreRiggedModel(importedScene, importedMeshes, synth.Skeleton, heroNode, heroSkeleton, customSkin, options);
+                        // Synthetic skeleton already uses exact Deadlock canonical bone names (including articulated finger_*_0..2_{L|R}).
+                        // Temporarily clear stale pre-rigged CustomBoneRemap / DisabledSourceBones and sync FingerMode from ReferenceRig
+                        // so 100% of synthetic core + finger bones map 1:1 onto the Deadlock hero skeleton!
+                        var prevRemap = options.CustomBoneRemap;
+                        var prevDisabled = options.DisabledSourceBones;
+                        var prevKeepRigid = options.KeepFingersRigidOnHand;
+                        var prevFingerMode = options.FingerMode;
+                        try
+                        {
+                            options.CustomBoneRemap = null;
+                            options.DisabledSourceBones = null;
+                            if (options.ReferenceRig != null)
+                            {
+                                bool articulated = options.ReferenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
+                                options.KeepFingersRigidOnHand = !articulated;
+                                options.FingerMode = articulated ? FingerRigMode.DeadlockFingerBones : FingerRigMode.RigidHand;
+                            }
+                            result = RigPreRiggedModel(importedScene, importedMeshes, synth.Skeleton, heroNode, heroSkeleton, customSkin, options);
+                        }
+                        finally
+                        {
+                            options.CustomBoneRemap = prevRemap;
+                            options.DisabledSourceBones = prevDisabled;
+                            options.KeepFingersRigidOnHand = prevKeepRigid;
+                            options.FingerMode = prevFingerMode;
+                        }
                     }
                     finally
                     {
@@ -1825,6 +1861,7 @@ namespace DeadlockPlayground.Importer
 
             int tgtBoneCount = targetSkeleton.GetBoneCount();
             // 0 = none, 1 = leftArm, 2 = rightArm, 3 = leftLeg, 4 = rightLeg, 5 = headSeg, 6 = pelvis
+            int spine0Bone = targetSkeleton.FindBone("spine_0");
             byte[] tgtSegmentKind = new byte[tgtBoneCount];
             for (int tb = 0; tb < tgtBoneCount; tb++)
             {
@@ -1834,6 +1871,7 @@ namespace DeadlockPlayground.Importer
                 else if (rightLeg != null && rightLeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 4;
                 else if (headSeg != null && headSeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 5;
                 else if (tb == pelvisBone) tgtSegmentKind[tb] = 6;
+                else if (tb == spine0Bone) tgtSegmentKind[tb] = 7;
             }
 
             int headBonePre = targetSkeleton.FindBone("head");
@@ -2123,6 +2161,10 @@ namespace DeadlockPlayground.Importer
                                         break;
                                     case 6:
                                         tPos = vHero + pelvisOffset;
+                                        tRot = Quaternion.Identity;
+                                        break;
+                                    case 7:
+                                        tPos = vHero + pelvisOffset * 0.5f;
                                         tRot = Quaternion.Identity;
                                         break;
                                     default:
@@ -2904,7 +2946,10 @@ namespace DeadlockPlayground.Importer
 
             Vector3 uS2 = (Cs - Bs) / Ls2;
             Vector3 uT2 = (Ct - Bt) / Lt2;
-            Quaternion R2 = ShortestArc(uS2, uT2);
+            // Parallel-transport the forearm rotation from R1 instead of an independent ShortestArc(uS2, uT2),
+            // eliminating spherical-holonomy axial twist jumps ("candy-wrapper" pinch) at the elbow joint!
+            Vector3 uS2AfterR1 = (R1 * uS2).Normalized();
+            Quaternion R2 = (ShortestArc(uS2AfterR1, uT2) * R1).Normalized();
             float sigma2 = Mathf.Clamp(Lt2 / Ls2, 0.75f, 1.35f);
 
             float maxArmAngleDeg = Mathf.RadToDeg(Mathf.Max(R1.GetAngle(), R2.GetAngle()));
@@ -3024,11 +3069,30 @@ namespace DeadlockPlayground.Importer
                 fingersReg = BuildFingerSegmentRegistration(sourceSkeleton, targetSkeleton, sourceToTargetMap, isLeft, tgtHand, Cs, Ct, handTotalRot, skelToHero, handScale);
             }
 
+            // Collect upper-arm & forearm counter-twist helper bones so painted SkinWeightOverrides
+            // (which store post-counter-twist *_TWIST bone weights) evaluate with their exact arm segment on rescale!
+            var upperTwists = new HashSet<int>();
+            var lowerTwists = new HashSet<int>();
+            string sideSuffix = "_" + side.ToLowerInvariant();
+            for (int b = 0; b < targetSkeleton.GetBoneCount(); b++)
+            {
+                string bn = targetSkeleton.GetBoneName(b).ToLowerInvariant();
+                if (!bn.Contains("twist")) continue;
+                int par = targetSkeleton.GetBoneParent(b);
+                bool sameSide = bn.EndsWith(sideSuffix) || bn.Contains(sideSuffix + "_");
+                if (par == tgtUpper || (sameSide && (bn.Contains("arm_upper") || bn.Contains("bicep") || bn.Contains("shoulder"))))
+                    upperTwists.Add(b);
+                else if (par == tgtLower || (sameSide && (bn.Contains("arm_lower") || bn.Contains("forearm") || bn.Contains("wrist"))))
+                    lowerTwists.Add(b);
+            }
+
             return new ArmSegmentRegistration
             {
                 TargetUpperBone = tgtUpper,
                 TargetLowerBone = tgtLower,
                 TargetHandBone = tgtHand,
+                UpperTwistBones = upperTwists,
+                LowerTwistBones = lowerTwists,
                 Fingers = fingersReg,
                 As = As,
                 Bs = Bs,
@@ -3381,11 +3445,47 @@ namespace DeadlockPlayground.Importer
                 metaAreCoLocated = maxSpread < 0.015f;
             }
 
+            // Compute palm-normal reference frames (source in vHand space vs target Deadlock hand) so finger
+            // alignment preserves each finger's anatomical curl plane instead of introducing arbitrary axial twist.
+            Vector3 srcPalmNormal = Vector3.Zero, tgtPalmNormal = Vector3.Zero;
+            {
+                int tgtIdx0 = FindBoneAny(targetSkeleton, $"finger_index_0_{side}", $"finger_index_0_{side}".ToLowerInvariant());
+                int tgtMid0 = FindBoneAny(targetSkeleton, $"finger_middle_0_{side}", $"finger_middle_0_{side}".ToLowerInvariant());
+                int tgtPnk0 = FindBoneAny(targetSkeleton, $"finger_pinky_0_{side}", $"finger_pinky_0_{side}".ToLowerInvariant());
+                int srcIdx0 = tgtIdx0 != -1 ? FindSourceBoneForTarget(sourceToTargetMap, tgtIdx0) : -1;
+                int srcMid0 = tgtMid0 != -1 ? FindSourceBoneForTarget(sourceToTargetMap, tgtMid0) : -1;
+                int srcPnk0 = tgtPnk0 != -1 ? FindSourceBoneForTarget(sourceToTargetMap, tgtPnk0) : -1;
+                if (tgtIdx0 != -1 && tgtMid0 != -1 && tgtPnk0 != -1 && srcIdx0 != -1 && srcMid0 != -1 && srcPnk0 != -1)
+                {
+                    Vector3 tIdx = targetSkeleton.GetBoneGlobalRest(tgtIdx0).Origin;
+                    Vector3 tMid = targetSkeleton.GetBoneGlobalRest(tgtMid0).Origin;
+                    Vector3 tPnk = targetSkeleton.GetBoneGlobalRest(tgtPnk0).Origin;
+                    Vector3 tN = (tMid - Ct).Cross(tIdx - tPnk);
+                    if (tN.LengthSquared() > 1e-8f) tgtPalmNormal = tN.Normalized();
+
+                    Vector3 sIdx = Ct + Rlower * (((skelToHero * sourceSkeleton.GetBoneGlobalRest(srcIdx0).Origin) - Cs) * handScale);
+                    Vector3 sMid = Ct + Rlower * (((skelToHero * sourceSkeleton.GetBoneGlobalRest(srcMid0).Origin) - Cs) * handScale);
+                    Vector3 sPnk = Ct + Rlower * (((skelToHero * sourceSkeleton.GetBoneGlobalRest(srcPnk0).Origin) - Cs) * handScale);
+                    Vector3 sN = (sMid - Ct).Cross(sIdx - sPnk);
+                    if (sN.LengthSquared() > 1e-8f) srcPalmNormal = sN.Normalized();
+                }
+            }
+            bool hasPalmNormals = srcPalmNormal.LengthSquared() > 0.5f && tgtPalmNormal.LengthSquared() > 0.5f;
+
             foreach (var fname in fingerNames)
             {
                 RegisterFingerMetacarpalSegment(
                     fingersReg, sourceSkeleton, targetSkeleton, sourceToTargetMap,
                     fname, side, Cs, Ct, Rlower, skelToHero, handScale, metaAreCoLocated);
+
+                int tgtMetaForFinger = FindBoneAny(targetSkeleton, $"finger_{fname}_meta_{side}", $"finger_{fname}_meta_{side}".ToLowerInvariant());
+                FingerPhalanxSegment metaSeg = null;
+                bool hasMetaSeg = tgtMetaForFinger != -1 && fingersReg.PhalanxesByTargetBone.TryGetValue(tgtMetaForFinger, out metaSeg);
+                Vector3 metaEndBt = hasMetaSeg ? metaSeg.Bt : Vector3.Zero;
+
+                bool hasPrevEff = false;
+                Vector3 prevEffBt = Vector3.Zero;
+                Quaternion prevR = Quaternion.Identity;
 
                 for (int i = 0; i < 3; i++)
                 {
@@ -3419,7 +3519,7 @@ namespace DeadlockPlayground.Importer
                         }
                     }
 
-                    Vector3 At = targetSkeleton.GetBoneGlobalRest(tgtBoneA).Origin;
+                    Vector3 rawAt = targetSkeleton.GetBoneGlobalRest(tgtBoneA).Origin;
                     Vector3 Bt;
 
                     if (tgtBoneB != -1)
@@ -3430,14 +3530,19 @@ namespace DeadlockPlayground.Importer
                     {
                         string tgtPrevName = $"finger_{fname}_{i - 1}_{side}";
                         int tgtPrev = FindBoneAny(targetSkeleton, tgtPrevName, tgtPrevName.ToLowerInvariant());
-                        Vector3 prevPos = tgtPrev != -1 ? targetSkeleton.GetBoneGlobalRest(tgtPrev).Origin : At - Vector3.Forward * 0.02f;
-                        Vector3 dir = (At - prevPos);
-                        Bt = At + (dir.Length() > 0.001f ? dir.Normalized() * (dir.Length() * 0.8f) : Vector3.Forward * 0.02f);
+                        Vector3 prevPos = tgtPrev != -1 ? targetSkeleton.GetBoneGlobalRest(tgtPrev).Origin : rawAt - Vector3.Forward * 0.02f;
+                        Vector3 dir = (rawAt - prevPos);
+                        Bt = rawAt + (dir.Length() > 0.001f ? dir.Normalized() * (dir.Length() * 0.8f) : Vector3.Forward * 0.02f);
                     }
                     else
                     {
-                        Bt = At + Vector3.Forward * 0.025f;
+                        Bt = rawAt + Vector3.Forward * 0.025f;
                     }
+
+                    // C0-continuous chain anchor: phalanx 0 starts at the metacarpal's exact Bt (or Deadlock's knuckle pivot
+                    // when no metacarpal exists), and each distal phalanx starts at prevEffBt so adjacent segments NEVER
+                    // pull shared joint vertices to two different 3D points!
+                    Vector3 At = (i > 0 && hasPrevEff) ? prevEffBt : (i == 0 && hasMetaSeg ? metaEndBt : rawAt);
 
                     Vector3 rawAs = skelToHero * sourceSkeleton.GetBoneGlobalRest(srcBoneA).Origin;
                     Vector3 As = Ct + Rlower * ((rawAs - Cs) * handScale);
@@ -3475,8 +3580,43 @@ namespace DeadlockPlayground.Importer
 
                     Vector3 uS = (Bs - As) / Ls;
                     Vector3 uT = (Bt - At) / Lt;
-                    Quaternion R = ShortestArc(uS, uT);
-                    float sigma = Mathf.Clamp(Lt / Ls, 0.75f, 1.35f);
+
+                    // Align phalanx 0 axis + palm-normal curl plane (for the 4 main fingers), then parallel-transport
+                    // along 0 -> 1 -> 2 so fingers bend cleanly in Deadlock's curl plane without axial twist!
+                    Quaternion R;
+                    if (i == 0 || !hasPrevEff)
+                    {
+                        Quaternion qAxis = ShortestArc(uS, uT);
+                        R = qAxis;
+                        if (hasPalmNormals && fname != "thumb")
+                        {
+                            Vector3 pSrc = qAxis * srcPalmNormal;
+                            pSrc -= uT * pSrc.Dot(uT);
+                            Vector3 pTgt = tgtPalmNormal - uT * tgtPalmNormal.Dot(uT);
+                            if (pSrc.LengthSquared() > 1e-4f && pTgt.LengthSquared() > 1e-4f)
+                            {
+                                Quaternion qTwist = ShortestArc(pSrc.Normalized(), pTgt.Normalized());
+                                float twAngle = qTwist.GetAngle();
+                                float maxTwist = Mathf.DegToRad(45f);
+                                if (twAngle > maxTwist)
+                                    qTwist = Quaternion.Identity.Slerp(qTwist, maxTwist / twAngle).Normalized();
+                                R = (qTwist * qAxis).Normalized();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        R = (ShortestArc((prevR * uS).Normalized(), uT) * prevR).Normalized();
+                    }
+
+                    // Exact length matching (clamped only against extreme degeneracy 0.50..1.80) so each phalanx's
+                    // distal tip lands dead-on Deadlock's next bone pivot Bt with 0.000mm gap!
+                    float sigma = Mathf.Clamp(Lt / Ls, 0.50f, 1.80f);
+                    Vector3 effBt = At + uT * (Ls * sigma);
+
+                    prevEffBt = effBt;
+                    prevR = R;
+                    hasPrevEff = true;
 
                     fingersReg.PhalanxesByTargetBone[tgtBoneA] = new FingerPhalanxSegment
                     {
@@ -3485,7 +3625,7 @@ namespace DeadlockPlayground.Importer
                         As = As,
                         Bs = Bs,
                         At = At,
-                        Bt = Bt,
+                        Bt = effBt,
                         UnitSource = uS,
                         UnitTarget = uT,
                         LengthSource = Ls,
@@ -3532,24 +3672,10 @@ namespace DeadlockPlayground.Importer
             float Ls = (Bs - As).Length();
             if (Ls < 0.001f) return;
 
-            Vector3 rawAt = targetSkeleton.GetBoneGlobalRest(tgtMeta).Origin;
+            // Watertight C0 bridge: anchor the metacarpal start at exact As (in vHand space) so Eval_meta(As) == Eval_hand(As)
+            // with 0.000mm palm seam, and end at Deadlock's exact knuckle Bt so Eval_meta(Bs) == Eval_finger0(As_0) with 0.000mm knuckle seam!
+            Vector3 At = As;
             Vector3 Bt = targetSkeleton.GetBoneGlobalRest(tgt0).Origin;
-
-            Vector3 palmVecSrc = Bs - Ct;
-            float palmLenSrc = palmVecSrc.Length();
-            float srcFrac = palmLenSrc > 0.005f
-                ? Mathf.Clamp((As - Ct).Dot(palmVecSrc / palmLenSrc) / palmLenSrc, 0.25f, 0.85f)
-                : 0.55f;
-            float metaDistSrc = (As - Ct).Length();
-            float rawLt = (Bt - rawAt).Length();
-
-            // Co-located mid-palm *Knuckle rigs (e.g. VRChat / Captain) share a single mid-palm pivot
-            // rather than distinct carpal roots near the wrist; anchor them proportionally along (Ct -> Bt)
-            // so mid-palm skin fans smoothly into each target knuckle without snapping backward to the wrist.
-            bool useProportionalAnchor = metaAreCoLocated
-                || (palmLenSrc > 0.005f && metaDistSrc > 0.45f * palmLenSrc)
-                || (rawLt / Ls > 1.45f);
-            Vector3 At = useProportionalAnchor ? Ct.Lerp(Bt, srcFrac) : rawAt;
 
             float Lt = (Bt - At).Length();
             if (Lt < 0.001f) return;
@@ -3557,7 +3683,7 @@ namespace DeadlockPlayground.Importer
             Vector3 uS = (Bs - As) / Ls;
             Vector3 uT = (Bt - At) / Lt;
             Quaternion R = ShortestArc(uS, uT);
-            float sigma = Mathf.Clamp(Lt / Ls, 0.70f, 1.40f);
+            float sigma = Mathf.Clamp(Lt / Ls, 0.35f, 2.50f);
 
             fingersReg.PhalanxesByTargetBone[tgtMeta] = new FingerPhalanxSegment
             {
@@ -3566,7 +3692,7 @@ namespace DeadlockPlayground.Importer
                 As = As,
                 Bs = Bs,
                 At = At,
-                Bt = Bt,
+                Bt = At + uT * (Ls * sigma),
                 UnitSource = uS,
                 UnitTarget = uT,
                 LengthSource = Ls,
@@ -3627,7 +3753,10 @@ namespace DeadlockPlayground.Importer
 
             Vector3 uS2 = (Cs - Bs) / Ls2;
             Vector3 uT2 = (Ct - Bt) / Lt2;
-            Quaternion R2 = ShortestArc(uS2, uT2);
+            // Parallel-transport the forearm rotation from R1 instead of an independent ShortestArc(uS2, uT2),
+            // eliminating spherical-holonomy axial twist jumps ("candy-wrapper" pinch) at the elbow joint!
+            Vector3 uS2AfterR1 = (R1 * uS2).Normalized();
+            Quaternion R2 = (ShortestArc(uS2AfterR1, uT2) * R1).Normalized();
             float sigma2 = Mathf.Clamp(Lt2 / Ls2, 0.75f, 1.35f);
 
             float maxLegAngleDeg = Mathf.RadToDeg(Mathf.Max(R1.GetAngle(), R2.GetAngle()));
@@ -3643,11 +3772,28 @@ namespace DeadlockPlayground.Importer
             float bootSoleOffset = Mathf.Max(0.0f, Cs.Y);
             Vector3 CtGrounded = new Vector3(Ct.X, bootSoleOffset, Ct.Z);
 
+            var thighTwists = new HashSet<int>();
+            var calfTwists = new HashSet<int>();
+            string legSideSfx = thighName.EndsWith("_L", StringComparison.OrdinalIgnoreCase) ? "_l" : "_r";
+            for (int b = 0; b < targetSkeleton.GetBoneCount(); b++)
+            {
+                string bn = targetSkeleton.GetBoneName(b).ToLowerInvariant();
+                if (!bn.Contains("twist")) continue;
+                int par = targetSkeleton.GetBoneParent(b);
+                bool sameSide = bn.EndsWith(legSideSfx) || bn.Contains(legSideSfx + "_");
+                if (par == tgtThigh || (sameSide && (bn.Contains("leg_upper") || bn.Contains("thigh"))))
+                    thighTwists.Add(b);
+                else if (par == tgtCalf || (sameSide && (bn.Contains("leg_lower") || bn.Contains("calf") || bn.Contains("shin"))))
+                    calfTwists.Add(b);
+            }
+
             return new LegSegmentRegistration
             {
                 TargetThighBone = tgtThigh,
                 TargetCalfBone = tgtCalf,
                 TargetAnkleBone = tgtAnkle,
+                ThighTwistBones = thighTwists,
+                CalfTwistBones = calfTwists,
                 As = As,
                 Bs = Bs,
                 Cs = Cs,

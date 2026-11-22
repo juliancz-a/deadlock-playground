@@ -36,7 +36,19 @@ namespace DeadlockPlayground.UI
         private CheckBox _chkBoneFilterAccessory;
         private CheckBox _chkBoneFilterDisabled;
         private CheckBox _chkBoneFilterVanilla;
+        private int _boneSourceFilterMode = 0; // 0 = Modded Only (default), 1 = Vanilla Hero, 2 = Both
+        private readonly Button[] _boneSourceFilterBtns = new Button[3];
+        private Shader _jointRingShaderCache;
         private readonly HashSet<string> _activeCustomWeightedBoneNames = new(StringComparer.OrdinalIgnoreCase);
+
+        private Shader GetJointRingShader()
+        {
+            if (_jointRingShaderCache == null)
+            {
+                _jointRingShaderCache = GD.Load<Shader>("res://assets/shaders/importer_joint_ring.gdshader");
+            }
+            return _jointRingShaderCache;
+        }
 
         private void RebuildActiveCustomWeightedBoneSet()
         {
@@ -278,7 +290,7 @@ namespace DeadlockPlayground.UI
         private void UpdateSelectedBoneBadge()
         {
             if (_boxSelectedBoneBadge == null) return;
-            if (string.IsNullOrEmpty(_selectedViewportBoneName) || _previewHeroSkeleton == null ||
+            if (IsPinEditActive() || string.IsNullOrEmpty(_selectedViewportBoneName) || _previewHeroSkeleton == null ||
                 _previewHeroSkeleton.FindBone(_selectedViewportBoneName) < 0)
             {
                 _boxSelectedBoneBadge.Visible = false;
@@ -359,19 +371,11 @@ namespace DeadlockPlayground.UI
         private void InspectWeightsForBone(string boneName)
         {
             if (string.IsNullOrEmpty(boneName)) return;
-            bool inBonesTab = _rightTabs != null && _rightTabs.CurrentTab == 2;
-            if (inBonesTab)
-            {
-                SetBonesSubView(1); // Dedicated Weights workspace
-                HostWeightPaintSectionIn(_boxTab3WeightPaintHost);
-            }
-            else
-            {
-                if (_rightTabs != null && _rightTabs.GetTabCount() > 1)
-                    _rightTabs.CurrentTab = 1; // 2_ Rig
-                SetRigWizardStep(2); // Weights step
-                HostWeightPaintSectionIn(_boxTab2WeightPaintHost);
-            }
+            // Always jump directly to Tab 3 (3. Bones) -> Weights sub-view so the Weight Paint panel is visible!
+            if (_rightTabs != null && _rightTabs.GetTabCount() > 2)
+                _rightTabs.CurrentTab = 2; // 3. Bones
+            SetBonesSubView(1); // Dedicated Weights workspace
+            HostWeightPaintSectionIn(_boxTab3WeightPaintHost);
             PopulatePaintBoneDropdown();
             if (_btnWeightPaintMode != null && !_btnWeightPaintMode.ButtonPressed)
                 _btnWeightPaintMode.ButtonPressed = true;
@@ -518,15 +522,45 @@ namespace DeadlockPlayground.UI
         private void SelectPaintBoneByName(string boneName)
         {
             if (_optPaintBone == null || string.IsNullOrEmpty(boneName)) return;
+            // Clear search filter if it would hide the target bone in the visible list
+            if (_txtPaintBoneSearch != null && !string.IsNullOrEmpty(_txtPaintBoneSearch.Text) &&
+                !boneName.Contains(_txtPaintBoneSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                _txtPaintBoneSearch.Text = "";
+            }
+
+            int foundIdx = -1;
             for (int i = 0; i < _optPaintBone.ItemCount; i++)
             {
                 if (_optPaintBone.GetItemText(i).Equals(boneName, StringComparison.OrdinalIgnoreCase))
                 {
-                    _optPaintBone.Select(i);
-                    UpdateResetBoneButtonLabel();
-                    RefreshWeightPaintHeatmap();
+                    foundIdx = i;
                     break;
                 }
+            }
+            if (foundIdx < 0 && _previewHeroSkeleton != null)
+            {
+                int skelIdx = _previewHeroSkeleton.FindBone(boneName);
+                if (skelIdx >= 0)
+                {
+                    _optPaintBone.AddItem(_previewHeroSkeleton.GetBoneName(skelIdx), skelIdx);
+                    foundIdx = _optPaintBone.ItemCount - 1;
+                }
+            }
+            if (foundIdx >= 0)
+            {
+                _optPaintBone.Select(foundIdx);
+                // If current filter mode hides this bone in the visible list, switch to 'All' so it is always visible & highlighted!
+                bool inCatalog = _paintBoneCatalog.Any(e => e.Name.Equals(boneName, StringComparison.OrdinalIgnoreCase));
+                if (!inCatalog && _paintBoneFilterMode != 2)
+                {
+                    _paintBoneFilterMode = 2;
+                    for (int k = 0; k < 3; k++) _paintBoneFilterBtns[k]?.SetPressedNoSignal(k == 2);
+                }
+                UpdateResetBoneButtonLabel();
+                RebuildPaintBoneListUI();
+                SyncWeightPaintHudFromControls();
+                RefreshWeightPaintHeatmap();
             }
         }
 
@@ -542,11 +576,11 @@ namespace DeadlockPlayground.UI
             }
         }
 
-        private int PickNearestViewportBone(Vector2 clickPos, float maxPixelDist = 14.0f)
+        private int PickNearestViewportBone(Vector2 clickPos, float maxPixelDist = 24.0f)
         {
             if (_previewCamera == null || _previewHeroSkeleton == null) return -1;
             int bestBone = -1;
-            float bestDist = maxPixelDist;
+            float bestScore = maxPixelDist;
             Transform3D skelGlobal = _previewHeroSkeleton.IsInsideTree() ? _previewHeroSkeleton.GlobalTransform : Transform3D.Identity;
             int bCount = _previewHeroSkeleton.GetBoneCount();
             int origCount = _previewHeroSkeleton.HasMeta("OriginalHeroBoneCount")
@@ -565,9 +599,10 @@ namespace DeadlockPlayground.UI
                 {
                     Vector2 sp = _previewCamera.UnprojectPosition(wp);
                     float dJoint = sp.DistanceTo(clickPos);
-                    if (dJoint < bestDist)
+                    // Prioritize clicking directly on joint rings (0.72x score bonus) over nearby bone sticks
+                    if (dJoint < maxPixelDist && dJoint * 0.72f < bestScore)
                     {
-                        bestDist = dJoint;
+                        bestScore = dJoint * 0.72f;
                         bestBone = b;
                     }
                 }
@@ -582,9 +617,9 @@ namespace DeadlockPlayground.UI
                         Vector2 spParent = _previewCamera.UnprojectPosition(wpParent);
                         Vector2 closestSeg = Geometry2D.GetClosestPointToSegment(clickPos, spParent, spChild);
                         float dSeg = closestSeg.DistanceTo(clickPos);
-                        if (dSeg < bestDist)
+                        if (dSeg < maxPixelDist * 0.75f && dSeg < bestScore)
                         {
-                            bestDist = dSeg;
+                            bestScore = dSeg;
                             bestBone = b;
                         }
                     }
@@ -596,7 +631,7 @@ namespace DeadlockPlayground.UI
         private bool TryHandleViewportBoneLeftClick(InputEvent @event)
         {
             if ((!_showBones && !_showColliders) || _previewCamera == null || _previewHeroSkeleton == null) return false;
-            if (IsWeightPaintActive() || IsDeformBrushActive()) return false;
+            if (IsWeightPaintActive() || IsDeformBrushActive() || IsPinEditActive()) return false;
             if (@event is not InputEventMouseButton mb || mb.ButtonIndex != MouseButton.Left) return false;
 
             if (mb.Pressed)
@@ -605,11 +640,11 @@ namespace DeadlockPlayground.UI
                 return false;
             }
 
-            if (mb.Position.DistanceTo(_leftClickStartPos) > 5.0f) return false;
+            if (mb.Position.DistanceTo(_leftClickStartPos) > 8.0f) return false;
 
             if (_showBones)
             {
-                int bestBone = PickNearestViewportBone(mb.Position, 14.0f);
+                int bestBone = PickNearestViewportBone(mb.Position, 24.0f);
                 if (bestBone >= 0)
                 {
                     string bName = _previewHeroSkeleton.GetBoneName(bestBone);
@@ -913,6 +948,22 @@ namespace DeadlockPlayground.UI
             if (_disabledSourceBones.Contains(bName))
                 return (new Color(0.95f, 0.25f, 0.25f, 0.98f), isSelected ? 1.85f : 1.35f, _chkBoneFilterDisabled?.ButtonPressed ?? true);
 
+            bool isAppended = boneIdx >= origCount || appendedByKind.ContainsKey(bName);
+            bool isUsedByCustom = isAppended || _activeCustomWeightedBoneNames.Contains(bName);
+
+            // Strict separation between Modded Model bones and Vanilla Hero bones:
+            // Mode 0 = Modded Only (default), Mode 1 = Vanilla Hero Only, Mode 2 = Both (Vanilla dimmed)
+            if (_boneSourceFilterMode == 1)
+            {
+                if (boneIdx >= origCount) return (Colors.Transparent, 1f, false);
+                return (isSelected ? Colors.White : new Color(0.50f, 0.72f, 0.85f, 0.75f), isSelected ? 1.65f : 0.95f, true);
+            }
+            if (!isUsedByCustom)
+            {
+                bool showVanilla = _boneSourceFilterMode == 2 || (_chkBoneFilterVanilla?.ButtonPressed ?? false);
+                return (isSelected ? Colors.White : new Color(0.55f, 0.68f, 0.72f, 0.28f), isSelected ? 1.50f : 0.70f, showVanilla || isSelected);
+            }
+
             if (appendedByKind.TryGetValue(bName, out Color chCol))
             {
                 bool isAccessory = chCol.R > 0.9f && chCol.B > 0.8f;
@@ -923,17 +974,8 @@ namespace DeadlockPlayground.UI
             if (boneIdx >= origCount)
                 return (isSelected ? Colors.White : new Color(1.0f, 0.82f, 0.18f, 0.98f), isSelected ? 1.85f : 1.25f, (_chkBoneFilterPhysics?.ButtonPressed ?? true) || isSelected);
 
-            // Hide vanilla hero bones not used by the custom character unless "Show Vanilla Hero" is explicitly enabled!
-            bool hasCustomSet = _activeCustomWeightedBoneNames.Count > 0;
-            bool isUsedByCustom = !hasCustomSet || _activeCustomWeightedBoneNames.Contains(bName);
-            if (!isUsedByCustom)
-            {
-                bool showVanilla = _chkBoneFilterVanilla?.ButtonPressed ?? false;
-                return (isSelected ? Colors.White : new Color(0.55f, 0.68f, 0.72f, 0.28f), isSelected ? 1.50f : 0.62f, showVanilla || isSelected);
-            }
-
             if (lower.Contains("finger_") || lower.Contains("thumb") || lower.Contains("index") || lower.Contains("middle") || lower.Contains("ring") || lower.Contains("pinky"))
-                return (isSelected ? Colors.White : new Color(1.0f, 0.80f, 0.25f, 0.96f), isSelected ? 1.85f : 0.78f, (_chkBoneFilterFingers?.ButtonPressed ?? true) || isSelected);
+                return (isSelected ? Colors.White : new Color(1.0f, 0.80f, 0.25f, 0.96f), isSelected ? 1.85f : 0.80f, (_chkBoneFilterFingers?.ButtonPressed ?? true) || isSelected);
 
             return (isSelected ? Colors.White : new Color(0.25f, 0.88f, 0.98f, 0.96f), isSelected ? 1.85f : 1.08f, (_chkBoneFilterCore?.ButtonPressed ?? true) || isSelected);
         }
@@ -941,6 +983,16 @@ namespace DeadlockPlayground.UI
         private void RedrawBoneWireframeColorCoded()
         {
             if (_previewHeroSkeleton == null || _bonesDebugMesh == null) return;
+
+            // Never draw the bound Deadlock hero skeleton wireframe on top of Reference Bone Edit mode!
+            if (IsPinEditActive())
+            {
+                _bonesDebugMesh.Visible = false;
+                if (_bonesJointPointsMesh != null && GodotObject.IsInstanceValid(_bonesJointPointsMesh))
+                    _bonesJointPointsMesh.Visible = false;
+                return;
+            }
+            _bonesDebugMesh.Visible = _showBones;
 
             var im = new ImmediateMesh();
             im.SurfaceBegin(Mesh.PrimitiveType.Lines);
@@ -987,24 +1039,33 @@ namespace DeadlockPlayground.UI
             }
             _bonesDebugMesh.Mesh = im;
 
-            // Render visible color-coded joint spheres at every bone origin
+            // Render crisp billboarded hollow-circle rings at every visible bone origin
             if (_bonesJointPointsMesh == null || !GodotObject.IsInstanceValid(_bonesJointPointsMesh))
             {
-                var dotMat = new StandardMaterial3D
+                Material ringMat;
+                var ringShader = GetJointRingShader();
+                if (ringShader != null)
                 {
-                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                    VertexColorUseAsAlbedo = true,
-                    Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                    NoDepthTest = _bonesOnTop,
-                    RenderPriority = _bonesOnTop ? 96 : 11
-                };
-                var sphere = new SphereMesh
+                    var sm = new ShaderMaterial { Shader = ringShader, RenderPriority = 96 };
+                    sm.SetShaderParameter("ring_color", Colors.White);
+                    sm.SetShaderParameter("is_selected", 0.0f);
+                    ringMat = sm;
+                }
+                else
                 {
-                    Radius = 0.011f,
-                    Height = 0.022f,
-                    RadialSegments = 8,
-                    Rings = 4,
-                    Material = dotMat
+                    ringMat = new StandardMaterial3D
+                    {
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                        VertexColorUseAsAlbedo = true,
+                        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                        NoDepthTest = _bonesOnTop,
+                        RenderPriority = _bonesOnTop ? 96 : 11
+                    };
+                }
+                var quad = new QuadMesh
+                {
+                    Size = new Vector2(0.032f, 0.032f),
+                    Material = ringMat
                 };
                 _bonesJointPointsMesh = new MultiMeshInstance3D
                 {
@@ -1014,7 +1075,7 @@ namespace DeadlockPlayground.UI
                     {
                         TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
                         UseColors = true,
-                        Mesh = sphere
+                        Mesh = quad
                     }
                 };
                 _previewHeroSkeleton.AddChild(_bonesJointPointsMesh);

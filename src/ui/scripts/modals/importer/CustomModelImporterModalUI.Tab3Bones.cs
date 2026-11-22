@@ -540,10 +540,13 @@ namespace DeadlockPlayground.UI
             presetLblRow.AddChild(lblPresetSection);
             var lblPresetHintRight = new Label
             {
-                Text = "Click to choose preset",
-                HorizontalAlignment = HorizontalAlignment.Right
+                Text = "Click to choose",
+                HorizontalAlignment = HorizontalAlignment.Right,
+                AutowrapMode = TextServer.AutowrapMode.Off,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
             };
-            ImporterStyle.ApplyHintStyle(lblPresetHintRight);
+            ImporterStyle.ApplyHintStyle(lblPresetHintRight, wrap: false);
             _secondaryLabels.Add(lblPresetHintRight);
             presetLblRow.AddChild(lblPresetHintRight);
             inspBox.AddChild(presetLblRow);
@@ -553,7 +556,7 @@ namespace DeadlockPlayground.UI
             {
                 ThemeTypeVariation = "ImporterPrimaryButton",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                CustomMinimumSize = new Vector2(0, 68),
+                CustomMinimumSize = new Vector2(0, 56),
                 TooltipText = "Click to open the Valve-backed Deadlock physics preset gallery (applies to all sibling chains in this garment group)."
             };
             var presetBtnPad = new MarginContainer
@@ -633,11 +636,12 @@ namespace DeadlockPlayground.UI
             {
                 Text = "Select a Valve-calibrated Deadlock preset",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                AutowrapMode = TextServer.AutowrapMode.Off,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
-            ImporterStyle.ApplyHintStyle(_lblSelectedPresetTag);
+            ImporterStyle.ApplyHintStyle(_lblSelectedPresetTag, wrap: false);
             _secondaryLabels.Add(_lblSelectedPresetTag);
             presetBtnTextCol.AddChild(_lblSelectedPresetName);
             presetBtnTextCol.AddChild(_lblSelectedPresetTag);
@@ -2833,8 +2837,6 @@ namespace DeadlockPlayground.UI
             {
                 if (_btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
                     _btnWeightPaintMode.ButtonPressed = false;
-                if (_boxTab3WeightPaintHost != null)
-                    _boxTab3WeightPaintHost.Visible = false;
             }
         }
 
@@ -2984,6 +2986,7 @@ namespace DeadlockPlayground.UI
                 Text = "Calibrated from compiled Deadlock hero FeModels. Hover any card for physics details.",
                 AutowrapMode = TextServer.AutowrapMode.WordSmart
             };
+            lblSub.Text = "Calibrated from compiled Deadlock hero FeModels. Select a preset to inspect its description, then click Apply.";
             ImporterStyle.ApplyHintStyle(lblSub);
             _secondaryLabels.Add(lblSub);
             rootVBox.AddChild(lblSub);
@@ -2992,7 +2995,7 @@ namespace DeadlockPlayground.UI
             {
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-                CustomMinimumSize = new Vector2(0, 560),
+                CustomMinimumSize = new Vector2(0, 440),
                 HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
             };
             rootVBox.AddChild(scroll);
@@ -3002,8 +3005,8 @@ namespace DeadlockPlayground.UI
                 Columns = 4,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
             };
-            _presetPickerGrid.AddThemeConstantOverride("h_separation", 12);
-            _presetPickerGrid.AddThemeConstantOverride("v_separation", 12);
+            _presetPickerGrid.AddThemeConstantOverride("h_separation", 10);
+            _presetPickerGrid.AddThemeConstantOverride("v_separation", 10);
             scroll.AddChild(_presetPickerGrid);
 
             var cardThumbFrameStyle = new StyleBoxFlat
@@ -3020,15 +3023,16 @@ namespace DeadlockPlayground.UI
                 CornerRadiusBottomRight = 8
             };
 
+            _presetPickerCardButtons.Clear();
             foreach (var preset in PhysicsPresetCatalog.Presets)
             {
                 var capturedPreset = preset;
                 var cardBtn = new Button
                 {
                     ThemeTypeVariation = "ToolbarButton",
+                    ToggleMode = true,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                    CustomMinimumSize = new Vector2(204, 178),
-                    TooltipText = $"{preset.DisplayName} ({preset.HeroReference})\n{preset.ShortTag}\n\n{preset.Description}"
+                    CustomMinimumSize = new Vector2(200, 158)
                 };
 
                 var pad = new MarginContainer
@@ -3039,10 +3043,10 @@ namespace DeadlockPlayground.UI
                     MouseFilter = Control.MouseFilterEnum.Ignore
                 };
                 pad.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-                pad.AddThemeConstantOverride("margin_left", 10);
-                pad.AddThemeConstantOverride("margin_right", 10);
-                pad.AddThemeConstantOverride("margin_top", 10);
-                pad.AddThemeConstantOverride("margin_bottom", 10);
+                pad.AddThemeConstantOverride("margin_left", 8);
+                pad.AddThemeConstantOverride("margin_right", 8);
+                pad.AddThemeConstantOverride("margin_top", 8);
+                pad.AddThemeConstantOverride("margin_bottom", 8);
                 cardBtn.AddChild(pad);
 
                 var col = new VBoxContainer
@@ -3052,12 +3056,12 @@ namespace DeadlockPlayground.UI
                     Alignment = BoxContainer.AlignmentMode.Center,
                     MouseFilter = Control.MouseFilterEnum.Ignore
                 };
-                col.AddThemeConstantOverride("separation", 8);
+                col.AddThemeConstantOverride("separation", 6);
                 pad.AddChild(col);
 
                 var thumbFrame = new PanelContainer
                 {
-                    CustomMinimumSize = new Vector2(104, 104),
+                    CustomMinimumSize = new Vector2(92, 92),
                     SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
                     SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                     MouseFilter = Control.MouseFilterEnum.Ignore
@@ -3070,16 +3074,16 @@ namespace DeadlockPlayground.UI
                     SizeFlagsVertical = Control.SizeFlags.ExpandFill,
                     MouseFilter = Control.MouseFilterEnum.Ignore
                 };
-                thumbPad.AddThemeConstantOverride("margin_left", 6);
-                thumbPad.AddThemeConstantOverride("margin_right", 6);
-                thumbPad.AddThemeConstantOverride("margin_top", 6);
-                thumbPad.AddThemeConstantOverride("margin_bottom", 6);
+                thumbPad.AddThemeConstantOverride("margin_left", 5);
+                thumbPad.AddThemeConstantOverride("margin_right", 5);
+                thumbPad.AddThemeConstantOverride("margin_top", 5);
+                thumbPad.AddThemeConstantOverride("margin_bottom", 5);
                 thumbFrame.AddChild(thumbPad);
 
                 var texRect = new TextureRect
                 {
                     Texture = PhysicsPresetCatalog.LoadPresetTexture(preset),
-                    CustomMinimumSize = new Vector2(92, 92),
+                    CustomMinimumSize = new Vector2(82, 82),
                     ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                     StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -3101,6 +3105,7 @@ namespace DeadlockPlayground.UI
                     Text = preset.DisplayName,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    AutowrapMode = TextServer.AutowrapMode.Off,
                     ClipText = true,
                     TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                     MouseFilter = Control.MouseFilterEnum.Ignore
@@ -3114,41 +3119,160 @@ namespace DeadlockPlayground.UI
                     Text = preset.HeroReference,
                     HorizontalAlignment = HorizontalAlignment.Center,
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    AutowrapMode = TextServer.AutowrapMode.Off,
                     ClipText = true,
                     TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                     MouseFilter = Control.MouseFilterEnum.Ignore
                 };
-                ImporterStyle.ApplyHintStyle(lblHero);
+                ImporterStyle.ApplyHintStyle(lblHero, wrap: false);
                 _secondaryLabels.Add(lblHero);
 
                 textBox.AddChild(lblName);
                 textBox.AddChild(lblHero);
                 col.AddChild(textBox);
 
-                cardBtn.Pressed += () =>
+                cardBtn.Pressed += () => SelectPresetInPickerModal(capturedPreset.Id);
+                cardBtn.GuiInput += (ev) =>
                 {
-                    if (_presetPickerTargets != null && _presetPickerTargets.Count > 0)
+                    if (ev is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.DoubleClick)
                     {
-                        bool anyPolicyChanged = false;
-                        foreach (var ch in _presetPickerTargets)
-                        {
-                            if (ch == null) continue;
-                            if (ch.Policy != ChainPolicy.PreservePhysicsChain)
-                            {
-                                ch.Policy = ChainPolicy.PreservePhysicsChain;
-                                anyPolicyChanged = true;
-                            }
-                            PhysicsPresetCatalog.ApplyPresetToChain(ch, capturedPreset.Id, resetMacros: true);
-                        }
-                        if (anyPolicyChanged) MarkRemapStaleAndRefresh();
-                        else ApplyChainParamsLiveToDriver();
-                        RefreshClothingChainsPanel();
-                        SetBottomStatus($"Applied preset '{capturedPreset.DisplayName} ({capturedPreset.HeroReference})' to {_presetPickerTargets.Count} chain(s).", StatusTone.Success);
+                        SelectPresetInPickerModal(capturedPreset.Id);
+                        ApplySelectedPresetFromPickerModal();
                     }
-                    _presetPickerPopup.Hide();
                 };
+                _presetPickerCardButtons[preset.Id] = cardBtn;
                 _presetPickerGrid.AddChild(cardBtn);
             }
+
+            // Selected Preset Details Preview Panel
+            var detailPanel = new PanelContainer
+            {
+                ThemeTypeVariation = "CardPanel",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            var detailMargin = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            detailMargin.AddThemeConstantOverride("margin_left", 12);
+            detailMargin.AddThemeConstantOverride("margin_right", 12);
+            detailMargin.AddThemeConstantOverride("margin_top", 10);
+            detailMargin.AddThemeConstantOverride("margin_bottom", 10);
+            detailPanel.AddChild(detailMargin);
+
+            var detailRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            detailRow.AddThemeConstantOverride("separation", 12);
+            detailMargin.AddChild(detailRow);
+
+            var detailThumbFrame = new PanelContainer
+            {
+                CustomMinimumSize = new Vector2(64, 64),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+            };
+            detailThumbFrame.AddThemeStyleboxOverride("panel", cardThumbFrameStyle);
+            _texPresetPickerPreview = new TextureRect
+            {
+                CustomMinimumSize = new Vector2(56, 56),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+            };
+            detailThumbFrame.AddChild(_texPresetPickerPreview);
+            detailRow.AddChild(detailThumbFrame);
+
+            var detailTextCol = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            detailTextCol.AddThemeConstantOverride("separation", 3);
+            _lblPresetPickerDetailTitle = new Label { Text = "Select a preset above" };
+            ImporterStyle.ApplyFontSize(_lblPresetPickerDetailTitle, ImporterStyle.FontBody);
+            _lblPresetPickerDetailTitle.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
+            _lblPresetPickerDetailMeta = new Label { Text = "", AutowrapMode = TextServer.AutowrapMode.Off };
+            ImporterStyle.ApplyHintStyle(_lblPresetPickerDetailMeta, wrap: false);
+            _lblPresetPickerDetailDesc = new Label
+            {
+                Text = "Click any preset card to preview its physics behavior and calibration notes.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            ImporterStyle.ApplyHintStyle(_lblPresetPickerDetailDesc);
+            detailTextCol.AddChild(_lblPresetPickerDetailTitle);
+            detailTextCol.AddChild(_lblPresetPickerDetailMeta);
+            detailTextCol.AddChild(_lblPresetPickerDetailDesc);
+            detailRow.AddChild(detailTextCol);
+            rootVBox.AddChild(detailPanel);
+
+            // Footer: Cancel | Apply Preset
+            var footerRow = new HBoxContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                Alignment = BoxContainer.AlignmentMode.End
+            };
+            footerRow.AddThemeConstantOverride("separation", 8);
+            var btnCancel = new Button
+            {
+                Text = "Cancel",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(104, 36)
+            };
+            btnCancel.Pressed += () => _presetPickerPopup.Hide();
+            _btnPresetPickerApply = new Button
+            {
+                Text = "Apply Preset",
+                ThemeTypeVariation = "ImporterPrimaryButton",
+                CustomMinimumSize = new Vector2(140, 36)
+            };
+            _btnPresetPickerApply.Pressed += ApplySelectedPresetFromPickerModal;
+            footerRow.AddChild(btnCancel);
+            footerRow.AddChild(_btnPresetPickerApply);
+            rootVBox.AddChild(footerRow);
+        }
+
+        private readonly Dictionary<string, Button> _presetPickerCardButtons = new(StringComparer.OrdinalIgnoreCase);
+        private string _presetPickerSelectedId = "";
+        private TextureRect _texPresetPickerPreview;
+        private Label _lblPresetPickerDetailTitle;
+        private Label _lblPresetPickerDetailMeta;
+        private Label _lblPresetPickerDetailDesc;
+        private Button _btnPresetPickerApply;
+
+        private void SelectPresetInPickerModal(string presetId)
+        {
+            var preset = PhysicsPresetCatalog.Find(presetId) ?? PhysicsPresetCatalog.Presets.FirstOrDefault();
+            if (preset == null) return;
+            _presetPickerSelectedId = preset.Id;
+            foreach (var (id, btn) in _presetPickerCardButtons)
+            {
+                if (!GodotObject.IsInstanceValid(btn)) continue;
+                bool active = string.Equals(id, preset.Id, StringComparison.OrdinalIgnoreCase);
+                btn.SetPressedNoSignal(active);
+                btn.ThemeTypeVariation = active ? "ImporterPrimaryButton" : "ToolbarButton";
+            }
+            if (_texPresetPickerPreview != null) _texPresetPickerPreview.Texture = PhysicsPresetCatalog.LoadPresetTexture(preset);
+            if (_lblPresetPickerDetailTitle != null) _lblPresetPickerDetailTitle.Text = $"{preset.DisplayName}  ({preset.HeroReference})";
+            if (_lblPresetPickerDetailMeta != null) _lblPresetPickerDetailMeta.Text = preset.ShortTag;
+            if (_lblPresetPickerDetailDesc != null) _lblPresetPickerDetailDesc.Text = preset.Description;
+            if (_btnPresetPickerApply != null) _btnPresetPickerApply.Disabled = false;
+        }
+
+        private void ApplySelectedPresetFromPickerModal()
+        {
+            var preset = PhysicsPresetCatalog.Find(_presetPickerSelectedId);
+            if (preset != null && _presetPickerTargets != null && _presetPickerTargets.Count > 0)
+            {
+                bool anyPolicyChanged = false;
+                foreach (var ch in _presetPickerTargets)
+                {
+                    if (ch == null) continue;
+                    if (ch.Policy != ChainPolicy.PreservePhysicsChain)
+                    {
+                        ch.Policy = ChainPolicy.PreservePhysicsChain;
+                        anyPolicyChanged = true;
+                    }
+                    PhysicsPresetCatalog.ApplyPresetToChain(ch, preset.Id, resetMacros: true);
+                }
+                if (anyPolicyChanged) MarkRemapStaleAndRefresh();
+                else ApplyChainParamsLiveToDriver();
+                RefreshClothingChainsPanel();
+                SetBottomStatus($"Applied preset '{preset.DisplayName} ({preset.HeroReference})' to {_presetPickerTargets.Count} chain(s).", StatusTone.Success);
+            }
+            _presetPickerPopup?.Hide();
         }
 
         private List<BoneChainDef> GetSiblingGroupChains(BoneChainDef selected)
@@ -3177,7 +3301,11 @@ namespace DeadlockPlayground.UI
             _presetPickerPopup.Title = targets.Count > 1
                 ? $"Select Physics Preset (Applies to {targets.Count} chains in group)"
                 : $"Select Physics Preset ({targets[0].Name})";
-            _presetPickerPopup.PopupCentered(new Vector2I(940, 680));
+            string initialId = targets[0]?.PresetId;
+            if (string.IsNullOrEmpty(initialId) || PhysicsPresetCatalog.Find(initialId) == null)
+                initialId = PhysicsPresetCatalog.Presets[0].Id;
+            SelectPresetInPickerModal(initialId);
+            _presetPickerPopup.PopupCentered(new Vector2I(940, 740));
         }
 
         private void ApplySelectedChainToSiblingGroup()
