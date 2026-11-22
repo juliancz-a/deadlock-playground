@@ -130,6 +130,8 @@ namespace DeadlockPlayground.Importer
             public Dictionary<string, Dictionary<int, Vector3>> OriginalMeshDeformSculpts { get; set; } = null;
             /// <summary>16 landmark pins (see CustomLandmarkWeightSolver.PinNames) in imported-scene space. Null = auto-estimate.</summary>
             public Dictionary<string, Vector3> LandmarkPins { get; set; } = null;
+            /// <summary>Modular Auto-Rig Pro–style reference skeleton definition (spine 1–4, fingers, cloth chains). Supersedes LandmarkPins when present.</summary>
+            public ReferenceRigDef ReferenceRig { get; set; } = null;
             /// <summary>Optional user-painted per-surface weight overrides keyed by MakeSurfaceKeepKey(meshName, surfaceIdx).</summary>
             public Dictionary<string, SkinWeightOverride> CustomSkinWeightOverrides { get; set; } = null;
 
@@ -1096,12 +1098,25 @@ namespace DeadlockPlayground.Importer
                 {
                     result = RigRigidBoneModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
                 }
-                else if (options.Method == RiggingMethod.LandmarkAutoRig && !hasImportedRig)
+                else if (options.Method == RiggingMethod.LandmarkAutoRig)
                 {
                     var synth = CustomLandmarkWeightSolver.BuildSyntheticRig(importedScene, importedMeshes, heroSkeleton, options);
                     try
                     {
-                        GD.Print($"[CustomModelAutoRigger] Landmark Auto-Rig: synthetic skeleton with {synth.Skeleton.GetBoneCount()} bones, {synth.VertexCount} vertices weighted.");
+                        // Merge any authored cloth chains from ReferenceRig into options.BoneChains (preserving existing user presets)
+                        if (synth.AuthoredClothChainDefs != null && synth.AuthoredClothChainDefs.Count > 0)
+                        {
+                            options.BoneChains ??= new List<BoneChainDef>();
+                            var existingById = new HashSet<string>(
+                                options.BoneChains.Where(c => c != null && !string.IsNullOrEmpty(c.ChainId)).Select(c => c.ChainId),
+                                StringComparer.OrdinalIgnoreCase);
+                            foreach (var ac in synth.AuthoredClothChainDefs)
+                            {
+                                if (ac != null && existingById.Add(ac.ChainId))
+                                    options.BoneChains.Add(ac);
+                            }
+                        }
+                        GD.Print($"[CustomModelAutoRigger] Modular Auto-Rig: synthetic skeleton with {synth.Skeleton.GetBoneCount()} bones, {synth.VertexCount} vertices weighted.");
                         result = RigPreRiggedModel(importedScene, importedMeshes, synth.Skeleton, heroNode, heroSkeleton, customSkin, options);
                     }
                     finally
@@ -1109,7 +1124,7 @@ namespace DeadlockPlayground.Importer
                         synth.Restore();
                     }
                 }
-                else if ((options.Method == RiggingMethod.PreRiggedSkeletonRemap || options.Method == RiggingMethod.LandmarkAutoRig) && hasImportedRig)
+                else if (options.Method == RiggingMethod.PreRiggedSkeletonRemap && hasImportedRig)
                 {
                     result = RigPreRiggedModel(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
                 }

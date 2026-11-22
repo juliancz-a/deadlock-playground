@@ -264,6 +264,9 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("landmark_pins")]
         public Dictionary<string, float[]> LandmarkPins { get; set; }
 
+        [JsonPropertyName("reference_rig")]
+        public WorkspaceReferenceRigEntry ReferenceRig { get; set; }
+
         [JsonPropertyName("skin_weight_overrides")]
         public Dictionary<string, WorkspaceSkinWeightOverrideEntry> CustomSkinWeightOverrides { get; set; }
 
@@ -539,6 +542,41 @@ namespace DeadlockPlayground.Workspace
                 foreach (var kv in o.LandmarkPins)
                     entry.LandmarkPins[kv.Key] = new[] { kv.Value.X, kv.Value.Y, kv.Value.Z };
             }
+            if (o.ReferenceRig != null)
+            {
+                var rr = o.ReferenceRig;
+                var rrEntry = new WorkspaceReferenceRigEntry
+                {
+                    SpineCount = rr.SpineCount,
+                    HasNeck = rr.HasNeck,
+                    HasClavicles = rr.HasClavicles,
+                    HasToes = rr.HasToes,
+                    FingerMode = (int)rr.FingerMode,
+                    EnableThumb = rr.EnableThumb,
+                    EnableIndex = rr.EnableIndex,
+                    EnableMiddle = rr.EnableMiddle,
+                    EnableRing = rr.EnableRing,
+                    EnablePinky = rr.EnablePinky,
+                    PhalanxCount = rr.PhalanxCount,
+                    Joints = new Dictionary<string, float[]>(),
+                    ClothChains = new List<WorkspaceReferenceClothChainEntry>()
+                };
+                if (rr.Joints != null)
+                    foreach (var kv in rr.Joints)
+                        rrEntry.Joints[kv.Key] = new[] { kv.Value.X, kv.Value.Y, kv.Value.Z };
+                if (rr.ClothChains != null)
+                    foreach (var cc in rr.ClothChains)
+                        if (cc != null)
+                            rrEntry.ClothChains.Add(new WorkspaceReferenceClothChainEntry
+                            {
+                                ChainId = cc.ChainId,
+                                Name = cc.Name,
+                                ParentBoneName = cc.ParentBoneName,
+                                MirrorPairId = cc.MirrorPairId,
+                                JointPositions = cc.JointPositions?.ConvertAll(p => new[] { p.X, p.Y, p.Z })
+                            });
+                entry.ReferenceRig = rrEntry;
+            }
             if (o.CustomSkinWeightOverrides != null)
             {
                 entry.CustomSkinWeightOverrides = new Dictionary<string, WorkspaceSkinWeightOverrideEntry>(StringComparer.OrdinalIgnoreCase);
@@ -697,6 +735,47 @@ namespace DeadlockPlayground.Workspace
                 foreach (var kv in LandmarkPins)
                     if (kv.Value != null && kv.Value.Length == 3)
                         o.LandmarkPins[kv.Key] = new Vector3(kv.Value[0], kv.Value[1], kv.Value[2]);
+            }
+            if (ReferenceRig != null)
+            {
+                var rr = new DeadlockPlayground.Importer.ReferenceRigDef
+                {
+                    SpineCount = Math.Clamp(ReferenceRig.SpineCount, 1, 4),
+                    HasNeck = ReferenceRig.HasNeck,
+                    HasClavicles = ReferenceRig.HasClavicles,
+                    HasToes = ReferenceRig.HasToes,
+                    FingerMode = (DeadlockPlayground.Importer.ReferenceFingerRigMode)ReferenceRig.FingerMode,
+                    EnableThumb = ReferenceRig.EnableThumb,
+                    EnableIndex = ReferenceRig.EnableIndex,
+                    EnableMiddle = ReferenceRig.EnableMiddle,
+                    EnableRing = ReferenceRig.EnableRing,
+                    EnablePinky = ReferenceRig.EnablePinky,
+                    PhalanxCount = Math.Clamp(ReferenceRig.PhalanxCount, 2, 3)
+                };
+                if (ReferenceRig.Joints != null)
+                    foreach (var kv in ReferenceRig.Joints)
+                        if (kv.Value != null && kv.Value.Length == 3)
+                            rr.Joints[kv.Key] = new Vector3(kv.Value[0], kv.Value[1], kv.Value[2]);
+                if (ReferenceRig.ClothChains != null)
+                {
+                    foreach (var cc in ReferenceRig.ClothChains)
+                    {
+                        if (cc == null) continue;
+                        var pts = new List<Vector3>();
+                        if (cc.JointPositions != null)
+                            foreach (var arr in cc.JointPositions)
+                                if (arr != null && arr.Length == 3) pts.Add(new Vector3(arr[0], arr[1], arr[2]));
+                        rr.ClothChains.Add(new DeadlockPlayground.Importer.ReferenceClothChainDef
+                        {
+                            ChainId = cc.ChainId ?? "",
+                            Name = cc.Name ?? "cloth_chain",
+                            ParentBoneName = cc.ParentBoneName ?? "spine_3",
+                            MirrorPairId = cc.MirrorPairId ?? "",
+                            JointPositions = pts
+                        });
+                    }
+                }
+                o.ReferenceRig = rr;
             }
             if (CustomSkinWeightOverrides != null)
             {
@@ -880,6 +959,32 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("synthetic_radius")] public float SyntheticRadius { get; set; } = 0.22f;
         [JsonPropertyName("synthetic_segments")] public int SyntheticSegments { get; set; } = 4;
         [JsonPropertyName("joint_overrides")] public List<WorkspaceBoneJointOverrideEntry> JointOverrides { get; set; }
+    }
+
+    public sealed class WorkspaceReferenceClothChainEntry
+    {
+        [JsonPropertyName("chain_id")] public string ChainId { get; set; }
+        [JsonPropertyName("name")] public string Name { get; set; }
+        [JsonPropertyName("parent_bone")] public string ParentBoneName { get; set; }
+        [JsonPropertyName("mirror_pair_id")] public string MirrorPairId { get; set; }
+        [JsonPropertyName("joints")] public List<float[]> JointPositions { get; set; }
+    }
+
+    public sealed class WorkspaceReferenceRigEntry
+    {
+        [JsonPropertyName("spine_count")] public int SpineCount { get; set; } = 4;
+        [JsonPropertyName("has_neck")] public bool HasNeck { get; set; } = true;
+        [JsonPropertyName("has_clavicles")] public bool HasClavicles { get; set; } = true;
+        [JsonPropertyName("has_toes")] public bool HasToes { get; set; } = false;
+        [JsonPropertyName("finger_mode")] public int FingerMode { get; set; } = 0;
+        [JsonPropertyName("enable_thumb")] public bool EnableThumb { get; set; } = true;
+        [JsonPropertyName("enable_index")] public bool EnableIndex { get; set; } = true;
+        [JsonPropertyName("enable_middle")] public bool EnableMiddle { get; set; } = true;
+        [JsonPropertyName("enable_ring")] public bool EnableRing { get; set; } = true;
+        [JsonPropertyName("enable_pinky")] public bool EnablePinky { get; set; } = true;
+        [JsonPropertyName("phalanx_count")] public int PhalanxCount { get; set; } = 3;
+        [JsonPropertyName("joints")] public Dictionary<string, float[]> Joints { get; set; }
+        [JsonPropertyName("cloth_chains")] public List<WorkspaceReferenceClothChainEntry> ClothChains { get; set; }
     }
 
     public class WorkspaceBoneJointOverrideEntry

@@ -35,6 +35,69 @@ namespace DeadlockPlayground.UI
         private CheckBox _chkBoneFilterPhysics;
         private CheckBox _chkBoneFilterAccessory;
         private CheckBox _chkBoneFilterDisabled;
+        private CheckBox _chkBoneFilterVanilla;
+        private readonly HashSet<string> _activeCustomWeightedBoneNames = new(StringComparer.OrdinalIgnoreCase);
+
+        private void RebuildActiveCustomWeightedBoneSet()
+        {
+            _activeCustomWeightedBoneNames.Clear();
+            if (_previewRiggedContainer == null || !GodotObject.IsInstanceValid(_previewRiggedContainer) || _previewHeroSkeleton == null)
+                return;
+            int bCount = _previewHeroSkeleton.GetBoneCount();
+            foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewRiggedContainer))
+            {
+                if (mi?.Mesh == null) continue;
+                var skin = mi.Skin;
+                for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+                {
+                    var arrays = mi.Mesh.SurfaceGetArrays(s);
+                    if (arrays == null || arrays.Count <= (int)Mesh.ArrayType.Weights) continue;
+                    var bones = CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]);
+                    var weights = CustomModelAutoRigger.GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]);
+                    if (bones == null || weights == null) continue;
+                    int n = Math.Min(bones.Length, weights.Length);
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (weights[i] <= 0.01f) continue;
+                        int bindIdx = bones[i];
+                        int skelIdx = bindIdx;
+                        if (skin != null && bindIdx >= 0 && bindIdx < skin.GetBindCount())
+                        {
+                            string bn = skin.GetBindName(bindIdx);
+                            if (!string.IsNullOrEmpty(bn))
+                                skelIdx = _previewHeroSkeleton.FindBone(bn);
+                            else
+                                skelIdx = skin.GetBindBone(bindIdx);
+                        }
+                        if (skelIdx >= 0 && skelIdx < bCount)
+                        {
+                            _activeCustomWeightedBoneNames.Add(_previewHeroSkeleton.GetBoneName(skelIdx));
+                        }
+                    }
+                }
+            }
+        }
+
+        private void FocusCameraOnReferenceHand(bool left)
+        {
+            if (_previewCamera == null) return;
+            EnsureReferenceRigInitialized(false);
+            string side = left ? "L" : "R";
+            if (_referenceRig == null || !_referenceRig.Joints.TryGetValue("Wrist" + side, out var wristLocal))
+                return;
+            Transform3D xf = BuildCurrentAlignedTransform();
+            Vector3 targetWorld = xf * wristLocal;
+            if (_referenceRig.Joints.TryGetValue("Elbow" + side, out var elbowLocal))
+            {
+                Vector3 dir = (targetWorld - (xf * elbowLocal));
+                if (dir.LengthSquared() > 1e-6f) targetWorld += dir.Normalized() * 0.06f;
+            }
+            _orbitTarget = targetWorld;
+            _orbitDist = 0.40f;
+            _orbitPitch = 0.35f;
+            _orbitYaw = left ? 0.35f : -0.35f;
+            UpdateCamera();
+        }
 
         private void SetCameraPreset(string preset)
         {
@@ -860,10 +923,19 @@ namespace DeadlockPlayground.UI
             if (boneIdx >= origCount)
                 return (isSelected ? Colors.White : new Color(1.0f, 0.82f, 0.18f, 0.98f), isSelected ? 1.85f : 1.25f, (_chkBoneFilterPhysics?.ButtonPressed ?? true) || isSelected);
 
-            if (lower.Contains("finger_") || lower.Contains("thumb") || lower.Contains("index") || lower.Contains("middle") || lower.Contains("ring") || lower.Contains("pinky"))
-                return (isSelected ? Colors.White : new Color(0.30f, 0.95f, 0.45f, 0.95f), isSelected ? 1.85f : 0.72f, (_chkBoneFilterFingers?.ButtonPressed ?? true) || isSelected);
+            // Hide vanilla hero bones not used by the custom character unless "Show Vanilla Hero" is explicitly enabled!
+            bool hasCustomSet = _activeCustomWeightedBoneNames.Count > 0;
+            bool isUsedByCustom = !hasCustomSet || _activeCustomWeightedBoneNames.Contains(bName);
+            if (!isUsedByCustom)
+            {
+                bool showVanilla = _chkBoneFilterVanilla?.ButtonPressed ?? false;
+                return (isSelected ? Colors.White : new Color(0.55f, 0.68f, 0.72f, 0.28f), isSelected ? 1.50f : 0.62f, showVanilla || isSelected);
+            }
 
-            return (isSelected ? Colors.White : new Color(0.25f, 0.88f, 0.98f, 0.95f), isSelected ? 1.85f : 1.05f, (_chkBoneFilterCore?.ButtonPressed ?? true) || isSelected);
+            if (lower.Contains("finger_") || lower.Contains("thumb") || lower.Contains("index") || lower.Contains("middle") || lower.Contains("ring") || lower.Contains("pinky"))
+                return (isSelected ? Colors.White : new Color(1.0f, 0.80f, 0.25f, 0.96f), isSelected ? 1.85f : 0.78f, (_chkBoneFilterFingers?.ButtonPressed ?? true) || isSelected);
+
+            return (isSelected ? Colors.White : new Color(0.25f, 0.88f, 0.98f, 0.96f), isSelected ? 1.85f : 1.08f, (_chkBoneFilterCore?.ButtonPressed ?? true) || isSelected);
         }
 
         private void RedrawBoneWireframeColorCoded()

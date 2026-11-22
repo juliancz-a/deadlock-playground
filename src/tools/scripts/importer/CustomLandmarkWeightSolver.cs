@@ -552,6 +552,343 @@ namespace DeadlockPlayground.Importer
             }
         }
 
+        private static int[,] BuildHopDistForSpecs(List<ReferenceRigDef.ResolvedBoneSpec> specs)
+        {
+            int n = specs.Count;
+            var dist = new int[n, n];
+            for (int i = 0; i < n; i++)
+                for (int j = 0; j < n; j++)
+                    dist[i, j] = i == j ? 0 : 99;
+            for (int i = 0; i < n; i++)
+            {
+                int p = specs[i].ParentIndex;
+                if (p >= 0 && p < n) { dist[i, p] = 1; dist[p, i] = 1; }
+            }
+            for (int k = 0; k < n; k++)
+                for (int i = 0; i < n; i++)
+                    for (int j = 0; j < n; j++)
+                        if (dist[i, k] + dist[k, j] < dist[i, j])
+                            dist[i, j] = dist[i, k] + dist[k, j];
+            return dist;
+        }
+
+        private static bool IsBoneAllowedForSpec(List<ReferenceRigDef.ResolvedBoneSpec> specs, int[,] hopDist, int primary, int candidate)
+        {
+            if (primary == candidate) return true;
+            var pSpec = specs[primary];
+            var cSpec = specs[candidate];
+            // Fingers only blend with their own immediate parent/child (hop <= 1) so adjacent fingers never bleed!
+            if (pSpec.Role == ReferenceBoneRole.Finger || cSpec.Role == ReferenceBoneRole.Finger)
+                return hopDist[primary, candidate] <= 1;
+            // Cloth chains only blend along their own chain + parent bone (hop <= 1)
+            if (pSpec.Role == ReferenceBoneRole.Cloth || cSpec.Role == ReferenceBoneRole.Cloth)
+                return hopDist[primary, candidate] <= 1;
+            bool isDistal = pSpec.Name.Equals("head", StringComparison.OrdinalIgnoreCase) ||
+                            pSpec.Name.StartsWith("hand_", StringComparison.OrdinalIgnoreCase) ||
+                            pSpec.Name.StartsWith("ankle_", StringComparison.OrdinalIgnoreCase) ||
+                            pSpec.Name.StartsWith("toe_", StringComparison.OrdinalIgnoreCase);
+            int maxHop = isDistal ? 1 : 2;
+            return hopDist[primary, candidate] <= maxHop;
+        }
+
+        private static void SolveWeightsModular(
+            List<Vector3[]> alignedVerts,
+            List<int[]> indices,
+            List<ReferenceRigDef.ResolvedBoneSpec> specs,
+            float H,
+            out List<int[]> outBones,
+            out List<float[]> outWeights)
+        {
+            int nb = specs.Count;
+            var hopDist = BuildHopDistForSpecs(specs);
+            float weldCell = 0.001f;
+            var weldMap = new Dictionary<(long, long, long), int>();
+            var weldPos = new List<Vector3>();
+            var vertToWeld = new List<int[]>();
+            for (int s = 0; s < alignedVerts.Count; s++)
+            {
+                var v = alignedVerts[s];
+                var map = new int[v.Length];
+                for (int i = 0; i < v.Length; i++)
+                {
+                    var key = ((long)MathF.Round(v[i].X / weldCell), (long)MathF.Round(v[i].Y / weldCell), (long)MathF.Round(v[i].Z / weldCell));
+                    if (!weldMap.TryGetValue(key, out int id))
+                    {
+                        id = weldPos.Count;
+                        weldMap[key] = id;
+                        weldPos.Add(v[i]);
+                    }
+                    map[i] = id;
+                }
+                vertToWeld.Add(map);
+            }
+
+            int n = weldPos.Count;
+            var adj = new List<(int, float)>[n];
+            for (int i = 0; i < n; i++) adj[i] = new List<(int, float)>(6);
+            var seenEdges = new HashSet<long>();
+            void AddEdge(int a, int b)
+            {
+                if (a == b) return;
+                long k = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+                if (!seenEdges.Add(k)) return;
+                float d = (weldPos[a] - weldPos[b]).Length();
+                adj[a].Add((b, d)); adj[b].Add((a, d));
+            }
+            for (int s = 0; s < indices.Count; s++)
+            {
+                var idx = indices[s]; var map = vertToWeld[s];
+                for (int t = 0; t + 2 < idx.Length; t += 3)
+                {
+                    int a = map[idx[t]], b = map[idx[t + 1]], c = map[idx[t + 2]];
+                    AddEdge(a, b); AddEdge(b, c); AddEdge(c, a);
+                }
+            }
+
+            // Locate key torso/arm indices dynamically for armpit lateral plane gating
+            int idxPelvis = specs.FindIndex(b => b.Name.Equals("pelvis", StringComparison.OrdinalIgnoreCase));
+            int idxArmUpL = specs.FindIndex(b => b.Name.Equals("arm_upper_L", StringComparison.OrdinalIgnoreCase));
+            int idxArmLoL = specs.FindIndex(b => b.Name.Equals("arm_lower_L", StringComparison.OrdinalIgnoreCase));
+            int idxHandL = specs.FindIndex(b => b.Name.Equals("hand_L", StringComparison.OrdinalIgnoreCase));
+            int idxArmUpR = specs.FindIndex(b => b.Name.Equals("arm_upper_R", StringComparison.OrdinalIgnoreCase));
+            int idxArmLoR = specs.FindIndex(b => b.Name.Equals("arm_lower_R", StringComparison.OrdinalIgnoreCase));
+            int idxHandR = specs.FindIndex(b => b.Name.Equals("hand_R", StringComparison.OrdinalIgnoreCase));
+            var torsoSet = new HashSet<int>();
+            for (int b = 0; b < nb; b++)
+                if (specs[b].Name.Equals("pelvis", StringComparison.OrdinalIgnoreCase) || specs[b].Name.StartsWith("spine_", StringComparison.OrdinalIgnoreCase))
+                    torsoSet.Add(b);
+
+            float chestX = idxPelvis >= 0 ? specs[idxPelvis].Origin.X : 0f;
+            float shLX = idxArmUpL >= 0 ? specs[idxArmUpL].Origin.X : chestX + 0.15f * H;
+            float shRX = idxArmUpR >= 0 ? specs[idxArmUpR].Origin.X : chestX - 0.15f * H;
+            float armSpanL = MathF.Abs(shLX - chestX), armSpanR = MathF.Abs(shRX - chestX);
+            float armDirL = shLX >= chestX ? 1f : -1f, armDirR = shRX >= chestX ? 1f : -1f;
+            float torsoArmTopY = MathF.Max(idxArmUpL >= 0 ? specs[idxArmUpL].Origin.Y : H, idxArmUpR >= 0 ? specs[idxArmUpR].Origin.Y : H) + 0.04f * H;
+            float torsoPelvisY = idxPelvis >= 0 ? specs[idxPelvis].Origin.Y : 0.45f * H;
+
+            var label = new int[n];
+            var seedsPerBone = new List<int>[nb];
+            for (int b = 0; b < nb; b++) seedsPerBone[b] = new List<int>();
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 wp = weldPos[i];
+                float latL = armSpanL > 1e-4f ? (wp.X - chestX) * armDirL / armSpanL : 0f;
+                float latR = armSpanR > 1e-4f ? (wp.X - chestX) * armDirR / armSpanR : 0f;
+                bool inArmHeight = wp.Y <= torsoArmTopY && wp.Y >= torsoPelvisY - 0.03f * H;
+
+                float best = float.MaxValue; int bi = 0; float bt = 0.5f;
+                for (int b = 0; b < nb; b++)
+                {
+                    var sp = specs[b];
+                    float sc = CapsuleScore(wp, sp.SegStart, sp.SegEnd, sp.Radius, out float t);
+                    if (inArmHeight)
+                    {
+                        if (b == idxArmUpL && latL < 0.68f) sc *= 2.2f;
+                        else if ((b == idxArmLoL || b == idxHandL) && latL < 0.60f) sc *= 1.45f;
+                        else if (b == idxArmUpR && latR < 0.68f) sc *= 2.2f;
+                        else if ((b == idxArmLoR || b == idxHandR) && latR < 0.60f) sc *= 1.45f;
+                        else if (torsoSet.Contains(b) && (latL > 0.85f || latR > 0.85f)) sc *= 2.0f;
+                    }
+                    if (sc < best) { best = sc; bi = b; bt = t; }
+                }
+                label[i] = bi;
+                bool okLow = bt >= 0.12f || specs[bi].AllowBelow;
+                bool okHigh = bt <= 0.88f || specs[bi].AllowBeyond;
+                if (okLow && okHigh) seedsPerBone[bi].Add(i);
+            }
+
+            var G = new float[nb][];
+            System.Threading.Tasks.Parallel.For(0, nb, b =>
+            {
+                var dist = new float[n];
+                Array.Fill(dist, float.PositiveInfinity);
+                if (seedsPerBone[b].Count == 0) { G[b] = dist; return; }
+                var pq = new PriorityQueue<int, float>(seedsPerBone[b].Count);
+                foreach (int sIdx in seedsPerBone[b]) { dist[sIdx] = 0f; pq.Enqueue(sIdx, 0f); }
+                while (pq.TryDequeue(out int u, out float du))
+                {
+                    if (du > dist[u]) continue;
+                    var neighbors = adj[u];
+                    for (int ei = 0; ei < neighbors.Count; ei++)
+                    {
+                        var (v, w) = neighbors[ei];
+                        float nd = du + w;
+                        if (nd < dist[v]) { dist[v] = nd; pq.Enqueue(v, nd); }
+                    }
+                }
+                G[b] = dist;
+            });
+
+            float eps = 0.02f * H;
+            var dense = new float[n * nb];
+            for (int i = 0; i < n; i++)
+            {
+                int primary = label[i];
+                float localEps = specs[primary].Role == ReferenceBoneRole.Finger ? 0.004f * H : eps;
+                float sum = 0f;
+                int rowOff = i * nb;
+                for (int b = 0; b < nb; b++)
+                {
+                    if (!IsBoneAllowedForSpec(specs, hopDist, primary, b)) continue;
+                    float gd = G[b][i];
+                    if (float.IsPositiveInfinity(gd)) continue;
+                    float w = 1f / ((gd + localEps) * (gd + localEps));
+                    dense[rowOff + b] = w; sum += w;
+                }
+                if (sum <= 0f)
+                {
+                    for (int b = 0; b < nb; b++)
+                    {
+                        if (!IsBoneAllowedForSpec(specs, hopDist, primary, b)) continue;
+                        float sc = CapsuleScore(weldPos[i], specs[b].SegStart, specs[b].SegEnd, specs[b].Radius, out _);
+                        float w = 1f / ((sc + 0.1f) * (sc + 0.1f) * (sc + 0.1f) * (sc + 0.1f));
+                        dense[rowOff + b] = w; sum += w;
+                    }
+                }
+                if (sum <= 0f) { dense[rowOff + primary] = 1f; sum = 1f; }
+                for (int b = 0; b < nb; b++) dense[rowOff + b] /= sum;
+            }
+
+            var next = new float[dense.Length];
+            for (int iter = 0; iter < 5; iter++)
+            {
+                bool transitionOnly = iter >= 1;
+                float selfKeep = transitionOnly ? 0.65f : 0.75f;
+                float neighborMix = 1f - selfKeep;
+                for (int i = 0; i < n; i++)
+                {
+                    int rowOff = i * nb;
+                    var neighbors = adj[i];
+                    if (neighbors.Count == 0)
+                    {
+                        Array.Copy(dense, rowOff, next, rowOff, nb);
+                        continue;
+                    }
+                    if (transitionOnly)
+                    {
+                        float maxW = 0f;
+                        for (int b = 0; b < nb; b++)
+                            if (dense[rowOff + b] > maxW) maxW = dense[rowOff + b];
+                        if (maxW >= 0.85f)
+                        {
+                            Array.Copy(dense, rowOff, next, rowOff, nb);
+                            continue;
+                        }
+                    }
+                    int primary = label[i];
+                    float rowSum = 0f;
+                    float invDeg = 1f / neighbors.Count;
+                    for (int b = 0; b < nb; b++)
+                    {
+                        if (!IsBoneAllowedForSpec(specs, hopDist, primary, b)) { next[rowOff + b] = 0f; continue; }
+                        float avg = 0f;
+                        for (int ni = 0; ni < neighbors.Count; ni++)
+                            avg += dense[neighbors[ni].Item1 * nb + b];
+                        avg *= invDeg;
+                        float val = dense[rowOff + b] * selfKeep + avg * neighborMix;
+                        next[rowOff + b] = val;
+                        rowSum += val;
+                    }
+                    if (rowSum > 1e-6f)
+                    {
+                        float invSum = 1f / rowSum;
+                        for (int b = 0; b < nb; b++) next[rowOff + b] *= invSum;
+                    }
+                    else
+                    {
+                        next[rowOff + primary] = 1f;
+                    }
+                }
+                (dense, next) = (next, dense);
+            }
+
+            outBones = new List<int[]>();
+            outWeights = new List<float[]>();
+            Span<int> topIdx = stackalloc int[4];
+            Span<float> topVal = stackalloc float[4];
+            for (int s = 0; s < alignedVerts.Count; s++)
+            {
+                int vc = alignedVerts[s].Length;
+                var bones = new int[vc * 4];
+                var weights = new float[vc * 4];
+                var map = vertToWeld[s];
+                for (int v = 0; v < vc; v++)
+                {
+                    int baseIdx = map[v] * nb;
+                    topIdx[0] = topIdx[1] = topIdx[2] = topIdx[3] = 0;
+                    topVal[0] = topVal[1] = topVal[2] = topVal[3] = -1f;
+                    for (int b = 0; b < nb; b++)
+                    {
+                        float w = dense[baseIdx + b];
+                        if (w <= topVal[3]) continue;
+                        int insertPos = 3;
+                        while (insertPos > 0 && w > topVal[insertPos - 1])
+                        {
+                            topVal[insertPos] = topVal[insertPos - 1];
+                            topIdx[insertPos] = topIdx[insertPos - 1];
+                            insertPos--;
+                        }
+                        topVal[insertPos] = w;
+                        topIdx[insertPos] = b;
+                    }
+                    float tot = 0f;
+                    for (int k = 0; k < 4; k++)
+                        if (topVal[k] > 0f) tot += topVal[k];
+                    if (tot <= 1e-6f) { bones[v * 4] = 0; weights[v * 4] = 1f; continue; }
+                    float invTot = 1f / tot;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        bones[v * 4 + k] = topVal[k] > 0f ? topIdx[k] : 0;
+                        weights[v * 4 + k] = topVal[k] > 0f ? topVal[k] * invTot : 0f;
+                    }
+                }
+                outBones.Add(bones);
+                outWeights.Add(weights);
+            }
+        }
+
+        /// <summary>
+        /// Builds a clean, Godot 4.7-valid surface array keeping only standard mesh attributes and
+        /// stripping incompatible <c>Custom0..3</c> slots that trigger
+        /// <c>Condition "p_arrays[ai].get_type() != Variant::PACKED_BYTE_ARRAY" is true</c>.
+        /// </summary>
+        private static Godot.Collections.Array BuildSanitizedSurfaceArrays(
+            Godot.Collections.Array srcArrays,
+            int[] bonesOverride = null,
+            float[] weightsOverride = null)
+        {
+            var clean = new Godot.Collections.Array();
+            clean.Resize((int)Mesh.ArrayType.Max);
+
+            void CopySlot(Mesh.ArrayType slot)
+            {
+                int idx = (int)slot;
+                if (srcArrays != null && idx < srcArrays.Count && srcArrays[idx].VariantType != Variant.Type.Nil)
+                    clean[idx] = srcArrays[idx];
+            }
+
+            CopySlot(Mesh.ArrayType.Vertex);
+            CopySlot(Mesh.ArrayType.Normal);
+            CopySlot(Mesh.ArrayType.Tangent);
+            CopySlot(Mesh.ArrayType.Color);
+            CopySlot(Mesh.ArrayType.TexUV);
+            CopySlot(Mesh.ArrayType.TexUV2);
+            CopySlot(Mesh.ArrayType.Index);
+
+            if (bonesOverride != null && weightsOverride != null)
+            {
+                clean[(int)Mesh.ArrayType.Bones] = bonesOverride;
+                clean[(int)Mesh.ArrayType.Weights] = weightsOverride;
+            }
+            else
+            {
+                CopySlot(Mesh.ArrayType.Bones);
+                CopySlot(Mesh.ArrayType.Weights);
+            }
+
+            return clean;
+        }
+
         // ------------------------------------------------------------------
         // Synthetic rig construction (temporarily mutates the imported scene)
         // ------------------------------------------------------------------
@@ -562,6 +899,7 @@ namespace DeadlockPlayground.Importer
             public Action Restore;
             public int VertexCount;
             public Dictionary<string, Vector3> PinsUsedAligned;
+            public List<BoneChainDef> AuthoredClothChainDefs = new();
         }
 
         public static SyntheticRig BuildSyntheticRig(
@@ -573,30 +911,24 @@ namespace DeadlockPlayground.Importer
             var surfaces = GatherSurfaces(scene, meshes);
             if (surfaces.Count == 0) throw new InvalidOperationException("Landmark rig: no mesh surfaces to bind.");
 
-            var pinsModel = options.LandmarkPins != null && PinNames.All(options.LandmarkPins.ContainsKey)
-                ? new Dictionary<string, Vector3>(options.LandmarkPins)
-                : EstimateLandmarks(scene, meshes);
-            if (!PinNames.All(pinsModel.ContainsKey)) throw new InvalidOperationException("Landmark rig: could not estimate landmark pins.");
+            ReferenceRigDef refRig = options.ReferenceRig?.Clone();
+            if (refRig == null)
+            {
+                var pinsModel = options.LandmarkPins != null && PinNames.All(options.LandmarkPins.ContainsKey)
+                    ? new Dictionary<string, Vector3>(options.LandmarkPins)
+                    : EstimateLandmarks(scene, meshes);
+                if (!PinNames.All(pinsModel.ContainsKey)) throw new InvalidOperationException("Landmark rig: could not estimate landmark pins.");
+                refRig = new ReferenceRigDef { Joints = new Dictionary<string, Vector3>(pinsModel, StringComparer.OrdinalIgnoreCase) };
+            }
+            else if (!PinNames.All(refRig.Joints.ContainsKey))
+            {
+                var est = EstimateLandmarks(scene, meshes);
+                foreach (var kv in est)
+                    if (!refRig.Joints.ContainsKey(kv.Key)) refRig.Joints[kv.Key] = kv.Value;
+            }
 
             Transform3D A = options.AlignedTransform;
             Transform3D Ainv = A.AffineInverse();
-            var pinsAligned = pinsModel.ToDictionary(kv => kv.Key, kv => A * kv.Value);
-
-            // Auto-correct left/right labelling against the hero skeleton.
-            int heroArmL = heroSkeleton.FindBone("arm_upper_L");
-            if (heroArmL >= 0)
-            {
-                float heroX = heroSkeleton.GetBoneGlobalRest(heroArmL).Origin.X;
-                float myX = pinsAligned["ShoulderL"].X - pinsAligned["ShoulderR"].X;
-                if (heroX * myX < 0f)
-                {
-                    foreach (var nm in PinNames.Where(x => x.EndsWith("L")).ToList())
-                    {
-                        string mir = MirrorName(nm);
-                        (pinsAligned[nm], pinsAligned[mir]) = (pinsAligned[mir], pinsAligned[nm]);
-                    }
-                }
-            }
 
             // Body metrics in aligned space.
             float minY = float.MaxValue, maxY = float.MinValue;
@@ -607,9 +939,20 @@ namespace DeadlockPlayground.Importer
                     minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
                 }
             float H = Math.Max(0.1f, maxY - minY);
+            refRig.EnsureDefaultJoints(H);
+
+            // Auto-correct left/right labelling against the hero skeleton.
+            bool swapLR = false;
+            int heroArmL = heroSkeleton.FindBone("arm_upper_L");
+            if (heroArmL >= 0 && refRig.Joints.TryGetValue("ShoulderL", out var shLm) && refRig.Joints.TryGetValue("ShoulderR", out var shRm))
+            {
+                float heroX = heroSkeleton.GetBoneGlobalRest(heroArmL).Origin.X;
+                float myX = (A * shLm).X - (A * shRm).X;
+                if (heroX * myX < 0f) swapLR = true;
+            }
 
             // Foot forward direction from the lowest vertices relative to the ankles.
-            float ankleZ = (pinsAligned["AnkleL"].Z + pinsAligned["AnkleR"].Z) * 0.5f;
+            float ankleZ = ((A * refRig.Joints["AnkleL"]).Z + (A * refRig.Joints["AnkleR"]).Z) * 0.5f;
             double sumZ = 0; int cntZ = 0;
             foreach (var sd in surfaces)
                 foreach (var v in sd.SceneVerts)
@@ -619,7 +962,8 @@ namespace DeadlockPlayground.Importer
                 }
             float footFwd = cntZ > 0 && (sumZ / cntZ) < ankleZ ? -1f : 1f;
 
-            var geom = BuildBoneGeom(pinsAligned, H, footFwd);
+            var specs = refRig.BuildResolvedBones(A, H, footFwd, swapLeftRight: swapLR);
+            var pinsAligned = refRig.Joints.ToDictionary(kv => kv.Key, kv => A * kv.Value, StringComparer.OrdinalIgnoreCase);
 
             var alignedVerts = new List<Vector3[]>();
             var indices = new List<int[]>();
@@ -630,27 +974,54 @@ namespace DeadlockPlayground.Importer
                 alignedVerts.Add(av);
                 indices.Add(sd.Indices);
             }
-            SolveWeights(alignedVerts, indices, geom, H, out var bonesPer, out var weightsPer);
+            SolveWeightsModular(alignedVerts, indices, specs, H, out var bonesPer, out var weightsPer);
 
-            // Build skeleton in scene space (identity transform under the scene root).
+            // Build modular skeleton in scene space (identity transform under the scene root).
             var skel = new Skeleton3D { Name = "LandmarkSyntheticSkeleton" };
             scene.AddChild(skel);
-            var globalRest = new Transform3D[BoneNames.Length];
-            for (int b = 0; b < BoneNames.Length; b++)
+            var globalRest = new Transform3D[specs.Count];
+            for (int b = 0; b < specs.Count; b++)
             {
-                skel.AddBone(BoneNames[b]);
-                globalRest[b] = new Transform3D(Basis.Identity, Ainv * geom.Origin[b]);
+                skel.AddBone(specs[b].Name);
+                globalRest[b] = new Transform3D(Basis.Identity, Ainv * specs[b].Origin);
             }
-            for (int b = 0; b < BoneNames.Length; b++)
+            for (int b = 0; b < specs.Count; b++)
             {
-                int parent = BoneParents[b];
+                int parent = specs[b].ParentIndex;
                 if (parent >= 0) skel.SetBoneParent(b, parent);
                 Transform3D local = parent >= 0 ? globalRest[parent].AffineInverse() * globalRest[b] : globalRest[b];
                 skel.SetBoneRest(b, local);
             }
             skel.ResetBonePoses();
 
-            // Swap each mesh's surfaces for skinned copies.
+            // Build BoneChainDefs for authored cloth chains so Tab 3 Physics & CSDK13 export pick them up seamlessly.
+            var authoredChains = new List<BoneChainDef>();
+            foreach (var grp in specs.Where(sp => sp.Role == ReferenceBoneRole.Cloth && !string.IsNullOrEmpty(sp.ClothChainId)).GroupBy(sp => sp.ClothChainId))
+            {
+                var ordered = grp.OrderBy(sp => sp.Index).ToList();
+                if (ordered.Count == 0) continue;
+                var srcChain = refRig.ClothChains.FirstOrDefault(c => string.Equals(c.ChainId, grp.Key, StringComparison.OrdinalIgnoreCase));
+                var chainDef = new BoneChainDef
+                {
+                    ChainId = grp.Key,
+                    Name = srcChain?.Name ?? ordered[0].Name,
+                    Category = "Clothing & Hair",
+                    RootSourceBone = ordered[0].Name,
+                    SourceBoneNames = ordered.Select(sp => sp.Name).ToList(),
+                    AnchorHeroBone = srcChain?.ParentBoneName ?? "spine_3",
+                    Policy = ChainPolicy.PreservePhysicsChain
+                };
+                string anchorLower = (chainDef.AnchorHeroBone ?? "").ToLowerInvariant();
+                string recPreset = anchorLower.Contains("head") || anchorLower.Contains("neck")
+                    ? PhysicsPresetCatalog.LongFlowingHairId
+                    : (anchorLower.Contains("pelvis") || anchorLower.Contains("leg")
+                        ? PhysicsPresetCatalog.HeavySkirtDressId
+                        : PhysicsPresetCatalog.CapeCloakId);
+                PhysicsPresetCatalog.ApplyPresetToChain(chainDef, recPreset, resetMacros: true);
+                authoredChains.Add(chainDef);
+            }
+
+            // Swap each mesh's surfaces for sanitized skinned copies.
             var originals = new List<(MeshInstance3D mi, Mesh mesh, Skin skin)>();
             var byMesh = surfaces.Select((sd, i) => (sd, i)).GroupBy(x => x.sd.Mi);
             int totalVerts = 0;
@@ -661,24 +1032,31 @@ namespace DeadlockPlayground.Importer
                 originals.Add((mi, srcMesh, mi.Skin));
                 var newMesh = new ArrayMesh();
                 var surfaceMap = grp.ToDictionary(x => x.sd.Surface, x => x.i);
+                int addedSurfIdx = 0;
                 for (int s = 0; s < srcMesh.GetSurfaceCount(); s++)
                 {
-                    Godot.Collections.Array arrays;
+                    Godot.Collections.Array cleanArrays;
                     if (surfaceMap.TryGetValue(s, out int gi))
                     {
-                        arrays = surfaces[gi].Arrays;
-                        arrays[(int)Mesh.ArrayType.Bones] = bonesPer[gi];
-                        arrays[(int)Mesh.ArrayType.Weights] = weightsPer[gi];
+                        cleanArrays = BuildSanitizedSurfaceArrays(surfaces[gi].Arrays, bonesPer[gi], weightsPer[gi]);
                         totalVerts += surfaces[gi].SceneVerts.Length;
                     }
-                    else arrays = srcMesh.SurfaceGetArrays(s);
-                    newMesh.AddSurfaceFromArrays((srcMesh as ArrayMesh)?.SurfaceGetPrimitiveType(s) ?? Mesh.PrimitiveType.Triangles, arrays);
-                    newMesh.SurfaceSetMaterial(s, srcMesh.SurfaceGetMaterial(s));
+                    else
+                    {
+                        cleanArrays = BuildSanitizedSurfaceArrays(srcMesh.SurfaceGetArrays(s));
+                    }
+                    var prim = (srcMesh as ArrayMesh)?.SurfaceGetPrimitiveType(s) ?? Mesh.PrimitiveType.Triangles;
+                    newMesh.AddSurfaceFromArrays(prim, cleanArrays);
+                    if (addedSurfIdx < newMesh.GetSurfaceCount())
+                    {
+                        newMesh.SurfaceSetMaterial(addedSurfIdx, srcMesh.SurfaceGetMaterial(s));
+                    }
+                    addedSurfIdx++;
                 }
 
                 Transform3D m = CustomModelAutoRigger.ComputeTransformRelativeToRoot(mi, scene);
                 var skin = new Skin();
-                for (int b = 0; b < BoneNames.Length; b++)
+                for (int b = 0; b < specs.Count; b++)
                     skin.AddBind(b, globalRest[b].AffineInverse() * m);
                 mi.Mesh = newMesh;
                 mi.Skin = skin;
@@ -689,6 +1067,7 @@ namespace DeadlockPlayground.Importer
                 Skeleton = skel,
                 VertexCount = totalVerts,
                 PinsUsedAligned = pinsAligned,
+                AuthoredClothChainDefs = authoredChains,
                 Restore = () =>
                 {
                     foreach (var (mi, mesh, skin) in originals)
