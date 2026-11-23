@@ -13,6 +13,8 @@ scratch_out
 tools/dump_out
 tools/tools
 tools/dump_runner
+tools/fe_model_dump/
+tests/importer_samples
 .agent/
 PRODUCT.md
 DESIGN.md
