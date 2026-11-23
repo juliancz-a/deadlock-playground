@@ -438,110 +438,193 @@ namespace DeadlockPlayground.Importer
                 string targetMesh = firstSpec.ClothTargetMeshName ?? "";
                 bool hasTargetMesh = !string.IsNullOrWhiteSpace(targetMesh);
 
+                int segCount = boneList.Count;
                 Vector3 rootPos = firstSpec.SegStart;
-                Vector3 tipPos = specs[boneList[^1]].SegEnd;
-                Vector3 chainAxis = tipPos - rootPos;
-                float chainLen = chainAxis.Length();
-                Vector3 chainDir = chainLen > 1e-4f ? chainAxis / chainLen : Vector3.Down;
+                Vector3 firstSegAxis = firstSpec.SegEnd - firstSpec.SegStart;
+                float firstSegLen = firstSegAxis.Length();
+                Vector3 rootDir = firstSegLen > 1e-4f
+                    ? firstSegAxis / firstSegLen
+                    : (specs[boneList[^1]].SegEnd - rootPos).LengthSquared() > 1e-8f
+                        ? (specs[boneList[^1]].SegEnd - rootPos).Normalized()
+                        : Vector3.Down;
 
-                // 1. Identify eligible vertices: either strictly on TargetMeshName, or on dedicated cloth island(s)
-                //    surrounding the chain (prevents a ponytail from grabbing separate head/hoodie shells even when touching!).
+                // Precompute per-segment lengths & cumulative arc length so curved chains evaluate cleanly
+                var segLens = new float[segCount];
+                var segCumStart = new float[segCount];
+                float totalChainLen = 0f;
+                for (int bi = 0; bi < segCount; bi++)
+                {
+                    segCumStart[bi] = totalChainLen;
+                    float sl = specs[boneList[bi]].SegStart.DistanceTo(specs[boneList[bi]].SegEnd);
+                    segLens[bi] = sl;
+                    totalChainLen += sl;
+                }
+
+                // 1. Project eligible vertices onto the chain & identify which mesh island(s) belong to this cloth chain.
+                //    - Dedicated cloth/hair shells (ponytails, overlapping anime hair cards, detached capes/skirts) are isolated
+                //      from adjacent head/face/body shells.
+                //    - Tiny nearby props/buttons/rivets are guarded from hijacking a large pierced cloth mesh.
+                //    - Welded/wide cloth (capes, long hair, skirts) is NOT blocked by parent-bone weight gates, so hanging
+                //      segments passing over spine/pelvis/legs receive full, smooth cloth weights all the way to the tip!
                 var allowedIslands = new HashSet<int>();
-                float coreSeedDist = radius * 0.72f;
-                float coreSeedDistSq = coreSeedDist * coreSeedDist;
                 float radiusSq = radius * radius;
+                float coreDist = radius * 0.70f;
+                float coreDistSq = coreDist * coreDist;
                 int closestAnyVert = -1;
                 float closestAnyDistSq = float.MaxValue;
 
                 var islandTotalVerts = new Dictionary<int, int>();
                 var islandNearVerts = new Dictionary<int, int>();
-                var islandMinMidDistSq = new Dictionary<int, float>();
+                var islandCoreVerts = new Dictionary<int, int>();
+                var islandDistalCoreVerts = new Dictionary<int, int>();
+
                 for (int i = 0; i < n; i++)
                 {
                     if (hasTargetMesh && !weldMeshNames[i].Contains(targetMesh)) continue;
                     int isl = islandId[i];
                     islandTotalVerts[isl] = islandTotalVerts.GetValueOrDefault(isl) + 1;
 
+                    Vector3 p = weldPos[i];
                     float minDSq = float.MaxValue;
-                    for (int bi = 0; bi < boneList.Count; bi++)
+                    int bestSeg = 0;
+                    float bestT = 0f;
+                    for (int bi = 0; bi < segCount; bi++)
                     {
                         var sp = specs[boneList[bi]];
-                        float dSq = weldPos[i].DistanceSquaredTo(ClosestPointOnSegment(weldPos[i], sp.SegStart, sp.SegEnd));
-                        if (dSq < minDSq) minDSq = dSq;
+                        Vector3 ab = sp.SegEnd - sp.SegStart;
+                        float len2 = ab.LengthSquared();
+                        float t = len2 < 1e-10f ? 0f : Mathf.Clamp((p - sp.SegStart).Dot(ab) / len2, 0f, 1f);
+                        float dSq = p.DistanceSquaredTo(sp.SegStart + ab * t);
+                        if (dSq < minDSq) { minDSq = dSq; bestSeg = bi; bestT = t; }
                     }
                     if (minDSq < closestAnyDistSq) { closestAnyDistSq = minDSq; closestAnyVert = i; }
 
-                    float along = (weldPos[i] - rootPos).Dot(chainDir);
-                    if (minDSq <= radiusSq && along >= -0.015f)
+                    bool pastRoot = bestSeg > 0 || (p - rootPos).Dot(rootDir) >= -0.015f;
+                    if (minDSq <= radiusSq && pastRoot)
                     {
                         islandNearVerts[isl] = islandNearVerts.GetValueOrDefault(isl) + 1;
-                        if (along >= chainLen * 0.12f)
+                        if (minDSq <= coreDistSq)
                         {
-                            if (!islandMinMidDistSq.TryGetValue(isl, out float prevD) || minDSq < prevD)
-                                islandMinMidDistSq[isl] = minDSq;
+                            islandCoreVerts[isl] = islandCoreVerts.GetValueOrDefault(isl) + 1;
+                            float arcAlong = segCumStart[bestSeg] + bestT * segLens[bestSeg];
+                            if (arcAlong >= totalChainLen * 0.15f)
+                                islandDistalCoreVerts[isl] = islandDistalCoreVerts.GetValueOrDefault(isl) + 1;
                         }
                     }
                 }
 
-                // Prefer dedicated cloth/hair islands (>= 35% of the island sits within InfluenceRadius of the chain)
-                bool foundDedicatedIsland = false;
-                foreach (var ikv in islandNearVerts)
+                if (hasTargetMesh)
                 {
-                    int isl = ikv.Key;
-                    int tot = Math.Max(1, islandTotalVerts.GetValueOrDefault(isl));
-                    float frac = ikv.Value / (float)tot;
-                    if (frac >= 0.35f)
-                    {
+                    foreach (int isl in islandTotalVerts.Keys)
                         allowedIslands.Add(isl);
-                        foundDedicatedIsland = true;
-                    }
                 }
-                // Fallback when cloth is welded directly into the body mesh: pick the single island with the highest near-chain share
-                if (!foundDedicatedIsland)
+                else
                 {
-                    int bestIsl = -1;
-                    float bestScore = -1f;
+                    int maxNear = 0;
+                    foreach (var ikv in islandNearVerts)
+                        if (ikv.Value > maxNear) maxNear = ikv.Value;
+
+                    var dedicated = new List<int>();
+                    int dedicatedNearSum = 0;
                     foreach (var ikv in islandNearVerts)
                     {
                         int isl = ikv.Key;
                         int tot = Math.Max(1, islandTotalVerts.GetValueOrDefault(isl));
-                        float score = ikv.Value / (float)tot;
-                        if (score > bestScore) { bestScore = score; bestIsl = isl; }
+                        float frac = ikv.Value / (float)tot;
+                        if (frac >= 0.40f && islandCoreVerts.GetValueOrDefault(isl) > 0)
+                        {
+                            dedicated.Add(isl);
+                            dedicatedNearSum += ikv.Value;
+                        }
                     }
-                    if (bestIsl >= 0) allowedIslands.Add(bestIsl);
-                    else if (closestAnyVert >= 0) allowedIslands.Add(islandId[closestAnyVert]);
+
+                    // Accept dedicated cloth/hair island(s) only when they account for a meaningful share of the
+                    // chain's nearby geometry (prevents a tiny 6-vert button/rivet from locking out a 3000-vert skirt/cape).
+                    bool useDedicated = dedicated.Count > 0 && dedicatedNearSum >= Math.Max(4, (int)(maxNear * 0.25f));
+                    if (useDedicated)
+                    {
+                        foreach (int isl in dedicated) allowedIslands.Add(isl);
+                    }
+                    else
+                    {
+                        // Cloth is welded into a larger mesh (body or wide cape/skirt): pick the island most strongly
+                        // pierced along the chain core (never biased toward tiny unrelated islands).
+                        int bestIsl = -1;
+                        float bestScore = -1f;
+                        foreach (var ikv in islandNearVerts)
+                        {
+                            int isl = ikv.Key;
+                            float score = islandDistalCoreVerts.GetValueOrDefault(isl) * 2.0f
+                                        + islandCoreVerts.GetValueOrDefault(isl)
+                                        + ikv.Value * 0.5f;
+                            if (score > bestScore) { bestScore = score; bestIsl = isl; }
+                        }
+                        if (bestIsl >= 0) allowedIslands.Add(bestIsl);
+                        else if (closestAnyVert >= 0) allowedIslands.Add(islandId[closestAnyVert]);
+                    }
                 }
 
-                // 2. Collect geodesic Dijkstra seeds strictly inside the chain core on allowed islands
+                // Measure closest distance on allowed islands; if the user placed the chain slightly outside the cloth
+                // surface (> 90% of radius), expand effRadius just enough to bind that surface strip instead of leaving 0 weight.
+                float closestAllowedDistSq = float.MaxValue;
+                int closestAllowedVert = -1;
+                for (int i = 0; i < n; i++)
+                {
+                    if (!allowedIslands.Contains(islandId[i])) continue;
+                    if (hasTargetMesh && !weldMeshNames[i].Contains(targetMesh)) continue;
+                    Vector3 p = weldPos[i];
+                    float minDSq = float.MaxValue;
+                    for (int bi = 0; bi < segCount; bi++)
+                    {
+                        var sp = specs[boneList[bi]];
+                        float dSq = p.DistanceSquaredTo(ClosestPointOnSegment(p, sp.SegStart, sp.SegEnd));
+                        if (dSq < minDSq) minDSq = dSq;
+                    }
+                    if (minDSq < closestAllowedDistSq) { closestAllowedDistSq = minDSq; closestAllowedVert = i; }
+                }
+
+                float effRadius = radius;
+                if (closestAllowedVert >= 0)
+                {
+                    float closestAllowedDist = MathF.Sqrt(closestAllowedDistSq);
+                    if (closestAllowedDist > radius * 0.90f)
+                        effRadius = MathF.Min(0.45f, MathF.Max(radius, closestAllowedDist + MathF.Max(0.035f, radius * 0.50f)));
+                }
+
+                // 2. Collect geodesic Dijkstra seeds inside the chain core on allowed islands
                 var geoDist = new float[n];
                 Array.Fill(geoDist, float.PositiveInfinity);
                 var pq = new PriorityQueue<int, float>();
-                float maxGeo = radius * 1.45f;
+                float seedDist = effRadius * 0.82f;
+                float seedDistSq = seedDist * seedDist;
+                float maxGeo = effRadius * 1.65f;
 
                 for (int i = 0; i < n; i++)
                 {
                     if (!allowedIslands.Contains(islandId[i])) continue;
                     if (hasTargetMesh && !weldMeshNames[i].Contains(targetMesh)) continue;
-                    float along = (weldPos[i] - rootPos).Dot(chainDir);
-                    if (along < -0.010f) continue;
 
+                    Vector3 p = weldPos[i];
                     float minDSq = float.MaxValue;
-                    for (int bi = 0; bi < boneList.Count; bi++)
+                    int bestSeg = 0;
+                    for (int bi = 0; bi < segCount; bi++)
                     {
                         var sp = specs[boneList[bi]];
-                        float dSq = weldPos[i].DistanceSquaredTo(ClosestPointOnSegment(weldPos[i], sp.SegStart, sp.SegEnd));
-                        if (dSq < minDSq) minDSq = dSq;
+                        float dSq = p.DistanceSquaredTo(ClosestPointOnSegment(p, sp.SegStart, sp.SegEnd));
+                        if (dSq < minDSq) { minDSq = dSq; bestSeg = bi; }
                     }
-                    if (minDSq <= coreSeedDistSq)
+                    if (bestSeg == 0 && (p - rootPos).Dot(rootDir) < -0.012f) continue;
+
+                    if (minDSq <= seedDistSq)
                     {
                         geoDist[i] = 0f;
                         pq.Enqueue(i, 0f);
                     }
                 }
-                if (pq.Count == 0 && closestAnyVert >= 0)
+                if (pq.Count == 0 && closestAllowedVert >= 0)
                 {
-                    geoDist[closestAnyVert] = 0f;
-                    pq.Enqueue(closestAnyVert, 0f);
+                    geoDist[closestAllowedVert] = 0f;
+                    pq.Enqueue(closestAllowedVert, 0f);
                 }
 
                 // Bounded Dijkstra along mesh edges (stops at maxGeo so it never crawls across the face/scalp!)
@@ -562,26 +645,16 @@ namespace DeadlockPlayground.Importer
                     }
                 }
 
-                // 3. Assign smooth localized cloth weights with root feathering + 3D radius + geodesic cutoff
-                //    When the chain is welded to the main body (not a dedicated island), also gate by parent-bone affinity
-                //    so a head-anchored ponytail never steals weights from spine_3/clavicle hoodie vertices.
-                int parentCoreBone = firstSpec.ParentIndex;
-                float radInner = radius * 0.55f;
-                float geoInner = radius * 0.60f;
-                int segCount = boneList.Count;
-                float rootFeatherLen = MathF.Min(0.045f, MathF.Max(0.018f, chainLen * 0.22f));
+                // 3. Assign crisp localized cloth weights with root-seam feathering + 3D radius + geodesic cutoff
+                float radInner = effRadius * 0.65f;
+                float geoInner = effRadius * 0.90f;
+                float rootFeatherLen = MathF.Min(0.040f, MathF.Max(0.015f, firstSegLen * 0.28f));
                 var segW = new float[segCount];
 
                 for (int i = 0; i < n; i++)
                 {
                     float gd = geoDist[i];
                     if (float.IsPositiveInfinity(gd) || gd >= maxGeo) continue;
-
-                    if (!foundDedicatedIsland && !hasTargetMesh && parentCoreBone >= 0 && parentCoreBone < nb)
-                    {
-                        float parentW = dense[i * nb + parentCoreBone];
-                        if (parentW < 0.25f) continue;
-                    }
 
                     Vector3 p = weldPos[i];
                     // Strict 3D distance to the chain
@@ -597,14 +670,18 @@ namespace DeadlockPlayground.Importer
                         float d = p.DistanceTo(sp.SegStart + ab * t);
                         if (d < minDist) { minDist = d; bestSeg = bi; bestSegT = t; }
                     }
-                    if (minDist >= radius) continue;
+                    if (minDist >= effRadius) continue;
 
-                    // Smooth root-plane ramp so nothing behind/above the root hair-tie receives cloth weight
-                    float alongRoot = (p - rootPos).Dot(chainDir);
-                    float rootRamp = SmoothStep01(-0.008f, rootFeatherLen, alongRoot);
-                    if (rootRamp <= 0.001f) continue;
+                    // Smooth root-seam ramp on the root segment only (never zeros out distal segments of curved chains)
+                    float rootRamp = 1.0f;
+                    if (bestSeg == 0)
+                    {
+                        float alongRoot = (p - rootPos).Dot(rootDir);
+                        rootRamp = SmoothStep01(-0.010f, rootFeatherLen, alongRoot);
+                        if (rootRamp <= 0.001f) continue;
+                    }
 
-                    float radialFalloff = 1.0f - SmoothStep01(radInner, radius, minDist);
+                    float radialFalloff = 1.0f - SmoothStep01(radInner, effRadius, minDist);
                     float geoFalloff = 1.0f - SmoothStep01(geoInner, maxGeo, gd);
                     float wChain = rootRamp * radialFalloff * geoFalloff;
                     if (wChain <= 0.005f) continue;

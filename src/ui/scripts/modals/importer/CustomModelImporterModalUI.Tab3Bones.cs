@@ -529,8 +529,6 @@ namespace DeadlockPlayground.UI
             inspBox.AddChild(_lblSelectedChainTitle);
 
             // Clean section header above the primary Physics Preset selector button
-            var presetLblRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            presetLblRow.AddThemeConstantOverride("separation", 6);
             var lblPresetSection = new Label
             {
                 Text = "PHYSICS PRESET",
@@ -539,26 +537,15 @@ namespace DeadlockPlayground.UI
             ImporterStyle.ApplyFontSize(lblPresetSection, ImporterStyle.FontHint);
             lblPresetSection.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
             _accentLabels.Add(lblPresetSection);
-            presetLblRow.AddChild(lblPresetSection);
-            var lblPresetHintRight = new Label
-            {
-                Text = "Click to choose",
-                HorizontalAlignment = HorizontalAlignment.Right,
-                AutowrapMode = TextServer.AutowrapMode.Off,
-                SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
-            };
-            ImporterStyle.ApplyHintStyle(lblPresetHintRight, wrap: false);
-            _secondaryLabels.Add(lblPresetHintRight);
-            presetLblRow.AddChild(lblPresetHintRight);
-            inspBox.AddChild(presetLblRow);
+            inspBox.AddChild(lblPresetSection);
 
             // Prominent Hero Physics Preset Selector Card (centered icon, title, tag & action pill)
             _btnSelectPresetCard = new Button
             {
                 ThemeTypeVariation = "ImporterPrimaryButton",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                CustomMinimumSize = new Vector2(0, 122),
+                CustomMinimumSize = new Vector2(0, 162),
+                ClipContents = true,
                 TooltipText = "Click to open the Valve-backed Deadlock physics preset gallery (choose Single Chain or Active Group)."
             };
             var presetCardNormal = new StyleBoxFlat
@@ -596,8 +583,8 @@ namespace DeadlockPlayground.UI
             presetBtnPad.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             presetBtnPad.AddThemeConstantOverride("margin_left", 14);
             presetBtnPad.AddThemeConstantOverride("margin_right", 14);
-            presetBtnPad.AddThemeConstantOverride("margin_top", 10);
-            presetBtnPad.AddThemeConstantOverride("margin_bottom", 10);
+            presetBtnPad.AddThemeConstantOverride("margin_top", 12);
+            presetBtnPad.AddThemeConstantOverride("margin_bottom", 12);
             _btnSelectPresetCard.AddChild(presetBtnPad);
 
             var presetBtnCol = new VBoxContainer
@@ -607,7 +594,7 @@ namespace DeadlockPlayground.UI
                 Alignment = BoxContainer.AlignmentMode.Center,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
-            presetBtnCol.AddThemeConstantOverride("separation", 5);
+            presetBtnCol.AddThemeConstantOverride("separation", 4);
             presetBtnPad.AddChild(presetBtnCol);
 
             var thumbFrameStyle = new StyleBoxFlat
@@ -625,7 +612,7 @@ namespace DeadlockPlayground.UI
             };
             var presetThumbFrame = new PanelContainer
             {
-                CustomMinimumSize = new Vector2(54, 54),
+                CustomMinimumSize = new Vector2(52, 52),
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 MouseFilter = Control.MouseFilterEnum.Ignore
@@ -633,7 +620,7 @@ namespace DeadlockPlayground.UI
             presetThumbFrame.AddThemeStyleboxOverride("panel", thumbFrameStyle);
             _texSelectedPresetIcon = new TextureRect
             {
-                CustomMinimumSize = new Vector2(46, 46),
+                CustomMinimumSize = new Vector2(42, 42),
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                 TextureFilter = CanvasItem.TextureFilterEnum.LinearWithMipmaps,
@@ -672,16 +659,46 @@ namespace DeadlockPlayground.UI
             _secondaryLabels.Add(_lblSelectedPresetTag);
             presetBtnCol.AddChild(_lblSelectedPresetTag);
 
+            var chevPillStyle = new StyleBoxFlat
+            {
+                BgColor = new Color(0.76f, 0.67f, 0.46f, 0.14f),
+                BorderColor = new Color(0.76f, 0.67f, 0.46f, 0.42f),
+                BorderWidthLeft = 1,
+                BorderWidthRight = 1,
+                BorderWidthTop = 1,
+                BorderWidthBottom = 1,
+                CornerRadiusTopLeft = 10,
+                CornerRadiusTopRight = 10,
+                CornerRadiusBottomLeft = 10,
+                CornerRadiusBottomRight = 10,
+                ContentMarginLeft = 12,
+                ContentMarginRight = 12,
+                ContentMarginTop = 2,
+                ContentMarginBottom = 2
+            };
+            var chevPillMargin = new MarginContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            chevPillMargin.AddThemeConstantOverride("margin_top", 4);
+            var chevPill = new PanelContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            chevPill.AddThemeStyleboxOverride("panel", chevPillStyle);
             var lblPresetChev = new Label
             {
                 Text = "Click to Change Preset ▾",
                 HorizontalAlignment = HorizontalAlignment.Center,
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
             ImporterStyle.ApplyFontSize(lblPresetChev, ImporterStyle.FontHint);
-            lblPresetChev.AddThemeColorOverride("font_color", new Color(0.84f, 0.77f, 0.58f, 0.95f));
-            presetBtnCol.AddChild(lblPresetChev);
+            lblPresetChev.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
+            chevPill.AddChild(lblPresetChev);
+            chevPillMargin.AddChild(chevPill);
+            presetBtnCol.AddChild(chevPillMargin);
 
             _btnSelectPresetCard.Pressed += () =>
             {

@@ -1180,10 +1180,12 @@ namespace DeadlockPlayground.Importer
 
             // Build BoneChainDefs for authored cloth chains so Tab 3 Physics & CSDK13 export pick them up seamlessly.
             var authoredChains = new List<BoneChainDef>();
+            var authoredClothBoneNames = new Godot.Collections.Array<string>();
             foreach (var grp in specs.Where(sp => sp.Role == ReferenceBoneRole.Cloth && !string.IsNullOrEmpty(sp.ClothChainId)).GroupBy(sp => sp.ClothChainId))
             {
                 var ordered = grp.OrderBy(sp => sp.Index).ToList();
                 if (ordered.Count == 0) continue;
+                foreach (var sp in ordered) authoredClothBoneNames.Add(sp.Name);
                 var srcChain = refRig.ClothChains.FirstOrDefault(c => string.Equals(c.ChainId, grp.Key, StringComparison.OrdinalIgnoreCase));
                 var chainDef = new BoneChainDef
                 {
@@ -1205,6 +1207,10 @@ namespace DeadlockPlayground.Importer
                             : PhysicsPresetCatalog.CapeCloakId));
                 PhysicsPresetCatalog.ApplyPresetToChain(chainDef, recPreset, resetMacros: true);
                 authoredChains.Add(chainDef);
+            }
+            if (authoredClothBoneNames.Count > 0)
+            {
+                skel.SetMeta("AuthoredClothBoneNames", authoredClothBoneNames);
             }
 
             // Swap each mesh's surfaces for sanitized skinned copies baked in scene space

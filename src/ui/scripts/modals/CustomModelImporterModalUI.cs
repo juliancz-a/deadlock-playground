@@ -9125,19 +9125,51 @@ namespace DeadlockPlayground.UI
                 if (_showBones) RedrawBoneWireframe();
                 RefreshReviewTabFromReport(result.Report);
                 MarkRemapAppliedBadge();
-                // Sync any newly discovered accessory chains back into _boneChains without overwriting
-                // existing user-tuned chains (prevents moving/scaling an accessory from resetting physics settings).
+                // Sync newly discovered & updated authored chains back into _boneChains without overwriting
+                // existing user-tuned physics presets (prevents moving/scaling an accessory from resetting physics settings).
+                if (options.Method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig)
+                {
+                    var activeRefIds = new HashSet<string>(
+                        (options.BoneChains ?? new List<BoneChainDef>())
+                            .Where(c => c != null && !string.IsNullOrEmpty(c.ChainId) && c.ChainId.StartsWith("refcloth_", StringComparison.OrdinalIgnoreCase))
+                            .Select(c => c.ChainId),
+                        StringComparer.OrdinalIgnoreCase);
+                    _boneChains.RemoveAll(c =>
+                        c != null && !c.IsSynthetic &&
+                        !string.IsNullOrEmpty(c.ChainId) &&
+                        c.ChainId.StartsWith("refcloth_", StringComparison.OrdinalIgnoreCase) &&
+                        !activeRefIds.Contains(c.ChainId));
+                }
                 if (options.BoneChains != null && options.BoneChains.Count > 0)
                 {
-                    var existingRoots = new HashSet<string>(
-                        _boneChains.Where(c => c != null && !string.IsNullOrEmpty(c.RootSourceBone)).Select(c => c.RootSourceBone),
-                        StringComparer.OrdinalIgnoreCase);
+                    var existingById = new Dictionary<string, BoneChainDef>(StringComparer.OrdinalIgnoreCase);
+                    var existingByRoot = new Dictionary<string, BoneChainDef>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var c in _boneChains)
+                    {
+                        if (c == null) continue;
+                        if (!string.IsNullOrEmpty(c.ChainId)) existingById[c.ChainId] = c;
+                        if (!string.IsNullOrEmpty(c.RootSourceBone)) existingByRoot[c.RootSourceBone] = c;
+                    }
                     foreach (var oc in options.BoneChains)
                     {
                         if (oc == null || string.IsNullOrEmpty(oc.RootSourceBone)) continue;
-                        if (existingRoots.Add(oc.RootSourceBone))
+                        BoneChainDef match = (!string.IsNullOrEmpty(oc.ChainId) && existingById.TryGetValue(oc.ChainId, out var byId))
+                            ? byId
+                            : (existingByRoot.TryGetValue(oc.RootSourceBone, out var byRoot) ? byRoot : null);
+                        if (match != null)
                         {
-                            _boneChains.Add(oc.Clone());
+                            match.Name = oc.Name;
+                            match.RootSourceBone = oc.RootSourceBone;
+                            match.AnchorHeroBone = oc.AnchorHeroBone;
+                            match.SourceBoneNames = new List<string>(oc.SourceBoneNames);
+                            match.AppendedHeroBoneNames = new List<string>(oc.AppendedHeroBoneNames);
+                        }
+                        else
+                        {
+                            var cloned = oc.Clone();
+                            _boneChains.Add(cloned);
+                            if (!string.IsNullOrEmpty(cloned.ChainId)) existingById[cloned.ChainId] = cloned;
+                            existingByRoot[cloned.RootSourceBone] = cloned;
                         }
                     }
                 }

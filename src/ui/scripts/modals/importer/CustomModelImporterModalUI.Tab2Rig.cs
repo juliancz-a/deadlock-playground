@@ -1060,9 +1060,14 @@ namespace DeadlockPlayground.UI
                 _ => Vector3.Down
             };
 
-            // Resolve parent anchor position in model space
+            // Resolve parent anchor position in model space ("Chin" supersedes legacy "Head")
             Vector3 parentPos = _referenceRig.Joints.TryGetValue("Chest", out var cp) ? cp : Vector3.Zero;
-            if (parentBone == "head" && _referenceRig.Joints.TryGetValue("Head", out var hp)) parentPos = hp;
+            if (parentBone == "head")
+            {
+                if (_referenceRig.Joints.TryGetValue("Chin", out var chp)) parentPos = chp;
+                else if (_referenceRig.Joints.TryGetValue("Head", out var hp)) parentPos = hp;
+                else if (_referenceRig.Joints.TryGetValue("Neck", out var np)) parentPos = np;
+            }
             else if (parentBone == "pelvis" && _referenceRig.Joints.TryGetValue("Pelvis", out var pp)) parentPos = pp;
             else if (parentBone == "clavicle_L" && _referenceRig.Joints.TryGetValue("ShoulderL", out var sl)) parentPos = sl;
             else if (parentBone == "clavicle_R" && _referenceRig.Joints.TryGetValue("ShoulderR", out var sr)) parentPos = sr;
@@ -1070,8 +1075,9 @@ namespace DeadlockPlayground.UI
             else if (parentBone == "hand_R" && _referenceRig.Joints.TryGetValue("WristR", out var wr)) parentPos = wr;
 
             float h = 1.7f;
-            if (_referenceRig.Joints.TryGetValue("Head", out var headP) && _referenceRig.Joints.TryGetValue("AnkleL", out var ankP))
-                h = MathF.Max(0.2f, MathF.Abs(headP.Y - ankP.Y) / 0.88f);
+            if ((_referenceRig.Joints.TryGetValue("Chin", out var headP) || _referenceRig.Joints.TryGetValue("Head", out headP)) &&
+                _referenceRig.Joints.TryGetValue("AnkleL", out var ankP))
+                h = MathF.Max(0.2f, MathF.Abs(headP.Y - ankP.Y) / 0.84f);
 
             var chain = ReferenceRigDef.CreateDefaultClothChain(
                 rawName, parentBone, parentPos, dir, segs,
@@ -1079,6 +1085,13 @@ namespace DeadlockPlayground.UI
                 influenceRadius: radiusMeters,
                 targetMeshName: targetMesh);
             _referenceRig.ClothChains.Add(chain);
+            // Ensure custom physics is active so authored cloth chains are preserved and appended on Bind
+            if (_chkEnableCustomPhysics != null && !_chkEnableCustomPhysics.ButtonPressed)
+            {
+                _chkEnableCustomPhysics.SetPressedNoSignal(true);
+                _chkPhysicsMasterTab3?.SetPressedNoSignal(true);
+                UpdateRigPhysicsLinkText();
+            }
             _isEditReferenceBonesMode = true;
             _selectedPin = $"cloth::{chain.ChainId}::0";
             SyncEditBindButtonVisuals();

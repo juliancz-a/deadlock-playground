@@ -42,6 +42,7 @@ namespace DeadlockPlayground.Tests
                 TestModularSpineCountAndExactMapping();
                 TestClothChainIsolationFromFaceAndHoodie();
                 TestLandmarkAutoRigOnPreviouslyRiggedModel();
+                TestAuthoredClothChainWeightsOnBind();
                 DiagnoseKirikoModelIfPresent();
             }
             catch (Exception ex)
@@ -816,6 +817,273 @@ namespace DeadlockPlayground.Tests
             // 4. Verify Restore() left original mesh/skin/skeleton intact
             Check(mi.Mesh == oldMesh && mi.Skin == oldSkin && mi.Skeleton == new NodePath(".."),
                 "BuildSyntheticRig.Restore() cleanly restored original Mesh, Skin, and Skeleton NodePath");
+
+            Root.RemoveChild(heroRoot);
+            heroRoot.Free();
+            Root.RemoveChild(importedScene);
+            importedScene.Free();
+        }
+
+        private void TestAuthoredClothChainWeightsOnBind()
+        {
+            GD.Print("\n--- Test 6: Authored Cloth Chains Receive Full Weights on Bind (Long Welded Cape, Vanilla Name Collision, Custom Face-Token Name, 1-Bone Jiggle) ---");
+
+            // Build a humanoid mesh with:
+            // 1. Torso + legs + head (welded single-mesh body + a long cape welded to the back of the torso hanging past pelvis/thighs)
+            // 2. A tiny 12-vert collar button near the cape root (must NOT hijack island selection!)
+            // 3. A detached ponytail mesh behind the head (named "cheek_hair" by user -> contains Face token "cheek"!)
+            // 4. A detached hip pouch mesh on the right hip (1-bone rigid jiggle chain)
+            var (torsoV, torsoI) = BuildCylinder(new Vector3(0, 0.90f, 0), new Vector3(0, 1.50f, 0), 0.14f, 16, 10, true);
+            var (headV, headI) = BuildCylinder(new Vector3(0, 1.52f, 0), new Vector3(0, 1.74f, 0), 0.10f, 12, 6, true);
+            var (legLV, legLI) = BuildCylinder(new Vector3(0.10f, 0.02f, 0), new Vector3(0.10f, 0.92f, 0), 0.065f, 12, 10, true);
+            var (legRV, legRI) = BuildCylinder(new Vector3(-0.10f, 0.02f, 0), new Vector3(-0.10f, 0.92f, 0), 0.065f, 12, 10, true);
+            var (armLV, armLI) = BuildCylinder(new Vector3(0.16f, 1.42f, 0), new Vector3(0.68f, 1.32f, 0), 0.045f, 10, 8, true);
+            var (armRV, armRI) = BuildCylinder(new Vector3(-0.16f, 1.42f, 0), new Vector3(-0.68f, 1.32f, 0), 0.045f, 10, 8, true);
+
+            // Long cape panel welded directly onto back of upper torso (Y=1.44 down to Y=0.44 at Z=-0.16..-0.22)
+            // Notice: its lower half sits at Y=0.44..0.95 behind pelvis & thighs where spine_3 Pass-1 weight is 0.0!
+            var (capeV, capeI) = BuildCylinder(new Vector3(0, 0.44f, -0.22f), new Vector3(0, 1.44f, -0.15f), 0.055f, 12, 14, true);
+            // Tiny collar rivet right near cape root (12 verts total — must NOT hijack island selection!)
+            var (rivetV, rivetI) = BuildCylinder(new Vector3(0.02f, 1.40f, -0.14f), new Vector3(0.02f, 1.43f, -0.14f), 0.012f, 4, 1, true);
+            // Separate ponytail hanging behind head
+            var (ponyV, ponyI) = BuildCylinder(new Vector3(0, 1.32f, -0.16f), new Vector3(0, 1.66f, -0.12f), 0.040f, 10, 10, true);
+            // Separate hip pouch for 1-bone jiggle chain
+            var (pouchV, pouchI) = BuildCylinder(new Vector3(-0.19f, 0.78f, 0.02f), new Vector3(-0.19f, 0.92f, 0.02f), 0.045f, 8, 4, true);
+
+            var allV = new List<Vector3>();
+            var allI = new List<int>();
+            (int Start, int Count) Append(Vector3[] v, int[] idx)
+            {
+                int off = allV.Count;
+                allV.AddRange(v);
+                foreach (int t in idx) allI.Add(off + t);
+                return (off, v.Length);
+            }
+            Append(torsoV, torsoI);
+            var headRange = Append(headV, headI);
+            Append(legLV, legLI);
+            Append(legRV, legRI);
+            Append(armLV, armLI);
+            Append(armRV, armRI);
+            var capeRange = Append(capeV, capeI);
+            // Weld cape top rim to torso back so torso+cape form ONE connected mesh island!
+            int torsoBackIdx = 0;
+            float bestBackZ = float.MaxValue;
+            for (int i = 0; i < torsoV.Length; i++)
+            {
+                if (MathF.Abs(torsoV[i].Y - 1.44f) < 0.06f && torsoV[i].Z < bestBackZ)
+                {
+                    bestBackZ = torsoV[i].Z;
+                    torsoBackIdx = i;
+                }
+            }
+            int capeTopIdx = capeRange.Start;
+            float bestCapeY = float.MinValue;
+            for (int i = capeRange.Start; i < capeRange.Start + capeRange.Count; i++)
+            {
+                if (allV[i].Y > bestCapeY) { bestCapeY = allV[i].Y; capeTopIdx = i; }
+            }
+            allI.Add(torsoBackIdx); allI.Add(capeTopIdx); allI.Add(capeTopIdx > capeRange.Start ? capeTopIdx - 1 : capeTopIdx + 1);
+
+            Append(rivetV, rivetI);
+            var ponyRange = Append(ponyV, ponyI);
+            var pouchRange = Append(pouchV, pouchI);
+
+            var norms = new Vector3[allV.Count];
+            Array.Fill(norms, Vector3.Up);
+            var arr = new Godot.Collections.Array();
+            arr.Resize((int)Mesh.ArrayType.Max);
+            arr[(int)Mesh.ArrayType.Vertex] = allV.ToArray();
+            arr[(int)Mesh.ArrayType.Normal] = norms;
+            arr[(int)Mesh.ArrayType.Index] = allI.ToArray();
+            var mesh = new ArrayMesh();
+            mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr);
+
+            var importedScene = new Node3D { Name = "AuthoredClothTestRoot" };
+            var mi = new MeshInstance3D { Name = "CharacterAll", Mesh = mesh };
+            importedScene.AddChild(mi);
+            Root.AddChild(importedScene);
+
+            var estPins = CustomLandmarkWeightSolver.EstimateLandmarks(importedScene, new[] { mi });
+            var refRig = new ReferenceRigDef { SpineCount = 3, FingerMode = ReferenceFingerRigMode.RigidMitten };
+            foreach (var kv in estPins) refRig.Joints[kv.Key] = kv.Value;
+            refRig.EnsureDefaultJoints(1.74f);
+
+            // 1. Authored 3-bone long cape named "cape" (collides with vanilla hero's cape_0!)
+            var capeChain = new ReferenceClothChainDef
+            {
+                ChainId = "refcloth_cape01",
+                Name = "cape",
+                ParentBoneName = "spine_3",
+                InfluenceRadius = 0.09f,
+                JointPositions = new List<Vector3>
+                {
+                    new Vector3(0, 1.44f, -0.15f),
+                    new Vector3(0, 1.11f, -0.18f),
+                    new Vector3(0, 0.78f, -0.20f),
+                    new Vector3(0, 0.44f, -0.22f)
+                }
+            };
+            // 2. Authored 2-bone ponytail named "cheek_hair" (contains Face token "cheek"!)
+            var ponyChain = new ReferenceClothChainDef
+            {
+                ChainId = "refcloth_pony01",
+                Name = "cheek_hair",
+                ParentBoneName = "head",
+                InfluenceRadius = 0.08f,
+                JointPositions = new List<Vector3>
+                {
+                    new Vector3(0, 1.66f, -0.12f),
+                    new Vector3(0, 1.49f, -0.14f),
+                    new Vector3(0, 1.32f, -0.16f)
+                }
+            };
+            // 3. Authored 1-bone hip pouch
+            var pouchChain = new ReferenceClothChainDef
+            {
+                ChainId = "refcloth_pouch01",
+                Name = "hip_pouch",
+                ParentBoneName = "pelvis",
+                InfluenceRadius = 0.08f,
+                JointPositions = new List<Vector3>
+                {
+                    new Vector3(-0.19f, 0.92f, 0.02f),
+                    new Vector3(-0.19f, 0.78f, 0.02f)
+                }
+            };
+            refRig.ClothChains.Add(capeChain);
+            refRig.ClothChains.Add(ponyChain);
+            refRig.ClothChains.Add(pouchChain);
+
+            // Build target hero skeleton WITH a pre-existing vanilla "cape_0" bone (to test name-collision protection!)
+            var heroRoot = new Node3D { Name = "ClothTestHeroRoot" };
+            var heroSkel = new Skeleton3D { Name = "HeroSkeleton" };
+            heroRoot.AddChild(heroSkel);
+            var heroBaseRig = new ReferenceRigDef { SpineCount = 3, FingerMode = ReferenceFingerRigMode.RigidMitten };
+            foreach (var kv in estPins) heroBaseRig.Joints[kv.Key] = kv.Value;
+            heroBaseRig.EnsureDefaultJoints(1.74f);
+            var heroSpecs = heroBaseRig.BuildResolvedBones(Transform3D.Identity, 1.74f, 1f, false);
+            var heroGlobalRest = new Transform3D[heroSpecs.Count];
+            for (int b = 0; b < heroSpecs.Count; b++)
+            {
+                heroSkel.AddBone(heroSpecs[b].Name);
+                heroGlobalRest[b] = new Transform3D(Basis.Identity, heroSpecs[b].Origin);
+            }
+            for (int b = 0; b < heroSpecs.Count; b++)
+            {
+                int p = heroSpecs[b].ParentIndex;
+                if (p >= 0) heroSkel.SetBoneParent(b, p);
+                heroSkel.SetBoneRest(b, p >= 0 ? heroGlobalRest[p].AffineInverse() * heroGlobalRest[b] : heroGlobalRest[b]);
+            }
+            int vanillaSpine3 = heroSkel.FindBone("spine_3");
+            int vanillaCapeIdx = heroSkel.GetBoneCount();
+            heroSkel.AddBone("cape_0");
+            heroSkel.SetBoneParent(vanillaCapeIdx, vanillaSpine3);
+            heroSkel.SetBoneRest(vanillaCapeIdx, new Transform3D(Basis.Identity, new Vector3(0, 0, -0.30f)));
+            heroSkel.ResetBonePoses();
+            Root.AddChild(heroRoot);
+
+            var options = new CustomModelAutoRigger.RiggingOptions
+            {
+                Method = CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
+                AlignedTransform = Transform3D.Identity,
+                ReferenceRig = refRig.Clone(),
+                EnableCustomPhysics = true,
+                PreserveSourceClothingChains = true,
+                AutoSnapArmsToHero = false,
+                AutoSnapLegsToHero = false,
+                AutoSnapHeadToHero = false,
+                AutoAlignHandOrientation = false
+            };
+
+            var rigRes = CustomModelAutoRigger.RigAndBind(importedScene, heroRoot, options);
+            Check(rigRes.Success && rigRes.CustomSubmeshes.Count == 1, "Authored cloth RigAndBind succeeded");
+
+            var outMi = rigRes.CustomSubmeshes[0];
+            var outArr = outMi.Mesh.SurfaceGetArrays(0);
+            var outBones = outArr[(int)Mesh.ArrayType.Bones].AsInt32Array();
+            var outWeights = outArr[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+            var outSkin = outMi.Skin;
+
+            float SumWeightInRange(int vStart, int vCount, Func<string, bool> matchBone, out float maxVertW)
+            {
+                double sum = 0;
+                maxVertW = 0f;
+                for (int v = vStart; v < vStart + vCount; v++)
+                {
+                    float vw = 0f;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float w = outWeights[v * 4 + k];
+                        if (w <= 1e-4f) continue;
+                        int bi = outBones[v * 4 + k];
+                        int sb = (outSkin != null && bi >= 0 && bi < outSkin.GetBindCount()) ? outSkin.GetBindBone(bi) : bi;
+                        if (sb >= 0 && sb < heroSkel.GetBoneCount() && matchBone(heroSkel.GetBoneName(sb)))
+                            vw += w;
+                    }
+                    sum += vw;
+                    if (vw > maxVertW) maxVertW = vw;
+                }
+                return vCount > 0 ? (float)(sum / vCount) : 0f;
+            }
+
+            // Verify cape chain was appended as NEW custom bones (NOT hijacked onto vanilla cape_0!)
+            var capeDef = options.BoneChains.Find(c => c.ChainId == "refcloth_cape01");
+            Check(capeDef != null && capeDef.AppendedHeroBoneNames.Count == 3,
+                $"Long cape chain appended all 3 custom bones (count={capeDef?.AppendedHeroBoneNames.Count ?? 0})");
+            Check(capeDef != null && capeDef.AppendedHeroBoneNames.Count > 0 && !string.Equals(capeDef.AppendedHeroBoneNames[0], "cape_0", StringComparison.OrdinalIgnoreCase),
+                $"Authored cape_0 was deduplicated instead of hijacking vanilla hero cape_0 (actual='{capeDef?.AppendedHeroBoneNames?[0] ?? ""}')");
+
+            string capeBone0 = capeDef?.AppendedHeroBoneNames.Count > 0 ? capeDef.AppendedHeroBoneNames[0] : "";
+            string capeBone1 = capeDef?.AppendedHeroBoneNames.Count > 1 ? capeDef.AppendedHeroBoneNames[1] : "";
+            string capeBone2 = capeDef?.AppendedHeroBoneNames.Count > 2 ? capeDef.AppendedHeroBoneNames[2] : "";
+            var capeSet = new HashSet<string>(capeDef?.AppendedHeroBoneNames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+
+            float capeTotalAvg = SumWeightInRange(capeRange.Start, capeRange.Count, bn => capeSet.Contains(bn), out float capeMaxW);
+            SumWeightInRange(capeRange.Start, capeRange.Count, bn => bn.Equals(capeBone0, StringComparison.OrdinalIgnoreCase), out float cape0Max);
+            SumWeightInRange(capeRange.Start, capeRange.Count, bn => bn.Equals(capeBone1, StringComparison.OrdinalIgnoreCase), out float cape1Max);
+            SumWeightInRange(capeRange.Start, capeRange.Count, bn => bn.Equals(capeBone2, StringComparison.OrdinalIgnoreCase), out float cape2Max);
+            float vanillaCapeAvg = SumWeightInRange(capeRange.Start, capeRange.Count, bn => bn.Equals("cape_0", StringComparison.OrdinalIgnoreCase), out _);
+            GD.Print($"  Welded long cape: avgClothW={capeTotalAvg:F3}, maxW={capeMaxW:F3}, b0Max={cape0Max:F3}, b1Max={cape1Max:F3}, b2Max={cape2Max:F3}, vanillaCape0Avg={vanillaCapeAvg:F4}");
+            Check(capeTotalAvg >= 0.70f, $"Welded long cape receives strong cloth weights (avg={capeTotalAvg:F3} >= 0.70)");
+            Check(cape0Max >= 0.70f && cape1Max >= 0.70f && cape2Max >= 0.70f,
+                $"All 3 cape bones including distal tip receive strong weights (b0={cape0Max:F2}, b1={cape1Max:F2}, b2={cape2Max:F2})");
+            Check(vanillaCapeAvg < 0.01f, $"Vanilla hero cape_0 received zero stolen weights (avg={vanillaCapeAvg:F4})");
+
+            // Verify "cheek_hair" (Face-token name!) was NOT dropped by RigBoneClassifier and stays isolated from head
+            var ponyDef = options.BoneChains.Find(c => c.ChainId == "refcloth_pony01");
+            var ponySet = new HashSet<string>(ponyDef?.AppendedHeroBoneNames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            float ponyAvg = SumWeightInRange(ponyRange.Start, ponyRange.Count, bn => ponySet.Contains(bn), out float ponyMax);
+            double ponyBodySum = 0;
+            int ponyBodyCnt = 0;
+            for (int v = ponyRange.Start; v < ponyRange.Start + ponyRange.Count; v++)
+            {
+                if (allV[v].Y >= 1.60f) continue; // exclude top hair-tie cap where root feathers smoothly into head
+                for (int k = 0; k < 4; k++)
+                {
+                    float w = outWeights[v * 4 + k];
+                    if (w <= 1e-4f) continue;
+                    int bi = outBones[v * 4 + k];
+                    int sb = (outSkin != null && bi >= 0 && bi < outSkin.GetBindCount()) ? outSkin.GetBindBone(bi) : bi;
+                    if (sb >= 0 && sb < heroSkel.GetBoneCount() && ponySet.Contains(heroSkel.GetBoneName(sb)))
+                        ponyBodySum += w;
+                }
+                ponyBodyCnt++;
+            }
+            float ponyBodyAvg = ponyBodyCnt > 0 ? (float)(ponyBodySum / ponyBodyCnt) : 0f;
+            float headBleedAvg = SumWeightInRange(headRange.Start, headRange.Count, bn => ponySet.Contains(bn), out float headBleedMax);
+            GD.Print($"  'cheek_hair' ponytail: appended={ponySet.Count}, ponyAvg={ponyAvg:F3}, ponyBodyAvg={ponyBodyAvg:F3}, ponyMax={ponyMax:F3}, headBleedAvg={headBleedAvg:F4}, headBleedMax={headBleedMax:F4}");
+            Check(ponySet.Count == 2, $"Authored 'cheek_hair' chain (with Face token) appended both bones (count={ponySet.Count})");
+            Check(ponyAvg >= 0.70f && ponyBodyAvg >= 0.88f, $"Ponytail island receives strong cloth weights with smooth root feather (allAvg={ponyAvg:F3} >= 0.70, bodyAvg={ponyBodyAvg:F3} >= 0.88)");
+            Check(headBleedMax < 0.05f, $"Ponytail cloth weights stay isolated from head/face (headBleedMax={headBleedMax:F4} < 0.05)");
+
+            // Verify 1-bone hip pouch jiggle chain
+            var pouchDef = options.BoneChains.Find(c => c.ChainId == "refcloth_pouch01");
+            var pouchSet = new HashSet<string>(pouchDef?.AppendedHeroBoneNames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            float pouchAvg = SumWeightInRange(pouchRange.Start, pouchRange.Count, bn => pouchSet.Contains(bn), out float pouchMax);
+            GD.Print($"  1-bone hip pouch: appended={pouchSet.Count}, pouchAvg={pouchAvg:F3}, pouchMax={pouchMax:F3}");
+            Check(pouchSet.Count == 1, $"1-bone hip pouch chain appended 1 bone (count={pouchSet.Count})");
+            Check(pouchAvg >= 0.75f, $"1-bone hip pouch receives strong weight (avg={pouchAvg:F3} >= 0.75)");
 
             Root.RemoveChild(heroRoot);
             heroRoot.Free();

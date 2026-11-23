@@ -1146,17 +1146,46 @@ namespace DeadlockPlayground.Importer
                     var synth = CustomLandmarkWeightSolver.BuildSyntheticRig(importedScene, primaryMeshes, heroSkeleton, options);
                     try
                     {
-                        // Merge any authored cloth chains from ReferenceRig into options.BoneChains (preserving existing user presets)
+                        // Merge & refresh authored cloth chains from ReferenceRig into options.BoneChains
+                        // (preserving existing user physics presets while removing deleted refcloth_* entries).
+                        options.BoneChains ??= new List<BoneChainDef>();
+                        var activeAuthoredIds = new HashSet<string>(
+                            (synth.AuthoredClothChainDefs ?? new List<BoneChainDef>())
+                                .Where(c => c != null && !string.IsNullOrEmpty(c.ChainId))
+                                .Select(c => c.ChainId),
+                            StringComparer.OrdinalIgnoreCase);
+                        options.BoneChains.RemoveAll(c =>
+                            c != null && !c.IsSynthetic &&
+                            !string.IsNullOrEmpty(c.ChainId) &&
+                            c.ChainId.StartsWith("refcloth_", StringComparison.OrdinalIgnoreCase) &&
+                            !activeAuthoredIds.Contains(c.ChainId));
                         if (synth.AuthoredClothChainDefs != null && synth.AuthoredClothChainDefs.Count > 0)
                         {
-                            options.BoneChains ??= new List<BoneChainDef>();
-                            var existingById = new HashSet<string>(
-                                options.BoneChains.Where(c => c != null && !string.IsNullOrEmpty(c.ChainId)).Select(c => c.ChainId),
-                                StringComparer.OrdinalIgnoreCase);
+                            var existingById = new Dictionary<string, BoneChainDef>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var c in options.BoneChains)
+                                if (c != null && !string.IsNullOrEmpty(c.ChainId))
+                                    existingById[c.ChainId] = c;
+
                             foreach (var ac in synth.AuthoredClothChainDefs)
                             {
-                                if (ac != null && existingById.Add(ac.ChainId))
+                                if (ac == null || string.IsNullOrEmpty(ac.ChainId)) continue;
+                                if (existingById.TryGetValue(ac.ChainId, out var prev))
+                                {
+                                    prev.Name = ac.Name;
+                                    prev.RootSourceBone = ac.RootSourceBone;
+                                    prev.SourceBoneNames = new List<string>(ac.SourceBoneNames);
+                                    prev.AnchorHeroBone = ac.AnchorHeroBone;
+                                }
+                                else
+                                {
+                                    // Avoid stale non-refcloth chain with same RootSourceBone stealing the authored chain
+                                    options.BoneChains.RemoveAll(c =>
+                                        c != null && !c.IsSynthetic &&
+                                        !string.Equals(c.ChainId, ac.ChainId, StringComparison.OrdinalIgnoreCase) &&
+                                        string.Equals(c.RootSourceBone, ac.RootSourceBone, StringComparison.OrdinalIgnoreCase));
                                     options.BoneChains.Add(ac);
+                                    existingById[ac.ChainId] = ac;
+                                }
                             }
                         }
                         GD.Print($"[CustomModelAutoRigger] Modular Auto-Rig: synthetic skeleton with {synth.Skeleton.GetBoneCount()} bones, {synth.VertexCount} vertices weighted.");
@@ -1808,6 +1837,38 @@ namespace DeadlockPlayground.Importer
             {
                 if (c != null && !c.IsSynthetic && !string.IsNullOrEmpty(c.RootSourceBone))
                     existingByRoot[c.RootSourceBone] = c;
+            }
+
+            // Guarantee every explicitly authored ReferenceRig cloth chain (refcloth_*) is preserved even if the user
+            // named it something RigBoneClassifier categorizes as Face/Core/Twist/Helper (e.g. "cheek_hair", "chest_flap").
+            var detectedRoots = new HashSet<string>(detectedChains.Select(d => d.RootName), StringComparer.OrdinalIgnoreCase);
+            if (string.Equals(sourceSkeleton.Name.ToString(), "LandmarkSyntheticSkeleton", StringComparison.Ordinal))
+            {
+                foreach (var ac in options.BoneChains)
+                {
+                    if (ac == null || ac.IsSynthetic || string.IsNullOrEmpty(ac.ChainId) ||
+                        !ac.ChainId.StartsWith("refcloth_", StringComparison.OrdinalIgnoreCase) ||
+                        string.IsNullOrEmpty(ac.RootSourceBone) || detectedRoots.Contains(ac.RootSourceBone))
+                        continue;
+
+                    var idxs = new List<int>();
+                    foreach (var bn in ac.SourceBoneNames)
+                    {
+                        int sIdx = sourceSkeleton.FindBone(bn);
+                        if (sIdx >= 0 && !mappedSourceSet.Contains(sIdx))
+                            idxs.Add(sIdx);
+                    }
+                    if (idxs.Count == 0) continue;
+                    var syntheticDc = new ExtraBoneChain
+                    {
+                        RootIndex = idxs[0],
+                        RootName = srcNames[idxs[0]],
+                        Category = string.IsNullOrWhiteSpace(ac.Category) ? RigBoneClassifier.CatClothing : ac.Category
+                    };
+                    syntheticDc.BoneIndices.AddRange(idxs);
+                    detectedChains.Add(syntheticDc);
+                    detectedRoots.Add(syntheticDc.RootName);
+                }
             }
 
             var resolvedChains = new List<BoneChainDef>();
@@ -6151,11 +6212,29 @@ namespace DeadlockPlayground.Importer
             bool isSyntheticDeadlockRig = string.Equals(sourceSkeleton.Name.ToString(), "LandmarkSyntheticSkeleton", StringComparison.Ordinal);
             if (isSyntheticDeadlockRig && (userCustomRemap == null || userCustomRemap.Count == 0))
             {
+                // Never hijack user-authored ReferenceRig cloth bones onto vanilla hero bones that happen to share
+                // a name (e.g. cape_0, hair_0, coat_0, skirt_0 on Haze/Wraith/Vindicta/Kelvin).
+                HashSet<string> authoredClothBones = null;
+                if (sourceSkeleton.HasMeta("AuthoredClothBoneNames"))
+                {
+                    var metaArr = sourceSkeleton.GetMeta("AuthoredClothBoneNames").AsGodotArray();
+                    if (metaArr != null && metaArr.Count > 0)
+                    {
+                        authoredClothBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var item in metaArr)
+                        {
+                            string bn = item.AsString();
+                            if (!string.IsNullOrEmpty(bn)) authoredClothBones.Add(bn);
+                        }
+                    }
+                }
+
                 int sTotal = sourceSkeleton.GetBoneCount();
                 for (int sIdx = 0; sIdx < sTotal; sIdx++)
                 {
                     if (IsDisabled(sIdx) || map.ContainsKey(sIdx)) continue;
                     string sName = sourceSkeleton.GetBoneName(sIdx);
+                    if (authoredClothBones != null && authoredClothBones.Contains(sName)) continue;
                     int tIdx = FindBoneAny(targetSkeleton, sName, sName.ToLowerInvariant());
                     if (tIdx == -1 && sName.Equals("neck_0", StringComparison.OrdinalIgnoreCase))
                         tIdx = FindBoneAny(targetSkeleton, "neck", "neck_01");
