@@ -7,6 +7,11 @@ uniform sampler2D g_tNprTransmissiveColor : source_color, filter_linear_mipmap;
 uniform bool has_transmissive_texture = false;
 uniform mat4 g_mAlbedoColorCorrect = mat4(1.0);
 
+// Direct Material Parameter Overrides (synced to patched .vmat_c on VPK export)
+uniform vec4 color_tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float vertex_color_strength : hint_range(0.0, 1.0) = 1.0;
+uniform vec3 albedo_csb = vec3(1.0, 1.0, 1.0); // x=Contrast, y=Saturation, z=Brightness
+
 uniform sampler2D g_tNormalRoughness : hint_normal, filter_linear_mipmap;
 uniform sampler2D g_tAmbientOcclusion : hint_default_white, filter_linear_mipmap;
 
@@ -54,7 +59,7 @@ void fragment() {
             discard;
         }
     }
-    vec3 vert = COLOR.rgb;
+    vec3 vert = mix(vec3(1.0), COLOR.rgb, vertex_color_strength);
 
     // 1. Transmissive color (g_tNprTransmissiveColor texture or g_vSkinColor vector) with CSB matrix
     vec3 rawTransColor = has_transmissive_texture 
@@ -76,7 +81,11 @@ void fragment() {
     // Input A = COLOR (vert)
     // Input B = Mix (multiplied)
     // Output = mix(vert, multiplied, ramp)
-    vec3 finalAlbedo = mix(vert, multiplied, ramp);
+    vec3 finalAlbedo = mix(vert, multiplied, ramp) * color_tint.rgb;
+    float csbLum = dot(finalAlbedo, vec3(0.2126, 0.7152, 0.0722));
+    finalAlbedo = mix(vec3(csbLum), finalAlbedo, albedo_csb.y);
+    finalAlbedo = ((finalAlbedo - vec3(0.5)) * albedo_csb.x + vec3(0.5)) * albedo_csb.z;
+    finalAlbedo = clamp(finalAlbedo, vec3(0.0), vec3(1.0));
 
     // 5. Normal & Roughness from g_tNormalRoughness (Separate Color.001: Blue -> Roughness)
     vec4 normSample = texture(g_tNormalRoughness, UV);

@@ -228,8 +228,18 @@ public static class ProceduralClothSolver
 
         float spineSpan = Mathf.Max(0.20f, restChestPos.Y - restPelvisPos.Y);
         float maxClothY = float.MinValue;
+        var customOwnedBones = new HashSet<int>();
+        foreach (Node child in skeleton.GetChildren())
+        {
+            if (child is DeadlockPlayground.Animation.CustomJiggleBoneDriver jiggleDriver)
+            {
+                jiggleDriver.CollectOwnedBoneIndices(customOwnedBones);
+            }
+        }
+
         for (int i = 0; i < totalBones; i++)
         {
+            if (customOwnedBones.Contains(i)) continue;
             string bName = skeleton.GetBoneName(i);
             if (string.IsNullOrEmpty(bName)) continue;
             int parentIdx = skeleton.GetBoneParent(i);
@@ -247,6 +257,7 @@ public static class ProceduralClothSolver
 
         for (int i = 0; i < totalBones; i++)
         {
+            if (customOwnedBones.Contains(i)) continue;
             string bName = skeleton.GetBoneName(i);
             if (string.IsNullOrEmpty(bName)) continue;
 

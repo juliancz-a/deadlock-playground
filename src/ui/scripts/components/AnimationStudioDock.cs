@@ -124,10 +124,26 @@ namespace DeadlockPlayground.UI
         private Button _btnToggleAdditiveOffsetMode;
         private Button _btnApplyOffsetToAllFrames;
         private bool _isUpdatingBoneSliders = false;
+        private bool _isBoneSliderDragging = false;
         private bool _isAdditiveClipOffsetMode = false;
         private Quaternion _baselineBoneRot = Quaternion.Identity;
         private Vector3 _baselineBonePos = Vector3.Zero;
         private bool _hasBaselinePose = false;
+
+        // Live Auto-Key Drag Batching (avoids per-frame Undo/StageAnimation lag during gizmo & slider drags)
+        private bool _isAutoKeyDragActive = false;
+        private string _autoKeyDragBoneName = "";
+        private double _autoKeyDragTime = 0.0;
+        private int _autoKeyDragPosTrack = -1;
+        private int _autoKeyDragRotTrack = -1;
+        private bool _autoKeyDragHadPosKey = false;
+        private Variant _autoKeyDragOldPos;
+        private bool _autoKeyDragHadRotKey = false;
+        private Variant _autoKeyDragOldRot;
+        private Vector3 _autoKeyDragLastPos;
+        private Quaternion _autoKeyDragLastRot;
+        private string _cachedSkeletonTrackPrefix = "";
+        private Godot.Animation _cachedTrackPrefixAnim;
 
         // Active State
         private Skeleton3D _skeleton;
@@ -385,17 +401,20 @@ namespace DeadlockPlayground.UI
 
             // Dope Sheet Nodes (inside instanced DopeSheetView)
             _boneSearch = FindSceneNode<LineEdit>("BoneSearch");
-            if (_boneSearch != null)
-            {
-            }
-            var lblSummary = FindSceneNode<Label>("LblSummaryRow");
-            if (lblSummary != null)
-            {
-                var fontColus = PlaygroundThemeHelper.GetFontColus();
-            }
             _boneListCanvas = FindSceneNode<BoneListCanvas>("BoneListCanvas");
             _boneListVScrollBar = FindSceneNode<VScrollBar>("BoneListVScrollBar");
             _dopeSheetCanvas = FindSceneNode<DopeSheetGridCanvas>("DopeSheetCanvas");
+
+            var boneHeaderPanel = FindSceneNode<PanelContainer>("BoneHeaderPanel");
+            if (boneHeaderPanel != null && _dopeSheetCanvas != null)
+            {
+                boneHeaderPanel.Resized += () =>
+                {
+                    if (boneHeaderPanel.Size.Y > 0f)
+                        _dopeSheetCanvas?.SyncHeaderHeight(boneHeaderPanel.Size.Y);
+                };
+                CallDeferred(MethodName.SyncDopeSheetHeaderAlignment);
+            }
 
             // Graph Editor Nodes (inside instanced GraphEditorView)
             _spinKeyFrame = FindSceneNode<SpinBox>("SpinKeyFrame");
@@ -469,6 +488,15 @@ namespace DeadlockPlayground.UI
             _btnBoneGizmoSpace = FindSceneNode<Button>("BtnBoneGizmoSpace") ?? GetNodeOrNull<Button>("%BtnBoneGizmoSpace");
             _btnToggleAdditiveOffsetMode = FindSceneNode<Button>("BtnToggleAdditiveOffsetMode") ?? GetNodeOrNull<Button>("%BtnToggleAdditiveOffsetMode");
             _btnApplyOffsetToAllFrames = FindSceneNode<Button>("BtnApplyOffsetToAllFrames") ?? GetNodeOrNull<Button>("%BtnApplyOffsetToAllFrames");
+        }
+
+        private void SyncDopeSheetHeaderAlignment()
+        {
+            var boneHeaderPanel = FindSceneNode<PanelContainer>("BoneHeaderPanel");
+            if (boneHeaderPanel != null && _dopeSheetCanvas != null && boneHeaderPanel.Size.Y > 0f)
+            {
+                _dopeSheetCanvas.SyncHeaderHeight(boneHeaderPanel.Size.Y);
+            }
         }
 
         private void InitDockIcons()
@@ -852,18 +880,36 @@ namespace DeadlockPlayground.UI
             // Bone Quick-Control Inspector
             if (_sliderBoneRotX != null)
             {
+                _sliderBoneRotX.DragStarted += () => _isBoneSliderDragging = true;
                 _sliderBoneRotX.ValueChanged += (v) => OnBoneSliderChanged(v, 0);
-                _sliderBoneRotX.DragEnded += (valChanged) => { if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip(); };
+                _sliderBoneRotX.DragEnded += (valChanged) =>
+                {
+                    _isBoneSliderDragging = false;
+                    if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip();
+                    else if (_isAutoKeyDragActive) CommitLiveAutoKeyDrag();
+                };
             }
             if (_sliderBoneRotY != null)
             {
+                _sliderBoneRotY.DragStarted += () => _isBoneSliderDragging = true;
                 _sliderBoneRotY.ValueChanged += (v) => OnBoneSliderChanged(v, 1);
-                _sliderBoneRotY.DragEnded += (valChanged) => { if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip(); };
+                _sliderBoneRotY.DragEnded += (valChanged) =>
+                {
+                    _isBoneSliderDragging = false;
+                    if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip();
+                    else if (_isAutoKeyDragActive) CommitLiveAutoKeyDrag();
+                };
             }
             if (_sliderBoneRotZ != null)
             {
+                _sliderBoneRotZ.DragStarted += () => _isBoneSliderDragging = true;
                 _sliderBoneRotZ.ValueChanged += (v) => OnBoneSliderChanged(v, 2);
-                _sliderBoneRotZ.DragEnded += (valChanged) => { if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip(); };
+                _sliderBoneRotZ.DragEnded += (valChanged) =>
+                {
+                    _isBoneSliderDragging = false;
+                    if (_isAdditiveClipOffsetMode && valChanged) ApplyCurrentBoneTweakToEntireClip();
+                    else if (_isAutoKeyDragActive) CommitLiveAutoKeyDrag();
+                };
             }
             if (_btnResetBonePose != null) _btnResetBonePose.Pressed += OnResetBonePosePressed;
             if (_btnDeselectBone != null) _btnDeselectBone.Pressed += () => SelectBone("");
@@ -1541,6 +1587,9 @@ namespace DeadlockPlayground.UI
             _activeAnimation = godotAnim;
             _activeAnimName = animName;
             _fps = fps > 0 ? fps : 30f;
+            _isAutoKeyDragActive = false;
+            _cachedTrackPrefixAnim = null;
+            _cachedSkeletonTrackPrefix = "";
 
             AnimationTransportService.Instance.Bind(_animPlayer, _skeleton, _activeAnimName, _fps);
 
@@ -2006,7 +2055,14 @@ namespace DeadlockPlayground.UI
             if (_isAutoKeyEnabled && !_isAdditiveClipOffsetMode)
             {
                 Vector3 curPos = _skeleton.GetBonePosePosition(boneIdx);
-                InsertKeyframeForBone(_selectedBoneName, curPos, newRot);
+                if (_isBoneSliderDragging)
+                {
+                    UpdateLiveAutoKeyForBone(_selectedBoneName, curPos, newRot);
+                }
+                else
+                {
+                    InsertKeyframeForBone(_selectedBoneName, curPos, newRot);
+                }
             }
         }
 
@@ -2132,8 +2188,8 @@ namespace DeadlockPlayground.UI
         {
             EmitSignal(SignalName.AnimationModified, _activeAnimName);
             UpdateTotalFramesLabel();
+            _dopeSheetCanvas?.RefreshFromAnimation();
             _graphEditorCanvas?.RebuildCurves();
-            _dopeSheetCanvas?.QueueRedraw();
             _graphEditorCanvas?.QueueRedraw();
             ScrubToTime(_currentTime);
         }
@@ -2142,8 +2198,7 @@ namespace DeadlockPlayground.UI
         {
             EmitSignal(SignalName.AnimationModified, _activeAnimName);
             UpdateTotalFramesLabel();
-            _dopeSheetCanvas?.RebuildTrackRows();
-            _dopeSheetCanvas?.QueueRedraw();
+            _dopeSheetCanvas?.RefreshFromAnimation();
             _graphEditorCanvas?.QueueRedraw();
             ScrubToTime(_currentTime);
         }
@@ -2152,15 +2207,25 @@ namespace DeadlockPlayground.UI
         {
             EmitSignal(SignalName.AnimationModified, _activeAnimName);
             UpdateTotalFramesLabel();
-            _dopeSheetCanvas?.RebuildTrackRows();
+            _dopeSheetCanvas?.RefreshFromAnimation();
             _graphEditorCanvas?.RebuildCurves();
-            _dopeSheetCanvas?.QueueRedraw();
             _graphEditorCanvas?.QueueRedraw();
             ScrubToTime(_currentTime);
         }
         #endregion
 
         #region Keyframe Insertion & Auto-Key
+        private string GetCachedSkeletonTrackPrefix()
+        {
+            if (_cachedTrackPrefixAnim == _activeAnimation && !string.IsNullOrEmpty(_cachedSkeletonTrackPrefix))
+            {
+                return _cachedSkeletonTrackPrefix;
+            }
+            _cachedSkeletonTrackPrefix = DeadlockPlayground.Tools.DeadlockAnimLoader.GetSkeletonTrackPathPrefix(_animPlayer, _skeleton);
+            _cachedTrackPrefixAnim = _activeAnimation;
+            return _cachedSkeletonTrackPrefix;
+        }
+
         public void InsertKeyframeForSelectedBone()
         {
             if (string.IsNullOrEmpty(_selectedBoneName) || _skeleton == null) return;
@@ -2176,22 +2241,133 @@ namespace DeadlockPlayground.UI
         {
             if (_activeAnimation == null || _skeleton == null) return;
 
-            string skelPath = DeadlockPlayground.Tools.DeadlockAnimLoader.GetSkeletonTrackPathPrefix(_animPlayer, _skeleton);
+            string skelPath = GetCachedSkeletonTrackPrefix();
             int posTrack = FindOrCreateTrack(Godot.Animation.TrackType.Position3D, $"{skelPath}:{boneName}");
             int rotTrack = FindOrCreateTrack(Godot.Animation.TrackType.Rotation3D, $"{skelPath}:{boneName}");
 
-            var cmdPos = new InsertKeyframeCommand(_activeAnimation, posTrack, _currentTime, pos);
-            var cmdRot = new InsertKeyframeCommand(_activeAnimation, rotTrack, _currentTime, rot);
+            var batch = new BatchAnimationCommand($"Key {boneName} at {_currentTime:F2}s", new IAnimationCommand[]
+            {
+                new InsertKeyframeCommand(_activeAnimation, posTrack, _currentTime, pos),
+                new InsertKeyframeCommand(_activeAnimation, rotTrack, _currentTime, rot)
+            });
 
-            _undoRedo.Execute(cmdPos);
-            _undoRedo.Execute(cmdRot);
+            // _undoRedo.Execute fires HistoryChanged -> OnCanvasKeyframesModified() once cleanly.
+            _undoRedo.Execute(batch);
+        }
 
-            _dopeSheetCanvas?.RebuildTrackRows();
-            _dopeSheetCanvas?.QueueRedraw();
-            _graphEditorCanvas?.RebuildCurves();
-            _graphEditorCanvas?.QueueRedraw();
+        /// <summary>
+        /// Updates the bone's Position/Rotation keyframes in-place during an interactive gizmo or slider drag
+        /// without pushing per-frame Undo entries or triggering heavy workspace disk serialization.
+        /// Call <see cref="CommitLiveAutoKeyDrag"/> when the drag ends to record a single Undo step.
+        /// </summary>
+        private void UpdateLiveAutoKeyForBone(string boneName, Vector3 pos, Quaternion rot)
+        {
+            if (_activeAnimation == null || _skeleton == null || string.IsNullOrEmpty(boneName)) return;
 
-            EmitSignal(SignalName.AnimationModified, _activeAnimName);
+            bool needsNewSession = !_isAutoKeyDragActive
+                || !string.Equals(_autoKeyDragBoneName, boneName, StringComparison.OrdinalIgnoreCase)
+                || Math.Abs(_autoKeyDragTime - _currentTime) > 1e-4;
+
+            if (needsNewSession)
+            {
+                if (_isAutoKeyDragActive)
+                {
+                    CommitLiveAutoKeyDrag();
+                }
+
+                string skelPath = GetCachedSkeletonTrackPrefix();
+                int prevTrackCount = _activeAnimation.GetTrackCount();
+                _autoKeyDragPosTrack = FindOrCreateTrack(Godot.Animation.TrackType.Position3D, $"{skelPath}:{boneName}");
+                _autoKeyDragRotTrack = FindOrCreateTrack(Godot.Animation.TrackType.Rotation3D, $"{skelPath}:{boneName}");
+                bool trackAdded = _activeAnimation.GetTrackCount() != prevTrackCount;
+
+                _autoKeyDragBoneName = boneName;
+                _autoKeyDragTime = _currentTime;
+
+                int existingPos = FindExactOrApproxKey(_autoKeyDragPosTrack, _currentTime);
+                _autoKeyDragHadPosKey = existingPos != -1;
+                _autoKeyDragOldPos = _autoKeyDragHadPosKey ? _activeAnimation.TrackGetKeyValue(_autoKeyDragPosTrack, existingPos) : default;
+
+                int existingRot = FindExactOrApproxKey(_autoKeyDragRotTrack, _currentTime);
+                _autoKeyDragHadRotKey = existingRot != -1;
+                _autoKeyDragOldRot = _autoKeyDragHadRotKey ? _activeAnimation.TrackGetKeyValue(_autoKeyDragRotTrack, existingRot) : default;
+
+                _isAutoKeyDragActive = true;
+
+                SetOrInsertKeyDirect(_autoKeyDragPosTrack, _currentTime, pos);
+                SetOrInsertKeyDirect(_autoKeyDragRotTrack, _currentTime, rot);
+                _autoKeyDragLastPos = pos;
+                _autoKeyDragLastRot = rot;
+
+                // Refresh only the affected bone's tracks on the first frame of the drag (shows new diamond immediately)
+                _dopeSheetCanvas?.InvalidateTracksAndRedraw(_autoKeyDragPosTrack, _autoKeyDragRotTrack, trackAdded || !_autoKeyDragHadPosKey || !_autoKeyDragHadRotKey);
+                return;
+            }
+
+            // Subsequent drag frames: pure O(1) in-place key value update, zero allocations / zero disk I/O
+            SetOrInsertKeyDirect(_autoKeyDragPosTrack, _autoKeyDragTime, pos);
+            SetOrInsertKeyDirect(_autoKeyDragRotTrack, _autoKeyDragTime, rot);
+            _autoKeyDragLastPos = pos;
+            _autoKeyDragLastRot = rot;
+        }
+
+        private void CommitLiveAutoKeyDrag()
+        {
+            if (!_isAutoKeyDragActive || _activeAnimation == null)
+            {
+                _isAutoKeyDragActive = false;
+                return;
+            }
+
+            _isAutoKeyDragActive = false;
+
+            var cmdPos = new InsertKeyframeCommand(
+                _activeAnimation,
+                _autoKeyDragPosTrack,
+                _autoKeyDragTime,
+                _autoKeyDragLastPos,
+                _autoKeyDragHadPosKey,
+                _autoKeyDragOldPos);
+
+            var cmdRot = new InsertKeyframeCommand(
+                _activeAnimation,
+                _autoKeyDragRotTrack,
+                _autoKeyDragTime,
+                _autoKeyDragLastRot,
+                _autoKeyDragHadRotKey,
+                _autoKeyDragOldRot);
+
+            var batch = new BatchAnimationCommand($"Auto-Key {_autoKeyDragBoneName} at {_autoKeyDragTime:F2}s", new IAnimationCommand[] { cmdPos, cmdRot });
+
+            // Keys are already applied in-place; record as one atomic Undo entry and trigger HistoryChanged once.
+            _undoRedo.RecordExecuted(batch);
+        }
+
+        private int FindExactOrApproxKey(int trackIdx, double time)
+        {
+            if (_activeAnimation == null || trackIdx < 0 || trackIdx >= _activeAnimation.GetTrackCount()) return -1;
+            int idx = _activeAnimation.TrackFindKey(trackIdx, time, Godot.Animation.FindMode.Approx);
+            if (idx != -1 && Math.Abs(_activeAnimation.TrackGetKeyTime(trackIdx, idx) - time) > 1e-4)
+            {
+                return -1;
+            }
+            return idx;
+        }
+
+        private void SetOrInsertKeyDirect(int trackIdx, double time, Vector3 value)
+        {
+            if (_activeAnimation == null || trackIdx < 0 || trackIdx >= _activeAnimation.GetTrackCount()) return;
+            int idx = FindExactOrApproxKey(trackIdx, time);
+            if (idx != -1) _activeAnimation.TrackSetKeyValue(trackIdx, idx, value);
+            else _activeAnimation.PositionTrackInsertKey(trackIdx, time, value);
+        }
+
+        private void SetOrInsertKeyDirect(int trackIdx, double time, Quaternion value)
+        {
+            if (_activeAnimation == null || trackIdx < 0 || trackIdx >= _activeAnimation.GetTrackCount()) return;
+            int idx = FindExactOrApproxKey(trackIdx, time);
+            if (idx != -1) _activeAnimation.TrackSetKeyValue(trackIdx, idx, value);
+            else _activeAnimation.RotationTrackInsertKey(trackIdx, time, value);
         }
 
         public void RecordBoneKeyframe(string boneName, Vector3 pos, Quaternion rot)
@@ -2210,7 +2386,19 @@ namespace DeadlockPlayground.UI
             }
             else if (_isAutoKeyEnabled)
             {
-                InsertKeyframeForBone(boneName, newPos, newRot);
+                if (_gizmoManager == null)
+                {
+                    _gizmoManager = GetTree()?.Root?.FindChild("SkeletonGizmoManager", true, false) as SkeletonGizmoManager;
+                }
+
+                if (_gizmoManager != null && _gizmoManager.IsGizmoDragging)
+                {
+                    UpdateLiveAutoKeyForBone(boneName, newPos, newRot);
+                }
+                else
+                {
+                    InsertKeyframeForBone(boneName, newPos, newRot);
+                }
             }
         }
 
@@ -2220,6 +2408,21 @@ namespace DeadlockPlayground.UI
             if (_isAdditiveClipOffsetMode)
             {
                 ApplyCurrentBoneTweakToEntireClip();
+            }
+            else if (_isAutoKeyDragActive)
+            {
+                if (boneIdx >= 0 && boneIdx < _skeleton.GetBoneCount())
+                {
+                    string boneName = _skeleton.GetBoneName(boneIdx);
+                    if (string.Equals(boneName, _autoKeyDragBoneName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        SetOrInsertKeyDirect(_autoKeyDragPosTrack, _autoKeyDragTime, pos);
+                        SetOrInsertKeyDirect(_autoKeyDragRotTrack, _autoKeyDragTime, rot);
+                        _autoKeyDragLastPos = pos;
+                        _autoKeyDragLastRot = rot;
+                    }
+                }
+                CommitLiveAutoKeyDrag();
             }
         }
 
@@ -2327,13 +2530,27 @@ namespace DeadlockPlayground.UI
 
         private void CommitAutoKeyForCurrentPose()
         {
-            if (!_isAutoKeyEnabled || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion()) return;
-            for (int i = 0; i < _skeleton.GetBoneCount(); i++)
+            if (!_isAutoKeyEnabled || _activeAnimation == null || _skeleton == null || !GodotObject.IsInstanceValid(_skeleton) || _skeleton.IsQueuedForDeletion()) return;
+
+            string skelPath = GetCachedSkeletonTrackPrefix();
+            int boneCount = _skeleton.GetBoneCount();
+            var commands = new List<IAnimationCommand>(boneCount * 2);
+
+            for (int i = 0; i < boneCount; i++)
             {
                 string bName = _skeleton.GetBoneName(i);
                 Vector3 p = _skeleton.GetBonePosePosition(i);
                 Quaternion r = _skeleton.GetBonePoseRotation(i);
-                InsertKeyframeForBone(bName, p, r);
+
+                int posTrack = FindOrCreateTrack(Godot.Animation.TrackType.Position3D, $"{skelPath}:{bName}");
+                int rotTrack = FindOrCreateTrack(Godot.Animation.TrackType.Rotation3D, $"{skelPath}:{bName}");
+                commands.Add(new InsertKeyframeCommand(_activeAnimation, posTrack, _currentTime, p));
+                commands.Add(new InsertKeyframeCommand(_activeAnimation, rotTrack, _currentTime, r));
+            }
+
+            if (commands.Count > 0)
+            {
+                _undoRedo.Execute(new BatchAnimationCommand($"Auto-Key Pose at {_currentTime:F2}s", commands));
             }
         }
 

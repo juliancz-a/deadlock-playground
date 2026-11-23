@@ -31,10 +31,27 @@ namespace DeadlockPlayground.Animation
         }
 
         // Layout Constants
-        public const float RulerHeight = 28f;
+        public const float DefaultRulerHeight = 28f;
         public const float SummaryRowHeight = 26f;
         public const float TrackRowHeight = 26f;
         public const float DiamondRadius = 5.5f;
+
+        // Dynamic ruler height synced with BoneHeaderPanel so Row 0..N never drift vertically
+        public float RulerHeight { get; private set; } = DefaultRulerHeight;
+
+        public void SyncHeaderHeight(float totalHeaderHeight)
+        {
+            float clampedRuler = Math.Max(20f, totalHeaderHeight - SummaryRowHeight);
+            if (Math.Abs(RulerHeight - clampedRuler) > 0.25f)
+            {
+                RulerHeight = clampedRuler;
+                if (_playheadOverlay != null)
+                {
+                    _playheadOverlay.TopY = RulerHeight;
+                }
+                QueueRedraw();
+            }
+        }
 
         // View State
         private double _currentTime = 0.0;
@@ -75,11 +92,15 @@ namespace DeadlockPlayground.Animation
         private Vector2 _dragStartMousePos = Vector2.Zero;
         private double _dragStartTime = 0.0;
         private double _dragDeltaTime = 0.0;
+        private bool _dragThresholdExceeded = false;
+        private List<SelectedKeyInfo> _pendingSingleSelectKeys = null;
         private Rect2 _boxSelectRect = default;
         private readonly Dictionary<SelectedKeyInfo, double> _keysInitialTimes = new();
         private double _scaleCenterTime = 0.0;
         private float _scaleFactor = 1.0f;
         private bool _isSnappingEnabled = true;
+        private const float DragThresholdPx = 3.0f;
+        private const float KeyHitRadiusX = 10.0f;
 
         public bool IsSnappingEnabled { get => _isSnappingEnabled; set => _isSnappingEnabled = value; }
 
@@ -115,6 +136,7 @@ namespace DeadlockPlayground.Animation
         public override void _Ready()
         {
             ClipContents = true;
+            FocusMode = FocusModeEnum.Click;
             GetDiamondTexture(); // Ensure diamond texture is initialized
 
             _playheadOverlay = new PlayheadOverlay();
@@ -212,6 +234,80 @@ namespace DeadlockPlayground.Animation
         {
             _filter = filter?.Trim().ToLowerInvariant() ?? "";
             RebuildTrackRows();
+            QueueRedraw();
+        }
+
+        /// <summary>
+        /// Rebuilds the internal keyframe cache from the active Godot.Animation, refreshes track rows,
+        /// reconciles selected keys, and queues a redraw. Must be called after Undo/Redo or external edits.
+        /// </summary>
+        public void RefreshFromAnimation()
+        {
+            if (_activeAnimation == null || !GodotObject.IsInstanceValid(_activeAnimation))
+            {
+                _selectedKeys.Clear();
+                UpdateSelectedKeySet();
+                QueueRedraw();
+                return;
+            }
+
+            _duration = Math.Max(0.01, _activeAnimation.Length);
+            _keyCache.InvalidateAll();
+            _keyCache.Rebuild(_skeleton);
+
+            // Preserve selected bone name across RebuildTrackRows
+            string prevSelectedBone = (_selectedTrackIdx >= 0 && _selectedTrackIdx < _trackRows.Count)
+                ? _trackRows[_selectedTrackIdx].BoneName
+                : null;
+
+            RebuildTrackRows();
+
+            if (!string.IsNullOrEmpty(prevSelectedBone))
+            {
+                SelectTrackByBone(prevSelectedBone);
+            }
+
+            // Reconcile _selectedKeys against the updated animation so stale keys don't linger after Undo/Redo
+            if (_selectedKeys.Count > 0)
+            {
+                for (int i = _selectedKeys.Count - 1; i >= 0; i--)
+                {
+                    var sk = _selectedKeys[i];
+                    if (sk.TrackIdx < 0 || sk.TrackIdx >= _activeAnimation.GetTrackCount())
+                    {
+                        _selectedKeys.RemoveAt(i);
+                        continue;
+                    }
+                    int found = _activeAnimation.TrackFindKey(sk.TrackIdx, sk.Time, Godot.Animation.FindMode.Approx);
+                    if (found == -1 || Math.Abs(_activeAnimation.TrackGetKeyTime(sk.TrackIdx, found) - sk.Time) > 1e-3)
+                    {
+                        _selectedKeys.RemoveAt(i);
+                    }
+                    else
+                    {
+                        sk.Time = _activeAnimation.TrackGetKeyTime(sk.TrackIdx, found);
+                        sk.Value = _activeAnimation.TrackGetKeyValue(sk.TrackIdx, found);
+                        sk.Transition = _activeAnimation.TrackGetKeyTransition(sk.TrackIdx, found);
+                    }
+                }
+                UpdateSelectedKeySet();
+            }
+
+            QueueRedraw();
+        }
+
+        /// <summary>
+        /// Lightweight O(1) cache invalidation for live Auto-Key updates during interactive gizmo/slider dragging.
+        /// </summary>
+        public void InvalidateTracksAndRedraw(int posTrack, int rotTrack, bool trackAdded = false)
+        {
+            if (trackAdded)
+            {
+                RefreshFromAnimation();
+                return;
+            }
+            if (posTrack >= 0) _keyCache.InvalidateTrack(posTrack);
+            if (rotTrack >= 0) _keyCache.InvalidateTrack(rotTrack);
             QueueRedraw();
         }
 
@@ -408,12 +504,12 @@ namespace DeadlockPlayground.Animation
 
             double offset = 1.0 / _fps;
             var newSelection = new List<SelectedKeyInfo>();
+            var commands = new List<IAnimationCommand>(_selectedKeys.Count);
 
             foreach (var k in _selectedKeys)
             {
                 double newTime = Math.Clamp(k.Time + offset, 0.0, _duration);
-                var cmd = new InsertKeyframeCommand(_activeAnimation, k.TrackIdx, newTime, k.Value, k.Transition);
-                if (_undoRedo != null) _undoRedo.Execute(cmd); else cmd.Execute();
+                commands.Add(new InsertKeyframeCommand(_activeAnimation, k.TrackIdx, newTime, k.Value, k.Transition));
 
                 newSelection.Add(new SelectedKeyInfo
                 {
@@ -424,15 +520,27 @@ namespace DeadlockPlayground.Animation
                 });
             }
 
-            _selectedKeys.Clear();
-            _selectedKeys.AddRange(newSelection);
-            UpdateSelectedKeySet();
-            _keyCache.InvalidateAll();
-            _keyCache.Rebuild(_skeleton);
-
-            EmitSignal(SignalName.KeyframesModified);
-            EmitSignal(SignalName.KeyframeSelectionChanged);
-            QueueRedraw();
+            var batch = new BatchAnimationCommand($"Duplicate {commands.Count} Keyframe(s)", commands);
+            if (_undoRedo != null)
+            {
+                _selectedKeys.Clear();
+                _selectedKeys.AddRange(newSelection);
+                UpdateSelectedKeySet();
+                _undoRedo.Execute(batch);
+                EmitSignal(SignalName.KeyframeSelectionChanged);
+            }
+            else
+            {
+                batch.Execute();
+                _selectedKeys.Clear();
+                _selectedKeys.AddRange(newSelection);
+                UpdateSelectedKeySet();
+                _keyCache.InvalidateAll();
+                _keyCache.Rebuild(_skeleton);
+                EmitSignal(SignalName.KeyframesModified);
+                EmitSignal(SignalName.KeyframeSelectionChanged);
+                QueueRedraw();
+            }
         }
 
         public override void _Draw()
@@ -602,14 +710,19 @@ namespace DeadlockPlayground.Animation
 
                 float centerY = rowY + TrackRowHeight * 0.5f;
 
-                // Draw Position keys
-                DrawTrackKeys(row.PosTrackIdx, centerY, visibleStartTime, visibleEndTime);
-                // Draw Rotation keys
-                DrawTrackKeys(row.RotTrackIdx, centerY, visibleStartTime, visibleEndTime);
+                // Draw unselected keys first, then selected keys on top so a selected key
+                // is never hidden behind an unselected Pos/Rot diamond at the same timestamp.
+                DrawTrackKeys(row.PosTrackIdx, centerY, visibleStartTime, visibleEndTime, drawSelectedPass: false);
+                DrawTrackKeys(row.RotTrackIdx, centerY, visibleStartTime, visibleEndTime, drawSelectedPass: false);
+                if (_selectedKeys.Count > 0)
+                {
+                    DrawTrackKeys(row.PosTrackIdx, centerY, visibleStartTime, visibleEndTime, drawSelectedPass: true);
+                    DrawTrackKeys(row.RotTrackIdx, centerY, visibleStartTime, visibleEndTime, drawSelectedPass: true);
+                }
             }
         }
 
-        private void DrawTrackKeys(int trackIdx, float centerY, double minTime, double maxTime)
+        private void DrawTrackKeys(int trackIdx, float centerY, double minTime, double maxTime, bool drawSelectedPass)
         {
             if (trackIdx < 0) return;
 
@@ -622,9 +735,12 @@ namespace DeadlockPlayground.Animation
 
             if (drawDensityStrip)
             {
-                float startX = XFromTime(times[startIdx]);
-                float endX = XFromTime(times[endIdx]);
-                DrawRect(new Rect2(startX, centerY - 2f, Math.Max(2f, endX - startX), 4f), ColorDiamondNormal * 0.6f);
+                if (!drawSelectedPass)
+                {
+                    float startX = XFromTime(times[startIdx]);
+                    float endX = XFromTime(times[endIdx]);
+                    DrawRect(new Rect2(startX, centerY - 2f, Math.Max(2f, endX - startX), 4f), ColorDiamondNormal * 0.6f);
+                }
                 return;
             }
 
@@ -632,7 +748,8 @@ namespace DeadlockPlayground.Animation
             for (int k = startIdx; k <= endIdx; k++)
             {
                 double t = times[k];
-                bool isSelected = _selectedKeySet.Contains(MakeKeyId(trackIdx, t, _fps));
+                bool isSelected = _selectedKeys.Count > 0 && _selectedKeySet.Contains(MakeKeyId(trackIdx, t, _fps));
+                if (isSelected != drawSelectedPass) continue;
 
                 float drawT = (float)t;
                 if (isSelected)
@@ -688,6 +805,10 @@ namespace DeadlockPlayground.Animation
             {
                 if (mb.Pressed)
                 {
+                    GrabFocus();
+                    _pendingSingleSelectKeys = null;
+                    _dragThresholdExceeded = false;
+
                     if (pos.Y <= RulerHeight)
                     {
                         _currentDragMode = DragMode.ScrubPlayhead;
@@ -699,35 +820,68 @@ namespace DeadlockPlayground.Animation
                     }
                     else
                     {
-                        var hitKey = HitTestKey(pos);
-                        if (hitKey != null)
+                        var hitKeys = HitTestKeys(pos, out int hitRowIdx);
+                        if (hitKeys.Count > 0)
                         {
-                            long hitId = MakeKeyId(hitKey.TrackIdx, hitKey.Time, _fps);
-                            if (!mb.ShiftPressed && !_selectedKeySet.Contains(hitId))
+                            // Also highlight the clicked bone row
+                            if (hitRowIdx >= 0 && hitRowIdx < _trackRows.Count && _selectedTrackIdx != hitRowIdx)
                             {
-                                _selectedKeys.Clear();
+                                _selectedTrackIdx = hitRowIdx;
+                                EmitSignal(SignalName.TrackSelected, hitRowIdx, _trackRows[hitRowIdx].BoneName);
                             }
 
-                            if (mb.ShiftPressed && _selectedKeySet.Contains(hitId))
+                            bool allAlreadySelected = hitKeys.All(hk => _selectedKeySet.Contains(MakeKeyId(hk.TrackIdx, hk.Time, _fps)));
+
+                            if (mb.ShiftPressed)
                             {
-                                _selectedKeys.RemoveAll(k => k.TrackIdx == hitKey.TrackIdx && Math.Abs(k.Time - hitKey.Time) < 0.001);
+                                if (allAlreadySelected)
+                                {
+                                    foreach (var hk in hitKeys)
+                                    {
+                                        long hkId = MakeKeyId(hk.TrackIdx, hk.Time, _fps);
+                                        _selectedKeys.RemoveAll(k => MakeKeyId(k.TrackIdx, k.Time, _fps) == hkId);
+                                    }
+                                }
+                                else
+                                {
+                                    foreach (var hk in hitKeys)
+                                    {
+                                        long hkId = MakeKeyId(hk.TrackIdx, hk.Time, _fps);
+                                        if (!_selectedKeySet.Contains(hkId))
+                                        {
+                                            _selectedKeys.Add(hk);
+                                        }
+                                    }
+                                }
                             }
                             else
                             {
-                                _selectedKeys.Add(hitKey);
+                                if (!allAlreadySelected)
+                                {
+                                    _selectedKeys.Clear();
+                                    _selectedKeys.AddRange(hitKeys);
+                                }
+                                else if (_selectedKeys.Count > hitKeys.Count)
+                                {
+                                    // Keep multi-selection for potential drag; narrow to clicked key on click-release without drag
+                                    _pendingSingleSelectKeys = hitKeys;
+                                }
                             }
 
                             UpdateSelectedKeySet();
                             EmitSignal(SignalName.KeyframeSelectionChanged);
 
-                            _currentDragMode = DragMode.DragKeys;
-                            _dragStartMousePos = pos;
-                            _dragStartTime = TimeFromX(pos.X);
-                            _dragDeltaTime = 0.0;
-                            _keysInitialTimes.Clear();
-                            foreach (var k in _selectedKeys)
+                            if (_selectedKeys.Count > 0)
                             {
-                                _keysInitialTimes[k] = k.Time;
+                                _currentDragMode = DragMode.DragKeys;
+                                _dragStartMousePos = pos;
+                                _dragStartTime = TimeFromX(pos.X);
+                                _dragDeltaTime = 0.0;
+                                _keysInitialTimes.Clear();
+                                foreach (var k in _selectedKeys)
+                                {
+                                    _keysInitialTimes[k] = k.Time;
+                                }
                             }
                             QueueRedraw();
                         }
@@ -761,7 +915,18 @@ namespace DeadlockPlayground.Animation
                 {
                     if (_currentDragMode == DragMode.DragKeys)
                     {
-                        CommitKeyMoves();
+                        if (!_dragThresholdExceeded && _pendingSingleSelectKeys != null)
+                        {
+                            // User clicked an already-selected key within a multi-selection without dragging -> select just that key
+                            _selectedKeys.Clear();
+                            _selectedKeys.AddRange(_pendingSingleSelectKeys);
+                            UpdateSelectedKeySet();
+                            EmitSignal(SignalName.KeyframeSelectionChanged);
+                        }
+                        else
+                        {
+                            CommitKeyMoves();
+                        }
                     }
                     else if (_currentDragMode == DragMode.ScaleKeys)
                     {
@@ -773,6 +938,8 @@ namespace DeadlockPlayground.Animation
                     }
                     _currentDragMode = DragMode.None;
                     _dragDeltaTime = 0.0;
+                    _dragThresholdExceeded = false;
+                    _pendingSingleSelectKeys = null;
                     _scaleFactor = 1.0f;
                     QueueRedraw();
                 }
@@ -872,6 +1039,11 @@ namespace DeadlockPlayground.Animation
             }
             else if (_currentDragMode == DragMode.DragKeys && _activeAnimation != null)
             {
+                if (!_dragThresholdExceeded && pos.DistanceTo(_dragStartMousePos) < DragThresholdPx)
+                {
+                    return;
+                }
+                _dragThresholdExceeded = true;
                 double currentMouseT = TimeFromX(pos.X);
                 double deltaT = currentMouseT - _dragStartTime;
                 if (_isSnappingEnabled)
@@ -894,24 +1066,40 @@ namespace DeadlockPlayground.Animation
                 _scaleFactor = Mathf.Clamp(scale, 0.05f, 20f);
                 QueueRedraw();
             }
-            else if (_currentDragMode == DragMode.None && pos.Y >= RulerHeight + SummaryRowHeight)
+            else if (_currentDragMode == DragMode.None)
             {
-                float relY = pos.Y - (RulerHeight + SummaryRowHeight) + _scrollY;
-                int trackIdx = (int)Math.Floor(relY / TrackRowHeight);
-                if (trackIdx >= 0 && trackIdx < _trackRows.Count)
+                if (pos.Y >= RulerHeight + SummaryRowHeight)
                 {
-                    if (_hoveredTrackIdx != trackIdx)
+                    float relY = pos.Y - (RulerHeight + SummaryRowHeight) + _scrollY;
+                    int trackIdx = (int)Math.Floor(relY / TrackRowHeight);
+                    if (trackIdx >= 0 && trackIdx < _trackRows.Count)
                     {
-                        _hoveredTrackIdx = trackIdx;
-                        EmitSignal(SignalName.TrackHovered, trackIdx, _trackRows[trackIdx].BoneName);
+                        if (_hoveredTrackIdx != trackIdx)
+                        {
+                            _hoveredTrackIdx = trackIdx;
+                            EmitSignal(SignalName.TrackHovered, trackIdx, _trackRows[trackIdx].BoneName);
+                            QueueRedraw();
+                        }
+                    }
+                    else if (_hoveredTrackIdx != -1)
+                    {
+                        _hoveredTrackIdx = -1;
+                        EmitSignal(SignalName.TrackHovered, -1, "");
                         QueueRedraw();
                     }
+
+                    bool overKey = HasKeyNear(pos);
+                    MouseDefaultCursorShape = overKey ? CursorShape.Move : CursorShape.Arrow;
                 }
-                else if (_hoveredTrackIdx != -1)
+                else
                 {
-                    _hoveredTrackIdx = -1;
-                    EmitSignal(SignalName.TrackHovered, -1, "");
-                    QueueRedraw();
+                    if (_hoveredTrackIdx != -1)
+                    {
+                        _hoveredTrackIdx = -1;
+                        EmitSignal(SignalName.TrackHovered, -1, "");
+                        QueueRedraw();
+                    }
+                    MouseDefaultCursorShape = pos.Y <= RulerHeight ? CursorShape.Hsize : CursorShape.Arrow;
                 }
             }
         }
@@ -950,21 +1138,50 @@ namespace DeadlockPlayground.Animation
             }
         }
 
-        private SelectedKeyInfo HitTestKey(Vector2 mousePos)
+        private bool HasKeyNear(Vector2 mousePos)
         {
-            if (_activeAnimation == null) return null;
+            if (_activeAnimation == null) return false;
             float relY = mousePos.Y - (RulerHeight + SummaryRowHeight) + _scrollY;
             int rowIdx = (int)Math.Floor(relY / TrackRowHeight);
-            if (rowIdx < 0 || rowIdx >= _trackRows.Count) return null;
+            if (rowIdx < 0 || rowIdx >= _trackRows.Count) return false;
 
             var row = _trackRows[rowIdx];
-            float centerY = (RulerHeight + SummaryRowHeight - _scrollY) + rowIdx * TrackRowHeight + TrackRowHeight * 0.5f;
-            if (Math.Abs(mousePos.Y - centerY) > DiamondRadius + 3f) return null;
-
             double mouseTime = TimeFromX(mousePos.X);
-            double hitTolerance = (DiamondRadius + 3f) / _pixelsPerSecond;
+            double hitTolerance = KeyHitRadiusX / _pixelsPerSecond;
 
             int[] tracks = [row.PosTrackIdx, row.RotTrackIdx];
+            foreach (int t in tracks)
+            {
+                if (t < 0 || t >= _activeAnimation.GetTrackCount()) continue;
+                var (startK, endK) = _keyCache.GetVisibleKeyRange(t, mouseTime - hitTolerance, mouseTime + hitTolerance);
+                if (startK <= endK) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Hit-tests a bone row and returns ALL keys (both Position and Rotation) at the closest frame
+        /// under the cursor, so clicking an individual bone keyframe selects and moves the full bone key cleanly.
+        /// </summary>
+        private List<SelectedKeyInfo> HitTestKeys(Vector2 mousePos, out int hitRowIdx)
+        {
+            var results = new List<SelectedKeyInfo>();
+            hitRowIdx = -1;
+            if (_activeAnimation == null) return results;
+
+            float relY = mousePos.Y - (RulerHeight + SummaryRowHeight) + _scrollY;
+            int rowIdx = (int)Math.Floor(relY / TrackRowHeight);
+            if (rowIdx < 0 || rowIdx >= _trackRows.Count) return results;
+
+            var row = _trackRows[rowIdx];
+            double mouseTime = TimeFromX(mousePos.X);
+            double hitTolerance = KeyHitRadiusX / _pixelsPerSecond;
+
+            // 1. Find the closest key timestamp across Pos & Rot tracks on this row
+            double bestTime = double.NaN;
+            float bestDistPx = float.MaxValue;
+            int[] tracks = [row.PosTrackIdx, row.RotTrackIdx];
+
             foreach (int t in tracks)
             {
                 if (t < 0 || t >= _activeAnimation.GetTrackCount()) continue;
@@ -974,35 +1191,74 @@ namespace DeadlockPlayground.Animation
                 var times = _keyCache.GetTrackTimes(t);
                 for (int k = startK; k <= endK; k++)
                 {
-                    double time = times[k];
-                    float x = XFromTime(time);
-                    if (Math.Abs(mousePos.X - x) <= DiamondRadius + 3f)
+                    float distPx = Math.Abs(mousePos.X - XFromTime(times[k]));
+                    if (distPx <= KeyHitRadiusX && distPx < bestDistPx)
                     {
-                        return new SelectedKeyInfo
-                        {
-                            TrackIdx = t,
-                            Time = time,
-                            Value = _activeAnimation.TrackGetKeyValue(t, k),
-                            Transition = _activeAnimation.TrackGetKeyTransition(t, k)
-                        };
+                        bestDistPx = distPx;
+                        bestTime = times[k];
                     }
                 }
             }
 
-            return null;
+            if (double.IsNaN(bestTime)) return results;
+
+            // 2. Collect all keys on this bone row at that same frame (Pos + Rot)
+            hitRowIdx = rowIdx;
+            double frameTol = 0.45 / _fps;
+            foreach (int t in tracks)
+            {
+                if (t < 0 || t >= _activeAnimation.GetTrackCount()) continue;
+                var (startK, endK) = _keyCache.GetVisibleKeyRange(t, bestTime - frameTol, bestTime + frameTol);
+                if (startK > endK) continue;
+
+                var times = _keyCache.GetTrackTimes(t);
+                for (int k = startK; k <= endK; k++)
+                {
+                    results.Add(new SelectedKeyInfo
+                    {
+                        TrackIdx = t,
+                        Time = times[k],
+                        Value = _activeAnimation.TrackGetKeyValue(t, k),
+                        Transition = _activeAnimation.TrackGetKeyTransition(t, k)
+                    });
+                }
+            }
+
+            return results;
         }
 
         private void HandleSummaryRowClick(Vector2 pos, bool isShift)
         {
             if (_activeAnimation == null) return;
             double clickT = TimeFromX(pos.X);
-            double frameSnap = 1.0 / _fps;
-            double snappedT = Math.Round(clickT / frameSnap) * frameSnap;
+            double hitTol = KeyHitRadiusX / _pixelsPerSecond;
 
+            // Find closest summary diamond within hit tolerance
+            var (sumStart, sumEnd) = _keyCache.GetVisibleSummaryRange(clickT - hitTol, clickT + hitTol);
+            double targetTime = double.NaN;
+            float bestDistPx = float.MaxValue;
+            var summaryTimes = _keyCache.SummaryTimes;
+            for (int i = sumStart; i <= sumEnd; i++)
+            {
+                float distPx = Math.Abs(pos.X - XFromTime(summaryTimes[i]));
+                if (distPx <= KeyHitRadiusX && distPx < bestDistPx)
+                {
+                    bestDistPx = distPx;
+                    targetTime = summaryTimes[i];
+                }
+            }
+
+            if (double.IsNaN(targetTime))
+            {
+                SetPlayheadFromMouseX(pos.X);
+                return;
+            }
+
+            double frameTol = 0.45 / _fps;
             var keysAtFrame = new List<SelectedKeyInfo>();
             for (int t = 0; t < _activeAnimation.GetTrackCount(); t++)
             {
-                var (startK, endK) = _keyCache.GetVisibleKeyRange(t, snappedT - frameSnap * 0.45, snappedT + frameSnap * 0.45);
+                var (startK, endK) = _keyCache.GetVisibleKeyRange(t, targetTime - frameTol, targetTime + frameTol);
                 if (startK > endK) continue;
                 var times = _keyCache.GetTrackTimes(t);
                 for (int k = startK; k <= endK; k++)
@@ -1020,12 +1276,24 @@ namespace DeadlockPlayground.Animation
             if (keysAtFrame.Count > 0)
             {
                 if (!isShift) _selectedKeys.Clear();
-                _selectedKeys.AddRange(keysAtFrame);
+                UpdateSelectedKeySet();
+
+                foreach (var k in keysAtFrame)
+                {
+                    long id = MakeKeyId(k.TrackIdx, k.Time, _fps);
+                    if (!_selectedKeySet.Contains(id))
+                    {
+                        _selectedKeys.Add(k);
+                        _selectedKeySet.Add(id);
+                    }
+                }
+
                 UpdateSelectedKeySet();
                 _currentDragMode = DragMode.DragKeys;
                 _dragStartMousePos = pos;
-                _dragStartTime = snappedT;
+                _dragStartTime = targetTime;
                 _dragDeltaTime = 0.0;
+                _dragThresholdExceeded = false;
                 _keysInitialTimes.Clear();
                 foreach (var k in _selectedKeys) _keysInitialTimes[k] = k.Time;
                 EmitSignal(SignalName.KeyframeSelectionChanged);
@@ -1060,18 +1328,16 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            if (moves.Count > 0)
-            {
-                var cmd = new MoveKeyframesCommand(_activeAnimation, moves);
-                _undoRedo.Execute(cmd);
-                _keyCache.InvalidateAll();
-                _keyCache.Rebuild(_skeleton);
-                UpdateSelectedKeySet();
-                EmitSignal(SignalName.KeyframesModified);
-            }
-
             _dragDeltaTime = 0.0;
             _keysInitialTimes.Clear();
+
+            if (moves.Count > 0)
+            {
+                UpdateSelectedKeySet();
+                var cmd = new MoveKeyframesCommand(_activeAnimation, moves);
+                // _undoRedo.Execute fires HistoryChanged -> AnimationStudioDock.OnCanvasKeyframesModified -> RefreshFromAnimation()
+                _undoRedo.Execute(cmd);
+            }
         }
 
         private void CommitKeyScales()
@@ -1101,18 +1367,15 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            if (moves.Count > 0)
-            {
-                var cmd = new MoveKeyframesCommand(_activeAnimation, moves);
-                _undoRedo.Execute(cmd);
-                _keyCache.InvalidateAll();
-                _keyCache.Rebuild(_skeleton);
-                UpdateSelectedKeySet();
-                EmitSignal(SignalName.KeyframesModified);
-            }
-
             _scaleFactor = 1.0f;
             _keysInitialTimes.Clear();
+
+            if (moves.Count > 0)
+            {
+                UpdateSelectedKeySet();
+                var cmd = new MoveKeyframesCommand(_activeAnimation, moves);
+                _undoRedo.Execute(cmd);
+            }
         }
 
         private void CommitBoxSelection()

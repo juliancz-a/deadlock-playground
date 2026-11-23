@@ -116,6 +116,10 @@ public sealed class MaterialChannelSet
     public string MaterialKey { get; set; } = "";
     public string OriginalVmatPath { get; set; } = "";
     public string MaterialStem { get; set; } = "";
+    public bool IsSourceTranslucent { get; set; } = false;
+    public bool IsSourceAlphaTest { get; set; } = false;
+    public float SourceAlphaCutoff { get; set; } = 0.5f;
+    public bool IsSourceDoubleSided { get; set; } = false;
 
     public Dictionary<MaterialTextureChannel, ChannelMapEntry> Channels { get; } = new();
 
@@ -322,6 +326,11 @@ public sealed class GlbMaterialSlotInfo
 {
     public int MaterialIndex { get; init; }
     public string MaterialName { get; init; } = "";
+    public string AlphaMode { get; init; } = "OPAQUE";
+    public float AlphaCutoff { get; init; } = 0.5f;
+    public bool DoubleSided { get; init; } = false;
+    public int BaseColorTexCoord { get; init; } = 0;
+
     public string BaseColorImageName { get; init; } = "";
     public string NormalImageName { get; init; } = "";
     public string OcclusionImageName { get; init; } = "";
@@ -456,12 +465,22 @@ public static class MaterialChannelDiscovery
                 foreach (var matEl in matsEl.EnumerateArray())
                 {
                     string mName = matEl.TryGetProperty("name", out var mn) ? mn.GetString() ?? "" : "";
+                    string alphaMode = matEl.TryGetProperty("alphaMode", out var am) ? am.GetString() ?? "OPAQUE" : "OPAQUE";
+                    float alphaCutoff = matEl.TryGetProperty("alphaCutoff", out var ac) && ac.TryGetSingle(out float acVal) ? acVal : 0.5f;
+                    bool doubleSided = matEl.TryGetProperty("doubleSided", out var ds) && ds.ValueKind == JsonValueKind.True;
                     int baseIdx = -1;
+                    int baseTexCoord = 0;
                     int mrIdx = -1;
 
                     if (matEl.TryGetProperty("pbrMetallicRoughness", out var pbrEl))
                     {
                         baseIdx = ResolveTexImageIndex(pbrEl, "baseColorTexture");
+                        if (pbrEl.TryGetProperty("baseColorTexture", out var bcTexEl) &&
+                            bcTexEl.TryGetProperty("texCoord", out var tcEl) &&
+                            tcEl.TryGetInt32(out int tcVal))
+                        {
+                            baseTexCoord = tcVal;
+                        }
                         mrIdx = ResolveTexImageIndex(pbrEl, "metallicRoughnessTexture");
                     }
 
@@ -473,6 +492,10 @@ public static class MaterialChannelDiscovery
                     {
                         MaterialIndex = mIdx,
                         MaterialName = mName,
+                        AlphaMode = alphaMode,
+                        AlphaCutoff = alphaCutoff,
+                        DoubleSided = doubleSided,
+                        BaseColorTexCoord = baseTexCoord,
                         BaseColorImageIndex = baseIdx,
                         NormalImageIndex = normIdx,
                         OcclusionImageIndex = occIdx,
@@ -1453,6 +1476,17 @@ public static class MaterialChannelDiscovery
 
         StandardMaterial3D std = mat as StandardMaterial3D;
         ShaderMaterial shaderMat = mat as ShaderMaterial;
+
+        bool glbBlend = string.Equals(glbSlot?.AlphaMode, "BLEND", StringComparison.OrdinalIgnoreCase);
+        bool glbMask = string.Equals(glbSlot?.AlphaMode, "MASK", StringComparison.OrdinalIgnoreCase);
+        set.IsSourceTranslucent = glbBlend || (std != null && std.Transparency == BaseMaterial3D.TransparencyEnum.Alpha);
+        set.IsSourceAlphaTest = glbMask || (std != null && (std.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
+                                                            std.Transparency == BaseMaterial3D.TransparencyEnum.AlphaHash));
+        set.SourceAlphaCutoff = glbSlot != null && glbMask
+            ? glbSlot.AlphaCutoff
+            : (std != null && std.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ? std.AlphaScissorThreshold : 0.5f);
+        set.IsSourceDoubleSided = (glbSlot != null && glbSlot.DoubleSided) ||
+                                  (std != null && std.CullMode == BaseMaterial3D.CullModeEnum.Disabled);
 
         ImageTexture ToImageTex(Godot.Texture t, string fallbackName = "")
         {

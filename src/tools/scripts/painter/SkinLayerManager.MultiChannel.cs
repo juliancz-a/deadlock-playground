@@ -64,12 +64,8 @@ public partial class SkinLayerManager : Node
                         return sub.Channels;
                     }
                     string subKey = GetMaterialKey(sub.Mesh, sub.SurfaceIndex);
-                    string targetStem = ExtractMaterialStem(cleanBase);
-                    if (string.Equals(subKey, cleanBase, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(sub.OriginalVmatPath, cleanBase, StringComparison.OrdinalIgnoreCase) ||
-                        (!string.IsNullOrEmpty(targetStem) &&
-                         (string.Equals(ExtractMaterialStem(subKey), targetStem, StringComparison.Ordinal) ||
-                          string.Equals(ExtractMaterialStem(sub.OriginalVmatPath), targetStem, StringComparison.Ordinal))))
+                    if (AreMaterialKeysEquivalent(subKey, cleanBase) ||
+                        AreMaterialKeysEquivalent(sub.OriginalVmatPath, cleanBase))
                     {
                         return sub.Channels;
                     }
@@ -77,11 +73,9 @@ public partial class SkinLayerManager : Node
             }
             if (!string.IsNullOrEmpty(cleanBase))
             {
-                string targetStem = ExtractMaterialStem(cleanBase);
                 foreach (var g in MeshHierarchy.MaterialGroups)
                 {
-                    if (string.Equals(g.MaterialKey, cleanBase, StringComparison.OrdinalIgnoreCase) ||
-                        (!string.IsNullOrEmpty(targetStem) && string.Equals(ExtractMaterialStem(g.MaterialKey), targetStem, StringComparison.Ordinal)))
+                    if (AreMaterialKeysEquivalent(g.MaterialKey, cleanBase))
                     {
                         if (g.Channels != null) return g.Channels;
                         foreach (var s in g.Submeshes)
@@ -98,11 +92,8 @@ public partial class SkinLayerManager : Node
                 {
                     if (s?.Channels == null || s.Mesh == null) continue;
                     string sKey = GetMaterialKey(s.Mesh, s.SurfaceIndex);
-                    if (string.Equals(sKey, cleanBase, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(s.OriginalVmatPath, cleanBase, StringComparison.OrdinalIgnoreCase) ||
-                        (!string.IsNullOrEmpty(targetStem) &&
-                         (string.Equals(ExtractMaterialStem(sKey), targetStem, StringComparison.Ordinal) ||
-                          string.Equals(ExtractMaterialStem(s.OriginalVmatPath), targetStem, StringComparison.Ordinal))))
+                    if (AreMaterialKeysEquivalent(sKey, cleanBase) ||
+                        AreMaterialKeysEquivalent(s.OriginalVmatPath, cleanBase))
                     {
                         return s.Channels;
                     }
@@ -665,16 +656,12 @@ public partial class SkinLayerManager : Node
 
         if (MeshHierarchy != null)
         {
-            string targetStem = ExtractMaterialStem(baseMatKey);
             foreach (var sub in MeshHierarchy.Submeshes)
             {
                 if (sub?.Mesh == null || !GodotObject.IsInstanceValid(sub.Mesh)) continue;
                 string subKey = GetMaterialKey(sub.Mesh, sub.SurfaceIndex);
-                if (!string.Equals(subKey, baseMatKey, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(sub.OriginalVmatPath, baseMatKey, StringComparison.OrdinalIgnoreCase) &&
-                    (string.IsNullOrEmpty(targetStem) ||
-                     (!string.Equals(ExtractMaterialStem(subKey), targetStem, StringComparison.Ordinal) &&
-                      !string.Equals(ExtractMaterialStem(sub.OriginalVmatPath), targetStem, StringComparison.Ordinal))))
+                if (!AreMaterialKeysEquivalent(subKey, baseMatKey) &&
+                    !AreMaterialKeysEquivalent(sub.OriginalVmatPath, baseMatKey))
                 {
                     continue;
                 }

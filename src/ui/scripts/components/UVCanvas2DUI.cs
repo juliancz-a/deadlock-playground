@@ -1204,9 +1204,13 @@ namespace DeadlockPlayground.UI
                         {
                             _baseTextureRect.Material = _baseTextureMat;
                         }
+                        // In Source 2 Deadlock, g_tColor.a often stores Metalness (0 on non-metallic cloth/plastics)
+                        // rather than transparency. Only preview base alpha transparency in the 2D canvas when
+                        // alpha transparency / base-alpha erasing is explicitly active; otherwise render opaque RGB.
+                        bool previewAlpha = _layerManager != null && (_layerManager.EnableAlphaTransparency || _layerManager.HasBaseAlphaEdits);
                         _baseTextureMat?.SetShaderParameter("texture_base", baseTex);
                         _baseTextureMat?.SetShaderParameter("show_alpha_mask", _showAlphaMask);
-                        _baseTextureMat?.SetShaderParameter("preview_transparency", true);
+                        _baseTextureMat?.SetShaderParameter("preview_transparency", previewAlpha);
                     }
                     else
                     {
@@ -1241,7 +1245,8 @@ namespace DeadlockPlayground.UI
                         {
                             var activeLayer = _layerManager.ActiveLayer;
                             bool activeVisible = !_layerManager.IsBaseTextureActive && (activeLayer?.IsVisible ?? true);
-                            bool clipActive = (_layerManager.PreserveBaseAlpha || (!_layerManager.IsBaseTextureActive && (activeLayer?.ClipToBaseAlpha ?? false))) && liveBaseTex != null;
+                            bool baseHasExplicitAlpha = _layerManager.EnableAlphaTransparency || _layerManager.HasBaseAlphaEdits;
+                            bool clipActive = ((_layerManager.PreserveBaseAlpha && baseHasExplicitAlpha) || (!_layerManager.IsBaseTextureActive && (activeLayer?.ClipToBaseAlpha ?? false))) && liveBaseTex != null;
                             _paintOverlayMat.SetShaderParameter("show_alpha_mask", _showAlphaMask);
                             _paintOverlayMat.SetShaderParameter("use_live_layers", true);
                             _paintOverlayMat.SetShaderParameter("below_texture", belowTex);
