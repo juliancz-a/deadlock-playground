@@ -1481,6 +1481,27 @@ namespace DeadlockPlayground.UI
             _secondaryLabels.Add(_lblMemoryStatus);
             footerHBox.AddChild(_lblMemoryStatus);
 
+            var btnToggleLight = new Button
+            {
+                Text = ImporterMemoryGuard.LightMode ? "Light: ON" : "Light",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = ImporterMemoryGuard.LightMode,
+                CustomMinimumSize = new Vector2(72, 34),
+                TooltipText = "Toggle Light Mode (reduces preview resolution and switches rig updates to manual to save RAM)"
+            };
+            ImporterStyle.ApplyFontSize(btnToggleLight, ImporterStyle.FontHint);
+            btnToggleLight.Toggled += (on) =>
+            {
+                ImporterMemoryGuard.LightMode = on;
+                btnToggleLight.Text = on ? "Light: ON" : "Light";
+                if (_subViewport != null) _subViewport.Msaa3D = on ? Viewport.Msaa.Disabled : Viewport.Msaa.Msaa2X;
+                if (_subViewportContainer != null) _subViewportContainer.StretchShrink = on ? 2 : 1;
+                if (_btnManualRigUpdate != null) _btnManualRigUpdate.Visible = on;
+                UpdateFooterMemoryIndicator();
+            };
+            footerHBox.AddChild(btnToggleLight);
+
             _btnToggleConsole = new Button
             {
                 Text = "Console",
@@ -2033,6 +2054,9 @@ namespace DeadlockPlayground.UI
             string fileName = Path.GetFileName(filePath);
             _lblFileBadge.Text = $"File: {fileName}";
             _lblFileBadge.TooltipText = filePath ?? fileName;
+            DeadlockPlayground.Core.SessionCrashGuard.RecordBreadcrumb(
+                $"Opened importer: {fileName} ({_workflowIntent})",
+                activeHeroId: _heroCodename);
             AppendConsoleMessage($"Opening importer for '{fileName}' (intent={_workflowIntent}, LightMode={ImporterMemoryGuard.LightMode})");
 
             if (_liveImportedScene == null || _liveHeroNode == null)
@@ -3262,8 +3286,11 @@ namespace DeadlockPlayground.UI
                 string lower = cName.ToLowerInvariant();
 
                 if (cType.Contains("SkeletonGizmo") || cType.Contains("BoneLayer") || cType.Contains("CharacterIK") ||
-                    cName.StartsWith("@") || lower.Contains("gizmo") || lower.Contains("picker") ||
-                    lower.Contains("handle") || lower.Contains("tipvisual") || lower.Contains("polevisual") ||
+                    cName.StartsWith("@") || (child is BoneAttachment3D && cName.StartsWith("Pick_", StringComparison.Ordinal)) ||
+                    lower.Contains("gizmo") || lower.Contains("bonepicker") ||
+                    lower.Contains("pickerhandle") || lower.Contains("pickerarea") || lower.Contains("pickershape") ||
+                    lower.Contains("ikhandle") || lower.Contains("bonehandle") || lower.Contains("resizehandle") ||
+                    lower.Contains("tipvisual") || lower.Contains("polevisual") ||
                     lower == "customjigglebonedriver" || lower == "source2boneconstraintdriver")
                 {
                     toRemove.Add(child);
@@ -4674,7 +4701,7 @@ namespace DeadlockPlayground.UI
                     {
                         Text = "×",
                         CustomMinimumSize = new Vector2(24, 24),
-                        TooltipText = "Disable mapped source bone (collapses weights to parent bone). Or right-click a bone in 3D viewport."
+                        TooltipText = "Clear / unmap this bone slot (sets it back to [ None / Auto-Collapse ])"
                     };
                     row.AddChild(optBone);
                     row.AddChild(lblRowStatus);
@@ -4699,13 +4726,21 @@ namespace DeadlockPlayground.UI
 
                     btnDisableSlot.Pressed += () =>
                     {
-                        if (_userBoneRemap.TryGetValue(entry.CanonicalName, out string curSrc) && !string.IsNullOrEmpty(curSrc))
+                        _userBoneRemap.Remove(entry.CanonicalName);
+                        _isUpdatingBoneDropdowns = true;
+                        try
                         {
-                            if (!_disabledSourceBones.Add(curSrc)) _disabledSourceBones.Remove(curSrc);
-                            RefreshDisabledBonesList();
-                            ApplyBoneMappingFilter();
-                            MarkRemapStaleAndRefresh();
+                            entry.BoneDropdown.Select(0);
+                            entry.BoneDropdown.TooltipText = "Unmapped (auto-collapses to parent bone)";
                         }
+                        finally
+                        {
+                            _isUpdatingBoneDropdowns = false;
+                        }
+                        UpdateBoneMappingValidationBadges();
+                        RefreshBoneTabDiffSummary();
+                        ApplyBoneMappingFilter();
+                        MarkRemapStaleAndRefresh();
                     };
 
                     optBone.ItemSelected += (long itemIdx) =>
@@ -4724,6 +4759,8 @@ namespace DeadlockPlayground.UI
                             _userBoneRemap.Remove(entry.CanonicalName);
                             optBone.TooltipText = "Unmapped (auto-collapses to parent bone)";
                         }
+                        UpdateBoneMappingValidationBadges();
+                        RefreshBoneTabDiffSummary();
                         ApplyBoneMappingFilter();
                         MarkRemapStaleAndRefresh();
                     };
@@ -7011,6 +7048,7 @@ namespace DeadlockPlayground.UI
             // Raycast against all triangles of active imported meshes to find front & back hits,
             // then place the joint cleanly at the midpoint depth inside the limb!
             var meshes = FilterActiveImportedMeshes(CustomModelAutoRigger.CollectMeshes(_liveImportedScene));
+            var fallbackSkel = CustomModelAutoRigger.FindSkeleton(_liveImportedScene);
             float tNear = float.MaxValue;
             float tFar = float.MinValue;
             int hitCount = 0;
@@ -7018,23 +7056,28 @@ namespace DeadlockPlayground.UI
             foreach (var mi in meshes)
             {
                 if (mi?.Mesh == null) continue;
-                Transform3D mWorld = xf * CustomModelAutoRigger.ComputeTransformRelativeToRoot(mi, _liveImportedScene);
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
                     var arrays = mi.Mesh.SurfaceGetArrays(s);
                     if (arrays == null || arrays.Count == 0) continue;
                     var verts = CustomModelAutoRigger.GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     if (verts == null || verts.Length < 3) continue;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? CustomModelAutoRigger.GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+                    CustomModelAutoRigger.EvaluateMeshSurfaceInTargetSpace(
+                        mi, _liveImportedScene, xf, fallbackSkel,
+                        verts, null, rawBones, rawWeights,
+                        out var worldVerts, out _);
                     var idx = arrays.Count > (int)Mesh.ArrayType.Index ? CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
-                    int triCount = idx != null && idx.Length >= 3 ? idx.Length / 3 : verts.Length / 3;
+                    int triCount = idx != null && idx.Length >= 3 ? idx.Length / 3 : worldVerts.Length / 3;
                     for (int ti = 0; ti < triCount; ti++)
                     {
                         int i0 = idx != null ? idx[ti * 3] : ti * 3;
                         int i1 = idx != null ? idx[ti * 3 + 1] : ti * 3 + 1;
                         int i2 = idx != null ? idx[ti * 3 + 2] : ti * 3 + 2;
-                        Vector3 v0 = mWorld * verts[i0];
-                        Vector3 v1 = mWorld * verts[i1];
-                        Vector3 v2 = mWorld * verts[i2];
+                        Vector3 v0 = worldVerts[i0];
+                        Vector3 v1 = worldVerts[i1];
+                        Vector3 v2 = worldVerts[i2];
 
                         // Möller–Trumbore ray-triangle intersection
                         Vector3 e1 = v1 - v0, e2 = v2 - v0;
@@ -8207,6 +8250,8 @@ namespace DeadlockPlayground.UI
 
             _customSkinOverrides.Clear();
             _baselineSkinOverrides.Clear();
+            _paintSurfaces.Clear();
+            _strokeDirty = false;
             _weightUndoStack.Clear();
             _weightRedoStack.Clear();
             UpdateWeightHistoryUI();
@@ -8980,11 +9025,14 @@ namespace DeadlockPlayground.UI
             SetRigChipStatus("Live Rig: Up to date", StatusTone.Success);
             if (_previewHeroClone == null || _previewHeroSkeleton == null || _liveImportedScene == null) return;
 
-            // CRITICAL: Flush active painted weights into _customSkinOverrides BEFORE rebuilding/moving
-            // the preview rig so moving, rotating, or scaling a layer NEVER resets painted weights!
-            if (_paintSurfaces.Count > 0)
+            // CRITICAL: Only flush active painted weights when a live brush stroke is actually dirty!
+            // Completed strokes, Smooth All, Mirror, Undo/Redo, and Reset Bone already call
+            // CommitPaintSurfaceOverrides() directly. Unconditionally flushing unedited _paintSurfaces
+            // froze weights on inspection or after Re-Bind / Reset All and skipped AutoCounterTwistWeights!
+            if (_paintSurfaces.Count > 0 && _strokeDirty)
             {
                 CommitPaintSurfaceOverrides();
+                _strokeDirty = false;
             }
 
             // 1. Capture current animation time and playback state
@@ -9107,6 +9155,12 @@ namespace DeadlockPlayground.UI
                 _collidersDirty = true;
                 if (_showColliders) RedrawColliderWireframe();
                 UpdateFooterMemoryIndicator();
+                DeadlockPlayground.Core.SessionCrashGuard.ScheduleImporterDraftSave(
+                    _heroCodename,
+                    _filePath,
+                    (int)_workflowIntent,
+                    _accessorySlotId,
+                    options);
                 if (result.Report != null)
                 {
                     AppendConsoleMessage($"Rigged preview: {result.TotalVertices:N0} verts, {result.Report.BuildSummaryLine()}");
@@ -9735,6 +9789,10 @@ namespace DeadlockPlayground.UI
                 GetViewport()?.GuiReleaseFocus();
                 try
                 {
+                    DeadlockPlayground.Core.SessionCrashGuard.ClearImporterDraft();
+                    DeadlockPlayground.Core.SessionCrashGuard.RecordBreadcrumb(
+                        $"Confirmed model import: {Path.GetFileName(_filePath)}",
+                        activeHeroId: _heroCodename);
                     // Live hero visibility for all stacked slots & replaced surfaces has already been updated by RecomputeHeroReplacementVisibility
                     EmitSignal(SignalName.RiggingConfirmed);
                 }
@@ -9764,6 +9822,8 @@ namespace DeadlockPlayground.UI
             }
 
             CleanupPreviewResources();
+            DeadlockPlayground.Core.SessionCrashGuard.ClearImporterDraft();
+            DeadlockPlayground.Core.SessionCrashGuard.RecordBreadcrumb("Cancelled model importer", activeHeroId: _heroCodename);
             EmitSignal(SignalName.ModalCancelled);
             QueueFree();
         }

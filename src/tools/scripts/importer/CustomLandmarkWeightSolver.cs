@@ -85,32 +85,47 @@ namespace DeadlockPlayground.Importer
             public MeshInstance3D Mi;
             public int Surface;
             public Godot.Collections.Array Arrays;
-            public Vector3[] SceneVerts;   // mesh -> scene space
+            public Vector3[] SceneVerts;   // evaluated rest-pose vertices in scene space (respecting existing Skin/Skeleton3D)
+            public Vector3[] SceneNorms;   // evaluated rest-pose normals in scene space (or null if absent)
             public int[] Indices;
         }
 
         private static List<SurfaceData> GatherSurfaces(Node3D scene, IEnumerable<MeshInstance3D> meshes)
         {
             var list = new List<SurfaceData>();
+            var fallbackSkel = CustomModelAutoRigger.FindSkeleton(scene);
             foreach (var mi in meshes)
             {
                 if (mi?.Mesh == null) continue;
-                Transform3D m = CustomModelAutoRigger.ComputeTransformRelativeToRoot(mi, scene);
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
                     var arrays = mi.Mesh.SurfaceGetArrays(s);
                     if (arrays == null || arrays.Count == 0) continue;
                     var verts = CustomModelAutoRigger.GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
                     if (verts == null || verts.Length == 0) continue;
-                    var sv = new Vector3[verts.Length];
-                    for (int i = 0; i < verts.Length; i++) sv[i] = m * verts[i];
+                    var rawNorms = arrays.Count > (int)Mesh.ArrayType.Normal ? CustomModelAutoRigger.GetVector3Array(arrays[(int)Mesh.ArrayType.Normal]) : null;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? CustomModelAutoRigger.GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+                    CustomModelAutoRigger.EvaluateMeshSurfaceInTargetSpace(
+                        mi, scene, Transform3D.Identity, fallbackSkel,
+                        verts, rawNorms, rawBones, rawWeights,
+                        out var sv, out var sn);
                     int[] idx = arrays.Count > (int)Mesh.ArrayType.Index ? CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Index]) : null;
                     if (idx == null || idx.Length == 0)
                     {
                         idx = new int[verts.Length - verts.Length % 3];
                         for (int i = 0; i < idx.Length; i++) idx[i] = i;
                     }
-                    list.Add(new SurfaceData { Mi = mi, Surface = s, Arrays = arrays, SceneVerts = sv, Indices = idx });
+                    bool hasNorms = rawNorms != null && rawNorms.Length == verts.Length;
+                    list.Add(new SurfaceData
+                    {
+                        Mi = mi,
+                        Surface = s,
+                        Arrays = arrays,
+                        SceneVerts = sv,
+                        SceneNorms = hasNorms ? sn : null,
+                        Indices = idx
+                    });
                 }
             }
             return list;
@@ -976,7 +991,9 @@ namespace DeadlockPlayground.Importer
         private static Godot.Collections.Array BuildSanitizedSurfaceArrays(
             Godot.Collections.Array srcArrays,
             int[] bonesOverride = null,
-            float[] weightsOverride = null)
+            float[] weightsOverride = null,
+            Vector3[] vertsOverride = null,
+            Vector3[] normsOverride = null)
         {
             var clean = new Godot.Collections.Array();
             clean.Resize((int)Mesh.ArrayType.Max);
@@ -988,9 +1005,19 @@ namespace DeadlockPlayground.Importer
                     clean[idx] = srcArrays[idx];
             }
 
-            CopySlot(Mesh.ArrayType.Vertex);
-            CopySlot(Mesh.ArrayType.Normal);
-            CopySlot(Mesh.ArrayType.Tangent);
+            if (vertsOverride != null)
+                clean[(int)Mesh.ArrayType.Vertex] = vertsOverride;
+            else
+                CopySlot(Mesh.ArrayType.Vertex);
+
+            if (normsOverride != null)
+                clean[(int)Mesh.ArrayType.Normal] = normsOverride;
+            else
+                CopySlot(Mesh.ArrayType.Normal);
+
+            if (vertsOverride == null)
+                CopySlot(Mesh.ArrayType.Tangent);
+
             CopySlot(Mesh.ArrayType.Color);
             CopySlot(Mesh.ArrayType.TexUV);
             CopySlot(Mesh.ArrayType.TexUV2);
@@ -1180,15 +1207,16 @@ namespace DeadlockPlayground.Importer
                 authoredChains.Add(chainDef);
             }
 
-            // Swap each mesh's surfaces for sanitized skinned copies.
-            var originals = new List<(MeshInstance3D mi, Mesh mesh, Skin skin)>();
+            // Swap each mesh's surfaces for sanitized skinned copies baked in scene space
+            // (completely decoupling previously rigged models from their old Skeleton3D / Skin inverse-bind transforms).
+            var originals = new List<(MeshInstance3D mi, Mesh mesh, Skin skin, NodePath skeletonPath)>();
             var byMesh = surfaces.Select((sd, i) => (sd, i)).GroupBy(x => x.sd.Mi);
             int totalVerts = 0;
             foreach (var grp in byMesh)
             {
                 var mi = grp.Key;
                 var srcMesh = mi.Mesh;
-                originals.Add((mi, srcMesh, mi.Skin));
+                originals.Add((mi, srcMesh, mi.Skin, mi.Skeleton));
                 var newMesh = new ArrayMesh();
                 var surfaceMap = grp.ToDictionary(x => x.sd.Surface, x => x.i);
                 int addedSurfIdx = 0;
@@ -1197,7 +1225,12 @@ namespace DeadlockPlayground.Importer
                     Godot.Collections.Array cleanArrays;
                     if (surfaceMap.TryGetValue(s, out int gi))
                     {
-                        cleanArrays = BuildSanitizedSurfaceArrays(surfaces[gi].Arrays, bonesPer[gi], weightsPer[gi]);
+                        cleanArrays = BuildSanitizedSurfaceArrays(
+                            surfaces[gi].Arrays,
+                            bonesPer[gi],
+                            weightsPer[gi],
+                            surfaces[gi].SceneVerts,
+                            surfaces[gi].SceneNorms);
                         totalVerts += surfaces[gi].SceneVerts.Length;
                     }
                     else
@@ -1213,12 +1246,14 @@ namespace DeadlockPlayground.Importer
                     addedSurfIdx++;
                 }
 
-                Transform3D m = CustomModelAutoRigger.ComputeTransformRelativeToRoot(mi, scene);
+                // Vertices in newMesh are already baked into scene space (= skel's local space),
+                // so each bind pose is simply globalRest[b].AffineInverse() with no old-mesh transform dependency.
                 var skin = new Skin();
                 for (int b = 0; b < specs.Count; b++)
-                    skin.AddBind(b, globalRest[b].AffineInverse() * m);
+                    skin.AddBind(b, globalRest[b].AffineInverse());
                 mi.Mesh = newMesh;
                 mi.Skin = skin;
+                mi.Skeleton = (mi.IsInsideTree() && skel.IsInsideTree()) ? mi.GetPathTo(skel) : new NodePath();
             }
 
             return new SyntheticRig
@@ -1229,11 +1264,12 @@ namespace DeadlockPlayground.Importer
                 AuthoredClothChainDefs = authoredChains,
                 Restore = () =>
                 {
-                    foreach (var (mi, mesh, skin) in originals)
+                    foreach (var (mi, mesh, skin, skelPath) in originals)
                     {
                         if (!GodotObject.IsInstanceValid(mi)) continue;
                         mi.Mesh = mesh;
                         mi.Skin = skin;
+                        mi.Skeleton = skelPath;
                     }
                     if (GodotObject.IsInstanceValid(skel))
                     {

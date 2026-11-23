@@ -453,6 +453,7 @@ namespace DeadlockPlayground.Workspace
                         TwistRelax = c.TwistRelax,
                         AngleLimitDeg = c.AngleLimitDeg,
                         PlanarizeBackBarrier = c.PlanarizeBackBarrier,
+                        FloorCollision = c.FloorCollision,
                         AnchorFreeRotate = c.AnchorFreeRotate,
                         OpenSheet = c.OpenSheet,
                         Friction = c.Friction,
@@ -854,6 +855,7 @@ namespace DeadlockPlayground.Workspace
                         TwistRelax = ce.TwistRelax >= 0f ? ce.TwistRelax : 1.0f,
                         AngleLimitDeg = ce.AngleLimitDeg > 1f ? ce.AngleLimitDeg : 35.0f,
                         PlanarizeBackBarrier = ce.PlanarizeBackBarrier ?? false,
+                        FloorCollision = ce.FloorCollision ?? false,
                         AnchorFreeRotate = ce.AnchorFreeRotate ?? false,
                         OpenSheet = ce.OpenSheet ?? true,
                         Friction = ce.Friction ?? 0.15f,
@@ -950,6 +952,7 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("twist_relax")] public float TwistRelax { get; set; } = 1.0f;
         [JsonPropertyName("angle_limit_deg")] public float AngleLimitDeg { get; set; } = 35.0f;
         [JsonPropertyName("planarize_back")] public bool? PlanarizeBackBarrier { get; set; }
+        [JsonPropertyName("floor_collision")] public bool? FloorCollision { get; set; }
         [JsonPropertyName("anchor_free_rotate")] public bool? AnchorFreeRotate { get; set; }
         [JsonPropertyName("open_sheet")] public bool? OpenSheet { get; set; }
         [JsonPropertyName("friction")] public float? Friction { get; set; }
@@ -1435,7 +1438,9 @@ namespace DeadlockPlayground.Workspace
             {
                 Directory.CreateDirectory(SessionDir);
                 string json = JsonSerializer.Serialize(Manifest, JsonOpts);
-                File.WriteAllText(ManifestPath, json);
+                string tmpPath = ManifestPath + ".tmp";
+                File.WriteAllText(tmpPath, json);
+                File.Move(tmpPath, ManifestPath, overwrite: true);
             }
             catch (Exception ex)
             {

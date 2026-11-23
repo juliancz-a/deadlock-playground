@@ -326,16 +326,23 @@ public partial class CharacterTabUI : VBoxContainer
     private async void OnHeroSelectedFromModal(string heroCodename, string vmdlPath, string displayName)
     {
         if (_vpkLoader == null) return;
-        var entry = DeadlockHeroCatalog.GetByCodename(heroCodename) ?? DeadlockHeroCatalog.ResolveHero(heroCodename);
-        if (entry != null)
+        await DeadlockPlayground.Core.SessionCrashGuard.SafeRunAsync(async () =>
         {
-            await _vpkLoader.LoadHeroModelAsync(entry);
-        }
-        else
-        {
-            await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroCodename, displayName);
-        }
-        UpdateContextualButtonsVisibility();
+            DeadlockPlayground.Core.SessionCrashGuard.RecordBreadcrumb(
+                $"Load hero: {displayName ?? heroCodename}",
+                activeHeroId: heroCodename,
+                activeHeroDisplayName: displayName);
+            var entry = DeadlockHeroCatalog.GetByCodename(heroCodename) ?? DeadlockHeroCatalog.ResolveHero(heroCodename);
+            if (entry != null)
+            {
+                await _vpkLoader.LoadHeroModelAsync(entry);
+            }
+            else
+            {
+                await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroCodename, displayName);
+            }
+            UpdateContextualButtonsVisibility();
+        }, $"Load Hero '{displayName ?? heroCodename}'");
     }
 
     public void OpenExtraModelModal()
@@ -371,22 +378,24 @@ public partial class CharacterTabUI : VBoxContainer
     private async void OnExtraModelSelectedFromModal(string vmdlPath, string displayName)
     {
         if (_vpkLoader == null || string.IsNullOrEmpty(vmdlPath)) return;
-
-        string baseVmdl = _vpkLoader.BaseHeroEntry?.VmdlRelativePath?.Replace('\\', '/');
-        string normSelected = vmdlPath.Replace('\\', '/');
-        bool isBaseCharacter = (!string.IsNullOrEmpty(baseVmdl) && normSelected.Equals(baseVmdl, StringComparison.OrdinalIgnoreCase))
-                            || (displayName != null && displayName.Contains("(Base Character)", StringComparison.OrdinalIgnoreCase));
-
-        if (isBaseCharacter && _vpkLoader.BaseHeroEntry != null)
+        await DeadlockPlayground.Core.SessionCrashGuard.SafeRunAsync(async () =>
         {
-            await _vpkLoader.LoadHeroModelAsync(_vpkLoader.BaseHeroEntry);
-        }
-        else
-        {
-            string heroKey = _vpkLoader.HeroName ?? "Hero";
-            await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroKey, displayName);
-        }
-        UpdateContextualButtonsVisibility();
+            string baseVmdl = _vpkLoader.BaseHeroEntry?.VmdlRelativePath?.Replace('\\', '/');
+            string normSelected = vmdlPath.Replace('\\', '/');
+            bool isBaseCharacter = (!string.IsNullOrEmpty(baseVmdl) && normSelected.Equals(baseVmdl, StringComparison.OrdinalIgnoreCase))
+                                || (displayName != null && displayName.Contains("(Base Character)", StringComparison.OrdinalIgnoreCase));
+
+            if (isBaseCharacter && _vpkLoader.BaseHeroEntry != null)
+            {
+                await _vpkLoader.LoadHeroModelAsync(_vpkLoader.BaseHeroEntry);
+            }
+            else
+            {
+                string heroKey = _vpkLoader.HeroName ?? "Hero";
+                await _vpkLoader.LoadExtraModelAsync(vmdlPath, heroKey, displayName);
+            }
+            UpdateContextualButtonsVisibility();
+        }, $"Load Extra Model '{displayName ?? vmdlPath}'");
     }
 
     public void OpenModPickerModal()
@@ -426,28 +435,30 @@ public partial class CharacterTabUI : VBoxContainer
     private async void OnModSelectedFromModal(string modFilePath, string modDisplayTitle, bool isVanilla)
     {
         if (_vpkLoader == null) return;
-
-        if (isVanilla || string.IsNullOrEmpty(modFilePath))
+        await DeadlockPlayground.Core.SessionCrashGuard.SafeRunAsync(async () =>
         {
-            // Vanilla
-            _vpkLoader.SetActiveAddon(null, null);
-            await _vpkLoader.ReloadCurrentHeroAsync();
+            if (isVanilla || string.IsNullOrEmpty(modFilePath))
+            {
+                // Vanilla
+                _vpkLoader.SetActiveAddon(null, null);
+                await _vpkLoader.ReloadCurrentHeroAsync();
+                UpdateContextualButtonsVisibility();
+                return;
+            }
+
+            var mod = _addonMods.FirstOrDefault(m => m.FilePath.Equals(modFilePath, StringComparison.OrdinalIgnoreCase))
+                   ?? (File.Exists(modFilePath) ? DeadlockAddonScanner.InspectAddonPackage(modFilePath) : null)
+                   ?? new AddonModInfo
+                   {
+                       FilePath = modFilePath,
+                       DisplayTitle = modDisplayTitle,
+                       FileName = System.IO.Path.GetFileName(modFilePath)
+                   };
+
+            _vpkLoader.SetActiveAddon(mod.FilePath, mod);
+            await _vpkLoader.LoadAddonModelAsync(mod);
             UpdateContextualButtonsVisibility();
-            return;
-        }
-
-        var mod = _addonMods.FirstOrDefault(m => m.FilePath.Equals(modFilePath, StringComparison.OrdinalIgnoreCase))
-               ?? (File.Exists(modFilePath) ? DeadlockAddonScanner.InspectAddonPackage(modFilePath) : null)
-               ?? new AddonModInfo
-               {
-                   FilePath = modFilePath,
-                   DisplayTitle = modDisplayTitle,
-                   FileName = System.IO.Path.GetFileName(modFilePath)
-               };
-
-        _vpkLoader.SetActiveAddon(mod.FilePath, mod);
-        await _vpkLoader.LoadAddonModelAsync(mod);
-        UpdateContextualButtonsVisibility();
+        }, $"Load Mod '{modDisplayTitle ?? modFilePath}'");
     }
 
     private string GetActiveHeroId(Node3D heroNode = null)
@@ -594,34 +605,90 @@ public partial class CharacterTabUI : VBoxContainer
     }
 
     /// <summary>
-    /// Runs a free-RAM pre-check (ImporterMemoryGuard), asks the user "Continue in Light Mode" vs "Cancel"
-    /// if memory is tight, and parses the 3D scene asynchronously with a progress bar overlay.
+    /// Runs a free-RAM pre-check (ImporterMemoryGuard). Only prompts on Critical (< ~0.9 GB) free RAM
+    /// with Light Mode / Full Quality / Cancel + "Don't warn again this session" options, and parses
+    /// the 3D scene asynchronously with a progress bar overlay.
     /// </summary>
     private async void LoadSceneForImporterModalAsync(string path, Node3D hero, Action<Node3D> onSceneReady)
     {
         var report = ImporterMemoryGuard.Evaluate(path, hero);
-        bool forceLightMode = false;
+        bool allowCriticalLight = false;
+        bool forceFullQuality = false;
 
-        if (report.Verdict == ImporterMemoryGuard.Verdict.Critical || report.Verdict == ImporterMemoryGuard.Verdict.LowMemory)
+        if (report.Verdict == ImporterMemoryGuard.Verdict.Critical && !ImporterMemoryGuard.SuppressPromptForSession)
         {
-            var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
-            var dlg = new ConfirmationDialog
+            // 0 = Cancel, 1 = Light Mode, 2 = Full Quality
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<int>();
+            var dlg = new AcceptDialog
             {
-                Title = report.Verdict == ImporterMemoryGuard.Verdict.Critical ? "Critical Low Memory Warning" : "Low Memory — Light Mode Recommended",
-                DialogText = report.Message,
+                Title = "Low Memory Warning",
                 OkButtonText = "Continue in Light Mode",
-                CancelButtonText = "Cancel",
                 Exclusive = false
             };
-            dlg.Confirmed += () => { tcs.TrySetResult(true); dlg.QueueFree(); };
-            dlg.Canceled += () => { tcs.TrySetResult(false); dlg.QueueFree(); };
-            GetTree()?.Root?.AddChild(dlg);
-            dlg.PopupCentered(new Vector2I(540, 240));
 
-            bool proceed = await tcs.Task;
-            if (!proceed) return;
-            forceLightMode = true;
-            ImporterMemoryGuard.LightMode = true;
+            var body = new VBoxContainer();
+            body.AddThemeConstantOverride("separation", 10);
+            var lbl = new Label
+            {
+                Text = report.Message,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                CustomMinimumSize = new Vector2(460, 0)
+            };
+            body.AddChild(lbl);
+
+            var chkSuppress = new CheckBox
+            {
+                Text = "Don't warn again this session",
+                ButtonPressed = false
+            };
+            body.AddChild(chkSuppress);
+            dlg.AddChild(body);
+
+            dlg.AddButton("Continue Full Quality", false, "full_quality");
+            dlg.AddCancelButton("Cancel");
+
+            dlg.Confirmed += () =>
+            {
+                if (chkSuppress.ButtonPressed) ImporterMemoryGuard.SuppressPromptForSession = true;
+                tcs.TrySetResult(1);
+                dlg.QueueFree();
+            };
+            dlg.CustomAction += (action) =>
+            {
+                if (action == "full_quality")
+                {
+                    if (chkSuppress.ButtonPressed) ImporterMemoryGuard.SuppressPromptForSession = true;
+                    tcs.TrySetResult(2);
+                    dlg.QueueFree();
+                }
+            };
+            dlg.Canceled += () => { tcs.TrySetResult(0); dlg.QueueFree(); };
+
+            GetTree()?.Root?.AddChild(dlg);
+            dlg.PopupCentered(new Vector2I(520, 220));
+
+            int choice = await tcs.Task;
+            if (choice == 0) return;
+            if (choice == 1)
+            {
+                allowCriticalLight = true;
+                ImporterMemoryGuard.LightMode = true;
+            }
+            else
+            {
+                forceFullQuality = true;
+                ImporterMemoryGuard.LightMode = false;
+            }
+        }
+        else if (report.Verdict == ImporterMemoryGuard.Verdict.Critical && ImporterMemoryGuard.SuppressPromptForSession)
+        {
+            forceFullQuality = !ImporterMemoryGuard.LightMode;
+            allowCriticalLight = ImporterMemoryGuard.LightMode;
+        }
+        else
+        {
+            // Ok or LowMemory (1.0–1.5 GB): enter directly without nagging popup; user can toggle Light Mode from footer
+            ImporterMemoryGuard.LightMode = false;
         }
 
         // Progress overlay
@@ -662,7 +729,8 @@ public partial class CharacterTabUI : VBoxContainer
                 if (GodotObject.IsInstanceValid(bar)) bar.Value = p * 100.0;
                 if (GodotObject.IsInstanceValid(lblStage)) lblStage.Text = msg;
             },
-            allowCriticalInLightMode: forceLightMode);
+            allowCriticalInLightMode: allowCriticalLight,
+            forceFullQuality: forceFullQuality);
 
         if (GodotObject.IsInstanceValid(overlay)) overlay.QueueFree();
 
@@ -744,6 +812,53 @@ public partial class CharacterTabUI : VBoxContainer
                     RefreshAfterModelOrAccessoryChange(activeHero);
                     GD.Print("[CharacterTabUI] Custom model rigging confirmed and bound successfully!");
                 }
+            };
+        });
+    }
+
+    public void OpenImporterFromRecoveryDraft(DeadlockPlayground.Core.SessionCrashGuard.ImporterDraftData draft)
+    {
+        var hero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+        if (hero == null || draft == null || string.IsNullOrEmpty(draft.ModelFilePath) || !File.Exists(draft.ModelFilePath))
+            return;
+
+        LoadSceneForImporterModalAsync(draft.ModelFilePath, hero, sceneRoot =>
+        {
+            var oldModal = GetTree()?.Root?.FindChild("CustomModelImporterModal", true, false) as CustomModelImporterModalUI;
+            oldModal?.QueueFree();
+
+            var modal = new CustomModelImporterModalUI { Name = "CustomModelImporterModal" };
+            GetTree()?.Root?.AddChild(modal);
+
+            var initialOpts = draft.ModelConfig?.ToRiggingOptions();
+            var intent = (CustomModelImporterModalUI.ImportWorkflowIntent)draft.WorkflowIntent;
+            modal.Open(hero, sceneRoot, draft.ModelFilePath, initialOpts, intent, draft.AccessorySlotId);
+
+            modal.RiggingConfirmed += () =>
+            {
+                var opts = modal.LastRiggingOptions;
+                var activeHero = _currentHeroNode ?? _vpkLoader?.CurrentHeroNode;
+                if (activeHero == null) return;
+
+                if (opts != null && !string.IsNullOrEmpty(opts.SlotId))
+                {
+                    string heroId = GetActiveHeroId(activeHero);
+                    string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
+                    string accName = !string.IsNullOrWhiteSpace(opts.AccessoryName)
+                        ? opts.AccessoryName
+                        : Path.GetFileNameWithoutExtension(draft.ModelFilePath);
+                    DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.StageAccessory(
+                        heroId, displayName, opts.SlotId, accName, draft.ModelFilePath, opts);
+                }
+                else
+                {
+                    _lastImportedOptions = opts;
+                    _lastImportedFilePath = draft.ModelFilePath;
+                    _lastImportedScene = sceneRoot;
+                    _hasCustomModelApplied = true;
+                    RegisterCustomModelInWorkspace(draft.ModelFilePath, opts);
+                }
+                RefreshAfterModelOrAccessoryChange(activeHero);
             };
         });
     }
@@ -1915,14 +2030,18 @@ public partial class CharacterTabUI : VBoxContainer
                 return;
             }
 
+            bool isCustomImported = mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool();
             string lowerName = rawName.ToLowerInvariant();
-            if (lowerName.Contains("tipvisual") || lowerName.Contains("polevisual") ||
-                lowerName.Contains("visual") || lowerName.Contains("wireframe") ||
-                lowerName.Contains("marker") || lowerName.Contains("gizmo") ||
-                lowerName.Contains("preview") || lowerName.Contains("picker") ||
-                lowerName.Contains("handle"))
+            if (HeroMeshHierarchy.IsEditorHelperNode(mi))
             {
                 return;
+            }
+            if (!isCustomImported)
+            {
+                if (lowerName.Contains("wireframe") || lowerName.Contains("marker") || lowerName.Contains("preview"))
+                {
+                    return;
+                }
             }
 
             // If this composite mesh has been split into individual per-surface meshes by HeroMeshHierarchy,

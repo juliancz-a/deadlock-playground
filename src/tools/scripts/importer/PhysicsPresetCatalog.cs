@@ -49,6 +49,7 @@ namespace DeadlockPlayground.Importer
             public float Friction { get; init; } = 0.15f;
             public float StrayRadiusInches { get; init; } = -1.0f;
             public bool PlanarizeBackBarrier { get; init; } = false;
+            public bool FloorCollision { get; init; } = false;
             public bool OpenSheet { get; init; } = true;
             public bool AnchorFreeRotate { get; init; } = false;
             public float AngleLimitDeg { get; init; } = 35.0f;
@@ -128,6 +129,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.10f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = true,
+                FloorCollision = true,
                 OpenSheet = true,
                 AnchorFreeRotate = true,
                 AngleLimitDeg = 55.0f,
@@ -153,6 +155,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.05f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = true,
+                FloorCollision = true,
                 OpenSheet = true,
                 AnchorFreeRotate = true,
                 AngleLimitDeg = 65.0f,
@@ -178,6 +181,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.20f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = false,
+                FloorCollision = true,
                 OpenSheet = false,
                 AnchorFreeRotate = false,
                 AngleLimitDeg = 45.0f,
@@ -203,6 +207,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.85f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = false,
+                FloorCollision = true,
                 OpenSheet = false,
                 AnchorFreeRotate = false,
                 AngleLimitDeg = 40.0f,
@@ -228,6 +233,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.25f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = false,
+                FloorCollision = true,
                 OpenSheet = true,
                 AnchorFreeRotate = false,
                 AngleLimitDeg = 45.0f,
@@ -253,6 +259,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.20f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = false,
+                FloorCollision = true,
                 OpenSheet = true,
                 AnchorFreeRotate = false,
                 AngleLimitDeg = 55.0f,
@@ -278,6 +285,7 @@ namespace DeadlockPlayground.Importer
                 Friction = 0.30f,
                 StrayRadiusInches = -1.0f,
                 PlanarizeBackBarrier = false,
+                FloorCollision = true,
                 OpenSheet = true,
                 AnchorFreeRotate = false,
                 AngleLimitDeg = 55.0f,
@@ -341,6 +349,7 @@ namespace DeadlockPlayground.Importer
                 ShortTag = "JiggleBone · 0× Grav · No Body Collision",
                 Description = "Compact rotational spring bounce with zero gravity and zero body-capsule collision (ideal for bust, glutes, ears, holsters, pouches).",
                 Category = "Accessory",
+                ThumbnailPath = "res://assets/thumbnails/physics_preview/pouches_bebop.png",
                 FallbackIconPath = "res://assets/at-icons/circle.svg",
                 Simulation = SimulationKind.Jiggle,
                 StiffnessRoot = 0.90f,
@@ -360,6 +369,7 @@ namespace DeadlockPlayground.Importer
         };
 
         private static readonly Dictionary<string, PhysicsPresetDef> ById;
+        private static readonly Dictionary<string, Texture2D> HighDpiSvgCache = new(StringComparer.OrdinalIgnoreCase);
 
         static PhysicsPresetCatalog()
         {
@@ -379,21 +389,53 @@ namespace DeadlockPlayground.Importer
             return p != null ? $"{p.DisplayName} ({p.HeroReference})" : "Custom (Manual Tuning)";
         }
 
+        /// <summary>
+        /// Rasterizes SVG icons at 4x scale (96–128 px) instead of Godot's default 1x (16–24 px)
+        /// so vector icons like <c>sliders.svg</c> stay razor-sharp inside preset cards.
+        /// </summary>
+        private static Texture2D LoadHighQualityIcon(string resPath)
+        {
+            if (string.IsNullOrEmpty(resPath)) return null;
+            if (resPath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+            {
+                if (HighDpiSvgCache.TryGetValue(resPath, out var cached) && cached != null)
+                    return cached;
+                try
+                {
+                    if (Godot.FileAccess.FileExists(resPath))
+                    {
+                        byte[] bytes = Godot.FileAccess.GetFileAsBytes(resPath);
+                        if (bytes != null && bytes.Length > 0)
+                        {
+                            var img = new Image();
+                            if (img.LoadSvgFromBuffer(bytes, 4.0f) == Error.Ok && !img.IsEmpty())
+                            {
+                                var tex = ImageTexture.CreateFromImage(img);
+                                HighDpiSvgCache[resPath] = tex;
+                                return tex;
+                            }
+                        }
+                    }
+                }
+                catch { /* Fall through to standard ResourceLoader */ }
+            }
+            return ResourceLoader.Exists(resPath) ? ResourceLoader.Load<Texture2D>(resPath) : null;
+        }
+
         public static Texture2D LoadPresetTexture(PhysicsPresetDef preset)
         {
             if (preset == null)
-                return ResourceLoader.Exists("res://assets/at-icons/sliders.svg")
-                    ? ResourceLoader.Load<Texture2D>("res://assets/at-icons/sliders.svg")
-                    : null;
+                return LoadHighQualityIcon("res://assets/at-icons/sliders.svg");
 
             if (!string.IsNullOrEmpty(preset.ThumbnailPath) && ResourceLoader.Exists(preset.ThumbnailPath))
             {
                 var customTex = ResourceLoader.Load<Texture2D>(preset.ThumbnailPath);
                 if (customTex != null) return customTex;
             }
-            if (!string.IsNullOrEmpty(preset.FallbackIconPath) && ResourceLoader.Exists(preset.FallbackIconPath))
+            if (!string.IsNullOrEmpty(preset.FallbackIconPath))
             {
-                return ResourceLoader.Load<Texture2D>(preset.FallbackIconPath);
+                var fallback = LoadHighQualityIcon(preset.FallbackIconPath);
+                if (fallback != null) return fallback;
             }
             return null;
         }
@@ -418,6 +460,7 @@ namespace DeadlockPlayground.Importer
             ch.Friction = preset.Friction;
             ch.StrayRadiusInches = preset.StrayRadiusInches;
             ch.PlanarizeBackBarrier = preset.PlanarizeBackBarrier;
+            ch.FloorCollision = preset.FloorCollision;
             ch.OpenSheet = preset.OpenSheet;
             ch.AnchorFreeRotate = preset.AnchorFreeRotate;
             ch.AngleLimitDeg = preset.AngleLimitDeg;

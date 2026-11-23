@@ -39,11 +39,15 @@ namespace DeadlockPlayground.Importer
         /// <summary>Set when the user/guard enables Light Mode (skip ghost, lower res, manual rig update).</summary>
         public static bool LightMode { get; set; }
 
-        // Tunables
-        private const long BaseOverheadBytes = 550L * 1024 * 1024;    // preview viewport, GPU staging
-        private const long SafetyMarginBytes = 1024L * 1024 * 1024;   // leave ~1 GB for OS / Blender
-        private const long LightModeFreeBytes = 3L * 1024 * 1024 * 1024; // below ~3 GB free -> recommend light mode
-        private const double FileExpansionFactor = 6.0;               // decoded geometry + textures vs. file size
+        /// <summary>When true, skips the Critical RAM confirmation prompt for the remainder of the app session.</summary>
+        public static bool SuppressPromptForSession { get; set; }
+
+        // Tunables (calibrated so users with ~1.0–1.5 GB free RAM can enter smoothly without nagging popups)
+        private const long BaseOverheadBytes = 350L * 1024 * 1024;       // preview viewport, GPU staging
+        private const long SafetyMarginBytes = 512L * 1024 * 1024;       // leave ~512 MB safety buffer
+        private const long CriticalMinFreeBytes = 900L * 1024 * 1024;    // below ~0.9 GB free -> Critical warning
+        private const long LightModeFreeBytes = 1536L * 1024 * 1024;     // below ~1.5 GB free -> non-blocking Light Mode hint
+        private const double FileExpansionFactor = 3.5;                  // decoded geometry + textures vs. file size
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
         private class MemoryStatusEx
@@ -140,26 +144,22 @@ namespace DeadlockPlayground.Importer
                 return new Report(Verdict.Ok, 0, 0, 0, estimate, "Memory status unavailable; continuing.");
             }
 
-            long effectiveHeadroom = commitFree > 0 ? Math.Min(free, commitFree) : free;
+            long effectiveHeadroom = commitFree > 0 ? Math.Max(free, Math.Min(commitFree, free + 512L * 1024 * 1024)) : free;
             string freeGb = $"{free / 1073741824.0:F1} GB";
             string needGb = $"{estimate / 1073741824.0:F1} GB";
 
-            if (estimate + SafetyMarginBytes > effectiveHeadroom)
+            if (free < CriticalMinFreeBytes || estimate + SafetyMarginBytes > effectiveHeadroom)
             {
-                LightMode = true;
                 return new Report(Verdict.Critical, free, total, commitFree, estimate,
-                    $"Free physical RAM is very tight ({freeGb} free, ~{needGb} estimated + 1.0 GB margin).\n" +
+                    $"Free physical RAM is very low ({freeGb} free, ~{needGb} estimated).\n" +
                     "Heavy background apps (e.g. Blender, browsers) may cause an out-of-memory crash.\n\n" +
-                    "Continue in Light Mode (disables hero ghost & realtime re-rig), or Cancel?");
+                    "Light Mode disables the hero ghost and realtime re-rig to save RAM.");
             }
 
-            if (free < LightModeFreeBytes || estimate + SafetyMarginBytes * 2 > effectiveHeadroom)
+            if (free < LightModeFreeBytes)
             {
-                LightMode = true;
                 return new Report(Verdict.LowMemory, free, total, commitFree, estimate,
-                    $"Free RAM is low ({freeGb} free). Light Mode is recommended " +
-                    "(skips hero ghost, lowers preview resolution, manual rig updates).\n" +
-                    "Close memory-heavy apps like Blender for full quality.");
+                    $"Low RAM ({freeGb} free) — Light Mode is available in the footer if performance is tight.");
             }
 
             LightMode = false;
@@ -313,8 +313,11 @@ namespace DeadlockPlayground.Importer
 
                 // Skip runtime gizmos, bone pickers, and generated split submeshes right away
                 if (cType.Contains("SkeletonGizmo") || cType.Contains("BoneLayer") || cType.Contains("CharacterIK") ||
-                    cName.StartsWith("@") || lower.Contains("gizmo") || lower.Contains("picker") ||
-                    lower.Contains("handle") || lower.Contains("tipvisual") || lower.Contains("polevisual"))
+                    cName.StartsWith("@") || (child is BoneAttachment3D && cName.StartsWith("Pick_", StringComparison.Ordinal)) ||
+                    lower.Contains("gizmo") || lower.Contains("bonepicker") ||
+                    lower.Contains("pickerhandle") || lower.Contains("pickerarea") || lower.Contains("pickershape") ||
+                    lower.Contains("ikhandle") || lower.Contains("bonehandle") || lower.Contains("resizehandle") ||
+                    lower.Contains("tipvisual") || lower.Contains("polevisual"))
                 {
                     continue;
                 }
@@ -377,18 +380,22 @@ namespace DeadlockPlayground.Importer
             Node3D heroNode,
             Action<float, string> onProgress = null,
             bool allowCriticalInLightMode = false,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool forceFullQuality = false)
         {
             onProgress?.Invoke(0.10f, "Checking free system memory...");
             Log("before async load");
             var report = Evaluate(filePath, heroNode);
-            if (report.Verdict == Verdict.Critical && !allowCriticalInLightMode)
+            if (report.Verdict == Verdict.Critical && !allowCriticalInLightMode && !forceFullQuality)
             {
                 return (null, report.Message, report.Verdict);
             }
 
             string msg = report.Verdict != Verdict.Ok ? report.Message : null;
-            if (report.Verdict != Verdict.Ok) LightMode = true;
+            if (forceFullQuality)
+                LightMode = false;
+            else if (report.Verdict == Verdict.Critical && allowCriticalInLightMode)
+                LightMode = true;
 
             onProgress?.Invoke(0.30f, $"Reading '{Path.GetFileName(filePath)}'...");
             try

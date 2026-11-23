@@ -181,10 +181,115 @@ public partial class StudioUIManager : CanvasLayer
         PlaygroundThemeHelper.AutoDecorate(this);
         StartupDiagnosticTracker.Mark("MainUI: theme decoration done");
 
+        // Initialize Crash Guard & Session Recovery (dirty-exit sentinel + zero-freeze breadcrumb ring)
+        SessionCrashGuard.BeginSession();
+
         // Non-blocking update check on application startup
         StartupDiagnosticTracker.Mark("MainUI: starting background update check");
         _ = CheckUpdatesOnStartupAsync();
+        Callable.From(CheckAndOfferCrashRecovery).CallDeferred();
         StartupDiagnosticTracker.Mark("MainUI: _Ready complete");
+    }
+
+    private void CheckAndOfferCrashRecovery()
+    {
+        if (!SessionCrashGuard.WasPreviousExitUnclean) return;
+
+        var prev = SessionCrashGuard.PreviousUncleanSession;
+        var draft = SessionCrashGuard.PendingImporterDraft;
+        int stagedAssets = ModWorkspaceSession.Instance.GetAllModifiedAssets().Count;
+        bool hasCrashLog = !string.IsNullOrEmpty(prev?.LastCrashLogPath) && System.IO.File.Exists(prev.LastCrashLogPath);
+
+        // Only prompt if there is actual recoverable work (staged edits, importer draft, or a known previous hero / crash log)
+        bool hasRecoverableHero = !string.IsNullOrEmpty(prev?.ActiveHeroId);
+        if (stagedAssets == 0 && draft == null && !hasCrashLog && !hasRecoverableHero)
+        {
+            SessionCrashGuard.DismissRecoveryNotice();
+            return;
+        }
+
+        var summary = new System.Text.StringBuilder();
+        summary.AppendLine("Deadlock Playground closed unexpectedly during your previous session.");
+        summary.AppendLine();
+        if (!string.IsNullOrEmpty(prev?.ActiveHeroDisplayName) || !string.IsNullOrEmpty(prev?.ActiveHeroId))
+        {
+            string hLabel = !string.IsNullOrEmpty(prev.ActiveHeroDisplayName) ? prev.ActiveHeroDisplayName : prev.ActiveHeroId;
+            summary.AppendLine($"• Last hero: {hLabel}");
+        }
+        if (!string.IsNullOrEmpty(prev?.LastBreadcrumb))
+        {
+            summary.AppendLine($"• Last action: {prev.LastBreadcrumb}");
+        }
+        if (stagedAssets > 0)
+        {
+            summary.AppendLine($"• Staged workspace edits on disk: {stagedAssets} item(s)");
+        }
+        if (draft != null)
+        {
+            summary.AppendLine($"• Unfinished model importer draft: {System.IO.Path.GetFileName(draft.ModelFilePath)}");
+        }
+
+        var dlg = new AcceptDialog
+        {
+            Title = "Recover Previous Session?",
+            DialogText = summary.ToString().TrimEnd(),
+            OkButtonText = "Restore Session",
+            Exclusive = false
+        };
+        if (hasCrashLog)
+        {
+            dlg.AddButton("Open Crash Log", false, "open_log");
+        }
+        dlg.AddCancelButton("Start Fresh");
+
+        dlg.Confirmed += async () =>
+        {
+            dlg.QueueFree();
+            SessionCrashGuard.DismissRecoveryNotice();
+            await SessionCrashGuard.SafeRunAsync(async () =>
+            {
+                string targetHeroId = !string.IsNullOrEmpty(draft?.HeroId)
+                    ? draft.HeroId
+                    : (!string.IsNullOrEmpty(prev?.ActiveHeroId) ? prev.ActiveHeroId : ModWorkspaceSession.Instance.Manifest?.LastActiveHeroId);
+
+                var vpkLoader = GetTree()?.Root?.FindChild("VpkLoaderTest", true, false) as VpkLoaderTest;
+                if (!string.IsNullOrEmpty(targetHeroId) && vpkLoader != null)
+                {
+                    var entry = DeadlockPlayground.Catalog.DeadlockHeroCatalog.GetByCodename(targetHeroId)
+                             ?? DeadlockPlayground.Catalog.DeadlockHeroCatalog.ResolveHero(targetHeroId);
+                    if (entry != null)
+                    {
+                        await vpkLoader.LoadHeroModelAsync(entry);
+                    }
+                }
+
+                if (draft != null && _tabCharacter != null && GodotObject.IsInstanceValid(_tabCharacter))
+                {
+                    _tabCharacter.OpenImporterFromRecoveryDraft(draft);
+                }
+                ShowToast("Previous session restored.");
+            }, "Crash Session Recovery", err => ShowToast(err));
+        };
+
+        dlg.CustomAction += (action) =>
+        {
+            if (action == "open_log" && hasCrashLog)
+            {
+                OS.ShellOpen(prev.LastCrashLogPath);
+            }
+        };
+
+        dlg.Canceled += () =>
+        {
+            dlg.QueueFree();
+            SessionCrashGuard.DismissRecoveryNotice();
+            SessionCrashGuard.ClearImporterDraft();
+            ModWorkspaceSession.Instance.ClearSession();
+            UpdateModChangesBadge();
+        };
+
+        GetTree()?.Root?.AddChild(dlg);
+        dlg.PopupCentered(new Vector2I(540, 260));
     }
 
     public override void _Notification(int what)
@@ -2005,6 +2110,8 @@ public partial class StudioUIManager : CanvasLayer
         else
         {
             ModWorkspaceSession.Instance.ClearSession();
+            SessionCrashGuard.ClearImporterDraft();
+            SessionCrashGuard.MarkCleanExit();
             GetTree().Quit();
         }
     }
@@ -2068,6 +2175,8 @@ public partial class StudioUIManager : CanvasLayer
             btnDiscard.Pressed += () =>
             {
                 ModWorkspaceSession.Instance.ClearSession();
+                SessionCrashGuard.ClearImporterDraft();
+                SessionCrashGuard.MarkCleanExit();
                 GetTree().Quit();
             };
             btnRow.AddChild(btnDiscard);
@@ -2119,6 +2228,8 @@ public partial class StudioUIManager : CanvasLayer
                     _tabPaint?.FlushActiveChangesToWorkspace(true);
                     ModWorkspaceSession.Instance.PackageProject(path);
                     ModWorkspaceSession.Instance.ClearSession();
+                    SessionCrashGuard.ClearImporterDraft();
+                    SessionCrashGuard.MarkCleanExit();
                     GetTree().Quit();
                 }
             };

@@ -1576,10 +1576,10 @@ bool isSourceModInTargetAddons = false;
                                     return result;
                                 }
 
-                                if (modelRes.AllowlistedVpkFiles.Count > 65)
+                                if (modelRes.AllowlistedVpkFiles.Count > 256)
                                 {
                                     result.Success = false;
-                                    result.ErrorMessage = $"Custom model export exceeded strict file count limit ({modelRes.AllowlistedVpkFiles.Count} > 65).";
+                                    result.ErrorMessage = $"Custom model export exceeded strict file count limit ({modelRes.AllowlistedVpkFiles.Count} > 256).";
                                     progress?.Report(new ExportProgressReport(0.93f, $"[ERROR] {result.ErrorMessage}", ExportLogLevel.Error));
                                     return result;
                                 }

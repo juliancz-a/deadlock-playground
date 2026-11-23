@@ -416,7 +416,9 @@ namespace DeadlockPlayground.Painter
             string name = mi.Name.ToString();
             if (name.StartsWith("@")) return false;
             string lowerName = name.ToLowerInvariant();
-            if (lowerName.Contains("bonepicker") || lowerName.Contains("gizmo") ||
+            if (lowerName.Contains("bonepicker") || lowerName.Contains("pickerhandle") ||
+                lowerName.Contains("pickerarea") || lowerName.Contains("pickershape") ||
+                lowerName.Contains("gizmo") ||
                 lowerName.Contains("selectionoutline") || lowerName.Contains("ringcursor") ||
                 lowerName.Contains("outline"))
             {
@@ -430,7 +432,9 @@ namespace DeadlockPlayground.Painter
                 string pName = parent.Name.ToString();
                 if (pName.StartsWith("@")) return false;
                 string pLower = pName.ToLowerInvariant();
-                if (pLower.Contains("bonepicker") || pLower.Contains("gizmo") ||
+                if (pLower.Contains("bonepicker") || pLower.Contains("pickerhandle") ||
+                    (parent is BoneAttachment3D && pName.StartsWith("Pick_", StringComparison.Ordinal)) ||
+                    pLower.Contains("gizmo") ||
                     pName.Contains("Custom_Rigged_Character") || pName.StartsWith("Custom_Accessory_", StringComparison.Ordinal) || pName == "Custom_Rigid_Accessory")
                 {
                     return false;
@@ -459,7 +463,8 @@ namespace DeadlockPlayground.Painter
                 if (!mi.HasMeta("ParentCompositeMesh"))
                 {
                     string lower = name.ToLowerInvariant();
-                    if (lower.Contains("bonepicker") || lower.Contains("gizmo") ||
+                    if (lower.Contains("bonepicker") || lower.Contains("pickerhandle") ||
+                        lower.Contains("gizmo") ||
                         lower.Contains("selectionoutline") || lower.Contains("ringcursor"))
                     {
                         return false;
@@ -816,6 +821,56 @@ namespace DeadlockPlayground.Painter
             }
         }
 
+        /// <summary>
+        /// Returns true only for runtime editor/rigging helper nodes (gizmos, bone pickers, cursor rings, IK visuals).
+        /// Never rejects custom imported meshes or containers whose asset names happen to contain generic words like
+        /// "Handle" (e.g. Roblox layered clothing <c>HandleWrapLayer</c> or weapon handles) or "Visual".
+        /// </summary>
+        public static bool IsEditorHelperNode(Node node)
+        {
+            if (node == null || !GodotObject.IsInstanceValid(node)) return true;
+
+            string name = node.Name.ToString();
+            if (name.StartsWith("@", StringComparison.Ordinal)) return true;
+
+            // Custom imported meshes, their root containers, and split composite surfaces are never editor helpers
+            if ((node.HasMeta("IsCustomImportedMesh") && node.GetMeta("IsCustomImportedMesh").AsBool()) ||
+                node.HasMeta("ParentCompositeMesh") ||
+                name.Contains("Custom_Rigged_Character", StringComparison.Ordinal) ||
+                name.StartsWith("Custom_Accessory_", StringComparison.Ordinal) ||
+                string.Equals(name, "Custom_Rigid_Accessory", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string typeName = node.GetType().Name;
+            if (typeName.Contains("SkeletonGizmo", StringComparison.OrdinalIgnoreCase) ||
+                typeName.Contains("BoneLayer", StringComparison.OrdinalIgnoreCase) ||
+                typeName.Contains("CharacterIK", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (node is BoneAttachment3D && name.StartsWith("Pick_", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            string lower = name.ToLowerInvariant();
+            return lower.Contains("bonepicker") ||
+                   lower.Contains("pickerhandle") ||
+                   lower.Contains("pickerarea") ||
+                   lower.Contains("pickershape") ||
+                   lower.Contains("gizmo") ||
+                   lower.Contains("selectionoutline") ||
+                   lower.Contains("ringcursor") ||
+                   lower.Contains("tipvisual") ||
+                   lower.Contains("polevisual") ||
+                   lower.Contains("ikhandle") ||
+                   lower.Contains("bonehandle") ||
+                   lower.Contains("resizehandle");
+        }
+
         private static void CollectCandidateMeshesRecursive(Node node, List<MeshInstance3D> results)
         {
             if (node is MeshInstance3D mi && IsAuthenticHeroMesh(mi))
@@ -825,10 +880,7 @@ namespace DeadlockPlayground.Painter
 
             foreach (Node child in node.GetChildren())
             {
-                string childName = child.Name.ToString();
-                if (childName.StartsWith("@")) continue;
-                string childLower = childName.ToLowerInvariant();
-                if (childLower.Contains("picker") || childLower.Contains("gizmo") || childLower.Contains("handle") || childLower.Contains("visual"))
+                if (IsEditorHelperNode(child))
                     continue;
 
                 CollectCandidateMeshesRecursive(child, results);

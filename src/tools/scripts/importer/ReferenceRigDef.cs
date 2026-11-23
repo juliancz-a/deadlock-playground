@@ -273,17 +273,23 @@ namespace DeadlockPlayground.Importer
             if (scene == null || meshes == null) return;
 
             var allPts = new List<Vector3>();
+            var fallbackSkel = CustomModelAutoRigger.FindSkeleton(scene);
             foreach (var mi in meshes)
             {
                 if (mi?.Mesh == null) continue;
-                Transform3D m = CustomModelAutoRigger.ComputeTransformRelativeToRoot(mi, scene);
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
                 {
                     var arrays = mi.Mesh.SurfaceGetArrays(s);
                     if (arrays == null || arrays.Count == 0) continue;
                     var verts = CustomModelAutoRigger.GetVector3Array(arrays[(int)Mesh.ArrayType.Vertex]);
-                    if (verts == null) continue;
-                    for (int i = 0; i < verts.Length; i++) allPts.Add(m * verts[i]);
+                    if (verts == null || verts.Length == 0) continue;
+                    var rawBones = arrays.Count > (int)Mesh.ArrayType.Bones ? CustomModelAutoRigger.GetInt32Array(arrays[(int)Mesh.ArrayType.Bones]) : null;
+                    var rawWeights = arrays.Count > (int)Mesh.ArrayType.Weights ? CustomModelAutoRigger.GetFloat32Array(arrays[(int)Mesh.ArrayType.Weights]) : null;
+                    CustomModelAutoRigger.EvaluateMeshSurfaceInTargetSpace(
+                        mi, scene, Transform3D.Identity, fallbackSkel,
+                        verts, null, rawBones, rawWeights,
+                        out var sceneVerts, out _);
+                    allPts.AddRange(sceneVerts);
                 }
             }
             if (allPts.Count == 0) return;

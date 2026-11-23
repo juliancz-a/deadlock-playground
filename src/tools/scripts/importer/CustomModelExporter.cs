@@ -519,7 +519,8 @@ namespace DeadlockPlayground.Importer
 
                             roughScalar = Mathf.Clamp(stdMat.Roughness, 0.05f, 1.0f);
                             metalScalar = Mathf.Clamp(stdMat.Metallic, 0.0f, 1.0f);
-                            isTranslucent = effTransp == BaseMaterial3D.TransparencyEnum.Alpha;
+                            isTranslucent = effTransp == BaseMaterial3D.TransparencyEnum.Alpha ||
+                                            effTransp == BaseMaterial3D.TransparencyEnum.AlphaDepthPrePass;
                             isAlphaTest = effTransp == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
                                           effTransp == BaseMaterial3D.TransparencyEnum.AlphaHash;
                             isDoubleSided = !isOutlineShell && (stdMat.CullMode == BaseMaterial3D.CullModeEnum.Disabled ||
@@ -558,7 +559,8 @@ namespace DeadlockPlayground.Importer
                         if (!isTranslucent && !isAlphaTest && meshInst.HasMeta("SourceTransparencyMode"))
                         {
                             var meshSrcTransp = (BaseMaterial3D.TransparencyEnum)meshInst.GetMeta("SourceTransparencyMode").AsInt32();
-                            if (meshSrcTransp == BaseMaterial3D.TransparencyEnum.Alpha)
+                            if (meshSrcTransp == BaseMaterial3D.TransparencyEnum.Alpha ||
+                                meshSrcTransp == BaseMaterial3D.TransparencyEnum.AlphaDepthPrePass)
                                 isTranslucent = true;
                             else if (meshSrcTransp == BaseMaterial3D.TransparencyEnum.AlphaScissor || meshSrcTransp == BaseMaterial3D.TransparencyEnum.AlphaHash)
                                 isAlphaTest = true;
@@ -640,6 +642,19 @@ namespace DeadlockPlayground.Importer
                             ? ResolveMultiChannelPng(MaterialTextureChannel.SelfIllum, null)
                             : null;
                         tintMaskPng = ResolveMultiChannelPng(MaterialTextureChannel.TintMask, null);
+
+                        // Skip 100%-invisible constant-alpha-0 translucent surfaces (e.g. Roblox R15 hidden under-body
+                        // meshes with alphaMode=BLEND & baseColorFactor.a=0 under layered clothing) unless painted,
+                        // preventing both wasted VPK material slots and F_WRITE_DEPTH_BEFORE_ALPHA_BLENDING depth holes.
+                        bool hasPaintedColorOrAlpha = lm != null && matchedSubInfo != null &&
+                            (lm.HasChannelEdits(matchedSubInfo, MaterialTextureChannel.Color) ||
+                             lm.HasEditedAlphaForMaterial(!string.IsNullOrEmpty(matchedSubInfo.OriginalVmatPath)
+                                 ? matchedSubInfo.OriginalVmatPath.ToLowerInvariant().Trim()
+                                 : lm.GetMaterialKey(matchedSubInfo.Mesh, matchedSubInfo.SurfaceIndex)));
+                        if (isTranslucent && albedoTint.A <= 0.002f && !hasPaintedColorOrAlpha)
+                        {
+                            continue;
+                        }
 
                         // If material has no texture image, bake its solid AlbedoColor into a 64x64 PNG
                         if (albedoPng == null || albedoPng.Length == 0)
@@ -1676,10 +1691,10 @@ namespace DeadlockPlayground.Importer
                             return result;
                         }
 
-                        if (vpkEntries.Count > 65)
+                        if (vpkEntries.Count > 256)
                         {
                             result.Success = false;
-                            result.ErrorMessage = $"VPK file count ({vpkEntries.Count}) exceeded strict upper bound of 65 files.";
+                            result.ErrorMessage = $"VPK file count ({vpkEntries.Count}) exceeded strict upper bound of 256 files.";
                             return result;
                         }
 
@@ -3725,6 +3740,8 @@ namespace DeadlockPlayground.Importer
                 "\t\t\t\t\t\tcloth_gravity_scale = 1.0\r\n" +
                 "\t\t\t\t\t\tcloth_drag_scale = 1.0\r\n" +
                 "\t\t\t\t\t\tcloth_collision_radius_scale = 1.0\r\n" +
+                "\t\t\t\t\t\tcloth_ground_collision_scale = 1.0\r\n" +
+                "\t\t\t\t\t\tcloth_ground_friction_scale = 1.0\r\n" +
                 "\t\t\t\t\t\tcloth_anchor_free_rotate_scale = 1.0\r\n" +
                 "\t\t\t\t\t\tcloth_suspenders_scale = 1.0\r\n" +
                 "\t\t\t\t\t\tcloth_bend_stiffness_scale = 1.0\r\n" +
@@ -3811,6 +3828,9 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine($"\t\t\t\t\t\tlocal_force = {FmtKvFloat(cp.LocalForce)}");
             sb.AppendLine($"\t\t\t\t\t\tlocal_rotation = {FmtKvFloat(cp.LocalRotation)}");
             sb.AppendLine($"\t\t\t\t\t\tlocal_drag1 = {FmtKvFloat(cp.LocalDrag1)}");
+            sb.AppendLine("\t\t\t\t\t\tdefault_ground_friction = 0.0");
+            sb.AppendLine("\t\t\t\t\t\tdefault_world_collision_penetration = 0.0");
+            sb.AppendLine("\t\t\t\t\t\tadd_world_collision_radius = 2.0");
             sb.AppendLine("\t\t\t\t\t\tadd_stiffness_rods = true");
             sb.AppendLine("\t\t\t\t\t\tnew_style = true");
             sb.AppendLine("\t\t\t\t\t\tunitless_damping = true");
@@ -4091,6 +4111,12 @@ namespace DeadlockPlayground.Importer
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tfriction = {FmtKvFloat(rp.Friction)}");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tgravity_z = {FmtKvFloat(rp.GravityScale)}");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tcollision_radius = {FmtKvFloat(rp.CollisionRadiusInches)}");
+                if (simJoint && ch.FloorCollision)
+                {
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tworld_collision = true");
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tworld_friction = 0.0");
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tground_friction = 0.0");
+                }
                 if (simJoint && rp.StrayRadiusInches > 0.01f)
                 {
                     sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tstray_radius = {FmtKvFloat(rp.StrayRadiusInches)}");
@@ -4638,6 +4664,7 @@ namespace DeadlockPlayground.Importer
             var clothGravity = new Datamodel.FloatArray();
             var clothFriction = new Datamodel.FloatArray();
             var clothAnchorFreeRotate = new Datamodel.FloatArray();
+            var clothGroundCollision = new Datamodel.FloatArray();
             var blendIndices = new Datamodel.IntArray();
             var blendWeights = new Datamodel.FloatArray();
             var vertIndices = new Datamodel.IntArray();
@@ -4809,6 +4836,7 @@ namespace DeadlockPlayground.Importer
             }
 
             var anyExplicitStray = false;
+            var anyFloorCollision = false;
 
             bundle.PlanarizeBackProxyNodes.Clear();
             bundle.PlanarizeWrapProxyNodes.Clear();
@@ -4868,6 +4896,9 @@ namespace DeadlockPlayground.Importer
                 // Allow pinned Row 0 (bone[0] waistband/collar/scalp) to rotate freely via back_solve_joints
                 // while locking its origin, matching Valve's yamato/geist/wraith/chrono proxy meshes.
                 clothAnchorFreeRotate.Add(effPinned ? 1.0f : rp.AnchorFreeRotate);
+                bool groundCol = !effPinned && ch.FloorCollision;
+                if (groundCol) anyFloorCollision = true;
+                clothGroundCollision.Add(groundCol ? 1.0f : 0.0f);
 
                 // 2-bone skinning (jointCount = 2): Row 1 carries a secondary 0.15 weight on pinned bone[0]
                 // (>= back_solve_influence_threshold = 0.05) so CSDK13 generates a NodeBase for bone[0] and
@@ -5210,6 +5241,8 @@ namespace DeadlockPlayground.Importer
             };
             if (anyExplicitStray)
                 vFmt.Insert(8, "cloth_stray_radius$0");
+            if (anyFloorCollision)
+                vFmt.Insert(8, "cloth_ground_collision$0");
             vertexData["vertexFormat"] = vFmt;
             vertexData["jointCount"] = 2;
             vertexData["flipVCoordinates"] = false;
@@ -5233,6 +5266,11 @@ namespace DeadlockPlayground.Importer
             {
                 vertexData["cloth_stray_radius$0"] = clothStrayRadius;
                 vertexData["cloth_stray_radius$0Indices"] = vertIndices;
+            }
+            if (anyFloorCollision)
+            {
+                vertexData["cloth_ground_collision$0"] = clothGroundCollision;
+                vertexData["cloth_ground_collision$0Indices"] = vertIndices;
             }
             vertexData["cloth_suspenders$0"] = clothSuspenders;
             vertexData["cloth_suspenders$0Indices"] = vertIndices;

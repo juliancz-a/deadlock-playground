@@ -59,6 +59,7 @@ namespace DeadlockPlayground.Animation
             public float RestSuspenderDistMeters = -1f;
             public bool IsBackSideOfTorso;
             public bool IsPlanarizeWrap;
+            public bool FloorCollision;
             public bool Simulate = true;
             public string BoneName = "";
             public string SourceBoneName = "";
@@ -448,6 +449,7 @@ namespace DeadlockPlayground.Animation
                         RestSuspenderDistMeters = restSuspDist,
                         IsBackSideOfTorso = isBackSide,
                         IsPlanarizeWrap = isPlanarizeWrap,
+                        FloorCollision = def.FloorCollision,
                         Initialized = false
                     });
                 }
@@ -540,6 +542,7 @@ namespace DeadlockPlayground.Animation
                     // 1:1 parity: unchecking PlanarizeBackBarrier / toggling OpenSheet updates planes immediately!
                     st.IsBackSideOfTorso = match.PlanarizeBackBarrier;
                     st.IsPlanarizeWrap = match.Simulation == SimulationKind.ProxyCloth && !match.OpenSheet;
+                    st.FloorCollision = match.FloorCollision;
                     if (planesChanged) st.Initialized = false;
                     st.EnableRibbonExtrude = match.EnableRibbonExtrude;
                     st.ClothHingeLimitRad = Mathf.DegToRad(Mathf.Clamp(match.AngleLimitDeg > 1f ? match.AngleLimitDeg : 35f, 5f, 140f));
@@ -779,6 +782,19 @@ namespace DeadlockPlayground.Animation
                     PlanarizeBackOnly = cap.PlanarizeBackOnly
                 });
             }
+
+            // Rebuild bind-pose FeCollisionPlanes immediately so Auto-Fit or live collider edits
+            // never leave initialized chains referencing stale or empty planes.
+            foreach (var ch in _chains)
+            {
+                foreach (var st in ch.Bones)
+                {
+                    if (st.Initialized)
+                    {
+                        BuildBindPoseCollisionPlanes(st);
+                    }
+                }
+            }
         }
 
         public override void _Process(double delta)
@@ -992,22 +1008,18 @@ namespace DeadlockPlayground.Animation
 
                     Transform3D capRestSkel = _skeleton.GetBoneGlobalRest(c.BoneIdx);
                     Vector3 nodeInCapLocal = capRestSkel.AffineInverse() * nodeRestSkel;
-                    ComputeClosestTaperedCapsule(nodeInCapLocal, c.Point0Local, c.Point1Local, c.Radius0, c.Radius1, out float dist, out float capRad, out Vector3 closestLocal);
-                    if (dist < bestDist)
+                    ComputeClosestTaperedCapsule(nodeInCapLocal, c.Point0Local, c.Point1Local, c.Radius0, c.Radius1, out float dist, out float capRad, out Vector3 closestLocal, out Vector3 outwardLocal);
+                    if (dist < bestDist && dist > 1e-5f)
                     {
-                        Vector3 diff = nodeInCapLocal - closestLocal;
-                        if (diff.LengthSquared() > 1e-8f)
-                        {
-                            bestDist = dist;
-                            bestBoneIdx = c.BoneIdx;
-                            bestNormalLocal = diff / dist;
-                            // Tangent plane on the capsule surface facing this vertex at bind pose
-                            bestOffsetLocal = closestLocal.Dot(bestNormalLocal) + capRad;
-                        }
+                        bestDist = dist;
+                        bestBoneIdx = c.BoneIdx;
+                        bestNormalLocal = outwardLocal;
+                        // Exact Source 2 tangent plane on the capsule surface facing this vertex at bind pose
+                        bestOffsetLocal = closestLocal.Dot(bestNormalLocal) + capRad;
                     }
                 }
 
-                if (bestBoneIdx >= 0)
+                if (bestBoneIdx >= 0 && bestDist < 0.75f)
                 {
                     st.CollisionPlanes.Add(new BindCollisionPlane
                     {
@@ -1035,14 +1047,19 @@ namespace DeadlockPlayground.Animation
 
                     Transform3D capRestSkel = _skeleton.GetBoneGlobalRest(c.BoneIdx);
                     Vector3 nodeInCapLocal = capRestSkel.AffineInverse() * nodeRestSkel;
-                    ComputeClosestTaperedCapsule(nodeInCapLocal, c.Point0Local, c.Point1Local, c.Radius0, c.Radius1, out float dist, out float capRad, out Vector3 closestLocal);
+                    ComputeClosestTaperedCapsule(nodeInCapLocal, c.Point0Local, c.Point1Local, c.Radius0, c.Radius1, out float dist, out float capRad, out Vector3 closestLocal, out Vector3 outwardLocal);
                     if (dist < bestDist)
                     {
-                        Vector3 diff = nodeInCapLocal - closestLocal;
                         Vector3 backLocal = (capRestSkel.Basis.Orthonormalized().Inverse() * new Vector3(0f, 0f, -1f)).Normalized();
-                        Vector3 nLocal = diff.LengthSquared() > 1e-8f ? (diff / dist) : backLocal;
-                        // Ensure the back-barrier plane normal always points toward the back half-space
-                        if (nLocal.Dot(backLocal) < 0.25f) nLocal = backLocal;
+                        Vector3 nLocal = dist > 1e-5f ? outwardLocal : backLocal;
+                        float backDot = nLocal.Dot(backLocal);
+                        // For back/shoulder-blade hair & capes (backDot >= -0.05), keep the barrier normal biased
+                        // toward the back half-space so looking up never flips hair into the chest.
+                        // For front/side framing strands (backDot < -0.05), preserve their actual bind-pose outward
+                        // tangent normal (exact Source 2 planarize=true behavior) so front hair is NEVER slammed
+                        // backward through the neck/chest on Frame 1!
+                        if (backDot >= -0.05f && backDot < 0.25f)
+                            nLocal = backLocal;
                         bestDist = dist;
                         bestBoneIdx = c.BoneIdx;
                         bestNormalLocal = nLocal;
@@ -1090,11 +1107,13 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            // 2. Exact Source 2 FeModel Constraint Solver (1 + ExtraIterations passes):
+            // 2. Source 2 FeModel Constraint Solver:
             //    Symmetric Weight0 = 0.500 dynamic-dynamic / 0.000 static-dynamic rods (RelaxationFactor = 1.0),
             //    compressible MinDist bend rods (VRF ClothExtract.BendPaint.cs), one-sided suspenders, stray leash,
             //    bind-pose FeCollisionPlanes, and exact TaperedCapsuleRigid / BoxRigid collisions.
-            int rodIterations = 1 + Math.Max(0, PhysicsParamResolver.ValveBaselineClothParams.ExtraIterations);
+            //    Run >= 3 PBD passes so multi-bone skirts & long hair preserve exact bone lengths and woven sheet width
+            //    after collision pushout instead of drifting/kinking before CommitFinalBonePoses.
+            int rodIterations = Math.Max(3, 1 + Math.Max(0, PhysicsParamResolver.ValveBaselineClothParams.ExtraIterations));
             Transform3D skelGlobal = _skeleton.IsInsideTree() ? _skeleton.GlobalTransform : Transform3D.Identity;
             int boneCount = _skeleton.GetBoneCount();
 
@@ -1227,6 +1246,16 @@ namespace DeadlockPlayground.Animation
                         if (_worldCapsulesCache.Count > 0 || _worldBoxesCache.Count > 0)
                         {
                             ResolveBodyCapsuleCollisions(headWorld, st, st.CurWorldBoneLength, chain.AnchorBoneIdx, isSkirtChain);
+                        }
+
+                        // Source 2 native world/ground floor collision (cloth_ground_collision$0 / world_collision = true)
+                        if (st.FloorCollision)
+                        {
+                            float floorY = skelGlobal.Origin.Y + MathF.Max(0.015f, st.ColRadiusMeters * 0.5f);
+                            if (st.TipWorldPos.Y < floorY)
+                            {
+                                PushTipOutOfCollider(st, Vector3.Up, MathF.Min(0.25f, floorY - st.TipWorldPos.Y));
+                            }
                         }
                     }
                 }
@@ -1372,7 +1401,7 @@ namespace DeadlockPlayground.Animation
             {
                 var wc = _worldCapsulesCache[c];
                 if (!wc.IsTorsoBarrier) continue;
-                ComputeClosestTaperedCapsule(worldPos, wc.A, wc.B, wc.Radius0, wc.Radius1, out float rDist, out float rCap, out _);
+                ComputeClosestTaperedCapsule(worldPos, wc.A, wc.B, wc.Radius0, wc.Radius1, out float rDist, out float rCap, out _, out _);
                 if (rDist < rCap + margin) return true;
             }
             return false;
@@ -1567,13 +1596,13 @@ namespace DeadlockPlayground.Animation
             {
                 var wc = _worldCapsulesCache[c];
 
-                ComputeClosestTaperedCapsule(st.TipWorldPos, wc.A, wc.B, wc.Radius0, wc.Radius1, out float dist, out float capRad, out Vector3 ptOnCap);
+                ComputeClosestTaperedCapsule(st.TipWorldPos, wc.A, wc.B, wc.Radius0, wc.Radius1, out float dist, out float capRad, out Vector3 ptOnCap, out Vector3 outwardNormal);
                 Vector3 diff = st.TipWorldPos - ptOnCap;
-                Vector3 normal = dist > 1e-5f ? (diff / dist) : (wc.IsTorsoBarrier ? wc.BackWorld : Vector3.Back);
+                Vector3 normal = dist > 1e-5f ? outwardNormal : (wc.IsTorsoBarrier ? wc.BackWorld : Vector3.Back);
                 float minAllowed = capRad + nodeRad;
 
-                // Planarized torso back-barrier fallback only when no bind-pose FeCollisionPlane covers this capsule
-                if (st.IsBackSideOfTorso && wc.IsTorsoBarrier && st.CollisionPlanes.Count == 0 && normal.Dot(wc.BackWorld) < 0.20f)
+                // Planarized torso back-barrier fallback only when colliding and no bind-pose FeCollisionPlane covers this capsule
+                if (st.IsBackSideOfTorso && wc.IsTorsoBarrier && st.CollisionPlanes.Count == 0 && dist < minAllowed && normal.Dot(wc.BackWorld) < 0.20f)
                 {
                     float signedBack = diff.Dot(wc.BackWorld);
                     if (signedBack < minAllowed)
@@ -1710,14 +1739,15 @@ namespace DeadlockPlayground.Animation
             float r1,
             out float dist,
             out float interpolatedRadius,
+            out Vector3 closestPoint,
             out Vector3 outwardNormal)
         {
             Vector3 ab = b - a;
             float abSq = ab.LengthSquared();
             float t = abSq > 1e-8f ? Mathf.Clamp((p - a).Dot(ab) / abSq, 0f, 1f) : 0f;
-            Vector3 closest = a + ab * t;
+            closestPoint = a + ab * t;
             interpolatedRadius = Mathf.Lerp(r0, r1, t);
-            Vector3 diff = p - closest;
+            Vector3 diff = p - closestPoint;
             float dSq = diff.LengthSquared();
             if (dSq > 1e-8f)
             {

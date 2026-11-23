@@ -7775,10 +7775,7 @@ namespace DeadlockPlayground.Painter
                     }
                     foreach (Node child in node.GetChildren())
                     {
-                        string childName = child.Name.ToString();
-                        if (childName.StartsWith("@")) continue;
-                        string childLower = childName.ToLowerInvariant();
-                        if (childLower.Contains("picker") || childLower.Contains("gizmo") || childLower.Contains("handle") || childLower.Contains("visual"))
+                        if (HeroMeshHierarchy.IsEditorHelperNode(child))
                             continue;
 
                         FindMeshes(child);

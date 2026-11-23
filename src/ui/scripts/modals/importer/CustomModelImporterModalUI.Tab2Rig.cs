@@ -990,6 +990,8 @@ namespace DeadlockPlayground.UI
             {
                 _customSkinOverrides.Clear();
                 _baselineSkinOverrides.Clear();
+                _paintSurfaces.Clear();
+                _strokeDirty = false;
                 _weightUndoStack.Clear();
                 _weightRedoStack.Clear();
                 UpdatePaintOverrideLabel();

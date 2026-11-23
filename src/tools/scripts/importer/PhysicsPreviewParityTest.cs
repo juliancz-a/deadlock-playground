@@ -56,6 +56,8 @@ namespace DeadlockPlayground.Tests
                 TestPaigeShortHairExactSource2SagAndZeroHiddenCollision();
                 TestCmScaledShortHairExportAndCsdk13FeModel();
                 TestProxyClothSkirtAndCoatCsdk13Parity();
+                TestSkirtAndNonShortHairPreviewFidelity();
+                await TestHandleWrapLayerHierarchyAndHazeExportAsync();
             }
             catch (Exception ex)
             {
@@ -809,11 +811,14 @@ namespace DeadlockPlayground.Tests
             }
 
             // Settle at rest first (builds bind-pose FeCollisionPlanes)
+            skel.SetBonePosePosition(bPelvis, new Vector3(0f, 1.00f, 0f));
+            skel.SetBonePosePosition(bLegL, new Vector3(0.10f, -0.08f, 0f));
+            skel.SetBonePosePosition(bLegR, new Vector3(-0.10f, -0.08f, 0f));
             for (int f = 0; f < 30; f++) driver.StepSimulation(1f / 60f);
             int frontB2 = skel.FindBone("skirt_front_2");
             float frontLowZBefore = GetBoneWorldOrigin(skel, frontB2).Z;
 
-            // Swing both thighs forward (+55 deg around +X so legs kick toward +Z front)
+            // Swing both thighs forward (-55 deg around +X so legs kick toward +Z front)
             skel.SetBonePoseRotation(bLegL, new Quaternion(Vector3.Right, Mathf.DegToRad(-55f)));
             skel.SetBonePoseRotation(bLegR, new Quaternion(Vector3.Right, Mathf.DegToRad(-55f)));
             skel.ForceUpdateBoneChildTransform(bLegL);
@@ -928,6 +933,8 @@ namespace DeadlockPlayground.Tests
                     float minDynHorizFromPelvis = 9999f;
                     int colPlaneCount = 0;
                     int nodeBasesCount = 0;
+                    int worldColNodesCount = 0;
+                    int worldColParamsCount = 0;
                     float row1GoalF = -1f, hemGoalF = -1f;
                     if (compiledOk)
                     {
@@ -941,6 +948,8 @@ namespace DeadlockPlayground.Tests
                             var pelP = pelNode >= 0 ? fe.InitPose[pelNode].Position : new System.Numerics.Vector3(pelSrc.X, pelSrc.Y, pelSrc.Z);
                             colPlaneCount = fe.CollisionPlanes?.Length ?? 0;
                             nodeBasesCount = fe.NodeBases?.Length ?? 0;
+                            worldColNodesCount = fe.WorldCollisionNodes?.Length ?? 0;
+                            worldColParamsCount = fe.WorldCollisionParams?.Length ?? 0;
                             var dynGoalFs = new List<float>();
                             string minHorizNodeName = "";
                             for (int ni = fe.StaticNodes; ni < fe.NodeCount; ni++)
@@ -970,6 +979,8 @@ namespace DeadlockPlayground.Tests
                     // Exact match to PhysicsParamResolver at t=1/3 (0.185) and t=1.0 (0.0008)
                     Check(compiledOk && row1GoalF > 0.14f && row1GoalF < 0.24f && hemGoalF < 0.01f,
                         $"CSDK13 skirt goalF matches preview & Valve Yamato curve exactly (row1={row1GoalF:F3} vs 0.185, hem={hemGoalF:F4} vs 0.0008)");
+                    Check(compiledOk && worldColNodesCount > 0 && worldColParamsCount > 0,
+                        $"CSDK13 ProxyCloth skirt compiles native Source 2 floor collision (WorldCollisionNodes={worldColNodesCount}, Params={worldColParamsCount})");
                 }
                 finally
                 {
@@ -1070,6 +1081,7 @@ namespace DeadlockPlayground.Tests
 
                     string ponyVmdlC = Path.Combine(tmpPonyDst, "unicorn.vmdl_c");
                     int ponyPlanes = 0;
+                    int ponyWorldColNodes = 0;
                     bool ponyOk = proc2.ExitCode == 0 && File.Exists(ponyVmdlC);
                     if (ponyOk)
                     {
@@ -1077,9 +1089,12 @@ namespace DeadlockPlayground.Tests
                         res2.Read(ponyVmdlC);
                         var fe2 = (res2.DataBlock as Model)?.GetEmbeddedPhys()?.FeModel;
                         ponyPlanes = fe2?.CollisionPlanes?.Length ?? 0;
+                        ponyWorldColNodes = fe2?.WorldCollisionNodes?.Length ?? 0;
                     }
                     Check(ponyOk && ponyVmdl.Contains("name = \"planarize_back\"") && ponyPlanes > 0,
                         $"Standalone ClothChain UltraLongPonytail emits ClothVertexMap planarize_back and compiles spine CollisionPlanes (count={ponyPlanes})");
+                    Check(ponyOk && ponyWorldColNodes > 0,
+                        $"Standalone ClothChain UltraLongPonytail compiles native Source 2 floor collision (WorldCollisionNodes={ponyWorldColNodes})");
                 }
                 finally
                 {
@@ -1090,6 +1105,362 @@ namespace DeadlockPlayground.Tests
             }
 
             root.QueueFree();
+        }
+
+        private void TestSkirtAndNonShortHairPreviewFidelity()
+        {
+            GD.Print("--- Skirt & Non-Short Hair In-App Preview Fidelity (FeCollisionPlane + Multi-Pass PBD) ---");
+
+            // 1. HeavySkirtDressId (6-strand wrap-around skirt) with full leg_upper + leg_lower capsules:
+            //    Must settle calmly at rest with zero Frame-1 outward/upward explosion from ComputeClosestTaperedCapsule bug!
+            var rootSk = new Node3D { Name = "SkirtPreviewFidelityRoot" };
+            var skelSk = new Skeleton3D { Name = "Skeleton3D" };
+            rootSk.AddChild(skelSk);
+            Root.AddChild(rootSk);
+
+            int sRoot = skelSk.AddBone("root_motion");
+            skelSk.SetBoneRest(sRoot, Transform3D.Identity);
+            int sPelvis = skelSk.AddBone("pelvis");
+            skelSk.SetBoneParent(sPelvis, sRoot);
+            skelSk.SetBoneRest(sPelvis, new Transform3D(Basis.Identity, new Vector3(0f, 1.00f, 0f)));
+            int sLegL = skelSk.AddBone("leg_upper_L");
+            skelSk.SetBoneParent(sLegL, sPelvis);
+            skelSk.SetBoneRest(sLegL, new Transform3D(Basis.Identity, new Vector3(0.095f, -0.06f, 0f)));
+            int sLegR = skelSk.AddBone("leg_upper_R");
+            skelSk.SetBoneParent(sLegR, sPelvis);
+            skelSk.SetBoneRest(sLegR, new Transform3D(Basis.Identity, new Vector3(-0.095f, -0.06f, 0f)));
+            skelSk.ResetBonePoses();
+
+            var skirtDefs = new List<BoneChainDef>();
+            var restHemWorld = new List<Vector3>();
+            int strandN = 6;
+            for (int s = 0; s < strandN; s++)
+            {
+                float ang = s * Mathf.Tau / strandN;
+                Vector3 radial = new Vector3(MathF.Sin(ang), 0f, MathF.Cos(ang));
+                int parent = sPelvis;
+                var names = new List<string>();
+                for (int k = 0; k < 4; k++)
+                {
+                    string bn = $"skirt6_{s}_{k}";
+                    int bi = skelSk.AddBone(bn);
+                    skelSk.SetBoneParent(bi, parent);
+                    Vector3 loc = k == 0
+                        ? (radial * 0.21f + new Vector3(0f, -0.02f, 0f))
+                        : (radial * 0.022f + new Vector3(0f, -0.14f, 0f));
+                    skelSk.SetBoneRest(bi, new Transform3D(Basis.Identity, loc));
+                    skelSk.SetBonePosePosition(bi, loc);
+                    skelSk.SetBonePoseRotation(bi, Quaternion.Identity);
+                    names.Add(bn);
+                    parent = bi;
+                }
+                restHemWorld.Add(skelSk.GetBoneGlobalRest(skelSk.FindBone(names[^1])).Origin);
+                var ch = new BoneChainDef
+                {
+                    ChainId = $"skirt6_{s}",
+                    Name = names[0],
+                    RootSourceBone = names[0],
+                    AnchorHeroBone = "pelvis",
+                    Policy = ChainPolicy.PreservePhysicsChain,
+                    SourceBoneNames = new List<string>(names),
+                    AppendedHeroBoneNames = new List<string>(names)
+                };
+                PhysicsPresetCatalog.ApplyPresetToChain(ch, PhysicsPresetCatalog.HeavySkirtDressId, resetMacros: true);
+                skirtDefs.Add(ch);
+            }
+
+            var drvSk = CustomJiggleBoneDriver.GetOrAttach(rootSk, skelSk);
+            drvSk.RegisterChains("skirt6", skirtDefs);
+            // Step 5 frames BEFORE registering capsules to verify RegisterCollisionCapsules rebuilds planes on initialized chains!
+            for (int f = 0; f < 5; f++) drvSk.StepSimulation(1f / 60f);
+            drvSk.RegisterCollisionCapsules(new[]
+            {
+                new BodyCollisionCapsuleDef { BoneName = "leg_upper_L", Enabled = true, Point0Local = Vector3.Zero, Point1Local = new Vector3(0f, -0.42f, 0f), Radius0Meters = 0.082f, Radius1Meters = 0.070f },
+                new BodyCollisionCapsuleDef { BoneName = "leg_upper_R", Enabled = true, Point0Local = Vector3.Zero, Point1Local = new Vector3(0f, -0.42f, 0f), Radius0Meters = 0.082f, Radius1Meters = 0.070f }
+            });
+
+            for (int f = 0; f < 90; f++) drvSk.StepSimulation(1f / 60f);
+
+            static Vector3 BoneWorldOrigin(Skeleton3D sk, int bi)
+            {
+                var chain = new List<int>();
+                for (int b = bi; b >= 0; b = sk.GetBoneParent(b)) chain.Add(b);
+                Transform3D acc = Transform3D.Identity;
+                for (int i = chain.Count - 1; i >= 0; i--) acc *= sk.GetBonePose(chain[i]);
+                return acc.Origin;
+            }
+
+            float maxSkirtRestDisp = 0f;
+            bool skirtAllFinite = true;
+            for (int s = 0; s < strandN; s++)
+            {
+                Vector3 cur = BoneWorldOrigin(skelSk, skelSk.FindBone($"skirt6_{s}_3"));
+                if (!cur.IsFinite()) skirtAllFinite = false;
+                float d = cur.DistanceTo(restHemWorld[s]);
+                if (d > maxSkirtRestDisp) maxSkirtRestDisp = d;
+            }
+            Check(skirtAllFinite && maxSkirtRestDisp < 0.08f,
+                $"HeavySkirtDressId (6-strand) settles cleanly at rest with zero plane explosion (maxDisp={maxSkirtRestDisp:F3}m < 0.08m)");
+
+            // 2. LongFlowingHairId + MediumHairId with BOTH back strands AND front/side framing strands:
+            //    Back strands stay calm behind spine_2/spine_3; front/side framing strands stay in FRONT (never slammed through chest!).
+            var rootH = new Node3D { Name = "LongHairPreviewRoot" };
+            var skelH = new Skeleton3D { Name = "Skeleton3D" };
+            rootH.AddChild(skelH);
+            Root.AddChild(rootH);
+
+            int hRoot = skelH.AddBone("root_motion");
+            skelH.SetBoneRest(hRoot, Transform3D.Identity);
+            int hSpine2 = skelH.AddBone("spine_2");
+            skelH.SetBoneParent(hSpine2, hRoot);
+            skelH.SetBoneRest(hSpine2, new Transform3D(Basis.Identity, new Vector3(0f, 1.25f, 0f)));
+            int hSpine3 = skelH.AddBone("spine_3");
+            skelH.SetBoneParent(hSpine3, hSpine2);
+            skelH.SetBoneRest(hSpine3, new Transform3D(Basis.Identity, new Vector3(0f, 0.16f, 0f)));
+            int hHead = skelH.AddBone("head");
+            skelH.SetBoneParent(hHead, hSpine3);
+            skelH.SetBoneRest(hHead, new Transform3D(Basis.Identity, new Vector3(0f, 0.24f, 0f)));
+            skelH.ResetBonePoses();
+
+            (string Tag, Vector3 RootOff)[] hairStrands =
+            {
+                ("back_c", new Vector3(0f, -0.02f, -0.20f)),
+                ("back_l", new Vector3(0.09f, -0.02f, -0.19f)),
+                ("front_l", new Vector3(0.14f, -0.02f, 0.15f))
+            };
+            var hairDefs = new List<BoneChainDef>();
+            var hairRestTips = new Dictionary<string, Vector3>();
+            foreach (var (tag, rOff) in hairStrands)
+            {
+                int parent = hHead;
+                var names = new List<string>();
+                for (int k = 0; k < 4; k++)
+                {
+                    string bn = $"hair_{tag}_{k}";
+                    int bi = skelH.AddBone(bn);
+                    skelH.SetBoneParent(bi, parent);
+                    Vector3 loc = k == 0 ? rOff : new Vector3(0f, -0.12f, 0f);
+                    skelH.SetBoneRest(bi, new Transform3D(Basis.Identity, loc));
+                    skelH.SetBonePosePosition(bi, loc);
+                    skelH.SetBonePoseRotation(bi, Quaternion.Identity);
+                    names.Add(bn);
+                    parent = bi;
+                }
+                hairRestTips[tag] = skelH.GetBoneGlobalRest(skelH.FindBone(names[^1])).Origin;
+                var ch = new BoneChainDef
+                {
+                    ChainId = $"hair_{tag}",
+                    Name = names[0],
+                    RootSourceBone = names[0],
+                    AnchorHeroBone = "head",
+                    Policy = ChainPolicy.PreservePhysicsChain,
+                    SourceBoneNames = new List<string>(names),
+                    AppendedHeroBoneNames = new List<string>(names)
+                };
+                PhysicsPresetCatalog.ApplyPresetToChain(ch, PhysicsPresetCatalog.LongFlowingHairId, resetMacros: true);
+                hairDefs.Add(ch);
+            }
+
+            var drvH = CustomJiggleBoneDriver.GetOrAttach(rootH, skelH);
+            drvH.RegisterChains("long_hair", hairDefs);
+            drvH.RegisterCollisionCapsules(new[]
+            {
+                new BodyCollisionCapsuleDef { BoneName = "spine_2", Enabled = true, Point0Local = new Vector3(0f, -0.12f, 0f), Point1Local = new Vector3(0f, 0.12f, 0f), Radius0Meters = 0.11f, Radius1Meters = 0.11f },
+                new BodyCollisionCapsuleDef { BoneName = "spine_3", Enabled = true, Point0Local = new Vector3(0f, -0.10f, 0f), Point1Local = new Vector3(0f, 0.10f, 0f), Radius0Meters = 0.11f, Radius1Meters = 0.11f }
+            });
+
+            for (int f = 0; f < 90; f++) drvH.StepSimulation(1f / 60f);
+
+            Vector3 backCur = BoneWorldOrigin(skelH, skelH.FindBone("hair_back_c_3"));
+            Vector3 frontCur = BoneWorldOrigin(skelH, skelH.FindBone("hair_front_l_3"));
+            float backDisp = backCur.DistanceTo(hairRestTips["back_c"]);
+            float frontDisp = frontCur.DistanceTo(hairRestTips["front_l"]);
+            Check(backCur.IsFinite() && backCur.Z < -0.15f && backDisp < 0.08f,
+                $"LongFlowingHairId back strand settles calmly behind spine with zero plane blast (Z={backCur.Z:F3}m, disp={backDisp:F3}m)");
+            Check(frontCur.IsFinite() && frontCur.Z > 0.08f && frontDisp < 0.08f,
+                $"LongFlowingHairId front/side framing strand stays in front of chest instead of slamming behind spine (Z={frontCur.Z:F3}m, disp={frontDisp:F3}m)");
+
+            rootSk.QueueFree();
+            rootH.QueueFree();
+        }
+
+        private async Task TestHandleWrapLayerHierarchyAndHazeExportAsync()
+        {
+            GD.Print("--- HandleWrapLayer Discovery & Finished_.glb -> Haze Export Parity ---");
+
+            // 1. Unit test: HeroMeshHierarchy.ScanHero + BuildExportBundle must preserve custom meshes named
+            //    'HandleWrapLayer' while still ignoring editor gizmos and skipping constant alpha-0 AlphaDepthPrePass meshes!
+            var heroRoot = new Node3D { Name = "TestHazeHero" };
+            var skel = new Skeleton3D { Name = "Skeleton3D" };
+            heroRoot.AddChild(skel);
+            int bRoot = skel.AddBone("root_motion");
+            skel.SetBoneRest(bRoot, Transform3D.Identity);
+            int bPelvis = skel.AddBone("pelvis");
+            skel.SetBoneParent(bPelvis, bRoot);
+            skel.SetBoneRest(bPelvis, new Transform3D(Basis.Identity, new Vector3(0, 1.0f, 0)));
+
+            var customContainer = new Node3D { Name = "Custom_Rigged_Character" };
+            customContainer.SetMeta("IsCustomImportedMesh", true);
+            heroRoot.AddChild(customContainer);
+
+            static MeshInstance3D MakeTriMesh(string name, StandardMaterial3D mat, bool isCustom)
+            {
+                var arr = new Godot.Collections.Array();
+                arr.Resize((int)Godot.Mesh.ArrayType.Max);
+                arr[(int)Godot.Mesh.ArrayType.Vertex] = new[] { new Vector3(0, 0, 0), new Vector3(0.2f, 0, 0), new Vector3(0, 0.2f, 0) };
+                arr[(int)Godot.Mesh.ArrayType.Normal] = new[] { Vector3.Back, Vector3.Back, Vector3.Back };
+                arr[(int)Godot.Mesh.ArrayType.TexUV] = new[] { Vector2.Zero, Vector2.Right, Vector2.Up };
+                arr[(int)Godot.Mesh.ArrayType.Index] = new[] { 0, 1, 2 };
+                var am = new ArrayMesh();
+                am.AddSurfaceFromArrays(Godot.Mesh.PrimitiveType.Triangles, arr);
+                am.SurfaceSetMaterial(0, mat);
+                var mi = new MeshInstance3D { Name = name, Mesh = am };
+                if (isCustom) mi.SetMeta("IsCustomImportedMesh", true);
+                return mi;
+            }
+
+            var bodyMat = new StandardMaterial3D { ResourceName = "rbx_Rig3.model/HandleWrapLayer.MeshPart.001", AlbedoColor = new Color(0.2f, 0.2f, 0.25f, 1f) };
+            var hiddenR15Mat = new StandardMaterial3D
+            {
+                ResourceName = "rbx_Rig3.model/LeftFoot.MeshPart",
+                Transparency = BaseMaterial3D.TransparencyEnum.AlphaDepthPrePass,
+                AlbedoColor = new Color(1f, 1f, 1f, 0f)
+            };
+            var gizmoMat = new StandardMaterial3D { ResourceName = "gizmo_mat" };
+
+            var uniformMi = MakeTriMesh("Rig3_model_HandleWrapLayer_MeshPart_001_surf0", bodyMat, isCustom: true);
+            var hiddenMi = MakeTriMesh("Rig3_model_LeftFoot_MeshPart_surf0", hiddenR15Mat, isCustom: true);
+            var gizmoMi = MakeTriMesh("BonePickerGizmo", gizmoMat, isCustom: false);
+            var pickAttach = new BoneAttachment3D { Name = "Pick_cloth_0" };
+            var pickerHandleMi = MakeTriMesh("PickerHandle", gizmoMat, isCustom: false);
+            pickAttach.AddChild(pickerHandleMi);
+            skel.AddChild(pickAttach);
+            customContainer.AddChild(uniformMi);
+            customContainer.AddChild(hiddenMi);
+            heroRoot.AddChild(gizmoMi);
+            Root.AddChild(heroRoot);
+
+            var hierarchy = new DeadlockPlayground.Painter.HeroMeshHierarchy();
+            Root.AddChild(hierarchy);
+            hierarchy.ScanHero(heroRoot);
+
+            bool foundHandleBody = hierarchy.Submeshes.Any(s => s.RawName.Contains("HandleWrapLayer_MeshPart_001"));
+            bool excludedGizmo = !hierarchy.Submeshes.Any(s => s.RawName.Contains("BonePickerGizmo"));
+            bool excludedPickerHandle = !hierarchy.Submeshes.Any(s => s.RawName.Contains("PickerHandle"));
+            Check(foundHandleBody && excludedGizmo && excludedPickerHandle,
+                $"HeroMeshHierarchy preserves custom HandleWrapLayer body mesh ({foundHandleBody}) while excluding BonePickerGizmo ({excludedGizmo}) and X-ray PickerHandle ({excludedPickerHandle})");
+
+            // Verify RigidJiggle thumbnail uses pouches_bebop.png and Custom SVG loads at crisp high-DPI (>= 64px)
+            var rigidPreset = PhysicsPresetCatalog.Find(PhysicsPresetCatalog.RigidJiggleId);
+            var customSvgTex = PhysicsPresetCatalog.LoadPresetTexture(null);
+            Check(rigidPreset != null && rigidPreset.ThumbnailPath.EndsWith("pouches_bebop.png", StringComparison.OrdinalIgnoreCase),
+                $"RigidJiggle preset uses pouches_bebop.png thumbnail ({rigidPreset?.ThumbnailPath})");
+            Check(customSvgTex != null && customSvgTex.GetWidth() >= 64,
+                $"Custom preset SVG icon rasterizes at high quality (size={customSvgTex?.GetWidth() ?? 0}x{customSvgTex?.GetHeight() ?? 0})");
+
+            var customMeshes = hierarchy.Submeshes
+                .Where(s => s.IsCustomImportedMesh && s.Mesh != null && s.Mesh.Visible)
+                .Select(s => s.Mesh)
+                .Distinct()
+                .ToList();
+            var unitBundle = CustomModelExporter.BuildExportBundle(customMeshes, skel, "haze");
+            bool bundleHasUniform = unitBundle.Submeshes.Any(sm => sm.SubmeshName.Contains("HandleWrapLayer_MeshPart_001"));
+            bool bundleSkippedAlpha0 = !unitBundle.Submeshes.Any(sm => sm.SubmeshName.Contains("LeftFoot"));
+            Check(bundleHasUniform && bundleSkippedAlpha0,
+                $"BuildExportBundle keeps HandleWrapLayer uniform ({bundleHasUniform}) and skips constant alpha-0 AlphaDepthPrePass under-body ({bundleSkippedAlpha0})");
+
+            // 2. Real end-to-end test on scratch_out\Finished_.glb -> haze.vmdl_c via CSDK13 (when local test asset + VPK + CSDK13 exist)
+            string finishedGlb = @"d:\GameDev\deadlock-playground\scratch_out\Finished_.glb";
+            string csdkRc = @"D:\Reduced_CSDK_13\game\bin\win64\resourcecompiler.exe";
+            string deadlockRoot = @"E:\SteamLibrary\steamapps\common\Deadlock";
+            if (File.Exists(finishedGlb) && File.Exists(csdkRc) && File.Exists(Path.Combine(deadlockRoot, "game", "citadel", "pak01_dir.vpk")))
+            {
+                var doc = new GltfDocument();
+                var state = new GltfState();
+                Error gErr = doc.AppendFromFile(finishedGlb, state);
+                Node3D glbRoot = gErr == Error.Ok ? doc.GenerateScene(state) as Node3D : null;
+                if (glbRoot != null)
+                {
+                    var glbContainer = new Node3D { Name = "Custom_Rigged_Character" };
+                    glbContainer.SetMeta("IsCustomImportedMesh", true);
+                    // Re-tag all imported meshes as IsCustomImportedMesh as RigAndBind does
+                    var srcMeshes = new List<MeshInstance3D>();
+                    void WalkMeshes(Node n)
+                    {
+                        if (n is MeshInstance3D m && m.Mesh != null) srcMeshes.Add(m);
+                        foreach (Node c in n.GetChildren()) WalkMeshes(c);
+                    }
+                    WalkMeshes(glbRoot);
+
+                    var fakeHero = new Node3D { Name = "HazeFinishedTest" };
+                    var fakeSkel = new Skeleton3D { Name = "Skeleton3D" };
+                    fakeHero.AddChild(fakeSkel);
+                    int r0 = fakeSkel.AddBone("root_motion");
+                    fakeSkel.SetBoneRest(r0, Transform3D.Identity);
+                    int r1 = fakeSkel.AddBone("pelvis");
+                    fakeSkel.SetBoneParent(r1, r0);
+                    fakeSkel.SetBoneRest(r1, new Transform3D(Basis.Identity, new Vector3(0, 1.0f, 0)));
+                    fakeHero.AddChild(glbContainer);
+                    foreach (var m in srcMeshes)
+                    {
+                        var dup = new MeshInstance3D { Name = $"{m.Name}_surf0", Mesh = m.Mesh, Visible = true };
+                        dup.SetMeta("IsCustomImportedMesh", true);
+                        glbContainer.AddChild(dup);
+                    }
+                    Root.AddChild(fakeHero);
+
+                    var h2 = new DeadlockPlayground.Painter.HeroMeshHierarchy();
+                    Root.AddChild(h2);
+                    h2.ScanHero(fakeHero);
+
+                    int scannedHandleCount = h2.Submeshes.Count(s => s.RawName.Contains("HandleWrapLayer", StringComparison.OrdinalIgnoreCase));
+                    Check(scannedHandleCount == 4,
+                        $"Finished_.glb HeroMeshHierarchy captures all 4 HandleWrapLayer meshes including main body uniform (got {scannedHandleCount}/4)");
+
+                    var exportMeshes = h2.Submeshes
+                        .Where(s => s.IsCustomImportedMesh && s.Mesh != null && s.Mesh.Visible)
+                        .Select(s => s.Mesh)
+                        .Distinct()
+                        .ToList();
+                    var hazeBundle = CustomModelExporter.BuildExportBundle(
+                        exportMeshes,
+                        fakeSkel,
+                        "haze",
+                        heroModelVpkPath: "models/heroes_staging/haze/haze.vmdl_c",
+                        compilerExe: csdkRc,
+                        deadlockGamePath: deadlockRoot);
+
+                    bool hasMainUniform = hazeBundle.Submeshes.Any(sm => sm.SubmeshName.Contains("HandleWrapLayer_MeshPart_001") && sm.Vertices.Length == 3718);
+                    Check(hasMainUniform && hazeBundle.Submeshes.Count == 9,
+                        $"Finished_.glb BuildExportBundle includes 3718-vert main body uniform and exactly 9 visible opaque meshes (got {hazeBundle.Submeshes.Count})");
+
+                    var compRes = await CustomModelExporter.ExportAndCompileCustomModelAsync(hazeBundle);
+                    int compiledTris = 0;
+                    if (compRes.Success && !string.IsNullOrEmpty(compRes.CompiledVmdlCPath) && File.Exists(compRes.CompiledVmdlCPath))
+                    {
+                        using var vRes = new ValveResourceFormat.Resource { FileName = compRes.CompiledVmdlCPath };
+                        vRes.Read(compRes.CompiledVmdlCPath);
+                        if (vRes.DataBlock is Model mdl)
+                        {
+                            foreach (var em in mdl.GetEmbeddedMeshes())
+                            {
+                                var vb = em.Mesh.VBIB;
+                                if (vb?.IndexBuffers != null)
+                                    foreach (var ib in vb.IndexBuffers) compiledTris += (int)(ib.ElementCount / 3);
+                            }
+                        }
+                    }
+                    Check(compRes.Success && compiledTris >= 20000,
+                        $"Finished_.glb compiled cleanly into haze.vmdl_c via CSDK13 with full body geometry (ok={compRes.Success}, tris={compiledTris}, files={compRes.AllowlistedVpkFiles.Count}, err='{compRes.ErrorMessage}')");
+
+                    h2.QueueFree();
+                    fakeHero.QueueFree();
+                    glbRoot.QueueFree();
+                }
+            }
+
+            hierarchy.QueueFree();
+            heroRoot.QueueFree();
         }
     }
 }

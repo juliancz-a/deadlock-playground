@@ -41,6 +41,7 @@ namespace DeadlockPlayground.Tests
                 TestHighResHandAndFingerIsolation();
                 TestModularSpineCountAndExactMapping();
                 TestClothChainIsolationFromFaceAndHoodie();
+                TestLandmarkAutoRigOnPreviouslyRiggedModel();
                 DiagnoseKirikoModelIfPresent();
             }
             catch (Exception ex)
@@ -586,6 +587,240 @@ namespace DeadlockPlayground.Tests
             Check(postMaxDiff2mm < 0.005f, $"kirikonorig.glb upper/legs seam coincident vertices welded with 0 gap (maxDiff<=2mm={postMaxDiff2mm:F4} < 0.005)");
             skel.Free();
             scene.Free();
+        }
+
+        private void TestLandmarkAutoRigOnPreviouslyRiggedModel()
+        {
+            GD.Print("\n--- Test 5: LandmarkAutoRig on Previously Rigged Model (Old Skeleton + Non-Identity cm Skin) ---");
+
+            // Build a synthetic humanoid mesh in upright 1.7m scene space first.
+            var (torsoV, torsoI) = BuildCylinder(new Vector3(0, 0.90f, 0), new Vector3(0, 1.50f, 0), 0.14f, 16, 10, true);
+            var (headV, headI) = BuildCylinder(new Vector3(0, 1.52f, 0), new Vector3(0, 1.74f, 0), 0.10f, 12, 6, true);
+            var (legLV, legLI) = BuildCylinder(new Vector3(0.10f, 0.02f, 0), new Vector3(0.10f, 0.92f, 0), 0.065f, 12, 10, true);
+            var (legRV, legRI) = BuildCylinder(new Vector3(-0.10f, 0.02f, 0), new Vector3(-0.10f, 0.92f, 0), 0.065f, 12, 10, true);
+            var (armLV, armLI) = BuildCylinder(new Vector3(0.16f, 1.42f, 0), new Vector3(0.68f, 1.32f, 0), 0.045f, 10, 8, true);
+            var (armRV, armRI) = BuildCylinder(new Vector3(-0.16f, 1.42f, 0), new Vector3(-0.68f, 1.32f, 0), 0.045f, 10, 8, true);
+
+            var sceneVerts = new List<Vector3>();
+            var allIdx = new List<int>();
+            void AppendPart(Vector3[] v, int[] idx)
+            {
+                int off = sceneVerts.Count;
+                sceneVerts.AddRange(v);
+                foreach (int t in idx) allIdx.Add(off + t);
+            }
+            AppendPart(torsoV, torsoI);
+            AppendPart(headV, headI);
+            AppendPart(legLV, legLI);
+            AppendPart(legRV, legRI);
+            AppendPart(armLV, armLI);
+            AppendPart(armRV, armRI);
+
+            // Create a previously rigged imported scene whose OLD Skeleton3D has 0.01x cm scale,
+            // 90° X rotation, and scrambled arbitrary bones in wildly different positions!
+            var importedScene = new Node3D { Name = "PreRiggedImportedRoot" };
+            var oldSkel = new Skeleton3D
+            {
+                Name = "OldArmature",
+                Transform = new Transform3D(Basis.FromEuler(new Vector3(Mathf.DegToRad(90f), 0f, 0f)) * Basis.FromScale(Vector3.One * 0.01f), new Vector3(0f, 0f, 0f))
+            };
+            importedScene.AddChild(oldSkel);
+
+            // Populate 30 arbitrary old bones with huge offsets in cm space so any bone-index mismatch explodes the mesh by meters!
+            var oldGlobalRest = new Transform3D[30];
+            for (int b = 0; b < 30; b++)
+            {
+                oldSkel.AddBone($"old_scrambled_bone_{b}");
+                if (b > 0) oldSkel.SetBoneParent(b, b - 1);
+                Vector3 posCm = new Vector3((b % 5 - 2) * 35f, (b / 5) * 45f, ((b * 7) % 5 - 2) * 30f);
+                Basis rot = Basis.FromEuler(new Vector3(b * 0.4f, b * 0.7f, b * 0.3f));
+                oldGlobalRest[b] = new Transform3D(rot, posCm);
+                Transform3D local = b > 0 ? oldGlobalRest[b - 1].AffineInverse() * oldGlobalRest[b] : oldGlobalRest[b];
+                oldSkel.SetBoneRest(b, local);
+            }
+            oldSkel.ResetBonePoses();
+
+            // Encode the mesh's raw vertices in 100x cm Z-up space (different from scene space!),
+            // with an old Skin whose inverse-bind matrices map rawVerts back to exact upright sceneVerts!
+            Transform3D oldSkelToScene = oldSkel.Transform;
+            Transform3D rawToScene = new Transform3D(Basis.FromEuler(new Vector3(Mathf.DegToRad(-90f), 0f, 0f)) * Basis.FromScale(Vector3.One * 0.01f), new Vector3(0.5f, -0.3f, 0.2f));
+            Transform3D sceneToRaw = rawToScene.AffineInverse();
+
+            var rawVerts = new Vector3[sceneVerts.Count];
+            var rawNorms = new Vector3[sceneVerts.Count];
+            var rawBones = new int[sceneVerts.Count * 4];
+            var rawWeights = new float[sceneVerts.Count * 4];
+            for (int i = 0; i < sceneVerts.Count; i++)
+            {
+                rawVerts[i] = sceneToRaw * sceneVerts[i];
+                rawNorms[i] = Vector3.Up;
+                // Skin each vertex to an old scrambled bone (0..29)
+                int oldB = i % 30;
+                rawBones[i * 4] = oldB;
+                rawWeights[i * 4] = 1f;
+            }
+
+            var oldSkin = new Skin();
+            for (int b = 0; b < 30; b++)
+            {
+                // Ensure: oldSkelToScene * oldGlobalRest[b] * oldBindPose[b] * rawVert == sceneVert
+                // => oldBindPose[b] = (oldSkelToScene * oldGlobalRest[b]).AffineInverse() * rawToScene
+                Transform3D oldBindPose = (oldSkelToScene * oldGlobalRest[b]).AffineInverse() * rawToScene;
+                oldSkin.AddBind(b, oldBindPose);
+            }
+
+            var arrays = new Godot.Collections.Array();
+            arrays.Resize((int)Mesh.ArrayType.Max);
+            arrays[(int)Mesh.ArrayType.Vertex] = rawVerts;
+            arrays[(int)Mesh.ArrayType.Normal] = rawNorms;
+            arrays[(int)Mesh.ArrayType.Index] = allIdx.ToArray();
+            arrays[(int)Mesh.ArrayType.Bones] = rawBones;
+            arrays[(int)Mesh.ArrayType.Weights] = rawWeights;
+            var oldMesh = new ArrayMesh();
+            oldMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+
+            // Parent MeshInstance3D directly under OldArmature with Skeleton = ".." (exact glTF/FBX layout!)
+            var mi = new MeshInstance3D
+            {
+                Name = "CharacterBody",
+                Mesh = oldMesh,
+                Skin = oldSkin,
+                Skeleton = new NodePath("..")
+            };
+            oldSkel.AddChild(mi);
+
+            // Add importedScene to SceneTree so mi.GetNodeOrNull(mi.Skeleton) resolves OldArmature just like in the real app!
+            Root.AddChild(importedScene);
+
+            // 1. EstimateLandmarks must see the evaluated 1.7m upright humanoid (NOT the 100x raw buffer!)
+            var estPins = CustomLandmarkWeightSolver.EstimateLandmarks(importedScene, new[] { mi });
+            Check(estPins.ContainsKey("Head") && estPins.ContainsKey("AnkleL"), "EstimateLandmarks succeeded on pre-rigged cm-scaled mesh");
+            float estH = estPins["Head"].Y - estPins["AnkleL"].Y;
+            Check(estH > 1.2f && estH < 2.0f, $"EstimateLandmarks height matches evaluated 1.7m rest pose (estH={estH:F3}m)");
+
+            // 2. Build a matching target Deadlock hero rig and run full CustomModelAutoRigger.RigAndBind with LandmarkAutoRig!
+            var heroRoot = new Node3D { Name = "SyntheticHeroRoot" };
+            var heroSkel = new Skeleton3D { Name = "HeroSkeleton" };
+            heroRoot.AddChild(heroSkel);
+            var refRigForHero = new ReferenceRigDef { SpineCount = 3, FingerMode = ReferenceFingerRigMode.RigidMitten };
+            foreach (var kv in estPins) refRigForHero.Joints[kv.Key] = kv.Value;
+            refRigForHero.EnsureDefaultJoints(1.74f);
+            var heroSpecs = refRigForHero.BuildResolvedBones(Transform3D.Identity, 1.74f, 1f, false);
+            var heroGlobalRest = new Transform3D[heroSpecs.Count];
+            for (int b = 0; b < heroSpecs.Count; b++)
+            {
+                heroSkel.AddBone(heroSpecs[b].Name);
+                heroGlobalRest[b] = new Transform3D(Basis.Identity, heroSpecs[b].Origin);
+            }
+            for (int b = 0; b < heroSpecs.Count; b++)
+            {
+                int p = heroSpecs[b].ParentIndex;
+                if (p >= 0) heroSkel.SetBoneParent(b, p);
+                heroSkel.SetBoneRest(b, p >= 0 ? heroGlobalRest[p].AffineInverse() * heroGlobalRest[b] : heroGlobalRest[b]);
+            }
+            // Add native Deadlock thigh, upper-arm, and forearm twist bones to verify AutoCounterTwistWeights on LandmarkAutoRig!
+            void AddTwistPair(string upperName, string lowerName, string twist0Name, string twist1Name)
+            {
+                int u = heroSkel.FindBone(upperName);
+                int l = heroSkel.FindBone(lowerName);
+                if (u < 0 || l < 0) return;
+                Vector3 pU = heroSkel.GetBoneGlobalRest(u).Origin;
+                Vector3 pL = heroSkel.GetBoneGlobalRest(l).Origin;
+                int t0 = heroSkel.GetBoneCount(); heroSkel.AddBone(twist0Name); heroSkel.SetBoneParent(t0, u);
+                heroSkel.SetBoneRest(t0, new Transform3D(Basis.Identity, (pL - pU) * 0.33f));
+                int t1 = heroSkel.GetBoneCount(); heroSkel.AddBone(twist1Name); heroSkel.SetBoneParent(t1, u);
+                heroSkel.SetBoneRest(t1, new Transform3D(Basis.Identity, (pL - pU) * 0.66f));
+            }
+            foreach (string side in new[] { "L", "R" })
+            {
+                AddTwistPair($"leg_upper_{side}", $"leg_lower_{side}", $"leg_upper_{side}_TWIST", $"leg_upper_{side}_TWIST1");
+                AddTwistPair($"arm_upper_{side}", $"arm_lower_{side}", $"arm_upper_{side}_TWIST", $"arm_upper_{side}_TWIST1");
+                AddTwistPair($"arm_lower_{side}", $"hand_{side}", $"arm_lower_{side}_TWIST", $"arm_lower_{side}_TWIST1");
+            }
+            heroSkel.ResetBonePoses();
+            Root.AddChild(heroRoot);
+
+            var options = new CustomModelAutoRigger.RiggingOptions
+            {
+                Method = CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
+                AlignedTransform = Transform3D.Identity,
+                ReferenceRig = refRigForHero.Clone(),
+                RigFamilyOverride = RigFamily.Mixamo, // Stale override from old rig should be ignored
+                AutoSnapArmsToHero = true,
+                AutoSnapLegsToHero = true,
+                AutoSnapHeadToHero = true,
+                AutoAlignHandOrientation = false
+            };
+
+            var rigRes = CustomModelAutoRigger.RigAndBind(importedScene, heroRoot, options);
+            Check(rigRes.Success && rigRes.CustomSubmeshes.Count == 1, "LandmarkAutoRig RigAndBind succeeded on previously rigged model");
+
+            // 3. Verify ZERO vertex explosion: every output vertex must stay tightly within the 1.74m humanoid bounds!
+            Vector3 minOut = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 maxOut = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            float maxErr = 0f;
+            if (rigRes.Success && rigRes.CustomSubmeshes.Count > 0)
+            {
+                var outArr = rigRes.CustomSubmeshes[0].Mesh.SurfaceGetArrays(0);
+                var outVerts = outArr[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                for (int i = 0; i < outVerts.Length; i++)
+                {
+                    minOut = minOut.Min(outVerts[i]);
+                    maxOut = maxOut.Max(outVerts[i]);
+                    if (i < sceneVerts.Count)
+                    {
+                        float err = outVerts[i].DistanceTo(sceneVerts[i]);
+                        if (err > maxErr) maxErr = err;
+                    }
+                }
+            }
+            GD.Print($"  Rigged output bounds: min={minOut:F3}, max={maxOut:F3}, maxVertErr={maxErr:F4}m");
+            Check(minOut.X > -0.95f && maxOut.X < 0.95f && minOut.Y > -0.15f && maxOut.Y < 1.95f && minOut.Z > -0.50f && maxOut.Z < 0.50f,
+                $"Zero vertex explosion on pre-rigged model (bounds=[{minOut:F2}..{maxOut:F2}])");
+            Check(maxErr < 0.005f, $"Output vertices match evaluated rest pose tightly (maxErr={maxErr:F4}m < 0.005m)");
+
+            // 3b. Verify ALL 12 native Deadlock thigh/upper-arm/forearm twist bones receive weights on LandmarkAutoRig!
+            var weightedTwistCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (rigRes.Success && rigRes.CustomSubmeshes.Count > 0)
+            {
+                var outMi = rigRes.CustomSubmeshes[0];
+                var outArr = outMi.Mesh.SurfaceGetArrays(0);
+                var outBones = outArr[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                var outWeights = outArr[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                var outSkin = outMi.Skin;
+                for (int i = 0; i < outBones.Length && i < outWeights.Length; i++)
+                {
+                    if (outWeights[i] <= 0.01f) continue;
+                    int bi = outBones[i];
+                    int sb = (outSkin != null && bi >= 0 && bi < outSkin.GetBindCount()) ? outSkin.GetBindBone(bi) : bi;
+                    if (sb >= 0 && sb < heroSkel.GetBoneCount())
+                    {
+                        string bn = heroSkel.GetBoneName(sb);
+                        if (bn.Contains("TWIST", StringComparison.OrdinalIgnoreCase))
+                            weightedTwistCounts[bn] = weightedTwistCounts.GetValueOrDefault(bn) + 1;
+                    }
+                }
+            }
+            string[] expectedTwists =
+            {
+                "leg_upper_L_TWIST", "leg_upper_L_TWIST1", "leg_upper_R_TWIST", "leg_upper_R_TWIST1",
+                "arm_upper_L_TWIST", "arm_upper_L_TWIST1", "arm_upper_R_TWIST", "arm_upper_R_TWIST1",
+                "arm_lower_L_TWIST", "arm_lower_L_TWIST1", "arm_lower_R_TWIST", "arm_lower_R_TWIST1"
+            };
+            var missingTwists = new List<string>();
+            foreach (var tn in expectedTwists)
+                if (!weightedTwistCounts.TryGetValue(tn, out int c) || c == 0) missingTwists.Add(tn);
+            GD.Print($"  Weighted twist bones ({weightedTwistCounts.Count}/12): {string.Join(", ", weightedTwistCounts)}");
+            Check(missingTwists.Count == 0, $"LandmarkAutoRig populates all 12 thigh/arm/forearm TWIST bones (missing=[{string.Join(", ", missingTwists)}])");
+
+            // 4. Verify Restore() left original mesh/skin/skeleton intact
+            Check(mi.Mesh == oldMesh && mi.Skin == oldSkin && mi.Skeleton == new NodePath(".."),
+                "BuildSyntheticRig.Restore() cleanly restored original Mesh, Skin, and Skeleton NodePath");
+
+            Root.RemoveChild(heroRoot);
+            heroRoot.Free();
+            Root.RemoveChild(importedScene);
+            importedScene.Free();
         }
     }
 }

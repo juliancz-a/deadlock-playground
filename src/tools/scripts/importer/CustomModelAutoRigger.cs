@@ -1167,10 +1167,12 @@ namespace DeadlockPlayground.Importer
                         var prevDisabled = options.DisabledSourceBones;
                         var prevKeepRigid = options.KeepFingersRigidOnHand;
                         var prevFingerMode = options.FingerMode;
+                        var prevFamilyOverride = options.RigFamilyOverride;
                         try
                         {
                             options.CustomBoneRemap = null;
                             options.DisabledSourceBones = null;
+                            options.RigFamilyOverride = null;
                             if (options.ReferenceRig != null)
                             {
                                 bool articulated = options.ReferenceRig.FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
@@ -1185,6 +1187,7 @@ namespace DeadlockPlayground.Importer
                             options.DisabledSourceBones = prevDisabled;
                             options.KeepFingersRigidOnHand = prevKeepRigid;
                             options.FingerMode = prevFingerMode;
+                            options.RigFamilyOverride = prevFamilyOverride;
                         }
                     }
                     finally
@@ -1466,8 +1469,9 @@ namespace DeadlockPlayground.Importer
             long totalKnnMs = 0, totalLapMs = 0, totalBakeMs = 0, totalMeshMs = 0;
 
             var socketFrames = ComputeSocketGroupFrames(importedMeshes, importedScene, options, heroNode, heroSkeleton);
+            Transform3D heroSkelToHero = ComputeTransformRelativeToRoot(heroSkeleton, heroNode);
             LimbTwistProfile limbTwistProfile = options.AutoCounterTwistWeights
-                ? BuildLimbTwistProfile(heroSkeleton, restGlobalBoneTransforms)
+                ? BuildLimbTwistProfile(heroSkeleton, restGlobalBoneTransforms, heroSkelToHero)
                 : null;
 
             Skeleton3D srcFallbackSkel = FindSkeleton(importedScene);
@@ -1869,7 +1873,19 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            // Refresh skin bind mappings after appending preserved chains
+            int tgtTwistL = FindBoneAny(targetSkeleton, "arm_lower_L_TWIST", "arm_lower_twist_L", "arm_lower_l_twist");
+            if (tgtTwistL == -1) tgtTwistL = EnsureForearmTwistBone(targetSkeleton, isLeft: true);
+            int tgtTwistR = FindBoneAny(targetSkeleton, "arm_lower_R_TWIST", "arm_lower_twist_R", "arm_lower_r_twist");
+            if (tgtTwistR == -1) tgtTwistR = EnsureForearmTwistBone(targetSkeleton, isLeft: false);
+
+            if (heroSkin != null)
+            {
+                EnsureSkinHasBind(heroSkin, targetSkeleton, tgtTwistL);
+                EnsureSkinHasBind(heroSkin, targetSkeleton, tgtTwistR);
+            }
+
+            // Refresh skin bind mappings AFTER appending preserved chains and forearm twist bones
+            // so newly created twist bones always resolve to their own Skin bind index (never bind 0).
             var (skeletonToBindMap, _) = BuildSkinIndexMappings(targetSkeleton, heroSkin);
 
             // Precompute thread-safe managed lookups BEFORE entering Parallel.For (eliminates CowData race crashes on Skeleton3D)
@@ -1940,19 +1956,9 @@ namespace DeadlockPlayground.Importer
             if (spine3BonePre < 0) spine3BonePre = targetSkeleton.FindBone("spine_2");
             int spine2BonePre = targetSkeleton.FindBone("spine_2");
 
-            int tgtTwistL = FindBoneAny(targetSkeleton, "arm_lower_L_TWIST", "arm_lower_twist_L", "arm_lower_l_twist");
-            if (tgtTwistL == -1) tgtTwistL = EnsureForearmTwistBone(targetSkeleton, isLeft: true);
-            int tgtTwistR = FindBoneAny(targetSkeleton, "arm_lower_R_TWIST", "arm_lower_twist_R", "arm_lower_r_twist");
-            if (tgtTwistR == -1) tgtTwistR = EnsureForearmTwistBone(targetSkeleton, isLeft: false);
-
-            if (heroSkin != null)
-            {
-                EnsureSkinHasBind(heroSkin, targetSkeleton, tgtTwistL);
-                EnsureSkinHasBind(heroSkin, targetSkeleton, tgtTwistR);
-            }
-
+            Transform3D targetSkelToHero = ComputeTransformRelativeToRoot(targetSkeleton, heroNode);
             LimbTwistProfile limbTwistProfile = options.AutoCounterTwistWeights
-                ? BuildLimbTwistProfile(targetSkeleton)
+                ? BuildLimbTwistProfile(targetSkeleton, null, targetSkelToHero)
                 : null;
 
             int totalVerts = 0;
@@ -2022,7 +2028,7 @@ namespace DeadlockPlayground.Importer
                     if (isSocketProp)
                     {
                         // Evaluate accurate rest-pose geometry in Hero space before optional socket offsets
-                        EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] sockVerts, out Vector3[] sockNorms);
+                        EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] sockVerts, out Vector3[] sockNorms, useExplicitSkeleton: true);
 
                         var baked = BakeSocketPropSurface(
                             targetSkeleton,
@@ -2043,7 +2049,7 @@ namespace DeadlockPlayground.Importer
                     }
                     else
                     {
-                        EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] baseHeroVerts, out Vector3[] baseHeroNorms);
+                        EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] baseHeroVerts, out Vector3[] baseHeroNorms, useExplicitSkeleton: true);
 
                         int srcStride = (rawBones != null && rawWeights != null && vCount > 0 && rawBones.Length >= vCount * 8 && rawWeights.Length >= vCount * 8) ? 8 : 4;
                         int[] srcBindToSkel = null;
@@ -3420,6 +3426,12 @@ namespace DeadlockPlayground.Importer
                     int bpv = weights.Length / verts.Length;
                     if (bpv <= 0) continue;
 
+                    Vector3[] heroVerts = null;
+                    if (importedScene != null)
+                    {
+                        EvaluateMeshSurfaceInTargetSpace(mi, importedScene, alignedTransform, sourceSkeleton, verts, null, bones, weights, out heroVerts, out _, useExplicitSkeleton: true);
+                    }
+
                     for (int v = 0; v < verts.Length; v++)
                     {
                         float hw = 0f;
@@ -3436,7 +3448,8 @@ namespace DeadlockPlayground.Importer
                         }
                         if (hw < 0.35f) continue;
 
-                        Vector3 d = (miToHero * verts[v]) - Cs;
+                        Vector3 vHeroPos = heroVerts != null ? heroVerts[v] : (miToHero * verts[v]);
+                        Vector3 d = vHeroPos - Cs;
                         float axial = d.Dot(uS2);
                         if (axial >= 0.01f && axial <= 0.22f)
                         {
@@ -5175,6 +5188,7 @@ namespace DeadlockPlayground.Importer
         {
             public string Label { get; init; }
             public bool IsLeg { get; init; }
+            public bool IsDistalTwist { get; init; }
             public int UpperBone { get; init; }
             public int TwistFullBone { get; init; }
             public int TwistHalfBone { get; init; }
@@ -5191,7 +5205,7 @@ namespace DeadlockPlayground.Importer
         }
 
         /// <summary>
-        /// Resolved thigh and upper-arm counter-twist chains on a Deadlock hero skeleton.
+        /// Resolved thigh, upper-arm, and forearm twist chains on a Deadlock hero skeleton.
         /// </summary>
         public sealed class LimbTwistProfile
         {
@@ -5201,10 +5215,11 @@ namespace DeadlockPlayground.Importer
 
         private readonly struct LimbTwistChainSpec
         {
-            public LimbTwistChainSpec(string label, bool isLeg, string[] upper, string[] twistFull, string[] twistHalf, string[] lower, string[] distal)
+            public LimbTwistChainSpec(string label, bool isLeg, string[] upper, string[] twistFull, string[] twistHalf, string[] lower, string[] distal, bool isDistalTwist = false)
             {
                 Label = label;
                 IsLeg = isLeg;
+                IsDistalTwist = isDistalTwist;
                 Upper = upper;
                 TwistFull = twistFull;
                 TwistHalf = twistHalf;
@@ -5214,6 +5229,7 @@ namespace DeadlockPlayground.Importer
 
             public string Label { get; }
             public bool IsLeg { get; }
+            public bool IsDistalTwist { get; }
             public string[] Upper { get; }
             public string[] TwistFull { get; }
             public string[] TwistHalf { get; }
@@ -5254,25 +5270,46 @@ namespace DeadlockPlayground.Importer
                 new[] { "arm_upper_R_TWIST", "arm_upper_r_twist", "arm_upper_twist_R" },
                 new[] { "arm_upper_R_TWIST1", "arm_upper_r_twist1", "arm_upper_twist1_R" },
                 new[] { "arm_lower_R", "arm_lower_r", "forearm_r" },
-                new[] { "hand_R", "hand_r", "wrist_r" })
+                new[] { "hand_R", "hand_r", "wrist_r" }),
+            // Forearms use distal wrist-follow twist: arm_lower_*_TWIST (+0.5 mid-forearm) -> arm_lower_*_TWIST1 (+1.0 near wrist)
+            new(
+                "LeftForearm",
+                false,
+                new[] { "arm_lower_L", "arm_lower_l", "forearm_l" },
+                new[] { "arm_lower_L_TWIST1", "arm_lower_l_twist1", "arm_lower_twist1_L" },
+                new[] { "arm_lower_L_TWIST", "arm_lower_l_twist", "arm_lower_twist_L" },
+                new[] { "hand_L", "hand_l", "wrist_l" },
+                Array.Empty<string>(),
+                isDistalTwist: true),
+            new(
+                "RightForearm",
+                false,
+                new[] { "arm_lower_R", "arm_lower_r", "forearm_r" },
+                new[] { "arm_lower_R_TWIST1", "arm_lower_r_twist1", "arm_lower_twist1_R" },
+                new[] { "arm_lower_R_TWIST", "arm_lower_r_twist", "arm_lower_twist_R" },
+                new[] { "hand_R", "hand_r", "wrist_r" },
+                Array.Empty<string>(),
+                isDistalTwist: true)
         };
 
         /// <summary>
-        /// Resolves upper-limb joints and existing procedural *_TWIST / *_TWIST1 bones on the hero skeleton.
+        /// Resolves upper-limb and forearm joints and existing procedural *_TWIST / *_TWIST1 bones on the hero skeleton.
         /// Works generically across any Deadlock hero skeleton without hardcoded bone indices.
         /// </summary>
-        public static LimbTwistProfile BuildLimbTwistProfile(Skeleton3D skeleton, Transform3D[] restGlobalTransforms = null)
+        public static LimbTwistProfile BuildLimbTwistProfile(Skeleton3D skeleton, Transform3D[] restGlobalTransforms = null, Transform3D? skelToHeroTransform = null)
         {
             if (skeleton == null) return new LimbTwistProfile();
 
             int pelvisBone = FindBoneAny(skeleton, "pelvis", "hips", "bip01_pelvis");
             var chains = new List<LimbTwistChain>(DefaultLimbTwistSpecs.Length);
+            Transform3D toHero = skelToHeroTransform ?? Transform3D.Identity;
 
             Vector3 GetBoneOrigin(int boneIdx)
             {
-                if (restGlobalTransforms != null && boneIdx >= 0 && boneIdx < restGlobalTransforms.Length)
-                    return restGlobalTransforms[boneIdx].Origin;
-                return skeleton.GetBoneGlobalRest(boneIdx).Origin;
+                Vector3 localOrigin = (restGlobalTransforms != null && boneIdx >= 0 && boneIdx < restGlobalTransforms.Length)
+                    ? restGlobalTransforms[boneIdx].Origin
+                    : skeleton.GetBoneGlobalRest(boneIdx).Origin;
+                return toHero * localOrigin;
             }
 
             foreach (var spec in DefaultLimbTwistSpecs)
@@ -5281,7 +5318,7 @@ namespace DeadlockPlayground.Importer
                 int lower = FindBoneAny(skeleton, spec.Lower);
                 if (upper < 0 || lower < 0) continue;
 
-                int distal = FindBoneAny(skeleton, spec.Distal);
+                int distal = spec.Distal.Length > 0 ? FindBoneAny(skeleton, spec.Distal) : -1;
                 int twistFull = FindBoneAny(skeleton, spec.TwistFull);
                 int twistHalf = FindBoneAny(skeleton, spec.TwistHalf);
 
@@ -5300,6 +5337,7 @@ namespace DeadlockPlayground.Importer
                 {
                     Label = spec.Label,
                     IsLeg = spec.IsLeg,
+                    IsDistalTwist = spec.IsDistalTwist,
                     UpperBone = upper,
                     TwistFullBone = twistFull,
                     TwistHalfBone = twistHalf,
@@ -5704,13 +5742,14 @@ namespace DeadlockPlayground.Importer
                 }
 
                 // Flag proximal hip / glute / shoulder / knee crease vertices for targeted triangle-seam feathering
-                if ((tUpper >= (chain.IsLeg ? -0.14f : -0.10f) && tUpper <= 0.20f) ||
-                    (chain.IsLeg && tUpper >= 0.90f && tUpper <= 1.10f))
+                if (!chain.IsDistalTwist &&
+                    ((tUpper >= (chain.IsLeg ? -0.14f : -0.10f) && tUpper <= 0.20f) ||
+                     (chain.IsLeg && tUpper >= 0.90f && tUpper <= 1.10f)))
                 {
                     inCreaseSeam = true;
                 }
 
-                // 5. Redistribute upper-limb weight onto procedural *_TWIST (-1.0) and *_TWIST1 (-0.5) bones
+                // 5. Redistribute limb weight onto procedural *_TWIST and *_TWIST1 bones
                 bool hasTwistFull = chain.TwistFullBone >= 0;
                 bool hasTwistHalf = chain.TwistHalfBone >= 0;
                 if (!hasTwistFull && !hasTwistHalf)
@@ -5721,9 +5760,32 @@ namespace DeadlockPlayground.Importer
                 if (hasTwistHalf) SubtractLimbWeight(uBones, uWeights, ref uCount, chain.TwistHalfBone);
 
                 float fFull, fHalf, fUpper;
-                if (hasTwistFull && hasTwistHalf)
+                if (chain.IsDistalTwist)
                 {
-                    // Smooth partition of unity along tUpper in [0, 1] matching Deadlock hero thighs:
+                    // Distal wrist-follow forearm twist (elbow t=0 -> wrist t=1):
+                    // 0.00..0.14: ~100% arm_lower (0.0) -> ~0.52: ~95% arm_lower_*_TWIST (+0.5) -> >=0.90: ~100% arm_lower_*_TWIST1 (+1.0)
+                    if (hasTwistFull && hasTwistHalf)
+                    {
+                        fUpper = 1.0f - SmoothStep01(0.14f, 0.52f, tUpper);
+                        fFull = SmoothStep01(0.52f, 0.90f, tUpper);
+                        fHalf = MathF.Max(0f, 1.0f - fUpper - fFull);
+                    }
+                    else if (hasTwistHalf)
+                    {
+                        fHalf = SmoothStep01(0.25f, 0.90f, tUpper) * 0.90f;
+                        fFull = 0f;
+                        fUpper = 1.0f - fHalf;
+                    }
+                    else
+                    {
+                        fFull = SmoothStep01(0.25f, 0.90f, tUpper) * 0.90f;
+                        fHalf = 0f;
+                        fUpper = 1.0f - fFull;
+                    }
+                }
+                else if (hasTwistFull && hasTwistHalf)
+                {
+                    // Smooth partition of unity along tUpper in [0, 1] matching Deadlock hero thighs & upper arms:
                     // 0.00..0.14: ~100% TWIST (-1.0) -> ~0.52: ~95% TWIST1 (-0.5) -> >=0.92: 100% UpperBone (0.0)
                     fFull = 1.0f - SmoothStep01(0.14f, 0.52f, tUpper);
                     fUpper = SmoothStep01(0.52f, 0.92f, tUpper);
@@ -7850,10 +7912,22 @@ namespace DeadlockPlayground.Importer
 
         private static int FindBoneAny(Skeleton3D skeleton, params string[] candidates)
         {
+            if (skeleton == null || candidates == null) return -1;
             foreach (var c in candidates)
             {
+                if (string.IsNullOrEmpty(c)) continue;
                 int idx = skeleton.FindBone(c);
                 if (idx != -1) return idx;
+            }
+            int count = skeleton.GetBoneCount();
+            for (int b = 0; b < count; b++)
+            {
+                string bn = skeleton.GetBoneName(b);
+                foreach (var c in candidates)
+                {
+                    if (!string.IsNullOrEmpty(c) && bn.Equals(c, StringComparison.OrdinalIgnoreCase))
+                        return b;
+                }
             }
             return -1;
         }
@@ -8081,7 +8155,7 @@ namespace DeadlockPlayground.Importer
         /// Accurately applies Godot Skin Inverse Bind Poses * Skeleton3D GlobalRest * SkeletonRelTransform
         /// when the mesh is skinned, avoiding double-rotation/collapse on glTFs whose Skeleton3D carries an up-axis correction.
         /// </summary>
-        private static void EvaluateMeshSurfaceInTargetSpace(
+        public static void EvaluateMeshSurfaceInTargetSpace(
             MeshInstance3D mi,
             Node3D sourceRoot,
             Transform3D prefixTransform,
@@ -8091,7 +8165,8 @@ namespace DeadlockPlayground.Importer
             int[] rawBones,
             float[] rawWeights,
             out Vector3[] outVerts,
-            out Vector3[] outNorms)
+            out Vector3[] outNorms,
+            bool useExplicitSkeleton = false)
         {
             int vCount = rawVerts.Length;
             outVerts = new Vector3[vCount];
@@ -8100,12 +8175,19 @@ namespace DeadlockPlayground.Importer
             Transform3D fallbackXform = ComputeImportedMeshToHeroTransform(mi, sourceRoot, prefixTransform);
 
             Skeleton3D skel = null;
-            if (!string.IsNullOrEmpty(mi.Skeleton.ToString()))
+            if (useExplicitSkeleton && fallbackSkeleton != null)
             {
-                skel = mi.GetNodeOrNull<Skeleton3D>(mi.Skeleton);
+                skel = fallbackSkeleton;
             }
-            if (skel == null && mi.GetParent() is Skeleton3D parentSkel) skel = parentSkel;
-            if (skel == null) skel = fallbackSkeleton;
+            else
+            {
+                if (!string.IsNullOrEmpty(mi.Skeleton.ToString()))
+                {
+                    skel = mi.GetNodeOrNull<Skeleton3D>(mi.Skeleton);
+                }
+                if (skel == null && mi.GetParent() is Skeleton3D parentSkel) skel = parentSkel;
+                if (skel == null) skel = fallbackSkeleton;
+            }
 
             int stride = (rawBones != null && rawWeights != null && vCount > 0 && rawBones.Length >= vCount * 8 && rawWeights.Length >= vCount * 8) ? 8 : 4;
             bool useSkinning = skel != null && mi.Skin != null && mi.Skin.GetBindCount() > 0 &&
@@ -8131,11 +8213,16 @@ namespace DeadlockPlayground.Importer
             int bindCount = mi.Skin.GetBindCount();
             int skelBoneCount = skel.GetBoneCount();
             var bindToHero = new Transform3D[bindCount];
+            var bindNormToHero = new Basis[bindCount];
             for (int bi = 0; bi < bindCount; bi++)
             {
                 int boneIdx = ResolveSkinBindBone(mi.Skin, bi, skel);
                 Transform3D gRest = (boneIdx >= 0 && boneIdx < skelBoneCount) ? skel.GetBoneGlobalRest(boneIdx) : Transform3D.Identity;
-                bindToHero[bi] = skelToHero * gRest * mi.Skin.GetBindPose(bi);
+                Transform3D bt = skelToHero * gRest * mi.Skin.GetBindPose(bi);
+                bindToHero[bi] = bt;
+                bindNormToHero[bi] = MathF.Abs(bt.Basis.Determinant()) > 1e-8f
+                    ? bt.Basis.Inverse().Transposed()
+                    : bt.Basis;
             }
 
             Vector3[] vertsOut = outVerts;
@@ -8160,7 +8247,7 @@ namespace DeadlockPlayground.Importer
 
                     Transform3D bt = bindToHero[bi];
                     accPos += (bt * rv) * w;
-                    accNorm += (bt.Basis * rn) * w;
+                    accNorm += (bindNormToHero[bi] * rn) * w;
                     totalW += w;
                 }
 
@@ -10150,7 +10237,7 @@ namespace DeadlockPlayground.Importer
                     totalVerts += vCount;
                     totalTris += (rawIndices != null) ? rawIndices.Length / 3 : vCount / 3;
 
-                    EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] heroVerts, out Vector3[] heroNorms);
+                    EvaluateMeshSurfaceInTargetSpace(srcMi, importedScene, options.AlignedTransform, sourceSkeleton, rawVerts, rawNorms, rawBones, rawWeights, out Vector3[] heroVerts, out Vector3[] heroNorms, useExplicitSkeleton: true);
 
                     int srcStride = (rawBones != null && rawWeights != null && rawBones.Length >= vCount * 8 && rawWeights.Length >= vCount * 8) ? 8 : 4;
                     int[] srcBindToSkel = null;

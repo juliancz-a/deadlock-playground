@@ -106,6 +106,8 @@ namespace DeadlockPlayground.Importer
         /// on <c>spine_2</c>/<c>spine_3</c> (matching Valve's <c>unicorn.vmdl_c</c>) so long hair/capes cannot flip into the chest.
         /// </summary>
         public bool PlanarizeBackBarrier { get; set; } = false;
+        /// <summary>When true, enables Source 2 native world/floor ground collision (<c>cloth_ground_collision$0</c> / <c>world_collision = true</c>) so long capes, skirts, and ultra-long hair do not clip through the floor.</summary>
+        public bool FloorCollision { get; set; } = false;
         /// <summary>When true, writes <c>cloth_anchor_free_rotate$0 = 1.0</c> so head/neck hair hinges freely at the nape.</summary>
         public bool AnchorFreeRotate { get; set; } = false;
         /// <summary>When true, multi-strand <c>ProxyCloth</c> sheets stay open (curtain/cape) instead of closing a 360° ring (skirt).</summary>
@@ -198,6 +200,7 @@ namespace DeadlockPlayground.Importer
                 TwistRelax = TwistRelax,
                 AngleLimitDeg = AngleLimitDeg,
                 PlanarizeBackBarrier = PlanarizeBackBarrier,
+                FloorCollision = FloorCollision,
                 AnchorFreeRotate = AnchorFreeRotate,
                 OpenSheet = OpenSheet,
                 Friction = Friction,

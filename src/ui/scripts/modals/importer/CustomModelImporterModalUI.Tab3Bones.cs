@@ -75,6 +75,7 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderSelStrayRadius;
         private CheckBox _chkSelStrayUnlimited;
         private CheckBox _chkSelPlanarizeBack;
+        private CheckBox _chkSelFloorCollision;
         private CheckBox _chkSelOpenSheet;
         private CheckBox _chkSelAnchorFreeRotate;
         private HSlider _sliderSelFriction;
@@ -552,14 +553,39 @@ namespace DeadlockPlayground.UI
             presetLblRow.AddChild(lblPresetHintRight);
             inspBox.AddChild(presetLblRow);
 
-            // Prominent Primary Visual Preset Selector Card Button (opens 4-column visual gallery popup)
+            // Prominent Hero Physics Preset Selector Card (centered icon, title, tag & action pill)
             _btnSelectPresetCard = new Button
             {
                 ThemeTypeVariation = "ImporterPrimaryButton",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                CustomMinimumSize = new Vector2(0, 56),
-                TooltipText = "Click to open the Valve-backed Deadlock physics preset gallery (applies to all sibling chains in this garment group)."
+                CustomMinimumSize = new Vector2(0, 122),
+                TooltipText = "Click to open the Valve-backed Deadlock physics preset gallery (choose Single Chain or Active Group)."
             };
+            var presetCardNormal = new StyleBoxFlat
+            {
+                BgColor = new Color(0.11f, 0.16f, 0.14f, 0.96f),
+                BorderColor = new Color(0.76f, 0.67f, 0.46f, 0.78f),
+                BorderWidthLeft = 2,
+                BorderWidthRight = 2,
+                BorderWidthTop = 2,
+                BorderWidthBottom = 2,
+                CornerRadiusTopLeft = 10,
+                CornerRadiusTopRight = 10,
+                CornerRadiusBottomLeft = 10,
+                CornerRadiusBottomRight = 10,
+                ShadowColor = new Color(0f, 0f, 0f, 0.32f),
+                ShadowSize = 6
+            };
+            var presetCardHover = (StyleBoxFlat)presetCardNormal.Duplicate();
+            presetCardHover.BgColor = new Color(0.15f, 0.22f, 0.19f, 0.98f);
+            presetCardHover.BorderColor = PlaygroundThemeHelper.Parchment;
+            var presetCardPressed = (StyleBoxFlat)presetCardNormal.Duplicate();
+            presetCardPressed.BgColor = new Color(0.09f, 0.13f, 0.12f, 0.98f);
+            _btnSelectPresetCard.AddThemeStyleboxOverride("normal", presetCardNormal);
+            _btnSelectPresetCard.AddThemeStyleboxOverride("hover", presetCardHover);
+            _btnSelectPresetCard.AddThemeStyleboxOverride("pressed", presetCardPressed);
+            _btnSelectPresetCard.AddThemeStyleboxOverride("focus", presetCardHover);
+
             var presetBtnPad = new MarginContainer
             {
                 LayoutMode = 1,
@@ -568,74 +594,74 @@ namespace DeadlockPlayground.UI
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
             presetBtnPad.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-            presetBtnPad.AddThemeConstantOverride("margin_left", 10);
-            presetBtnPad.AddThemeConstantOverride("margin_right", 12);
-            presetBtnPad.AddThemeConstantOverride("margin_top", 8);
-            presetBtnPad.AddThemeConstantOverride("margin_bottom", 8);
+            presetBtnPad.AddThemeConstantOverride("margin_left", 14);
+            presetBtnPad.AddThemeConstantOverride("margin_right", 14);
+            presetBtnPad.AddThemeConstantOverride("margin_top", 10);
+            presetBtnPad.AddThemeConstantOverride("margin_bottom", 10);
             _btnSelectPresetCard.AddChild(presetBtnPad);
 
-            var presetBtnRow = new HBoxContainer
+            var presetBtnCol = new VBoxContainer
             {
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                Alignment = BoxContainer.AlignmentMode.Center,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
-            presetBtnRow.AddThemeConstantOverride("separation", 12);
-            presetBtnPad.AddChild(presetBtnRow);
+            presetBtnCol.AddThemeConstantOverride("separation", 5);
+            presetBtnPad.AddChild(presetBtnCol);
 
             var thumbFrameStyle = new StyleBoxFlat
             {
-                BgColor = new Color(0.08f, 0.10f, 0.09f, 0.92f),
-                BorderColor = new Color(0.24f, 0.30f, 0.27f, 0.70f),
+                BgColor = new Color(0.07f, 0.09f, 0.08f, 0.94f),
+                BorderColor = new Color(0.76f, 0.67f, 0.46f, 0.45f),
                 BorderWidthLeft = 1,
                 BorderWidthRight = 1,
                 BorderWidthTop = 1,
                 BorderWidthBottom = 1,
-                CornerRadiusTopLeft = 6,
-                CornerRadiusTopRight = 6,
-                CornerRadiusBottomLeft = 6,
-                CornerRadiusBottomRight = 6
+                CornerRadiusTopLeft = 8,
+                CornerRadiusTopRight = 8,
+                CornerRadiusBottomLeft = 8,
+                CornerRadiusBottomRight = 8
             };
             var presetThumbFrame = new PanelContainer
             {
-                CustomMinimumSize = new Vector2(48, 48),
+                CustomMinimumSize = new Vector2(54, 54),
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
             presetThumbFrame.AddThemeStyleboxOverride("panel", thumbFrameStyle);
             _texSelectedPresetIcon = new TextureRect
             {
-                CustomMinimumSize = new Vector2(42, 42),
+                CustomMinimumSize = new Vector2(46, 46),
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                TextureFilter = CanvasItem.TextureFilterEnum.LinearWithMipmaps,
                 SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
             presetThumbFrame.AddChild(_texSelectedPresetIcon);
-            presetBtnRow.AddChild(presetThumbFrame);
+            presetBtnCol.AddChild(presetThumbFrame);
 
-            var presetBtnTextCol = new VBoxContainer
-            {
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                MouseFilter = Control.MouseFilterEnum.Ignore
-            };
-            presetBtnTextCol.AddThemeConstantOverride("separation", 2);
             _lblSelectedPresetName = new Label
             {
                 Text = "Custom (Manual Tuning)",
+                HorizontalAlignment = HorizontalAlignment.Center,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 ClipText = true,
                 TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
-            ImporterStyle.ApplyFontSize(_lblSelectedPresetName, ImporterStyle.FontBody);
+            ImporterStyle.ApplyFontSize(_lblSelectedPresetName, 15);
             _lblSelectedPresetName.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
             _accentLabels.Add(_lblSelectedPresetName);
+            presetBtnCol.AddChild(_lblSelectedPresetName);
+
             _lblSelectedPresetTag = new Label
             {
                 Text = "Select a Valve-calibrated Deadlock preset",
+                HorizontalAlignment = HorizontalAlignment.Center,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 AutowrapMode = TextServer.AutowrapMode.Off,
                 ClipText = true,
@@ -644,26 +670,25 @@ namespace DeadlockPlayground.UI
             };
             ImporterStyle.ApplyHintStyle(_lblSelectedPresetTag, wrap: false);
             _secondaryLabels.Add(_lblSelectedPresetTag);
-            presetBtnTextCol.AddChild(_lblSelectedPresetName);
-            presetBtnTextCol.AddChild(_lblSelectedPresetTag);
-            presetBtnRow.AddChild(presetBtnTextCol);
+            presetBtnCol.AddChild(_lblSelectedPresetTag);
 
             var lblPresetChev = new Label
             {
-                Text = "Change ▾",
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                Text = "Click to Change Preset ▾",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 MouseFilter = Control.MouseFilterEnum.Ignore
             };
             ImporterStyle.ApplyFontSize(lblPresetChev, ImporterStyle.FontHint);
-            lblPresetChev.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
-            presetBtnRow.AddChild(lblPresetChev);
+            lblPresetChev.AddThemeColorOverride("font_color", new Color(0.84f, 0.77f, 0.58f, 0.95f));
+            presetBtnCol.AddChild(lblPresetChev);
 
             _btnSelectPresetCard.Pressed += () =>
             {
                 if (_selectedChain != null)
                 {
                     var groupTargets = GetSiblingGroupChains(_selectedChain);
-                    OpenPhysicsPresetPicker(groupTargets, _btnSelectPresetCard);
+                    OpenPhysicsPresetPicker(groupTargets, _btnSelectPresetCard, primarySingleTarget: _selectedChain);
                 }
             };
             inspBox.AddChild(_btnSelectPresetCard);
@@ -1062,6 +1087,23 @@ namespace DeadlockPlayground.UI
                 }
             };
             sliderStack.AddChild(_chkSelPlanarizeBack);
+
+            _chkSelFloorCollision = new CheckBox
+            {
+                Text = "Floor / World Ground Collision — Stops Long Capes & Hair Clipping Floor",
+                ButtonPressed = false,
+                TooltipText = "Enables Source 2's native cloth_ground_collision$0 / world_collision (used on Valve's Abrams, Pocket, McGinnis, Mirage) so floor-length capes, skirts, and hair rest on the ground instead of clipping through it."
+            };
+            ImporterStyle.ApplyFontSize(_chkSelFloorCollision, ImporterStyle.FontHint);
+            _chkSelFloorCollision.Toggled += (on) =>
+            {
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.FloorCollision = on;
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            sliderStack.AddChild(_chkSelFloorCollision);
 
             _chkSelOpenSheet = new CheckBox
             {
@@ -2190,7 +2232,7 @@ namespace DeadlockPlayground.UI
                     Text = "Preset ▾",
                     ThemeTypeVariation = "ToolbarButton",
                     CustomMinimumSize = new Vector2(72, 26),
-                    TooltipText = $"Pick a Valve-backed preset for all {toggleableChains.Count} chain(s) in '{grpLabel}' at once."
+                    TooltipText = $"Pick a Valve-backed preset for all active chain(s) in '{grpLabel}' (disabled bones stay disabled)."
                 };
                 ImporterStyle.ApplyFontSize(btnGroupPreset, ImporterStyle.FontHint);
                 var capturedGroupChains = toggleableChains;
@@ -2360,6 +2402,7 @@ namespace DeadlockPlayground.UI
                 if (_lblValColRadius != null) _lblValColRadius.Text = $"{_selectedChain.CollisionRadiusTipInches:F1} in";
                 if (_lblValStrayRadius != null) _lblValStrayRadius.Text = strayUnlim ? "Unlimited (-1)" : $"{_selectedChain.StrayRadiusInches:F1} in";
                 _chkSelPlanarizeBack?.SetPressedNoSignal(_selectedChain.PlanarizeBackBarrier);
+                _chkSelFloorCollision?.SetPressedNoSignal(_selectedChain.FloorCollision);
                 _chkSelOpenSheet?.SetPressedNoSignal(_selectedChain.OpenSheet);
                 _chkSelAnchorFreeRotate?.SetPressedNoSignal(_selectedChain.AnchorFreeRotate);
                 _sliderSelFriction?.SetValueNoSignal(_selectedChain.Friction);
@@ -3215,7 +3258,7 @@ namespace DeadlockPlayground.UI
             detailRow.AddChild(detailTextCol);
             rootVBox.AddChild(detailPanel);
 
-            // Footer: Cancel | Apply Preset
+            // Footer: Cancel | Apply to This Bone Only (when group > 1) | Apply Preset / Apply to Active Group
             var footerRow = new HBoxContainer
             {
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -3229,24 +3272,37 @@ namespace DeadlockPlayground.UI
                 CustomMinimumSize = new Vector2(104, 36)
             };
             btnCancel.Pressed += () => _presetPickerPopup.Hide();
+            _btnPresetPickerApplySingle = new Button
+            {
+                Text = "Apply to This Bone Only",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(180, 36),
+                Visible = false,
+                TooltipText = "Apply this preset exclusively to the currently selected bone/chain without modifying sibling chains."
+            };
+            _btnPresetPickerApplySingle.Pressed += () => ApplySelectedPresetFromPickerModal(singleChainOnly: true);
             _btnPresetPickerApply = new Button
             {
                 Text = "Apply Preset",
                 ThemeTypeVariation = "ImporterPrimaryButton",
-                CustomMinimumSize = new Vector2(140, 36)
+                CustomMinimumSize = new Vector2(150, 36),
+                TooltipText = "Apply this preset to active physics chains in this group (disabled/static bones stay disabled)."
             };
-            _btnPresetPickerApply.Pressed += ApplySelectedPresetFromPickerModal;
+            _btnPresetPickerApply.Pressed += () => ApplySelectedPresetFromPickerModal(singleChainOnly: false);
             footerRow.AddChild(btnCancel);
+            footerRow.AddChild(_btnPresetPickerApplySingle);
             footerRow.AddChild(_btnPresetPickerApply);
             rootVBox.AddChild(footerRow);
         }
 
         private readonly Dictionary<string, Button> _presetPickerCardButtons = new(StringComparer.OrdinalIgnoreCase);
         private string _presetPickerSelectedId = "";
+        private BoneChainDef _presetPickerSingleTarget;
         private TextureRect _texPresetPickerPreview;
         private Label _lblPresetPickerDetailTitle;
         private Label _lblPresetPickerDetailMeta;
         private Label _lblPresetPickerDetailDesc;
+        private Button _btnPresetPickerApplySingle;
         private Button _btnPresetPickerApply;
 
         private void SelectPresetInPickerModal(string presetId)
@@ -3266,28 +3322,62 @@ namespace DeadlockPlayground.UI
             if (_lblPresetPickerDetailMeta != null) _lblPresetPickerDetailMeta.Text = preset.ShortTag;
             if (_lblPresetPickerDetailDesc != null) _lblPresetPickerDetailDesc.Text = preset.Description;
             if (_btnPresetPickerApply != null) _btnPresetPickerApply.Disabled = false;
+            if (_btnPresetPickerApplySingle != null) _btnPresetPickerApplySingle.Disabled = false;
         }
 
-        private void ApplySelectedPresetFromPickerModal()
+        private void ApplySelectedPresetFromPickerModal(bool singleChainOnly = false)
         {
             var preset = PhysicsPresetCatalog.Find(_presetPickerSelectedId);
-            if (preset != null && _presetPickerTargets != null && _presetPickerTargets.Count > 0)
+            List<BoneChainDef> effectiveTargets;
+            if (singleChainOnly && _presetPickerSingleTarget != null)
+            {
+                effectiveTargets = new List<BoneChainDef> { _presetPickerSingleTarget };
+            }
+            else
+            {
+                effectiveTargets = _presetPickerTargets ?? new List<BoneChainDef>();
+            }
+
+            if (preset != null && effectiveTargets.Count > 0)
             {
                 bool anyPolicyChanged = false;
-                foreach (var ch in _presetPickerTargets)
+                int appliedCount = 0;
+                foreach (var ch in effectiveTargets)
                 {
                     if (ch == null) continue;
+                    // Never auto-activate already disabled/static sibling chains when applying a group preset.
+                    // Only activate the explicitly targeted single chain if the user picked a preset directly on it.
+                    bool isPrimarySingle = ReferenceEquals(ch, _presetPickerSingleTarget);
                     if (ch.Policy != ChainPolicy.PreservePhysicsChain)
                     {
-                        ch.Policy = ChainPolicy.PreservePhysicsChain;
-                        anyPolicyChanged = true;
+                        if (isPrimarySingle && (singleChainOnly || effectiveTargets.Count == 1))
+                        {
+                            ch.Policy = ChainPolicy.PreservePhysicsChain;
+                            anyPolicyChanged = true;
+                        }
+                        else
+                        {
+                            continue;
+                        }
                     }
                     PhysicsPresetCatalog.ApplyPresetToChain(ch, preset.Id, resetMacros: true);
+                    appliedCount++;
                 }
-                if (anyPolicyChanged) MarkRemapStaleAndRefresh();
-                else ApplyChainParamsLiveToDriver();
-                RefreshClothingChainsPanel();
-                SetBottomStatus($"Applied preset '{preset.DisplayName} ({preset.HeroReference})' to {_presetPickerTargets.Count} chain(s).", StatusTone.Success);
+                if (appliedCount > 0)
+                {
+                    if (anyPolicyChanged) MarkRemapStaleAndRefresh();
+                    else
+                    {
+                        ApplyChainParamsLiveToDriver();
+                        RefreshUneditedCollidersClearanceForCurrentChains();
+                    }
+                    RefreshClothingChainsPanel();
+                    SetBottomStatus($"Applied preset '{preset.DisplayName} ({preset.HeroReference})' to {appliedCount} chain(s).", StatusTone.Success);
+                }
+                else
+                {
+                    SetBottomStatus("No active physics chains in this group to update (disabled bones were kept disabled).", StatusTone.Info);
+                }
             }
             _presetPickerPopup?.Hide();
         }
@@ -3302,6 +3392,8 @@ namespace DeadlockPlayground.UI
             foreach (var ch in _boneChains)
             {
                 if (ch == null || ReferenceEquals(ch, selected) || IsRigidHubChain(ch)) continue;
+                // Never include already disabled/static sibling chains so changing a preset never re-activates them
+                if (ch.Policy != ChainPolicy.PreservePhysicsChain) continue;
                 bool sameAnchor = string.Equals(ch.AnchorHeroBone ?? "", selAnchor, StringComparison.OrdinalIgnoreCase);
                 bool sameCat = string.Equals(ch.Category ?? "", selCat, StringComparison.OrdinalIgnoreCase);
                 if (sameAnchor && sameCat)
@@ -3310,15 +3402,46 @@ namespace DeadlockPlayground.UI
             return targets;
         }
 
-        private void OpenPhysicsPresetPicker(List<BoneChainDef> targets, Control anchorControl)
+        private void OpenPhysicsPresetPicker(List<BoneChainDef> targets, Control anchorControl, BoneChainDef primarySingleTarget = null)
         {
             if (targets == null || targets.Count == 0) return;
             EnsurePhysicsPresetPickerPopup();
-            _presetPickerTargets = targets;
-            _presetPickerPopup.Title = targets.Count > 1
-                ? $"Select Physics Preset (Applies to {targets.Count} chains in group)"
-                : $"Select Physics Preset ({targets[0].Name})";
-            string initialId = targets[0]?.PresetId;
+
+            // Filter out disabled sibling chains while always keeping an explicit single selected chain
+            var activeTargets = new List<BoneChainDef>();
+            foreach (var ch in targets)
+            {
+                if (ch == null) continue;
+                if (ReferenceEquals(ch, primarySingleTarget) || ch.Policy == ChainPolicy.PreservePhysicsChain)
+                    activeTargets.Add(ch);
+            }
+            if (activeTargets.Count == 0)
+            {
+                SetBottomStatus("All chains in this group are currently disabled. Enable a chain first or select one to apply a preset.", StatusTone.Info);
+                return;
+            }
+
+            _presetPickerTargets = activeTargets;
+            _presetPickerSingleTarget = primarySingleTarget ?? (activeTargets.Count == 1 ? activeTargets[0] : null);
+
+            bool hasGroupChoice = _presetPickerSingleTarget != null && activeTargets.Count > 1;
+            if (_btnPresetPickerApplySingle != null)
+            {
+                _btnPresetPickerApplySingle.Visible = hasGroupChoice;
+                if (hasGroupChoice)
+                    _btnPresetPickerApplySingle.Text = $"Apply to '{_presetPickerSingleTarget.Name}' Only";
+            }
+            if (_btnPresetPickerApply != null)
+            {
+                _btnPresetPickerApply.Text = activeTargets.Count > 1
+                    ? $"Apply to Active Group ({activeTargets.Count})"
+                    : "Apply Preset";
+            }
+
+            _presetPickerPopup.Title = activeTargets.Count > 1
+                ? $"Select Physics Preset ({activeTargets.Count} active chains in group)"
+                : $"Select Physics Preset ({activeTargets[0].Name})";
+            string initialId = (_presetPickerSingleTarget ?? activeTargets[0])?.PresetId;
             if (string.IsNullOrEmpty(initialId) || PhysicsPresetCatalog.Find(initialId) == null)
                 initialId = PhysicsPresetCatalog.Presets[0].Id;
             SelectPresetInPickerModal(initialId);
@@ -3329,17 +3452,16 @@ namespace DeadlockPlayground.UI
         {
             if (_selectedChain == null) return;
             int count = 0;
-            bool anyPolicyChanged = false;
             string selAnchor = _selectedChain.AnchorHeroBone ?? "";
             foreach (var ch in _boneChains)
             {
                 if (ch == null || ch == _selectedChain || IsRigidHubChain(ch)) continue;
+                // Do not re-activate already disabled/static sibling chains
+                if (ch.Policy != ChainPolicy.PreservePhysicsChain) continue;
                 bool sameAnchor = string.Equals(ch.AnchorHeroBone ?? "", selAnchor, StringComparison.OrdinalIgnoreCase);
                 bool sameCat = string.Equals(ch.Category ?? "", _selectedChain.Category ?? "", StringComparison.OrdinalIgnoreCase);
                 if (!sameAnchor || !sameCat) continue;
 
-                if (ch.Policy != _selectedChain.Policy) anyPolicyChanged = true;
-                ch.Policy = _selectedChain.Policy;
                 ch.Simulation = _selectedChain.Simulation;
                 ch.PresetId = _selectedChain.PresetId;
                 ch.MacroLooseness = _selectedChain.MacroLooseness;
@@ -3354,6 +3476,7 @@ namespace DeadlockPlayground.UI
                 ch.TwistRelax = _selectedChain.TwistRelax;
                 ch.AngleLimitDeg = _selectedChain.AngleLimitDeg;
                 ch.PlanarizeBackBarrier = _selectedChain.PlanarizeBackBarrier;
+                ch.FloorCollision = _selectedChain.FloorCollision;
                 ch.AnchorFreeRotate = _selectedChain.AnchorFreeRotate;
                 ch.OpenSheet = _selectedChain.OpenSheet;
                 ch.Friction = _selectedChain.Friction;
@@ -3363,10 +3486,33 @@ namespace DeadlockPlayground.UI
                 ch.ExtrudeTwistDeg = _selectedChain.ExtrudeTwistDeg;
                 count++;
             }
-            if (anyPolicyChanged) MarkRemapStaleAndRefresh();
-            else ApplyChainParamsLiveToDriver();
+            ApplyChainParamsLiveToDriver();
+            RefreshUneditedCollidersClearanceForCurrentChains();
             RefreshClothingChainsPanel();
-            SetBottomStatus($"Applied '{PhysicsPresetCatalog.GetDisplayLabel(_selectedChain.PresetId)}' to {count} sibling chain(s).", StatusTone.Success);
+            SetBottomStatus($"Applied '{PhysicsPresetCatalog.GetDisplayLabel(_selectedChain.PresetId)}' to {count} active sibling chain(s).", StatusTone.Success);
+        }
+
+        /// <summary>
+        /// Re-applies bind-pose clearance to non-user-edited body capsules whenever a chain preset changes
+        /// (e.g. Short Hair 0.5 in -> Long Hair 2.4 in or Heavy Skirt 2.0 in) so live preview matches export 1:1.
+        /// </summary>
+        private void RefreshUneditedCollidersClearanceForCurrentChains()
+        {
+            if (_previewHeroSkeleton == null || !GodotObject.IsInstanceValid(_previewHeroSkeleton)) return;
+            if (_bodyCollisionCapsules.Count == 0) return;
+            var meshes = new List<MeshInstance3D>();
+            CollectSkinnedSubmeshes(_previewRiggedContainer ?? _previewHeroClone, meshes);
+            if (meshes.Count == 0) return;
+            var fitted = BodyColliderAutoFitter.FitFromRiggedMeshes(
+                _previewHeroSkeleton, meshes, _bodyCollisionCapsules, forceResetEdits: false, physicsChains: _boneChains);
+            if (fitted == null || fitted.Count == 0) return;
+            string prevSel = _selectedCollider?.BoneName;
+            _bodyCollisionCapsules.Clear();
+            _bodyCollisionCapsules.AddRange(fitted);
+            _selectedCollider = !string.IsNullOrEmpty(prevSel)
+                ? _bodyCollisionCapsules.FirstOrDefault(c => c.BoneName.Equals(prevSel, StringComparison.OrdinalIgnoreCase))
+                : _bodyCollisionCapsules.FirstOrDefault();
+            ApplyBodyCollidersLiveToDriver();
         }
 
         private void SetPhysicsSubView(int index)
@@ -3821,6 +3967,7 @@ namespace DeadlockPlayground.UI
                 ch.TwistRelax = _selectedChain.TwistRelax;
                 ch.AngleLimitDeg = _selectedChain.AngleLimitDeg;
                 ch.PlanarizeBackBarrier = _selectedChain.PlanarizeBackBarrier;
+                ch.FloorCollision = _selectedChain.FloorCollision;
                 ch.AnchorFreeRotate = _selectedChain.AnchorFreeRotate;
                 ch.OpenSheet = _selectedChain.OpenSheet;
                 ch.Friction = _selectedChain.Friction;
