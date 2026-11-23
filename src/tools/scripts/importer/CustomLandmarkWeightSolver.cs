@@ -581,8 +581,17 @@ namespace DeadlockPlayground.Importer
             if (primary == candidate) return true;
             var pSpec = specs[primary];
             var cSpec = specs[candidate];
+
+            // Never allow Left-side bones to blend with Right-side bones (e.g. leg_upper_L <-> leg_upper_R through pelvis)
+            bool pL = pSpec.Name.EndsWith("_L", StringComparison.OrdinalIgnoreCase);
+            bool pR = pSpec.Name.EndsWith("_R", StringComparison.OrdinalIgnoreCase);
+            bool cL = cSpec.Name.EndsWith("_L", StringComparison.OrdinalIgnoreCase);
+            bool cR = cSpec.Name.EndsWith("_R", StringComparison.OrdinalIgnoreCase);
+            if ((pL && cR) || (pR && cL)) return false;
+
             // Fingers only blend with their own immediate parent/child (hop <= 1) so adjacent fingers never bleed;
-            // allow hand <-> finger_*_0 (hop == 2 through metacarpal) so the knuckle seam never forms a hard cliff!
+            // allow hand <-> finger_*_0 (hop == 2 through metacarpal) so the knuckle seam never forms a hard cliff,
+            // AND allow sibling metacarpals on the same hand to blend smoothly across the palm!
             if (pSpec.Role == ReferenceBoneRole.Finger || cSpec.Role == ReferenceBoneRole.Finger)
             {
                 if (hopDist[primary, candidate] <= 1) return true;
@@ -591,6 +600,10 @@ namespace DeadlockPlayground.Importer
                     bool pIsHand = pSpec.Name.StartsWith("hand_", StringComparison.OrdinalIgnoreCase);
                     bool cIsHand = cSpec.Name.StartsWith("hand_", StringComparison.OrdinalIgnoreCase);
                     if (pIsHand || cIsHand) return true;
+
+                    bool pIsMeta = pSpec.Name.Contains("_meta_", StringComparison.OrdinalIgnoreCase);
+                    bool cIsMeta = cSpec.Name.Contains("_meta_", StringComparison.OrdinalIgnoreCase);
+                    if (pIsMeta && cIsMeta && pSpec.ParentIndex == cSpec.ParentIndex) return true;
                 }
                 return false;
             }
@@ -760,30 +773,45 @@ namespace DeadlockPlayground.Importer
             for (int i = 0; i < n; i++)
             {
                 int primary = label[i];
-                float localEps = specs[primary].Role == ReferenceBoneRole.Finger ? 0.004f * H : eps;
+                bool primaryIsMeta = specs[primary].Name.Contains("_meta_", StringComparison.OrdinalIgnoreCase);
+                float localEps = (specs[primary].Role == ReferenceBoneRole.Finger && !primaryIsMeta) ? 0.004f * H : eps;
                 float sum = 0f;
                 int rowOff = i * nb;
+
+                // Detect disconnected overlapping shells (e.g. shorts/underwear mesh over thigh skin):
+                // if ANY allowed Core neighbor has no geodesic path onto this shell, evaluate ALL allowed Core bones
+                // using a consistent Euclidean segment distance rather than mixing shorter Euclidean distances with
+                // longer surface geodesic paths — ensuring overlapping shells receive identical pelvis<->thigh weights!
+                bool useConsistentCoreEuclidean = false;
+                if (specs[primary].Role == ReferenceBoneRole.Core)
+                {
+                    for (int b = 0; b < nb; b++)
+                    {
+                        if (specs[b].Role != ReferenceBoneRole.Core) continue;
+                        if (!IsBoneAllowedForSpec(specs, hopDist, primary, b)) continue;
+                        if (float.IsPositiveInfinity(G[b][i]))
+                        {
+                            useConsistentCoreEuclidean = true;
+                            break;
+                        }
+                    }
+                }
+
                 for (int b = 0; b < nb; b++)
                 {
                     if (!IsBoneAllowedForSpec(specs, hopDist, primary, b)) continue;
-                    float gd = G[b][i];
-                    if (float.IsPositiveInfinity(gd))
+                    float gd;
+                    if (useConsistentCoreEuclidean && specs[b].Role == ReferenceBoneRole.Core)
                     {
-                        // Disconnected overlapping shell fallback (e.g. shorts/underwear mesh over thigh skin):
-                        // if an allowed Core neighbor bone has no geodesic path onto this shell, use Euclidean
-                        // distance to its bone segment so both shells receive matching pelvis<->thigh weights
-                        // and move in lockstep instead of tearing apart at the glute/hip seam!
-                        if (specs[primary].Role == ReferenceBoneRole.Core && specs[b].Role == ReferenceBoneRole.Core)
-                        {
-                            Vector3 ab = specs[b].SegEnd - specs[b].SegStart;
-                            float len2 = ab.LengthSquared();
-                            float ct = len2 < 1e-10f ? 0f : Mathf.Clamp((weldPos[i] - specs[b].SegStart).Dot(ab) / len2, 0f, 1f);
-                            gd = (weldPos[i] - (specs[b].SegStart + ab * ct)).Length();
-                        }
-                        else
-                        {
-                            continue;
-                        }
+                        Vector3 ab = specs[b].SegEnd - specs[b].SegStart;
+                        float len2 = ab.LengthSquared();
+                        float ct = len2 < 1e-10f ? 0f : Mathf.Clamp((weldPos[i] - specs[b].SegStart).Dot(ab) / len2, 0f, 1f);
+                        gd = (weldPos[i] - (specs[b].SegStart + ab * ct)).Length();
+                    }
+                    else
+                    {
+                        gd = G[b][i];
+                        if (float.IsPositiveInfinity(gd)) continue;
                     }
                     float w = 1f / ((gd + localEps) * (gd + localEps));
                     dense[rowOff + b] = w; sum += w;
@@ -812,8 +840,11 @@ namespace DeadlockPlayground.Importer
                 {
                     int rowOff = i * nb;
                     int primary = label[i];
-                    // Keep finger joints crisp: stop Laplacian smoothing on fingers after 2 passes so adjacent fingers never web!
-                    if (iter >= 2 && specs[primary].Role == ReferenceBoneRole.Finger)
+                    // Keep distal finger phalanges crisp (stop after 2 passes so adjacent fingers never web),
+                    // while letting palm metacarpals (_meta_) smooth smoothly across all 5 passes!
+                    bool isDistalFinger = specs[primary].Role == ReferenceBoneRole.Finger &&
+                                          !specs[primary].Name.Contains("_meta_", StringComparison.OrdinalIgnoreCase);
+                    if (iter >= 2 && isDistalFinger)
                     {
                         Array.Copy(dense, rowOff, next, rowOff, nb);
                         continue;
@@ -1057,15 +1088,28 @@ namespace DeadlockPlayground.Importer
 
             var alignedVerts = new List<Vector3[]>();
             var indices = new List<int[]>();
+            var surfaceMeshNames = new List<string>(surfaces.Count);
             foreach (var sd in surfaces)
             {
                 var av = new Vector3[sd.SceneVerts.Length];
                 for (int i = 0; i < av.Length; i++) av[i] = A * sd.SceneVerts[i];
                 alignedVerts.Add(av);
                 indices.Add(sd.Indices);
+                surfaceMeshNames.Add(sd.Mi?.Name.ToString() ?? "");
             }
             float? chinPlaneY = pinsAligned.TryGetValue("Chin", out var chinAligned) ? chinAligned.Y : (float?)null;
-            SolveWeightsModular(alignedVerts, indices, specs, H, chinPlaneY, out var bonesPer, out var weightsPer);
+            var swHeat = System.Diagnostics.Stopwatch.StartNew();
+            List<int[]> bonesPer;
+            List<float[]> weightsPer;
+            if (VoxelHeatWeightSolver.SolveWeights(alignedVerts, indices, specs, H, chinPlaneY, out bonesPer, out weightsPer, surfaceMeshNames))
+            {
+                swHeat.Stop();
+                GD.Print($"[VoxelHeatWeightSolver] Solved volumetric heat weights for {specs.Count} bones in {swHeat.ElapsedMilliseconds} ms.");
+            }
+            else
+            {
+                SolveWeightsModular(alignedVerts, indices, specs, H, chinPlaneY, out bonesPer, out weightsPer);
+            }
 
             // Build modular skeleton in scene space (identity transform under the scene root).
             var skel = new Skeleton3D { Name = "LandmarkSyntheticSkeleton" };

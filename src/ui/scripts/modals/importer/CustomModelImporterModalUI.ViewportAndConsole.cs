@@ -1148,6 +1148,7 @@ namespace DeadlockPlayground.UI
                 _previewHeroClone.QueueFree();
                 _previewHeroClone = null;
             }
+            CleanupDonorVanillaHeroCache();
             _previewHeroSkeleton = null;
             _previewConstraintDriver = null;
             _previewAnimPlayer = null;

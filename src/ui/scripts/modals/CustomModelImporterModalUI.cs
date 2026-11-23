@@ -32,6 +32,7 @@ namespace DeadlockPlayground.UI
 
         // Accessory / Outfit Workflow State
         private ImportWorkflowIntent _workflowIntent = ImportWorkflowIntent.FullCharacter;
+        private bool _hasActiveCompleteReplacement = false;
         private string _accessorySlotId = "";
         private CustomModelAutoRigger.AccessoryIntent _accessoryIntent = CustomModelAutoRigger.AccessoryIntent.AddAccessory;
         private Control _boxAccessorySetupCard;
@@ -245,7 +246,9 @@ namespace DeadlockPlayground.UI
         private VBoxContainer _boxImportedSubmeshes;
         private VBoxContainer _boxHeroSubmeshes;
         private readonly List<CheckBox> _heroKeepCheckboxes = new();
+        private readonly Dictionary<CheckBox, MeshThumbCard> _heroKeepCards = new();
         private readonly List<CheckBox> _importedSubmeshCheckboxes = new();
+        private readonly Dictionary<CheckBox, MeshThumbCard> _importedSubmeshCards = new();
         private readonly Dictionary<string, string> _submeshSocketAssignments = new();
         private readonly Dictionary<string, string> _submeshHeroReplacements = new();
         private readonly Dictionary<string, bool> _submeshSnapToSocket = new();
@@ -2054,8 +2057,14 @@ namespace DeadlockPlayground.UI
                 if (_subViewportContainer != null) _subViewportContainer.StretchShrink = 1;
                 if (_btnManualRigUpdate != null) _btnManualRigUpdate.Visible = false;
             }
+            _hasActiveCompleteReplacement =
+                _workflowIntent == ImportWorkflowIntent.AccessoryAddOrReplace &&
+                _liveHeroNode.FindChild("Custom_Rigged_Character", true, false) is Node3D activeReplacementNode &&
+                GodotObject.IsInstanceValid(activeReplacementNode) &&
+                activeReplacementNode.Visible;
+
             _previewHeroClone = ImporterMemoryGuard.CloneHierarchySharingResources(_liveHeroNode);
-            StripGizmosAndNonAuthenticNodes(_previewHeroClone);
+            StripGizmosAndNonAuthenticNodes(_previewHeroClone, preserveActiveReplacement: _hasActiveCompleteReplacement, editingSlotId: _accessorySlotId);
             _previewWorldRoot.AddChild(_previewHeroClone);
 
             // CRITICAL REQUIREMENT 2: Force 100% symmetrical bind pose (ResetBonePoses) on primary hero skeleton clone!
@@ -2186,6 +2195,7 @@ namespace DeadlockPlayground.UI
 
             // 5. Populate submesh checklists
             PopulateSubmeshChecklists();
+            PopulateDonorVanillaHeroDropdown();
             PopulateAccQuickBonePicker();
             PopulateAccessoryReplaceList();
             PopulateAccDeformTargetList();
@@ -2729,29 +2739,36 @@ namespace DeadlockPlayground.UI
                     if (chk.HasMeta("SubmeshName"))
                     {
                         string sName = chk.GetMeta("SubmeshName").AsString();
-                        chk.SetPressedNoSignal(options.IncludedImportedSubmeshNames.Contains(sName));
+                        bool included = options.IncludedImportedSubmeshNames.Contains(sName);
+                        chk.SetPressedNoSignal(included);
+                        if (_importedSubmeshCards.TryGetValue(chk, out var impCard) && GodotObject.IsInstanceValid(impCard))
+                            impCard.SetActive(included);
                     }
                 }
                 SyncPreviewModelMeshVisibility();
                 ComputeAccLocalBoundsCenter();
             }
-            if (options.KeptOriginalSubmeshNames != null && options.KeptOriginalSubmeshNames.Count > 0)
+            if (options.KeptOriginalSubmeshNames != null)
             {
                 foreach (var chk in _heroKeepCheckboxes)
                 {
                     if (chk.HasMeta("SubmeshName"))
                     {
                         string sName = chk.GetMeta("SubmeshName").AsString();
+                        bool kept;
                         int surfIdxSep = sName.IndexOf(CustomModelAutoRigger.SurfaceKeepSeparator, StringComparison.Ordinal);
                         if (surfIdxSep >= 0 && int.TryParse(sName.Substring(surfIdxSep + CustomModelAutoRigger.SurfaceKeepSeparator.Length), out int sIdx))
                         {
                             string baseMeshName = sName.Substring(0, surfIdxSep);
-                            chk.ButtonPressed = CustomModelAutoRigger.IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, baseMeshName, sIdx);
+                            kept = CustomModelAutoRigger.IsOriginalSurfaceKept(options.KeptOriginalSubmeshNames, baseMeshName, sIdx);
                         }
                         else
                         {
-                            chk.ButtonPressed = options.KeptOriginalSubmeshNames.Contains(sName);
+                            kept = options.KeptOriginalSubmeshNames.Contains(sName);
                         }
+                        chk.SetPressedNoSignal(kept);
+                        if (_heroKeepCards.TryGetValue(chk, out var keepCard) && GodotObject.IsInstanceValid(keepCard))
+                            keepCard.SetActive(kept);
                     }
                 }
             }
@@ -2854,6 +2871,32 @@ namespace DeadlockPlayground.UI
             ApplyTransformToPreviewModel(immediate: true);
         }
 
+        private bool IsUnderCustomReplacementContainer(Node node)
+        {
+            Node cur = node;
+            while (cur != null)
+            {
+                if (string.Equals(cur.Name.ToString(), "Custom_Rigged_Character", StringComparison.Ordinal))
+                    return true;
+                cur = cur.GetParent();
+            }
+            return false;
+        }
+
+        private bool IsUnderActivePreviewAccessoryContainer(Node node)
+        {
+            if (_previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer))
+            {
+                Node cur = node;
+                while (cur != null)
+                {
+                    if (cur == _previewRiggedContainer) return true;
+                    cur = cur.GetParent();
+                }
+            }
+            return false;
+        }
+
         private void CaptureOriginalHeroMaterials(Node3D clone)
         {
             _previewHeroOriginalMaterials.Clear();
@@ -2861,9 +2904,11 @@ namespace DeadlockPlayground.UI
 
             foreach (var mi in CustomModelAutoRigger.CollectMeshes(clone))
             {
-                if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool()) continue;
+                if (IsUnderActivePreviewAccessoryContainer(mi)) continue;
+                bool isMainReplacement = _hasActiveCompleteReplacement && IsUnderCustomReplacementContainer(mi);
+                if (!isMainReplacement && mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool()) continue;
                 string miName = mi.Name.ToString().ToLowerInvariant();
-                if (miName.Contains("custom_rigged") || miName.Contains("previewmodel")) continue;
+                if (!isMainReplacement && (miName.Contains("custom_rigged") || miName.Contains("previewmodel"))) continue;
 
                 int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
                 var surfOverrides = new Material[surfCount];
@@ -2881,14 +2926,24 @@ namespace DeadlockPlayground.UI
             _previewGhostMeshes.Clear();
             foreach (var mi in CustomModelAutoRigger.CollectMeshes(clone))
             {
-                // Never apply ghost material to custom imported meshes!
-                if (mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool())
+                if (IsUnderActivePreviewAccessoryContainer(mi)) continue;
+                bool isMainReplacement = _hasActiveCompleteReplacement && IsUnderCustomReplacementContainer(mi);
+                // Never apply ghost material to custom imported meshes unless it is the active complete replacement base in Accessory mode
+                if (!isMainReplacement && mi.HasMeta("IsCustomImportedMesh") && mi.GetMeta("IsCustomImportedMesh").AsBool())
                 {
                     continue;
                 }
                 string miName = mi.Name.ToString().ToLowerInvariant();
-                if (miName.Contains("custom_rigged") || miName.Contains("previewmodel"))
+                if (!isMainReplacement && (miName.Contains("custom_rigged") || miName.Contains("previewmodel")))
                 {
+                    continue;
+                }
+
+                // In Accessory mode on a complete replacement model, keep hidden original vanilla meshes hidden
+                if (_hasActiveCompleteReplacement && !isMainReplacement &&
+                    mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool())
+                {
+                    mi.Visible = false;
                     continue;
                 }
 
@@ -2906,12 +2961,18 @@ namespace DeadlockPlayground.UI
             var keptNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var chk in _heroKeepCheckboxes)
             {
-                if (GodotObject.IsInstanceValid(chk) && chk.ButtonPressed && chk.HasMeta("SubmeshName"))
+                if (!GodotObject.IsInstanceValid(chk)) continue;
+                if (_heroKeepCards.TryGetValue(chk, out var keepCard) && GodotObject.IsInstanceValid(keepCard))
+                {
+                    keepCard.SetActive(chk.ButtonPressed);
+                }
+                if (chk.ButtonPressed && chk.HasMeta("SubmeshName"))
                 {
                     keptNames.Add(chk.GetMeta("SubmeshName").AsString());
                 }
             }
 
+            UpdateHeroKeepCountBadge();
             foreach (var mi in _previewGhostMeshes)
             {
                 if (!GodotObject.IsInstanceValid(mi)) continue;
@@ -3173,11 +3234,11 @@ namespace DeadlockPlayground.UI
             return list;
         }
 
-        private static void StripGizmosAndNonAuthenticNodes(Node root)
+        private static void StripGizmosAndNonAuthenticNodes(Node root, bool preserveActiveReplacement = false, string editingSlotId = null)
         {
             if (root == null) return;
             var toRemove = new List<Node>();
-            FindNodesToStrip(root, toRemove);
+            FindNodesToStrip(root, toRemove, preserveActiveReplacement, editingSlotId);
             foreach (var node in toRemove)
             {
                 if (GodotObject.IsInstanceValid(node))
@@ -3188,8 +3249,12 @@ namespace DeadlockPlayground.UI
             }
         }
 
-        private static void FindNodesToStrip(Node node, List<Node> toRemove)
+        private static void FindNodesToStrip(Node node, List<Node> toRemove, bool preserveActiveReplacement = false, string editingSlotId = null)
         {
+            string editingContainerName = !string.IsNullOrWhiteSpace(editingSlotId)
+                ? CustomModelAutoRigger.GetContainerNameForSlot(editingSlotId)
+                : null;
+
             foreach (var child in node.GetChildren())
             {
                 string cName = child.Name.ToString();
@@ -3205,6 +3270,25 @@ namespace DeadlockPlayground.UI
                     continue;
                 }
 
+                // When adding/editing an independent accessory on top of a complete replacement model,
+                // keep Custom_Rigged_Character (and any other visible accessories except the slot being edited) intact!
+                if (preserveActiveReplacement)
+                {
+                    if (string.Equals(cName, "Custom_Rigged_Character", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    if (cName.StartsWith("Custom_Accessory_", StringComparison.Ordinal))
+                    {
+                        if (!string.IsNullOrEmpty(editingContainerName) &&
+                            string.Equals(cName, editingContainerName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            toRemove.Add(child);
+                        }
+                        continue;
+                    }
+                }
+
                 if (child is MeshInstance3D mi)
                 {
                     // Remove duplicate generated split submeshes on preview clone
@@ -3214,10 +3298,13 @@ namespace DeadlockPlayground.UI
                         continue;
                     }
 
-                    // Restore original composite meshes
+                    // Restore original composite meshes (unless preserving an active complete replacement)
                     if (mi.HasMeta("IsHiddenComposite"))
                     {
-                        mi.Visible = true;
+                        bool hiddenByCustom = preserveActiveReplacement &&
+                                              mi.HasMeta("UserHiddenByCustomModel") &&
+                                              mi.GetMeta("UserHiddenByCustomModel").AsBool();
+                        mi.Visible = !hiddenByCustom;
                         mi.RemoveMeta("IsHiddenComposite");
                         if (mi.HasMeta("GeneratedSubmeshes")) mi.RemoveMeta("GeneratedSubmeshes");
                     }
@@ -3228,13 +3315,20 @@ namespace DeadlockPlayground.UI
                         continue;
                     }
 
-                    // Restore authentic hero submesh to full visibility on reference ghost clone
-                    mi.Visible = true;
-                    if (mi.HasMeta("UserHiddenByCustomModel")) mi.RemoveMeta("UserHiddenByCustomModel");
-                    if (mi.HasMeta("UserVisibility")) mi.SetMeta("UserVisibility", true);
+                    if (preserveActiveReplacement && mi.HasMeta("UserHiddenByCustomModel") && mi.GetMeta("UserHiddenByCustomModel").AsBool())
+                    {
+                        mi.Visible = false;
+                    }
+                    else
+                    {
+                        // Restore authentic hero submesh to full visibility on reference ghost clone
+                        mi.Visible = true;
+                        if (mi.HasMeta("UserHiddenByCustomModel")) mi.RemoveMeta("UserHiddenByCustomModel");
+                        if (mi.HasMeta("UserVisibility")) mi.SetMeta("UserVisibility", true);
+                    }
                 }
 
-                FindNodesToStrip(child, toRemove);
+                FindNodesToStrip(child, toRemove, preserveActiveReplacement, editingSlotId);
             }
         }
 
@@ -3450,8 +3544,10 @@ namespace DeadlockPlayground.UI
             // Clear existing
             foreach (var c in _heroKeepCheckboxes) c.QueueFree();
             _heroKeepCheckboxes.Clear();
+            _heroKeepCards.Clear();
             foreach (var c in _importedSubmeshCheckboxes) c.QueueFree();
             _importedSubmeshCheckboxes.Clear();
+            _importedSubmeshCards.Clear();
             foreach (Node child in _boxImportedSubmeshes.GetChildren()) child.QueueFree();
             foreach (Node child in _boxHeroSubmeshes.GetChildren()) child.QueueFree();
 
@@ -3470,10 +3566,62 @@ namespace DeadlockPlayground.UI
             heroGrid.AddThemeConstantOverride("v_separation", 8);
             _boxHeroSubmeshes.AddChild(heroGrid);
 
-            // Original Deadlock Hero submeshes (strictly authentic, zero gizmo meshes!)
-            // Expand composite multi-surface meshes (e.g. _priest -> priest_lower, priest_upper, priest_shotgun, ...)
-            // so users can keep individual weapons/parts active without restoring the entire hero body.
+            // Original Deadlock Hero submeshes (or active complete replacement model submeshes in Accessory mode!)
             var heroMeshes = CustomModelAutoRigger.CollectOriginalHeroMeshes(_liveHeroNode);
+            if (_lblHeroKeepSectionTitle != null)
+            {
+                _lblHeroKeepSectionTitle.Text = _hasActiveCompleteReplacement
+                    ? "Active Replacement Model Parts"
+                    : "Keep from Original Hero";
+            }
+
+            if (_hasActiveCompleteReplacement)
+            {
+                var mainReplacement = _liveHeroNode?.FindChild("Custom_Rigged_Character", true, false) as Node3D;
+                if (mainReplacement != null && GodotObject.IsInstanceValid(mainReplacement))
+                {
+                    foreach (var cMi in CustomModelAutoRigger.CollectMeshes(mainReplacement))
+                    {
+                        if (cMi?.Mesh == null) continue;
+                        string cName = cMi.Name.ToString();
+                        bool isVis = cMi.Visible && !(cMi.HasMeta("UserHiddenByCustomModel") && cMi.GetMeta("UserHiddenByCustomModel").AsBool());
+                        var chk = new CheckBox
+                        {
+                            Text = cName,
+                            ButtonPressed = isVis,
+                            Visible = false
+                        };
+                        chk.SetMeta("SubmeshName", cName);
+                        var hCard = new MeshThumbCard();
+                        hCard.Build(cName, "Replacement model", "Model Part", new Color(0.32f, 0.82f, 0.52f), isVis, isHeroKeepMode: true);
+                        chk.Toggled += (on) =>
+                        {
+                            hCard.SetActive(on);
+                            UpdatePreviewHeroKeepAndGhostMaterials();
+                        };
+                        _heroKeepCheckboxes.Add(chk);
+                        _heroKeepCards[chk] = hCard;
+                        _boxHeroSubmeshes.AddChild(chk);
+
+                        hCard.Toggled += (on) =>
+                        {
+                            if (chk.ButtonPressed != on) chk.ButtonPressed = on;
+                        };
+                        hCard.IsolatePressed += () =>
+                        {
+                            if (!chk.ButtonPressed)
+                            {
+                                chk.ButtonPressed = true;
+                                hCard.SetActive(true);
+                            }
+                        };
+                        heroGrid.AddChild(hCard);
+                        _meshThumbService?.RequestThumbnail($"repl_{cName}", cMi.Mesh, -1, new Color(0.75f, 0.86f, 0.78f), tex => hCard.SetThumbnail(tex));
+                    }
+                }
+            }
+            else
+            {
             foreach (var mi in heroMeshes)
             {
                 int surfCount = mi.Mesh?.GetSurfaceCount() ?? 0;
@@ -3512,12 +3660,17 @@ namespace DeadlockPlayground.UI
                             Visible = false
                         };
                         chk.SetMeta("SubmeshName", keepKey);
-                        chk.Toggled += (_) => UpdatePreviewHeroKeepAndGhostMaterials();
-                        _heroKeepCheckboxes.Add(chk);
-                        _boxHeroSubmeshes.AddChild(chk);
-
                         var hCard = new MeshThumbCard();
                         hCard.Build(cleanLabel, mi.Name.ToString(), "Hero Part", new Color(0.32f, 0.82f, 0.52f), false, isHeroKeepMode: true);
+                        chk.Toggled += (on) =>
+                        {
+                            hCard.SetActive(on);
+                            UpdatePreviewHeroKeepAndGhostMaterials();
+                        };
+                        _heroKeepCheckboxes.Add(chk);
+                        _heroKeepCards[chk] = hCard;
+                        _boxHeroSubmeshes.AddChild(chk);
+
                         hCard.Toggled += (on) =>
                         {
                             if (chk.ButtonPressed != on) chk.ButtonPressed = on;
@@ -3549,12 +3702,17 @@ namespace DeadlockPlayground.UI
                         Visible = false
                     };
                     chk.SetMeta("SubmeshName", hName);
-                    chk.Toggled += (_) => UpdatePreviewHeroKeepAndGhostMaterials();
-                    _heroKeepCheckboxes.Add(chk);
-                    _boxHeroSubmeshes.AddChild(chk);
-
                     var hCard = new MeshThumbCard();
                     hCard.Build(hName, "Original mesh", "Hero Part", new Color(0.32f, 0.82f, 0.52f), false, isHeroKeepMode: true);
+                    chk.Toggled += (on) =>
+                    {
+                        hCard.SetActive(on);
+                        UpdatePreviewHeroKeepAndGhostMaterials();
+                    };
+                    _heroKeepCheckboxes.Add(chk);
+                    _heroKeepCards[chk] = hCard;
+                    _boxHeroSubmeshes.AddChild(chk);
+
                     hCard.Toggled += (on) =>
                     {
                         if (chk.ButtonPressed != on) chk.ButtonPressed = on;
@@ -3571,10 +3729,12 @@ namespace DeadlockPlayground.UI
                     _meshThumbService?.RequestThumbnail($"hero_{hName}", mi.Mesh, -1, new Color(0.68f, 0.85f, 0.78f), tex => hCard.SetThumbnail(tex));
                 }
             }
+            }
 
             var importedGrid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             importedGrid.AddThemeConstantOverride("h_separation", 8);
             importedGrid.AddThemeConstantOverride("v_separation", 8);
+            _importedSubmeshGrid = importedGrid;
             _boxImportedSubmeshes.AddChild(importedGrid);
 
             // Socket bone candidate list
@@ -3589,6 +3749,24 @@ namespace DeadlockPlayground.UI
             foreach (var mi in importedMeshes)
             {
                 if (mi.Mesh == null) continue;
+                var (vCount, tCount) = AddImportedSubmeshCard(mi, importedGrid, socketBones, heroMeshes, ref weaponCount);
+                totalVerts += vCount;
+                totalTris += tCount;
+            }
+
+            _lblGeometryStats.Text = $"Geometry: {importedMeshes.Count} submesh(es) | {totalVerts:N0} vertices | {totalTris:N0} triangles";
+            UpdateImportedPartsCountBadge();
+            UpdateHeroKeepCountBadge();
+        }
+
+        private (int Verts, int Tris) AddImportedSubmeshCard(
+            MeshInstance3D mi,
+            GridContainer importedGrid,
+            List<string> socketBones,
+            List<MeshInstance3D> heroMeshes,
+            ref int weaponCount)
+        {
+                if (mi?.Mesh == null) return (0, 0);
                 int vCount = 0;
                 int tCount = 0;
 
@@ -3615,11 +3793,9 @@ namespace DeadlockPlayground.UI
                     }
                 }
 
-                totalVerts += vCount;
-                totalTris += tCount;
-
                 string rawMeshName = mi.Name.ToString();
                 string meshNameLower = rawMeshName.ToLowerInvariant();
+                bool isVanillaDonor = mi.HasMeta("IsHeroSpaceDonorMesh") && mi.GetMeta("IsHeroSpaceDonorMesh").AsBool();
 
                 // Check for weapon or accessory keywords
                 bool isLikelyWeapon = meshNameLower.Contains("gun") || meshNameLower.Contains("pistol") ||
@@ -3638,14 +3814,16 @@ namespace DeadlockPlayground.UI
                 }
 
                 // Build interactive visual submesh gallery card
-                bool isOutlineShell = CustomModelAutoRigger.IsLikelyOutlineShell(mi);
+                bool isOutlineShell = !isVanillaDonor && CustomModelAutoRigger.IsLikelyOutlineShell(mi);
                 _submeshIsOutlineShell[rawMeshName] = isOutlineShell;
 
                 bool initialIncluded = isOutlineShell ? (_chkIncludeBakedOutlines?.ButtonPressed ?? true) : true;
-                string initialRoleText = isOutlineShell ? "Outline" : (isLikelyWeapon ? "Prop" : "Body");
-                Color initialRoleCol = isOutlineShell
-                    ? new Color(0.85f, 0.65f, 0.25f)
-                    : (isLikelyWeapon ? new Color(0.45f, 0.72f, 0.96f) : new Color(0.45f, 0.85f, 0.62f));
+                string initialRoleText = isVanillaDonor ? "Vanilla" : (isOutlineShell ? "Outline" : (isLikelyWeapon ? "Prop" : "Body"));
+                Color initialRoleCol = isVanillaDonor
+                    ? new Color(0.45f, 0.78f, 0.96f)
+                    : (isOutlineShell
+                        ? new Color(0.85f, 0.65f, 0.25f)
+                        : (isLikelyWeapon ? new Color(0.45f, 0.72f, 0.96f) : new Color(0.45f, 0.85f, 0.62f)));
 
                 var card = new MeshThumbCard();
                 card.Build(
@@ -3668,6 +3846,7 @@ namespace DeadlockPlayground.UI
                 {
                     card.SetActive(on);
                     OnImportedSubmeshesChanged();
+                    UpdateImportedPartsCountBadge();
                 };
                 card.Toggled += (on) =>
                 {
@@ -3675,6 +3854,7 @@ namespace DeadlockPlayground.UI
                 };
                 card.IsolatePressed += () => IsolateSubmeshIn3D(rawMeshName);
                 _importedSubmeshCheckboxes.Add(chk);
+                _importedSubmeshCards[chk] = card;
                 cardVBox.AddChild(chk);
 
                 _meshThumbService?.RequestThumbnail($"imp_{rawMeshName}", mi.Mesh, -1, new Color(0.86f, 0.84f, 0.78f), tex => card.SetThumbnail(tex));
@@ -4133,9 +4313,7 @@ namespace DeadlockPlayground.UI
                 };
 
                 importedGrid.AddChild(card);
-            }
-
-            _lblGeometryStats.Text = $"Geometry: {importedMeshes.Count} submesh(es) | {totalVerts:N0} vertices | {totalTris:N0} triangles";
+                return (vCount, tCount);
         }
 
         private static readonly HashSet<string> RequiredCoreCanonicalBones = new(StringComparer.OrdinalIgnoreCase)
@@ -8860,6 +9038,7 @@ namespace DeadlockPlayground.UI
                 _previewRiggedContainer = result.ContainerNode;
                 _bakedPreviewTransform = _previewModelRoot.Transform;
                 _hasBakedPreviewTransform = true;
+                SnapshotBakedDonorLocalTransforms();
                 _previewModelRoot.Visible = false;
 
                 CustomModelAutoRigger.UpdateCustomModelRuntimePosing(_previewHeroSkeleton, options.ClampLimbStretching);
@@ -9118,6 +9297,57 @@ namespace DeadlockPlayground.UI
                     _gizmoDummyTarget.RotationDegrees = xf.RotationDeg;
                 }
             }
+            else if (target == 5) // Added Vanilla Donor Mesh
+            {
+                var st = GetSelectedDonorMeshState();
+                if (st == null || _previewWorldRoot == null)
+                {
+                    _previewGizmo.Visible = false;
+                    if (_gizmoDummyTarget != null && GodotObject.IsInstanceValid(_gizmoDummyTarget))
+                        _previewGizmo.Deselect(_gizmoDummyTarget);
+                    _isGizmoUpdatingFromUI = false;
+                    return;
+                }
+
+                _previewGizmo.Mode = Gizmo3D.ToolMode.Rotate | Gizmo3D.ToolMode.Move;
+                if (_gizmoDummyTarget == null || !GodotObject.IsInstanceValid(_gizmoDummyTarget))
+                {
+                    _gizmoDummyTarget = new Node3D { Name = "GizmoDummyTarget" };
+                }
+
+                int bIdx = st.IsRigid && !string.IsNullOrEmpty(st.ParentBone) ? _previewHeroSkeleton.FindBone(st.ParentBone) : -1;
+                if (st.IsRigid && bIdx >= 0)
+                {
+                    string actualBoneName = _previewHeroSkeleton.GetBoneName(bIdx);
+                    if (_boneAttachment == null || !GodotObject.IsInstanceValid(_boneAttachment) || _boneAttachment.GetParent() != _previewHeroSkeleton)
+                    {
+                        if (_boneAttachment != null && GodotObject.IsInstanceValid(_boneAttachment))
+                            _boneAttachment.QueueFree();
+                        _boneAttachment = new BoneAttachment3D();
+                        _previewHeroSkeleton.AddChild(_boneAttachment);
+                    }
+                    _boneAttachment.BoneName = actualBoneName;
+                    if (_gizmoDummyTarget.GetParent() != _boneAttachment)
+                    {
+                        _gizmoDummyTarget.GetParent()?.RemoveChild(_gizmoDummyTarget);
+                        _boneAttachment.AddChild(_gizmoDummyTarget);
+                    }
+                    _gizmoDummyTarget.RemoveMeta("DonorFallbackOrigin");
+                    _gizmoDummyTarget.Position = st.PositionOffset;
+                    _gizmoDummyTarget.RotationDegrees = st.RotationDeg;
+                }
+                else
+                {
+                    if (_gizmoDummyTarget.GetParent() != _previewWorldRoot)
+                    {
+                        _gizmoDummyTarget.GetParent()?.RemoveChild(_gizmoDummyTarget);
+                        _previewWorldRoot.AddChild(_gizmoDummyTarget);
+                    }
+                    _gizmoDummyTarget.SetMeta("DonorFallbackOrigin", st.LocalBoundsCenter);
+                    _gizmoDummyTarget.Position = st.LocalBoundsCenter + st.PositionOffset;
+                    _gizmoDummyTarget.RotationDegrees = st.RotationDeg;
+                }
+            }
             if (_gizmoDummyTarget != null && !_previewGizmo.IsSelected(_gizmoDummyTarget))
             {
                 _previewGizmo.Select(_gizmoDummyTarget);
@@ -9151,6 +9381,7 @@ namespace DeadlockPlayground.UI
                 }
                 _optGizmoTarget.AddItem("Model Root", 3);
                 _optGizmoTarget.AddItem("Kept Part (Hero)", 4);
+                _optGizmoTarget.AddItem("Vanilla Donor Mesh", 5);
 
                 int targetToSelect = (!isFullCharacter && (prevId == 1 || prevId == 2)) ? 3 : prevId;
                 SelectGizmoTargetById(targetToSelect);
@@ -9183,6 +9414,17 @@ namespace DeadlockPlayground.UI
             {
                 ApplyPreviewHeroDeformation();
             }
+            else if (target == 5)
+            {
+                string meshName = GetSelectedDonorEditMeshName();
+                var st = GetSelectedDonorMeshState();
+                // For Rigid to Parent Bone donor meshes, fast 1-bone Skin bind-pose update already applied at 60 FPS — zero full re-rig needed!
+                if (st != null && st.IsRigid && TryApplyFastDonorPreviewTransform(meshName, st, Transform3D.Identity))
+                {
+                    return;
+                }
+                ScheduleDebouncedLiveRigUpdate();
+            }
         }
 
         private void OnGizmoTransformChanged(int mode, Vector3 value)
@@ -9199,6 +9441,26 @@ namespace DeadlockPlayground.UI
                 return;
             }
             int target = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
+            if (target == 5)
+            {
+                string meshName = GetSelectedDonorEditMeshName();
+                var st = GetSelectedDonorMeshState();
+                if (string.IsNullOrEmpty(meshName) || st == null) return;
+
+                _isGizmoDragging = true;
+                Vector3 pos = _gizmoDummyTarget.Position;
+                if (_gizmoDummyTarget.HasMeta("DonorFallbackOrigin"))
+                {
+                    pos -= _gizmoDummyTarget.GetMeta("DonorFallbackOrigin").AsVector3();
+                }
+                Vector3 rot = _gizmoDummyTarget.RotationDegrees;
+                st.PositionOffset = pos;
+                st.RotationDeg = rot;
+
+                SyncDonorEditUiFromSelected(repopulateBones: false);
+                ApplyDonorMeshStateToPipeline(meshName, st, triggerRig: true, forceFullRebake: false);
+                return;
+            }
             if (target == 4)
             {
                 string keepKey = GetSelectedKeptPartKey();

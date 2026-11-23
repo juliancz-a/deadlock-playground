@@ -42,6 +42,7 @@ public partial class SkeletonGizmoManager : Node3D
     private Gizmo3D _gizmo;
     private Node3D _dummyTarget;
     private bool _isGizmoDragging = false;
+    public bool IsGizmoDragging => _isGizmoDragging;
     private bool _areDotsGloballyEnabled = true;
     private bool _isGizmoEnabled = true;
 

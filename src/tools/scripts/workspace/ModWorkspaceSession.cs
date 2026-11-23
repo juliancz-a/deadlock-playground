@@ -456,6 +456,7 @@ namespace DeadlockPlayground.Workspace
                         AnchorFreeRotate = c.AnchorFreeRotate,
                         OpenSheet = c.OpenSheet,
                         Friction = c.Friction,
+                        EnableRibbonExtrude = c.EnableRibbonExtrude,
                         ExtrudeRadiusInches = c.ExtrudeRadiusInches,
                         ExtrudeForwardAxis = c.ExtrudeForwardAxis,
                         ExtrudeTwistDeg = c.ExtrudeTwistDeg,
@@ -573,6 +574,8 @@ namespace DeadlockPlayground.Workspace
                                 Name = cc.Name,
                                 ParentBoneName = cc.ParentBoneName,
                                 MirrorPairId = cc.MirrorPairId,
+                                InfluenceRadius = cc.InfluenceRadius,
+                                TargetMeshName = cc.TargetMeshName ?? "",
                                 JointPositions = cc.JointPositions?.ConvertAll(p => new[] { p.X, p.Y, p.Z })
                             });
                 entry.ReferenceRig = rrEntry;
@@ -771,6 +774,8 @@ namespace DeadlockPlayground.Workspace
                             Name = cc.Name ?? "cloth_chain",
                             ParentBoneName = cc.ParentBoneName ?? "spine_3",
                             MirrorPairId = cc.MirrorPairId ?? "",
+                            InfluenceRadius = cc.InfluenceRadius > 0.005f ? cc.InfluenceRadius : 0.08f,
+                            TargetMeshName = cc.TargetMeshName ?? "",
                             JointPositions = pts
                         });
                     }
@@ -852,6 +857,7 @@ namespace DeadlockPlayground.Workspace
                         AnchorFreeRotate = ce.AnchorFreeRotate ?? false,
                         OpenSheet = ce.OpenSheet ?? true,
                         Friction = ce.Friction ?? 0.15f,
+                        EnableRibbonExtrude = ce.EnableRibbonExtrude ?? false,
                         ExtrudeRadiusInches = ce.ExtrudeRadiusInches ?? 1.0f,
                         ExtrudeForwardAxis = ce.ExtrudeForwardAxis ?? 0,
                         ExtrudeTwistDeg = ce.ExtrudeTwistDeg ?? 0.0f,
@@ -947,6 +953,7 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("anchor_free_rotate")] public bool? AnchorFreeRotate { get; set; }
         [JsonPropertyName("open_sheet")] public bool? OpenSheet { get; set; }
         [JsonPropertyName("friction")] public float? Friction { get; set; }
+        [JsonPropertyName("enable_ribbon_extrude")] public bool? EnableRibbonExtrude { get; set; }
         [JsonPropertyName("extrude_radius")] public float? ExtrudeRadiusInches { get; set; }
         [JsonPropertyName("extrude_axis")] public int? ExtrudeForwardAxis { get; set; }
         [JsonPropertyName("extrude_twist")] public float? ExtrudeTwistDeg { get; set; }
@@ -967,6 +974,8 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("name")] public string Name { get; set; }
         [JsonPropertyName("parent_bone")] public string ParentBoneName { get; set; }
         [JsonPropertyName("mirror_pair_id")] public string MirrorPairId { get; set; }
+        [JsonPropertyName("influence_radius")] public float InfluenceRadius { get; set; } = 0.08f;
+        [JsonPropertyName("target_mesh")] public string TargetMeshName { get; set; } = "";
         [JsonPropertyName("joints")] public List<float[]> JointPositions { get; set; }
     }
 

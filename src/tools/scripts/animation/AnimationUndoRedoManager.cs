@@ -41,6 +41,22 @@ namespace DeadlockPlayground.Animation
             HistoryChanged?.Invoke();
         }
 
+        /// <summary>
+        /// Records an already-applied command onto the undo stack without re-executing it.
+        /// Useful when an interactive drag updated the animation live and commits a single undo entry on release.
+        /// </summary>
+        public void RecordExecuted(IAnimationCommand command)
+        {
+            if (command == null) return;
+            _undoStack.Add(command);
+            if (_undoStack.Count > MaxHistory)
+            {
+                _undoStack.RemoveAt(0);
+            }
+            _redoStack.Clear();
+            HistoryChanged?.Invoke();
+        }
+
         public void Undo()
         {
             if (!CanUndo) return;
@@ -69,10 +85,41 @@ namespace DeadlockPlayground.Animation
         }
     }
 
+    /// <summary>
+    /// Groups multiple animation commands into a single atomic Undo/Redo entry.
+    /// </summary>
+    public class BatchAnimationCommand : IAnimationCommand
+    {
+        private readonly List<IAnimationCommand> _commands;
+        public string Description { get; }
+
+        public BatchAnimationCommand(string description, IEnumerable<IAnimationCommand> commands)
+        {
+            Description = description;
+            _commands = new List<IAnimationCommand>(commands);
+        }
+
+        public void Execute()
+        {
+            for (int i = 0; i < _commands.Count; i++)
+            {
+                _commands[i].Execute();
+            }
+        }
+
+        public void Undo()
+        {
+            for (int i = _commands.Count - 1; i >= 0; i--)
+            {
+                _commands[i].Undo();
+            }
+        }
+    }
+
     public record KeyframeRecord(double Time, Variant Value, Godot.Animation.InterpolationType Interpolation, float Transition = 1.0f);
 
     /// <summary>
-    /// Command that inserts keyframes into an Animation track.
+    /// Command that inserts or updates a keyframe on an Animation track.
     /// </summary>
     public class InsertKeyframeCommand : IAnimationCommand
     {
@@ -81,8 +128,9 @@ namespace DeadlockPlayground.Animation
         private readonly double _time;
         private readonly Variant _value;
         private readonly float _transition;
-        private int _existingKeyIdx = -1;
+        private bool _hadExistingKey;
         private Variant _oldValue;
+        private bool _stateCaptured;
 
         public string Description => $"Insert Keyframe at {_time:F2}s";
 
@@ -95,16 +143,44 @@ namespace DeadlockPlayground.Animation
             _transition = transition;
         }
 
+        /// <summary>
+        /// Constructor for a keyframe edit whose pre-edit state was already captured before an interactive drag.
+        /// </summary>
+        public InsertKeyframeCommand(Godot.Animation anim, int trackIdx, double time, Variant newValue, bool hadExistingKey, Variant oldValue, float transition = 1.0f)
+        {
+            _anim = anim;
+            _trackIdx = trackIdx;
+            _time = time;
+            _value = newValue;
+            _hadExistingKey = hadExistingKey;
+            _oldValue = oldValue;
+            _transition = transition;
+            _stateCaptured = true;
+        }
+
         public void Execute()
         {
             if (_anim == null || _trackIdx < 0 || _trackIdx >= _anim.GetTrackCount()) return;
 
-            // Check if key already exists at this exact time
-            _existingKeyIdx = _anim.TrackFindKey(_trackIdx, _time, Godot.Animation.FindMode.Exact);
-            if (_existingKeyIdx != -1)
+            int existingIdx = _anim.TrackFindKey(_trackIdx, _time, Godot.Animation.FindMode.Approx);
+            if (existingIdx != -1 && Math.Abs(_anim.TrackGetKeyTime(_trackIdx, existingIdx) - _time) > 1e-4)
             {
-                _oldValue = _anim.TrackGetKeyValue(_trackIdx, _existingKeyIdx);
-                _anim.TrackSetKeyValue(_trackIdx, _existingKeyIdx, _value);
+                existingIdx = -1;
+            }
+
+            if (!_stateCaptured)
+            {
+                _hadExistingKey = existingIdx != -1;
+                if (_hadExistingKey)
+                {
+                    _oldValue = _anim.TrackGetKeyValue(_trackIdx, existingIdx);
+                }
+                _stateCaptured = true;
+            }
+
+            if (existingIdx != -1)
+            {
+                _anim.TrackSetKeyValue(_trackIdx, existingIdx, _value);
             }
             else
             {
@@ -128,18 +204,31 @@ namespace DeadlockPlayground.Animation
         {
             if (_anim == null || _trackIdx < 0 || _trackIdx >= _anim.GetTrackCount()) return;
 
-            if (_existingKeyIdx != -1)
+            int keyIdx = _anim.TrackFindKey(_trackIdx, _time, Godot.Animation.FindMode.Approx);
+            if (keyIdx != -1 && Math.Abs(_anim.TrackGetKeyTime(_trackIdx, keyIdx) - _time) > 1e-4)
             {
-                // Restore previous value
-                int keyIdx = _anim.TrackFindKey(_trackIdx, _time, Godot.Animation.FindMode.Exact);
+                keyIdx = -1;
+            }
+
+            if (_hadExistingKey)
+            {
                 if (keyIdx != -1)
                 {
                     _anim.TrackSetKeyValue(_trackIdx, keyIdx, _oldValue);
                 }
+                else
+                {
+                    var trackType = _anim.TrackGetType(_trackIdx);
+                    if (trackType == Godot.Animation.TrackType.Position3D)
+                        _anim.PositionTrackInsertKey(_trackIdx, _time, (Vector3)_oldValue);
+                    else if (trackType == Godot.Animation.TrackType.Rotation3D)
+                        _anim.RotationTrackInsertKey(_trackIdx, _time, (Quaternion)_oldValue);
+                    else
+                        _anim.TrackInsertKey(_trackIdx, _time, _oldValue, _transition);
+                }
             }
             else
             {
-                int keyIdx = _anim.TrackFindKey(_trackIdx, _time, Godot.Animation.FindMode.Exact);
                 if (keyIdx != -1)
                 {
                     _anim.TrackRemoveKey(_trackIdx, keyIdx);
@@ -202,12 +291,30 @@ namespace DeadlockPlayground.Animation
     }
 
     /// <summary>
-    /// Command that moves/retimes keyframes from old times to new times.
+    /// Command that moves/retimes keyframes from old times to new times using lossless per-track snapshots.
+    /// Handles adjacent multi-key shifts, overlapping destination times, and floating-point precision safely.
     /// </summary>
     public class MoveKeyframesCommand : IAnimationCommand
     {
+        private readonly struct TrackKeySnapshot
+        {
+            public readonly double Time;
+            public readonly Variant Value;
+            public readonly float Transition;
+
+            public TrackKeySnapshot(double time, Variant value, float transition)
+            {
+                Time = time;
+                Value = value;
+                Transition = transition;
+            }
+        }
+
         private readonly Godot.Animation _anim;
         private readonly List<(int TrackIdx, double OldTime, double NewTime)> _moves;
+        private readonly Dictionary<int, List<TrackKeySnapshot>> _beforeSnapshots = new();
+        private readonly Dictionary<int, List<TrackKeySnapshot>> _afterSnapshots = new();
+        private bool _builtSnapshots;
 
         public string Description => $"Move {_moves.Count} Keyframe(s)";
 
@@ -219,26 +326,140 @@ namespace DeadlockPlayground.Animation
 
         public void Execute()
         {
-            ApplyTimes(isUndo: false);
+            if (_anim == null) return;
+            if (!_builtSnapshots)
+            {
+                BuildSnapshots();
+                _builtSnapshots = true;
+            }
+            ApplySnapshots(_afterSnapshots);
         }
 
         public void Undo()
         {
-            ApplyTimes(isUndo: true);
+            if (_anim == null || !_builtSnapshots) return;
+            ApplySnapshots(_beforeSnapshots);
         }
 
-        private void ApplyTimes(bool isUndo)
+        private void BuildSnapshots()
         {
-            if (_anim == null) return;
+            var movesByTrack = new Dictionary<int, List<(double OldTime, double NewTime)>>();
             foreach (var (trackIdx, oldTime, newTime) in _moves)
             {
                 if (trackIdx < 0 || trackIdx >= _anim.GetTrackCount()) continue;
-                double from = isUndo ? newTime : oldTime;
-                double to = isUndo ? oldTime : newTime;
-                int keyIdx = _anim.TrackFindKey(trackIdx, from, Godot.Animation.FindMode.Exact);
-                if (keyIdx != -1)
+                if (!movesByTrack.TryGetValue(trackIdx, out var list))
                 {
-                    _anim.TrackSetKeyTime(trackIdx, keyIdx, to);
+                    list = new List<(double, double)>();
+                    movesByTrack[trackIdx] = list;
+                }
+                list.Add((oldTime, newTime));
+            }
+
+            foreach (var (trackIdx, trackMoves) in movesByTrack)
+            {
+                int keyCount = _anim.TrackGetKeyCount(trackIdx);
+                var before = new List<TrackKeySnapshot>(keyCount);
+                for (int k = 0; k < keyCount; k++)
+                {
+                    before.Add(new TrackKeySnapshot(
+                        _anim.TrackGetKeyTime(trackIdx, k),
+                        _anim.TrackGetKeyValue(trackIdx, k),
+                        _anim.TrackGetKeyTransition(trackIdx, k)
+                    ));
+                }
+                _beforeSnapshots[trackIdx] = before;
+
+                // Match each move to its closest original key index (avoiding duplicate matches)
+                var movedIndices = new HashSet<int>();
+                var movedNewKeys = new List<TrackKeySnapshot>(trackMoves.Count);
+
+                foreach (var (oldTime, newTime) in trackMoves)
+                {
+                    int bestIdx = -1;
+                    double bestDiff = 1e-3;
+                    for (int k = 0; k < before.Count; k++)
+                    {
+                        if (movedIndices.Contains(k)) continue;
+                        double diff = Math.Abs(before[k].Time - oldTime);
+                        if (diff < bestDiff)
+                        {
+                            bestDiff = diff;
+                            bestIdx = k;
+                        }
+                    }
+
+                    if (bestIdx != -1)
+                    {
+                        movedIndices.Add(bestIdx);
+                        var orig = before[bestIdx];
+                        movedNewKeys.Add(new TrackKeySnapshot(newTime, orig.Value, orig.Transition));
+                    }
+                }
+
+                // Keep all unmoved keys that are not overwritten by a moved key landing on the exact same timestamp
+                var after = new List<TrackKeySnapshot>(before.Count);
+                for (int k = 0; k < before.Count; k++)
+                {
+                    if (movedIndices.Contains(k)) continue;
+                    double t = before[k].Time;
+                    bool overwritten = false;
+                    for (int m = 0; m < movedNewKeys.Count; m++)
+                    {
+                        if (Math.Abs(movedNewKeys[m].Time - t) < 1e-4)
+                        {
+                            overwritten = true;
+                            break;
+                        }
+                    }
+                    if (!overwritten)
+                    {
+                        after.Add(before[k]);
+                    }
+                }
+
+                // Deduplicate moved keys if multiple landed on the same clamped boundary
+                foreach (var mk in movedNewKeys)
+                {
+                    int existing = after.FindIndex(a => Math.Abs(a.Time - mk.Time) < 1e-4);
+                    if (existing >= 0)
+                        after[existing] = mk;
+                    else
+                        after.Add(mk);
+                }
+
+                after.Sort((a, b) => a.Time.CompareTo(b.Time));
+                _afterSnapshots[trackIdx] = after;
+            }
+        }
+
+        private void ApplySnapshots(Dictionary<int, List<TrackKeySnapshot>> snapshots)
+        {
+            foreach (var (trackIdx, keys) in snapshots)
+            {
+                if (trackIdx < 0 || trackIdx >= _anim.GetTrackCount()) continue;
+
+                // Clear track keys in reverse order
+                for (int k = _anim.TrackGetKeyCount(trackIdx) - 1; k >= 0; k--)
+                {
+                    _anim.TrackRemoveKey(trackIdx, k);
+                }
+
+                var trackType = _anim.TrackGetType(trackIdx);
+                for (int i = 0; i < keys.Count; i++)
+                {
+                    var snap = keys[i];
+                    if (trackType == Godot.Animation.TrackType.Position3D)
+                    {
+                        _anim.PositionTrackInsertKey(trackIdx, snap.Time, (Vector3)snap.Value);
+                    }
+                    else if (trackType == Godot.Animation.TrackType.Rotation3D)
+                    {
+                        _anim.RotationTrackInsertKey(trackIdx, snap.Time, (Quaternion)snap.Value);
+                    }
+                    else
+                    {
+                        _anim.TrackInsertKey(trackIdx, snap.Time, snap.Value, snap.Transition);
+                    }
                 }
             }
         }

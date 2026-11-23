@@ -84,6 +84,7 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderSelAngleLimit;
         private Label _lblValAngleLimit;
         private VBoxContainer _boxClothExtrudeSection;
+        private CheckBox _chkSelEnableRibbonExtrude;
         private HSlider _sliderSelExtrudeRadius;
         private Label _lblValExtrudeRadius;
         private OptionButton _optSelExtrudeAxis;
@@ -1141,13 +1142,28 @@ namespace DeadlockPlayground.UI
                     }
                 });
 
-            // ClothChain-only Extrude / Hinge Plane settings (matching Blender / Source 2 ClothChain)
+            // ClothChain-only Extrude / Hinge Plane settings (opt-in; default off = pure Valve 1D Rope matching Paige/Lash/Silver)
             _boxClothExtrudeSection = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
             _boxClothExtrudeSection.AddThemeConstantOverride("separation", 6);
-            var lblExtHdr = new Label { Text = "ClothChain Ribbon Extrude & Hinge Plane:" };
+            var lblExtHdr = new Label { Text = "ClothChain Ribbon Extrude & Hinge Plane (Optional):" };
             ImporterStyle.ApplyFontSize(lblExtHdr, ImporterStyle.FontHint);
             _accentLabels.Add(lblExtHdr);
             _boxClothExtrudeSection.AddChild(lblExtHdr);
+
+            _chkSelEnableRibbonExtrude = new CheckBox
+            {
+                Text = "Enable Ribbon Extrude & Hinge (Off = Valve 1D Rope)",
+                TooltipText = "Off (Recommended): exports a clean Valve 1D Rope (Paige/Lash/Silver) with pinned scalp root and zero sideways kinking. On: extrudes a 2-sided flat ribbon with stiff hinge clamping."
+            };
+            _chkSelEnableRibbonExtrude.Toggled += on =>
+            {
+                if (!_isUpdatingChainInspector && _selectedChain != null)
+                {
+                    _selectedChain.EnableRibbonExtrude = on;
+                    ApplyChainParamsLiveToDriver();
+                }
+            };
+            _boxClothExtrudeSection.AddChild(_chkSelEnableRibbonExtrude);
 
             var extAxisRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             extAxisRow.AddThemeConstantOverride("separation", 6);
@@ -2355,6 +2371,7 @@ namespace DeadlockPlayground.UI
 
                 bool isClothChain = _selectedChain.Simulation == SimulationKind.Cloth;
                 if (_boxClothExtrudeSection != null) _boxClothExtrudeSection.Visible = isClothChain;
+                _chkSelEnableRibbonExtrude?.SetPressedNoSignal(_selectedChain.EnableRibbonExtrude);
                 _optSelExtrudeAxis?.Select(Math.Clamp(_selectedChain.ExtrudeForwardAxis, 0, 5) % 3);
                 _sliderSelExtrudeTwist?.SetValueNoSignal(_selectedChain.ExtrudeTwistDeg);
                 if (_lblValExtrudeTwist != null) _lblValExtrudeTwist.Text = $"{_selectedChain.ExtrudeTwistDeg:F0}°";
@@ -3340,6 +3357,7 @@ namespace DeadlockPlayground.UI
                 ch.AnchorFreeRotate = _selectedChain.AnchorFreeRotate;
                 ch.OpenSheet = _selectedChain.OpenSheet;
                 ch.Friction = _selectedChain.Friction;
+                ch.EnableRibbonExtrude = _selectedChain.EnableRibbonExtrude;
                 ch.ExtrudeRadiusInches = _selectedChain.ExtrudeRadiusInches;
                 ch.ExtrudeForwardAxis = _selectedChain.ExtrudeForwardAxis;
                 ch.ExtrudeTwistDeg = _selectedChain.ExtrudeTwistDeg;
@@ -3806,6 +3824,7 @@ namespace DeadlockPlayground.UI
                 ch.AnchorFreeRotate = _selectedChain.AnchorFreeRotate;
                 ch.OpenSheet = _selectedChain.OpenSheet;
                 ch.Friction = _selectedChain.Friction;
+                ch.EnableRibbonExtrude = _selectedChain.EnableRibbonExtrude;
                 ch.ExtrudeRadiusInches = _selectedChain.ExtrudeRadiusInches;
                 ch.ExtrudeForwardAxis = _selectedChain.ExtrudeForwardAxis;
                 ch.ExtrudeTwistDeg = _selectedChain.ExtrudeTwistDeg;

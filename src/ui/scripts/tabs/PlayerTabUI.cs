@@ -177,6 +177,7 @@ public partial class PlayerTabUI : VBoxContainer
 
     public override void _ExitTree()
     {
+        FlushPendingAnimationStage();
         SkeletonGizmoManager.OnBonePoseChanged -= OnGizmoBonePoseChanged;
         DeadlockPlayground.Theming.ThemeManager.ThemeChanged -= OnThemeChanged;
         AnimationTransportService.Instance.PlaybackStateChanged -= OnTransportPlaybackStateChanged;
@@ -304,9 +305,33 @@ public partial class PlayerTabUI : VBoxContainer
         _animStudioDock?.OnBoneTransformedByGizmo(boneIdx, pos, rot);
     }
 
+    private Godot.Timer _animStageDebounceTimer;
+    private string _pendingStageAnimName;
+
     private void OnAnimStudioAnimationModified(string animName)
     {
         NotifyPoseChanged(animName);
+        if (string.IsNullOrEmpty(animName)) return;
+
+        _pendingStageAnimName = animName;
+        if (_animStageDebounceTimer == null)
+        {
+            _animStageDebounceTimer = new Godot.Timer
+            {
+                OneShot = true,
+                WaitTime = 0.35
+            };
+            _animStageDebounceTimer.Timeout += FlushPendingAnimationStage;
+            AddChild(_animStageDebounceTimer);
+        }
+        _animStageDebounceTimer.Start();
+    }
+
+    private void FlushPendingAnimationStage()
+    {
+        string animName = _pendingStageAnimName;
+        _pendingStageAnimName = null;
+        if (string.IsNullOrEmpty(animName)) return;
 
         try
         {

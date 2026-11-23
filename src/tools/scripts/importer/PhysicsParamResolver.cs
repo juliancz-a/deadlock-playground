@@ -59,19 +59,38 @@ namespace DeadlockPlayground.Importer
         }
 
         /// <summary>
-        /// Valve's proven vanilla baseline across yamato, chrono, wraith, hornet, unicorn, abrams, fencer, geist.
+        /// Valve's proven vanilla baseline across paige, silver, lash, shiv, necro, haze, yamato, chrono, unicorn, geist
+        /// (10/11 heroes use ExtraIterations = 0; 9/11 use RodVelocitySmoothRate = 0.0, RodVelocitySmoothIterations = 0).
         /// </summary>
         public static readonly GlobalClothParams ValveBaselineClothParams = new(
-            extraIterations: 1,
+            extraIterations: 0,
             defaultGravityScale: 1.0f,
             defaultVelAirDrag: 0.0f,
             defaultExpAirDrag: 0.0f,
-            velocitySmoothRate: 0.10f,
-            velocitySmoothIterations: 1,
+            velocitySmoothRate: 0.0f,
+            velocitySmoothIterations: 0,
             quadBendTolerance: 0.05f,
             localForce: 1.0f,
             localRotation: 0.0f,
             localDrag1: 0.0f);
+
+        /// <summary>
+        /// Exact Source 2 Rubikon <c>FeModel.NodeIntegrator.AnimationVertexAttraction</c> (<c>va</c>) formula
+        /// verified against VRF 21.1 <c>ClothReconstruction.Goals.cs</c>:
+        /// <c>va = 1 - ((1 - fa) / (sqrt((1 - fa) * fa + d^2) + d))^2 * fa</c>.
+        /// </summary>
+        public static float ComputeAnimationVertexAttraction(float forceAttraction, float goalDamping)
+        {
+            float fa = Mathf.Clamp(forceAttraction, 0f, 1f);
+            float d = Mathf.Clamp(goalDamping, 0f, 1f);
+            if (fa >= 0.9999f) return 1.0f;
+            if (fa < 0.0001f) return d;
+            if (d <= 1e-6f) return fa;
+            float denom = MathF.Sqrt((1.0f - fa) * fa + d * d) + d;
+            if (denom <= 1e-6f) return 1.0f;
+            float r = (1.0f - fa) / denom;
+            return Mathf.Clamp(1.0f - r * r * fa, fa, 1.0f);
+        }
 
         /// <summary>
         /// Resolved per-vertex / per-node parameters for Source 2 <c>ProxyCloth</c> DMX and <c>ClothChain</c>.
@@ -80,9 +99,11 @@ namespace DeadlockPlayground.Importer
         {
             /// <summary>Effective compiled <c>FeModel.AnimationForceAttraction</c> (0.000 .. 0.900).</summary>
             public readonly float GoalForce;
+            /// <summary>Effective compiled <c>FeModel.AnimationVertexAttraction</c> computed via exact Source 2 formula.</summary>
+            public readonly float GoalVertexAttraction;
             /// <summary>Cube-root compensated <c>cloth_goal_strength_v2$0</c> / <c>goal_strength</c> input to CSDK13.</summary>
             public readonly float GoalStrengthInput;
-            /// <summary><c>cloth_goal_damping$0</c> / <c>goal_damping</c> (0.0 by default to prevent CSDK13 tip attraction spikes).</summary>
+            /// <summary><c>cloth_goal_damping$0</c> / <c>goal_damping</c> scaled proportionally to <c>GoalForce</c> for spike-free Valve damping.</summary>
             public readonly float GoalDamping;
             /// <summary>Per-node air drag (<c>cloth_drag$0</c> / <c>drag</c>), driven cleanly by the UI Damping slider.</summary>
             public readonly float Drag;
@@ -105,6 +126,7 @@ namespace DeadlockPlayground.Importer
 
             public ResolvedClothNodeParams(
                 float goalForce,
+                float goalVertexAttraction,
                 float goalStrengthInput,
                 float goalDamping,
                 float drag,
@@ -118,6 +140,7 @@ namespace DeadlockPlayground.Importer
                 float torsion)
             {
                 GoalForce = goalForce;
+                GoalVertexAttraction = goalVertexAttraction;
                 GoalStrengthInput = goalStrengthInput;
                 GoalDamping = goalDamping;
                 Drag = drag;
@@ -157,11 +180,13 @@ namespace DeadlockPlayground.Importer
             public readonly float StrayRadiusMeters;
             /// <summary>Exact Source 2 <c>FeModel.AnimationForceAttraction</c> (0.000..0.900) for Verlet PBD cloth.</summary>
             public readonly float GoalForce;
+            /// <summary>Exact Source 2 <c>FeModel.AnimationVertexAttraction</c> computed from <c>GoalForce</c> &amp; <c>GoalDamping</c>.</summary>
+            public readonly float GoalVertexAttraction;
             /// <summary>Per-bone <c>goal_damping</c> (0.000..0.500) honored in both export and preview.</summary>
             public readonly float GoalDamping;
             /// <summary>Normalized UI Damping slider (0..1) for perceptible preview damping.</summary>
             public readonly float Damping01;
-            /// <summary>Exact Source 2 <c>FeModel.NodeIntegrator.PointDamping</c> (0.000..0.750) for Verlet PBD cloth.</summary>
+            /// <summary>Exact Source 2 <c>FeModel.NodeIntegrator.PointDamping</c> (0.000..0.600) for Verlet PBD cloth.</summary>
             public readonly float PointDamping;
             /// <summary>Exact Source 2 <c>cloth_bend_stiffness$0</c> (0.05..1.00) for 2-hop bend constraints.</summary>
             public readonly float BendStiffness;
@@ -181,6 +206,7 @@ namespace DeadlockPlayground.Importer
                 float collisionRadiusMeters,
                 float strayRadiusMeters,
                 float goalForce,
+                float goalVertexAttraction,
                 float goalDamping,
                 float damping01,
                 float pointDamping,
@@ -196,6 +222,7 @@ namespace DeadlockPlayground.Importer
                 CollisionRadiusMeters = collisionRadiusMeters;
                 StrayRadiusMeters = strayRadiusMeters;
                 GoalForce = goalForce;
+                GoalVertexAttraction = goalVertexAttraction;
                 GoalDamping = goalDamping;
                 Damping01 = damping01;
                 PointDamping = pointDamping;
@@ -229,14 +256,14 @@ namespace DeadlockPlayground.Importer
         }
 
         /// <summary>
-        /// Maps UI <c>Damping</c> (0..1) to per-node DMX <c>cloth_drag$0</c> (0.000..0.025).
+        /// Maps UI <c>Damping</c> (0..1) to per-node DMX <c>cloth_drag$0</c> (0.000..0.020).
         /// CSDK13 multiplies <c>cloth_drag$0</c> by 30.0 into compiled <c>FeModel.NodeIntegrator.PointDamping</c>
-        /// (0.000..0.750; Valve vanilla heroes use 0.000), preventing underwater molasses lag on skirts/hair.
+        /// (0.000..0.600; Valve vanilla defaults sit near 0.000..0.050 and rely on <c>goal_damping</c> for spring settle).
         /// </summary>
         public static float ResolveClothDrag(float damping01)
         {
             float d = Mathf.Clamp(damping01, 0f, 1f);
-            return MathF.Pow(d, 1.5f) * 0.025f;
+            return MathF.Pow(d, 1.5f) * 0.020f;
         }
 
         /// <summary>
@@ -290,18 +317,29 @@ namespace DeadlockPlayground.Importer
                 goalInput = goalForce > 1e-6f ? MathF.Cbrt(Mathf.Clamp(goalForce, 0f, 1f)) : 0f;
             }
 
-            // Keep goal_damping = 0 by default (CSDK13 computes AnimationVertexAttraction = goal_damping / sqrt(goal_strength))
-            // and route the UI Damping slider cleanly into per-node cloth_drag$0 instead.
-            float goalDamp = (isPinned || jov?.GoalDamping.HasValue != true)
-                ? 0.0f
-                : Mathf.Clamp(jov.GoalDamping.Value, 0f, 0.50f);
+            // Valve-matched goal_damping scaled proportionally to goalForce (d = fa is exact critical damping in Rubikon):
+            // produces crisp, bounce-controlled settle on structured hair without ever causing small-goalForce tip spikes!
+            float goalDamp;
+            if (isPinned)
+            {
+                goalDamp = 0.0f;
+            }
+            else if (jov?.GoalDamping.HasValue == true)
+            {
+                goalDamp = Mathf.Clamp(jov.GoalDamping.Value, 0f, 0.50f);
+            }
+            else
+            {
+                goalDamp = goalForce > 0.005f ? Mathf.Clamp(damp01 * goalForce * 0.85f, 0f, 0.50f) : 0.0f;
+            }
+            float goalVertexAttraction = isPinned ? 1.0f : ComputeAnimationVertexAttraction(goalForce, goalDamp);
             float drag = isPinned ? 0.0f : ResolveClothDrag(damp01);
 
             float bend = Mathf.Clamp(Mathf.Lerp(sRoot, sTip, t), 0.05f, 1.0f);
 
             // Valve-matched root->tip collision radius taper: small near root (0.25..0.50 in) so root doesn't
             // fight its own anchor capsule, expanding to colTip toward the hem/tip.
-            float colRoot = MathF.Min(0.45f, colTip * 0.35f);
+            float colRoot = MathF.Min(0.45f, colTip * 0.45f);
             float colRad = isPinned
                 ? 0.0f
                 : (jov?.CollisionRadiusInches.HasValue == true
@@ -327,6 +365,7 @@ namespace DeadlockPlayground.Importer
 
             return new ResolvedClothNodeParams(
                 goalForce: goalForce,
+                goalVertexAttraction: goalVertexAttraction,
                 goalStrengthInput: goalInput,
                 goalDamping: goalDamp,
                 drag: drag,
@@ -396,6 +435,7 @@ namespace DeadlockPlayground.Importer
                 collisionRadiusMeters: colMeters,
                 strayRadiusMeters: strayMeters,
                 goalForce: cloth.GoalForce,
+                goalVertexAttraction: cloth.GoalVertexAttraction,
                 goalDamping: cloth.GoalDamping,
                 damping01: Mathf.Clamp(ch?.Damping ?? 0.25f, 0f, 1f),
                 pointDamping: pointDamping,

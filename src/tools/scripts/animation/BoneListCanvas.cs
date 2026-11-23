@@ -77,6 +77,7 @@ namespace DeadlockPlayground.Animation
         {
             ClipContents = true;
             MouseFilter = MouseFilterEnum.Stop;
+            FocusMode = FocusModeEnum.Click;
             _font = PlaygroundThemeHelper.GetFontColus() ?? ThemeDB.FallbackFont;
         }
 
@@ -168,6 +169,7 @@ namespace DeadlockPlayground.Animation
                 }
                 else if (mb.ButtonIndex == MouseButton.Left)
                 {
+                    GrabFocus();
                     float totalY = mb.Position.Y + _scrollY;
                     int row = (int)Math.Floor(totalY / TrackRowHeight);
                     if (row >= 0 && row < _bones.Count)

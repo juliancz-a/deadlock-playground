@@ -1201,9 +1201,9 @@ namespace DeadlockPlayground.Importer
             string[] slots = chosenSpine.Count switch
             {
                 0 => Array.Empty<string>(),
-                1 => new[] { "spine_1" },
-                2 => new[] { "spine_0", "spine_3" },
-                3 => new[] { "spine_0", "spine_1", "spine_3" },
+                1 => new[] { "spine_2" },
+                2 => new[] { "spine_1", "spine_3" },
+                3 => new[] { "spine_1", "spine_2", "spine_3" },
                 _ => new[] { "spine_0", "spine_1", "spine_2", "spine_3" }
             };
             for (int i = 0; i < chosenSpine.Count; i++)

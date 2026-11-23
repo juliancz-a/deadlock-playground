@@ -24,6 +24,10 @@ namespace DeadlockPlayground.Importer
         public string Name { get; set; } = "cloth_chain";
         public string ParentBoneName { get; set; } = "spine_3";
         public string MirrorPairId { get; set; } = "";
+        /// <summary>Maximum 3D &amp; geodesic influence radius in meters (default 0.08m = 8cm) so cloth never bleeds into face/body.</summary>
+        public float InfluenceRadius { get; set; } = 0.08f;
+        /// <summary>Optional imported submesh name filter; empty = Auto (isolates nearest connected mesh island).</summary>
+        public string TargetMeshName { get; set; } = "";
         /// <summary>Ordered joint positions in model space (root -> tip).</summary>
         public List<Vector3> JointPositions { get; set; } = new();
 
@@ -33,6 +37,8 @@ namespace DeadlockPlayground.Importer
             Name = Name,
             ParentBoneName = ParentBoneName,
             MirrorPairId = MirrorPairId,
+            InfluenceRadius = InfluenceRadius,
+            TargetMeshName = TargetMeshName ?? "",
             JointPositions = JointPositions != null ? new List<Vector3>(JointPositions) : new()
         };
     }
@@ -49,7 +55,7 @@ namespace DeadlockPlayground.Importer
         public static readonly string[] FingerNames = { "thumb", "index", "middle", "ring", "pinky" };
 
         // Modular limb configuration
-        public int SpineCount { get; set; } = 4; // 1..4 (auto-mapped onto Deadlock spine_0..3)
+        public int SpineCount { get; set; } = 3; // 1..4 (3 = spine_1..3, omitting pelvis-adjacent spine_0 by default)
         public bool HasNeck { get; set; } = true;
         public bool HasClavicles { get; set; } = true;
         public bool HasToes { get; set; } = false;
@@ -61,7 +67,7 @@ namespace DeadlockPlayground.Importer
         public bool EnableMiddle { get; set; } = true;
         public bool EnableRing { get; set; } = true;
         public bool EnablePinky { get; set; } = true;
-        public int PhalanxCount { get; set; } = 2; // 2 or 3 (2j deforms cleaner on most models)
+        public int PhalanxCount { get; set; } = 3; // 2 or 3 (3j matches Deadlock's native 3-bone finger chains 1:1)
 
         /// <summary>
         /// Editable 3D joint positions in imported model space (core pins + finger joints).
@@ -90,8 +96,8 @@ namespace DeadlockPlayground.Importer
         public static string[] GetDeadlockSpineBoneNames(int spineCount) => Math.Clamp(spineCount, 1, 4) switch
         {
             1 => new[] { "spine_2" },
-            2 => new[] { "spine_0", "spine_3" },
-            3 => new[] { "spine_0", "spine_2", "spine_3" },
+            2 => new[] { "spine_1", "spine_3" },
+            3 => new[] { "spine_1", "spine_2", "spine_3" },
             _ => new[] { "spine_0", "spine_1", "spine_2", "spine_3" }
         };
 
@@ -345,106 +351,138 @@ namespace DeadlockPlayground.Importer
                     Joints["HandTip" + side] = tipCentroid;
                 }
 
-                // Build palm orthonormal frame aligned to actual hand geometry
+                // Build palm orthonormal frame aligned to actual hand geometry using 2D PCA perpendicular to handFwd
+                // so rotated/pronated palms and -Z/+Z-facing models always get the true palm width & thickness axes.
                 Vector3 upRef = MathF.Abs(handFwd.Y) < 0.9f ? Vector3.Up : Vector3.Forward;
-                Vector3 palmAcross = handFwd.Cross(upRef);
-                palmAcross = palmAcross.LengthSquared() > 1e-6f ? palmAcross.Normalized() : Vector3.Forward;
-                if (palmAcross.Z < 0f) palmAcross = -palmAcross; // +across points toward thumb (+Z front)
+                Vector3 basisE1 = handFwd.Cross(upRef);
+                basisE1 = basisE1.LengthSquared() > 1e-6f ? basisE1.Normalized() : Vector3.Forward;
+                Vector3 basisE2 = handFwd.Cross(basisE1).Normalized();
+
+                Vector3 palmAcross = basisE1;
+                {
+                    // Collect palm-band radial offsets (f in 0.18..0.72) to extract palm width eigenvector via 2x2 PCA
+                    float mx = 0f, my = 0f;
+                    int pCnt = 0;
+                    foreach (var p in handPts)
+                    {
+                        Vector3 rel = p - wrist;
+                        float f = rel.Dot(handFwd) / handLen;
+                        if (f < 0.18f || f > 0.72f) continue;
+                        mx += rel.Dot(basisE1);
+                        my += rel.Dot(basisE2);
+                        pCnt++;
+                    }
+                    if (pCnt >= 10)
+                    {
+                        mx /= pCnt;
+                        my /= pCnt;
+                        float cxx = 0f, cxy = 0f, cyy = 0f;
+                        foreach (var p in handPts)
+                        {
+                            Vector3 rel = p - wrist;
+                            float f = rel.Dot(handFwd) / handLen;
+                            if (f < 0.18f || f > 0.72f) continue;
+                            float x = rel.Dot(basisE1) - mx;
+                            float y = rel.Dot(basisE2) - my;
+                            cxx += x * x;
+                            cxy += x * y;
+                            cyy += y * y;
+                        }
+                        float tr = cxx + cyy;
+                        float diff = cxx - cyy;
+                        float disc = MathF.Sqrt(diff * diff + 4f * cxy * cxy);
+                        float lMax = 0.5f * (tr + disc);
+                        float lMin = 0.5f * (tr - disc);
+                        if (lMax > 1e-6f && lMax > lMin * 1.25f)
+                        {
+                            float vx = MathF.Abs(cxy) > 1e-7f ? (lMax - cyy) : (cxx >= cyy ? 1f : 0f);
+                            float vy = MathF.Abs(cxy) > 1e-7f ? cxy : (cxx >= cyy ? 0f : 1f);
+                            Vector3 pcaAxis = basisE1 * vx + basisE2 * vy;
+                            if (pcaAxis.LengthSquared() > 1e-6f)
+                                palmAcross = pcaAxis.Normalized();
+                        }
+                    }
+
+                    // Resolve +palmAcross sign toward the thumb side:
+                    // Compare lateral protrusion in the thumb zone (f in 0.22..0.64) beyond the distal 4-finger span (f in 0.74..0.98).
+                    float midMinA = float.MaxValue, midMaxA = float.MinValue;
+                    float distMinA = float.MaxValue, distMaxA = float.MinValue;
+                    int midCnt = 0, distCnt = 0;
+                    foreach (var p in handPts)
+                    {
+                        Vector3 rel = p - wrist;
+                        float f = rel.Dot(handFwd) / handLen;
+                        float a = rel.Dot(palmAcross);
+                        if (f >= 0.22f && f <= 0.64f) { if (a < midMinA) midMinA = a; if (a > midMaxA) midMaxA = a; midCnt++; }
+                        else if (f >= 0.74f && f <= 0.98f) { if (a < distMinA) distMinA = a; if (a > distMaxA) distMaxA = a; distCnt++; }
+                    }
+                    bool resolvedSign = false;
+                    if (midCnt >= 6 && distCnt >= 6)
+                    {
+                        float posBulge = midMaxA - distMaxA;
+                        float negBulge = distMinA - midMinA;
+                        float span = MathF.Max(1e-4f, midMaxA - midMinA);
+                        if (MathF.Abs(posBulge - negBulge) > 0.06f * span)
+                        {
+                            if (negBulge > posBulge) palmAcross = -palmAcross;
+                            resolvedSign = true;
+                        }
+                    }
+                    if (!resolvedSign && palmAcross.Z < 0f)
+                        palmAcross = -palmAcross;
+                }
                 Vector3 palmUp = palmAcross.Cross(handFwd).Normalized();
 
-                // Measure actual lateral (across) span of the 4-finger + palm band (f in 0.30..0.92)
+                // Measure actual lateral (across) span of the 4-finger + palm band (f in 0.26..0.94)
                 float minA = float.MaxValue, maxA = float.MinValue;
-                float sumUp = 0f; int cntBand = 0;
+                float minUp = float.MaxValue, maxUp = float.MinValue;
+                int cntBand = 0;
                 foreach (var p in handPts)
                 {
                     Vector3 rel = p - wrist;
                     float f = rel.Dot(handFwd) / handLen;
                     if (f < 0.26f || f > 0.94f) continue;
                     float a = rel.Dot(palmAcross);
+                    float u = rel.Dot(palmUp);
                     if (a < minA) minA = a;
                     if (a > maxA) maxA = a;
-                    sumUp += rel.Dot(palmUp);
+                    if (u < minUp) minUp = u;
+                    if (u > maxUp) maxUp = u;
                     cntBand++;
                 }
                 if (cntBand < 6 || maxA - minA < 0.01f * H) continue;
                 float palmWidth = maxA - minA;
-                float avgUp = sumUp / cntBand;
+                float avgUp = 0.5f * (minUp + maxUp);
 
-                // 1. Dedicated angled-ray thumb solver (isolated to f <= 0.70 & a >= 0.74 so it NEVER snaps to index fingertip!)
-                if (IsFingerEnabled("thumb"))
+                // Helper: compute geometric bounding-box center of a local point list along (handFwd, palmAcross, palmUp)
+                // so dense glove cuffs or fingernail topology never pull joints off a finger's true centerline.
+                Vector3 BboxCenter(List<Vector3> pts, Vector3 fallback)
                 {
-                    var thumbPts = new List<(float F, float A, Vector3 P)>();
-                    float thumbMinA = minA + 0.72f * palmWidth;
-                    foreach (var p in handPts)
+                    if (pts.Count == 0) return fallback;
+                    float f0 = float.MaxValue, f1 = float.MinValue;
+                    float a0 = float.MaxValue, a1 = float.MinValue;
+                    float u0 = float.MaxValue, u1 = float.MinValue;
+                    for (int i = 0; i < pts.Count; i++)
                     {
-                        Vector3 rel = p - wrist;
-                        float f = rel.Dot(handFwd) / handLen;
-                        float a = rel.Dot(palmAcross);
-                        if (f >= 0.14f && f <= 0.68f && a >= thumbMinA)
-                            thumbPts.Add((f, a, p));
+                        Vector3 rel = pts[i] - wrist;
+                        float fv = rel.Dot(handFwd);
+                        float av = rel.Dot(palmAcross);
+                        float uv = rel.Dot(palmUp);
+                        if (fv < f0) f0 = fv; if (fv > f1) f1 = fv;
+                        if (av < a0) a0 = av; if (av > a1) a1 = av;
+                        if (uv < u0) u0 = uv; if (uv > u1) u1 = uv;
                     }
-
-                    Vector3 thumbBase = wrist + handFwd * (0.22f * handLen) + palmAcross * (minA + 0.76f * palmWidth) + palmUp * avgUp;
-                    Vector3 thumbTip = wrist + handFwd * (0.58f * handLen) + palmAcross * (minA + 0.96f * palmWidth) + palmUp * avgUp;
-
-                    if (thumbPts.Count >= 6)
-                    {
-                        // Tip = centroid of the most-lateral + distal thumb vertices (score = a_norm*0.65 + f*0.35)
-                        thumbPts.Sort((x, y) =>
-                        {
-                            float sx = ((x.A - minA) / palmWidth) * 0.65f + x.F * 0.35f;
-                            float sy = ((y.A - minA) / palmWidth) * 0.65f + y.F * 0.35f;
-                            return sx.CompareTo(sy);
-                        });
-                        int tStart = Math.Max(0, (int)(thumbPts.Count * 0.82f));
-                        Vector3 tipSum = Vector3.Zero;
-                        for (int i = tStart; i < thumbPts.Count; i++) tipSum += thumbPts[i].P;
-                        thumbTip = tipSum / (thumbPts.Count - tStart);
-
-                        // Base = centroid of proximal thumb vertices (f in 0.16..0.34)
-                        Vector3 baseSum = Vector3.Zero; int baseCnt = 0;
-                        foreach (var tp in thumbPts)
-                        {
-                            if (tp.F >= 0.16f && tp.F <= 0.34f) { baseSum += tp.P; baseCnt++; }
-                        }
-                        if (baseCnt >= 2) thumbBase = baseSum / baseCnt;
-                    }
-
-                    // Clamp thumb length to realistic anatomical bounds (0.28..0.52 of handLen)
-                    Vector3 tDelta = thumbTip - thumbBase;
-                    float tLen = tDelta.Length();
-                    if (tLen < 0.18f * handLen)
-                        thumbTip = thumbBase + (handFwd * 0.65f + palmAcross * 0.75f).Normalized() * (0.36f * handLen);
-                    else if (tLen > 0.52f * handLen)
-                        thumbTip = thumbBase + (tDelta / tLen) * (0.52f * handLen);
-
-                    for (int j = 0; j <= phalanges; j++)
-                    {
-                        string key = $"finger_thumb_{j}_{side}";
-                        if (!forceRegenerate && Joints.ContainsKey(key)) continue;
-                        float frac = j / (float)phalanges;
-                        Vector3 target = thumbBase.Lerp(thumbTip, frac);
-                        // Gently snap toward local thumb vertices within a tight radius around target
-                        float snapRad = MathF.Max(0.008f * H, handLen * 0.12f);
-                        Vector3 acc = Vector3.Zero; int hits = 0;
-                        foreach (var tp in thumbPts)
-                        {
-                            if (tp.P.DistanceSquaredTo(target) <= snapRad * snapRad) { acc += tp.P; hits++; }
-                        }
-                        Joints[key] = hits >= 2 ? target.Lerp(acc / hits, 0.75f) : target;
-                    }
+                    return wrist + handFwd * (0.5f * (f0 + f1)) + palmAcross * (0.5f * (a0 + a1)) + palmUp * (0.5f * (u0 + u1));
                 }
 
-                // 2. Four main fingers (index, middle, ring, pinky):
-                // Measure lateral span strictly in the distal fingertip zone (f in 0.74..0.98, strictly PAST the thumb tip
-                // which ends at f <= 0.68!) so the thumb NEVER enters max4A and all 4 fingers land on their exact fingers!
+                // Measure distal 4-finger lateral span strictly PAST the thumb tip (f in 0.72..0.98)
                 float min4A = float.MaxValue, max4A = float.MinValue;
                 int cnt4 = 0;
                 foreach (var p in handPts)
                 {
                     Vector3 rel = p - wrist;
                     float f = rel.Dot(handFwd) / handLen;
-                    if (f < 0.74f || f > 0.98f) continue;
+                    if (f < 0.72f || f > 0.98f) continue;
                     float a = rel.Dot(palmAcross);
                     if (a < min4A) min4A = a;
                     if (a > max4A) max4A = a;
@@ -457,42 +495,167 @@ namespace DeadlockPlayground.Importer
                 }
                 float width4 = max4A - min4A;
 
-                // Use a 3% dead-zone gutter between adjacent fingers and per-finger anatomical fCap limits
-                // so a longer neighbor (e.g. ring) NEVER leaks into a shorter neighbor's tip (e.g. pinky)!
-                (string name, float a0, float a1, float fStart, float fFallbackEnd, float fCap)[] bands =
+                // 1. Dedicated angled-ray thumb solver (isolated to f <= 0.70 & beyond the 4-finger index edge)
+                if (IsFingerEnabled("thumb"))
                 {
-                    ("index",  0.76f, 1.02f, 0.48f, 0.93f, 0.99f),
-                    ("middle", 0.50f, 0.74f, 0.50f, 1.00f, 1.04f),
-                    ("ring",   0.24f, 0.48f, 0.48f, 0.91f, 0.97f),
-                    ("pinky", -0.02f, 0.21f, 0.44f, 0.78f, 0.85f)
-                };
-
-                foreach (var (fName, a0, a1, fStart, fFallbackEnd, fCap) in bands)
-                {
-                    if (!IsFingerEnabled(fName)) continue;
-                    float loA = min4A + a0 * width4;
-                    float hiA = min4A + a1 * width4;
-                    float midA = (loA + hiA) * 0.5f;
-
-                    var slice = new List<(float F, float A, float U, Vector3 P)>();
+                    var thumbPts = new List<(float F, float A, Vector3 P)>();
+                    float thumbMinA = MathF.Max(minA + 0.68f * palmWidth, max4A - 0.10f * width4);
                     foreach (var p in handPts)
                     {
                         Vector3 rel = p - wrist;
                         float f = rel.Dot(handFwd) / handLen;
                         float a = rel.Dot(palmAcross);
-                        if (f >= fStart * 0.82f && f <= fCap && a >= loA && a <= hiA)
-                            slice.Add((f, a, rel.Dot(palmUp), p));
+                        if (f >= 0.14f && f <= 0.70f && a >= thumbMinA)
+                            thumbPts.Add((f, a, p));
+                    }
+
+                    Vector3 thumbBase = wrist + handFwd * (0.20f * handLen) + palmAcross * (minA + 0.74f * palmWidth) + palmUp * avgUp;
+                    Vector3 thumbTip = wrist + handFwd * (0.58f * handLen) + palmAcross * (minA + 0.96f * palmWidth) + palmUp * avgUp;
+
+                    if (thumbPts.Count >= 6)
+                    {
+                        thumbPts.Sort((x, y) =>
+                        {
+                            float sx = ((x.A - minA) / palmWidth) * 0.65f + x.F * 0.35f;
+                            float sy = ((y.A - minA) / palmWidth) * 0.65f + y.F * 0.35f;
+                            return sx.CompareTo(sy);
+                        });
+                        int tStart = Math.Max(0, (int)(thumbPts.Count * 0.82f));
+                        var tipCluster = new List<Vector3>(thumbPts.Count - tStart);
+                        for (int i = tStart; i < thumbPts.Count; i++) tipCluster.Add(thumbPts[i].P);
+                        thumbTip = BboxCenter(tipCluster, thumbTip);
+
+                        var baseCluster = new List<Vector3>();
+                        foreach (var tp in thumbPts)
+                        {
+                            if (tp.F >= 0.15f && tp.F <= 0.34f) baseCluster.Add(tp.P);
+                        }
+                        if (baseCluster.Count >= 2) thumbBase = BboxCenter(baseCluster, thumbBase);
+                    }
+
+                    Vector3 tDelta = thumbTip - thumbBase;
+                    float tLen = tDelta.Length();
+                    if (tLen < 0.18f * handLen)
+                        thumbTip = thumbBase + (handFwd * 0.65f + palmAcross * 0.75f).Normalized() * (0.36f * handLen);
+                    else if (tLen > 0.54f * handLen)
+                        thumbTip = thumbBase + (tDelta / tLen) * (0.54f * handLen);
+
+                    float[] thumbFracs = phalanges == 2
+                        ? new[] { 0.0f, 0.50f, 1.0f }
+                        : new[] { 0.0f, 0.42f, 0.74f, 1.0f };
+                    var localSlice = new List<Vector3>();
+                    for (int j = 0; j <= phalanges; j++)
+                    {
+                        string key = $"finger_thumb_{j}_{side}";
+                        if (!forceRegenerate && Joints.ContainsKey(key)) continue;
+                        Vector3 target = thumbBase.Lerp(thumbTip, thumbFracs[j]);
+                        float snapRad = MathF.Max(0.008f * H, handLen * 0.11f);
+                        localSlice.Clear();
+                        foreach (var tp in thumbPts)
+                        {
+                            if (tp.P.DistanceSquaredTo(target) <= snapRad * snapRad) localSlice.Add(tp.P);
+                        }
+                        Joints[key] = localSlice.Count >= 2 ? target.Lerp(BboxCenter(localSlice, target), 0.75f) : target;
+                    }
+                }
+
+                // 2. Four main fingers (index, middle, ring, pinky):
+                // Detect knuckle-band span (excluding thumb) + fan-aware 1D valley/peak centers so splayed/fanned hands
+                // follow each finger's true angled axis instead of slicing diagonally with rigid vertical strips.
+                float knuckleMinA = min4A, knuckleMaxA = max4A;
+                {
+                    float kMin = float.MaxValue, kMax = float.MinValue;
+                    int kCnt = 0;
+                    float kClipMax = max4A + 0.05f * width4;
+                    foreach (var p in handPts)
+                    {
+                        Vector3 rel = p - wrist;
+                        float f = rel.Dot(handFwd) / handLen;
+                        if (f < 0.38f || f > 0.54f) continue;
+                        float a = rel.Dot(palmAcross);
+                        if (a > kClipMax) continue;
+                        if (a < kMin) kMin = a;
+                        if (a > kMax) kMax = a;
+                        kCnt++;
+                    }
+                    if (kCnt >= 6 && (kMax - kMin) >= 0.45f * width4 && (kMax - kMin) <= 1.15f * width4)
+                    {
+                        knuckleMinA = kMin;
+                        knuckleMaxA = kMax;
+                    }
+                }
+                float knuckleWidth4 = knuckleMaxA - knuckleMinA;
+
+                // 1D lateral density histogram across distal fingers (f in 0.64..0.95) to find finger peaks/gutters
+                const int HistBins = 32;
+                var hist = new int[HistBins];
+                foreach (var p in handPts)
+                {
+                    Vector3 rel = p - wrist;
+                    float f = rel.Dot(handFwd) / handLen;
+                    if (f < 0.64f || f > 0.95f) continue;
+                    float an = (rel.Dot(palmAcross) - min4A) / MathF.Max(1e-5f, width4);
+                    int bin = Math.Clamp((int)(an * HistBins), 0, HistBins - 1);
+                    hist[bin]++;
+                }
+                // Refine each finger's distal lateral center toward its nearest local peak within its anatomical window
+                (string name, float a0, float a1, float kFrac, float fStart, float fFallbackEnd, float fCap)[] bands =
+                {
+                    ("index",  0.75f, 1.02f, 0.86f, 0.47f, 0.93f, 0.99f),
+                    ("middle", 0.49f, 0.75f, 0.61f, 0.49f, 1.00f, 1.04f),
+                    ("ring",   0.23f, 0.49f, 0.36f, 0.47f, 0.91f, 0.97f),
+                    ("pinky", -0.02f, 0.23f, 0.12f, 0.43f, 0.78f, 0.86f)
+                };
+
+                float[] phalanxFracs = phalanges == 2
+                    ? new[] { 0.0f, 0.52f, 1.0f }
+                    : new[] { 0.0f, 0.46f, 0.76f, 1.0f };
+
+                var slicePts = new List<Vector3>();
+                foreach (var (fName, a0, a1, kFrac, fStart, fFallbackEnd, fCap) in bands)
+                {
+                    if (!IsFingerEnabled(fName)) continue;
+                    float loA = min4A + a0 * width4;
+                    float hiA = min4A + a1 * width4;
+                    float defaultTipA = 0.5f * (loA + hiA);
+
+                    // Find peak bin inside this finger's distal window
+                    int b0 = Math.Clamp((int)(MathF.Max(0f, a0) * HistBins), 0, HistBins - 1);
+                    int b1 = Math.Clamp((int)(MathF.Min(1f, a1) * HistBins), b0, HistBins - 1);
+                    int bestBin = -1, bestCnt = 0;
+                    for (int bi = b0; bi <= b1; bi++)
+                    {
+                        if (hist[bi] > bestCnt) { bestCnt = hist[bi]; bestBin = bi; }
+                    }
+                    float tipA = bestBin >= 0 && bestCnt >= 2
+                        ? min4A + ((bestBin + 0.5f) / HistBins) * width4
+                        : defaultTipA;
+                    float knuckleA = knuckleMinA + kFrac * knuckleWidth4;
+                    float halfTubeA = MathF.Max(0.006f * H, 0.115f * width4);
+
+                    // Gather vertices along the fanned finger corridor from (fStart, knuckleA) -> (fCap, tipA)
+                    var slice = new List<(float F, float A, Vector3 P)>();
+                    foreach (var p in handPts)
+                    {
+                        Vector3 rel = p - wrist;
+                        float f = rel.Dot(handFwd) / handLen;
+                        if (f < fStart * 0.84f || f > fCap) continue;
+                        float tRay = Mathf.Clamp((f - fStart) / MathF.Max(0.15f, fFallbackEnd - fStart), 0f, 1.1f);
+                        float expectedA = Mathf.Lerp(knuckleA, tipA, tRay);
+                        float a = rel.Dot(palmAcross);
+                        if (MathF.Abs(a - expectedA) <= halfTubeA)
+                            slice.Add((f, a, p));
                     }
 
                     float fMax = fFallbackEnd;
                     if (slice.Count >= 4)
                     {
                         slice.Sort((x, y) => x.F.CompareTo(y.F));
-                        fMax = Math.Clamp(slice[(int)((slice.Count - 1) * 0.94f)].F, fStart + 0.16f, fCap);
+                        fMax = Math.Clamp(slice[(int)((slice.Count - 1) * 0.95f)].F, fStart + 0.16f, fCap);
                     }
 
                     Vector3 prevPos = Vector3.Zero;
-                    float prevA = midA;
+                    float prevA = knuckleA;
                     for (int j = 0; j <= phalanges; j++)
                     {
                         string key = $"finger_{fName}_{j}_{side}";
@@ -503,38 +666,33 @@ namespace DeadlockPlayground.Importer
                             continue;
                         }
 
-                        float frac = j / (float)phalanges;
+                        float frac = phalanxFracs[j];
                         float targetF = Mathf.Lerp(fStart, fMax, frac);
-                        float bandHalf = (fMax - fStart) / (phalanges * 1.45f);
+                        float targetA = Mathf.Lerp(knuckleA, tipA, frac);
+                        float bandHalf = (fMax - fStart) / (phalanges * 1.65f);
 
-                        Vector3 snapped = Vector3.Zero;
-                        int hits = 0;
+                        slicePts.Clear();
                         foreach (var item in slice)
                         {
                             if (MathF.Abs(item.F - targetF) <= bandHalf)
-                            {
-                                snapped += item.P;
-                                hits++;
-                            }
+                                slicePts.Add(item.P);
                         }
 
-                        Vector3 chosen = hits >= 2
-                            ? snapped / hits
-                            : (wrist + handFwd * (targetF * handLen) + palmAcross * midA + palmUp * avgUp);
+                        Vector3 fallback = wrist + handFwd * (targetF * handLen) + palmAcross * targetA + palmUp * avgUp;
+                        Vector3 chosen = slicePts.Count >= 2 ? BboxCenter(slicePts, fallback) : fallback;
 
-                        // Lateral continuity guard: prevent a distal phalanx/tip (especially pinky) from drifting
-                        // sideways onto an adjacent finger if a few neighbor vertices grazed the band edge.
+                        // Lateral continuity guard along the fanned ray so a distal joint never drifts onto a neighbor finger
                         if (j > 0)
                         {
                             Vector3 relC = chosen - wrist;
                             float curA = relC.Dot(palmAcross);
-                            float maxStepA = 0.08f * width4;
-                            float clampedA = Math.Clamp(curA, MathF.Max(loA, prevA - maxStepA), MathF.Min(hiA, prevA + maxStepA));
+                            float maxDev = 0.08f * width4;
+                            float clampedA = Math.Clamp(curA, targetA - maxDev, targetA + maxDev);
                             if (MathF.Abs(clampedA - curA) > 1e-5f)
                                 chosen += palmAcross * (clampedA - curA);
                         }
 
-                        // Monotonic progression guard: ensure each phalanx advances along handFwd
+                        // Monotonic progression guard along handFwd
                         if (j > 0 && (chosen - prevPos).Dot(handFwd) < 0.02f * handLen)
                         {
                             chosen = prevPos + handFwd * ((fMax - fStart) * handLen / phalanges);
@@ -553,7 +711,9 @@ namespace DeadlockPlayground.Importer
             Vector3 parentWorldModelSpace,
             Vector3 directionModelSpace,
             int segmentCount,
-            float totalLength)
+            float totalLength,
+            float influenceRadius = 0.08f,
+            string targetMeshName = "")
         {
             int segs = Math.Clamp(segmentCount, 1, 6);
             Vector3 dir = directionModelSpace.LengthSquared() > 1e-6f ? directionModelSpace.Normalized() : Vector3.Down;
@@ -563,6 +723,8 @@ namespace DeadlockPlayground.Importer
                 ChainId = $"refcloth_{Guid.NewGuid().ToString("N")[..8]}",
                 Name = string.IsNullOrWhiteSpace(name) ? "cloth_chain" : name.Trim(),
                 ParentBoneName = string.IsNullOrWhiteSpace(parentBoneName) ? "spine_3" : parentBoneName,
+                InfluenceRadius = Math.Clamp(influenceRadius, 0.02f, 0.35f),
+                TargetMeshName = targetMeshName ?? "",
                 JointPositions = new List<Vector3>(segs + 1)
             };
             // Offset root slightly along dir from parent so it sits cleanly on the garment seam
@@ -593,6 +755,8 @@ namespace DeadlockPlayground.Importer
                 Name = mirroredName,
                 ParentBoneName = mirroredParent,
                 MirrorPairId = src.ChainId,
+                InfluenceRadius = src.InfluenceRadius,
+                TargetMeshName = src.TargetMeshName ?? "",
                 JointPositions = src.JointPositions.Select(p => new Vector3(2f * cx - p.X, p.Y, p.Z)).ToList()
             };
             src.MirrorPairId = mirrored.ChainId;
@@ -618,6 +782,7 @@ namespace DeadlockPlayground.Importer
             public string HeadJointKey = "";
             public string TailJointKey = "";
             public string ClothChainId = "";
+            public string ClothTargetMeshName = "";
         }
 
         /// <summary>
@@ -689,12 +854,12 @@ namespace DeadlockPlayground.Importer
             Vector3 hipR = GetJ("HipR", pelvis + new Vector3(-0.08f * H, -0.04f * H, 0f));
             Vector3 midHip = hipL.Lerp(hipR, 0.5f);
 
-            // 1. Pelvis + Modular Spine (1..4 bones) with clean pelvis/hip/spine_0 separation
+            // 1. Pelvis + Modular Spine (1..4 bones) with clean pelvis/glute seeding (allowBelow=true avoids glute gap)
             string[] spineNames = GetDeadlockSpineBoneNames(SpineCount);
             Vector3 firstSpineOrigin = spineNames.Length == 1
                 ? pelvis.Lerp(neck, 0.48f)
                 : pelvis.Lerp(neck, 0.30f);
-            AddBone("pelvis", null, ReferenceBoneRole.Core, pelvis, midHip, firstSpineOrigin, 0.074f * H, allowBelow: false, headKey: "Pelvis");
+            AddBone("pelvis", null, ReferenceBoneRole.Core, pelvis, midHip - Vector3.Up * (0.025f * H), firstSpineOrigin, 0.088f * H, allowBelow: true, headKey: "Pelvis");
 
             string prevTorso = "pelvis";
             for (int si = 0; si < spineNames.Length; si++)
@@ -752,11 +917,11 @@ namespace DeadlockPlayground.Importer
 
                 Vector3 handDir = (wr - el).LengthSquared() > 1e-6f ? (wr - el).Normalized() : -Vector3.Up;
                 bool hasFingers = FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
-                Vector3 handEnd = wr + handDir * (hasFingers ? 0.025f * H : 0.11f * H);
+                Vector3 handEnd = wr + handDir * (hasFingers ? 0.042f * H : 0.11f * H);
                 if (hasFingers)
                 {
-                    // Anchor hand capsule strictly proximal to the metacarpal roots so hand_L/R never steals
-                    // palm/knuckle vertices from finger_*_meta or finger_*_0!
+                    // Anchor hand capsule across the proximal half of the palm so hand_L/R gives the central palm
+                    // cohesive structural support while transitioning smoothly into the 4 metacarpals toward the knuckles.
                     Vector3 knuckleSum = Vector3.Zero;
                     int knuckleCnt = 0;
                     foreach (string fn in new[] { "index", "middle", "ring", "pinky" })
@@ -769,9 +934,9 @@ namespace DeadlockPlayground.Importer
                         }
                     }
                     if (knuckleCnt > 0)
-                        handEnd = wr.Lerp(knuckleSum / knuckleCnt, 0.30f);
+                        handEnd = wr.Lerp(knuckleSum / knuckleCnt, 0.52f);
                 }
-                AddBone("hand_" + s, "arm_lower_" + s, ReferenceBoneRole.Core, wr, wr, handEnd, hasFingers ? 0.015f * H : 0.042f * H,
+                AddBone("hand_" + s, "arm_lower_" + s, ReferenceBoneRole.Core, wr, wr, handEnd, hasFingers ? 0.022f * H : 0.042f * H,
                     allowBelow: true, allowBeyond: !hasFingers, headKey: "Wrist" + s);
 
                 // Individual Articulated Fingers (matching DeadlockRigs finger_{name}_meta_{L|R} + finger_{name}_{0..2}_{L|R})
@@ -782,16 +947,16 @@ namespace DeadlockPlayground.Importer
                         if (!IsFingerEnabled(fName)) continue;
                         string prevF = "hand_" + s;
 
-                        // Emit metacarpal bone (finger_{name}_meta_{L|R}) for the 4 non-thumb fingers with balanced
-                        // palm-width radius so it receives clean mid-palm seeds and bridges hand -> knuckle smoothly!
+                        // Emit metacarpal bone (finger_{name}_meta_{L|R}) for the 4 non-thumb fingers with softer
+                        // palm radius so metacarpals blend smoothly with hand_L/R and adjacent metacarpals across the palm.
                         string firstHk = $"finger_{fName}_0_{s}";
                         if (fName != "thumb" && Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(firstHk) ?? firstHk) : firstHk))
                         {
                             Vector3 k0 = GetJ(firstHk, handEnd);
-                            Vector3 metaOrig = wr.Lerp(k0, 0.28f);
+                            Vector3 metaOrig = wr.Lerp(k0, 0.35f);
                             string metaName = $"finger_{fName}_meta_{s}";
-                            AddBone(metaName, prevF, ReferenceBoneRole.Finger, metaOrig, metaOrig, k0, MathF.Max(0.007f, 0.011f * H),
-                                allowBelow: true, allowBeyond: false, headKey: "Wrist" + s, tailKey: firstHk);
+                            AddBone(metaName, prevF, ReferenceBoneRole.Finger, metaOrig, metaOrig, k0, MathF.Max(0.008f, 0.014f * H),
+                                allowBelow: false, allowBeyond: false, headKey: "Wrist" + s, tailKey: firstHk);
                             prevF = metaName;
                         }
 
@@ -850,12 +1015,15 @@ namespace DeadlockPlayground.Importer
                         int suffix = 1;
                         while (byName.ContainsKey(bName)) { bName = $"{safeName}_{k}_{suffix++}"; }
                         float segLen = p0.DistanceTo(p1);
-                        float cRad = MathF.Max(0.025f * H, segLen * 0.45f);
-                        AddBone(bName, prevCloth, ReferenceBoneRole.Cloth, p0, p0, p1, cRad,
+                        float cRad = cc.InfluenceRadius > 0.005f
+                            ? Math.Clamp(cc.InfluenceRadius, 0.02f, 0.35f)
+                            : MathF.Max(0.04f, MathF.Min(0.12f, segLen * 0.45f));
+                        int bIdx = AddBone(bName, prevCloth, ReferenceBoneRole.Cloth, p0, p0, p1, cRad,
                             allowBelow: k == 0, allowBeyond: k == segs - 1,
                             headKey: $"cloth::{cc.ChainId}::{k}",
                             tailKey: $"cloth::{cc.ChainId}::{k + 1}",
                             clothChainId: cc.ChainId);
+                        list[bIdx].ClothTargetMeshName = cc.TargetMeshName ?? "";
                         prevCloth = bName;
                     }
                 }

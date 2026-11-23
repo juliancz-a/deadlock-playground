@@ -211,7 +211,7 @@ namespace DeadlockPlayground.Importer
                 {
                     Vector3 d = vHandAligned - p.As;
                     float proj = d.Dot(p.UnitSource);
-                    // Axial-only scaling clamped to [0.85, 1.15] - zero lateral thickness scaling!
+                    // Axial-only scaling clamped to [0.75, 1.30] - zero lateral thickness scaling!
                     Vector3 dScaled = p.UnitSource * (proj * p.Sigma) + (d - p.UnitSource * proj);
                     Vector3 pos = p.At + p.Rotation * dScaled;
                     Quaternion rot = p.Rotation * rotHand;
@@ -1094,24 +1094,56 @@ namespace DeadlockPlayground.Importer
 
             try
             {
-                if (isAccessorySlot && options.AccessoryBoneMode == AccessoryBoneMode.KeepOwnBones && hasImportedRig)
+                // Separate lazy-loaded vanilla Deadlock donor meshes (already in Deadlock Hero Space,
+                // unskinned) when the primary model uses a foreign skeleton/landmark/own-bone pipeline,
+                // so donor meshes are rigged via KNN/socket without interfering with the primary skeleton.
+                bool needsSeparateDonorPass =
+                    (isAccessorySlot && options.AccessoryBoneMode == AccessoryBoneMode.KeepOwnBones && hasImportedRig) ||
+                    options.Method == RiggingMethod.LandmarkAutoRig ||
+                    (options.Method == RiggingMethod.PreRiggedSkeletonRemap && hasImportedRig);
+
+                List<MeshInstance3D> primaryMeshes = importedMeshes;
+                List<MeshInstance3D> heroSpaceDonorMeshes = null;
+                if (needsSeparateDonorPass)
                 {
-                    result = RigAccessoryKeepOwnBones(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
+                    heroSpaceDonorMeshes = importedMeshes
+                        .Where(m => m.HasMeta("IsHeroSpaceDonorMesh") && m.GetMeta("IsHeroSpaceDonorMesh").AsBool())
+                        .ToList();
+                    if (heroSpaceDonorMeshes.Count > 0)
+                    {
+                        primaryMeshes = importedMeshes
+                            .Where(m => !(m.HasMeta("IsHeroSpaceDonorMesh") && m.GetMeta("IsHeroSpaceDonorMesh").AsBool()))
+                            .ToList();
+                    }
+                    else
+                    {
+                        heroSpaceDonorMeshes = null;
+                    }
+                }
+
+                if (primaryMeshes.Count == 0 && heroSpaceDonorMeshes != null && heroSpaceDonorMeshes.Count > 0)
+                {
+                    result = RigUnriggedModel(importedScene, heroSpaceDonorMeshes, heroNode, heroSkeleton, customSkin, options);
+                    heroSpaceDonorMeshes = null;
+                }
+                else if (isAccessorySlot && options.AccessoryBoneMode == AccessoryBoneMode.KeepOwnBones && hasImportedRig)
+                {
+                    result = RigAccessoryKeepOwnBones(importedScene, primaryMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
                 }
                 else if (isAccessorySlot && options.AccessoryBoneMode == AccessoryBoneMode.SkinToHero)
                 {
                     if (hasImportedRig && options.Method == RiggingMethod.PreRiggedSkeletonRemap)
-                        result = RigPreRiggedModel(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
+                        result = RigPreRiggedModel(importedScene, primaryMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
                     else
-                        result = RigUnriggedModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
+                        result = RigUnriggedModel(importedScene, primaryMeshes, heroNode, heroSkeleton, customSkin, options);
                 }
                 else if (options.Method == RiggingMethod.RigidSingleBone || options.Preset == PosePreset.RigidSingleBone)
                 {
-                    result = RigRigidBoneModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
+                    result = RigRigidBoneModel(importedScene, primaryMeshes, heroNode, heroSkeleton, customSkin, options);
                 }
                 else if (options.Method == RiggingMethod.LandmarkAutoRig)
                 {
-                    var synth = CustomLandmarkWeightSolver.BuildSyntheticRig(importedScene, importedMeshes, heroSkeleton, options);
+                    var synth = CustomLandmarkWeightSolver.BuildSyntheticRig(importedScene, primaryMeshes, heroSkeleton, options);
                     try
                     {
                         // Merge any authored cloth chains from ReferenceRig into options.BoneChains (preserving existing user presets)
@@ -1145,7 +1177,7 @@ namespace DeadlockPlayground.Importer
                                 options.KeepFingersRigidOnHand = !articulated;
                                 options.FingerMode = articulated ? FingerRigMode.DeadlockFingerBones : FingerRigMode.RigidHand;
                             }
-                            result = RigPreRiggedModel(importedScene, importedMeshes, synth.Skeleton, heroNode, heroSkeleton, customSkin, options);
+                            result = RigPreRiggedModel(importedScene, primaryMeshes, synth.Skeleton, heroNode, heroSkeleton, customSkin, options);
                         }
                         finally
                         {
@@ -1162,12 +1194,36 @@ namespace DeadlockPlayground.Importer
                 }
                 else if (options.Method == RiggingMethod.PreRiggedSkeletonRemap && hasImportedRig)
                 {
-                    result = RigPreRiggedModel(importedScene, importedMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
+                    result = RigPreRiggedModel(importedScene, primaryMeshes, importedSkeleton, heroNode, heroSkeleton, customSkin, options);
                 }
                 else
                 {
                     // Default & Recommended: KNN Surface Projection!
-                    result = RigUnriggedModel(importedScene, importedMeshes, heroNode, heroSkeleton, customSkin, options);
+                    result = RigUnriggedModel(importedScene, primaryMeshes, heroNode, heroSkeleton, customSkin, options);
+                }
+
+                // Merge lazy-loaded vanilla Deadlock donor meshes into the primary container
+                if (result.Success && heroSpaceDonorMeshes != null && heroSpaceDonorMeshes.Count > 0)
+                {
+                    var donorRes = RigUnriggedModel(importedScene, heroSpaceDonorMeshes, heroNode, heroSkeleton, customSkin, options);
+                    if (donorRes.Success && donorRes.ContainerNode != null && GodotObject.IsInstanceValid(donorRes.ContainerNode))
+                    {
+                        foreach (var donorMi in donorRes.CustomSubmeshes)
+                        {
+                            if (donorMi == null || !GodotObject.IsInstanceValid(donorMi)) continue;
+                            donorMi.GetParent()?.RemoveChild(donorMi);
+                            result.ContainerNode.AddChild(donorMi);
+                            if (donorMi.Skeleton != null && !donorMi.Skeleton.IsEmpty && heroSkeleton != null)
+                            {
+                                donorMi.Skeleton = donorMi.GetPathTo(heroSkeleton);
+                            }
+                            result.CustomSubmeshes.Add(donorMi);
+                        }
+                        result.TotalVertices += donorRes.TotalVertices;
+                        result.TotalTriangles += donorRes.TotalTriangles;
+                        donorRes.ContainerNode.GetParent()?.RemoveChild(donorRes.ContainerNode);
+                        donorRes.ContainerNode.QueueFree();
+                    }
                 }
 
                 swTotal.Stop();
@@ -1421,7 +1477,7 @@ namespace DeadlockPlayground.Importer
                 if (srcMesh == null || srcMesh.GetSurfaceCount() == 0) continue;
 
                 // Deterministic mesh transform relative to imported root (Works without being inside scene tree!)
-                Transform3D toHeroSpace = options.AlignedTransform * ComputeTransformRelativeToRoot(srcMi, importedScene);
+                Transform3D toHeroSpace = ComputeImportedMeshToHeroTransform(srcMi, importedScene, options.AlignedTransform);
 
                 for (int s = 0; s < srcMesh.GetSurfaceCount(); s++)
                 {
@@ -1860,8 +1916,10 @@ namespace DeadlockPlayground.Importer
             }
 
             int tgtBoneCount = targetSkeleton.GetBoneCount();
-            // 0 = none, 1 = leftArm, 2 = rightArm, 3 = leftLeg, 4 = rightLeg, 5 = headSeg, 6 = pelvis
+            // 0 = none, 1 = leftArm, 2 = rightArm, 3 = leftLeg, 4 = rightLeg, 5 = headSeg, 6 = pelvis, 7 = lowerSpine (0.60x), 8 = midSpine (0.25x)
             int spine0Bone = targetSkeleton.FindBone("spine_0");
+            int spine1Bone = targetSkeleton.FindBone("spine_1");
+            bool hasMappedSpine0 = spine0Bone >= 0 && FindSourceBoneForTarget(sourceToTargetBoneMap, spine0Bone) >= 0;
             byte[] tgtSegmentKind = new byte[tgtBoneCount];
             for (int tb = 0; tb < tgtBoneCount; tb++)
             {
@@ -1872,6 +1930,7 @@ namespace DeadlockPlayground.Importer
                 else if (headSeg != null && headSeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 5;
                 else if (tb == pelvisBone) tgtSegmentKind[tb] = 6;
                 else if (tb == spine0Bone) tgtSegmentKind[tb] = 7;
+                else if (tb == spine1Bone) tgtSegmentKind[tb] = hasMappedSpine0 ? (byte)8 : (byte)7;
             }
 
             int headBonePre = targetSkeleton.FindBone("head");
@@ -1901,13 +1960,28 @@ namespace DeadlockPlayground.Importer
 
             var socketFrames = ComputeSocketGroupFrames(importedMeshes, importedScene, options, heroNode, targetSkeleton);
 
+            var pendingSurfaces = new List<(
+                MeshInstance3D SrcMi,
+                Mesh SrcMesh,
+                int SurfaceIndex,
+                Vector3[] AlignedVerts,
+                Vector3[] AlignedNorms,
+                Vector2[] RawUvs,
+                int[] RawIndices,
+                int[] SkelBoneIndices,
+                float[] OutWeights,
+                bool IsSocketProp,
+                bool HasSurfaceOverride,
+                Skin PropSkin,
+                SocketBakeMeta? SocketMeta)>();
+
             foreach (var srcMi in importedMeshes)
             {
                 var srcMesh = srcMi.Mesh;
                 if (srcMesh == null || srcMesh.GetSurfaceCount() == 0) continue;
 
                 // Deterministic mesh transform relative to imported root (Works without being inside scene tree!)
-                Transform3D toHeroSpace = options.AlignedTransform * ComputeTransformRelativeToRoot(srcMi, importedScene);
+                Transform3D toHeroSpace = ComputeImportedMeshToHeroTransform(srcMi, importedScene, options.AlignedTransform);
 
                 for (int s = 0; s < srcMesh.GetSurfaceCount(); s++)
                 {
@@ -1943,6 +2017,7 @@ namespace DeadlockPlayground.Importer
                     float[] outWeights = new float[vCount * 4];
                     Skin propSkin = null;
                     SocketBakeMeta? socketMeta = null;
+                    bool hasSurfaceOverride = false;
 
                     if (isSocketProp)
                     {
@@ -1983,7 +2058,7 @@ namespace DeadlockPlayground.Importer
                         }
 
                         SkinWeightOverride surfaceOverride = null;
-                        bool hasSurfaceOverride = options.CustomSkinWeightOverrides != null &&
+                        hasSurfaceOverride = options.CustomSkinWeightOverrides != null &&
                             options.CustomSkinWeightOverrides.TryGetValue(MakeSurfaceKeepKey(srcMi.Name.ToString(), s), out surfaceOverride) &&
                             surfaceOverride != null &&
                             surfaceOverride.VertexCount == vCount &&
@@ -2164,7 +2239,11 @@ namespace DeadlockPlayground.Importer
                                         tRot = Quaternion.Identity;
                                         break;
                                     case 7:
-                                        tPos = vHero + pelvisOffset * 0.5f;
+                                        tPos = vHero + pelvisOffset * 0.60f;
+                                        tRot = Quaternion.Identity;
+                                        break;
+                                    case 8:
+                                        tPos = vHero + pelvisOffset * 0.25f;
                                         tRot = Quaternion.Identity;
                                         break;
                                     default:
@@ -2185,70 +2264,103 @@ namespace DeadlockPlayground.Importer
                         {
                             SmoothWeightsLaplacian(rawIndices, vCount, skelBoneIndices, outWeights, 2, alignedVerts, wristMask);
                         }
-
-                        if (!hasSurfaceOverride && options.AutoCounterTwistWeights)
-                        {
-                            AdjustLimbTwistAndHipWeights(targetSkeleton, vCount, skelBoneIndices, outWeights, alignedVerts, rawIndices, limbTwistProfile);
-                        }
                     }
 
-                    int[] skinBoneIndices;
-                    if (isSocketProp)
-                    {
-                        // BakeSocketPropSurface writes Skin bind indices directly for its dedicated propSkin.
-                        skinBoneIndices = skelBoneIndices;
-                    }
-                    else
-                    {
-                        skinBoneIndices = new int[vCount * 4];
-                        for (int i = 0; i < vCount * 4; i++)
-                        {
-                            int skelBone = skelBoneIndices[i];
-                            skinBoneIndices[i] = skeletonToBindMap.TryGetValue(skelBone, out int bindIdx) ? bindIdx : 0;
-                        }
-                    }
-
-                    var surfaceArrays = new Godot.Collections.Array();
-                    surfaceArrays.Resize((int)Mesh.ArrayType.Max);
-                    surfaceArrays[(int)Mesh.ArrayType.Vertex] = alignedVerts;
-                    surfaceArrays[(int)Mesh.ArrayType.Normal] = alignedNorms;
-                    if (rawUvs != null && rawUvs.Length == vCount)
-                    {
-                        surfaceArrays[(int)Mesh.ArrayType.TexUV] = rawUvs;
-                    }
-                    if (rawIndices != null && rawIndices.Length > 0)
-                    {
-                        surfaceArrays[(int)Mesh.ArrayType.Index] = rawIndices;
-                    }
-                    surfaceArrays[(int)Mesh.ArrayType.Bones] = skinBoneIndices;
-                    surfaceArrays[(int)Mesh.ArrayType.Weights] = outWeights;
-
-                    var newMesh = new ArrayMesh();
-                    newMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, surfaceArrays);
-
-                    Material surfMat = srcMesh.SurfaceGetMaterial(s) ?? srcMi.GetSurfaceOverrideMaterial(s) ?? CreateDefaultPbrMaterial(srcMi.Name);
-                    newMesh.SurfaceSetMaterial(0, surfMat);
-
-                    var newMi = new MeshInstance3D
-                    {
-                        Name = $"{srcMi.Name}_surf{s}",
-                        Mesh = newMesh,
-                        Skin = (isSocketProp && propSkin != null) ? propSkin : heroSkin,
-                        Transform = Transform3D.Identity
-                    };
-
-                    newMi.Layers &= ~(uint)(1 << 20);
-                    newMi.SetMeta("IsCustomImportedMesh", true);
-                    newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
-                    newMi.SetMeta("SourceSurfaceIndex", s);
-                    newMi.SetMeta("OriginalMaterial_0", surfMat);
-                    ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options, heroNode);
-                    if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
-
-                    containerNode.AddChild(newMi);
-                    newMi.Skeleton = newMi.GetPathTo(targetSkeleton);
-                    result.CustomSubmeshes.Add(newMi);
+                    pendingSurfaces.Add((
+                        srcMi, srcMesh, s, alignedVerts, alignedNorms, rawUvs, rawIndices,
+                        skelBoneIndices, outWeights, isSocketProp, hasSurfaceOverride, propSkin, socketMeta));
                 }
+            }
+
+            // Run counter-twist & hip-seam smoothing JOINTLY across all non-socket, non-overridden surfaces so
+            // coincident boundary vertices between separate meshes (e.g. shorts/upper-body mesh vs bare-legs mesh)
+            // weld and smooth across the seam instead of diverging by 15-20% and ripping open a gap!
+            if (options.AutoCounterTwistWeights)
+            {
+                var twistSurfaces = new List<(Vector3[] Verts, int[] Indices, int[] BoneIndices, float[] BoneWeights)>();
+                foreach (var ps in pendingSurfaces)
+                {
+                    if (!ps.IsSocketProp && !ps.HasSurfaceOverride)
+                        twistSurfaces.Add((ps.AlignedVerts, ps.RawIndices, ps.SkelBoneIndices, ps.OutWeights));
+                }
+                if (twistSurfaces.Count > 0)
+                {
+                    AdjustLimbTwistAndHipWeightsMultiSurface(targetSkeleton, twistSurfaces, limbTwistProfile);
+                }
+            }
+
+            foreach (var ps in pendingSurfaces)
+            {
+                var srcMi = ps.SrcMi;
+                var srcMesh = ps.SrcMesh;
+                int s = ps.SurfaceIndex;
+                var alignedVerts = ps.AlignedVerts;
+                var alignedNorms = ps.AlignedNorms;
+                var rawUvs = ps.RawUvs;
+                var rawIndices = ps.RawIndices;
+                var skelBoneIndices = ps.SkelBoneIndices;
+                var outWeights = ps.OutWeights;
+                bool isSocketProp = ps.IsSocketProp;
+                var propSkin = ps.PropSkin;
+                var socketMeta = ps.SocketMeta;
+                int vCount = alignedVerts.Length;
+
+                int[] skinBoneIndices;
+                if (isSocketProp)
+                {
+                    // BakeSocketPropSurface writes Skin bind indices directly for its dedicated propSkin.
+                    skinBoneIndices = skelBoneIndices;
+                }
+                else
+                {
+                    skinBoneIndices = new int[vCount * 4];
+                    for (int i = 0; i < vCount * 4; i++)
+                    {
+                        int skelBone = skelBoneIndices[i];
+                        skinBoneIndices[i] = skeletonToBindMap.TryGetValue(skelBone, out int bindIdx) ? bindIdx : 0;
+                    }
+                }
+
+                var surfaceArrays = new Godot.Collections.Array();
+                surfaceArrays.Resize((int)Mesh.ArrayType.Max);
+                surfaceArrays[(int)Mesh.ArrayType.Vertex] = alignedVerts;
+                surfaceArrays[(int)Mesh.ArrayType.Normal] = alignedNorms;
+                if (rawUvs != null && rawUvs.Length == vCount)
+                {
+                    surfaceArrays[(int)Mesh.ArrayType.TexUV] = rawUvs;
+                }
+                if (rawIndices != null && rawIndices.Length > 0)
+                {
+                    surfaceArrays[(int)Mesh.ArrayType.Index] = rawIndices;
+                }
+                surfaceArrays[(int)Mesh.ArrayType.Bones] = skinBoneIndices;
+                surfaceArrays[(int)Mesh.ArrayType.Weights] = outWeights;
+
+                var newMesh = new ArrayMesh();
+                newMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, surfaceArrays);
+
+                Material surfMat = srcMesh.SurfaceGetMaterial(s) ?? srcMi.GetSurfaceOverrideMaterial(s) ?? CreateDefaultPbrMaterial(srcMi.Name);
+                newMesh.SurfaceSetMaterial(0, surfMat);
+
+                var newMi = new MeshInstance3D
+                {
+                    Name = $"{srcMi.Name}_surf{s}",
+                    Mesh = newMesh,
+                    Skin = (isSocketProp && propSkin != null) ? propSkin : heroSkin,
+                    Transform = Transform3D.Identity
+                };
+
+                newMi.Layers &= ~(uint)(1 << 20);
+                newMi.SetMeta("IsCustomImportedMesh", true);
+                newMi.SetMeta("SourceMeshName", srcMi.Name.ToString());
+                newMi.SetMeta("SourceSurfaceIndex", s);
+                newMi.SetMeta("OriginalMaterial_0", surfMat);
+                ConfigureRiggedSubmeshMetadata(newMi, srcMi, surfMat, options, heroNode);
+                if (socketMeta.HasValue) ApplySocketMetadata(newMi, srcMi.Name.ToString(), socketMeta.Value);
+
+                containerNode.AddChild(newMi);
+                newMi.Skeleton = newMi.GetPathTo(targetSkeleton);
+                result.CustomSubmeshes.Add(newMi);
             }
 
 
@@ -2970,7 +3082,7 @@ namespace DeadlockPlayground.Importer
             Vector3 sumTgtPalmDir = Vector3.Zero;
             int palmDirCount = 0;
             {
-                string[] palmFingers = { "thumb", "index", "middle", "ring", "pinky" };
+                string[] palmFingers = { "index", "middle", "ring", "pinky" };
                 float sumSrcDist = 0f;
                 float sumTgtDist = 0f;
                 int knucklePairs = 0;
@@ -2990,17 +3102,14 @@ namespace DeadlockPlayground.Importer
                         sumSrcDist += lsK;
                         sumTgtDist += ltK;
                         knucklePairs++;
-                        if (pf != "thumb")
-                        {
-                            sumSrcPalmDir += srcOff / lsK;
-                            sumTgtPalmDir += tgtOff / ltK;
-                            palmDirCount++;
-                        }
+                        sumSrcPalmDir += srcOff / lsK;
+                        sumTgtPalmDir += tgtOff / ltK;
+                        palmDirCount++;
                     }
                 }
                 if (!keepFingersRigid && knucklePairs >= 2 && sumSrcDist > 0.01f)
                 {
-                    autoPalmScale = Mathf.Clamp(sumTgtDist / sumSrcDist, 0.78f, 1.50f);
+                    autoPalmScale = Mathf.Clamp(sumTgtDist / sumSrcDist, 0.82f, 1.25f);
                 }
             }
 
@@ -3522,7 +3631,32 @@ namespace DeadlockPlayground.Importer
                     Vector3 rawAt = targetSkeleton.GetBoneGlobalRest(tgtBoneA).Origin;
                     Vector3 Bt;
 
-                    if (tgtBoneB != -1)
+                    // When source is a 2-phalanx finger (i == 1 has no mapped finger_*_2 so srcBoneB == -1 and
+                    // falls through to finger_*_end at the fingertip), resolve target Bt to Deadlock's actual
+                    // fingertip (finger_*_end / extrapolated past finger_*_2) rather than stopping at DIP finger_*_2,
+                    // preventing 50% axial squashing/bunching of the distal finger!
+                    bool isTwoJointDistalTip = (i == 1 && srcBoneB == -1 && sourceSkeleton.GetBoneChildren(srcBoneA).Length > 0);
+                    if (isTwoJointDistalTip)
+                    {
+                        int tgtTip = FindBoneAny(targetSkeleton,
+                            $"finger_{fname}_end_{side}", $"finger_{fname}_leaf_{side}",
+                            $"finger_{fname}_end_{side}".ToLowerInvariant(), $"finger_{fname}_leaf_{side}".ToLowerInvariant());
+                        if (tgtTip != -1)
+                        {
+                            Bt = targetSkeleton.GetBoneGlobalRest(tgtTip).Origin;
+                        }
+                        else if (tgtBoneB != -1)
+                        {
+                            Vector3 dipPos = targetSkeleton.GetBoneGlobalRest(tgtBoneB).Origin;
+                            Vector3 segDir = dipPos - rawAt;
+                            Bt = dipPos + segDir * 0.75f;
+                        }
+                        else
+                        {
+                            Bt = rawAt + Vector3.Forward * 0.03f;
+                        }
+                    }
+                    else if (tgtBoneB != -1)
                     {
                         Bt = targetSkeleton.GetBoneGlobalRest(tgtBoneB).Origin;
                     }
@@ -3597,7 +3731,7 @@ namespace DeadlockPlayground.Importer
                             {
                                 Quaternion qTwist = ShortestArc(pSrc.Normalized(), pTgt.Normalized());
                                 float twAngle = qTwist.GetAngle();
-                                float maxTwist = Mathf.DegToRad(45f);
+                                float maxTwist = Mathf.DegToRad(30f);
                                 if (twAngle > maxTwist)
                                     qTwist = Quaternion.Identity.Slerp(qTwist, maxTwist / twAngle).Normalized();
                                 R = (qTwist * qAxis).Normalized();
@@ -3609,9 +3743,9 @@ namespace DeadlockPlayground.Importer
                         R = (ShortestArc((prevR * uS).Normalized(), uT) * prevR).Normalized();
                     }
 
-                    // Exact length matching (clamped only against extreme degeneracy 0.50..1.80) so each phalanx's
-                    // distal tip lands dead-on Deadlock's next bone pivot Bt with 0.000mm gap!
-                    float sigma = Mathf.Clamp(Lt / Ls, 0.50f, 1.80f);
+                    // Keep phalanx axial stretch tightly bounded [0.75, 1.30] so fingers never bunch up or over-stretch
+                    // when source finger proportions differ from the target Deadlock hero.
+                    float sigma = Mathf.Clamp(Lt / Ls, 0.75f, 1.30f);
                     Vector3 effBt = At + uT * (Ls * sigma);
 
                     prevEffBt = effBt;
@@ -3683,7 +3817,12 @@ namespace DeadlockPlayground.Importer
             Vector3 uS = (Bs - As) / Ls;
             Vector3 uT = (Bt - At) / Lt;
             Quaternion R = ShortestArc(uS, uT);
-            float sigma = Mathf.Clamp(Lt / Ls, 0.35f, 2.50f);
+            float metaAngle = R.GetAngle();
+            float maxMetaAngle = Mathf.DegToRad(25f);
+            if (metaAngle > maxMetaAngle)
+                R = Quaternion.Identity.Slerp(R, maxMetaAngle / metaAngle).Normalized();
+            float sigma = Mathf.Clamp(Lt / Ls, 0.75f, 1.30f);
+            Vector3 effUnitT = (R * uS).Normalized();
 
             fingersReg.PhalanxesByTargetBone[tgtMeta] = new FingerPhalanxSegment
             {
@@ -3692,9 +3831,9 @@ namespace DeadlockPlayground.Importer
                 As = As,
                 Bs = Bs,
                 At = At,
-                Bt = At + uT * (Ls * sigma),
+                Bt = At + effUnitT * (Ls * sigma),
                 UnitSource = uS,
-                UnitTarget = uT,
+                UnitTarget = effUnitT,
                 LengthSource = Ls,
                 LengthTarget = Lt,
                 Sigma = sigma,
@@ -3936,6 +4075,15 @@ namespace DeadlockPlayground.Importer
             skeleton.ForceUpdateAllBoneTransforms();
         }
 
+        public static Transform3D ComputeImportedMeshToHeroTransform(MeshInstance3D mi, Node3D importedScene, Transform3D alignedTransform)
+        {
+            if (mi != null && mi.HasMeta("IsHeroSpaceDonorMesh") && mi.GetMeta("IsHeroSpaceDonorMesh").AsBool())
+            {
+                return ComputeTransformRelativeToRoot(mi, importedScene);
+            }
+            return alignedTransform * ComputeTransformRelativeToRoot(mi, importedScene);
+        }
+
         private static List<DonorVertex> ExtractHeroDonorVertices(
             Node3D heroNode,
             Skeleton3D skeleton,
@@ -3945,7 +4093,28 @@ namespace DeadlockPlayground.Importer
             RiggingOptions options)
         {
             var result = new List<DonorVertex>(3500);
-            var meshes = CollectOriginalHeroMeshes(heroNode);
+            bool isAccessorySlot = !string.IsNullOrWhiteSpace(options?.SlotId);
+            List<MeshInstance3D> meshes = null;
+            bool allowCustomMeshes = false;
+
+            // When rigging an independent accessory onto a hero that has an active complete replacement model,
+            // prefer the replacement model's skinned meshes as the KNN donor cloud so cloth/armor conforms to it.
+            if (isAccessorySlot && heroNode != null)
+            {
+                var mainCustomContainer = heroNode.FindChild("Custom_Rigged_Character", true, false) as Node3D;
+                if (mainCustomContainer != null && GodotObject.IsInstanceValid(mainCustomContainer) && mainCustomContainer.Visible)
+                {
+                    var customCandidates = CollectMeshes(mainCustomContainer)
+                        .Where(m => m.Mesh != null && m.Visible && (m.Skin != null || HasSkinnedVertices(m)))
+                        .ToList();
+                    if (customCandidates.Count > 0)
+                    {
+                        meshes = customCandidates;
+                        allowCustomMeshes = true;
+                    }
+                }
+            }
+            meshes ??= CollectOriginalHeroMeshes(heroNode);
             Skin fallbackHeroSkin = FindSkin(heroNode);
 
             int boneCount = Math.Min(restGlobal.Length, posedGlobal.Length);
@@ -3964,7 +4133,7 @@ namespace DeadlockPlayground.Importer
             foreach (var mi in meshes)
             {
                 if (mi.Mesh == null || mi.Mesh.GetSurfaceCount() == 0) continue;
-                if (mi.HasMeta("IsCustomImportedMesh")) continue;
+                if (!allowCustomMeshes && mi.HasMeta("IsCustomImportedMesh")) continue;
 
                 string rawName = mi.Name.ToString().ToLowerInvariant();
                 if (rawName.Contains("weapon") || rawName.Contains("gun") || rawName.Contains("cloth") ||
@@ -5162,6 +5331,76 @@ namespace DeadlockPlayground.Importer
         }
 
         /// <summary>
+        /// Runs <see cref="AdjustLimbTwistAndHipWeights"/> jointly across all rigged surfaces so
+        /// <see cref="SmoothWeightsLaplacian"/> welds coincident seam vertices across separate meshes
+        /// (e.g. upper-body shorts mesh + bare legs mesh) and guarantees 0.0000 weight divergence across seams.
+        /// </summary>
+        public static void AdjustLimbTwistAndHipWeightsMultiSurface(
+            Skeleton3D skeleton,
+            IReadOnlyList<(Vector3[] Verts, int[] Indices, int[] BoneIndices, float[] BoneWeights)> surfaces,
+            LimbTwistProfile profile = null)
+        {
+            if (skeleton == null || surfaces == null || surfaces.Count == 0)
+                return;
+            if (surfaces.Count == 1)
+            {
+                var s0 = surfaces[0];
+                AdjustLimbTwistAndHipWeights(skeleton, s0.Verts.Length, s0.BoneIndices, s0.BoneWeights, s0.Verts, s0.Indices, profile);
+                return;
+            }
+
+            int totalV = 0;
+            int totalI = 0;
+            for (int s = 0; s < surfaces.Count; s++)
+            {
+                var surf = surfaces[s];
+                if (surf.Verts == null || surf.Verts.Length == 0) continue;
+                totalV += surf.Verts.Length;
+                if (surf.Indices != null && surf.Indices.Length >= 3) totalI += surf.Indices.Length;
+            }
+            if (totalV == 0) return;
+
+            var allVerts = new Vector3[totalV];
+            var allBones = new int[totalV * 4];
+            var allWeights = new float[totalV * 4];
+            var allIndices = totalI >= 3 ? new int[totalI] : null;
+
+            int vOff = 0;
+            int iOff = 0;
+            for (int s = 0; s < surfaces.Count; s++)
+            {
+                var surf = surfaces[s];
+                int vc = surf.Verts?.Length ?? 0;
+                if (vc == 0) continue;
+                Array.Copy(surf.Verts, 0, allVerts, vOff, vc);
+                Array.Copy(surf.BoneIndices, 0, allBones, vOff * 4, vc * 4);
+                Array.Copy(surf.BoneWeights, 0, allWeights, vOff * 4, vc * 4);
+                if (allIndices != null && surf.Indices != null && surf.Indices.Length >= 3)
+                {
+                    int ic = surf.Indices.Length;
+                    for (int k = 0; k < ic; k++)
+                        allIndices[iOff + k] = surf.Indices[k] + vOff;
+                    iOff += ic;
+                }
+                vOff += vc;
+            }
+
+            AdjustLimbTwistAndHipWeights(skeleton, totalV, allBones, allWeights, allVerts, allIndices, profile);
+
+            // Copy updated cross-seam-welded weights back to each surface
+            vOff = 0;
+            for (int s = 0; s < surfaces.Count; s++)
+            {
+                var surf = surfaces[s];
+                int vc = surf.Verts?.Length ?? 0;
+                if (vc == 0) continue;
+                Array.Copy(allBones, vOff * 4, surf.BoneIndices, 0, vc * 4);
+                Array.Copy(allWeights, vOff * 4, surf.BoneWeights, 0, vc * 4);
+                vOff += vc;
+            }
+        }
+
+        /// <summary>
         /// Automatically redistributes proximal thigh and upper-arm weights onto existing Source 2
         /// counter-twist bones (*_TWIST / *_TWIST1), softens razor-sharp 1-bone hip seams for LBS volume
         /// preservation, and prunes stray distal ankle/hand bleeds above the knee/elbow.
@@ -5238,18 +5477,26 @@ namespace DeadlockPlayground.Importer
             if (profile.PelvisBone >= 0 && rPerp <= 0.32f)
             {
                 float pelvisW = GetLimbWeight(uBones, uWeights, uCount, profile.PelvisBone);
-                float maxPelvis = 0.42f * (1.0f - SmoothStep01(-0.02f, 0.14f, tUpper));
-                if (tUpper >= 0.00f && tUpper <= 0.50f && (upperW + pelvisW) >= 0.40f && upperW >= 0.08f && pelvisW > maxPelvis)
+                // Keep hip/glute crease weights smooth (no hard step-cliff at tUpper=0) while capping stray
+                // pelvis bleed below tUpper >= 0.16 down to <= 0.12 by tUpper = 0.20 for thigh LBS volume preservation.
+                float maxPelvis = 0.12f * (1.0f - SmoothStep01(0.18f, 0.28f, tUpper));
+                float thighGate = tUpper >= 0.20f ? 1.0f : SmoothStep01(0.12f, 0.28f, upperW);
+                float effectiveMaxPelvis = Mathf.Lerp(pelvisW, maxPelvis, thighGate);
+
+                if (tUpper >= 0.16f && tUpper <= 0.50f && (upperW + pelvisW) >= 0.40f && upperW >= 0.12f && pelvisW > effectiveMaxPelvis)
                 {
-                    float cappedPelvis = maxPelvis > 0.005f ? maxPelvis : 0f;
+                    float cappedPelvis = effectiveMaxPelvis > 0.005f ? effectiveMaxPelvis : 0f;
                     float excess = pelvisW - cappedPelvis;
-                    SubtractLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone);
-                    if (cappedPelvis > 0f)
-                        AccumulateLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone, cappedPelvis);
-                    if (absorbBoneOverride >= 0)
-                        AccumulateLimbWeight(uBones, uWeights, ref uCount, absorbBone, excess);
-                    upperW += excess;
-                    changed = true;
+                    if (excess > 0.003f)
+                    {
+                        SubtractLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone);
+                        if (cappedPelvis > 0f)
+                            AccumulateLimbWeight(uBones, uWeights, ref uCount, profile.PelvisBone, cappedPelvis);
+                        if (absorbBoneOverride >= 0)
+                            AccumulateLimbWeight(uBones, uWeights, ref uCount, absorbBone, excess);
+                        upperW += excess;
+                        changed = true;
+                    }
                 }
                 else if (absorbBoneOverride < 0 && tUpper >= -0.10f && tUpper <= 0.05f && upperW >= 0.45f && pelvisW < 0.24f)
                 {
@@ -5456,8 +5703,8 @@ namespace DeadlockPlayground.Importer
                     }
                 }
 
-                // Flag proximal hip / shoulder / knee crease vertices for targeted triangle-seam feathering
-                if ((tUpper >= -0.10f && tUpper <= (chain.IsLeg ? 0.12f : 0.20f)) ||
+                // Flag proximal hip / glute / shoulder / knee crease vertices for targeted triangle-seam feathering
+                if ((tUpper >= (chain.IsLeg ? -0.14f : -0.10f) && tUpper <= 0.20f) ||
                     (chain.IsLeg && tUpper >= 0.90f && tUpper <= 1.10f))
                 {
                     inCreaseSeam = true;
@@ -5834,6 +6081,34 @@ namespace DeadlockPlayground.Importer
                         usedTargets.Add(tIdx);
                     }
                 }
+            }
+
+            // 1b. Exact 1:1 canonical mapping for LandmarkSyntheticSkeleton (built by ReferenceRigDef with authentic Deadlock
+            //     bone names) BEFORE heuristic HumanoidBoneMapper.AutoMap / AdjustThreeSpineToFourSpine / RigBoneClassifier,
+            //     so removing spine_0 or reducing SpineCount is respected verbatim instead of remapping back onto spine_0!
+            bool isSyntheticDeadlockRig = string.Equals(sourceSkeleton.Name.ToString(), "LandmarkSyntheticSkeleton", StringComparison.Ordinal);
+            if (isSyntheticDeadlockRig && (userCustomRemap == null || userCustomRemap.Count == 0))
+            {
+                int sTotal = sourceSkeleton.GetBoneCount();
+                for (int sIdx = 0; sIdx < sTotal; sIdx++)
+                {
+                    if (IsDisabled(sIdx) || map.ContainsKey(sIdx)) continue;
+                    string sName = sourceSkeleton.GetBoneName(sIdx);
+                    int tIdx = FindBoneAny(targetSkeleton, sName, sName.ToLowerInvariant());
+                    if (tIdx == -1 && sName.Equals("neck_0", StringComparison.OrdinalIgnoreCase))
+                        tIdx = FindBoneAny(targetSkeleton, "neck", "neck_01");
+                    if (tIdx == -1 && sName.StartsWith("toe_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string ballName = "ball_" + sName[4..];
+                        tIdx = FindBoneAny(targetSkeleton, ballName, ballName.ToLowerInvariant());
+                    }
+                    if (tIdx != -1 && !usedTargets.Contains(tIdx))
+                    {
+                        map[sIdx] = tIdx;
+                        usedTargets.Add(tIdx);
+                    }
+                }
+                return map;
             }
 
             // 2. Fallback via HumanoidBoneMapper.AutoMap for any unmapped targets ONLY when no explicit user map was supplied,
@@ -6672,6 +6947,43 @@ namespace DeadlockPlayground.Importer
                     mi.SetMeta("UserVisibility", keep);
                     if (keep) mi.RemoveMeta("UserHiddenByCustomModel");
                     else mi.SetMeta("UserHiddenByCustomModel", true);
+                }
+            }
+
+            // Also apply explicit accessory replacement targets against a complete custom replacement model
+            // so independent accessories can replace/hide specific parts of Custom_Rigged_Character cleanly.
+            var mainReplacementContainer = heroNode.FindChild("Custom_Rigged_Character", true, false) as Node3D;
+            if (mainReplacementContainer != null && GodotObject.IsInstanceValid(mainReplacementContainer))
+            {
+                var accessoryHiddenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var container in CollectCustomContainers(heroNode))
+                {
+                    if (!container.Visible || container == mainReplacementContainer) continue;
+                    if (container.HasMeta("SlotIsAddAccessory") && container.GetMeta("SlotIsAddAccessory").AsBool())
+                        continue;
+                    if (container.HasMeta("SlotHiddenTargets"))
+                    {
+                        var arr = container.GetMeta("SlotHiddenTargets").AsStringArray();
+                        if (arr != null)
+                        {
+                            foreach (var t in arr)
+                            {
+                                if (!string.IsNullOrEmpty(t)) accessoryHiddenTargets.Add(t);
+                            }
+                        }
+                    }
+                }
+
+                foreach (var customMi in CollectMeshes(mainReplacementContainer))
+                {
+                    if (customMi == null || !GodotObject.IsInstanceValid(customMi)) continue;
+                    string cName = customMi.Name.ToString();
+                    bool hiddenByAccessory = accessoryHiddenTargets.Contains(cName) ||
+                                             accessoryHiddenTargets.Contains(MakeSurfaceKeepKey(cName, 0));
+                    customMi.Visible = !hiddenByAccessory;
+                    customMi.SetMeta("UserVisibility", !hiddenByAccessory);
+                    if (hiddenByAccessory) customMi.SetMeta("UserHiddenByCustomModel", true);
+                    else customMi.RemoveMeta("UserHiddenByCustomModel");
                 }
             }
 
@@ -7785,7 +8097,7 @@ namespace DeadlockPlayground.Importer
             outVerts = new Vector3[vCount];
             outNorms = new Vector3[vCount];
 
-            Transform3D fallbackXform = prefixTransform * ComputeTransformRelativeToRoot(mi, sourceRoot);
+            Transform3D fallbackXform = ComputeImportedMeshToHeroTransform(mi, sourceRoot, prefixTransform);
 
             Skeleton3D skel = null;
             if (!string.IsNullOrEmpty(mi.Skeleton.ToString()))
@@ -7894,6 +8206,7 @@ namespace DeadlockPlayground.Importer
             foreach (var mi in meshes)
             {
                 if (mi.Mesh == null) continue;
+                if (mi.HasMeta("IsHeroSpaceDonorMesh") && mi.GetMeta("IsHeroSpaceDonorMesh").AsBool()) continue;
                 if (includedSet != null && !includedSet.Contains(mi.Name.ToString())) continue;
 
                 for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
@@ -9532,6 +9845,18 @@ namespace DeadlockPlayground.Importer
             else skeleton.RemoveMeta("CustomAppendedBoneEntries");
         }
 
+        /// <summary>
+        /// Strips non-unit scale, shear, and handedness reflection from a basis so appended custom bones
+        /// always carry pure unit-scale right-handed rotations matching Source 2's scale-less Skeleton/FeModel.
+        /// </summary>
+        private static Basis OrthonormalizeRightHanded(Basis b)
+        {
+            Basis ortho = b.Orthonormalized();
+            if (ortho.Determinant() < 0f)
+                ortho = new Basis(ortho.X, ortho.Y, -ortho.Z);
+            return ortho;
+        }
+
         private static void AppendPreservedSourceChainToHeroSkeleton(
             Skeleton3D sourceSkeleton,
             Transform3D skelToHero,
@@ -9581,8 +9906,15 @@ namespace DeadlockPlayground.Importer
                 {
                     srcGlobalHero.Origin += pelvisOffset;
                 }
+                // Source 2 skeletons & FeModel cloth chains have NO per-bone scale.
+                // Stripping cm-armature / Fitting-Room scale (e.g. 0.01x from Unreal/FBX/Blender rigs)
+                // prevents parentGlobalHero.AffineInverse() from exploding child bone origins by 100x on export!
+                srcGlobalHero = new Transform3D(OrthonormalizeRightHanded(srcGlobalHero.Basis), srcGlobalHero.Origin);
+
                 Transform3D parentGlobalHero = tgtParent >= 0 ? targetSkeleton.GetBoneGlobalRest(tgtParent) : Transform3D.Identity;
-                Transform3D localRestHero = parentGlobalHero.AffineInverse() * srcGlobalHero;
+                Transform3D parentRigidHero = new Transform3D(OrthonormalizeRightHanded(parentGlobalHero.Basis), parentGlobalHero.Origin);
+                Transform3D localRestHero = parentRigidHero.AffineInverse() * srcGlobalHero;
+                localRestHero = new Transform3D(OrthonormalizeRightHanded(localRestHero.Basis), localRestHero.Origin);
 
                 string uniqueName = DeduplicateHeroBoneName(targetSkeleton, srcName);
                 int newIdx = targetSkeleton.GetBoneCount();
@@ -9591,7 +9923,7 @@ namespace DeadlockPlayground.Importer
                 targetSkeleton.SetBoneRest(newIdx, localRestHero);
                 targetSkeleton.SetBonePosePosition(newIdx, localRestHero.Origin);
                 targetSkeleton.SetBonePoseRotation(newIdx, localRestHero.Basis.GetRotationQuaternion());
-                targetSkeleton.SetBonePoseScale(newIdx, localRestHero.Basis.Scale);
+                targetSkeleton.SetBonePoseScale(newIdx, Vector3.One);
 
                 if (heroSkin != null) GetOrAddSkinBindIndex(heroSkin, targetSkeleton, newIdx);
 

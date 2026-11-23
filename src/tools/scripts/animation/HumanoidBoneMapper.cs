@@ -560,6 +560,13 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
+            // 0. Exact canonical match for Deadlock-named spine bones (e.g. spine_0..3) when spine_0 is intentionally omitted
+            if (def.Group == BoneGroup.Spine)
+            {
+                var exactCanonical = sourceBones.FirstOrDefault(b => string.Equals(b, def.CanonicalName, StringComparison.OrdinalIgnoreCase));
+                if (exactCanonical != null) return exactCanonical;
+            }
+
             // 1. Exact match with any source alias
             foreach (var alias in aliasesToSearch)
             {
@@ -608,6 +615,14 @@ namespace DeadlockPlayground.Animation
 
                     // Leaf "_end" nubs (e.g. head1_end, hand_end) must not steal primary joint slots
                     if (c.EndsWith("_end") && !cleanAlias.EndsWith("_end")) return false;
+
+                    // Prevent bare "spine" alias on spine_0 from prefix-hijacking numbered spine bones (e.g. spine_1, spine_2, spine_3)
+                    if (cleanAlias == "spine" && c.StartsWith("spine_", StringComparison.Ordinal))
+                    {
+                        string tail = c["spine_".Length..];
+                        if (tail.Length > 0 && char.IsDigit(tail[0]) && tail != "0" && tail != "00")
+                            return false;
+                    }
 
                     // Match tokens or exact compound word
                     return c == cleanAlias || c.StartsWith(cleanAlias + "_") || c.EndsWith("_" + cleanAlias) || c.Contains("_" + cleanAlias + "_");
@@ -667,6 +682,18 @@ namespace DeadlockPlayground.Animation
                     "spine_3" => new[] { "spine_3", "spine3", "bip_spine3", "b_spine3", "upperchest", "upper_chest", "spine_03" },
                     _ => def.SourceAliases
                 };
+            }
+
+            // 0. Exact canonical match for Deadlock-named spine bones (e.g. spine_0..3) when spine_0 is intentionally omitted
+            if (def.Group == BoneGroup.Spine)
+            {
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    ref readonly var e = ref entries[i];
+                    if (e.IsHelper || (!allowTwist && e.IsTwist)) continue;
+                    if (excludeSourceBones != null && excludeSourceBones.Contains(e.Raw)) continue;
+                    if (string.Equals(e.Raw, def.CanonicalName, StringComparison.OrdinalIgnoreCase)) return e.Raw;
+                }
             }
 
             // 1. Exact match
@@ -733,6 +760,14 @@ namespace DeadlockPlayground.Animation
                     if (isRight && (c.EndsWith("_l") || c.Contains("_l_") || c.Contains("left")) && !c.Contains("right")) continue;
                     if (def.CanonicalName == "head" && c.Contains("forehead")) continue;
                     if (c.EndsWith("_end") && !cleanAlias.EndsWith("_end")) continue;
+
+                    // Prevent bare "spine" alias on spine_0 from prefix-hijacking numbered spine bones (e.g. spine_1, spine_2, spine_3)
+                    if (cleanAlias == "spine" && c.StartsWith("spine_", StringComparison.Ordinal))
+                    {
+                        string tail = c["spine_".Length..];
+                        if (tail.Length > 0 && char.IsDigit(tail[0]) && tail != "0" && tail != "00")
+                            continue;
+                    }
 
                     if (c == cleanAlias || c.StartsWith(cleanAlias + "_") || c.EndsWith("_" + cleanAlias) || c.Contains("_" + cleanAlias + "_"))
                         return e.Raw;

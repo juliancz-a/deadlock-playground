@@ -346,11 +346,17 @@ namespace DeadlockPlayground.Importer
                 var names = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
                     ? ch.AppendedHeroBoneNames
                     : ch.SourceBoneNames;
-                if (names == null || names.Count < 2) continue;
+                if (names == null || names.Count == 0) continue;
 
-                float tipColM = MathF.Max(0.008f, ch.CollisionRadiusTipInches * InchesToMeters);
+                float tipColM = MathF.Max(0.006f, ch.CollisionRadiusTipInches * InchesToMeters);
                 int count = names.Count;
-                for (int j = 1; j < count; j++) // j == 0 is pinned root
+                // Both Valve-style ClothChain (pinned scalp bone[0]) and ProxyCloth (pinned waistband/collar bone[0])
+                // pin bone 0 and simulate bone 1..end plus a tip row past the leaf bone.
+                int startJ = count > 1 ? 1 : 0;
+                int dynTotal = Math.Max(1, count - startJ + 1);
+                int prevBIdx = -1;
+                int lastBIdx = -1;
+                for (int j = startJ; j < count; j++)
                 {
                     string bn = names[j];
                     if (string.IsNullOrWhiteSpace(bn)) continue;
@@ -361,13 +367,32 @@ namespace DeadlockPlayground.Importer
                     int bIdx = FindBoneCaseInsensitive(skeleton, bn);
                     if (bIdx < 0) continue;
 
-                    float frac = count > 1 ? (float)j / (count - 1) : 1f;
+                    float frac = (float)(j - startJ + 1) / dynTotal;
                     float colM = (jOv != null && jOv.CollisionRadiusInches.HasValue)
                         ? MathF.Max(0.005f, jOv.CollisionRadiusInches.Value * InchesToMeters)
-                        : Mathf.Lerp(tipColM * 0.45f, tipColM, frac);
+                        : Mathf.Lerp(MathF.Min(0.011f, tipColM * 0.45f), tipColM, frac);
 
                     Vector3 posHero = skeleton.GetBoneGlobalRest(bIdx).Origin;
-                    dynamicNodes.Add((posHero, colM, ch.AnchorHeroBone ?? ""));
+                    if (j > 0 || count == 1)
+                        dynamicNodes.Add((posHero, colM, ch.AnchorHeroBone ?? ""));
+                    prevBIdx = lastBIdx;
+                    lastBIdx = bIdx;
+                }
+                // Include the synthetic hem/leaf tip position for BOTH ClothChain and ProxyCloth so clearance matches export & preview 1:1.
+                if (lastBIdx >= 0)
+                {
+                    Vector3 leafPos = skeleton.GetBoneGlobalRest(lastBIdx).Origin;
+                    int refPrevIdx = prevBIdx >= 0 ? prevBIdx : (count >= 2 ? FindBoneCaseInsensitive(skeleton, names[count - 2]) : skeleton.GetBoneParent(lastBIdx));
+                    if (refPrevIdx >= 0)
+                    {
+                        Vector3 seg = leafPos - skeleton.GetBoneGlobalRest(refPrevIdx).Origin;
+                        float segLen = seg.Length();
+                        if (segLen > 1e-4f)
+                        {
+                            float tipLen = Mathf.Clamp(segLen * 0.85f, 0.035f, 0.12f);
+                            dynamicNodes.Add((leafPos + (seg / segLen) * tipLen, tipColM, ch.AnchorHeroBone ?? ""));
+                        }
+                    }
                 }
             }
 
@@ -382,11 +407,14 @@ namespace DeadlockPlayground.Importer
                 int bIdx = FindBoneCaseInsensitive(skeleton, cap.BoneName);
                 if (bIdx < 0) continue;
 
-                // Never crush a mesh-fitted anatomical capsule into a pencil stick (e.g. 2.17 in thighs):
-                // trim at most ~25% of fitted silhouette and always respect spec.MinRadius.
-                float specMin = minRadiusByBone.TryGetValue(cap.BoneName, out float sm) ? sm : 0.075f;
-                float floorR0 = MathF.Max(specMin, cap.Radius0Meters * 0.75f);
-                float floorR1 = MathF.Max(specMin, cap.Radius1Meters * 0.75f);
+                // Never crush anatomical torso/leg capsules into pencil sticks, but allow head/neck capsules
+                // to trim further when dynamic short-hair/bang nodes sit close to the skull surface.
+                bool isHeadOrNeck = cap.BoneName.Equals("head", StringComparison.OrdinalIgnoreCase) ||
+                                    cap.BoneName.Equals("neck_0", StringComparison.OrdinalIgnoreCase);
+                bool isArm = cap.BoneName.StartsWith("arm_", StringComparison.OrdinalIgnoreCase);
+                float specMin = minRadiusByBone.TryGetValue(cap.BoneName, out float sm) ? sm : 0.065f;
+                float floorR0 = isHeadOrNeck ? 0.046f : (isArm ? 0.050f : MathF.Min(specMin, 0.068f));
+                float floorR1 = isHeadOrNeck ? 0.046f : (isArm ? 0.050f : MathF.Min(specMin, 0.068f));
 
                 Transform3D boneRest = skeleton.GetBoneGlobalRest(bIdx);
                 Vector3 p0Hero = boneRest * (cap.Point0Local + cap.LocalOffsetMeters);
@@ -404,11 +432,15 @@ namespace DeadlockPlayground.Importer
 
                     // Ignore nodes sitting virtually on top of their own anchor bone's centerline
                     // (e.g. a scalp tuft right on the head bone origin) so we don't collapse that capsule.
-                    if (dist < 0.055f && cap.BoneName.Equals(node.AnchorBone, StringComparison.OrdinalIgnoreCase))
+                    if (dist < 0.048f && cap.BoneName.Equals(node.AnchorBone, StringComparison.OrdinalIgnoreCase))
                         continue;
 
                     float rAtT = Mathf.Lerp(cap.Radius0Meters, cap.Radius1Meters, t) * cap.RadiusScale;
-                    float margin = MathF.Min(node.NodeColRMeters * 0.45f, 0.015f);
+                    // Source 2 collides at capRad + nodeColRad; clear full node radius (capped at 2.2 in = 5.6 cm)
+                    // on ALL capsules so skirts, coats, capes, and hair never spawn penetrating a body capsule on Frame 1.
+                    float margin = isHeadOrNeck
+                        ? (MathF.Min(node.NodeColRMeters, 0.038f) + 0.004f)
+                        : (MathF.Min(node.NodeColRMeters, 0.056f) + 0.003f);
                     if (dist < rAtT + margin)
                     {
                         float rawSafeR = (dist - margin) / MathF.Max(0.01f, cap.RadiusScale);

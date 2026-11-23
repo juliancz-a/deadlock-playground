@@ -762,6 +762,7 @@ namespace DeadlockPlayground.Importer
 
             var usedNormalized = new HashSet<string>(nonCustomNames, StringComparer.OrdinalIgnoreCase);
             var renameMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            var processedOrig = new HashSet<string>(StringComparer.Ordinal);
 
             string SanitizeCustomBoneName(string raw)
             {
@@ -778,7 +779,7 @@ namespace DeadlockPlayground.Importer
                 string orig = bundle.BoneNames[i];
                 if (string.IsNullOrEmpty(orig) || !bundle.PreservedCustomBoneNames.Contains(orig))
                     continue;
-                if (renameMap.ContainsKey(orig))
+                if (!processedOrig.Add(orig))
                     continue;
 
                 string baseClean = SanitizeCustomBoneName(orig);
@@ -797,7 +798,7 @@ namespace DeadlockPlayground.Importer
             // Also cover any PreservedCustomBoneNames not present in BoneNames
             foreach (var orig in bundle.PreservedCustomBoneNames.ToList())
             {
-                if (string.IsNullOrEmpty(orig) || renameMap.ContainsKey(orig))
+                if (string.IsNullOrEmpty(orig) || !processedOrig.Add(orig))
                     continue;
                 string baseClean = SanitizeCustomBoneName(orig);
                 string candidate = baseClean;
@@ -1431,6 +1432,7 @@ namespace DeadlockPlayground.Importer
                     {
                         targetSkeletonBones = ParseSkeletonBonesFromVmdlText(decompiledVmdlText);
                     }
+                    EnsureClothChainLeafTipBonesInBundle(bundle);
                     MergePreservedCustomBonesIntoSkeleton(bundle, targetSkeletonBones);
                     ExtendShortLeafClothBonesInBundle(bundle, targetSkeletonBones);
                     GD.Print($"[CustomModelExporter] Final exported bone list ({targetSkeletonBones.Count} bones, {bundle.PreservedCustomBoneNames.Count} custom/preserved): " +
@@ -2436,6 +2438,10 @@ namespace DeadlockPlayground.Importer
                 bool wroteSoftbody = false;
                 bool wroteJiggleList = false;
 
+                // Ensure every ClothChain with a weighted leaf bone has an unweighted Valve-style *_end tip bone
+                // so pinning bone[0] on the scalp (allow_rotation=true) aims every bone cleanly (matching Paige/Lash).
+                EnsureClothChainLeafTipBonesInBundle(bundle);
+
                 var boneParentByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 var srcWorldByName = new Dictionary<string, (Vector3 Pos, System.Numerics.Quaternion Rot)>(StringComparer.OrdinalIgnoreCase);
                 if (bundle.BoneHierarchy != null)
@@ -2735,10 +2741,157 @@ namespace DeadlockPlayground.Importer
         private static readonly System.Numerics.Quaternion SourceToGltfRootQuat = new(-0.5f, -0.5f, -0.5f, 0.5f);
         private static readonly System.Numerics.Quaternion GltfToSourceRootQuat = new(0.5f, 0.5f, 0.5f, 0.5f);
 
+        private static Basis OrthonormalizeRightHanded(Basis b)
+        {
+            Basis ortho = b.Orthonormalized();
+            if (ortho.Determinant() < 0f)
+                ortho = new Basis(ortho.X, ortho.Y, -ortho.Z);
+            return ortho;
+        }
+
+        private static Vector3 SourceToGodotPosition(Vector3 s)
+        {
+            return new Vector3(s.Y * InchesToMeters, s.Z * InchesToMeters, s.X * InchesToMeters);
+        }
+
+        private static Dictionary<string, (Vector3 Pos, System.Numerics.Quaternion Rot)> ComputeSourceWorldTransformsFromVmdlBones(
+            List<VmdlSkeletonBone> bones)
+        {
+            var map = new Dictionary<string, (Vector3 Pos, System.Numerics.Quaternion Rot)>(StringComparer.OrdinalIgnoreCase);
+            if (bones == null || bones.Count == 0) return map;
+
+            var posArr = new Vector3[bones.Count];
+            var rotArr = new System.Numerics.Quaternion[bones.Count];
+            var done = new bool[bones.Count];
+
+            void Ensure(int idx)
+            {
+                if (idx < 0 || idx >= bones.Count || done[idx]) return;
+                done[idx] = true;
+                var b = bones[idx];
+                var qLocal = b.HasParentRot
+                    ? System.Numerics.Quaternion.Normalize(b.ParentRot)
+                    : SourceQAngleDegreesToQuaternion(b.AnglesDeg);
+                if (b.ParentIndex >= 0 && b.ParentIndex < bones.Count && b.ParentIndex != idx)
+                {
+                    Ensure(b.ParentIndex);
+                    rotArr[idx] = System.Numerics.Quaternion.Normalize(rotArr[b.ParentIndex] * qLocal);
+                    posArr[idx] = posArr[b.ParentIndex] + RotateVecBySysQuat(rotArr[b.ParentIndex], b.Origin);
+                }
+                else
+                {
+                    rotArr[idx] = qLocal;
+                    posArr[idx] = b.Origin;
+                }
+                if (!string.IsNullOrEmpty(b.Name))
+                    map[b.Name] = (posArr[idx], rotArr[idx]);
+            }
+
+            for (int i = 0; i < bones.Count; i++) Ensure(i);
+            return map;
+        }
+
+        private static Vector3 ComputeParentAccumulatedGodotScale(string parentName, CustomModelExportBundle bundle)
+        {
+            if (string.IsNullOrEmpty(parentName) || bundle?.BoneLocalRestTransforms == null)
+                return Vector3.One;
+            Vector3 accum = Vector3.One;
+            string cur = parentName;
+            int guard = 0;
+            while (!string.IsNullOrEmpty(cur) && guard++ < 64)
+            {
+                if (bundle.BoneLocalRestTransforms.TryGetValue(cur, out Transform3D lt))
+                {
+                    Vector3 sc = lt.Basis.Scale;
+                    accum = new Vector3(accum.X * MathF.Abs(sc.X), accum.Y * MathF.Abs(sc.Y), accum.Z * MathF.Abs(sc.Z));
+                }
+                if (bundle.BoneHierarchy == null || !bundle.BoneHierarchy.TryGetValue(cur, out cur))
+                    break;
+            }
+            return accum;
+        }
+
+        /// <summary>
+        /// Resolves a preserved custom bone's Source 2 parent-local (origin inches, quaternion, QAngles)
+        /// using orthonormalized world rest transforms whenever available so non-unit ancestor scales
+        /// (e.g. 0.01x cm-rigged FBX/GLB armatures or Fitting-Room resizes) NEVER inflate child bone
+        /// offsets in Source 2's scale-less Skeleton / FeModel.
+        /// </summary>
+        private static (Vector3 OriginIn, System.Numerics.Quaternion ParentRot, Vector3 AnglesDeg) ResolveCustomBoneSourceLocal(
+            string bName,
+            string parentName,
+            bool isRootBone,
+            CustomModelExportBundle bundle,
+            Dictionary<string, (Vector3 Pos, System.Numerics.Quaternion Rot)> srcWorldByName)
+        {
+            // Primary path: derive directly from orthonormalized global rest transforms (immune to ancestor bone scale)
+            if (bundle?.BoneRestTransforms != null &&
+                bundle.BoneLocalRestTransforms != null && bundle.BoneLocalRestTransforms.Count > 0 &&
+                bundle.BoneRestTransforms.TryGetValue(bName, out Transform3D boneGlobalGd))
+            {
+                Vector3 bonePosSrc = GodotToSourcePosition(boneGlobalGd.Origin);
+                Quaternion qGd = OrthonormalizeRightHanded(boneGlobalGd.Basis).GetRotationQuaternion();
+                var boneRotSrc = System.Numerics.Quaternion.Normalize(
+                    GltfToSourceRootQuat * new System.Numerics.Quaternion(qGd.X, qGd.Y, qGd.Z, qGd.W));
+
+                if (isRootBone)
+                {
+                    if (srcWorldByName != null) srcWorldByName[bName] = (bonePosSrc, boneRotSrc);
+                    return (bonePosSrc, boneRotSrc, QuaternionToSourceQAngleDegrees(boneRotSrc));
+                }
+
+                if (!string.IsNullOrEmpty(parentName) &&
+                    srcWorldByName != null &&
+                    srcWorldByName.TryGetValue(parentName, out var parentSrcXf) &&
+                    bundle.BoneRestTransforms.TryGetValue(parentName, out Transform3D parentGlobalGd) &&
+                    GodotToSourcePosition(parentGlobalGd.Origin).DistanceTo(parentSrcXf.Pos) < 2.0f)
+                {
+                    var qInvP = System.Numerics.Quaternion.Inverse(parentSrcXf.Rot);
+                    Vector3 originIn = RotateVecBySysQuat(qInvP, bonePosSrc - parentSrcXf.Pos);
+                    var qLocalSrc = System.Numerics.Quaternion.Normalize(qInvP * boneRotSrc);
+                    srcWorldByName[bName] = (bonePosSrc, boneRotSrc);
+                    return (originIn, qLocalSrc, QuaternionToSourceQAngleDegrees(qLocalSrc));
+                }
+            }
+
+            // Fallback path (synthetic bundles populating only BoneLocalRestTransforms):
+            // apply parent's accumulated scale to localT.Origin before stripping scale from Basis.
+            Transform3D localT = bundle?.BoneLocalRestTransforms != null && bundle.BoneLocalRestTransforms.TryGetValue(bName, out var lt)
+                ? lt
+                : Transform3D.Identity;
+            if (!isRootBone)
+            {
+                Vector3 pScale = ComputeParentAccumulatedGodotScale(parentName, bundle);
+                localT = new Transform3D(
+                    OrthonormalizeRightHanded(localT.Basis),
+                    new Vector3(localT.Origin.X * pScale.X, localT.Origin.Y * pScale.Y, localT.Origin.Z * pScale.Z));
+            }
+            else
+            {
+                localT = new Transform3D(OrthonormalizeRightHanded(localT.Basis), localT.Origin);
+            }
+
+            var resolved = GodotLocalBoneToSource(localT, isRootBone);
+            if (srcWorldByName != null)
+            {
+                if (!isRootBone && !string.IsNullOrEmpty(parentName) && srcWorldByName.TryGetValue(parentName, out var pXf))
+                {
+                    srcWorldByName[bName] = (
+                        pXf.Pos + RotateVecBySysQuat(pXf.Rot, resolved.OriginIn),
+                        System.Numerics.Quaternion.Normalize(pXf.Rot * resolved.ParentRot));
+                }
+                else
+                {
+                    srcWorldByName[bName] = (resolved.OriginIn, resolved.ParentRot);
+                }
+            }
+            return resolved;
+        }
+
         private static (Vector3 OriginIn, System.Numerics.Quaternion ParentRot, Vector3 AnglesDeg) GodotLocalBoneToSource(
             Transform3D localT, bool isRootBone)
         {
-            var qGd = localT.Basis.GetRotationQuaternion();
+            var qGd = OrthonormalizeRightHanded(localT.Basis).GetRotationQuaternion();
             var qLocalSys = new System.Numerics.Quaternion(qGd.X, qGd.Y, qGd.Z, qGd.W);
             Vector3 originIn;
             System.Numerics.Quaternion qSys;
@@ -2768,6 +2921,8 @@ namespace DeadlockPlayground.Importer
             for (int i = 0; i < targetSkeletonBones.Count; i++)
                 nameToIdx[targetSkeletonBones[i].Name] = i;
 
+            var srcWorldByName = ComputeSourceWorldTransformsFromVmdlBones(targetSkeletonBones);
+
             var pending = new List<string>();
             foreach (string bName in bundle.BoneNames)
             {
@@ -2793,8 +2948,11 @@ namespace DeadlockPlayground.Importer
                     if (!string.IsNullOrEmpty(parentName) && !nameToIdx.TryGetValue(parentName, out parentIdx))
                         parentIdx = -1;
 
-                    Transform3D localT = bundle.BoneLocalRestTransforms.TryGetValue(bName, out var lt) ? lt : Transform3D.Identity;
-                    var (originIn, qSys, anglesDeg) = GodotLocalBoneToSource(localT, isRootBone: parentIdx < 0);
+                    string resolvedParentName = (parentIdx >= 0 && parentIdx < targetSkeletonBones.Count)
+                        ? targetSkeletonBones[parentIdx].Name
+                        : "";
+                    var (originIn, qSys, anglesDeg) = ResolveCustomBoneSourceLocal(
+                        bName, resolvedParentName, isRootBone: parentIdx < 0, bundle, srcWorldByName);
 
                     int newIdx = targetSkeletonBones.Count;
                     nameToIdx[bName] = newIdx;
@@ -2816,10 +2974,13 @@ namespace DeadlockPlayground.Importer
                 {
                     // Cycle/missing parent safety break: emit remaining attached to pelvis/root
                     int fallbackRoot = nameToIdx.TryGetValue("pelvis", out int pv) ? pv : (targetSkeletonBones.Count > 0 ? 0 : -1);
+                    string fallbackParentName = (fallbackRoot >= 0 && fallbackRoot < targetSkeletonBones.Count)
+                        ? targetSkeletonBones[fallbackRoot].Name
+                        : "";
                     foreach (string bName in pending)
                     {
-                        Transform3D localT = bundle.BoneLocalRestTransforms.TryGetValue(bName, out var lt) ? lt : Transform3D.Identity;
-                        var (originIn, qSys, anglesDeg) = GodotLocalBoneToSource(localT, isRootBone: fallbackRoot < 0);
+                        var (originIn, qSys, anglesDeg) = ResolveCustomBoneSourceLocal(
+                            bName, fallbackParentName, isRootBone: fallbackRoot < 0, bundle, srcWorldByName);
                         int newIdx = targetSkeletonBones.Count;
                         nameToIdx[bName] = newIdx;
                         targetSkeletonBones.Add(new VmdlSkeletonBone
@@ -2845,6 +3006,140 @@ namespace DeadlockPlayground.Importer
         /// as a rigid blade. This synthesizes 1-3 real child extension bones into the exported skeleton
         /// and smoothly re-weights those lower vertices along the extension chain.
         /// </summary>
+        private static bool IsCrownOrBangTuftChain(BoneChainDef ch)
+        {
+            if (ch == null) return false;
+            string nm = $"{ch.Name} {ch.RootSourceBone}".ToLowerInvariant();
+            if (nm.Contains("poof") || nm.Contains("bang") || nm.Contains("fringe") ||
+                nm.Contains("tuft") || nm.Contains("ahoge") || nm.Contains("front") ||
+                nm.Contains("brow") || nm.Contains("crown"))
+                return true;
+            int bc = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
+                ? ch.AppendedHeroBoneNames.Count
+                : (ch.SourceBoneNames?.Count ?? 0);
+            return bc <= 1;
+        }
+
+        /// <summary>
+        /// Ensures every <see cref="SimulationKind.Cloth"/> chain whose leaf bone is weighted to mesh geometry
+        /// (or has only 1 bone) receives a single unweighted Valve-style <c>*_end</c> tip bone continuing along the
+        /// strand's natural rest direction (matching Paige <c>hair_0 -> hair_1 -> hair_end</c> and Lash bangs).
+        /// This lets <c>bone[0]</c> stay pinned on the scalp (<c>simulate = false, allow_rotation = true</c>) while
+        /// every weighted bone rotates smoothly in pure 1D <c>m_Ropes</c> mode with exact 1:1 preview topology parity.
+        /// Idempotent and never alters existing vertex weights.
+        /// </summary>
+        internal static void EnsureClothChainLeafTipBonesInBundle(CustomModelExportBundle bundle)
+        {
+            if (bundle?.PreservedChains == null || bundle.PreservedChains.Count == 0)
+                return;
+
+            var existingBones = new HashSet<string>(bundle.BoneNames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            if (bundle.BoneHierarchy != null)
+            {
+                foreach (var k in bundle.BoneHierarchy.Keys) existingBones.Add(k);
+            }
+
+            foreach (var ch in bundle.PreservedChains)
+            {
+                if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain || ch.Simulation != SimulationKind.Cloth)
+                    continue;
+                var list = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
+                    ? ch.AppendedHeroBoneNames
+                    : ch.SourceBoneNames;
+                if (list == null || list.Count == 0)
+                    continue;
+
+                string leafName = list[^1];
+                if (string.IsNullOrWhiteSpace(leafName)) continue;
+
+                // Already ends in an unweighted Valve-style tip bone?
+                string leafLow = leafName.ToLowerInvariant();
+                if (list.Count >= 2 &&
+                    (leafLow.EndsWith("_end") || leafLow.EndsWith("_tip") || leafLow.EndsWith("_null") || leafLow.EndsWith("_fe_end")))
+                {
+                    continue;
+                }
+
+                // If mesh weights are already present and chain has >= 2 bones, skip if the leaf bone carries zero mesh weight.
+                if (list.Count >= 2 && bundle.Submeshes != null && bundle.Submeshes.Count > 0 && bundle.BoneNames != null)
+                {
+                    int leafBundleIdx = bundle.BoneNames.FindIndex(b => string.Equals(b, leafName, StringComparison.OrdinalIgnoreCase));
+                    if (leafBundleIdx >= 0)
+                    {
+                        bool hasWeight = false;
+                        foreach (var sm in bundle.Submeshes)
+                        {
+                            if (sm?.BoneIndices == null || sm.BoneWeights == null) continue;
+                            int n = Math.Min(sm.BoneIndices.Length, sm.BoneWeights.Length);
+                            for (int i = 0; i < n; i++)
+                            {
+                                if (sm.BoneIndices[i] == leafBundleIdx && sm.BoneWeights[i] > 0.05f)
+                                {
+                                    hasWeight = true;
+                                    break;
+                                }
+                            }
+                            if (hasWeight) break;
+                        }
+                        if (!hasWeight) continue;
+                    }
+                }
+
+                if (!bundle.BoneRestTransforms.TryGetValue(leafName, out Transform3D leafGlobal))
+                    continue;
+
+                Basis leafBasisOrtho = leafGlobal.Basis.Orthonormalized();
+                Vector3 tipDirWorld;
+                float tipLenMeters;
+
+                if (list.Count >= 2 && bundle.BoneRestTransforms.TryGetValue(list[^2], out Transform3D prevGlobal))
+                {
+                    Vector3 seg = leafGlobal.Origin - prevGlobal.Origin;
+                    float segLen = seg.Length();
+                    tipDirWorld = segLen > 1e-4f ? (seg / segLen) : Vector3.Down;
+                    tipLenMeters = Mathf.Clamp(segLen * 0.85f, 0.035f, 0.12f);
+                }
+                else if (bundle.BoneHierarchy.TryGetValue(leafName, out string pName) &&
+                         !string.IsNullOrEmpty(pName) &&
+                         bundle.BoneRestTransforms.TryGetValue(pName, out Transform3D anchorGlobal))
+                {
+                    Vector3 seg = leafGlobal.Origin - anchorGlobal.Origin;
+                    float segLen = seg.Length();
+                    tipDirWorld = segLen > 1e-4f ? (seg / segLen) : Vector3.Down;
+                    tipLenMeters = Mathf.Clamp(segLen * 0.85f, 0.05f, 0.12f);
+                }
+                else
+                {
+                    tipDirWorld = Vector3.Down;
+                    tipLenMeters = 0.07f;
+                }
+
+                string tipName = $"{leafName}_end";
+                if (existingBones.Contains(tipName))
+                {
+                    tipName = $"{leafName}_fe_end";
+                    int suf = 2;
+                    while (existingBones.Contains(tipName))
+                        tipName = $"{leafName}_fe_end_{suf++}";
+                }
+
+                Vector3 tipLocalGd = leafBasisOrtho.Inverse() * (tipDirWorld * tipLenMeters);
+                Transform3D tipGlobal = new Transform3D(leafBasisOrtho, leafGlobal.Origin + tipDirWorld * tipLenMeters);
+
+                existingBones.Add(tipName);
+                bundle.BoneNames.Add(tipName);
+                bundle.PreservedCustomBoneNames.Add(tipName);
+                bundle.BoneHierarchy[tipName] = leafName;
+                bundle.BoneLocalRestTransforms[tipName] = new Transform3D(Basis.Identity, tipLocalGd);
+                bundle.BoneRestTransforms[tipName] = tipGlobal;
+
+                if (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
+                    ch.AppendedHeroBoneNames.Add(tipName);
+                else
+                    ch.SourceBoneNames.Add(tipName);
+            }
+        }
+
         private static void ExtendShortLeafClothBonesInBundle(
             CustomModelExportBundle bundle,
             List<VmdlSkeletonBone> targetSkeletonBones)
@@ -2894,6 +3189,9 @@ namespace DeadlockPlayground.Importer
             {
                 if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain || ch.Simulation == SimulationKind.Jiggle)
                     continue;
+                if (string.Equals(ch.PresetId, PhysicsPresetCatalog.ShortHairBangsId, StringComparison.OrdinalIgnoreCase) ||
+                    IsCrownOrBangTuftChain(ch))
+                    continue;
                 var chainBones = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
                     ? ch.AppendedHeroBoneNames
                     : ch.SourceBoneNames;
@@ -2906,29 +3204,34 @@ namespace DeadlockPlayground.Importer
 
                 var leafPos = worldPos[leafSmdIdx];
                 var leafRot = worldRot[leafSmdIdx];
+                var rootPos = nameToSmdIdx.TryGetValue(chainBones[0], out int rootSmdIdx) ? worldPos[rootSmdIdx] : leafPos;
 
-                System.Numerics.Vector3 tailDir;
+                System.Numerics.Vector3 rawTailDir;
                 if (chainBones.Count >= 2 && nameToSmdIdx.TryGetValue(chainBones[^2], out int prevSmdIdx))
                 {
-                    tailDir = leafPos - worldPos[prevSmdIdx];
+                    rawTailDir = leafPos - worldPos[prevSmdIdx];
                 }
                 else if (targetSkeletonBones[leafSmdIdx].ParentIndex >= 0)
                 {
-                    tailDir = leafPos - worldPos[targetSkeletonBones[leafSmdIdx].ParentIndex];
+                    rawTailDir = leafPos - worldPos[targetSkeletonBones[leafSmdIdx].ParentIndex];
                 }
                 else
                 {
-                    tailDir = new System.Numerics.Vector3(0, 0, -1);
+                    continue;
                 }
-                if (tailDir.Z > -0.2f * tailDir.Length())
-                    tailDir = new System.Numerics.Vector3(tailDir.X * 0.25f, tailDir.Y * 0.25f, -1.0f);
-                float tdLen = tailDir.Length();
-                tailDir = tdLen > 0.01f ? tailDir / tdLen : new System.Numerics.Vector3(0, 0, -1);
+                float rawLen = rawTailDir.Length();
+                // Only extend chains that genuinely hang downward (long hair/capes/skirts); never extend
+                // upward/outward spiky hair, bangs, horns, or collars downward toward the scalp/head!
+                if (rawLen < 0.1f || rawTailDir.Z > -0.25f * rawLen)
+                    continue;
+
+                var tailDir = rawTailDir / rawLen;
                 // Blend strongly toward vertical gravity drape (0, 0, -1) so shoulder-clearing side strands
                 // (e.g. hairside_l/r) hang straight down instead of flaring out to X = +-25 in!
                 tailDir = System.Numerics.Vector3.Normalize(
                     new System.Numerics.Vector3(tailDir.X * 0.15f, tailDir.Y * 0.15f, -1.0f));
 
+                float leafFromRootSq = (leafPos - rootPos).LengthSquared();
                 float maxReach = 0f;
                 foreach (var sm in bundle.Submeshes)
                 {
@@ -2941,7 +3244,10 @@ namespace DeadlockPlayground.Importer
                             if (sm.BoneIndices[vi * 4 + k] == leafBundleIdx) lw += sm.BoneWeights[vi * 4 + k];
                         if (lw < 0.25f) continue;
                         Vector3 vSrc = GodotToSourcePosition(sm.Vertices[vi]);
-                        float proj = System.Numerics.Vector3.Dot(new System.Numerics.Vector3(vSrc.X, vSrc.Y, vSrc.Z) - leafPos, tailDir);
+                        if (vSrc.Z >= leafPos.Z - 1.0f) continue;
+                        var vNum = new System.Numerics.Vector3(vSrc.X, vSrc.Y, vSrc.Z);
+                        if ((vNum - rootPos).LengthSquared() <= leafFromRootSq) continue;
+                        float proj = System.Numerics.Vector3.Dot(vNum - leafPos, tailDir);
                         if (proj > maxReach) maxReach = proj;
                     }
                 }
@@ -2974,10 +3280,15 @@ namespace DeadlockPlayground.Importer
                         continue;
                     }
 
+                    var extWorldPosSrc = leafPos + tailDir * (stepIn * e);
+                    var qExtGd = System.Numerics.Quaternion.Normalize(SourceToGltfRootQuat * leafRot);
                     int newBundleIdx = bundle.BoneNames.Count;
                     bundle.BoneNames.Add(extName);
                     bundle.BoneHierarchy[extName] = prevParentName;
                     bundle.BoneLocalRestTransforms[extName] = new Transform3D(Basis.Identity, stepLocalGodotM);
+                    bundle.BoneRestTransforms[extName] = new Transform3D(
+                        new Basis(new Quaternion(qExtGd.X, qExtGd.Y, qExtGd.Z, qExtGd.W)),
+                        SourceToGodotPosition(new Vector3(extWorldPosSrc.X, extWorldPosSrc.Y, extWorldPosSrc.Z)));
                     bundle.PreservedCustomBoneNames.Add(extName);
                     ch.AppendedHeroBoneNames.Add(extName);
 
@@ -2993,7 +3304,7 @@ namespace DeadlockPlayground.Importer
                         ParentRot = System.Numerics.Quaternion.Identity,
                         HasParentRot = true
                     });
-                    worldPos.Add(leafPos + tailDir * (stepIn * e));
+                    worldPos.Add(extWorldPosSrc);
                     worldRot.Add(leafRot);
                     computed.Add(true);
 
@@ -3121,10 +3432,12 @@ namespace DeadlockPlayground.Importer
                 }
             }
 
-            string FormatBoneSubtree(string bName, string indent, bool isRootLevel)
+            var existingBones = ParseSkeletonBonesFromVmdlText(skeletonBlock);
+            var srcWorldByName = ComputeSourceWorldTransformsFromVmdlBones(existingBones);
+
+            string FormatBoneSubtree(string bName, string parentName, string indent, bool isRootLevel)
             {
-                Transform3D localT = bundle.BoneLocalRestTransforms.TryGetValue(bName, out var lt) ? lt : Transform3D.Identity;
-                var (originIn, _, ang) = GodotLocalBoneToSource(localT, isRootBone: isRootLevel);
+                var (originIn, _, ang) = ResolveCustomBoneSourceLocal(bName, parentName, isRootLevel, bundle, srcWorldByName);
 
                 var sb = new StringBuilder();
                 sb.AppendLine($"{indent}{{");
@@ -3139,7 +3452,7 @@ namespace DeadlockPlayground.Importer
                     sb.AppendLine($"{indent}\t[");
                     foreach (string ch in subChildren)
                     {
-                        sb.Append(FormatBoneSubtree(ch, indent + "\t\t", isRootLevel: false));
+                        sb.Append(FormatBoneSubtree(ch, bName, indent + "\t\t", isRootLevel: false));
                     }
                     sb.AppendLine($"{indent}\t]");
                 }
@@ -3166,7 +3479,7 @@ namespace DeadlockPlayground.Importer
                         var insSb = new StringBuilder();
                         foreach (var item in group)
                         {
-                            insSb.Append(FormatBoneSubtree(item.BoneName, indent + "\t\t", isRootLevel: false));
+                            insSb.Append(FormatBoneSubtree(item.BoneName, parentName, indent + "\t\t", isRootLevel: false));
                         }
                         edits.Add((directChildrenClose, "\r\n" + insSb.ToString() + indent + "\t"));
                     }
@@ -3177,7 +3490,7 @@ namespace DeadlockPlayground.Importer
                         insSb.AppendLine($"\t{indent}[");
                         foreach (var item in group)
                         {
-                            insSb.Append(FormatBoneSubtree(item.BoneName, indent + "\t\t", isRootLevel: false));
+                            insSb.Append(FormatBoneSubtree(item.BoneName, parentName, indent + "\t\t", isRootLevel: false));
                         }
                         insSb.AppendLine($"\t{indent}]");
                         edits.Add((boneClose, insSb.ToString() + indent));
@@ -3200,7 +3513,7 @@ namespace DeadlockPlayground.Importer
                     var insSb = new StringBuilder();
                     foreach (string bName in fallbackRoots)
                     {
-                        insSb.Append(FormatBoneSubtree(bName, "\t\t\t\t\t", isRootLevel: true));
+                        insSb.Append(FormatBoneSubtree(bName, "", "\t\t\t\t\t", isRootLevel: true));
                     }
                     edits.Add((lastClose, "\r\n" + insSb.ToString() + "\t\t\t\t"));
                 }
@@ -3299,6 +3612,17 @@ namespace DeadlockPlayground.Importer
                 if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain || ch.Simulation != SimulationKind.Jiggle) continue;
                 var bones = ch.AppendedHeroBoneNames.Count > 0 ? ch.AppendedHeroBoneNames : ch.SourceBoneNames;
 
+                int simTotal = 0;
+                for (int i = 0; i < bones.Count; i++)
+                {
+                    string bn = bones[i];
+                    string sn = (ch.SourceBoneNames != null && i < ch.SourceBoneNames.Count) ? ch.SourceBoneNames[i] : bn;
+                    var jv = ch.FindJointOverride(bn, sn);
+                    if (jv?.Simulate.HasValue == true && !jv.Simulate.Value) continue;
+                    simTotal++;
+                }
+                int simCursor = 0;
+
                 for (int i = 0; i < bones.Count; i++)
                 {
                     string bName = bones[i];
@@ -3307,7 +3631,9 @@ namespace DeadlockPlayground.Importer
                     if (jov?.Simulate.HasValue == true && !jov.Simulate.Value)
                         continue;
 
-                    float t = bones.Count > 1 ? i / (float)(bones.Count - 1) : 0f;
+                    // 1:1 parity with CustomJiggleBoneDriver: t = (simCursor + 1) / simTotal
+                    float t = simTotal <= 0 ? 0f : (simCursor + 1) / (float)simTotal;
+                    simCursor++;
                     var jp = PhysicsParamResolver.ResolveJiggleNode(ch, t, bones.Count);
                     float stiff = jp.Stiffness;
                     float damp = jp.Damping;
@@ -3490,7 +3816,7 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine("\t\t\t\t\t\tunitless_damping = true");
             sb.AppendLine("\t\t\t\t\t},");
 
-            bool anyPlanarizeClothChain = false;
+            var planarizeBackClothChainNodes = new List<string>();
             if (includeClothChains && bundle?.PreservedChains != null && boneParentByName != null && boneParentByName.Count > 0)
             {
                 var chainBlocks = new List<string>();
@@ -3500,7 +3826,25 @@ namespace DeadlockPlayground.Importer
                     // Jiggle chains run strictly via FeJiggleBone (CollisionMask=0) to prevent body/hair collisions.
                     if (ch.Simulation == SimulationKind.Jiggle) continue;
                     if (skipProxyDesignated && ch.Simulation == SimulationKind.ProxyCloth) continue;
-                    if (ch.PlanarizeBackBarrier) anyPlanarizeClothChain = true;
+                    if (ch.PlanarizeBackBarrier)
+                    {
+                        var chNames = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
+                            ? ch.AppendedHeroBoneNames
+                            : ch.SourceBoneNames;
+                        if (chNames != null)
+                        {
+                            int startIdx = chNames.Count >= 2 ? 1 : 0;
+                            for (int bi = startIdx; bi < chNames.Count; bi++)
+                            {
+                                string bn = chNames[bi];
+                                if (!string.IsNullOrWhiteSpace(bn) && boneParentByName.ContainsKey(bn) &&
+                                    !planarizeBackClothChainNodes.Contains(bn, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    planarizeBackClothChainNodes.Add(bn);
+                                }
+                            }
+                        }
+                    }
                     string cc = BuildClothChainVmdlBlock(ch, boneParentByName);
                     if (!string.IsNullOrEmpty(cc))
                         chainBlocks.Add(cc);
@@ -3523,10 +3867,18 @@ namespace DeadlockPlayground.Importer
             }
 
             // Emit real CSDK13 ClothVertexMap for planarized back-barrier CollisionPlanes (matching unicorn/yamato)
-            bool hasPlanarizeBackMap = (bundle?.PlanarizeBackProxyNodes != null && bundle.PlanarizeBackProxyNodes.Count > 0)
-                                       || anyPlanarizeClothChain;
+            // covering BOTH ProxyCloth ($cloth_m0p*) AND standalone ClothChain (e.g. UltraLongPonytail) dynamic nodes!
+            var allPlanarizeBackNodes = new List<string>();
+            if (bundle?.PlanarizeBackProxyNodes != null)
+                allPlanarizeBackNodes.AddRange(bundle.PlanarizeBackProxyNodes);
+            foreach (string cn in planarizeBackClothChainNodes)
+            {
+                if (!allPlanarizeBackNodes.Contains(cn, StringComparer.OrdinalIgnoreCase))
+                    allPlanarizeBackNodes.Add(cn);
+            }
+            bool hasPlanarizeBackMap = allPlanarizeBackNodes.Count > 0;
             bool hasPlanarizeWrapMap = bundle?.PlanarizeWrapProxyNodes != null && bundle.PlanarizeWrapProxyNodes.Count > 0;
-            if (bundle?.PlanarizeBackProxyNodes != null && bundle.PlanarizeBackProxyNodes.Count > 0)
+            if (hasPlanarizeBackMap)
             {
                 sb.AppendLine("\t\t\t\t\t{");
                 sb.AppendLine("\t\t\t\t\t\t_class = \"ClothVertexMap\"");
@@ -3536,7 +3888,7 @@ namespace DeadlockPlayground.Importer
                 sb.AppendLine("\t\t\t\t\t\t{");
                 sb.AppendLine("\t\t\t\t\t\t\tnodes = ");
                 sb.AppendLine("\t\t\t\t\t\t\t{");
-                foreach (string nodeName in bundle.PlanarizeBackProxyNodes)
+                foreach (string nodeName in allPlanarizeBackNodes)
                 {
                     sb.AppendLine($"\t\t\t\t\t\t\t\t\"{EscapeKvString(nodeName)}\" = true");
                 }
@@ -3595,16 +3947,66 @@ namespace DeadlockPlayground.Importer
             if (validBones.Count == 0) return "";
 
             string rootBone = validBones[0];
+            string srcRootName = (ch.SourceBoneNames != null && ch.SourceBoneNames.Count > 0) ? ch.SourceBoneNames[0] : rootBone;
+            var rootJov = ch.FindJointOverride(rootBone, srcRootName);
+
+            // Valve Deadlock parity (paige, lash, silver, inferno):
+            // Pin bone[0] directly on the scalp (simulate = false, allow_rotation = true) so the strand origin
+            // never detaches/slides around the skull, while rotating smoothly to aim at bone[1]!
+            // Only fall back to emitting anchorBone as parent if the chain has 1 bone or the user explicitly forced root Simulate = true.
+            bool pinScalpRoot = validBones.Count >= 2 && rootJov?.Simulate != true;
+            bool userLockedRootRigid = pinScalpRoot && rootJov?.Simulate == false && validBones.Count >= 3;
+
             string anchorBone = null;
-            if (boneParentByName.TryGetValue(rootBone, out string directParent) && !string.IsNullOrEmpty(directParent))
-                anchorBone = directParent;
-            else if (!string.IsNullOrEmpty(ch.AnchorHeroBone) && boneParentByName.ContainsKey(ch.AnchorHeroBone))
-                anchorBone = ch.AnchorHeroBone;
-            if (string.IsNullOrEmpty(anchorBone) || !boneParentByName.ContainsKey(anchorBone))
-                return "";
+            if (!pinScalpRoot)
+            {
+                if (boneParentByName.TryGetValue(rootBone, out string directParent) && !string.IsNullOrEmpty(directParent))
+                    anchorBone = directParent;
+                else if (!string.IsNullOrEmpty(ch.AnchorHeroBone) && boneParentByName.ContainsKey(ch.AnchorHeroBone))
+                    anchorBone = ch.AnchorHeroBone;
+                if (string.IsNullOrEmpty(anchorBone) || !boneParentByName.ContainsKey(anchorBone))
+                    return "";
+            }
+
+            // Determine per-joint simulation flags so t-interpolation spans the dynamic joints 1:1 with CustomJiggleBoneDriver
+            var jointSimFlags = new bool[validBones.Count];
+            var jointAllowRotFlags = new bool[validBones.Count];
+            int dynTotal = 0;
+            for (int k = 0; k < validBones.Count; k++)
+            {
+                string jName = validBones[k];
+                string srcName = (ch.SourceBoneNames != null && k < ch.SourceBoneNames.Count) ? ch.SourceBoneNames[k] : jName;
+                var jov = ch.FindJointOverride(jName, srcName);
+                if (pinScalpRoot && k == 0)
+                {
+                    jointSimFlags[k] = false;
+                    jointAllowRotFlags[k] = !userLockedRootRigid;
+                }
+                else if (userLockedRootRigid && k == 1)
+                {
+                    jointSimFlags[k] = false;
+                    jointAllowRotFlags[k] = true;
+                }
+                else
+                {
+                    bool sim = jov?.Simulate ?? true;
+                    jointSimFlags[k] = sim;
+                    jointAllowRotFlags[k] = true;
+                }
+                if (jointSimFlags[k]) dynTotal++;
+            }
 
             float gravZ = Mathf.Clamp(ch.Gravity, 0.0f, 4.0f);
+            bool enableRibbon = ch.EnableRibbonExtrude;
             float hingeAngle = Mathf.Clamp(ch.AngleLimitDeg > 1.0f ? ch.AngleLimitDeg : 58.0f, 10.0f, 120.0f);
+            float extrudeRad = Mathf.Clamp(ch.ExtrudeRadiusInches > 0.05f ? ch.ExtrudeRadiusInches : 1.0f, 0.2f, 6.0f);
+            string extrudeAxisStr = (Math.Clamp(ch.ExtrudeForwardAxis, 0, 5) % 3) switch
+            {
+                1 => "Y",
+                2 => "Z",
+                _ => "X"
+            };
+            float extrudeTwist = Mathf.Clamp(ch.ExtrudeTwistDeg, -180f, 180f);
 
             var sb = new StringBuilder();
             sb.AppendLine("\t\t\t\t\t\t\t{");
@@ -3616,43 +4018,80 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine("\t\t\t\t\t\t\t\t\tjoints = ");
             sb.AppendLine("\t\t\t\t\t\t\t\t\t[");
 
-            // Anchor bone (pinned static frame)
-            sb.AppendLine("\t\t\t\t\t\t\t\t\t\t{");
-            sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tjoint_name = \"{EscapeKvString(anchorBone)}\"");
-            sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tsimulate = false");
-            sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tallow_rotation = false");
-            sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tgoal_strength = 0.99");
-            sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tgoal_damping = 0.0");
-            sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tgravity_z = {FmtKvFloat(gravZ)}");
-            sb.AppendLine("\t\t\t\t\t\t\t\t\t\t},");
+            if (!pinScalpRoot)
+            {
+                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t{");
+                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tjoint_name = \"{EscapeKvString(anchorBone)}\"");
+                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tsimulate = false");
+                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tallow_rotation = false");
+                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tgoal_strength = 0.99");
+                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tgoal_damping = 0.0");
+                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tgravity_z = {FmtKvFloat(gravZ)}");
+                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t},");
+            }
 
+            int dynCursor = 0;
             for (int k = 0; k < validBones.Count; k++)
             {
                 string jName = validBones[k];
                 string srcName = (ch.SourceBoneNames != null && k < ch.SourceBoneNames.Count) ? ch.SourceBoneNames[k] : jName;
                 var jov = ch.FindJointOverride(jName, srcName);
-                string jParent = (k == 0) ? anchorBone : validBones[k - 1];
-                if (k > 0 && boneParentByName.TryGetValue(jName, out string actualP) &&
-                    !string.IsNullOrEmpty(actualP) && boneParentByName.ContainsKey(actualP))
+                bool simJoint = jointSimFlags[k];
+                bool allowRot = jointAllowRotFlags[k];
+
+                string jParent = null;
+                if (k == 0)
                 {
-                    jParent = actualP;
+                    if (!pinScalpRoot) jParent = anchorBone;
+                }
+                else
+                {
+                    jParent = validBones[k - 1];
+                    if (boneParentByName.TryGetValue(jName, out string actualP) &&
+                        !string.IsNullOrEmpty(actualP) && validBones.Contains(actualP, StringComparer.OrdinalIgnoreCase))
+                    {
+                        jParent = actualP;
+                    }
                 }
 
-                float t = validBones.Count > 1 ? k / (float)(validBones.Count - 1) : 0.0f;
-                bool simJoint = jov?.Simulate ?? true;
+                float t = 0.0f;
+                if (simJoint)
+                {
+                    // Exact Valve curve: pinned root sits at t = 0.0; dynamic joints 1..dynTotal sit at t = (dynCursor + 1) / dynTotal
+                    // (100% identical to WriteProceduralClothProxyDmx and CustomJiggleBoneDriver).
+                    t = dynTotal <= 0 ? 0.0f : (dynCursor + 1) / (float)dynTotal;
+                    dynCursor++;
+                }
                 var rp = PhysicsParamResolver.ResolveClothNode(ch, t, !simJoint, jov);
 
+                bool emitLockTransRoot = !simJoint && allowRot && (k == 0 || userLockedRootRigid);
                 sb.AppendLine("\t\t\t\t\t\t\t\t\t\t{");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tjoint_name = \"{EscapeKvString(jName)}\"");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tjoint_parent = \"{EscapeKvString(jParent)}\"");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tsimulate = {(simJoint ? "true" : "false")}");
+                if (!string.IsNullOrEmpty(jParent))
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tjoint_parent = \"{EscapeKvString(jParent)}\"");
+                if (emitLockTransRoot)
+                {
+                    // VRF ClothExtract.Chains.cs (Paige/Lash): a static scalp root that rotates to aim at its child
+                    // is authored with simulate = true + lock_translation = true + allow_rotation = true so CSDK13
+                    // compiles it as a free-rotating static node (outside RotLockStaticNodes) driving m_Ropes + m_Twists!
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tsimulate = true");
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tallow_rotation = true");
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tlock_translation = true");
+                }
+                else
+                {
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tsimulate = {(simJoint ? "true" : "false")}");
+                    if (!simJoint)
+                        sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tallow_rotation = {(allowRot ? "true" : "false")}");
+                }
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tgoal_strength = {FmtKvFloat(rp.GoalStrengthInput)}");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tgoal_damping = {FmtKvFloat(rp.GoalDamping)}");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tdrag = {FmtKvFloat(rp.Drag)}");
+                if (rp.Drag > 1e-5f)
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tdrag = {FmtKvFloat(rp.Drag)}");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tfriction = {FmtKvFloat(rp.Friction)}");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tgravity_z = {FmtKvFloat(rp.GravityScale)}");
                 sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tcollision_radius = {FmtKvFloat(rp.CollisionRadiusInches)}");
-                if (rp.StrayRadiusInches > 0.01f)
+                if (simJoint && rp.StrayRadiusInches > 0.01f)
                 {
                     sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tstray_radius = {FmtKvFloat(rp.StrayRadiusInches)}");
                     sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tstray_radius_stretchiness = 0.25");
@@ -3661,23 +4100,21 @@ namespace DeadlockPlayground.Importer
                 {
                     sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tvertex_map = \"planarize_back\"");
                 }
-                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tbend_spring = 1.0");
-                if (k > 0) sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\ttorsion_spring = {FmtKvFloat(rp.Torsion)}");
-                float extrudeRad = Mathf.Clamp(ch.ExtrudeRadiusInches > 0.05f ? ch.ExtrudeRadiusInches : 1.0f, 0.2f, 6.0f);
-                // CSDK13 ClothChain requires a string: "x", "y", "z" or "" (default is X)
-                string extrudeAxisStr = (Math.Clamp(ch.ExtrudeForwardAxis, 0, 5) % 3) switch
+                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tbend_spring = {FmtKvFloat(enableRibbon ? 1.0f : rp.BendStiffness)}");
+                float twistRelax = Mathf.Clamp(rp.Torsion, 0.0f, 1.0f);
+                if (twistRelax > 1e-4f)
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\ttwist_relax = {FmtKvFloat(twistRelax)}");
+
+                if (enableRibbon)
                 {
-                    1 => "Y",
-                    2 => "Z",
-                    _ => "X"
-                };
-                float extrudeTwist = Mathf.Clamp(ch.ExtrudeTwistDeg, -180f, 180f);
-                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tstiff_hinge = 1.0");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tstiff_hinge_angle = {FmtKvFloat(hingeAngle)}");
-                sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\textrude_sides = 2");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_radius = {FmtKvFloat(extrudeRad)}");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_forward_axis = \"{extrudeAxisStr}\"");
-                sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_twist = {FmtKvFloat(extrudeTwist)}");
+                    if (k > 0) sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\ttorsion_spring = {FmtKvFloat(rp.Torsion)}");
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\tstiff_hinge = 1.0");
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\tstiff_hinge_angle = {FmtKvFloat(hingeAngle)}");
+                    sb.AppendLine("\t\t\t\t\t\t\t\t\t\t\textrude_sides = 2");
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_radius = {FmtKvFloat(extrudeRad)}");
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_forward_axis = \"{extrudeAxisStr}\"");
+                    sb.AppendLine($"\t\t\t\t\t\t\t\t\t\t\textrude_twist = {FmtKvFloat(extrudeTwist)}");
+                }
                 sb.AppendLine("\t\t\t\t\t\t\t\t\t\t},");
             }
 
@@ -3810,11 +4247,17 @@ namespace DeadlockPlayground.Importer
                     var names = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
                         ? ch.AppendedHeroBoneNames
                         : ch.SourceBoneNames;
-                    if (names == null || names.Count < 2) continue;
+                    if (names == null || names.Count == 0) continue;
 
-                    float tipColIn = MathF.Max(0.4f, ch.CollisionRadiusTipInches);
+                    float tipColIn = MathF.Max(0.3f, ch.CollisionRadiusTipInches);
                     int nBones = names.Count;
-                    for (int j = 1; j < nBones; j++) // j == 0 is pinned root
+                    // Both Valve-style ClothChain (pinned scalp bone[0] with allow_rotation=true) and ProxyCloth
+                    // pin bone 0 and simulate bone 1..end (including synthesized *_end tip nodes).
+                    string rootSrcBn = (ch.SourceBoneNames != null && ch.SourceBoneNames.Count > 0) ? ch.SourceBoneNames[0] : names[0];
+                    var rootOv = ch.FindJointOverride(names[0], rootSrcBn);
+                    bool clothRootExplicitDynamic = ch.Simulation == SimulationKind.Cloth && rootOv?.Simulate == true;
+                    int startJ = (clothRootExplicitDynamic || nBones <= 1) ? 0 : 1;
+                    for (int j = startJ; j < nBones; j++)
                     {
                         string bn = names[j];
                         if (string.IsNullOrWhiteSpace(bn)) continue;
@@ -3823,10 +4266,10 @@ namespace DeadlockPlayground.Importer
                         if (jOv != null && jOv.Simulate.HasValue && !jOv.Simulate.Value) continue;
                         if (!srcWorldByName.TryGetValue(bn, out var nodeXf)) continue;
 
-                        float frac = nBones > 1 ? (float)j / (nBones - 1) : 1f;
+                        float frac = nBones > startJ + 1 ? (float)(j - startJ) / (nBones - 1 - startJ) : 1f;
                         float colIn = (jOv != null && jOv.CollisionRadiusInches.HasValue)
                             ? MathF.Max(0.2f, jOv.CollisionRadiusInches.Value)
-                            : Mathf.Lerp(tipColIn * 0.45f, tipColIn, frac);
+                            : Mathf.Lerp(MathF.Min(0.45f, tipColIn * 0.45f), tipColIn, frac);
                         dynamicClothNodes.Add((bn, nodeXf.Pos, colIn, ch.AnchorHeroBone ?? ""));
                     }
                 }
@@ -3891,14 +4334,14 @@ namespace DeadlockPlayground.Importer
                     Vector3 p1W = capXf.Pos + RotateVecBySysQuat(capXf.Rot, cap.Point1);
                     float origR0 = cap.Radius0;
                     float origR1 = cap.Radius1;
-                    // Never crush anatomical body capsules into pencil sticks (e.g. 2.17 in thighs):
-                    // preserve at least 72% of fitted body silhouette + anatomical minimum radius.
+                    // Never crush anatomical torso/leg capsules into pencil sticks, but allow head/neck capsules
+                    // to trim further when dynamic short-hair/bang nodes sit close to the skull surface.
                     bool isHeadOrNeck = cap.ParentBone.Equals("head", StringComparison.OrdinalIgnoreCase) ||
                                         cap.ParentBone.Equals("neck_0", StringComparison.OrdinalIgnoreCase);
                     bool isArm = cap.ParentBone.StartsWith("arm_", StringComparison.OrdinalIgnoreCase);
-                    float anatMinIn = isArm ? 2.2f : (isHeadOrNeck ? 2.8f : 3.4f);
-                    float floorR0 = MathF.Max(anatMinIn, origR0 * 0.72f);
-                    float floorR1 = MathF.Max(anatMinIn, origR1 * 0.72f);
+                    float anatMinIn = isArm ? 2.0f : (isHeadOrNeck ? 1.8f : 2.7f);
+                    float floorR0 = anatMinIn;
+                    float floorR1 = anatMinIn;
                     string blockerBone = null;
 
                     foreach (var dn in dynamicClothNodes)
@@ -3906,11 +4349,15 @@ namespace DeadlockPlayground.Importer
                         float d = DistPointToSegment(dn.PosSrcW, p0W, p1W, out float t);
                         // Ignore a node sitting practically on top of its own anchor bone's centerline
                         // (e.g. a scalp tuft right on the head bone origin) so we don't collapse that capsule.
-                        if (d < 2.2f && cap.ParentBone.Equals(dn.AnchorBone, StringComparison.OrdinalIgnoreCase))
+                        if (d < 1.9f && cap.ParentBone.Equals(dn.AnchorBone, StringComparison.OrdinalIgnoreCase))
                             continue;
 
                         float rAtT = Mathf.Lerp(cap.Radius0, cap.Radius1, t);
-                        float margin = MathF.Min(dn.ColRIn * 0.45f, 0.60f);
+                        // Source 2 collides at capRadius + nodeCollisionRadius; clear full node radius (capped at 2.2 in)
+                        // on ALL body capsules so skirts, coats, capes, and hair never spawn penetrating on Frame 1.
+                        float margin = isHeadOrNeck
+                            ? (MathF.Min(dn.ColRIn, 1.5f) + 0.15f)
+                            : (MathF.Min(dn.ColRIn, 2.2f) + 0.12f);
                         if (d < rAtT + margin)
                         {
                             float rawSafe = d - margin;
@@ -4042,12 +4489,14 @@ namespace DeadlockPlayground.Importer
                     idx++;
                 }
 
-                // Yamato-style planarized thigh collision planes for closed wrap-around skirts/dresses:
-                // keeps full-size leg_upper_L/R capsules AND generates per-node CollisionPlanes so moving
-                // thighs push the skirt cleanly without exploding it at rest pose.
+                // Yamato-style planarized thigh + shin collision planes for closed wrap-around skirts/dresses:
+                // generates per-node CollisionPlanes on BOTH leg_upper_L/R and leg_lower_L/R so knee/shin kicks
+                // push ankle-length skirts & dresses cleanly forward without exploding them at rest pose.
                 if (hasPlanarizeWrapMap &&
                     (cap.ParentBone.Equals("leg_upper_L", StringComparison.OrdinalIgnoreCase) ||
-                     cap.ParentBone.Equals("leg_upper_R", StringComparison.OrdinalIgnoreCase)))
+                     cap.ParentBone.Equals("leg_upper_R", StringComparison.OrdinalIgnoreCase) ||
+                     cap.ParentBone.Equals("leg_lower_L", StringComparison.OrdinalIgnoreCase) ||
+                     cap.ParentBone.Equals("leg_lower_R", StringComparison.OrdinalIgnoreCase)))
                 {
                     var pw = new StringBuilder();
                     pw.AppendLine("\t\t\t\t\t{");
@@ -4111,7 +4560,9 @@ namespace DeadlockPlayground.Importer
                 if (bi < 0 || bi >= smdBones.Count || computed[bi]) return;
                 computed[bi] = true; // cycle guard
                 var b = smdBones[bi];
-                var localQ = b.HasParentRot ? b.ParentRot : System.Numerics.Quaternion.Identity;
+                var localQ = b.HasParentRot
+                    ? System.Numerics.Quaternion.Normalize(b.ParentRot)
+                    : SourceQAngleDegreesToQuaternion(b.AnglesDeg);
                 var localP = new System.Numerics.Vector3(b.Origin.X, b.Origin.Y, b.Origin.Z);
                 if (b.ParentIndex >= 0 && b.ParentIndex < smdBones.Count)
                 {
@@ -4148,7 +4599,9 @@ namespace DeadlockPlayground.Importer
                 var jEl = new Datamodel.Element(dm, b.Name, null, "DmeJoint");
                 var jXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
                 jXf["position"] = new System.Numerics.Vector3(b.Origin.X, b.Origin.Y, b.Origin.Z);
-                var q = b.HasParentRot ? System.Numerics.Quaternion.Normalize(b.ParentRot) : System.Numerics.Quaternion.Identity;
+                var q = b.HasParentRot
+                    ? System.Numerics.Quaternion.Normalize(b.ParentRot)
+                    : SourceQAngleDegreesToQuaternion(b.AnglesDeg);
                 jXf["orientation"] = q;
                 jEl["transform"] = jXf;
                 jEl["visible"] = true;
@@ -4225,29 +4678,16 @@ namespace DeadlockPlayground.Importer
                 if (pinParentBi < 0 && !string.IsNullOrEmpty(ch.AnchorHeroBone) && nameToSmdIdx.TryGetValue(ch.AnchorHeroBone, out int anchorBi))
                     pinParentBi = anchorBi;
 
-                if (pinParentBi >= 0 && pinParentBi < smdBones.Count)
-                {
-                    rowPositions.Add(srcWorldPos[pinParentBi]);
-                    rowJointIdx.Add(pinParentBi);
-                    rowPin.Add(true);
-                }
-                else
-                {
-                    rowPositions.Add(srcWorldPos[firstBi]);
-                    rowJointIdx.Add(firstBi);
-                    rowPin.Add(true);
-                }
+                // Valve Deadlock ProxyCloth parity (yamato, geist, wraith, chrono):
+                // Pin Row 0 directly at bone[0] (exterior waistband / collar / shoulders) instead of pelvis/spine_3 center!
+                // Never generate interior dynamic cloth vertices inside the pelvis/torso capsule.
+                rowPositions.Add(srcWorldPos[firstBi]);
+                rowJointIdx.Add(firstBi);
+                rowPin.Add(true);
 
-                for (int k = 0; k < boneIndices.Count; k++)
+                for (int k = 1; k < boneIndices.Count; k++)
                 {
                     int bi = boneIndices[k];
-                    if (k == 0 && pinParentBi < 0)
-                    {
-                        rowPositions.Add(srcWorldPos[bi] + new System.Numerics.Vector3(0, 0, -4.0f));
-                        rowJointIdx.Add(bi);
-                        rowPin.Add(false);
-                        continue;
-                    }
                     var pos = srcWorldPos[bi];
                     if ((pos - rowPositions[^1]).LengthSquared() < 0.04f)
                         pos = rowPositions[^1] + new System.Numerics.Vector3(0, 0, -3.0f);
@@ -4256,64 +4696,91 @@ namespace DeadlockPlayground.Importer
                     rowPin.Add(false);
                 }
 
-                if (rowPositions.Count == 2)
+                // Append a single hem/leaf tip row continuing along the strand's natural rest direction
+                // (100% identical to CustomJiggleBoneDriver's AimAxisLocal * BoneLength = clamp(0.85 * segLen, 1.4..4.7 in))
+                // so the bottom hem bone rotates identically in Source 2 back_solve_joints and in Godot preview.
                 {
-                    var segDir = rowPositions[1] - rowPositions[0];
-                    float len = segDir.Length();
-                    segDir = len > 0.1f ? segDir / len : new System.Numerics.Vector3(0, 0, -1);
-                    rowPositions.Add(rowPositions[1] + segDir * 4.0f);
-                    rowJointIdx.Add(rowJointIdx[1]);
+                    int lastBi = boneIndices[^1];
+                    System.Numerics.Vector3 tipDir;
+                    float segLenIn;
+                    if (rowPositions.Count >= 2)
+                    {
+                        var seg = rowPositions[^1] - rowPositions[^2];
+                        segLenIn = seg.Length();
+                        tipDir = segLenIn > 0.1f ? seg / segLenIn : new System.Numerics.Vector3(0, 0, -1);
+                    }
+                    else if (pinParentBi >= 0 && pinParentBi < smdBones.Count)
+                    {
+                        var seg = rowPositions[0] - srcWorldPos[pinParentBi];
+                        segLenIn = seg.Length();
+                        tipDir = segLenIn > 0.1f ? seg / segLenIn : new System.Numerics.Vector3(0, 0, -1);
+                    }
+                    else
+                    {
+                        segLenIn = 4.0f;
+                        tipDir = new System.Numerics.Vector3(0, 0, -1);
+                    }
+                    float tipLenIn = Math.Clamp(segLenIn * 0.85f, 1.4f, 4.7f);
+                    rowPositions.Add(rowPositions[^1] + tipDir * tipLenIn);
+                    rowJointIdx.Add(lastBi);
                     rowPin.Add(false);
                 }
 
                 // Extend proxy sheet past short leaf bones (e.g. ARP hair ending at Z=60 while mesh reaches Z=16)
-                // so pelvis/thigh/calf capsules push the entire hanging mesh outward instead of clipping!
-                if (rowPositions.Count >= 2 && bundle.Submeshes != null && bundle.Submeshes.Count > 0 && bundle.BoneNames != null)
+                // ONLY when the chain actually hangs downward (never extend upward/spiky short hair downward!).
+                if (rowPositions.Count >= 2 && bundle.Submeshes != null && bundle.Submeshes.Count > 0 && bundle.BoneNames != null &&
+                    !string.Equals(ch.PresetId, PhysicsPresetCatalog.ShortHairBangsId, StringComparison.OrdinalIgnoreCase) &&
+                    !IsCrownOrBangTuftChain(ch))
                 {
                     string leafName = smdBones[rowJointIdx[^1]].Name;
                     int leafBundleIdx = bundle.BoneNames.FindIndex(b => b.Equals(leafName, StringComparison.OrdinalIgnoreCase));
                     if (leafBundleIdx >= 0)
                     {
                         var leafPos = rowPositions[^1];
-                        var tailDir = rowPositions[^1] - rowPositions[^2];
-                        if (tailDir.Z > -0.2f * tailDir.Length())
-                            tailDir = new System.Numerics.Vector3(tailDir.X * 0.25f, tailDir.Y * 0.25f, -1.0f);
-                        float tLen = tailDir.Length();
-                        tailDir = tLen > 0.01f ? tailDir / tLen : new System.Numerics.Vector3(0, 0, -1);
-
-                        float maxReach = 0f;
-                        foreach (var sm in bundle.Submeshes)
+                        var rawTailDir = rowPositions[^1] - rowPositions[^2];
+                        float rawLen = rawTailDir.Length();
+                        if (rawLen >= 0.1f && rawTailDir.Z <= -0.25f * rawLen)
                         {
-                            if (sm?.Vertices == null || sm.BoneIndices == null || sm.BoneWeights == null) continue;
-                            int vc = sm.Vertices.Length;
-                            for (int vi = 0; vi < vc; vi++)
+                            var tailDir = rawTailDir / rawLen;
+                            var rootPos = rowPositions[0];
+                            float leafFromRootSq = (leafPos - rootPos).LengthSquared();
+
+                            float maxReach = 0f;
+                            foreach (var sm in bundle.Submeshes)
                             {
-                                float lw = 0f;
-                                for (int k = 0; k < 4; k++)
+                                if (sm?.Vertices == null || sm.BoneIndices == null || sm.BoneWeights == null) continue;
+                                int vc = sm.Vertices.Length;
+                                for (int vi = 0; vi < vc; vi++)
                                 {
-                                    if (sm.BoneIndices[vi * 4 + k] == leafBundleIdx)
-                                        lw += sm.BoneWeights[vi * 4 + k];
+                                    float lw = 0f;
+                                    for (int k = 0; k < 4; k++)
+                                    {
+                                        if (sm.BoneIndices[vi * 4 + k] == leafBundleIdx)
+                                            lw += sm.BoneWeights[vi * 4 + k];
+                                    }
+                                    if (lw < 0.25f) continue;
+                                    Vector3 vSrc = GodotToSourcePosition(sm.Vertices[vi]);
+                                    if (vSrc.Z >= leafPos.Z - 1.0f) continue;
+                                    var vNum = new System.Numerics.Vector3(vSrc.X, vSrc.Y, vSrc.Z);
+                                    if ((vNum - rootPos).LengthSquared() <= leafFromRootSq) continue;
+                                    float proj = System.Numerics.Vector3.Dot(vNum - leafPos, tailDir);
+                                    if (proj > maxReach) maxReach = proj;
                                 }
-                                if (lw < 0.25f) continue;
-                                Vector3 vSrc = GodotToSourcePosition(sm.Vertices[vi]);
-                                var d = new System.Numerics.Vector3(vSrc.X, vSrc.Y, vSrc.Z) - leafPos;
-                                float proj = System.Numerics.Vector3.Dot(d, tailDir);
-                                if (proj > maxReach) maxReach = proj;
                             }
-                        }
 
-                        if (maxReach > 5.0f)
-                        {
-                            float extLen = MathF.Min(maxReach * 0.80f, 34.0f);
-                            rowPositions.Add(leafPos + tailDir * extLen);
-                            rowJointIdx.Add(rowJointIdx[^1]);
-                            rowPin.Add(false);
+                            if (maxReach > 5.0f)
+                            {
+                                float extLen = MathF.Min(maxReach * 0.80f, 34.0f);
+                                rowPositions.Add(leafPos + tailDir * extLen);
+                                rowJointIdx.Add(rowJointIdx[^1]);
+                                rowPin.Add(false);
+                            }
                         }
                     }
                 }
 
-                // Subdivide segments (> 4.0 in) so neck/spine/pelvis/leg capsules collide densely along the span
-                // instead of letting straight edges slice through the upper back when looking upward.
+                // Only subdivide unusually long single spans (> 12 in / 30 cm, e.g. 2-bone floor-length capes)
+                // so standard 3–6 bone skirts, coats, and hair keep 1:1 row parity between DMX proxy and preview!
                 if (rowPositions.Count >= 3)
                 {
                     var subPos = new List<System.Numerics.Vector3> { rowPositions[0] };
@@ -4324,13 +4791,13 @@ namespace DeadlockPlayground.Importer
                         var a = rowPositions[r];
                         var b = rowPositions[r + 1];
                         float segLen = (b - a).Length();
-                        float maxSeg = (r == 0) ? 5.0f : 4.0f;
-                        int steps = segLen <= maxSeg ? 1 : Math.Clamp((int)MathF.Ceiling(segLen / maxSeg), 2, 6);
+                        const float maxSeg = 12.0f;
+                        int steps = segLen <= maxSeg ? 1 : Math.Clamp((int)MathF.Ceiling(segLen / maxSeg), 2, 4);
                         for (int s = 1; s <= steps; s++)
                         {
                             float u = s / (float)steps;
                             subPos.Add(System.Numerics.Vector3.Lerp(a, b, u));
-                            subJoint.Add(r == 0 ? rowJointIdx[1] : (u < 0.5f ? rowJointIdx[r] : rowJointIdx[r + 1]));
+                            subJoint.Add(u < 0.5f ? rowJointIdx[r] : rowJointIdx[r + 1]);
                             subPin.Add(s == steps ? rowPin[r + 1] : false);
                         }
                     }
@@ -4338,24 +4805,10 @@ namespace DeadlockPlayground.Importer
                     rowJointIdx = subJoint;
                     rowPin = subPin;
                 }
-                return rowPositions.Count >= 3;
+                return rowPositions.Count >= 2;
             }
 
             var anyExplicitStray = false;
-
-            static bool IsCrownOrBangTuftChain(BoneChainDef ch)
-            {
-                if (ch == null) return false;
-                string nm = $"{ch.Name} {ch.RootSourceBone}".ToLowerInvariant();
-                if (nm.Contains("poof") || nm.Contains("bang") || nm.Contains("fringe") ||
-                    nm.Contains("tuft") || nm.Contains("ahoge") || nm.Contains("front") ||
-                    nm.Contains("brow") || nm.Contains("crown"))
-                    return true;
-                int bc = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
-                    ? ch.AppendedHeroBoneNames.Count
-                    : (ch.SourceBoneNames?.Count ?? 0);
-                return bc <= 1;
-            }
 
             bundle.PlanarizeBackProxyNodes.Clear();
             bundle.PlanarizeWrapProxyNodes.Clear();
@@ -4367,7 +4820,9 @@ namespace DeadlockPlayground.Importer
                 float u,
                 float t,
                 bool isPinned,
-                int jointIdx)
+                int jointIdx,
+                int secondaryJointIdx = -1,
+                float secondaryWeight = 0.0f)
             {
                 string jName = (jointIdx >= 0 && jointIdx < smdBones.Count) ? smdBones[jointIdx].Name : "";
                 var jov = isPinned ? null : ch.FindJointOverride(jName);
@@ -4410,9 +4865,28 @@ namespace DeadlockPlayground.Importer
                 clothDrag.Add(rp.Drag);
                 clothGravity.Add(rp.GravityInchesPerSecSq);
                 clothFriction.Add(effPinned ? 0.0f : rp.Friction);
-                clothAnchorFreeRotate.Add(rp.AnchorFreeRotate);
-                blendIndices.Add(jointIdx);
-                blendWeights.Add(1.0f);
+                // Allow pinned Row 0 (bone[0] waistband/collar/scalp) to rotate freely via back_solve_joints
+                // while locking its origin, matching Valve's yamato/geist/wraith/chrono proxy meshes.
+                clothAnchorFreeRotate.Add(effPinned ? 1.0f : rp.AnchorFreeRotate);
+
+                // 2-bone skinning (jointCount = 2): Row 1 carries a secondary 0.15 weight on pinned bone[0]
+                // (>= back_solve_influence_threshold = 0.05) so CSDK13 generates a NodeBase for bone[0] and
+                // rotates the upper skirt/coat/cape bone cleanly in-game (matching Godot preview 1:1!).
+                if (!effPinned && secondaryJointIdx >= 0 && secondaryJointIdx != jointIdx && secondaryWeight > 0.01f)
+                {
+                    float w2 = Math.Clamp(secondaryWeight, 0.06f, 0.35f);
+                    blendIndices.Add(jointIdx);
+                    blendIndices.Add(secondaryJointIdx);
+                    blendWeights.Add(1.0f - w2);
+                    blendWeights.Add(w2);
+                }
+                else
+                {
+                    blendIndices.Add(jointIdx);
+                    blendIndices.Add(jointIdx);
+                    blendWeights.Add(1.0f);
+                    blendWeights.Add(0.0f);
+                }
                 vertIndices.Add(vi);
 
                 if (!effPinned && ch.PlanarizeBackBarrier)
@@ -4444,9 +4918,11 @@ namespace DeadlockPlayground.Importer
                     side = System.Numerics.Vector3.Normalize(side) * 1.25f;
                     var nrm = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(side, segDir));
                     float t = rowPositions.Count > 1 ? r / (float)(rowPositions.Count - 1) : 0f;
+                    int secJoint = (r == 1 && rowPin[0]) ? rowJointIdx[0] : -1;
+                    float secWeight = secJoint >= 0 ? 0.15f : 0.0f;
 
-                    PushClothVertex(ch, rowPositions[r] - side, nrm, 0.0f, t, rowPin[r], rowJointIdx[r]);
-                    PushClothVertex(ch, rowPositions[r] + side, nrm, 1.0f, t, rowPin[r], rowJointIdx[r]);
+                    PushClothVertex(ch, rowPositions[r] - side, nrm, 0.0f, t, rowPin[r], rowJointIdx[r], secJoint, secWeight);
+                    PushClothVertex(ch, rowPositions[r] + side, nrm, 1.0f, t, rowPin[r], rowJointIdx[r], secJoint, secWeight);
                 }
 
                 for (int r = 0; r < rowPositions.Count - 1; r++)
@@ -4486,7 +4962,7 @@ namespace DeadlockPlayground.Importer
                             EmitRibbonStrip(ch, rp, rj, rpin);
                             continue;
                         }
-                        var rootP = rp[Math.Min(1, rp.Count - 1)];
+                        var rootP = rp[0];
                         var tipP = rp[^1];
                         bool pointsUpward = (tipP.Z - rootP.Z) > 4.0f;
                         if (pointsUpward)
@@ -4507,8 +4983,8 @@ namespace DeadlockPlayground.Importer
                         if (built.Count == 2)
                         {
                             // Avoid bridging across opposite left/right hip tails (>12 in apart at mid/root)
-                            var p0 = built[0].Pos[Math.Min(1, built[0].Pos.Count - 1)];
-                            var p1 = built[1].Pos[Math.Min(1, built[1].Pos.Count - 1)];
+                            var p0 = built[0].Pos[0];
+                            var p1 = built[1].Pos[0];
                             if ((p0 - p1).Length() > 12.0f)
                             {
                                 EmitRibbonStrip(built[0].Ch, built[0].Pos, built[0].JointIdx, built[0].Pin);
@@ -4534,7 +5010,7 @@ namespace DeadlockPlayground.Importer
                     }
                     if (!foundAnchorCenter)
                     {
-                        foreach (var s in built) center += s.Pos[Math.Min(1, s.Pos.Count - 1)];
+                        foreach (var s in built) center += s.Pos[0];
                         center /= built.Count;
                     }
 
@@ -4637,8 +5113,8 @@ namespace DeadlockPlayground.Importer
                     for (int c = 0; c < quadCols; c++)
                     {
                         int cNext = (c + 1) % built.Count;
-                        var rootA = built[c].Pos[Math.Min(1, built[c].Pos.Count - 1)];
-                        var rootB = built[cNext].Pos[Math.Min(1, built[cNext].Pos.Count - 1)];
+                        var rootA = built[c].Pos[0];
+                        var rootB = built[cNext].Pos[0];
                         var midA = built[c].Pos[built[c].Pos.Count / 2];
                         var midB = built[cNext].Pos[built[cNext].Pos.Count / 2];
                         var tipA = built[c].Pos[^1];
@@ -4679,10 +5155,10 @@ namespace DeadlockPlayground.Importer
                                 ? System.Numerics.Vector3.Normalize(radial)
                                 : new System.Numerics.Vector3(0, 1, 0);
                             float t = st.Pos.Count > 1 ? r / (float)(st.Pos.Count - 1) : 0f;
-                            var vPos = (r == 0 && st.Pos.Count > 1)
-                                ? System.Numerics.Vector3.Lerp(st.Pos[0], st.Pos[1], 0.15f)
-                                : st.Pos[r];
-                            PushClothVertex(st.Ch, vPos, nrm, u, t, st.Pin[r], st.JointIdx[r]);
+                            var vPos = st.Pos[r];
+                            int secJoint = (r == 1 && st.Pin[0]) ? st.JointIdx[0] : -1;
+                            float secWeight = secJoint >= 0 ? 0.15f : 0.0f;
+                            PushClothVertex(st.Ch, vPos, nrm, u, t, st.Pin[r], st.JointIdx[r], secJoint, secWeight);
                         }
                     }
 
@@ -4735,7 +5211,7 @@ namespace DeadlockPlayground.Importer
             if (anyExplicitStray)
                 vFmt.Insert(8, "cloth_stray_radius$0");
             vertexData["vertexFormat"] = vFmt;
-            vertexData["jointCount"] = 1;
+            vertexData["jointCount"] = 2;
             vertexData["flipVCoordinates"] = false;
             vertexData["position$0"] = positions;
             vertexData["position$0Indices"] = vertIndices;

@@ -67,7 +67,9 @@ namespace DeadlockPlayground.UI
         private OptionButton _optRefClothParent;
         private LineEdit _txtRefClothName;
         private SpinBox _spinRefClothSegments;
+        private SpinBox _spinRefClothRadius;
         private OptionButton _optRefClothDir;
+        private OptionButton _optRefClothMesh;
         private VBoxContainer _boxRefClothList;
         private bool _isSyncingRefRigUi;
 
@@ -556,28 +558,35 @@ namespace DeadlockPlayground.UI
 
             var (clothCard, clothBody) = CreateInspectorCard(
                 "Cloth Bone Chains",
-                "Author custom hair, cape, skirt, or accessory bone chains in 3D. They automatically appear in Tab 3 (Physics) on Bind.");
+                "Add hair, cape, skirt, or ribbon bones in 3D. Each chain stays isolated to its radius and mesh island, then appears in Tab 3 (Physics) on Bind.");
             box.AddChild(clothCard);
 
-            var clothTopRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            clothTopRow.AddThemeConstantOverride("separation", 6);
+            // Row 1: Chain Name + Parent Bone
+            var clothRow1 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            clothRow1.AddThemeConstantOverride("separation", 6);
             _txtRefClothName = new LineEdit
             {
-                PlaceholderText = "Chain name (e.g. cape_L)",
+                PlaceholderText = "Chain name (e.g. hair_tail)",
                 Text = "cloth_strand",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 CustomMinimumSize = new Vector2(0, 32)
             };
-            _optRefClothParent = new OptionButton { CustomMinimumSize = new Vector2(110, 32) };
+            _optRefClothParent = new OptionButton
+            {
+                CustomMinimumSize = new Vector2(106, 32),
+                TooltipText = "Skeleton bone this cloth chain attaches to."
+            };
             ConfigureOptionButton(_optRefClothParent);
-            foreach (string pb in new[] { "spine_3", "head", "pelvis", "spine_2", "clavicle_L", "clavicle_R", "hand_L", "hand_R" })
+            foreach (string pb in new[] { "head", "spine_3", "spine_2", "pelvis", "clavicle_L", "clavicle_R", "hand_L", "hand_R" })
                 _optRefClothParent.AddItem(pb);
-            clothTopRow.AddChild(_txtRefClothName);
-            clothTopRow.AddChild(_optRefClothParent);
-            clothBody.AddChild(clothTopRow);
+            _optRefClothParent.Select(1); // default spine_3
+            clothRow1.AddChild(_txtRefClothName);
+            clothRow1.AddChild(_optRefClothParent);
+            clothBody.AddChild(clothRow1);
 
-            var clothOptRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            clothOptRow.AddThemeConstantOverride("separation", 6);
+            // Row 2: Bone Count + Hang Direction
+            var clothRow2 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            clothRow2.AddThemeConstantOverride("separation", 6);
             _spinRefClothSegments = new SpinBox
             {
                 MinValue = 1,
@@ -585,31 +594,67 @@ namespace DeadlockPlayground.UI
                 Step = 1,
                 Value = 2,
                 Prefix = "Bones:",
-                CustomMinimumSize = new Vector2(100, 32),
-                TooltipText = "Number of bones in chain (1 = single jiggle bone with 0 mid-joints, 2–6 = bendable cloth/hair chain)."
+                CustomMinimumSize = new Vector2(96, 32),
+                TooltipText = "Number of bones in chain (1 = single jiggle bone, 2–6 = bendable hair/cape/skirt chain)."
             };
-            _optRefClothDir = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, CustomMinimumSize = new Vector2(0, 32) };
+            _optRefClothDir = new OptionButton
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 32),
+                TooltipText = "Initial direction for newly placed cloth chain joints."
+            };
             ConfigureOptionButton(_optRefClothDir);
             _optRefClothDir.AddItem("Hang Down (-Y)", 0);
             _optRefClothDir.AddItem("Back (-Z)", 1);
             _optRefClothDir.AddItem("Outward Left (+X)", 2);
             _optRefClothDir.AddItem("Outward Right (-X)", 3);
+            clothRow2.AddChild(_spinRefClothSegments);
+            clothRow2.AddChild(_optRefClothDir);
+            clothBody.AddChild(clothRow2);
 
+            // Row 3: Influence Radius (cm) + Optional Target Mesh Filter
+            var clothRow3 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            clothRow3.AddThemeConstantOverride("separation", 6);
+            _spinRefClothRadius = new SpinBox
+            {
+                MinValue = 2,
+                MaxValue = 30,
+                Step = 1,
+                Value = 8,
+                Prefix = "Radius:",
+                Suffix = " cm",
+                CustomMinimumSize = new Vector2(124, 32),
+                TooltipText = "Max weight influence radius in cm. Smaller (4–8 cm) keeps hair/ponytails off the face and hoodie; larger (12–20 cm) fits wide capes/skirts."
+            };
+            _optRefClothMesh = new OptionButton
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 32),
+                TooltipText = "Auto (Nearest Island) isolates weights to the mesh shell pierced by the chain, or lock strictly to one submesh."
+            };
+            ConfigureOptionButton(_optRefClothMesh);
+            _optRefClothMesh.AddItem("Auto (Mesh Island)", 0);
+            clothRow3.AddChild(_spinRefClothRadius);
+            clothRow3.AddChild(_optRefClothMesh);
+            clothBody.AddChild(clothRow3);
+
+            // Row 4: Full-width Add Button (never clips off right edge)
             var btnAddCloth = new Button
             {
-                Text = "+ Add Chain",
+                Text = "+ Add Cloth Chain",
                 ThemeTypeVariation = "ImporterPrimaryButton",
-                CustomMinimumSize = new Vector2(108, 32)
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                CustomMinimumSize = new Vector2(0, 34)
             };
-            ImporterStyle.ApplyFontSize(btnAddCloth, ImporterStyle.FontHint);
+            ImporterStyle.ApplyFontSize(btnAddCloth, ImporterStyle.FontBody);
             btnAddCloth.Pressed += OnAddReferenceClothChainPressed;
-            clothOptRow.AddChild(_spinRefClothSegments);
-            clothOptRow.AddChild(_optRefClothDir);
-            clothOptRow.AddChild(btnAddCloth);
-            clothBody.AddChild(clothOptRow);
+            clothBody.AddChild(btnAddCloth);
+
+            var sep = new HSeparator();
+            clothBody.AddChild(sep);
 
             _boxRefClothList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            _boxRefClothList.AddThemeConstantOverride("separation", 4);
+            _boxRefClothList.AddThemeConstantOverride("separation", 6);
             clothBody.AddChild(_boxRefClothList);
 
             return box;
@@ -960,6 +1005,35 @@ namespace DeadlockPlayground.UI
             SetBottomStatus("Bound mesh to modular Reference Rig. Adjust Pose Fit or refine in Tab 3 (Weights & Physics).", StatusTone.Success);
         }
 
+        private List<string> GetActiveImportedSubmeshNamesForCloth()
+        {
+            var names = new List<string>();
+            if (_liveImportedScene == null || !GodotObject.IsInstanceValid(_liveImportedScene)) return names;
+            var meshes = FilterActiveImportedMeshes(CustomModelAutoRigger.CollectMeshes(_liveImportedScene));
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mi in meshes)
+            {
+                string nm = mi?.Name.ToString() ?? "";
+                if (!string.IsNullOrEmpty(nm) && seen.Add(nm)) names.Add(nm);
+            }
+            return names;
+        }
+
+        private void PopulateClothTargetMeshDropdown(OptionButton opt, List<string> meshNames, string selectedMesh)
+        {
+            if (opt == null) return;
+            opt.Clear();
+            opt.AddItem("Auto (Mesh Island)", 0);
+            int selIdx = 0;
+            for (int i = 0; i < meshNames.Count; i++)
+            {
+                opt.AddItem(meshNames[i], i + 1);
+                if (!string.IsNullOrEmpty(selectedMesh) && string.Equals(meshNames[i], selectedMesh, StringComparison.OrdinalIgnoreCase))
+                    selIdx = i + 1;
+            }
+            opt.Select(selIdx);
+        }
+
         private void OnAddReferenceClothChainPressed()
         {
             EnsureReferenceRigInitialized(false);
@@ -969,7 +1043,11 @@ namespace DeadlockPlayground.UI
             string rawName = string.IsNullOrWhiteSpace(_txtRefClothName?.Text)
                 ? $"cloth_{(_referenceRig.ClothChains?.Count ?? 0) + 1}"
                 : _txtRefClothName.Text.Trim();
-            int segs = (int)(_spinRefClothSegments?.Value ?? 3);
+            int segs = (int)(_spinRefClothSegments?.Value ?? 2);
+            float radiusMeters = (float)((_spinRefClothRadius?.Value ?? 8.0) * 0.01);
+            string targetMesh = (_optRefClothMesh != null && _optRefClothMesh.Selected > 0)
+                ? _optRefClothMesh.GetItemText(_optRefClothMesh.Selected)
+                : "";
             int dirId = _optRefClothDir != null && _optRefClothDir.Selected >= 0 ? _optRefClothDir.GetItemId(_optRefClothDir.Selected) : 0;
 
             Vector3 dir = dirId switch
@@ -993,7 +1071,11 @@ namespace DeadlockPlayground.UI
             if (_referenceRig.Joints.TryGetValue("Head", out var headP) && _referenceRig.Joints.TryGetValue("AnkleL", out var ankP))
                 h = MathF.Max(0.2f, MathF.Abs(headP.Y - ankP.Y) / 0.88f);
 
-            var chain = ReferenceRigDef.CreateDefaultClothChain(rawName, parentBone, parentPos, dir, segs, totalLength: 0.28f * h);
+            var chain = ReferenceRigDef.CreateDefaultClothChain(
+                rawName, parentBone, parentPos, dir, segs,
+                totalLength: 0.24f * h,
+                influenceRadius: radiusMeters,
+                targetMeshName: targetMesh);
             _referenceRig.ClothChains.Add(chain);
             _isEditReferenceBonesMode = true;
             _selectedPin = $"cloth::{chain.ChainId}::0";
@@ -1002,16 +1084,23 @@ namespace DeadlockPlayground.UI
             ApplyLandmarkPreviewState();
             AttachGizmoToSelectedReferenceJoint();
             _pinsDirtyNeedsRigRebuild = true;
-            SetBottomStatus($"Added cloth chain '{chain.Name}' on {parentBone}. Drag joints in 3D, then click Bind / Re-Bind.", StatusTone.Info);
+            SetBottomStatus($"Added cloth chain '{chain.Name}' on {parentBone} (radius {radiusMeters * 100f:F0} cm). Drag joints in 3D, then click Bind.", StatusTone.Info);
         }
 
         private void RefreshReferenceClothListUI()
         {
+            var activeMeshes = GetActiveImportedSubmeshNamesForCloth();
+            if (_optRefClothMesh != null && GodotObject.IsInstanceValid(_optRefClothMesh))
+            {
+                string prevSel = _optRefClothMesh.Selected > 0 ? _optRefClothMesh.GetItemText(_optRefClothMesh.Selected) : "";
+                PopulateClothTargetMeshDropdown(_optRefClothMesh, activeMeshes, prevSel);
+            }
+
             if (_boxRefClothList == null) return;
             foreach (Node ch in _boxRefClothList.GetChildren()) ch.QueueFree();
             if (_referenceRig?.ClothChains == null || _referenceRig.ClothChains.Count == 0)
             {
-                var empty = new Label { Text = "No cloth chains authored yet." };
+                var empty = new Label { Text = "No cloth chains authored yet.", AutowrapMode = TextServer.AutowrapMode.WordSmart };
                 ImporterStyle.ApplyHintStyle(empty);
                 _boxRefClothList.AddChild(empty);
                 return;
@@ -1019,17 +1108,35 @@ namespace DeadlockPlayground.UI
             foreach (var cc in _referenceRig.ClothChains.ToList())
             {
                 var captured = cc;
+                var card = new PanelContainer
+                {
+                    ThemeTypeVariation = "SubPanelContainer",
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                var pad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                pad.AddThemeConstantOverride("margin_left", 6);
+                pad.AddThemeConstantOverride("margin_right", 6);
+                pad.AddThemeConstantOverride("margin_top", 5);
+                pad.AddThemeConstantOverride("margin_bottom", 5);
+                card.AddChild(pad);
+
+                var col = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                col.AddThemeConstantOverride("separation", 4);
+                pad.AddChild(col);
+
+                // Card Row 1: Select Chain + Mirror + Delete (zero right-edge clipping)
                 var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
                 row.AddThemeConstantOverride("separation", 4);
 
                 var btnSel = new Button
                 {
-                    Text = $"{cc.Name} ({cc.ParentBoneName} · {Math.Max(0, cc.JointPositions.Count - 1)}b)",
+                    Text = $"{cc.Name} · {cc.ParentBoneName} ({Math.Max(0, cc.JointPositions.Count - 1)}b)",
                     Alignment = HorizontalAlignment.Left,
                     ClipText = true,
+                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
                     ThemeTypeVariation = "ToolbarButton",
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                    CustomMinimumSize = new Vector2(0, 30)
+                    CustomMinimumSize = new Vector2(0, 28)
                 };
                 ImporterStyle.ApplyFontSize(btnSel, ImporterStyle.FontHint);
                 btnSel.Pressed += () =>
@@ -1046,7 +1153,7 @@ namespace DeadlockPlayground.UI
                 {
                     Text = "Mirror",
                     ThemeTypeVariation = "ToolbarButton",
-                    CustomMinimumSize = new Vector2(56, 30),
+                    CustomMinimumSize = new Vector2(54, 28),
                     TooltipText = "Create a mirrored L↔R copy of this cloth chain."
                 };
                 ImporterStyle.ApplyFontSize(btnMir, ImporterStyle.FontHint);
@@ -1067,7 +1174,7 @@ namespace DeadlockPlayground.UI
                 {
                     Text = "✕",
                     ThemeTypeVariation = "ToolbarButton",
-                    CustomMinimumSize = new Vector2(30, 30),
+                    CustomMinimumSize = new Vector2(28, 28),
                     TooltipText = "Delete this cloth chain."
                 };
                 ImporterStyle.ApplyFontSize(btnDel, ImporterStyle.FontHint);
@@ -1082,8 +1189,47 @@ namespace DeadlockPlayground.UI
                     _pinsDirtyNeedsRigRebuild = true;
                 };
                 row.AddChild(btnDel);
+                col.AddChild(row);
 
-                _boxRefClothList.AddChild(row);
+                // Card Row 2: Inline Radius (cm) + Target Mesh filter (click Re-Bind after tweaking)
+                var tuneRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                tuneRow.AddThemeConstantOverride("separation", 4);
+
+                var spinRad = new SpinBox
+                {
+                    MinValue = 2,
+                    MaxValue = 30,
+                    Step = 1,
+                    Value = Math.Round(Math.Clamp(captured.InfluenceRadius, 0.02f, 0.30f) * 100.0),
+                    Prefix = "R:",
+                    Suffix = "cm",
+                    CustomMinimumSize = new Vector2(96, 26),
+                    TooltipText = "Influence radius in cm. Click Re-Bind to apply."
+                };
+                spinRad.ValueChanged += (v) =>
+                {
+                    captured.InfluenceRadius = Math.Clamp((float)(v * 0.01), 0.02f, 0.35f);
+                    _pinsDirtyNeedsRigRebuild = true;
+                };
+                tuneRow.AddChild(spinRad);
+
+                var optMesh = new OptionButton
+                {
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    CustomMinimumSize = new Vector2(0, 26),
+                    TooltipText = "Restrict this cloth chain to a specific submesh, or Auto (Mesh Island)."
+                };
+                ConfigureOptionButton(optMesh);
+                PopulateClothTargetMeshDropdown(optMesh, activeMeshes, captured.TargetMeshName);
+                optMesh.ItemSelected += (idx) =>
+                {
+                    captured.TargetMeshName = idx > 0 ? optMesh.GetItemText((int)idx) : "";
+                    _pinsDirtyNeedsRigRebuild = true;
+                };
+                tuneRow.AddChild(optMesh);
+                col.AddChild(tuneRow);
+
+                _boxRefClothList.AddChild(card);
             }
         }
 
@@ -1473,7 +1619,7 @@ namespace DeadlockPlayground.UI
             for (int sc = 1; sc <= 4; sc++)
             {
                 int cap = sc;
-                var b = MakeHudBtn(sc.ToString(), 24, 24, toggle: true, pressed: sc == 4);
+                var b = MakeHudBtn(sc.ToString(), 24, 24, toggle: true, pressed: sc == 3);
                 b.Pressed += () =>
                 {
                     if (_isSyncingRefRigUi) return;

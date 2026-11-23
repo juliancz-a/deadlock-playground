@@ -1,8 +1,33 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Theme" uid="uid://b08qj211playg" path="res://assets/themes/PlaygroundTheme.tres" id="1_theme"]
 [ext_resource type="Script" path="res://tools/scripts/animation/DopeSheetGridCanvas.cs" id="2_dope_canvas"]
 [ext_resource type="Script" path="res://tools/scripts/animation/BoneListCanvas.cs" id="3_bone_canvas"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bone_header"]
+content_margin_left = 6.0
+content_margin_top = 2.0
+content_margin_right = 6.0
+content_margin_bottom = 0.0
+bg_color = Color(0.16, 0.17, 0.2, 1)
+border_width_bottom = 1
+border_color = Color(0.2, 0.22, 0.25, 0.7)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_search_compact"]
+content_margin_left = 6.0
+content_margin_top = 1.0
+content_margin_right = 6.0
+content_margin_bottom = 1.0
+bg_color = Color(0.1, 0.11, 0.13, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.247059, 0.364706, 0.301961, 0.65)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [node name="DopeSheetView" type="HSplitContainer"]
 anchors_preset = 15
@@ -24,16 +49,19 @@ theme_override_constants/separation = 0
 [node name="BoneHeaderPanel" type="PanelContainer" parent="BoneListPanel"]
 custom_minimum_size = Vector2(0, 54)
 layout_mode = 2
-theme_type_variation = &"InspectorSectionPanel"
+theme_override_styles/panel = SubResource("StyleBoxFlat_bone_header")
 
 [node name="VBox" type="VBoxContainer" parent="BoneListPanel/BoneHeaderPanel"]
 layout_mode = 2
-theme_override_constants/separation = 2
+theme_override_constants/separation = 0
 
 [node name="BoneSearch" type="LineEdit" parent="BoneListPanel/BoneHeaderPanel/VBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 26)
+custom_minimum_size = Vector2(0, 25)
 layout_mode = 2
+theme_override_font_sizes/font_size = 12
+theme_override_styles/normal = SubResource("StyleBoxFlat_search_compact")
+theme_override_styles/focus = SubResource("StyleBoxFlat_search_compact")
 placeholder_text = "Filter bones..."
 clear_button_enabled = true
 
@@ -42,6 +70,7 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 theme_type_variation = &"CompactLabel"
+theme_override_font_sizes/font_size = 12
 text = "All Channels (Summary)"
 vertical_alignment = 1
 

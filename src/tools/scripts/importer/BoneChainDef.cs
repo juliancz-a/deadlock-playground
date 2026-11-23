@@ -112,6 +112,11 @@ namespace DeadlockPlayground.Importer
         public bool OpenSheet { get; set; } = true;
         /// <summary>Sliding friction (<c>cloth_friction$0</c>, 0.0..1.0; Valve uses 0.10..0.20).</summary>
         public float Friction { get; set; } = 0.15f;
+        /// <summary>
+        /// Opt-in 2-side ribbon extrusion &amp; hinge plane for flat banners/sashes (<c>extrude_sides = 2</c>, <c>stiff_hinge = 1.0</c>).
+        /// Defaults to <c>false</c> (pure Valve 1D Rope <c>m_Ropes</c> matching Paige/Lash/Silver — zero sideways ribbon kinking).
+        /// </summary>
+        public bool EnableRibbonExtrude { get; set; } = false;
         /// <summary>Source 2 <c>ClothChain</c> ribbon half-width in inches (<c>extrude_radius</c>, 0.2..6.0 in; default 1.0).</summary>
         public float ExtrudeRadiusInches { get; set; } = 1.0f;
         /// <summary>Source 2 <c>ClothChain</c> hinge/extrude forward axis (<c>extrude_forward_axis</c>): 0=+X (Default), 1=+Y, 2=+Z, 3=-X, 4=-Y, 5=-Z.</summary>
@@ -196,6 +201,7 @@ namespace DeadlockPlayground.Importer
                 AnchorFreeRotate = AnchorFreeRotate,
                 OpenSheet = OpenSheet,
                 Friction = Friction,
+                EnableRibbonExtrude = EnableRibbonExtrude,
                 ExtrudeRadiusInches = ExtrudeRadiusInches,
                 ExtrudeForwardAxis = ExtrudeForwardAxis,
                 ExtrudeTwistDeg = ExtrudeTwistDeg,

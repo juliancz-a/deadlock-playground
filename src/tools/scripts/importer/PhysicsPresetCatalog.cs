@@ -62,21 +62,21 @@ namespace DeadlockPlayground.Importer
             {
                 Id = ShortHairBangsId,
                 DisplayName = "Short Hair / Bangs",
-                HeroReference = "Silver / Violet / Paige",
-                ShortTag = "Cloth Chain · High Hold · 1.2 in Col",
-                Description = "Structured bangs and short hair strands that hold their styled silhouette with light bounce (calibrated to Silver/Violet/Paige).",
+                HeroReference = "Paige / Silver / Lash",
+                ShortTag = "1D Rope · Paige/Silver · 3.0 in Leash",
+                Description = "Structured bangs, short spiky hair, and tufts using a pure Valve 1D rope with pinned scalp root, 1.0g gravity, and 3.0 in leash (calibrated to Paige/Silver/Lash).",
                 Category = "Hair",
                 ThumbnailPath = "res://assets/thumbnails/physics_preview/short_hair_paige.png",
                 FallbackIconPath = "res://assets/at-icons/sparkles.svg",
                 Simulation = SimulationKind.Cloth,
-                StiffnessRoot = 0.80f,
-                StiffnessTip = 0.45f,
-                GoalTaperPower = 1.20f,
-                Damping = 0.12f,
+                StiffnessRoot = 0.86f,
+                StiffnessTip = 0.65f,
+                GoalTaperPower = 1.15f,
+                Damping = 0.15f,
                 Gravity = 1.0f,
-                CollisionRadiusTipInches = 1.2f,
-                Friction = 0.35f,
-                StrayRadiusInches = -1.0f,
+                CollisionRadiusTipInches = 0.50f,
+                Friction = 0.10f,
+                StrayRadiusInches = 3.0f,
                 PlanarizeBackBarrier = false,
                 OpenSheet = true,
                 AnchorFreeRotate = true,
@@ -245,8 +245,8 @@ namespace DeadlockPlayground.Importer
                 FallbackIconPath = "res://assets/at-icons/flag_triangular.svg",
                 Simulation = SimulationKind.ProxyCloth,
                 StiffnessRoot = 0.58f,
-                StiffnessTip = 0.14f,
-                GoalTaperPower = 1.40f,
+                StiffnessTip = 0.04f,
+                GoalTaperPower = 1.50f,
                 Damping = 0.10f,
                 Gravity = 1.0f,
                 CollisionRadiusTipInches = 3.2f,
@@ -422,6 +422,7 @@ namespace DeadlockPlayground.Importer
             ch.AnchorFreeRotate = preset.AnchorFreeRotate;
             ch.AngleLimitDeg = preset.AngleLimitDeg;
             ch.TwistRelax = preset.TwistRelax;
+            ch.EnableRibbonExtrude = false;
 
             if (resetMacros)
             {

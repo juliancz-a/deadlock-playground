@@ -377,6 +377,120 @@ public partial class VpkLoaderTest : Node3D
 		return await LoadModelInternalAsync(vmdlPath, LastLoadedHeroKey, LastLoadedDisplayName);
 	}
 
+	/// <summary>
+	/// Lazily extracts and builds a standalone vanilla Deadlock hero/model Node3D in memory
+	/// (with authentic Source 2 PBR materials) WITHOUT touching the active stage hero,
+	/// animations, or workspace state. Caller owns the returned Node3D lifetime.
+	/// </summary>
+	public async Task<Node3D> LoadStandaloneVanillaModelAsync(
+		string vmdlRelativePath,
+		string heroCodename,
+		Action<string> onProgress = null)
+	{
+		if (string.IsNullOrWhiteSpace(vmdlRelativePath)) return null;
+
+		var basePackage = GetOrCreateBasePackage();
+		if (basePackage == null)
+		{
+			GD.PrintErr("[VpkLoader] Cannot lazy-load vanilla model: base pak01_dir.vpk is not available.");
+			return null;
+		}
+
+		string normalizedRoute = vmdlRelativePath.Replace('\\', '/').TrimStart('/');
+		var entry = basePackage.FindEntry(normalizedRoute);
+		if (entry == null)
+		{
+			GD.PrintErr($"[VpkLoader] Standalone vanilla model not found in VPK: '{normalizedRoute}'");
+			return null;
+		}
+
+		string heroKey = string.IsNullOrWhiteSpace(heroCodename)
+			? Path.GetFileNameWithoutExtension(normalizedRoute)
+			: heroCodename;
+
+		onProgress?.Invoke($"Extracting {heroKey} geometry from VPK...");
+
+		byte[] glbBytes = null;
+		Dictionary<string, List<string>> meshMaterialMap = null;
+
+		try
+		{
+			await Task.Run(() =>
+			{
+				basePackage.ReadEntry(entry, out byte[] resourceData);
+				using var resource = new ValveResourceFormat.Resource();
+				using var stream = new MemoryStream(resourceData);
+				resource.Read(stream);
+
+				meshMaterialMap = BuildMeshMaterialMap(resource);
+
+				var fileLoader = new GameFileLoader(basePackage, entry.DirectoryName);
+				var exporter = new GltfModelExporter(fileLoader)
+				{
+					ExportAnimations = false,
+					AdaptTextures = true,
+					ExportMaterials = false,
+					ExportExtras = false
+				};
+
+				string tempGlbPath = Path.Combine(Path.GetTempPath(), $"donor_{heroKey}_{Guid.NewGuid():N}.glb");
+				try
+				{
+					exporter.Export(resource, tempGlbPath);
+					glbBytes = File.ReadAllBytes(tempGlbPath);
+				}
+				finally
+				{
+					if (File.Exists(tempGlbPath))
+					{
+						File.Delete(tempGlbPath);
+					}
+				}
+			});
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[VpkLoader] Failed to extract standalone vanilla model '{normalizedRoute}': {ex.Message}");
+			return null;
+		}
+
+		if (glbBytes == null || glbBytes.Length == 0)
+			return null;
+
+		onProgress?.Invoke($"Resolving {heroKey} materials...");
+
+		try
+		{
+			var gltfDoc = new GltfDocument();
+			var gltfState = new GltfState();
+			Error err = gltfDoc.AppendFromBuffer(glbBytes, "", gltfState);
+			if (err != Error.Ok)
+			{
+				GD.PrintErr($"[VpkLoader] Failed to parse standalone vanilla GLB for '{heroKey}': {err}");
+				return null;
+			}
+
+			var modelScene = gltfDoc.GenerateScene(gltfState) as Node3D;
+			if (modelScene == null) return null;
+
+			modelScene.Name = $"VanillaDonor_{heroKey}";
+			ApplyMaterialsRecursively(modelScene, heroKey, basePackage, meshMaterialMap ?? new Dictionary<string, List<string>>(), null);
+			DeadlockMaterialResolver.ApplyInitialSubmeshVisibility(modelScene, heroKey);
+			ProceduralClothSolver.EnforceClothTwoSidedMaterials(modelScene);
+
+			var skel = SearchSkeleton(modelScene);
+			skel?.ResetBonePoses();
+
+			GD.Print($"[VpkLoader] Lazy-loaded standalone vanilla model '{heroKey}' ({glbBytes.Length / 1024} KB).");
+			return modelScene;
+		}
+		catch (Exception ex)
+		{
+			GD.PrintErr($"[VpkLoader] Failed to instantiate standalone vanilla model '{heroKey}': {ex.Message}");
+			return null;
+		}
+	}
+
 	public async Task LoadHeroAsync(string hero, string model)
 	{
 		var catalogEntry = DeadlockHeroCatalog.GetByCodename(hero) ??
