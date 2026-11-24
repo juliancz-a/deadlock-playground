@@ -155,6 +155,13 @@ namespace DeadlockPlayground.Importer
             public bool PreserveSourceClothingChains { get; set; } = true;
             public HashSet<string> DisabledSourceBones { get; set; } = new(StringComparer.OrdinalIgnoreCase);
             public List<BoneChainDef> BoneChains { get; set; } = new();
+            /// <summary>
+            /// Optional explicit set of synthetic ChainIds that are newly added or geometry-dirty and should run
+            /// procedural weighting on surfaces that already carry <see cref="CustomSkinWeightOverrides"/>.
+            /// When non-null (even if empty), any other chain on a painted surface is left untouched so erased or
+            /// sibling-painted chains are never overwritten on re-bind.
+            /// </summary>
+            public HashSet<string> SyntheticChainsToRebind { get; set; } = null;
             public List<BodyCollisionCapsuleDef> BodyCollisionCapsules { get; set; } = new();
             public AccessoryBoneMode AccessoryBoneMode { get; set; } = AccessoryBoneMode.RigidToOneBone;
             public FingerRigMode FingerMode { get; set; } = FingerRigMode.DeadlockFingerBones;
@@ -1030,9 +1037,17 @@ namespace DeadlockPlayground.Importer
                                    options.Intent == AccessoryIntent.AddAccessory ||
                                    options.Intent == AccessoryIntent.ReplacePart;
 
-            // Clean up any bones previously appended by this slot before re-binding
+            // Clean up any bones previously appended by this slot before re-binding.
+            // CRITICAL: Do NOT re-play AnimationPlayer poses mid-RigAndBind (restoreAnimationPose: false),
+            // otherwise re-binding with any prior appended/synthetic bones poses heroSkeleton into the active
+            // animation before RigPreRiggedModel/RigStaticModel runs, severely scrambling mesh weights!
             string activeSlotKey = string.IsNullOrWhiteSpace(options?.SlotId) ? "__main__" : options.SlotId;
-            RemoveAppendedSlotBonesFromSkeleton(heroNode, heroSkeleton, activeSlotKey);
+            RemoveAppendedSlotBonesFromSkeleton(heroNode, heroSkeleton, activeSlotKey, restoreAnimationPose: false);
+            heroSkeleton.ResetBonePoses();
+            if (!heroSkeleton.HasMeta("OriginalHeroBoneCount"))
+            {
+                heroSkeleton.SetMeta("OriginalHeroBoneCount", heroSkeleton.GetBoneCount());
+            }
 
             // Ensure forearm twist bones exist for full character skeletal rigs when requested
             if (!isAccessorySlot && options.ExtraTwistBones && options.Method != RiggingMethod.RigidSingleBone)
@@ -1049,6 +1064,17 @@ namespace DeadlockPlayground.Importer
             for (int b = 0; b < heroSkeleton.GetBoneCount(); b++)
             {
                 GetOrAddSkinBindIndex(customSkin, heroSkeleton, b);
+            }
+
+            // Stage 1 (Synthetic Clothing Chains): Create synthetic bones on heroSkeleton + customSkin BEFORE
+            // RigPreRiggedModel / RigUnriggedModel / RigRigidBoneModel runs so any user-painted CustomSkinWeightOverrides
+            // referencing synthetic bones resolve to their exact bone indices instead of falling back to bone 0 (root_motion)!
+            List<AddClothingChainTool.PreparedSyntheticChain> preparedSyntheticChains = null;
+            int addedSyntheticBoneCount = 0;
+            if (options.BoneChains != null && options.BoneChains.Any(c => c != null && c.IsSynthetic && c.Policy == ChainPolicy.PreservePhysicsChain))
+            {
+                preparedSyntheticChains = AddClothingChainTool.CreateSyntheticChainBones(
+                    heroSkeleton, customSkin, options.BoneChains, out addedSyntheticBoneCount);
             }
 
             // Ensure unlit/emissive materials and outline shell metadata are sanitized on the imported scene
@@ -1285,19 +1311,20 @@ namespace DeadlockPlayground.Importer
                         }
                     }
 
-                    // Phase 2: Synthetic clothing chains from Add-Clothing-Bones tool
-                    if (options.BoneChains != null && options.BoneChains.Any(c => c != null && c.IsSynthetic && c.Policy == ChainPolicy.PreservePhysicsChain))
+                    // Phase 2 (Stage 2): Blend distance weights for any synthetic clothing chains not already hand-painted
+                    if (preparedSyntheticChains != null && preparedSyntheticChains.Count > 0)
                     {
-                        int addedSyn = AddClothingChainTool.ApplySyntheticChains(
-                            heroSkeleton, customSkin, result.CustomSubmeshes, options.BoneChains, result.Report.Warnings);
-                        if (addedSyn > 0)
+                        AddClothingChainTool.ApplySyntheticChainWeights(
+                            heroSkeleton, customSkin, result.CustomSubmeshes, preparedSyntheticChains,
+                            options.CustomSkinWeightOverrides, result.Report.Warnings, options.SyntheticChainsToRebind);
+                        if (addedSyntheticBoneCount > 0)
                         {
                             foreach (var sc in options.BoneChains.Where(c => c != null && c.IsSynthetic && c.AppendedHeroBoneNames.Count > 0))
                             {
                                 TagAppendedBonesOnSkeleton(heroSkeleton, activeSlotKey, sc.ChainId, sc.AppendedHeroBoneNames);
                                 result.Report.AppendedChains.Add(sc.Name);
                             }
-                            result.Report.Stats.ClothBoneCount += addedSyn;
+                            result.Report.Stats.ClothBoneCount += addedSyntheticBoneCount;
                         }
                     }
 
@@ -1993,6 +2020,9 @@ namespace DeadlockPlayground.Importer
             }
 
             int tgtBoneCount = targetSkeleton.GetBoneCount();
+            int origCoreBoneCount = targetSkeleton.HasMeta("OriginalHeroBoneCount")
+                ? targetSkeleton.GetMeta("OriginalHeroBoneCount").AsInt32()
+                : tgtBoneCount;
             // 0 = none, 1 = leftArm, 2 = rightArm, 3 = leftLeg, 4 = rightLeg, 5 = headSeg, 6 = pelvis, 7 = lowerSpine (0.60x), 8 = midSpine (0.25x)
             int spine0Bone = targetSkeleton.FindBone("spine_0");
             int spine1Bone = targetSkeleton.FindBone("spine_1");
@@ -2005,9 +2035,22 @@ namespace DeadlockPlayground.Importer
                 else if (leftLeg != null && leftLeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 3;
                 else if (rightLeg != null && rightLeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 4;
                 else if (headSeg != null && headSeg.AppliesTo(tb, targetSkeleton)) tgtSegmentKind[tb] = 5;
-                else if (tb == pelvisBone) tgtSegmentKind[tb] = 6;
-                else if (tb == spine0Bone) tgtSegmentKind[tb] = 7;
-                else if (tb == spine1Bone) tgtSegmentKind[tb] = hasMappedSpine0 ? (byte)8 : (byte)7;
+                else
+                {
+                    // Walk appended/synthetic bones (e.g. skirt chains anchored to pelvis/spine_0/spine_1)
+                    // up to their hero anchor so painted overrides inherit the exact same alignment offset.
+                    int anchor = tb;
+                    int guard = 0;
+                    while (anchor >= origCoreBoneCount && guard++ < 32)
+                    {
+                        int p = targetSkeleton.GetBoneParent(anchor);
+                        if (p < 0) break;
+                        anchor = p;
+                    }
+                    if (anchor == pelvisBone) tgtSegmentKind[tb] = 6;
+                    else if (anchor == spine0Bone) tgtSegmentKind[tb] = 7;
+                    else if (anchor == spine1Bone) tgtSegmentKind[tb] = hasMappedSpine0 ? (byte)8 : (byte)7;
+                }
             }
 
             int headBonePre = targetSkeleton.FindBone("head");
@@ -2138,9 +2181,24 @@ namespace DeadlockPlayground.Importer
                             ovPaletteToTgt = new int[surfaceOverride.BonePalette.Length];
                             for (int p = 0; p < surfaceOverride.BonePalette.Length; p++)
                             {
-                                int tb = targetSkeleton.FindBone(surfaceOverride.BonePalette[p]);
-                                ovPaletteToTgt[p] = tb >= 0 ? tb : 0;
+                                // Keep -1 when a bone was deleted (e.g. deleted synthetic cloth chain) so we NEVER dump its weight onto bone 0 (root_motion)!
+                                ovPaletteToTgt[p] = FindBoneIndexCaseInsensitive(targetSkeleton, surfaceOverride.BonePalette[p]);
                             }
+                        }
+
+                        bool isUnskinnedSurface = rawBones == null || rawWeights == null || rawBones.Length == 0 || rawWeights.Length == 0;
+                        int unskinnedFallbackTgtBone = 0;
+                        if ((isUnskinnedSurface || hasSurfaceOverride) && vCount > 0)
+                        {
+                            Vector3 surfCenter = Vector3.Zero;
+                            float surfMaxY = float.MinValue;
+                            for (int vi = 0; vi < vCount; vi++)
+                            {
+                                surfCenter += baseHeroVerts[vi];
+                                if (baseHeroVerts[vi].Y > surfMaxY) surfMaxY = baseHeroVerts[vi].Y;
+                            }
+                            surfCenter /= vCount;
+                            unskinnedFallbackTgtBone = FindNearestCoreHeroBone(targetSkeleton, surfCenter, surfMaxY);
                         }
 
                         System.Threading.Tasks.Parallel.For(0, vCount, v =>
@@ -2158,9 +2216,9 @@ namespace DeadlockPlayground.Importer
                                 for (int k = 0; k < 4; k++)
                                 {
                                     int pIdx = surfaceOverride.PaletteIndices[baseOff + k];
-                                    int tb = (ovPaletteToTgt != null && pIdx >= 0 && pIdx < ovPaletteToTgt.Length) ? ovPaletteToTgt[pIdx] : 0;
-                                    float w = Math.Max(0f, surfaceOverride.Weights[baseOff + k]);
-                                    topBones[k] = tb;
+                                    int tb = (ovPaletteToTgt != null && pIdx >= 0 && pIdx < ovPaletteToTgt.Length) ? ovPaletteToTgt[pIdx] : -1;
+                                    float w = tb >= 0 ? Math.Max(0f, surfaceOverride.Weights[baseOff + k]) : 0f;
+                                    topBones[k] = tb >= 0 ? tb : 0;
                                     topWeights[k] = w;
                                     sumOv += w;
                                 }
@@ -2170,8 +2228,21 @@ namespace DeadlockPlayground.Importer
                                 }
                                 else
                                 {
-                                    topBones[0] = 0; topWeights[0] = 1f;
+                                    topBones[0] = unskinnedFallbackTgtBone; topWeights[0] = 1f;
+                                    topBones[1] = 0; topWeights[1] = 0f;
+                                    topBones[2] = 0; topWeights[2] = 0f;
+                                    topBones[3] = 0; topWeights[3] = 0f;
                                 }
+                            }
+                            else if (isUnskinnedSurface)
+                            {
+                                // Unskinned static submesh inside a pre-rigged model (e.g. Roblox Blender export where the
+                                // Head + Hair + Face mesh has skin=None): bind to nearest core hero bone instead of bone 0 (pelvis)!
+                                topBones[0] = unskinnedFallbackTgtBone;
+                                topWeights[0] = 1.0f;
+                                topBones[1] = 0; topWeights[1] = 0f;
+                                topBones[2] = 0; topWeights[2] = 0f;
+                                topBones[3] = 0; topWeights[3] = 0f;
                             }
                             else
                             {
@@ -6371,6 +6442,16 @@ namespace DeadlockPlayground.Importer
                     if (isLeft && disallowRight) continue;
                     if (isRight && disallowLeft) continue;
 
+                    // Anatomical hand-vs-foot isolation: articulated toes (e.g. C_TOES_INDEX2.R) must never match fingers/arms,
+                    // and hand/finger bones must never match foot/toe/leg slots.
+                    bool isUpperLimbOrFinger = def.Group == HumanoidBoneMapper.BoneGroup.LeftHandFingers || def.Group == HumanoidBoneMapper.BoneGroup.RightHandFingers ||
+                                               def.Group == HumanoidBoneMapper.BoneGroup.LeftArm || def.Group == HumanoidBoneMapper.BoneGroup.RightArm;
+                    bool isLowerLimb = def.Group == HumanoidBoneMapper.BoneGroup.LeftLeg || def.Group == HumanoidBoneMapper.BoneGroup.RightLeg;
+                    if (isUpperLimbOrFinger && (cleanNoGltf.Contains("toe") || cleanNoGltf.Contains("foot") || cleanNoGltf.Contains("ankle") || cleanNoGltf.Contains("heel") || cleanNoGltf.Contains("sole") || cleanNoGltf.Contains("ball")))
+                        continue;
+                    if (isLowerLimb && (cleanNoGltf.Contains("hand") || cleanNoGltf.Contains("wrist") || cleanNoGltf.Contains("finger") || cleanNoGltf.Contains("palm") || cleanNoGltf.Contains("arm")))
+                        continue;
+
                     bool sourceMatch = cleanNoGltf == defCanonicalLower[d];
                     if (!sourceMatch)
                     {
@@ -9191,6 +9272,12 @@ namespace DeadlockPlayground.Importer
                                 solidCol.R < 0.02f && solidCol.G < 0.02f && solidCol.B < 0.02f)
                             {
                                 solidCol = stdMat.Emission;
+                                // Pure emissive / Roblox Neon materials exported from Blender often omit glTF metallicFactor,
+                                // which defaults to 1.0 and turns the surface solid black in PBR/Source 2 shaders.
+                                if (stdMat.MetallicTexture == null && stdMat.Metallic >= 0.99f)
+                                {
+                                    stdMat.Metallic = 0.0f;
+                                }
                             }
 
                             var img = Image.CreateEmpty(16, 16, false, Image.Format.Rgba8);
@@ -9334,6 +9421,66 @@ namespace DeadlockPlayground.Importer
         /// Auto-detects whether a MeshInstance3D or its Material is an Inverted-Hull Outline Shell
         /// (e.g. "Outline_Black", "Outline for Cube_005", "Outline for pistol", "Sasha.Body.Outline").
         /// </summary>
+        private static int FindNearestCoreHeroBone(Skeleton3D heroSkeleton, Vector3 posHeroSpace, float surfaceMaxY = float.NaN)
+        {
+            if (heroSkeleton == null) return 0;
+
+            int headIdx = FindBoneAny(heroSkeleton, "head", "head_01", "head0");
+            Vector3 headOrigin = Vector3.Zero;
+            if (headIdx >= 0)
+            {
+                headOrigin = heroSkeleton.GetBoneGlobalRest(headIdx).Origin;
+                // Surface centered near/above the skull/jaw plane (head, hair, hats, face accessories) belongs to head.
+                if (posHeroSpace.Y >= headOrigin.Y - 0.14f)
+                {
+                    return headIdx;
+                }
+                // Long hair / hoods / tall hats hang down behind the neck/shoulders so their centroid sits below
+                // headOrigin.Y - 0.14f even though their crown reaches the skull. Bind them to head (never neck_0
+                // or arm_upper_L, which rips hair apart when synthetic head-anchored cloth chains are added!).
+                if (!float.IsNaN(surfaceMaxY) && surfaceMaxY >= headOrigin.Y - 0.05f)
+                {
+                    float dx = posHeroSpace.X - headOrigin.X;
+                    float dz = posHeroSpace.Z - headOrigin.Z;
+                    if (dx * dx + dz * dz <= 0.38f * 0.38f)
+                    {
+                        return headIdx;
+                    }
+                }
+            }
+
+            string[] coreNames =
+            {
+                "head", "neck_0", "spine_3", "spine_2", "spine_1", "spine_0", "pelvis",
+                "arm_upper_L", "arm_lower_L", "hand_L",
+                "arm_upper_R", "arm_lower_R", "hand_R",
+                "leg_upper_L", "leg_lower_L", "ankle_L",
+                "leg_upper_R", "leg_lower_R", "ankle_R"
+            };
+
+            int spine2Idx = heroSkeleton.FindBone("spine_2");
+            float spine2Y = spine2Idx >= 0 ? heroSkeleton.GetBoneGlobalRest(spine2Idx).Origin.Y : float.MaxValue;
+            bool isMidlineUpper = headIdx >= 0 && MathF.Abs(posHeroSpace.X - headOrigin.X) < 0.16f && posHeroSpace.Y >= spine2Y;
+
+            int bestIdx = -1;
+            float bestDistSq = float.MaxValue;
+            foreach (string name in coreNames)
+            {
+                if (isMidlineUpper && (name.StartsWith("arm_", StringComparison.Ordinal) || name.StartsWith("hand_", StringComparison.Ordinal)))
+                    continue;
+                int idx = heroSkeleton.FindBone(name);
+                if (idx < 0) continue;
+                float dSq = heroSkeleton.GetBoneGlobalRest(idx).Origin.DistanceSquaredTo(posHeroSpace);
+                if (dSq < bestDistSq)
+                {
+                    bestDistSq = dSq;
+                    bestIdx = idx;
+                }
+            }
+
+            return bestIdx >= 0 ? bestIdx : 0;
+        }
+
         public static bool IsLikelyOutlineShell(MeshInstance3D mi, Material mat = null)
         {
             if (mi == null) return false;
@@ -9348,8 +9495,16 @@ namespace DeadlockPlayground.Importer
                 matName = mi.GetMeta("SourceMaterialName").AsString();
             }
 
-            if (meshName.Contains("outline", StringComparison.OrdinalIgnoreCase) ||
-                matName.Contains("outline", StringComparison.OrdinalIgnoreCase))
+            if (matName.Contains("outline", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // On multi-surface meshes (e.g. Roblox merged head/hair/accessory meshes whose parent node
+            // happens to be named after an outline accessory), trust the per-surface material name
+            // rather than falsely flagging every surface (head, hair, eyes) as an outline shell.
+            bool isMultiSurfaceWithNamedMat = mi.Mesh != null && mi.Mesh.GetSurfaceCount() > 1 && !string.IsNullOrWhiteSpace(matName);
+            if (!isMultiSurfaceWithNamedMat && meshName.Contains("outline", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -9881,7 +10036,7 @@ namespace DeadlockPlayground.Importer
         /// from <paramref name="skeleton"/> while preserving 100% of vanilla hero bone indices [0 .. OriginalHeroBoneCount - 1]
         /// and re-binding any remaining custom meshes by bone name.
         /// </summary>
-        public static void RemoveAppendedSlotBonesFromSkeleton(Node3D heroNode, Skeleton3D skeleton, string slotKey)
+        public static void RemoveAppendedSlotBonesFromSkeleton(Node3D heroNode, Skeleton3D skeleton, string slotKey, bool restoreAnimationPose = true)
         {
             if (skeleton == null || !GodotObject.IsInstanceValid(skeleton)) return;
 
@@ -9997,7 +10152,7 @@ namespace DeadlockPlayground.Importer
                         double curPos = !string.IsNullOrEmpty(ap.CurrentAnimation) ? ap.CurrentAnimationPosition : 0.0;
                         bool wasPlaying = ap.IsPlaying();
                         ap.ClearCaches();
-                        if (!string.IsNullOrEmpty(curAnim) && ap.HasAnimation(curAnim))
+                        if (restoreAnimationPose && !string.IsNullOrEmpty(curAnim) && ap.HasAnimation(curAnim))
                         {
                             ap.Play(curAnim);
                             ap.Seek(curPos, true);
@@ -10460,10 +10615,17 @@ namespace DeadlockPlayground.Importer
                 return false;
 
             var paletteToSkel = new int[ov.BonePalette.Length];
+            int safeFallbackSkel = -1;
             for (int p = 0; p < ov.BonePalette.Length; p++)
             {
                 int tb = FindBoneIndexCaseInsensitive(targetSkeleton, ov.BonePalette[p]);
-                paletteToSkel[p] = tb >= 0 ? tb : 0;
+                paletteToSkel[p] = tb;
+                if (safeFallbackSkel < 0 && tb > 0) safeFallbackSkel = tb;
+            }
+            if (safeFallbackSkel < 0)
+            {
+                safeFallbackSkel = FindBoneAny(targetSkeleton, "pelvis", "spine_3", "head");
+                if (safeFallbackSkel < 0) safeFallbackSkel = 0;
             }
 
             for (int v = 0; v < vCount; v++)
@@ -10473,9 +10635,9 @@ namespace DeadlockPlayground.Importer
                 for (int k = 0; k < 4; k++)
                 {
                     int pIdx = ov.PaletteIndices[baseOff + k];
-                    int tb = (pIdx >= 0 && pIdx < paletteToSkel.Length) ? paletteToSkel[pIdx] : 0;
-                    float w = Math.Max(0f, ov.Weights[baseOff + k]);
-                    outSkeletonBones[baseOff + k] = tb;
+                    int tb = (pIdx >= 0 && pIdx < paletteToSkel.Length) ? paletteToSkel[pIdx] : -1;
+                    float w = tb >= 0 ? Math.Max(0f, ov.Weights[baseOff + k]) : 0f;
+                    outSkeletonBones[baseOff + k] = tb >= 0 ? tb : 0;
                     outWeights[baseOff + k] = w;
                     sum += w;
                 }
@@ -10485,8 +10647,11 @@ namespace DeadlockPlayground.Importer
                 }
                 else
                 {
-                    outSkeletonBones[baseOff] = 0;
+                    outSkeletonBones[baseOff] = safeFallbackSkel;
                     outWeights[baseOff] = 1f;
+                    outSkeletonBones[baseOff + 1] = 0; outWeights[baseOff + 1] = 0f;
+                    outSkeletonBones[baseOff + 2] = 0; outWeights[baseOff + 2] = 0f;
+                    outSkeletonBones[baseOff + 3] = 0; outWeights[baseOff + 3] = 0f;
                 }
             }
 
@@ -10523,7 +10688,7 @@ namespace DeadlockPlayground.Importer
                 }
                 else
                 {
-                    paletteToBind[p] = fallbackBindIdx;
+                    paletteToBind[p] = -1;
                 }
             }
 
@@ -10534,9 +10699,9 @@ namespace DeadlockPlayground.Importer
                 for (int k = 0; k < 4; k++)
                 {
                     int pIdx = ov.PaletteIndices[baseOff + k];
-                    int bi = (pIdx >= 0 && pIdx < paletteToBind.Length) ? paletteToBind[pIdx] : fallbackBindIdx;
-                    float w = Math.Max(0f, ov.Weights[baseOff + k]);
-                    outSkinBones[baseOff + k] = bi;
+                    int bi = (pIdx >= 0 && pIdx < paletteToBind.Length) ? paletteToBind[pIdx] : -1;
+                    float w = bi >= 0 ? Math.Max(0f, ov.Weights[baseOff + k]) : 0f;
+                    outSkinBones[baseOff + k] = bi >= 0 ? bi : 0;
                     outWeights[baseOff + k] = w;
                     sum += w;
                 }
@@ -10548,6 +10713,9 @@ namespace DeadlockPlayground.Importer
                 {
                     outSkinBones[baseOff] = fallbackBindIdx;
                     outWeights[baseOff] = 1f;
+                    outSkinBones[baseOff + 1] = 0; outWeights[baseOff + 1] = 0f;
+                    outSkinBones[baseOff + 2] = 0; outWeights[baseOff + 2] = 0f;
+                    outSkinBones[baseOff + 3] = 0; outWeights[baseOff + 3] = 0f;
                 }
             }
 

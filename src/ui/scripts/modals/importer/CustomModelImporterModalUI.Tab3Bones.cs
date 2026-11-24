@@ -174,7 +174,7 @@ namespace DeadlockPlayground.UI
         private Button _btnDeleteCustomCol;
         private bool _isUpdatingColliderInspector;
 
-        // Collapsible Add-Clothing-Chain Tool controls
+        // Collapsible Add-Clothing-Chain Tool controls + Synthetic Chain Transform Inspector
         private Button _btnToggleAddSynthetic;
         private VBoxContainer _boxAddSyntheticBody;
         private LineEdit _txtNewChainName;
@@ -186,6 +186,32 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderNewChainStiffRoot;
         private HSlider _sliderNewChainStiffTip;
         private HSlider _sliderNewChainDamping;
+
+        // Synthetic Chain Transform & Placement Inspector + 3D Viewport Floating HUD (reuses Auto-Rig HUD helpers)
+        private PanelContainer _syntheticChainViewportHud;
+        private Label _lblSynHudTitle;
+        private HBoxContainer _boxSynHudJointChips;
+        private Button _btnSynHudGizmo;
+        private Button _btnSynHudWeightRadius;
+        private Button _btnSynHudApplyBind;
+
+        private PanelContainer _boxSynTransformCard;
+        private VBoxContainer _boxSynPropsBody;
+        private Button _btnSynToggleProps;
+        private Button _btnSynEnterEdit3D;
+        private Button _btnSynSidebarBind;
+        private LineEdit _txtSynChainName;
+        private OptionButton _optSynAnchorBone;
+        private SpinBox _spinSynPosX;
+        private SpinBox _spinSynPosY;
+        private SpinBox _spinSynPosZ;
+        private SpinBox _spinSynPitch;
+        private SpinBox _spinSynYaw;
+        private SpinBox _spinSynSegs;
+        private SpinBox _spinSynLen;
+        private SpinBox _spinSynRadius;
+        private OptionButton _optSynTargetMesh;
+        private CheckBox _chkSynProtectLimbs;
 
         // Disable / Prune Skeleton Picker controls
         private LineEdit _txtDisableBoneSearch;
@@ -503,6 +529,45 @@ namespace DeadlockPlayground.UI
                     if (c.Name.Contains("hair", StringComparison.OrdinalIgnoreCase) || c.RootSourceBone.Contains("hair", StringComparison.OrdinalIgnoreCase))
                         c.Policy = ChainPolicy.CollapseToNearestCore;
             });
+
+            // Integrated "+ Add Cloth Chain ▾" menu button directly in the Physics toolbar
+            var btnAddClothMenu = new MenuButton
+            {
+                Text = "+ Add Cloth Chain ▾",
+                ThemeTypeVariation = "ImporterPrimaryButton",
+                Flat = false,
+                CustomMinimumSize = new Vector2(146, 26),
+                TooltipText = "Add a new synthetic cloth or hair bone chain directly to this hero and edit its joints freely in 3D."
+            };
+            ImporterStyle.ApplyFontSize(btnAddClothMenu, ImporterStyle.FontHint);
+            var addClothPopup = btnAddClothMenu.GetPopup();
+            addClothPopup.AddItem("Front Bangs (Head)", 0);
+            addClothPopup.AddItem("Back Hair / Ponytail (Head)", 1);
+            addClothPopup.AddItem("Side Hair L (Head)", 2);
+            addClothPopup.AddItem("Cape / Cloak (Chest)", 3);
+            addClothPopup.AddItem("Skirt Flap (Pelvis)", 4);
+            addClothPopup.AddSeparator();
+            addClothPopup.AddItem("Custom Chain (Any Bone)...", 5);
+            addClothPopup.IdPressed += (id) =>
+            {
+                switch (id)
+                {
+                    case 0: SpawnSyntheticChainTemplate("hair_front", "head", new Vector3(0f, 0.06f, 0.14f), new Vector3(0f, -0.94f, 0.34f), 0.24f, 0.10f, 3, PhysicsPresetCatalog.ShortHairBangsId); break;
+                    case 1: SpawnSyntheticChainTemplate("hair_back", "head", new Vector3(0f, 0.04f, -0.15f), new Vector3(0f, -0.92f, -0.38f), 0.42f, 0.13f, 4, PhysicsPresetCatalog.MediumHairId); break;
+                    case 2: SpawnSyntheticChainTemplate("hair_side_L", "head", new Vector3(0.14f, 0.04f, 0.02f), new Vector3(0.24f, -0.97f, 0.0f), 0.32f, 0.11f, 3, PhysicsPresetCatalog.MediumHairId); break;
+                    case 3: SpawnSyntheticChainTemplate("cape_center", "spine_3", new Vector3(0f, 0.08f, -0.18f), new Vector3(0f, -0.94f, -0.34f), 0.72f, 0.18f, 5, PhysicsPresetCatalog.CapeCloakId); break;
+                    case 4: SpawnSyntheticChainTemplate("skirt_back", "pelvis", new Vector3(0f, -0.02f, -0.16f), new Vector3(0f, -0.95f, -0.30f), 0.48f, 0.15f, 4, PhysicsPresetCatalog.HeavySkirtDressId); break;
+                    default:
+                    {
+                        string anchor = (!string.IsNullOrEmpty(_selectedViewportBoneName) && _previewHeroSkeleton != null && _previewHeroSkeleton.FindBone(_selectedViewportBoneName) >= 0)
+                            ? _selectedViewportBoneName
+                            : "spine_3";
+                        SpawnSyntheticChainTemplate("cloth_chain", anchor, new Vector3(0f, 0.04f, -0.14f), new Vector3(0f, -1f, 0f), 0.45f, 0.14f, 4, PhysicsPresetCatalog.CapeCloakId);
+                        break;
+                    }
+                }
+            };
+            bulkPhysRow.AddChild(btnAddClothMenu);
             chainBody.AddChild(bulkPhysRow);
 
             // Compact Scrollable Chain List (bounded height so inspector stays visible!)
@@ -527,6 +592,11 @@ namespace DeadlockPlayground.UI
             ImporterStyle.ApplyFontSize(_lblSelectedChainTitle, ImporterStyle.FontBody);
             _accentLabels.Add(_lblSelectedChainTitle);
             inspBox.AddChild(_lblSelectedChainTitle);
+
+            // Dedicated Bone Chain Transform & Placement Inspector (shown when a Synthetic chain is selected)
+            _boxSynTransformCard = BuildSyntheticChainTransformInspector();
+            _boxSynTransformCard.Visible = false;
+            inspBox.AddChild(_boxSynTransformCard);
 
             // Clean section header above the primary Physics Preset selector button
             var lblPresetSection = new Label
@@ -1442,8 +1512,10 @@ namespace DeadlockPlayground.UI
 
             chainBody.AddChild(_boxChainInspector);
 
-            // Collapsible Add-Synthetic-Chain Card (collapsed by default)
+            // Legacy Add-Synthetic-Chain Card kept hidden (creation is now integrated into the Physics toolbar "+ Add Cloth Chain ▾" menu;
+            // keeping _optNewChainMesh alive preserves submesh list synchronization).
             var (synCard, synBody) = CreateInspectorCard("Custom / Synthetic Physics Chain");
+            synCard.Visible = false;
             chainsPane.AddChild(synCard);
 
             _btnToggleAddSynthetic = new Button
@@ -1992,8 +2064,16 @@ namespace DeadlockPlayground.UI
             if (viewIdx == 2)
             {
                 RefreshClothingChainsPanel();
+                UpdateSyntheticChainViewportHud();
             }
-            else if (viewIdx == 3)
+            else
+            {
+                SetSyntheticPropsExpanded(false);
+                if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+                else ClearSyntheticChainPreview();
+                UpdateSyntheticChainViewportHud();
+            }
+            if (viewIdx == 3)
             {
                 _wasInCollidersSubView = true;
                 if (_btnShowCollidersInCard != null) _btnShowCollidersInCard.SetPressedNoSignal(_showColliders);
@@ -2308,8 +2388,34 @@ namespace DeadlockPlayground.UI
                                 ChainPolicy.PreservePhysicsChain => masterOn ? simTag : "Paused",
                                 _ => "Static"
                             };
-                        int bCount = chain.SourceBoneNames?.Count ?? 0;
-                        string prefix = isHub ? "◈ " : "└ ";
+                        int bCount = chain.IsSynthetic
+                            ? Math.Max(chain.SyntheticSegmentCount, chain.AppendedHeroBoneNames?.Count ?? 0)
+                            : (chain.SourceBoneNames?.Count ?? 0);
+                        string prefix = chain.IsSynthetic ? "✦ " : (isHub ? "◈ " : "└ ");
+
+                        if (chain.IsSynthetic)
+                        {
+                            var customBadgePanel = new PanelContainer
+                            {
+                                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                                TooltipText = "User-created custom cloth/hair bone chain (editable in 3D viewport)"
+                            };
+                            var badgeStyle = new StyleBoxFlat
+                            {
+                                BgColor = new Color(0.11f, 0.34f, 0.33f, 0.92f),
+                                BorderColor = new Color(0.28f, 0.85f, 0.78f, 0.90f),
+                                BorderWidthLeft = 1, BorderWidthRight = 1, BorderWidthTop = 1, BorderWidthBottom = 1,
+                                CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+                                ContentMarginLeft = 5, ContentMarginRight = 5, ContentMarginTop = 1, ContentMarginBottom = 1
+                            };
+                            customBadgePanel.AddThemeStyleboxOverride("panel", badgeStyle);
+                            var lblBadge = new Label { Text = "CUSTOM" };
+                            ImporterStyle.ApplyFontSize(lblBadge, 10);
+                            lblBadge.AddThemeColorOverride("font_color", new Color(0.68f, 0.98f, 0.93f));
+                            customBadgePanel.AddChild(lblBadge);
+                            rowBtn.AddChild(customBadgePanel);
+                        }
+
                         var btnSelect = new Button
                         {
                             Text = $"{prefix}{chain.Name}  [{badge} · {bCount}b]",
@@ -2318,13 +2424,20 @@ namespace DeadlockPlayground.UI
                             Alignment = HorizontalAlignment.Left,
                             ToggleMode = true,
                             ButtonPressed = ReferenceEquals(chain, _selectedChain),
-                            TooltipText = $"Root: {chain.RootSourceBone} | Anchor: {chain.AnchorHeroBone} | Bones: {bCount} | Category: {chain.Category}\nClick to inspect spring settings and highlight in 3D viewport."
+                            TooltipText = $"Root: {chain.RootSourceBone} | Anchor: {chain.AnchorHeroBone} | Bones: {bCount} | Type: {(chain.IsSynthetic ? "Custom Synthetic" : "Native Rig")}\nClick to inspect settings and edit in 3D viewport."
                         };
+                        if (chain.IsSynthetic)
+                        {
+                            btnSelect.AddThemeColorOverride("font_color", new Color(0.75f, 0.96f, 0.92f));
+                            btnSelect.AddThemeColorOverride("font_pressed_color", new Color(0.95f, 1.0f, 0.98f));
+                        }
                         btnSelect.Pressed += () =>
                         {
                             _selectedChain = chain;
                             string firstBone = chain.AppendedHeroBoneNames?.FirstOrDefault() ?? chain.RootSourceBone;
                             _selectedViewportBoneName = firstBone;
+                            if (chain.IsSynthetic)
+                                _selectedSyntheticJointIndex = 0;
                             RefreshClothingChainsPanel();
                             UpdateSelectedBoneBadge();
                             if (_showBones) RedrawBoneWireframe();
@@ -2347,13 +2460,36 @@ namespace DeadlockPlayground.UI
             if (_selectedChain == null)
             {
                 _boxChainInspector.Visible = false;
+                if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+                else ClearSyntheticChainPreview();
+                UpdateSyntheticChainViewportHud();
                 return;
             }
             _boxChainInspector.Visible = true;
             _isUpdatingChainInspector = true;
             try
             {
-                _lblSelectedChainTitle.Text = $"Selected: {_selectedChain.Name} ({_selectedChain.SourceBoneNames.Count} bones)";
+                int displayBoneCount = _selectedChain.IsSynthetic
+                    ? Math.Max(_selectedChain.SyntheticSegmentCount, _selectedChain.AppendedHeroBoneNames.Count)
+                    : _selectedChain.SourceBoneNames.Count;
+                string synTag = _selectedChain.IsSynthetic ? "  ✦ CUSTOM" : "";
+                _lblSelectedChainTitle.Text = $"Selected: {_selectedChain.Name}{synTag} ({displayBoneCount} bones)";
+                if (_boxSynTransformCard != null)
+                {
+                    _boxSynTransformCard.Visible = _selectedChain.IsSynthetic;
+                    if (_selectedChain.IsSynthetic)
+                    {
+                        SyncSyntheticTransformControlsFromSelected(repopulateMeshes: true);
+                        RedrawSyntheticChainPreview();
+                    }
+                    else
+                    {
+                        SetSyntheticPropsExpanded(false);
+                        if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+                        else ClearSyntheticChainPreview();
+                    }
+                }
+                UpdateSyntheticChainViewportHud();
                 SyncSelectedPresetCardUI();
                 _sliderMacroLooseness?.SetValueNoSignal(_selectedChain.MacroLooseness);
                 if (_lblValMacroLooseness != null) _lblValMacroLooseness.Text = $"{_selectedChain.MacroLooseness * 100.0f:F0}%";
@@ -2795,6 +2931,10 @@ namespace DeadlockPlayground.UI
         private void ApplyChainParamsLiveToDriver()
         {
             if (_previewHeroClone == null || !GodotObject.IsInstanceValid(_previewHeroClone)) return;
+            // Tuning any physics preset, simulation mode (Cloth/ProxyCloth/Jiggle), or slider while
+            // 3D joint edit mode is still active automatically exits Edit 3D so live physics unpauses!
+            if (_isGizmoEditingSyntheticChain && !IsWeightPaintActive())
+                SetSyntheticChainGizmoActive(false);
             var driver = DeadlockPlayground.Animation.CustomJiggleBoneDriver.FindOn(_previewHeroClone);
             driver?.UpdateChainParametersInPlace(_boneChains);
         }
@@ -3382,6 +3522,10 @@ namespace DeadlockPlayground.UI
                 }
                 if (appliedCount > 0)
                 {
+                    if (_isGizmoEditingSyntheticChain && !IsWeightPaintActive())
+                    {
+                        SetSyntheticChainGizmoActive(false);
+                    }
                     if (anyPolicyChanged) MarkRemapStaleAndRefresh();
                     else
                     {
@@ -3998,6 +4142,930 @@ namespace DeadlockPlayground.UI
             else ApplyChainParamsLiveToDriver();
             RefreshClothingChainsPanel();
             SetBottomStatus($"Applied physics settings to {count} '{_selectedChain.Category}' chain(s).", StatusTone.Success);
+        }
+
+        /// <summary>
+        /// Strips all bones belonging to <paramref name="chain"/> from <c>_customSkinOverrides</c> and
+        /// <c>_baselineSkinOverrides</c>, transferring their weights cleanly back onto the chain's anchor
+        /// bone (e.g. <c>head</c>) so deleting or re-binding a synthetic chain never leaves stale bones
+        /// or root_motion (bone 0) artifacts in painted surfaces.
+        /// </summary>
+        private void PurgeSyntheticChainFromSkinOverrides(BoneChainDef chain)
+        {
+            if (chain == null || !chain.IsSynthetic) return;
+            var removedBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (chain.AppendedHeroBoneNames != null)
+            {
+                foreach (string bn in chain.AppendedHeroBoneNames)
+                    if (!string.IsNullOrWhiteSpace(bn)) removedBones.Add(bn);
+            }
+            string safeBase = AddClothingChainTool.SanitizeBoneBasePublic(string.IsNullOrWhiteSpace(chain.Name) ? "cloth_chain" : chain.Name);
+            int maxSegs = Math.Max(12, Math.Max(chain.SyntheticSegmentCount, chain.AppendedHeroBoneNames?.Count ?? 0));
+            for (int i = 0; i < maxSegs; i++)
+            {
+                removedBones.Add($"{safeBase}_{i}");
+            }
+            if (removedBones.Count == 0) return;
+
+            string fallbackAnchor = string.IsNullOrWhiteSpace(chain.AnchorHeroBone) ? "head" : chain.AnchorHeroBone;
+            PurgeBoneNamesFromOverrideDict(_customSkinOverrides, removedBones, fallbackAnchor);
+            PurgeBoneNamesFromOverrideDict(_baselineSkinOverrides, removedBones, fallbackAnchor);
+            UpdatePaintOverrideLabel();
+        }
+
+        private static void PurgeBoneNamesFromOverrideDict(
+            Dictionary<string, CustomModelAutoRigger.SkinWeightOverride> dict,
+            HashSet<string> removedBones,
+            string fallbackAnchorBone)
+        {
+            if (dict == null || dict.Count == 0 || removedBones == null || removedBones.Count == 0) return;
+
+            var keys = dict.Keys.ToList();
+            foreach (string key in keys)
+            {
+                var ov = dict[key];
+                if (ov?.BonePalette == null || ov.PaletteIndices == null || ov.Weights == null || ov.VertexCount <= 0)
+                    continue;
+
+                bool hasAnyRemoved = false;
+                for (int p = 0; p < ov.BonePalette.Length; p++)
+                {
+                    if (removedBones.Contains(ov.BonePalette[p] ?? ""))
+                    {
+                        hasAnyRemoved = true;
+                        break;
+                    }
+                }
+                if (!hasAnyRemoved) continue;
+
+                // Rebuild palette excluding removed synthetic bones, ensuring fallbackAnchorBone is present if needed
+                var newPaletteList = new List<string>(ov.BonePalette.Length + 1);
+                var oldToNew = new int[ov.BonePalette.Length];
+                int anchorNewIdx = -1;
+                for (int p = 0; p < ov.BonePalette.Length; p++)
+                {
+                    string bn = ov.BonePalette[p] ?? "";
+                    if (removedBones.Contains(bn))
+                    {
+                        oldToNew[p] = -1;
+                    }
+                    else
+                    {
+                        int ni = newPaletteList.Count;
+                        newPaletteList.Add(bn);
+                        oldToNew[p] = ni;
+                        if (anchorNewIdx < 0 && bn.Equals(fallbackAnchorBone, StringComparison.OrdinalIgnoreCase))
+                            anchorNewIdx = ni;
+                    }
+                }
+                if (anchorNewIdx < 0)
+                {
+                    anchorNewIdx = newPaletteList.Count;
+                    newPaletteList.Add(fallbackAnchorBone);
+                }
+
+                int vCount = ov.VertexCount;
+                var newIndices = new int[vCount * 4];
+                var newWeights = new float[vCount * 4];
+                var accum = new Dictionary<int, float>(4);
+
+                for (int v = 0; v < vCount; v++)
+                {
+                    accum.Clear();
+                    int baseOff = v * 4;
+                    float removedW = 0f;
+                    float keptW = 0f;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float w = Math.Max(0f, ov.Weights[baseOff + k]);
+                        if (w <= 1e-5f) continue;
+                        int oldP = ov.PaletteIndices[baseOff + k];
+                        int newP = (oldP >= 0 && oldP < oldToNew.Length) ? oldToNew[oldP] : -1;
+                        if (newP >= 0)
+                        {
+                            accum[newP] = accum.GetValueOrDefault(newP) + w;
+                            keptW += w;
+                        }
+                        else
+                        {
+                            removedW += w;
+                        }
+                    }
+
+                    if (removedW > 1e-5f)
+                    {
+                        // Transfer deleted synthetic bone weight cleanly back onto anchor bone (e.g. head)
+                        // if this surface doesn't already have another dominant kept bone, or blend onto anchor.
+                        if (keptW <= 1e-5f)
+                        {
+                            accum[anchorNewIdx] = 1.0f;
+                        }
+                        else
+                        {
+                            accum[anchorNewIdx] = accum.GetValueOrDefault(anchorNewIdx) + removedW;
+                        }
+                    }
+
+                    var top = accum.OrderByDescending(kv => kv.Value).Take(4).ToList();
+                    float sum = top.Sum(kv => kv.Value);
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (k < top.Count && sum > 1e-6f)
+                        {
+                            newIndices[baseOff + k] = top[k].Key;
+                            newWeights[baseOff + k] = top[k].Value / sum;
+                        }
+                        else
+                        {
+                            newIndices[baseOff + k] = 0;
+                            newWeights[baseOff + k] = 0f;
+                        }
+                    }
+                }
+
+                dict[key] = new CustomModelAutoRigger.SkinWeightOverride
+                {
+                    VertexCount = vCount,
+                    BonePalette = newPaletteList.ToArray(),
+                    PaletteIndices = newIndices,
+                    Weights = newWeights
+                };
+            }
+        }
+
+        private void ApplyBindSyntheticChain()
+        {
+            if (_selectedChain == null || !_selectedChain.IsSynthetic) return;
+            // Purge ONLY chains whose geometry/name/anchor was actually modified since the last bind!
+            // Never purge an unmodified chain just because it happens to be selected.
+            if (_dirtySyntheticChainIds.Count > 0)
+            {
+                foreach (var ch in _boneChains)
+                {
+                    if (ch != null && ch.IsSynthetic && IsSyntheticChainDirty(ch))
+                    {
+                        PurgeSyntheticChainFromSkinOverrides(ch);
+                    }
+                }
+            }
+            UpdateSyntheticApplyButtonVisual();
+            // Exit 3D joint edit mode on Bind so the preview animation & CustomJiggleBoneDriver immediately
+            // resume and demonstrate the newly bound hair/cloth chain moving live.
+            if (_isGizmoEditingSyntheticChain && !IsWeightPaintActive())
+            {
+                SetSyntheticChainGizmoActive(false);
+            }
+            MarkRemapStaleAndRefresh();
+            if (ImporterMemoryGuard.LightMode) TriggerRealtimeRigUpdate();
+            _dirtySyntheticChainIds.Clear();
+            UpdateSyntheticApplyButtonVisual();
+            RedrawSyntheticChainPreview();
+            SetBottomStatus($"Bound '{_selectedChain.Name}' — live physics active (click 'Edit 3D' to adjust joints again).", StatusTone.Success);
+        }
+
+        private void BuildSyntheticChainViewportHud(Control viewportPanel)
+        {
+            if (viewportPanel == null) return;
+
+            _syntheticChainViewportHud = CreateViewportFloatingTopHud(viewportPanel, out var row);
+
+            // Left: Active custom chain & joint indicator + uniform joint chips (J0..Tip)
+            _lblSynHudTitle = new Label
+            {
+                Text = "✦ Chain · Root",
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                AutowrapMode = TextServer.AutowrapMode.Off
+            };
+            ImporterStyle.ApplyFontSize(_lblSynHudTitle, ImporterStyle.FontHint);
+            _lblSynHudTitle.AddThemeColorOverride("font_color", PlaygroundThemeHelper.Parchment);
+            row.AddChild(_lblSynHudTitle);
+
+            _boxSynHudJointChips = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            _boxSynHudJointChips.AddThemeConstantOverride("separation", 3);
+            row.AddChild(_boxSynHudJointChips);
+
+            row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+
+            // Middle: Uniform 26px toolbar toggles & actions (matching Auto-Rig HUD proportions & quiet palette)
+            _btnSynHudGizmo = CreateViewportHudButton("Gizmo", 62, 26, toggle: true, pressed: false, tip: "Toggle 3D Move/Rotate gizmo on the selected joint.");
+            _btnSynHudGizmo.Toggled += (on) =>
+            {
+                if (_isUpdatingChainInspector) return;
+                SetSyntheticChainGizmoActive(on);
+            };
+            row.AddChild(_btnSynHudGizmo);
+
+            _btnSynHudWeightRadius = CreateViewportHudButton("Radius", 62, 26, toggle: true, pressed: _showSyntheticWeightRadius, tip: "Show/hide vertex weight influence radius rings around the chain.");
+            _btnSynHudWeightRadius.Toggled += (on) =>
+            {
+                _showSyntheticWeightRadius = on;
+                UpdateSyntheticWeightRadiusButtonVisual();
+                RedrawSyntheticChainPreview();
+            };
+            row.AddChild(_btnSynHudWeightRadius);
+            UpdateSyntheticWeightRadiusButtonVisual();
+
+            row.AddChild(CreateViewportHudSeparator());
+
+            var btnHudSnap = CreateViewportHudButton("Snap", 52, 26, tip: "Snap chain root back to its assigned anchor hero bone.");
+            btnHudSnap.Pressed += () =>
+            {
+                if (_selectedChain == null || !_selectedChain.IsSynthetic || _previewHeroSkeleton == null) return;
+                int aIdx = _previewHeroSkeleton.FindBone(_selectedChain.AnchorHeroBone ?? "spine_3");
+                if (aIdx >= 0)
+                {
+                    _selectedChain.SyntheticOriginHeroSpace = _previewHeroSkeleton.GetBoneGlobalRest(aIdx).Origin;
+                    _selectedChain.SyntheticJointPositionsHeroSpace?.Clear();
+                    EnsureSyntheticJointPositions(_selectedChain);
+                    _selectedSyntheticJointIndex = 0;
+                    MarkSyntheticChainDirty(_selectedChain);
+                    UpdateSyntheticApplyButtonVisual();
+                    SyncSyntheticTransformControlsFromSelected();
+                    UpdateGizmoTargetTransform();
+                    RedrawSyntheticChainPreview();
+                }
+            };
+            row.AddChild(btnHudSnap);
+
+            var btnHudStraight = CreateViewportHudButton("Straighten", 72, 26, tip: "Reset bent joint positions back into a straight line along Pitch/Yaw.");
+            btnHudStraight.Pressed += () =>
+            {
+                if (_selectedChain == null || !_selectedChain.IsSynthetic) return;
+                _selectedChain.SyntheticJointPositionsHeroSpace?.Clear();
+                EnsureSyntheticJointPositions(_selectedChain);
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+                SyncSyntheticTransformControlsFromSelected();
+                UpdateGizmoTargetTransform();
+                RedrawSyntheticChainPreview();
+            };
+            row.AddChild(btnHudStraight);
+
+            var btnHudMirror = CreateViewportHudButton("Mirror", 56, 26, tip: "Duplicate this custom chain mirrored across X = 0.");
+            btnHudMirror.Pressed += OnMirrorSelectedSyntheticChainPressed;
+            row.AddChild(btnHudMirror);
+
+            row.AddChild(CreateViewportHudSeparator());
+
+            _btnSynHudApplyBind = CreateViewportHudButton("Bind", 64, 26, variation: "ImporterPrimaryButton", tip: "Bind vertex weights to the updated synthetic joint positions.");
+            _btnSynHudApplyBind.Pressed += ApplyBindSyntheticChain;
+            row.AddChild(_btnSynHudApplyBind);
+
+            var btnHudDone = CreateViewportHudButton("✕", 28, 26, tip: "Exit 3D joint editing and hide this toolbar & gizmo.");
+            btnHudDone.Pressed += () => SetSyntheticChainGizmoActive(false);
+            row.AddChild(btnHudDone);
+        }
+
+        private void UpdateSyntheticWeightRadiusButtonVisual()
+        {
+            if (_btnSynHudWeightRadius == null || !GodotObject.IsInstanceValid(_btnSynHudWeightRadius)) return;
+            _btnSynHudWeightRadius.SetPressedNoSignal(_showSyntheticWeightRadius);
+        }
+
+        private void UpdateSyntheticChainViewportHud()
+        {
+            if (_btnSynEnterEdit3D != null && GodotObject.IsInstanceValid(_btnSynEnterEdit3D))
+            {
+                _btnSynEnterEdit3D.SetPressedNoSignal(_isGizmoEditingSyntheticChain);
+                _btnSynEnterEdit3D.Text = _isGizmoEditingSyntheticChain ? "Done 3D" : "Edit 3D";
+            }
+
+            if (_syntheticChainViewportHud == null || !GodotObject.IsInstanceValid(_syntheticChainViewportHud)) return;
+            bool onBonesTab = _rightTabs == null || _rightTabs.CurrentTab == 2;
+            bool inPhysicsSubView = _boxSubViewPhysics != null && _boxSubViewPhysics.Visible;
+            bool show = _isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic && onBonesTab && inPhysicsSubView && !IsWeightPaintActive();
+            _syntheticChainViewportHud.Visible = show;
+            if (!show) return;
+
+            var pts = EnsureSyntheticJointPositions(_selectedChain);
+            int ptCount = pts?.Count ?? 0;
+            _selectedSyntheticJointIndex = Math.Clamp(_selectedSyntheticJointIndex, 0, Math.Max(0, ptCount - 1));
+            string role = _selectedSyntheticJointIndex == 0
+                ? "Root"
+                : (_selectedSyntheticJointIndex == ptCount - 1 ? "Tip" : $"J{_selectedSyntheticJointIndex}");
+            if (_lblSynHudTitle != null)
+                _lblSynHudTitle.Text = $"{_selectedChain.Name} · {role}";
+
+            if (_boxSynHudJointChips != null)
+            {
+                foreach (Node c in _boxSynHudJointChips.GetChildren()) c.QueueFree();
+                for (int i = 0; i < ptCount; i++)
+                {
+                    int capturedIdx = i;
+                    string chipTxt = i == 0 ? "J0" : (i == ptCount - 1 ? "Tip" : $"J{i}");
+                    var chip = CreateViewportHudButton(
+                        chipTxt, 30, 26,
+                        toggle: true,
+                        pressed: i == _selectedSyntheticJointIndex,
+                        variation: "ToolbarButton",
+                        tip: i == 0 ? "Root joint (Move & Rotate whole chain)" : $"Joint {i} (Move freely in 3D)");
+                    chip.Pressed += () => SelectSyntheticJointIndex(capturedIdx);
+                    _boxSynHudJointChips.AddChild(chip);
+                }
+            }
+
+            _btnSynHudGizmo?.SetPressedNoSignal(_isGizmoEditingSyntheticChain);
+            UpdateSyntheticWeightRadiusButtonVisual();
+            UpdateSyntheticApplyButtonVisual();
+        }
+
+        private void PopulateSyntheticAnchorDropdown(string selectedAnchor)
+        {
+            if (_optSynAnchorBone == null || !GodotObject.IsInstanceValid(_optSynAnchorBone)) return;
+            _optSynAnchorBone.Clear();
+
+            var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var priorityBones = new[]
+            {
+                "head", "neck_0", "spine_3", "spine_2", "spine_1", "spine_0", "pelvis",
+                "clavicle_L", "clavicle_R", "arm_upper_L", "arm_upper_R",
+                "arm_lower_L", "arm_lower_R", "hand_L", "hand_R",
+                "leg_upper_L", "leg_upper_R", "leg_lower_L", "leg_lower_R",
+                "ankle_L", "ankle_R"
+            };
+
+            if (_previewHeroSkeleton != null && GodotObject.IsInstanceValid(_previewHeroSkeleton))
+            {
+                int bCount = _previewHeroSkeleton.GetBoneCount();
+                var allHeroBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < bCount; i++)
+                {
+                    string bn = _previewHeroSkeleton.GetBoneName(i);
+                    if (!string.IsNullOrEmpty(bn) && !bn.StartsWith("syn_", StringComparison.OrdinalIgnoreCase))
+                        allHeroBones.Add(bn);
+                }
+
+                foreach (string pb in priorityBones)
+                {
+                    if (allHeroBones.Contains(pb) && added.Add(pb))
+                        _optSynAnchorBone.AddItem(pb);
+                }
+
+                var extras = allHeroBones.Where(b => !added.Contains(b)).OrderBy(b => b, StringComparer.OrdinalIgnoreCase).ToList();
+                if (extras.Count > 0)
+                {
+                    _optSynAnchorBone.AddSeparator("Other Hero Bones");
+                    foreach (string eb in extras)
+                    {
+                        if (added.Add(eb))
+                            _optSynAnchorBone.AddItem(eb);
+                    }
+                }
+            }
+            else
+            {
+                foreach (string pb in priorityBones)
+                    if (added.Add(pb)) _optSynAnchorBone.AddItem(pb);
+            }
+
+            string target = string.IsNullOrEmpty(selectedAnchor) ? "spine_3" : selectedAnchor;
+            if (!added.Contains(target))
+                _optSynAnchorBone.AddItem(target);
+
+            for (int i = 0; i < _optSynAnchorBone.ItemCount; i++)
+            {
+                if (_optSynAnchorBone.IsItemSeparator(i)) continue;
+                if (string.Equals(_optSynAnchorBone.GetItemText(i), target, StringComparison.OrdinalIgnoreCase))
+                {
+                    _optSynAnchorBone.Select(i);
+                    break;
+                }
+            }
+        }
+
+        private PanelContainer BuildSyntheticChainTransformInspector()
+        {
+            var card = new PanelContainer { ThemeTypeVariation = "SubPanelContainer", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            var pad = new MarginContainer();
+            pad.AddThemeConstantOverride("margin_left", 10);
+            pad.AddThemeConstantOverride("margin_right", 10);
+            pad.AddThemeConstantOverride("margin_top", 8);
+            pad.AddThemeConstantOverride("margin_bottom", 8);
+            card.AddChild(pad);
+
+            var box = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            box.AddThemeConstantOverride("separation", 7);
+            pad.AddChild(box);
+
+            var hdrRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            hdrRow.AddThemeConstantOverride("separation", 6);
+            var hdr = new Label { Text = "CUSTOM CHAIN PROPERTIES", SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ImporterStyle.ApplyFontSize(hdr, ImporterStyle.FontHint);
+            hdr.AddThemeColorOverride("font_color", new Color(0.68f, 0.98f, 0.93f));
+            hdrRow.AddChild(hdr);
+
+            _btnSynEnterEdit3D = new Button
+            {
+                Text = "Edit 3D",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                CustomMinimumSize = new Vector2(72, 26),
+                TooltipText = "Open/close the 3D Viewport joint editing toolbar & gizmo for this custom chain."
+            };
+            ImporterStyle.ApplyFontSize(_btnSynEnterEdit3D, ImporterStyle.FontHint);
+            _btnSynEnterEdit3D.Toggled += (on) =>
+            {
+                if (_isUpdatingChainInspector) return;
+                SetSyntheticChainGizmoActive(on);
+            };
+            hdrRow.AddChild(_btnSynEnterEdit3D);
+
+            _btnSynSidebarBind = new Button
+            {
+                Text = "Bind",
+                ThemeTypeVariation = "ImporterPrimaryButton",
+                CustomMinimumSize = new Vector2(58, 26),
+                TooltipText = "Bind vertex weights to the updated custom chain properties & joint positions."
+            };
+            ImporterStyle.ApplyFontSize(_btnSynSidebarBind, ImporterStyle.FontHint);
+            _btnSynSidebarBind.Pressed += ApplyBindSyntheticChain;
+            hdrRow.AddChild(_btnSynSidebarBind);
+
+            _btnSynToggleProps = new Button
+            {
+                Text = "Edit ▾",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(68, 26),
+                TooltipText = "Expand or collapse custom chain properties (Name, Anchor, Position, Aim, Segments, Radius)."
+            };
+            ImporterStyle.ApplyFontSize(_btnSynToggleProps, ImporterStyle.FontHint);
+            _btnSynToggleProps.Toggled += (open) => SetSyntheticPropsExpanded(open);
+            hdrRow.AddChild(_btnSynToggleProps);
+            box.AddChild(hdrRow);
+
+            _boxSynPropsBody = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+            _boxSynPropsBody.AddThemeConstantOverride("separation", 7);
+            box.AddChild(_boxSynPropsBody);
+
+            // Name (editable!)
+            var nameRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            nameRow.AddThemeConstantOverride("separation", 6);
+            nameRow.AddChild(new Label { Text = "Name:", CustomMinimumSize = new Vector2(52, 0) });
+            _txtSynChainName = new LineEdit
+            {
+                PlaceholderText = "e.g. hair_front_L",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Rename this custom cloth/hair bone chain (exported bone names use this prefix)."
+            };
+            void CommitSyntheticRename(string raw)
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                string cleaned = new string((raw ?? "").Trim().Replace(' ', '_').Where(ch => char.IsLetterOrDigit(ch) || ch == '_' || ch == '-').ToArray());
+                if (string.IsNullOrEmpty(cleaned) || string.Equals(cleaned, _selectedChain.Name, StringComparison.Ordinal)) return;
+                string unique = cleaned;
+                int suffix = 2;
+                while (_boneChains.Any(c => c != null && !ReferenceEquals(c, _selectedChain) && string.Equals(c.Name, unique, StringComparison.OrdinalIgnoreCase)))
+                    unique = $"{cleaned}_{suffix++}";
+                _selectedChain.Name = unique;
+                _selectedChain.RootSourceBone = unique;
+                MarkSyntheticChainDirty(_selectedChain);
+                if (_lblSelectedChainTitle != null)
+                {
+                    int bCount = Math.Max(_selectedChain.SyntheticSegmentCount, _selectedChain.AppendedHeroBoneNames.Count);
+                    _lblSelectedChainTitle.Text = $"Selected: {_selectedChain.Name}  ✦ CUSTOM ({bCount} bones)";
+                }
+                UpdateSyntheticChainViewportHud();
+                RefreshClothingChainsPanel();
+            }
+            _txtSynChainName.TextSubmitted += CommitSyntheticRename;
+            _txtSynChainName.FocusExited += () => CommitSyntheticRename(_txtSynChainName.Text);
+            nameRow.AddChild(_txtSynChainName);
+            _boxSynPropsBody.AddChild(nameRow);
+
+            // Anchor Bone (ANY hero skeleton bone!)
+            var anchorRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            anchorRow.AddThemeConstantOverride("separation", 6);
+            anchorRow.AddChild(new Label { Text = "Anchor:", CustomMinimumSize = new Vector2(52, 0) });
+            _optSynAnchorBone = new OptionButton
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Attach this custom cloth/hair chain to any hero bone (head, spine, pelvis, arms, legs, or any extra bone)."
+            };
+            ConfigureOptionButton(_optSynAnchorBone);
+            _optSynAnchorBone.ItemSelected += (idx) =>
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                if (_optSynAnchorBone.IsItemSeparator((int)idx)) return;
+                string newAnchor = _optSynAnchorBone.GetItemText((int)idx);
+                if (string.IsNullOrEmpty(newAnchor) || string.Equals(newAnchor, _selectedChain.AnchorHeroBone, StringComparison.OrdinalIgnoreCase))
+                    return;
+                _selectedChain.AnchorHeroBone = newAnchor;
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+                RefreshClothingChainsPanel();
+                SetBottomStatus($"Anchored '{_selectedChain.Name}' to '{newAnchor}' — click 'Snap Anchor' in the 3D toolbar if you also want to move the root there.", StatusTone.Info);
+            };
+            anchorRow.AddChild(_optSynAnchorBone);
+            _boxSynPropsBody.AddChild(anchorRow);
+
+            // Active Joint Position X / Y / Z (zero-lag preview edit)
+            var posGrid = new GridContainer { Columns = 3, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            posGrid.AddThemeConstantOverride("h_separation", 6);
+            _spinSynPosX = CreateCoordSpinBox(-2.0, 2.0, 0.01, "X");
+            _spinSynPosY = CreateCoordSpinBox(-0.5, 3.0, 0.01, "Y");
+            _spinSynPosZ = CreateCoordSpinBox(-2.0, 2.0, 0.01, "Z");
+            void OnSynPosChanged(double _)
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                var pts = EnsureSyntheticJointPositions(_selectedChain);
+                int jIdx = Math.Clamp(_selectedSyntheticJointIndex, 0, pts.Count - 1);
+                Vector3 newPos = new Vector3((float)_spinSynPosX.Value, (float)_spinSynPosY.Value, (float)_spinSynPosZ.Value);
+                if (jIdx == 0)
+                {
+                    Vector3 delta = newPos - pts[0];
+                    for (int i = 0; i < pts.Count; i++) pts[i] += delta;
+                    _selectedChain.SyntheticOriginHeroSpace = pts[0];
+                }
+                else
+                {
+                    pts[jIdx] = newPos;
+                    if (pts.Count >= 2 && (pts[1] - pts[0]).LengthSquared() > 1e-6f)
+                        _selectedChain.SyntheticDirectionHeroSpace = (pts[1] - pts[0]).Normalized();
+                }
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+                UpdateGizmoTargetTransform();
+                RedrawSyntheticChainPreview();
+            }
+            _spinSynPosX.ValueChanged += OnSynPosChanged;
+            _spinSynPosY.ValueChanged += OnSynPosChanged;
+            _spinSynPosZ.ValueChanged += OnSynPosChanged;
+            posGrid.AddChild(_spinSynPosX); posGrid.AddChild(_spinSynPosY); posGrid.AddChild(_spinSynPosZ);
+            _boxSynPropsBody.AddChild(posGrid);
+
+            // Direction Pitch / Yaw + Quick Aim Chips (straightens chain along aim; zero-lag until Apply/Bind)
+            var aimGrid = new GridContainer { Columns = 2, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            aimGrid.AddThemeConstantOverride("h_separation", 6);
+            _spinSynPitch = CreateCoordSpinBox(-89.0, 89.0, 2.0, "Pitch°");
+            _spinSynYaw = CreateCoordSpinBox(-180.0, 180.0, 5.0, "Yaw°");
+            void OnSynAimChanged(double _)
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                _selectedChain.SyntheticDirectionHeroSpace = DirectionFromPitchYawDeg((float)_spinSynPitch.Value, (float)_spinSynYaw.Value);
+                _selectedChain.SyntheticJointPositionsHeroSpace?.Clear();
+                EnsureSyntheticJointPositions(_selectedChain);
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+                UpdateGizmoTargetTransform();
+                RedrawSyntheticChainPreview();
+            }
+            _spinSynPitch.ValueChanged += OnSynAimChanged;
+            _spinSynYaw.ValueChanged += OnSynAimChanged;
+            aimGrid.AddChild(_spinSynPitch); aimGrid.AddChild(_spinSynYaw);
+            _boxSynPropsBody.AddChild(aimGrid);
+
+            var aimChips = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            aimChips.AddThemeConstantOverride("h_separation", 4);
+            aimChips.AddThemeConstantOverride("v_separation", 4);
+            void AddAimChip(string txt, Vector3 dir)
+            {
+                var c = new Button { Text = txt, ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(62, 24) };
+                ImporterStyle.ApplyFontSize(c, ImporterStyle.FontHint);
+                c.Pressed += () =>
+                {
+                    if (_selectedChain == null || !_selectedChain.IsSynthetic) return;
+                    _selectedChain.SyntheticDirectionHeroSpace = dir.Normalized();
+                    _selectedChain.SyntheticJointPositionsHeroSpace?.Clear();
+                    EnsureSyntheticJointPositions(_selectedChain);
+                    MarkSyntheticChainDirty(_selectedChain);
+                    UpdateSyntheticApplyButtonVisual();
+                    SyncSyntheticTransformControlsFromSelected();
+                    UpdateGizmoTargetTransform();
+                    RedrawSyntheticChainPreview();
+                };
+                aimChips.AddChild(c);
+            }
+            AddAimChip("↓ Down", new Vector3(0f, -1f, 0f));
+            AddAimChip("↙ Back", new Vector3(0f, -0.92f, -0.38f));
+            AddAimChip("↘ Front", new Vector3(0f, -0.92f, 0.38f));
+            AddAimChip("← Left", new Vector3(0.32f, -0.95f, 0f));
+            AddAimChip("→ Right", new Vector3(-0.32f, -0.95f, 0f));
+            _boxSynPropsBody.AddChild(aimChips);
+
+            // Geometry: Segments / Length / Weight Influence Radius
+            var geoGrid = new GridContainer { Columns = 3, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            geoGrid.AddThemeConstantOverride("h_separation", 6);
+            _spinSynSegs = CreateCoordSpinBox(2, 12, 1, "Seg");
+            _spinSynLen = CreateCoordSpinBox(0.08, 2.0, 0.02, "Len");
+            _spinSynRadius = CreateCoordSpinBox(0.04, 1.0, 0.01, "Rad");
+            void OnSynGeoChanged(double _)
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                bool rebuildPts = _selectedChain.SyntheticSegmentCount != (int)_spinSynSegs.Value ||
+                                  MathF.Abs(_selectedChain.SyntheticLengthMeters - (float)_spinSynLen.Value) > 1e-4f;
+                _selectedChain.SyntheticSegmentCount = (int)_spinSynSegs.Value;
+                _selectedChain.SyntheticLengthMeters = (float)_spinSynLen.Value;
+                _selectedChain.SyntheticInfluenceRadius = (float)_spinSynRadius.Value;
+                if (rebuildPts)
+                {
+                    _selectedChain.SyntheticJointPositionsHeroSpace?.Clear();
+                    EnsureSyntheticJointPositions(_selectedChain);
+                    _selectedSyntheticJointIndex = Math.Clamp(_selectedSyntheticJointIndex, 0, _selectedChain.SyntheticSegmentCount);
+                    SyncSyntheticTransformControlsFromSelected();
+                    UpdateGizmoTargetTransform();
+                }
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+                RedrawSyntheticChainPreview();
+            }
+            _spinSynSegs.ValueChanged += OnSynGeoChanged;
+            _spinSynLen.ValueChanged += OnSynGeoChanged;
+            _spinSynRadius.ValueChanged += OnSynGeoChanged;
+            geoGrid.AddChild(_spinSynSegs); geoGrid.AddChild(_spinSynLen); geoGrid.AddChild(_spinSynRadius);
+            _boxSynPropsBody.AddChild(geoGrid);
+
+            // Target Submesh + Core Limb Protection
+            var meshRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            meshRow.AddThemeConstantOverride("separation", 6);
+            meshRow.AddChild(new Label { Text = "Mesh:", CustomMinimumSize = new Vector2(52, 0) });
+            _optSynTargetMesh = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ConfigureOptionButton(_optSynTargetMesh);
+            _optSynTargetMesh.ItemSelected += (idx) =>
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                _selectedChain.TargetMeshName = idx > 0 ? _optSynTargetMesh.GetItemText((int)idx) : "";
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+            };
+            meshRow.AddChild(_optSynTargetMesh);
+            _boxSynPropsBody.AddChild(meshRow);
+
+            _chkSynProtectLimbs = new CheckBox
+            {
+                Text = "Protect unrelated core limbs/face from weight theft",
+                ButtonPressed = true,
+                TooltipText = "When targeting All Active Submeshes, prevents a head/hair chain from stealing arm, leg, or pelvis weights."
+            };
+            ImporterStyle.ApplyFontSize(_chkSynProtectLimbs, ImporterStyle.FontHint);
+            _chkSynProtectLimbs.Toggled += (on) =>
+            {
+                if (_isUpdatingChainInspector || _selectedChain == null || !_selectedChain.IsSynthetic) return;
+                _selectedChain.SyntheticProtectCoreLimbs = on;
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+            };
+            _boxSynPropsBody.AddChild(_chkSynProtectLimbs);
+
+            // Delete button inside right-side Custom Chain Properties (keeps 3D viewport toolbar clean!)
+            var delRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            delRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+            var btnSynDelete = new Button
+            {
+                Text = "Delete Chain",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(102, 26),
+                TooltipText = "Delete this custom cloth/hair bone chain and restore clean mesh weights."
+            };
+            ImporterStyle.ApplyFontSize(btnSynDelete, ImporterStyle.FontHint);
+            btnSynDelete.AddThemeColorOverride("font_color", new Color(0.90f, 0.54f, 0.54f));
+            btnSynDelete.Pressed += OnDeleteSelectedSyntheticChainPressed;
+            delRow.AddChild(btnSynDelete);
+            _boxSynPropsBody.AddChild(delRow);
+
+            return card;
+        }
+
+        private void SetSyntheticPropsExpanded(bool expanded)
+        {
+            if (_boxSynPropsBody != null && GodotObject.IsInstanceValid(_boxSynPropsBody))
+                _boxSynPropsBody.Visible = expanded;
+            if (_btnSynToggleProps != null && GodotObject.IsInstanceValid(_btnSynToggleProps))
+            {
+                _btnSynToggleProps.SetPressedNoSignal(expanded);
+                _btnSynToggleProps.Text = expanded ? "Close ▴" : "Edit ▾";
+            }
+        }
+
+        private void UpdateSyntheticApplyButtonVisual()
+        {
+            bool anyDirty = _dirtySyntheticChainIds.Count > 0;
+            string label = anyDirty ? "• Bind" : "Bind";
+            Color tint = anyDirty ? new Color(1.0f, 0.94f, 0.72f) : Colors.White;
+            if (_btnSynHudApplyBind != null && GodotObject.IsInstanceValid(_btnSynHudApplyBind))
+            {
+                _btnSynHudApplyBind.Text = label;
+                _btnSynHudApplyBind.Modulate = tint;
+            }
+            if (_btnSynSidebarBind != null && GodotObject.IsInstanceValid(_btnSynSidebarBind))
+            {
+                _btnSynSidebarBind.Text = label;
+                _btnSynSidebarBind.Modulate = tint;
+            }
+        }
+
+        private static Vector3 DirectionFromPitchYawDeg(float pitchDeg, float yawDeg)
+        {
+            // Pitch 0° = straight down (0,-1,0); positive pitch tilts outward from vertical, Yaw rotates around Y
+            float p = Mathf.DegToRad(Mathf.Clamp(pitchDeg, -89f, 89f));
+            float y = Mathf.DegToRad(yawDeg);
+            float horiz = MathF.Sin(p);
+            float down = -MathF.Cos(p);
+            return new Vector3(horiz * MathF.Sin(y), down, horiz * MathF.Cos(y)).Normalized();
+        }
+
+        private static (float PitchDeg, float YawDeg) PitchYawDegFromDirection(Vector3 dir)
+        {
+            Vector3 d = dir.LengthSquared() > 1e-6f ? dir.Normalized() : Vector3.Down;
+            float horiz = MathF.Sqrt(d.X * d.X + d.Z * d.Z);
+            float pitch = Mathf.RadToDeg(MathF.Atan2(horiz, MathF.Max(1e-4f, -d.Y)));
+            float yaw = horiz > 1e-4f ? Mathf.RadToDeg(MathF.Atan2(d.X, d.Z)) : 0f;
+            return (pitch, yaw);
+        }
+
+        private void SyncSyntheticTransformControlsFromSelected(bool repopulateMeshes = false)
+        {
+            if (_selectedChain == null || !_selectedChain.IsSynthetic || _boxSynTransformCard == null)
+            {
+                UpdateSyntheticChainViewportHud();
+                return;
+            }
+            bool prev = _isUpdatingChainInspector;
+            _isUpdatingChainInspector = true;
+            try
+            {
+                var pts = EnsureSyntheticJointPositions(_selectedChain);
+                _selectedSyntheticJointIndex = Math.Clamp(_selectedSyntheticJointIndex, 0, pts.Count - 1);
+                Vector3 activePt = pts[_selectedSyntheticJointIndex];
+
+                if (_txtSynChainName != null && !_txtSynChainName.HasFocus())
+                    _txtSynChainName.Text = _selectedChain.Name ?? "";
+
+                if (repopulateMeshes || (_optSynAnchorBone != null && _optSynAnchorBone.ItemCount == 0))
+                    PopulateSyntheticAnchorDropdown(_selectedChain.AnchorHeroBone);
+                else if (_optSynAnchorBone != null)
+                {
+                    for (int i = 0; i < _optSynAnchorBone.ItemCount; i++)
+                    {
+                        if (!_optSynAnchorBone.IsItemSeparator(i) &&
+                            string.Equals(_optSynAnchorBone.GetItemText(i), _selectedChain.AnchorHeroBone ?? "spine_3", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _optSynAnchorBone.Select(i);
+                            break;
+                        }
+                    }
+                }
+
+                _spinSynPosX?.SetValueNoSignal(activePt.X);
+                _spinSynPosY?.SetValueNoSignal(activePt.Y);
+                _spinSynPosZ?.SetValueNoSignal(activePt.Z);
+                var (pitch, yaw) = PitchYawDegFromDirection(_selectedChain.SyntheticDirectionHeroSpace);
+                _spinSynPitch?.SetValueNoSignal(pitch);
+                _spinSynYaw?.SetValueNoSignal(yaw);
+                _spinSynSegs?.SetValueNoSignal(_selectedChain.SyntheticSegmentCount);
+                _spinSynLen?.SetValueNoSignal(_selectedChain.SyntheticLengthMeters);
+                _spinSynRadius?.SetValueNoSignal(_selectedChain.SyntheticInfluenceRadius);
+                _chkSynProtectLimbs?.SetPressedNoSignal(_selectedChain.SyntheticProtectCoreLimbs);
+
+                if (repopulateMeshes && _optSynTargetMesh != null)
+                {
+                    _optSynTargetMesh.Clear();
+                    _optSynTargetMesh.AddItem("All Active Submeshes", 0);
+                    int selIdx = 0;
+                    if (_optNewChainMesh != null)
+                    {
+                        for (int i = 1; i < _optNewChainMesh.ItemCount; i++)
+                        {
+                            string txt = _optNewChainMesh.GetItemText(i);
+                            _optSynTargetMesh.AddItem(txt, i);
+                            if (!string.IsNullOrEmpty(_selectedChain.TargetMeshName) &&
+                                txt.Equals(_selectedChain.TargetMeshName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                selIdx = i;
+                            }
+                        }
+                    }
+                    _optSynTargetMesh.Select(selIdx);
+                }
+
+                UpdateSyntheticChainViewportHud();
+            }
+            finally
+            {
+                _isUpdatingChainInspector = prev;
+            }
+        }
+
+        private void SpawnSyntheticChainTemplate(
+            string baseName,
+            string anchor,
+            Vector3 anchorOffsetHero,
+            Vector3 dirHero,
+            float lenMeters,
+            float radMeters,
+            int segs,
+            string presetId)
+        {
+            string uniqueName = baseName;
+            int idx = 1;
+            while (_boneChains.Any(c => c != null && string.Equals(c.Name, uniqueName, StringComparison.OrdinalIgnoreCase)))
+                uniqueName = $"{baseName}_{idx++}";
+
+            Vector3 originHero = anchorOffsetHero;
+            if (_previewHeroSkeleton != null)
+            {
+                int bIdx = _previewHeroSkeleton.FindBone(anchor);
+                if (bIdx >= 0) originHero = _previewHeroSkeleton.GetBoneGlobalRest(bIdx).Origin + anchorOffsetHero;
+            }
+
+            var chain = new BoneChainDef
+            {
+                ChainId = $"syn_{Guid.NewGuid().ToString("N")[..6]}",
+                Name = uniqueName,
+                Category = "Clothing & Hair",
+                RootSourceBone = uniqueName,
+                AnchorHeroBone = anchor,
+                Policy = ChainPolicy.PreservePhysicsChain,
+                Simulation = SimulationKind.Jiggle,
+                IsSynthetic = true,
+                SlotId = _accessorySlotId ?? "",
+                TargetMeshName = "",
+                SyntheticOriginHeroSpace = originHero,
+                SyntheticDirectionHeroSpace = dirHero.Normalized(),
+                SyntheticLengthMeters = lenMeters,
+                SyntheticInfluenceRadius = radMeters,
+                SyntheticSegmentCount = segs,
+                SyntheticProtectCoreLimbs = true
+            };
+            if (!string.IsNullOrEmpty(presetId))
+                PhysicsPresetCatalog.ApplyPresetToChain(chain, presetId, resetMacros: true);
+
+            EnsureSyntheticJointPositions(chain);
+            _boneChains.Add(chain);
+            _selectedChain = chain;
+            _selectedSyntheticJointIndex = 0;
+            MarkSyntheticChainDirty(chain);
+            if (_chkEnableCustomPhysics != null && !_chkEnableCustomPhysics.ButtonPressed)
+                _chkEnableCustomPhysics.ButtonPressed = true;
+            SetSyntheticChainGizmoActive(true);
+            SetSyntheticPropsExpanded(true);
+            RefreshClothingChainsPanel();
+            UpdateSyntheticApplyButtonVisual();
+            SetBottomStatus($"Added '{uniqueName}' — click any yellow diamond joint in 3D to drag freely, then click 'Apply / Bind Chain'.", StatusTone.Success);
+        }
+
+        private void OnMirrorSelectedSyntheticChainPressed()
+        {
+            if (_selectedChain == null || !_selectedChain.IsSynthetic) return;
+            var mirror = _selectedChain.Clone();
+            mirror.ChainId = $"syn_{Guid.NewGuid().ToString("N")[..6]}";
+            mirror.AppendedHeroBoneNames.Clear();
+
+            string nm = mirror.Name;
+            if (nm.EndsWith("_L", StringComparison.OrdinalIgnoreCase)) nm = nm[..^2] + "_R";
+            else if (nm.EndsWith("_R", StringComparison.OrdinalIgnoreCase)) nm = nm[..^2] + "_L";
+            else nm += "_mirror";
+            int n = 2;
+            string cand = nm;
+            while (_boneChains.Any(c => c != null && string.Equals(c.Name, cand, StringComparison.OrdinalIgnoreCase)))
+                cand = $"{nm}_{n++}";
+            mirror.Name = cand;
+            mirror.RootSourceBone = cand;
+            if (!string.IsNullOrEmpty(mirror.AnchorHeroBone))
+            {
+                if (mirror.AnchorHeroBone.EndsWith("_L", StringComparison.OrdinalIgnoreCase))
+                    mirror.AnchorHeroBone = mirror.AnchorHeroBone[..^2] + "_R";
+                else if (mirror.AnchorHeroBone.EndsWith("_R", StringComparison.OrdinalIgnoreCase))
+                    mirror.AnchorHeroBone = mirror.AnchorHeroBone[..^2] + "_L";
+            }
+            mirror.SyntheticOriginHeroSpace = new Vector3(-mirror.SyntheticOriginHeroSpace.X, mirror.SyntheticOriginHeroSpace.Y, mirror.SyntheticOriginHeroSpace.Z);
+            mirror.SyntheticDirectionHeroSpace = new Vector3(-mirror.SyntheticDirectionHeroSpace.X, mirror.SyntheticDirectionHeroSpace.Y, mirror.SyntheticDirectionHeroSpace.Z);
+            if (mirror.SyntheticJointPositionsHeroSpace != null)
+            {
+                for (int i = 0; i < mirror.SyntheticJointPositionsHeroSpace.Count; i++)
+                {
+                    var p = mirror.SyntheticJointPositionsHeroSpace[i];
+                    mirror.SyntheticJointPositionsHeroSpace[i] = new Vector3(-p.X, p.Y, p.Z);
+                }
+            }
+
+            _boneChains.Add(mirror);
+            _selectedChain = mirror;
+            _selectedSyntheticJointIndex = 0;
+            MarkSyntheticChainDirty(mirror);
+            UpdateSyntheticApplyButtonVisual();
+            RefreshClothingChainsPanel();
+            UpdateGizmoTargetTransform();
+            RedrawSyntheticChainPreview();
+            SetBottomStatus($"Mirrored '{_selectedChain.Name}' (both chains visible in 3D) — click 'Bind' when ready.", StatusTone.Success);
+        }
+
+        private void OnDeleteSelectedSyntheticChainPressed()
+        {
+            if (_selectedChain == null || !_selectedChain.IsSynthetic) return;
+            var deletedChain = _selectedChain;
+            string delName = deletedChain.Name;
+            _boneChains.Remove(deletedChain);
+            _selectedChain = null;
+            UnmarkSyntheticChainDirty(deletedChain);
+            PurgeSyntheticChainFromSkinOverrides(deletedChain);
+            SetSyntheticPropsExpanded(false);
+            SetSyntheticChainGizmoActive(false);
+            RefreshClothingChainsPanel();
+            MarkRemapStaleAndRefresh();
+            if (ImporterMemoryGuard.LightMode) TriggerRealtimeRigUpdate();
+            SetBottomStatus($"Deleted synthetic chain '{delName}' and restored clean mesh weights.", StatusTone.Info);
         }
 
         private void OnAddSyntheticClothingChainPressed()

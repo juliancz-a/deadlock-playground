@@ -239,11 +239,26 @@ public static class StandardPbrMaterialBuilder
         else if (matResource.FloatParams.TryGetValue("g_flRoughnessScale1", out float rScale)) roughness = rScale;
         godotMat.Roughness = roughness;
 
-        float metallic = isWeapon ? 0.35f : (isDedicatedGlow && !isAdditive ? 0.80f : 0.0f);
-        if (matResource.VectorParams.TryGetValue("TextureMetalness1", out var mVec)) metallic = mVec.X;
-        else if (matResource.VectorParams.TryGetValue("TextureMetalness", out var mVec0)) metallic = mVec0.X;
-        else if (matResource.FloatParams.TryGetValue("g_flMetalnessScale1", out float mScale)) metallic = mScale;
-        godotMat.Metallic = metallic;
+        string metalTexPath = Source2TextureLoader.GetTextureParam(matResource, "g_tMetalness")
+                           ?? Source2TextureLoader.GetTextureParam(matResource, "TextureMetalness1")
+                           ?? Source2TextureLoader.GetTextureParam(matResource, "TextureMetalness");
+        ImageTexture metalTex = !string.IsNullOrEmpty(metalTexPath)
+            ? Source2TextureLoader.GetOrLoadTexture(package, metalTexPath, forceOpaque: true, addonPackage)
+            : null;
+        if (metalTex != null)
+        {
+            godotMat.MetallicTexture = metalTex;
+            godotMat.MetallicTextureChannel = BaseMaterial3D.TextureChannel.Red;
+            godotMat.Metallic = 1.0f;
+        }
+        else
+        {
+            float metallic = isWeapon ? 0.35f : (isDedicatedGlow && !isAdditive ? 0.80f : 0.0f);
+            if (matResource.VectorParams.TryGetValue("TextureMetalness1", out var mVec)) metallic = mVec.X;
+            else if (matResource.VectorParams.TryGetValue("TextureMetalness", out var mVec0)) metallic = mVec0.X;
+            else if (matResource.FloatParams.TryGetValue("g_flMetalnessScale1", out float mScale)) metallic = mScale;
+            godotMat.Metallic = metallic;
+        }
 
         // Matte head / hair surfaces specular clamp: Godot's default MetallicSpecular = 0.5 produces
         // blinding glare blowout on high-roughness surfaces. Clamp to 0.08 and preserve per-pixel roughness maps.

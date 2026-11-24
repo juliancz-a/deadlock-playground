@@ -73,6 +73,7 @@ namespace DeadlockPlayground.Importer
                 public byte[] AlbedoPngBytes { get; set; }
                 public byte[] NormalPngBytes { get; set; }
                 public byte[] RoughnessPngBytes { get; set; }
+                public byte[] MetalnessPngBytes { get; set; }
                 public byte[] AmbientOcclusionPngBytes { get; set; }
                 public byte[] ShadowPngBytes { get; set; }
                 public byte[] SelfIllumPngBytes { get; set; }
@@ -221,8 +222,16 @@ namespace DeadlockPlayground.Importer
                 foreach (var ch in preservedChains)
                 {
                     if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain) continue;
-                    bundle.PreservedChains.Add(ch.Clone());
-                    foreach (var bn in ch.AppendedHeroBoneNames)
+                    var cloned = ch.Clone();
+                    // A 1-bone chain has 0 segments and cannot form a valid ProxyCloth strip; safely route to Jiggle
+                    // so resourcecompiler.exe never rejects the cloth proxy DMX (e.g. Drifter bip_ass_L/R).
+                    int boneCnt = Math.Max(cloned.AppendedHeroBoneNames?.Count ?? 0, cloned.SourceBoneNames?.Count ?? 0);
+                    if (cloned.Simulation == SimulationKind.ProxyCloth && boneCnt < 2 && !cloned.IsSynthetic)
+                    {
+                        cloned.Simulation = SimulationKind.Jiggle;
+                    }
+                    bundle.PreservedChains.Add(cloned);
+                    foreach (var bn in cloned.AppendedHeroBoneNames)
                         if (!string.IsNullOrWhiteSpace(bn)) bundle.PreservedCustomBoneNames.Add(bn);
                 }
             }
@@ -470,6 +479,7 @@ namespace DeadlockPlayground.Importer
                         byte[] albedoPng = null;
                         byte[] normalPng = null;
                         byte[] roughPng = null;
+                        byte[] metalPng = null;
                         byte[] aoPng = null;
                         byte[] shadowPng = null;
                         byte[] selfIllumPng = null;
@@ -490,6 +500,7 @@ namespace DeadlockPlayground.Importer
                             Texture2D albedoTex = stdMat.AlbedoTexture ?? stdMat.EmissionTexture;
                             albedoTint = stdMat.AlbedoColor;
                             bool isBlackAlbedo = albedoTint.R < 0.02f && albedoTint.G < 0.02f && albedoTint.B < 0.02f;
+                            bool recoveredFromEmission = false;
                             if (isBlackAlbedo)
                             {
                                 if (albedoTex != null)
@@ -499,6 +510,7 @@ namespace DeadlockPlayground.Importer
                                 else if (stdMat.EmissionEnabled && (stdMat.Emission.R > 0.02f || stdMat.Emission.G > 0.02f || stdMat.Emission.B > 0.02f))
                                 {
                                     albedoTint = new Color(stdMat.Emission.R, stdMat.Emission.G, stdMat.Emission.B, albedoTint.A > 0f ? albedoTint.A : 1f);
+                                    recoveredFromEmission = true;
                                 }
                             }
 
@@ -519,6 +531,11 @@ namespace DeadlockPlayground.Importer
 
                             roughScalar = Mathf.Clamp(stdMat.Roughness, 0.05f, 1.0f);
                             metalScalar = Mathf.Clamp(stdMat.Metallic, 0.0f, 1.0f);
+                            if (recoveredFromEmission && stdMat.MetallicTexture == null && metalScalar >= 0.99f)
+                            {
+                                // glTF omits metallicFactor (defaulting to 1.0) on pure emissive / Roblox Neon materials.
+                                metalScalar = 0.0f;
+                            }
                             isTranslucent = effTransp == BaseMaterial3D.TransparencyEnum.Alpha ||
                                             effTransp == BaseMaterial3D.TransparencyEnum.AlphaDepthPrePass;
                             isAlphaTest = effTransp == BaseMaterial3D.TransparencyEnum.AlphaScissor ||
@@ -533,6 +550,22 @@ namespace DeadlockPlayground.Importer
                             albedoPng = ExtractTexturePngPowerOfTwo(albedoTex, albedoTint);
                             normalPng = ExtractTexturePngPowerOfTwo(stdMat.NormalTexture, Colors.White);
                             roughPng = ExtractTexturePngPowerOfTwo(stdMat.RoughnessTexture, Colors.White);
+                            if (stdMat.MetallicTexture != null && metalScalar > 0.001f)
+                            {
+                                metalPng = ExtractSingleChannelTexturePngPowerOfTwo(
+                                    stdMat.MetallicTexture,
+                                    (int)stdMat.MetallicTextureChannel,
+                                    metalScalar,
+                                    out bool isUniformMetal,
+                                    out float uniformMetalVal);
+                                if (isUniformMetal)
+                                {
+                                    // Uniform dielectric/metallic map (e.g. Roblox metallicRoughnessTexture with B=0):
+                                    // collapse to exact scalar so we don't emit a bogus TextureMetalness1 "1.000".
+                                    metalScalar = uniformMetalVal;
+                                    metalPng = null;
+                                }
+                            }
                             aoPng = ExtractTexturePngPowerOfTwo(stdMat.AOTexture, Colors.White);
                         }
                         else if (primaryMat is ShaderMaterial sMat)
@@ -633,6 +666,12 @@ namespace DeadlockPlayground.Importer
                         }
                         normalPng = ResolveMultiChannelPng(MaterialTextureChannel.Normal, normalPng);
                         roughPng = ResolveMultiChannelPng(MaterialTextureChannel.Roughness, roughPng);
+                        bool hasPaintedMetal = lm != null && matchedSubInfo != null &&
+                                               lm.HasChannelEdits(matchedSubInfo, MaterialTextureChannel.Metalness);
+                        if (hasPaintedMetal)
+                        {
+                            metalPng = ResolveMultiChannelPng(MaterialTextureChannel.Metalness, metalPng);
+                        }
                         aoPng = ResolveMultiChannelPng(MaterialTextureChannel.AmbientOcclusion, aoPng);
                         shadowPng = ResolveMultiChannelPng(MaterialTextureChannel.Shadow, null);
                         bool hasPaintedSelfIllum = lm != null && matchedSubInfo != null &&
@@ -689,9 +728,9 @@ namespace DeadlockPlayground.Importer
                         // Deduplicate material name across submeshes sharing the same Material instance or identical (name + texture + flags)
                         string matName = null;
                         ulong matId = primaryMat != null ? primaryMat.GetInstanceId() : 0;
-                        string texHash = ComputeFastHash(albedoPng, normalPng, roughPng, aoPng);
+                        string texHash = ComputeFastHash(albedoPng, normalPng, roughPng, metalPng, aoPng);
                         string dedupKey = !string.IsNullOrEmpty(texHash)
-                            ? $"{baseSanitized}_{texHash}_{isOutlineShell}_{isTranslucent}_{isAlphaTest}"
+                            ? $"{baseSanitized}_{texHash}_{isOutlineShell}_{isTranslucent}_{isAlphaTest}_{metalScalar:F2}"
                             : "";
 
                         if (matId != 0 && materialInstanceToName.TryGetValue(matId, out string existingById))
@@ -733,6 +772,7 @@ namespace DeadlockPlayground.Importer
                             AlbedoPngBytes = albedoPng,
                             NormalPngBytes = normalPng,
                             RoughnessPngBytes = roughPng,
+                            MetalnessPngBytes = metalPng,
                             AmbientOcclusionPngBytes = aoPng,
                             ShadowPngBytes = shadowPng,
                             SelfIllumPngBytes = selfIllumPng,
@@ -1114,6 +1154,60 @@ namespace DeadlockPlayground.Importer
 
             EnsurePowerOfTwoResolution(img);
             return img.SavePngToBuffer();
+        }
+
+        private static byte[] ExtractSingleChannelTexturePngPowerOfTwo(
+            Texture2D tex,
+            int channelIndex,
+            float scale,
+            out bool isUniform,
+            out float uniformValue)
+        {
+            isUniform = true;
+            uniformValue = 0.0f;
+            if (tex == null) return null;
+
+            var img = tex.GetImage();
+            if (img == null || img.IsEmpty()) return null;
+
+            img = (Image)img.Duplicate();
+            if (img.IsCompressed()) img.Decompress();
+            if (img.GetFormat() != Image.Format.Rgba8)
+            {
+                img.Convert(Image.Format.Rgba8);
+            }
+
+            int w = img.GetWidth();
+            int h = img.GetHeight();
+            byte[] src = img.GetData();
+            int ch = Math.Clamp(channelIndex, 0, 3);
+            float clampedScale = Math.Clamp(scale, 0f, 1f);
+
+            byte minV = 255;
+            byte maxV = 0;
+            for (int i = 0; i + 3 < src.Length; i += 4)
+            {
+                byte v = (byte)Math.Clamp((int)MathF.Round(src[i + ch] * clampedScale), 0, 255);
+                if (v < minV) minV = v;
+                if (v > maxV) maxV = v;
+                src[i] = v;
+                src[i + 1] = v;
+                src[i + 2] = v;
+                src[i + 3] = 255;
+            }
+
+            if (maxV - minV <= 3)
+            {
+                isUniform = true;
+                uniformValue = ((minV + maxV) * 0.5f) / 255.0f;
+                return null;
+            }
+
+            isUniform = false;
+            uniformValue = maxV / 255.0f;
+            using var outImg = Image.CreateFromData(w, h, false, Image.Format.Rgba8, src);
+            EnsurePowerOfTwoResolution(outImg);
+            return outImg.SavePngToBuffer();
         }
 
         private static byte[] ExtractShaderTexturePngPowerOfTwo(ShaderMaterial sMat, params string[] paramNames)
@@ -1600,6 +1694,9 @@ namespace DeadlockPlayground.Importer
                             result.ErrorMessage = $"resourcecompiler.exe failed to compile '{Path.GetFileName(vmdlFullPath)}' (see log console for details).";
                             return result;
                         }
+
+                        // Post-compile AnimGraph 2 / NmSkeleton verification: warn loudly if compiled .vmdl_c lost its animation graph refs
+                        VerifyCompiledVmdlAnimGraph2Refs(expectedVmdlC, bundle.OriginalHeroVmdlCBytes, progress);
 
                         result.CompiledVmdlCPath = expectedVmdlC;
                         string vmdlRelKey = (vmdlRel + "_c").Replace('\\', '/').TrimStart('/');
@@ -2145,10 +2242,44 @@ namespace DeadlockPlayground.Importer
                 string bgBlock = blocks.FirstOrDefault(b => b.ClassName == "BodyGroupList").BlockText;
                 if (!string.IsNullOrEmpty(bgBlock))
                 {
-                    var m = Regex.Match(bgBlock, @"meshes\s*=\s*\[\s*""([^""]+)""");
-                    if (m.Success && !string.IsNullOrWhiteSpace(m.Groups[1].Value))
+                    // Inspect each BodyGroup individually: only adopt a BodyGroup's mesh name if it is genuinely
+                    // the primary body/character group — NEVER hijack a toggleable facial/head-expression, weapon,
+                    // or accessory BodyGroup (e.g. Drifter's "drifter_head_neutral"), otherwise switching that
+                    // BodyGroup in Shop / Hero Selection turns the entire custom model invisible!
+                    int chIdx = IndexOfChildrenArrayOutsideQuotes(bgBlock);
+                    int ob = chIdx >= 0 ? bgBlock.IndexOf('[', chIdx) : -1;
+                    int cb = ob >= 0 ? FindMatchingBracket(bgBlock, ob, '[', ']') : -1;
+                    if (cb > ob)
                     {
-                        return m.Groups[1].Value;
+                        foreach (string bgObj in SplitTopLevelKvObjects(bgBlock.Substring(ob + 1, cb - ob - 1)))
+                        {
+                            string bgName = (ExtractKvStringProperty(bgObj, "name") ?? "").ToLowerInvariant();
+                            bool isNonBodyGroup =
+                                bgName.Contains("head") || bgName.Contains("face") || bgName.Contains("expr") ||
+                                bgName.Contains("mouth") || bgName.Contains("teeth") || bgName.Contains("eye") ||
+                                bgName.Contains("weapon") || bgName.Contains("gun") || bgName.Contains("hat") ||
+                                bgName.Contains("prop") || bgName.Contains("mask") || bgName.Contains("hair") ||
+                                bgName.Contains("cape") || bgName.Contains("cloak") || bgName.Contains("wing");
+                            if (isNonBodyGroup) continue;
+
+                            var m = Regex.Match(bgObj, @"meshes\s*=\s*\[\s*""([^""]+)""");
+                            if (!m.Success || string.IsNullOrWhiteSpace(m.Groups[1].Value)) continue;
+
+                            string cand = m.Groups[1].Value;
+                            string candLow = cand.ToLowerInvariant();
+                            bool isNonBodyMesh =
+                                candLow.Contains("_head") || candLow.Contains("head_") || candLow.Contains("neutral") ||
+                                candLow.Contains("face") || candLow.Contains("teeth") || candLow.Contains("eye") ||
+                                candLow.Contains("weapon") || candLow.Contains("gun") || candLow.Contains("hat");
+                            if (isNonBodyMesh) continue;
+
+                            if (bgName == "body" || bgName == "default" || bgName == "hero" ||
+                                candLow.Contains("body") || candLow.Contains("_model") ||
+                                (!string.IsNullOrEmpty(fallbackHeroName) && candLow.Equals(fallbackHeroName.ToLowerInvariant(), StringComparison.Ordinal)))
+                            {
+                                return cand;
+                            }
+                        }
                     }
                 }
             }
@@ -2632,14 +2763,58 @@ namespace DeadlockPlayground.Importer
                     outSb.AppendLine(animListBlock + ",");
                 }
 
+                var (nmSkelRefs, defaultAnimGraphRef, uiAnimGraphRef, extraAnimGraphRefs) =
+                    ExtractVanillaAnimGraph2AndSkeletonRefs(bundle.OriginalHeroVmdlCBytes, modelFolderRel, hero);
+
                 if (includeAnimGraph2Nodes && !hasNmSkeletonList)
                 {
-                    outSb.AppendLine($"\t\t\t{{\r\n\t\t\t\t_class = \"NmSkeletonList\"\r\n\t\t\t\tchildren = \r\n\t\t\t\t[\r\n\t\t\t\t\t{{\r\n\t\t\t\t\t\t_class = \"NmSkeletonReference\"\r\n\t\t\t\t\t\tfilename = \"{modelFolderRel}/{hero}.vnmskel\"\r\n\t\t\t\t\t}},\r\n\t\t\t\t]\r\n\t\t\t}},");
+                    var nmSb = new StringBuilder();
+                    nmSb.AppendLine("\t\t\t{");
+                    nmSb.AppendLine("\t\t\t\t_class = \"NmSkeletonList\"");
+                    nmSb.AppendLine("\t\t\t\tchildren = ");
+                    nmSb.AppendLine("\t\t\t\t[");
+                    foreach (string skelRef in nmSkelRefs)
+                    {
+                        nmSb.AppendLine("\t\t\t\t\t{");
+                        nmSb.AppendLine("\t\t\t\t\t\t_class = \"NmSkeletonReference\"");
+                        nmSb.AppendLine($"\t\t\t\t\t\tfilename = \"{skelRef}\"");
+                        nmSb.AppendLine("\t\t\t\t\t},");
+                    }
+                    nmSb.AppendLine("\t\t\t\t]");
+                    nmSb.Append("\t\t\t},");
+                    outSb.AppendLine(nmSb.ToString());
                 }
 
                 if (includeAnimGraph2Nodes && !hasAnimGraph2List)
                 {
-                    outSb.AppendLine($"\t\t\t{{\r\n\t\t\t\t_class = \"AnimGraph2List\"\r\n\t\t\t\tchildren = \r\n\t\t\t\t[\r\n\t\t\t\t\t{{\r\n\t\t\t\t\t\t_class = \"DefaultAnimGraph2\"\r\n\t\t\t\t\t\tfilename = \"animgraphs/animgraph2/hero/hero.vnmgraph+{hero}.vnmgraph\"\r\n\t\t\t\t\t}},\r\n\t\t\t\t\t{{\r\n\t\t\t\t\t\t_class = \"AnimGraph2\"\r\n\t\t\t\t\t\tname = \"ui\"\r\n\t\t\t\t\t\tfilename = \"animgraphs/animgraph2/hero/hero_ui.vnmgraph+{hero}.vnmgraph\"\r\n\t\t\t\t\t}},\r\n\t\t\t\t]\r\n\t\t\t}},");
+                    var agSb = new StringBuilder();
+                    agSb.AppendLine("\t\t\t{");
+                    agSb.AppendLine("\t\t\t\t_class = \"AnimGraph2List\"");
+                    agSb.AppendLine("\t\t\t\tchildren = ");
+                    agSb.AppendLine("\t\t\t\t[");
+                    agSb.AppendLine("\t\t\t\t\t{");
+                    agSb.AppendLine("\t\t\t\t\t\t_class = \"DefaultAnimGraph2\"");
+                    agSb.AppendLine($"\t\t\t\t\t\tfilename = \"{defaultAnimGraphRef}\"");
+                    agSb.AppendLine("\t\t\t\t\t},");
+                    if (!string.IsNullOrEmpty(uiAnimGraphRef))
+                    {
+                        agSb.AppendLine("\t\t\t\t\t{");
+                        agSb.AppendLine("\t\t\t\t\t\t_class = \"AnimGraph2\"");
+                        agSb.AppendLine("\t\t\t\t\t\tname = \"ui\"");
+                        agSb.AppendLine($"\t\t\t\t\t\tfilename = \"{uiAnimGraphRef}\"");
+                        agSb.AppendLine("\t\t\t\t\t},");
+                    }
+                    foreach (var (extraName, extraPath) in extraAnimGraphRefs)
+                    {
+                        agSb.AppendLine("\t\t\t\t\t{");
+                        agSb.AppendLine("\t\t\t\t\t\t_class = \"AnimGraph2\"");
+                        agSb.AppendLine($"\t\t\t\t\t\tname = \"{extraName}\"");
+                        agSb.AppendLine($"\t\t\t\t\t\tfilename = \"{extraPath}\"");
+                        agSb.AppendLine("\t\t\t\t\t},");
+                    }
+                    agSb.AppendLine("\t\t\t\t]");
+                    agSb.Append("\t\t\t},");
+                    outSb.AppendLine(agSb.ToString());
                 }
 
                 outSb.AppendLine("\t\t]");
@@ -5747,6 +5922,14 @@ namespace DeadlockPlayground.Importer
                     roughValueOrPath = $"{materialsFolderRel}/{roughPngFile}";
                 }
 
+                string metalTexturePngRel = null;
+                if (sub.MetalnessPngBytes != null && sub.MetalnessPngBytes.Length > 0)
+                {
+                    string metalPngFile = $"{matName}_metal.png";
+                    File.WriteAllBytes(Path.Combine(contentMatDir, metalPngFile), sub.MetalnessPngBytes);
+                    metalTexturePngRel = $"{materialsFolderRel}/{metalPngFile}";
+                }
+
                 string aoValueOrPath = defaultWhiteAoRel;
                 if (sub.AmbientOcclusionPngBytes != null && sub.AmbientOcclusionPngBytes.Length > 0)
                 {
@@ -5805,7 +5988,8 @@ namespace DeadlockPlayground.Importer
                     hasCustomSelfIllum,
                     hasCustomTintMask,
                     defaultBlackMaskRel,
-                    transMaskPngRel);
+                    transMaskPngRel,
+                    metalTexturePngRel);
                 File.WriteAllText(vmatFull, vmatContent, new UTF8Encoding(false));
                 writtenVmatPaths.Add(vmatFull);
 
@@ -5872,7 +6056,8 @@ namespace DeadlockPlayground.Importer
             bool hasCustomSelfIllum = false,
             bool hasCustomTintMask = false,
             string blackMaskRel = null,
-            string translucencyMaskPngRel = null)
+            string translucencyMaskPngRel = null,
+            string metalnessTexturePngRel = null)
         {
             var ic = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
@@ -5936,8 +6121,16 @@ namespace DeadlockPlayground.Importer
             sb.AppendLine("\t//---- Roughness / Metalness / AO ----");
             sb.AppendLine($"\tTextureRoughness1 \"{roughnessValueOrPngRel}\"");
             sb.AppendLine($"\tTextureRoughness \"{roughnessValueOrPngRel}\"");
-            sb.AppendLine(string.Format(ic, "\tTextureMetalness1 \"{0:F3}\"", metallicScalar));
-            sb.AppendLine(string.Format(ic, "\tTextureMetalness \"[{0:F6} {0:F6} {0:F6} 0.000000]\"", metallicScalar));
+            if (!string.IsNullOrEmpty(metalnessTexturePngRel))
+            {
+                sb.AppendLine($"\tTextureMetalness1 \"{metalnessTexturePngRel}\"");
+                sb.AppendLine($"\tTextureMetalness \"{metalnessTexturePngRel}\"");
+            }
+            else
+            {
+                sb.AppendLine(string.Format(ic, "\tTextureMetalness1 \"{0:F3}\"", metallicScalar));
+                sb.AppendLine(string.Format(ic, "\tTextureMetalness \"[{0:F6} {0:F6} {0:F6} 0.000000]\"", metallicScalar));
+            }
             sb.AppendLine($"\tTextureAmbientOcclusion1 \"{aoValueOrPngRel}\"");
             sb.AppendLine($"\tTextureAmbientOcclusion \"{aoValueOrPngRel}\"");
             if (isOutlineShell || isUnlit || hasCustomSelfIllum)
@@ -6328,6 +6521,112 @@ namespace DeadlockPlayground.Importer
         /// Fallback for legacy CSDK12 compilers that lack NmSkeletonList / AnimGraph2List classes:
         /// logs guidance to upgrade to CSDK13 where NmSkeletonList and AnimGraph2List compile natively.
         /// </summary>
+        private static (List<string> NmSkelRefs, string DefaultAnimGraph, string UiAnimGraph, List<(string Name, string Path)> ExtraGraphs)
+            ExtractVanillaAnimGraph2AndSkeletonRefs(byte[] originalHeroVmdlCBytes, string modelFolderRel, string hero)
+        {
+            var nmSkels = new List<string>();
+            string defaultGraph = null;
+            string uiGraph = null;
+            var extraGraphs = new List<(string Name, string Path)>();
+
+            if (originalHeroVmdlCBytes != null && originalHeroVmdlCBytes.Length > 32)
+            {
+                try
+                {
+                    using var res = new ValveResourceFormat.Resource();
+                    using var ms = new MemoryStream(originalHeroVmdlCBytes);
+                    res.Read(ms);
+                    var extRefs = res.ExternalReferences?.ResourceRefInfoList;
+                    if (extRefs != null)
+                    {
+                        foreach (var r in extRefs)
+                        {
+                            string name = r.Name?.Replace('\\', '/').TrimStart('/');
+                            if (string.IsNullOrWhiteSpace(name)) continue;
+                            if (name.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (!nmSkels.Contains(name, StringComparer.OrdinalIgnoreCase))
+                                    nmSkels.Add(name);
+                            }
+                            else if (name.EndsWith(".vnmgraph", StringComparison.OrdinalIgnoreCase))
+                            {
+                                string low = name.ToLowerInvariant();
+                                if (low.Contains("_ui.vnmgraph") || low.Contains("hero_ui"))
+                                {
+                                    uiGraph ??= name;
+                                }
+                                else if (defaultGraph == null && (low.Contains("hero.vnmgraph") || !low.Contains("_ui")))
+                                {
+                                    defaultGraph = name;
+                                }
+                                else if (!string.Equals(name, defaultGraph, StringComparison.OrdinalIgnoreCase) &&
+                                         !string.Equals(name, uiGraph, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string leaf = Path.GetFileNameWithoutExtension(name);
+                                    int plusIdx = leaf.IndexOf('+');
+                                    if (plusIdx > 0) leaf = leaf[..plusIdx];
+                                    extraGraphs.Add((leaf, name));
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[CustomModelExporter] Warning reading vanilla RERL AnimGraph2 refs: {ex.Message}");
+                }
+            }
+
+            if (nmSkels.Count == 0)
+                nmSkels.Add($"{modelFolderRel}/{hero}.vnmskel");
+            defaultGraph ??= $"animgraphs/animgraph2/hero/hero.vnmgraph+{hero}.vnmgraph";
+            uiGraph ??= $"animgraphs/animgraph2/hero/hero_ui.vnmgraph+{hero}.vnmgraph";
+
+            return (nmSkels, defaultGraph, uiGraph, extraGraphs);
+        }
+
+        private static void VerifyCompiledVmdlAnimGraph2Refs(
+            string compiledVmdlCPath,
+            byte[] originalHeroVmdlCBytes,
+            IProgress<ExportProgressReport> progress)
+        {
+            if (string.IsNullOrEmpty(compiledVmdlCPath) || !File.Exists(compiledVmdlCPath)) return;
+            try
+            {
+                bool vanillaHadAg2 = false;
+                if (originalHeroVmdlCBytes != null && originalHeroVmdlCBytes.Length > 32)
+                {
+                    using var vanRes = new ValveResourceFormat.Resource();
+                    using var vms = new MemoryStream(originalHeroVmdlCBytes);
+                    vanRes.Read(vms);
+                    vanillaHadAg2 = vanRes.ExternalReferences?.ResourceRefInfoList?.Any(r =>
+                        !string.IsNullOrEmpty(r.Name) &&
+                        (r.Name.EndsWith(".vnmgraph", StringComparison.OrdinalIgnoreCase) ||
+                         r.Name.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase))) ?? false;
+                }
+
+                if (!vanillaHadAg2) return;
+
+                using var compRes = new ValveResourceFormat.Resource();
+                using var cms = new FileStream(compiledVmdlCPath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite);
+                compRes.Read(cms);
+                var refs = compRes.ExternalReferences?.ResourceRefInfoList;
+                bool hasSkel = refs?.Any(r => !string.IsNullOrEmpty(r.Name) && r.Name.EndsWith(".vnmskel", StringComparison.OrdinalIgnoreCase)) ?? false;
+                bool hasGraph = refs?.Any(r => !string.IsNullOrEmpty(r.Name) && r.Name.EndsWith(".vnmgraph", StringComparison.OrdinalIgnoreCase)) ?? false;
+
+                if (!hasSkel || !hasGraph)
+                {
+                    string warn = $"[WARNING] Compiled '{Path.GetFileName(compiledVmdlCPath)}' is missing AnimGraph 2 references (NmSkeleton={hasSkel}, AnimGraph2={hasGraph}). In-game animations will NOT play unless compiled with CSDK13 (Deadlock / CS2 Workshop Tools).";
+                    GD.PrintErr($"[CustomModelExporter] {warn}");
+                    progress?.Report(new ExportProgressReport(0.86f, warn, ExportLogLevel.Warning));
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[CustomModelExporter] Post-compile AnimGraph2 verification skipped: {ex.Message}");
+            }
+        }
+
         private static void InjectAnimGraph2ReferencesIntoCompiledVmdlC(
             string compiledVmdlCPath,
             CustomModelExportBundle bundle,

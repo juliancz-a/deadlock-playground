@@ -1416,20 +1416,24 @@ public partial class CharacterTabUI : VBoxContainer
             return false;
 
         bool restoredAny = false;
+        var failureReasons = new List<string>();
 
         if (hasCustomModel)
         {
             string modelDiskPath = session.ResolveCustomModelDiskPath(heroEntry.CustomModel);
-            if (string.IsNullOrEmpty(modelDiskPath) || !File.Exists(modelDiskPath))
+            if (!DeadlockPlayground.Workspace.ModWorkspaceSession.ValidateModelExternalDependencies(modelDiskPath, out string depErr))
             {
-                GD.PrintErr($"[CharacterTabUI] Saved custom model file missing in workspace: '{heroEntry.CustomModel.RelativeModelPath}'.");
+                GD.PrintErr($"[CharacterTabUI] Cannot restore custom model: {depErr}");
+                failureReasons.Add(depErr);
             }
             else
             {
                 var sceneRoot = CustomModelAutoRigger.LoadAndSanitize3DModelScene(modelDiskPath);
                 if (sceneRoot == null)
                 {
-                    GD.PrintErr($"[CharacterTabUI] Failed to parse saved custom model '{modelDiskPath}'.");
+                    string err = $"Failed to parse saved custom model '{Path.GetFileName(modelDiskPath)}'.";
+                    GD.PrintErr($"[CharacterTabUI] {err}");
+                    failureReasons.Add(err);
                 }
                 else
                 {
@@ -1441,7 +1445,9 @@ public partial class CharacterTabUI : VBoxContainer
                     if (!res.Success)
                     {
                         sceneRoot.QueueFree();
-                        GD.PrintErr($"[CharacterTabUI] Failed to re-bind saved custom model: {res.ErrorMessage}");
+                        string err = $"Failed to re-bind saved custom model: {res.ErrorMessage}";
+                        GD.PrintErr($"[CharacterTabUI] {err}");
+                        failureReasons.Add(err);
                     }
                     else
                     {
@@ -1464,16 +1470,19 @@ public partial class CharacterTabUI : VBoxContainer
                     continue;
 
                 string accDiskPath = session.ResolveCustomModelDiskPath(acc.ModelConfig);
-                if (string.IsNullOrEmpty(accDiskPath) || !File.Exists(accDiskPath))
+                if (!DeadlockPlayground.Workspace.ModWorkspaceSession.ValidateModelExternalDependencies(accDiskPath, out string accDepErr))
                 {
-                    GD.PrintErr($"[CharacterTabUI] Saved accessory file missing in workspace: '{acc.ModelConfig.RelativeModelPath}'.");
+                    GD.PrintErr($"[CharacterTabUI] Cannot restore accessory '{acc.DisplayName}': {accDepErr}");
+                    failureReasons.Add($"Accessory '{acc.DisplayName}': {accDepErr}");
                     continue;
                 }
 
                 var accScene = CustomModelAutoRigger.LoadAndSanitize3DModelScene(accDiskPath);
                 if (accScene == null)
                 {
-                    GD.PrintErr($"[CharacterTabUI] Failed to parse saved accessory model '{accDiskPath}'.");
+                    string err = $"Failed to parse saved accessory '{acc.DisplayName}'.";
+                    GD.PrintErr($"[CharacterTabUI] {err}");
+                    failureReasons.Add(err);
                     continue;
                 }
 
@@ -1486,7 +1495,9 @@ public partial class CharacterTabUI : VBoxContainer
                 if (!accRes.Success)
                 {
                     accScene.QueueFree();
-                    GD.PrintErr($"[CharacterTabUI] Failed to re-bind saved accessory '{acc.DisplayName}': {accRes.ErrorMessage}");
+                    string err = $"Failed to re-bind saved accessory '{acc.DisplayName}': {accRes.ErrorMessage}";
+                    GD.PrintErr($"[CharacterTabUI] {err}");
+                    failureReasons.Add(err);
                     continue;
                 }
 
@@ -1505,6 +1516,13 @@ public partial class CharacterTabUI : VBoxContainer
             {
                 CustomModelAutoRigger.RecomputeHeroReplacementVisibility(heroNode);
             }
+        }
+
+        if (failureReasons.Count > 0)
+        {
+            StudioUIManager.Instance?.ShowToast(
+                restoredAny ? "Partial Project Restore" : "Could Not Restore Custom Model",
+                failureReasons[0]);
         }
 
         if (!restoredAny)

@@ -18,6 +18,8 @@ namespace DeadlockPlayground.Importer
         VrmVroid,
         Biped,
         ValveBiped,
+        RobloxR15,
+        RobloxR6,
         Generic
     }
 
@@ -180,6 +182,31 @@ namespace DeadlockPlayground.Importer
 
             var cands = new List<Candidate>();
 
+            // Precompute anatomical foot/hand subtree membership so articulated toe bones
+            // (e.g. Auto-Rig Pro C_TOES_INDEX2.R) can never steal hand finger slots (C_INDEX2.R),
+            // and hand fingers can never steal foot/toe slots.
+            var isFootSubtree = new bool[n];
+            var isHandSubtree = new bool[n];
+            for (int i = 0; i < n; i++)
+            {
+                int cur = i, guard = 0;
+                while (cur >= 0 && cur < n && guard++ < 256)
+                {
+                    var ct = parsed[cur].Tokens;
+                    if (HasAny(ct, "toe", "toes", "foot", "ankle", "heel", "sole", "ball"))
+                    {
+                        isFootSubtree[i] = true;
+                        break;
+                    }
+                    if (HasAny(ct, "hand", "wrist", "palm", "forearm"))
+                    {
+                        isHandSubtree[i] = true;
+                        break;
+                    }
+                    cur = parents[cur];
+                }
+            }
+
             for (int i = 0; i < n; i++)
             {
                 var p = parsed[i];
@@ -202,7 +229,7 @@ namespace DeadlockPlayground.Importer
                 }
                 result.Bones[i] = bc;
                 bool isWeighted = weightedBones != null && weightedBones.Contains(i);
-                Classify(bc, p, result.Family, fingerZeroBased, hasRigifySpine001, isWeighted, cands, depth);
+                Classify(bc, p, result.Family, fingerZeroBased, hasRigifySpine001, isWeighted, isFootSubtree[i], isHandSubtree[i], cands, depth);
             }
 
             // Second pass: any bone under a facial root (e.g. ORG-face or head facial rig) stays BoneKind.Face
@@ -772,6 +799,8 @@ namespace DeadlockPlayground.Importer
             scores.Clear();
             int n = Math.Max(1, names.Count);
             int arpC = 0, arpX = 0, arpBody = 0, defBody = 0, defFace = 0, mixamo = 0, ue = 0, unity = 0, vrm = 0, bip = 0, valve = 0;
+            int rbxR15 = 0, rbxR6 = 0;
+            bool hasHumanoidRootPart = false, hasLowerTorso = false, hasUpperTorso = false, hasPlainTorso = false;
             bool hasTraj = false;
             foreach (var p in parsed)
             {
@@ -796,10 +825,34 @@ namespace DeadlockPlayground.Importer
                 if (l.Contains("valvebiped")) valve++;
                 if (l.StartsWith("bip01") || l.StartsWith("bip001") || l.StartsWith("bip ")) bip++;
                 if (l == "upperarm_l" || l == "thigh_l" || l == "lowerarm_r" || l == "calf_r" || l == "ik_foot_root") ue++;
-                if (l == "leftupperarm" || l == "rightlowerleg" || l == "leftupperleg" || l == "upperchest") unity++;
+                if (l == "humanoidrootpart") hasHumanoidRootPart = true;
+                if (l == "lowertorso" || l == "lower_torso") { hasLowerTorso = true; rbxR15 += 2; }
+                if (l == "uppertorso" || l == "upper_torso") { hasUpperTorso = true; rbxR15 += 2; }
+                if (l == "torso") hasPlainTorso = true;
+                if (l is "leftupperarm" or "rightupperarm" or "leftlowerarm" or "rightlowerarm" or "leftupperleg" or "rightupperleg" or "leftlowerleg" or "rightlowerleg")
+                {
+                    rbxR15++;
+                    unity++;
+                }
+                else if (l == "upperchest")
+                {
+                    unity++;
+                }
+                if (l is "left arm" or "right arm" or "left leg" or "right leg") rbxR6++;
             }
 
             double shapeBonus = 0.15 * symmetryScore + 0.10 * hierarchyScore;
+            bool isRobloxR15Signature = (hasLowerTorso && hasUpperTorso) || (hasHumanoidRootPart && (hasLowerTorso || hasUpperTorso));
+            bool isRobloxR6Signature = (hasHumanoidRootPart || hasPlainTorso) && !hasLowerTorso && !hasUpperTorso && rbxR6 >= 3;
+            double rbxR15Score = isRobloxR15Signature
+                ? Math.Min(1.0, (hasHumanoidRootPart ? 0.35 : 0.0) + 0.45 + Math.Min(0.20, rbxR15 * 0.03))
+                : 0.0;
+            double rbxR6Score = isRobloxR6Signature
+                ? Math.Min(1.0, (hasHumanoidRootPart ? 0.35 : 0.0) + (hasPlainTorso ? 0.25 : 0.0) + Math.Min(0.35, rbxR6 * 0.10))
+                : 0.0;
+            // Suppress UnityHumanoid false positive when Roblox R15 markers (HumanoidRootPart / LowerTorso / UpperTorso) are present
+            if (isRobloxR15Signature) unity = 0;
+
             double arpScore = (hasTraj ? 0.45 : 0.0)
                             + Math.Min(0.75, arpBody * 0.12)
                             + Math.Min(0.35, arpC * 0.05)
@@ -815,6 +868,8 @@ namespace DeadlockPlayground.Importer
             scores[RigFamily.Biped] = Math.Min(1.0, Math.Min(0.80, bip / 10.0) + (bip > 0 ? shapeBonus * 0.6 : 0));
             scores[RigFamily.UnrealMannequin] = Math.Min(1.0, Math.Min(0.75, ue / 4.0) + (ue > 0 ? shapeBonus * 0.6 : 0));
             scores[RigFamily.UnityHumanoid] = Math.Min(1.0, Math.Min(0.75, unity / 4.0) + (unity > 0 ? shapeBonus * 0.6 : 0));
+            scores[RigFamily.RobloxR15] = rbxR15Score;
+            scores[RigFamily.RobloxR6] = rbxR6Score;
             scores[RigFamily.Generic] = Math.Min(0.65, 0.25 + shapeBonus + (n >= 12 ? 0.15 : 0.0));
 
             var best = scores.OrderByDescending(kv => kv.Value).First();
@@ -853,7 +908,7 @@ namespace DeadlockPlayground.Importer
 
         private static void Classify(
             BoneClassification bc, Parsed p, RigFamily family, bool fingerZeroBased, bool hasRigifySpine001,
-            bool isWeighted, List<Candidate> cands, int[] depth)
+            bool isWeighted, bool isFootSubtree, bool isHandSubtree, List<Candidate> cands, int[] depth)
         {
             var t = p.Tokens;
             char side = p.Side;
@@ -892,6 +947,18 @@ namespace DeadlockPlayground.Importer
             if (HasAny(t, TwistTokens.ToArray())) { Set(BoneKind.Twist, "twist/corrective bone"); return; }
 
             // ---- Root --------------------------------------------------------------------------------------
+            if (p.RawLower == "humanoidrootpart")
+            {
+                if (family == RigFamily.RobloxR15)
+                {
+                    Set(BoneKind.Core, "Roblox R15 HumanoidRootPart = pelvis");
+                    bc.Canonical = "pelvis";
+                    cands.Add(new Candidate { Index = bc.Index, CanonicalKey = "pelvis", Priority = 0, Depth = depth[bc.Index] });
+                    return;
+                }
+                Set(BoneKind.Root, "root");
+                return;
+            }
             if (t.Count == 1 && (t[0] == "root" || t[0] == "armature" || t[0] == "rootnode" || t[0] == "world" || t[0] == "scene"))
             {
                 if (arp && t[0] == "root" && p.ArpCenterSuffix)
@@ -902,6 +969,14 @@ namespace DeadlockPlayground.Importer
                     return;
                 }
                 Set(BoneKind.Root, "root");
+                return;
+            }
+
+            // ---- Roblox Accessory leaf nodes (e.g. "Accessory (LeftShoeAccessory)", "Accessory (black gym top)") ----
+            if (p.RawLower.StartsWith("accessory ") || p.RawLower.StartsWith("accessory(") ||
+                t.Contains("accessory") || p.RawLower.EndsWith("accessory"))
+            {
+                Set(BoneKind.Accessory, "Roblox accessory bone (collapses to parent)");
                 return;
             }
 
@@ -928,7 +1003,10 @@ namespace DeadlockPlayground.Importer
             }
 
             // ---- Fingers ------------------------------------------------------------------------------------
-            if (p.FingerName != null && (HasAny(t, FingerNames) || t.Contains("finger")) && side != 'C')
+            // Strictly exclude foot/toe bones (e.g. Auto-Rig Pro C_TOES_INDEX2.R) so articulated toes never
+            // hijack hand finger slots (which have greater tree depth than foot bones and would otherwise lose tie-breaks!).
+            bool hasToeOrFootToken = isFootSubtree || HasAny(t, "toe", "toes", "foot", "ankle", "heel", "sole", "ball");
+            if (!hasToeOrFootToken && p.FingerName != null && (HasAny(t, FingerNames) || t.Contains("finger")) && side != 'C')
             {
                 string joint;
                 if (p.IsLeaf) joint = "end";
@@ -956,19 +1034,19 @@ namespace DeadlockPlayground.Importer
                 cands.Add(new Candidate { Index = bc.Index, CanonicalKey = key, Priority = 0, NumPenalty = 0, Depth = depth[bc.Index] });
                 return;
             }
-            if (p.FingerName != null && side == 'C' && HasAny(t, FingerNames))
+            if (!hasToeOrFootToken && p.FingerName != null && side == 'C' && HasAny(t, FingerNames))
             {
                 Set(BoneKind.Finger, "finger without side");
                 return;
             }
-            if (t.Contains("palm")) { Set(BoneKind.Finger, "palm (collapses to hand)"); return; }
+            if (!hasToeOrFootToken && t.Contains("palm")) { Set(BoneKind.Finger, "palm (collapses to hand)"); return; }
 
             // ---- Core humanoid roles -------------------------------------------------------------------------
             string role = null;
             int priority = 0;
 
-            bool hasToe = HasAny(t, "toe", "toes", "ball");
-            bool hasFoot = HasAny(t, "foot", "ankle");
+            bool hasToe = !isHandSubtree && !HasAny(t, "hand", "wrist", "finger", "palm") && HasAny(t, "toe", "toes", "ball");
+            bool hasFoot = !isHandSubtree && HasAny(t, "foot", "ankle");
             bool hasLeg = t.Contains("leg");
             bool hasArm = t.Contains("arm");
 
@@ -1000,8 +1078,9 @@ namespace DeadlockPlayground.Importer
             }
             else if (hasLeg && !HasAny(t, "upper", "lower"))
             {
-                // Bare "leg": Mixamo "LeftLeg" / ARP "leg_stretch" == shin
-                role = "leg_lower";
+                // Roblox R6 has a single leg bone ("Left Leg" / "Right Leg") with no knee split -> map to leg_upper.
+                // Mixamo "LeftLeg" / ARP "leg_stretch" == shin -> leg_lower.
+                role = family == RigFamily.RobloxR6 ? "leg_upper" : "leg_lower";
                 priority = 1;
             }
             else if (hasArm && !HasAny(t, "hand", "wrist", "shoulder", "clavicle", "collar"))
@@ -1072,6 +1151,36 @@ namespace DeadlockPlayground.Importer
             if (HasAny(t, "spine", "chest", "torso", "abdomen", "upperchest"))
             {
                 if (p.IsLeaf) { Set(BoneKind.Helper, "spine tip"); return; }
+                // Roblox R15: HumanoidRootPart = pelvis, LowerTorso = spine_0, UpperTorso = spine_3
+                if (t.Contains("torso") && t.Contains("lower") && side == 'C')
+                {
+                    if (family == RigFamily.RobloxR15)
+                    {
+                        Set(BoneKind.Core, "Roblox R15 LowerTorso = spine_0");
+                        bc.Canonical = "spine_0";
+                        cands.Add(new Candidate { Index = bc.Index, CanonicalKey = "spine_0", Priority = 0, Depth = depth[bc.Index] });
+                        return;
+                    }
+                    Set(BoneKind.Core, "Roblox LowerTorso = pelvis");
+                    bc.Canonical = "pelvis";
+                    cands.Add(new Candidate { Index = bc.Index, CanonicalKey = "pelvis", Priority = 1, Depth = depth[bc.Index] });
+                    return;
+                }
+                if (t.Contains("torso") && t.Contains("upper") && side == 'C' && family == RigFamily.RobloxR15)
+                {
+                    Set(BoneKind.Core, "Roblox R15 UpperTorso = spine_3");
+                    bc.Canonical = "spine_3";
+                    cands.Add(new Candidate { Index = bc.Index, CanonicalKey = "spine_3", Priority = 0, Depth = depth[bc.Index] });
+                    return;
+                }
+                // Roblox R6: single Torso bone acts as pelvis root
+                if (family == RigFamily.RobloxR6 && t.Count == 1 && t[0] == "torso" && side == 'C')
+                {
+                    Set(BoneKind.Core, "Roblox R6 Torso = pelvis");
+                    bc.Canonical = "pelvis";
+                    cands.Add(new Candidate { Index = bc.Index, CanonicalKey = "pelvis", Priority = 1, Depth = depth[bc.Index] });
+                    return;
+                }
                 int num = p.Nums.Count > 0 ? p.Nums[0] : -1;
                 if (family == RigFamily.Rigify && t.Contains("spine"))
                 {
@@ -1201,7 +1310,7 @@ namespace DeadlockPlayground.Importer
             string[] slots = chosenSpine.Count switch
             {
                 0 => Array.Empty<string>(),
-                1 => new[] { "spine_2" },
+                1 => new[] { "spine_3" },
                 2 => new[] { "spine_1", "spine_3" },
                 3 => new[] { "spine_1", "spine_2", "spine_3" },
                 _ => new[] { "spine_0", "spine_1", "spine_2", "spine_3" }

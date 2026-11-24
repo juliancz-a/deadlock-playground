@@ -787,6 +787,36 @@ public partial class VpkLoaderTest : Node3D
 			// Index sequence metadata without decoding frames (Source 2 Viewer VRF pattern)
 			CurrentHeroAnimations = DeadlockPlayground.Tools.DeadlockAnimLoader.IndexAnimations(vrfModel, fileLoader);
 
+			// If a custom-model mod .vmdl_c only carries a stub bind_idle_ref AnimationList (or stripped AnimGraph2),
+			// fall back to indexing the vanilla hero's animations from basePackage so Pose / Player tab stays populated.
+			if (addonPackage != null && (CurrentHeroAnimations == null || CurrentHeroAnimations.Count < 5) && basePackage != null)
+			{
+				try
+				{
+					var vanillaEntry = FindModelEntry(basePackage, searchRoute, heroKey, isAddon: false);
+					if (vanillaEntry != null)
+					{
+						using var vanRes = new ValveResourceFormat.Resource();
+						using var vanStream = basePackage.GetMemoryMappedStreamIfPossible(vanillaEntry);
+						vanRes.Read(vanStream);
+						if (vanRes.DataBlock is Model vanModel)
+						{
+							var vanLoader = new GameFileLoader(basePackage, vanillaEntry.DirectoryName);
+							var vanAnims = DeadlockPlayground.Tools.DeadlockAnimLoader.IndexAnimations(vanModel, vanLoader);
+							if (vanAnims != null && vanAnims.Count > (CurrentHeroAnimations?.Count ?? 0))
+							{
+								CurrentHeroAnimations = vanAnims;
+								GD.Print($"[VpkLoaderTest] Mod '{heroKey}' yielded few animations; restored {vanAnims.Count} animations from vanilla '{vanillaEntry.GetFullPath()}'.");
+							}
+						}
+					}
+				}
+				catch (Exception animFbEx)
+				{
+					GD.PrintErr($"[VpkLoaderTest] Vanilla animation fallback warning for '{heroKey}': {animFbEx.Message}");
+				}
+			}
+
 			EmitSignal(SignalName.LoadProgress, "Resolving hero materials and compiling PBR shaders...");
 			InstantiateInScene(glbBytes, heroKey, basePackage, meshMaterialMap, vrfModel, entry.DirectoryName, addonPackage);
 			EmitSignal(SignalName.LoadProgress, $"Finished loading {displayName}.");

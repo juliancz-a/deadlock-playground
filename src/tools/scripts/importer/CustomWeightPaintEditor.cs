@@ -37,6 +37,7 @@ namespace DeadlockPlayground.Importer
             public Vector3[] RestVerts;
             public Vector3[] RestNorms;
             public Vector3[] PosedVerts;
+            public Vector3[] PosedNorms;
             public Vector2[] Uvs;
             public int[] Indices;
             public int[] EdgeIndices;
@@ -44,6 +45,20 @@ namespace DeadlockPlayground.Importer
             public float[] Weights;   // vCount * 4
             public int[][] WeldClusters;
             public int[][] Neighbors;
+            public int[] IslandIds;   // connected-component island ID per vertex
+            public int IslandCount;
+            public HashSet<int> HiddenIslands = new();
+        }
+
+        public struct BrushOptions
+        {
+            public bool FrontFacingOnly;
+            public bool SameIslandOnly;
+            public bool PaintThrough;
+            public SurfaceState HitSurface;
+            public int HitVertex;
+            public Vector3 CameraRayDir;
+            public HashSet<int> LockedBindIndices;
         }
 
         public sealed class WeightHistoryEntry
@@ -112,7 +127,7 @@ namespace DeadlockPlayground.Importer
                         for (int i = 0; i < indices.Length; i++) indices[i] = i;
                     }
 
-                    BuildTopology(verts, indices, out var clusters, out var neighbors);
+                    BuildTopology(verts, indices, out var clusters, out var neighbors, out var islandIds, out int islandCount);
                     Material origMat = mi.HasMeta($"OriginalMaterial_{s}")
                         ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>()
                         : (mi.Mesh.SurfaceGetMaterial(s) ?? mi.GetSurfaceOverrideMaterial(s));
@@ -127,20 +142,23 @@ namespace DeadlockPlayground.Importer
                         RestVerts = verts,
                         RestNorms = norms,
                         PosedVerts = (Vector3[])verts.Clone(),
+                        PosedNorms = norms != null ? (Vector3[])norms.Clone() : new Vector3[verts.Length],
                         Uvs = uvs,
                         Indices = indices,
                         EdgeIndices = BuildUniqueEdgeIndices(indices),
                         SkinBones = (int[])bones.Clone(),
                         Weights = (float[])weights.Clone(),
                         WeldClusters = clusters,
-                        Neighbors = neighbors
+                        Neighbors = neighbors,
+                        IslandIds = islandIds,
+                        IslandCount = islandCount
                     });
                 }
             }
             return list;
         }
 
-        private static void BuildTopology(Vector3[] verts, int[] indices, out int[][] clustersPerVert, out int[][] neighbors)
+        private static void BuildTopology(Vector3[] verts, int[] indices, out int[][] clustersPerVert, out int[][] neighbors, out int[] islandIds, out int islandCount)
         {
             int n = verts.Length;
             float cell = 0.001f;
@@ -178,6 +196,39 @@ namespace DeadlockPlayground.Importer
                 merged.Remove(i);
                 neighbors[i] = merged.ToArray();
             }
+
+            // Connected-component island IDs via BFS (respecting UV-seam weld clusters).
+            islandIds = new int[n];
+            Array.Fill(islandIds, -1);
+            islandCount = 0;
+            var q = new Queue<int>();
+            for (int i = 0; i < n; i++)
+            {
+                if (islandIds[i] >= 0) continue;
+                int id = islandCount++;
+                islandIds[i] = id;
+                q.Enqueue(i);
+                while (q.Count > 0)
+                {
+                    int cur = q.Dequeue();
+                    foreach (int nb in neighbors[cur])
+                    {
+                        if (islandIds[nb] < 0)
+                        {
+                            islandIds[nb] = id;
+                            q.Enqueue(nb);
+                        }
+                    }
+                    foreach (int w in clustersPerVert[cur])
+                    {
+                        if (islandIds[w] < 0)
+                        {
+                            islandIds[w] = id;
+                            q.Enqueue(w);
+                        }
+                    }
+                }
+            }
         }
 
         public static void UpdatePosedVertices(List<SurfaceState> surfaces, Skeleton3D skel, Skin skin)
@@ -202,10 +253,14 @@ namespace DeadlockPlayground.Importer
             foreach (var s in surfaces)
             {
                 int vc = s.RestVerts.Length;
+                bool hasNorms = s.RestNorms != null && s.RestNorms.Length == vc;
+                if (s.PosedNorms == null || s.PosedNorms.Length != vc) s.PosedNorms = new Vector3[vc];
                 for (int v = 0; v < vc; v++)
                 {
                     Vector3 rv = s.RestVerts[v];
+                    Vector3 rn = hasNorms ? s.RestNorms[v] : Vector3.Up;
                     Vector3 acc = Vector3.Zero;
+                    Vector3 accN = Vector3.Zero;
                     float sumW = 0f;
                     int baseOff = v * 4;
                     for (int k = 0; k < 4; k++)
@@ -215,9 +270,11 @@ namespace DeadlockPlayground.Importer
                         int bi = s.SkinBones[baseOff + k];
                         if (bi < 0 || bi >= bindCount) continue;
                         acc += (bindMats[bi] * rv) * w;
+                        if (hasNorms) accN += (bindMats[bi].Basis * rn) * w;
                         sumW += w;
                     }
                     s.PosedVerts[v] = sumW > 0.0001f ? acc / sumW : (skelXform * rv);
+                    s.PosedNorms[v] = (hasNorms && accN.LengthSquared() > 1e-8f) ? accN.Normalized() : (skelXform.Basis * rn).Normalized();
                 }
             }
         }
@@ -230,9 +287,22 @@ namespace DeadlockPlayground.Importer
             out Vector3 hitPoint,
             out Vector3 hitNormal)
         {
+            return RaycastSurfaces(rayOrigin, rayDir, surfaces, out hitSurface, out hitPoint, out hitNormal, out _);
+        }
+
+        public static bool RaycastSurfaces(
+            Vector3 rayOrigin,
+            Vector3 rayDir,
+            List<SurfaceState> surfaces,
+            out SurfaceState hitSurface,
+            out Vector3 hitPoint,
+            out Vector3 hitNormal,
+            out int hitVertex)
+        {
             hitSurface = null;
             hitPoint = Vector3.Zero;
             hitNormal = Vector3.Up;
+            hitVertex = -1;
             float bestT = float.MaxValue;
 
             foreach (var s in surfaces)
@@ -240,9 +310,12 @@ namespace DeadlockPlayground.Importer
                 if (s.MeshInstance == null || !GodotObject.IsInstanceValid(s.MeshInstance) || !s.MeshInstance.Visible) continue;
                 var verts = s.PosedVerts;
                 var idx = s.Indices;
+                bool hasHidden = s.HiddenIslands != null && s.HiddenIslands.Count > 0 && s.IslandIds != null;
                 for (int i = 0; i + 2 < idx.Length; i += 3)
                 {
-                    Vector3 a = verts[idx[i]], b = verts[idx[i + 1]], c = verts[idx[i + 2]];
+                    int ia = idx[i], ib = idx[i + 1], ic = idx[i + 2];
+                    if (hasHidden && s.HiddenIslands.Contains(s.IslandIds[ia])) continue;
+                    Vector3 a = verts[ia], b = verts[ib], c = verts[ic];
                     if (RayTriangle(rayOrigin, rayDir, a, b, c, out float t) && t < bestT)
                     {
                         bestT = t;
@@ -250,6 +323,10 @@ namespace DeadlockPlayground.Importer
                         hitPoint = rayOrigin + rayDir * t;
                         Vector3 n = (b - a).Cross(c - a);
                         hitNormal = n.LengthSquared() > 1e-8f ? n.Normalized() : Vector3.Up;
+                        float da = hitPoint.DistanceSquaredTo(a);
+                        float db = hitPoint.DistanceSquaredTo(b);
+                        float dc = hitPoint.DistanceSquaredTo(c);
+                        hitVertex = (da <= db && da <= dc) ? ia : (db <= dc ? ib : ic);
                     }
                 }
             }
@@ -297,7 +374,36 @@ namespace DeadlockPlayground.Importer
             arrays[(int)Mesh.ArrayType.Vertex] = s.RestVerts;
             if (s.RestNorms != null && s.RestNorms.Length == vc) arrays[(int)Mesh.ArrayType.Normal] = s.RestNorms;
             if (s.Uvs != null && s.Uvs.Length == vc) arrays[(int)Mesh.ArrayType.TexUV] = s.Uvs;
-            if (s.Indices != null && s.Indices.Length > 0) arrays[(int)Mesh.ArrayType.Index] = s.Indices;
+            int[] visibleIndices = s.Indices;
+            int[] visibleEdges = s.EdgeIndices;
+            if (heatmapActive && s.HiddenIslands != null && s.HiddenIslands.Count > 0 && s.IslandIds != null)
+            {
+                var filtTris = new List<int>(s.Indices.Length);
+                for (int i = 0; i + 2 < s.Indices.Length; i += 3)
+                {
+                    int ia = s.Indices[i];
+                    if (ia >= 0 && ia < s.IslandIds.Length && s.HiddenIslands.Contains(s.IslandIds[ia])) continue;
+                    filtTris.Add(ia);
+                    filtTris.Add(s.Indices[i + 1]);
+                    filtTris.Add(s.Indices[i + 2]);
+                }
+                visibleIndices = filtTris.ToArray();
+
+                if (s.EdgeIndices != null && s.EdgeIndices.Length >= 2)
+                {
+                    var filtEdges = new List<int>(s.EdgeIndices.Length);
+                    for (int i = 0; i + 1 < s.EdgeIndices.Length; i += 2)
+                    {
+                        int ea = s.EdgeIndices[i];
+                        if (ea >= 0 && ea < s.IslandIds.Length && s.HiddenIslands.Contains(s.IslandIds[ea])) continue;
+                        filtEdges.Add(ea);
+                        filtEdges.Add(s.EdgeIndices[i + 1]);
+                    }
+                    visibleEdges = filtEdges.ToArray();
+                }
+            }
+
+            if (visibleIndices != null && visibleIndices.Length > 0) arrays[(int)Mesh.ArrayType.Index] = visibleIndices;
             arrays[(int)Mesh.ArrayType.Bones] = s.SkinBones;
             arrays[(int)Mesh.ArrayType.Weights] = s.Weights;
 
@@ -320,14 +426,20 @@ namespace DeadlockPlayground.Importer
             }
 
             arrMesh.ClearSurfaces();
-            arrMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-            Material surfaceMat = heatmapActive ? heatmapMat : (clayWireSolidMat ?? s.OriginalMaterial);
-            arrMesh.SurfaceSetMaterial(0, surfaceMat);
-            if (heatmapActive) s.MeshInstance.SetSurfaceOverrideMaterial(0, null);
+            if (visibleIndices == null || visibleIndices.Length > 0)
+            {
+                arrMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                Material surfaceMat = heatmapActive ? heatmapMat : (clayWireSolidMat ?? s.OriginalMaterial);
+                arrMesh.SurfaceSetMaterial(0, surfaceMat);
+                if (heatmapActive) s.MeshInstance.SetSurfaceOverrideMaterial(0, null);
+            }
 
             if (s.WireframeOverlay != null && GodotObject.IsInstanceValid(s.WireframeOverlay) && s.WireframeOverlay.Mesh is ArrayMesh wireMesh)
             {
-                RebuildWireframeLinesSurface(wireMesh, s.RestVerts, s.RestNorms, s.EdgeIndices, s.SkinBones, s.Weights, 4, s.WireframeOverlay.MaterialOverride);
+                if (visibleEdges != null && visibleEdges.Length >= 2)
+                    RebuildWireframeLinesSurface(wireMesh, s.RestVerts, s.RestNorms, visibleEdges, s.SkinBones, s.Weights, 4, s.WireframeOverlay.MaterialOverride);
+                else
+                    wireMesh.ClearSurfaces();
             }
         }
 
@@ -345,19 +457,25 @@ namespace DeadlockPlayground.Importer
             int fallbackBindIdx,
             bool mirrorLR,
             int mirrorBindIdx,
-            int mirrorFallbackBindIdx)
+            int mirrorFallbackBindIdx,
+            BrushOptions options = default)
         {
+            // Never paint onto a locked bone!
+            if (options.LockedBindIndices != null && options.LockedBindIndices.Contains(targetBindIdx))
+                return false;
+
             // When subtracting with Mirror L/R ON near the centerline (e.g. a cape), exclude the mirror bone
             // from receiving redistributed weight so the mirrored pass doesn't bounce weight right back.
             int excludeForPrimary = (mode == BrushMode.Subtract && mirrorLR && mirrorBindIdx >= 0 && mirrorBindIdx != targetBindIdx)
                 ? mirrorBindIdx
                 : -1;
-            bool anyChanged = ApplyHalfBrush(surfaces, hitPointWorld, mode, radius, strength, targetBindIdx, fallbackBindIdx, excludeForPrimary);
-            if (mirrorLR && mirrorBindIdx >= 0 && mirrorBindIdx != targetBindIdx)
+            bool anyChanged = ApplyHalfBrush(surfaces, hitPointWorld, mode, radius, strength, targetBindIdx, fallbackBindIdx, excludeForPrimary, options, isMirrorPass: false);
+            if (mirrorLR && mirrorBindIdx >= 0 && mirrorBindIdx != targetBindIdx &&
+                (options.LockedBindIndices == null || !options.LockedBindIndices.Contains(mirrorBindIdx)))
             {
                 Vector3 mirroredPt = new Vector3(-hitPointWorld.X, hitPointWorld.Y, hitPointWorld.Z);
                 int excludeForMirror = (mode == BrushMode.Subtract) ? targetBindIdx : -1;
-                if (ApplyHalfBrush(surfaces, mirroredPt, mode, radius, strength, mirrorBindIdx, mirrorFallbackBindIdx >= 0 ? mirrorFallbackBindIdx : fallbackBindIdx, excludeForMirror))
+                if (ApplyHalfBrush(surfaces, mirroredPt, mode, radius, strength, mirrorBindIdx, mirrorFallbackBindIdx >= 0 ? mirrorFallbackBindIdx : fallbackBindIdx, excludeForMirror, options, isMirrorPass: true))
                     anyChanged = true;
             }
             return anyChanged;
@@ -371,15 +489,38 @@ namespace DeadlockPlayground.Importer
             float strength,
             int targetBindIdx,
             int fallbackBindIdx,
-            int excludeReceiverBindIdx = -1)
+            int excludeReceiverBindIdx = -1,
+            BrushOptions options = default,
+            bool isMirrorPass = false)
         {
             if (targetBindIdx < 0 || radius <= 0.001f || strength <= 0.0001f) return false;
             float rSq = radius * radius;
             bool any = false;
+            bool enforceFrontFacing = options.FrontFacingOnly && !options.PaintThrough && options.CameraRayDir.LengthSquared() > 1e-6f;
+            Vector3 viewToCam = enforceFrontFacing ? (-options.CameraRayDir.Normalized()) : Vector3.Zero;
+            if (isMirrorPass && enforceFrontFacing) viewToCam = new Vector3(-viewToCam.X, viewToCam.Y, viewToCam.Z);
+
+            // Optional Geodesic / Same-Island candidate set (prevents brush from jumping air gaps onto adjacent strands!)
+            HashSet<int> geodesicAllowed = null;
+            int requiredIslandId = -1;
+            SurfaceState restrictedSurface = null;
+            if (options.SameIslandOnly && !isMirrorPass && options.HitSurface != null && options.HitVertex >= 0 &&
+                options.HitVertex < options.HitSurface.PosedVerts.Length)
+            {
+                restrictedSurface = options.HitSurface;
+                requiredIslandId = (restrictedSurface.IslandIds != null && options.HitVertex < restrictedSurface.IslandIds.Length)
+                    ? restrictedSurface.IslandIds[options.HitVertex]
+                    : -1;
+                geodesicAllowed = CollectGeodesicVertices(restrictedSurface, options.HitVertex, radius * 1.45f);
+            }
 
             foreach (var s in surfaces)
             {
+                if (s.MeshInstance == null || !GodotObject.IsInstanceValid(s.MeshInstance) || !s.MeshInstance.Visible) continue;
+                if (restrictedSurface != null && !ReferenceEquals(s, restrictedSurface)) continue;
+
                 int vc = s.PosedVerts.Length;
+                bool hasHidden = s.HiddenIslands != null && s.HiddenIslands.Count > 0 && s.IslandIds != null;
                 // Collect primary representative vertex per weld cluster inside brush radius.
                 var visitedCluster = new bool[vc];
                 float[] smoothSnapshots = mode == BrushMode.Smooth ? (float[])s.Weights.Clone() : null;
@@ -388,8 +529,16 @@ namespace DeadlockPlayground.Importer
                 for (int v = 0; v < vc; v++)
                 {
                     if (visitedCluster[v]) continue;
+                    if (hasHidden && s.HiddenIslands.Contains(s.IslandIds[v])) continue;
+                    if (requiredIslandId >= 0 && s.IslandIds != null && s.IslandIds[v] != requiredIslandId) continue;
+                    if (geodesicAllowed != null && !geodesicAllowed.Contains(v)) continue;
+
                     float dSq = (s.PosedVerts[v] - center).LengthSquared();
                     if (dSq > rSq) continue;
+
+                    if (enforceFrontFacing && s.PosedNorms != null && v < s.PosedNorms.Length &&
+                        s.PosedNorms[v].Dot(viewToCam) < 0.04f)
+                        continue;
 
                     float dist = MathF.Sqrt(dSq);
                     float normT = 1f - dist / radius;
@@ -406,21 +555,54 @@ namespace DeadlockPlayground.Importer
 
                     if (mode == BrushMode.Smooth)
                     {
+                        // Preserve locked bones verbatim during smooth pass
+                        var lockedCur = new Dictionary<int, float>(4);
+                        float lockedSum = 0f;
                         for (int k = 0; k < 4; k++)
-                            if (smoothBoneSnapshots[baseOff + k] >= 0 && smoothSnapshots[baseOff + k] > 0.0001f)
-                                dict[smoothBoneSnapshots[baseOff + k]] = dict.GetValueOrDefault(smoothBoneSnapshots[baseOff + k], 0f) + smoothSnapshots[baseOff + k] * (1f - alpha);
+                        {
+                            int bi = smoothBoneSnapshots[baseOff + k];
+                            float w = smoothSnapshots[baseOff + k];
+                            if (bi >= 0 && w > 0.0001f)
+                            {
+                                if (options.LockedBindIndices != null && options.LockedBindIndices.Contains(bi))
+                                {
+                                    lockedCur[bi] = lockedCur.GetValueOrDefault(bi, 0f) + w;
+                                    lockedSum += w;
+                                }
+                                else
+                                {
+                                    dict[bi] = dict.GetValueOrDefault(bi, 0f) + w * (1f - alpha);
+                                }
+                            }
+                        }
 
                         var nbrs = s.Neighbors[v];
-                        if (nbrs.Length > 0)
+                        if (nbrs.Length > 0 && lockedSum < 0.999f)
                         {
                             float wShare = alpha / nbrs.Length;
                             foreach (int nb in nbrs)
                             {
                                 int nOff = nb * 4;
                                 for (int k = 0; k < 4; k++)
-                                    if (smoothBoneSnapshots[nOff + k] >= 0 && smoothSnapshots[nOff + k] > 0.0001f)
-                                        dict[smoothBoneSnapshots[nOff + k]] = dict.GetValueOrDefault(smoothBoneSnapshots[nOff + k], 0f) + smoothSnapshots[nOff + k] * wShare;
+                                {
+                                    int bi = smoothBoneSnapshots[nOff + k];
+                                    float w = smoothSnapshots[nOff + k];
+                                    if (bi >= 0 && w > 0.0001f && (options.LockedBindIndices == null || !options.LockedBindIndices.Contains(bi)))
+                                        dict[bi] = dict.GetValueOrDefault(bi, 0f) + w * wShare;
+                                }
                             }
+                        }
+
+                        if (lockedSum > 0.0001f)
+                        {
+                            float unlockedSum = dict.Values.Sum();
+                            float budget = MathF.Max(0f, 1f - lockedSum);
+                            if (unlockedSum > 1e-5f)
+                            {
+                                float scale = budget / unlockedSum;
+                                foreach (int k in dict.Keys.ToList()) dict[k] *= scale;
+                            }
+                            foreach (var kv in lockedCur) dict[kv.Key] = kv.Value;
                         }
                     }
                     else
@@ -429,24 +611,31 @@ namespace DeadlockPlayground.Importer
                             if (s.SkinBones[baseOff + k] >= 0 && s.Weights[baseOff + k] > 0.0001f)
                                 dict[s.SkinBones[baseOff + k]] = dict.GetValueOrDefault(s.SkinBones[baseOff + k], 0f) + s.Weights[baseOff + k];
 
+                        float lockedSum = 0f;
+                        if (options.LockedBindIndices != null && options.LockedBindIndices.Count > 0)
+                        {
+                            foreach (var kv in dict)
+                                if (kv.Key != targetBindIdx && options.LockedBindIndices.Contains(kv.Key))
+                                    lockedSum += kv.Value;
+                        }
+                        float maxAllowedTarget = MathF.Max(0f, 1f - lockedSum);
                         float cur = dict.GetValueOrDefault(targetBindIdx, 0f);
                         if (mode == BrushMode.SetOne)
                         {
-                            float next = Mathf.Lerp(cur, 1f, falloff > 0.35f ? 1f : alpha);
-                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx);
+                            float next = Mathf.Clamp(Mathf.Lerp(cur, maxAllowedTarget, falloff > 0.35f ? 1f : alpha), 0f, maxAllowedTarget);
+                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, excludeReceiverBindIdx, capAmplification: false, lockedBones: options.LockedBindIndices);
                         }
                         else if (mode == BrushMode.Add)
                         {
-                            float next = Mathf.Clamp(cur + (1f - cur) * alpha, 0f, 1f);
-                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx);
+                            float next = Mathf.Clamp(cur + (maxAllowedTarget - cur) * alpha, 0f, maxAllowedTarget);
+                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, excludeReceiverBindIdx, capAmplification: false, lockedBones: options.LockedBindIndices);
                         }
                         else if (mode == BrushMode.Subtract)
                         {
                             float remove = cur * alpha;
                             float next = cur - remove;
-                            // Snap tiny residual weights cleanly to 0 so erased bones don't leave ghost weights
                             if (next < 0.015f) next = 0f;
-                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, excludeReceiverBindIdx, capAmplification: true);
+                            ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, excludeReceiverBindIdx, capAmplification: true, lockedBones: options.LockedBindIndices);
                         }
                     }
 
@@ -475,31 +664,216 @@ namespace DeadlockPlayground.Importer
             return any;
         }
 
-        private static void ScaleOthers(Dictionary<int, float> dict, int targetBone, float newTargetW, int fallbackBone, int excludeReceiverBone = -1, bool capAmplification = false)
+        private static HashSet<int> CollectGeodesicVertices(SurfaceState s, int seedVertex, float maxGeoDist)
         {
-            float lockedExcludedW = (excludeReceiverBone >= 0 && excludeReceiverBone != targetBone && dict.TryGetValue(excludeReceiverBone, out float ew))
-                ? ew
-                : 0f;
+            var result = new HashSet<int>();
+            if (s == null || seedVertex < 0 || seedVertex >= s.PosedVerts.Length) return result;
 
+            var dists = new Dictionary<int, float>(64) { [seedVertex] = 0f };
+            var pq = new PriorityQueue<int, float>();
+            pq.Enqueue(seedVertex, 0f);
+            while (pq.Count > 0)
+            {
+                int u = pq.Dequeue();
+                float du = dists[u];
+                if (du > maxGeoDist) continue;
+                if (!result.Add(u)) continue;
+                Vector3 pu = s.PosedVerts[u];
+                foreach (int nb in s.Neighbors[u])
+                {
+                    float nd = du + pu.DistanceTo(s.PosedVerts[nb]);
+                    if (nd <= maxGeoDist && (!dists.TryGetValue(nb, out float prev) || nd < prev))
+                    {
+                        dists[nb] = nd;
+                        pq.Enqueue(nb, nd);
+                    }
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Assigns/blends weights across an entire connected mesh island in one click (respecting locked bones).
+        /// </summary>
+        public static bool FloodFillIsland(
+            SurfaceState s,
+            int islandId,
+            BrushMode mode,
+            float strength,
+            int targetBindIdx,
+            int fallbackBindIdx,
+            HashSet<int> lockedBones = null)
+        {
+            if (s == null || islandId < 0 || s.IslandIds == null || targetBindIdx < 0) return false;
+            if (lockedBones != null && lockedBones.Contains(targetBindIdx)) return false;
+
+            int vc = s.RestVerts.Length;
+            var visited = new bool[vc];
+            bool changed = false;
+            var dict = new Dictionary<int, float>(8);
+
+            for (int v = 0; v < vc; v++)
+            {
+                if (visited[v] || s.IslandIds[v] != islandId) continue;
+                var cluster = s.WeldClusters[v];
+                foreach (int c in cluster) visited[c] = true;
+
+                dict.Clear();
+                int baseOff = v * 4;
+                for (int k = 0; k < 4; k++)
+                    if (s.SkinBones[baseOff + k] >= 0 && s.Weights[baseOff + k] > 0.0001f)
+                        dict[s.SkinBones[baseOff + k]] = dict.GetValueOrDefault(s.SkinBones[baseOff + k], 0f) + s.Weights[baseOff + k];
+
+                float lockedSum = 0f;
+                if (lockedBones != null)
+                    foreach (var kv in dict)
+                        if (kv.Key != targetBindIdx && lockedBones.Contains(kv.Key)) lockedSum += kv.Value;
+
+                float maxAllowed = MathF.Max(0f, 1f - lockedSum);
+                float cur = dict.GetValueOrDefault(targetBindIdx, 0f);
+                float next = mode switch
+                {
+                    BrushMode.Subtract => MathF.Max(0f, cur - strength),
+                    BrushMode.SetOne => maxAllowed,
+                    _ => Mathf.Clamp(cur + (maxAllowed - cur) * strength, 0f, maxAllowed)
+                };
+                if (next < 0.01f) next = 0f;
+
+                ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, -1, mode == BrushMode.Subtract, lockedBones);
+                var top = dict.Where(kv => kv.Value > 0.0001f).OrderByDescending(kv => kv.Value).Take(4).ToList();
+                float sum = top.Sum(kv => kv.Value);
+                int[] outB = new int[4];
+                float[] outW = new float[4];
+                if (sum <= 1e-6f) { outB[0] = fallbackBindIdx >= 0 ? fallbackBindIdx : 0; outW[0] = 1f; }
+                else { for (int k = 0; k < top.Count; k++) { outB[k] = top[k].Key; outW[k] = top[k].Value / sum; } }
+
+                foreach (int c in cluster)
+                {
+                    int cOff = c * 4;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (s.SkinBones[cOff + k] != outB[k] || MathF.Abs(s.Weights[cOff + k] - outW[k]) > 1e-5f) changed = true;
+                        s.SkinBones[cOff + k] = outB[k];
+                        s.Weights[cOff + k] = outW[k];
+                    }
+                }
+            }
+            return changed;
+        }
+
+        /// <summary>
+        /// Applies a smooth Blender-style linear/cubic weight gradient from <paramref name="startWorld"/> (0.0)
+        /// to <paramref name="endWorld"/> (1.0) across the target island (or all visible surfaces when <paramref name="onlySurf"/> is null).
+        /// </summary>
+        public static bool ApplyGradientFill(
+            List<SurfaceState> surfaces,
+            SurfaceState onlySurf,
+            int onlyIslandId,
+            Vector3 startWorld,
+            Vector3 endWorld,
+            float strength,
+            int targetBindIdx,
+            int fallbackBindIdx,
+            HashSet<int> lockedBones = null)
+        {
+            if (surfaces == null || targetBindIdx < 0) return false;
+            if (lockedBones != null && lockedBones.Contains(targetBindIdx)) return false;
+
+            Vector3 axis = endWorld - startWorld;
+            float lenSq = axis.LengthSquared();
+            if (lenSq < 1e-6f) return false;
+
+            bool changed = false;
+            var dict = new Dictionary<int, float>(8);
+            foreach (var s in surfaces)
+            {
+                if (s?.MeshInstance == null || !GodotObject.IsInstanceValid(s.MeshInstance) || !s.MeshInstance.Visible) continue;
+                if (onlySurf != null && !ReferenceEquals(s, onlySurf)) continue;
+
+                int vc = s.PosedVerts.Length;
+                bool hasHidden = s.HiddenIslands != null && s.HiddenIslands.Count > 0 && s.IslandIds != null;
+                var visited = new bool[vc];
+                for (int v = 0; v < vc; v++)
+                {
+                    if (visited[v]) continue;
+                    if (hasHidden && s.HiddenIslands.Contains(s.IslandIds[v])) continue;
+                    if (onlyIslandId >= 0 && s.IslandIds != null && s.IslandIds[v] != onlyIslandId) continue;
+
+                    var cluster = s.WeldClusters[v];
+                    foreach (int c in cluster) visited[c] = true;
+
+                    float t = Mathf.Clamp((s.PosedVerts[v] - startWorld).Dot(axis) / lenSq, 0f, 1f);
+                    float smoothT = t * t * (3f - 2f * t);
+
+                    dict.Clear();
+                    int baseOff = v * 4;
+                    for (int k = 0; k < 4; k++)
+                        if (s.SkinBones[baseOff + k] >= 0 && s.Weights[baseOff + k] > 0.0001f)
+                            dict[s.SkinBones[baseOff + k]] = dict.GetValueOrDefault(s.SkinBones[baseOff + k], 0f) + s.Weights[baseOff + k];
+
+                    float lockedSum = 0f;
+                    if (lockedBones != null)
+                        foreach (var kv in dict)
+                            if (kv.Key != targetBindIdx && lockedBones.Contains(kv.Key)) lockedSum += kv.Value;
+
+                    float maxAllowed = MathF.Max(0f, 1f - lockedSum);
+                    float cur = dict.GetValueOrDefault(targetBindIdx, 0f);
+                    float next = Mathf.Lerp(cur, smoothT * maxAllowed, Mathf.Clamp(strength, 0.05f, 1f));
+                    if (next < 0.005f) next = 0f;
+
+                    ScaleOthers(dict, targetBindIdx, next, fallbackBindIdx, -1, false, lockedBones);
+                    var top = dict.Where(kv => kv.Value > 0.0001f).OrderByDescending(kv => kv.Value).Take(4).ToList();
+                    float sum = top.Sum(kv => kv.Value);
+                    int[] outB = new int[4];
+                    float[] outW = new float[4];
+                    if (sum <= 1e-6f) { outB[0] = fallbackBindIdx >= 0 ? fallbackBindIdx : 0; outW[0] = 1f; }
+                    else { for (int k = 0; k < top.Count; k++) { outB[k] = top[k].Key; outW[k] = top[k].Value / sum; } }
+
+                    foreach (int c in cluster)
+                    {
+                        int cOff = c * 4;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            if (s.SkinBones[cOff + k] != outB[k] || MathF.Abs(s.Weights[cOff + k] - outW[k]) > 1e-5f) changed = true;
+                            s.SkinBones[cOff + k] = outB[k];
+                            s.Weights[cOff + k] = outW[k];
+                        }
+                    }
+                }
+            }
+            return changed;
+        }
+
+        private static void ScaleOthers(Dictionary<int, float> dict, int targetBone, float newTargetW, int fallbackBone, int excludeReceiverBone = -1, bool capAmplification = false, HashSet<int> lockedBones = null)
+        {
+            bool IsFixed(int b) =>
+                b == targetBone ||
+                b == excludeReceiverBone ||
+                (lockedBones != null && lockedBones.Contains(b));
+
+            float lockedExcludedW = 0f;
             float othersSum = 0f;
             foreach (var kv in dict)
-                if (kv.Key != targetBone && kv.Key != excludeReceiverBone) othersSum += kv.Value;
+            {
+                if (kv.Key == targetBone) continue;
+                if (IsFixed(kv.Key)) lockedExcludedW += kv.Value;
+                else othersSum += kv.Value;
+            }
 
-            float desiredOthers = MathF.Max(0f, 1f - newTargetW - lockedExcludedW);
-            var keys = dict.Keys.Where(k => k != targetBone && k != excludeReceiverBone).ToList();
+            float clampedTarget = Mathf.Clamp(newTargetW, 0f, MathF.Max(0f, 1f - lockedExcludedW));
+            float desiredOthers = MathF.Max(0f, 1f - clampedTarget - lockedExcludedW);
+            var keys = dict.Keys.Where(k => !IsFixed(k)).ToList();
             if (othersSum > 1e-5f)
             {
                 float ratio = desiredOthers / othersSum;
                 if (capAmplification && ratio > 1.75f)
                 {
-                    // Prevent tiny residual weights on previously erased sibling bones from exploding back to 1.0!
-                    // Scale existing significant bones modestly and route the remaining freed weight to the parent/fallback bone.
                     float cappedRatio = 1.75f;
                     foreach (int k in keys) dict[k] *= cappedRatio;
                     float leftover = MathF.Max(0f, desiredOthers - othersSum * cappedRatio);
                     if (leftover > 1e-5f)
                     {
-                        int receiver = (fallbackBone >= 0 && fallbackBone != targetBone && fallbackBone != excludeReceiverBone) ? fallbackBone : 0;
+                        int receiver = (fallbackBone >= 0 && !IsFixed(fallbackBone)) ? fallbackBone : (keys.Count > 0 ? keys[0] : 0);
                         dict[receiver] = dict.GetValueOrDefault(receiver, 0f) + leftover;
                     }
                 }
@@ -510,11 +884,11 @@ namespace DeadlockPlayground.Importer
             }
             else if (desiredOthers > 1e-5f)
             {
-                int receiver = (fallbackBone >= 0 && fallbackBone != targetBone && fallbackBone != excludeReceiverBone) ? fallbackBone : 0;
+                int receiver = (fallbackBone >= 0 && !IsFixed(fallbackBone)) ? fallbackBone : 0;
                 dict[receiver] = dict.GetValueOrDefault(receiver, 0f) + desiredOthers;
             }
 
-            if (newTargetW > 0.0001f) dict[targetBone] = newTargetW;
+            if (clampedTarget > 0.0001f) dict[targetBone] = clampedTarget;
             else dict.Remove(targetBone);
         }
 
@@ -637,7 +1011,27 @@ namespace DeadlockPlayground.Importer
             string mirName = includeMirror ? MirrorBoneName(targetBoneName) : null;
             int mirBi = mirName != null ? ResolveBindIdx(heroSkin, heroSkeleton, mirName) : -1;
 
-            int fallbackBi = ResolveBindIdx(heroSkin, heroSkeleton, "pelvis");
+            // Prefer the target bone's own skeleton parent (e.g. 'head' for 'hair_back_0') as fallback instead of 'pelvis'!
+            int fallbackBi = -1;
+            int tgtSkelIdx = heroSkeleton.FindBone(targetBoneName);
+            if (tgtSkelIdx >= 0)
+            {
+                int parentSkelIdx = heroSkeleton.GetBoneParent(tgtSkelIdx);
+                // Walk up through any sibling synthetic bones to find the core hero anchor (e.g. head)
+                int origCount = heroSkeleton.HasMeta("OriginalHeroBoneCount")
+                    ? heroSkeleton.GetMeta("OriginalHeroBoneCount").AsInt32()
+                    : heroSkeleton.GetBoneCount();
+                int guard = 0;
+                while (parentSkelIdx >= origCount && guard++ < 32)
+                {
+                    int p = heroSkeleton.GetBoneParent(parentSkelIdx);
+                    if (p < 0) break;
+                    parentSkelIdx = p;
+                }
+                if (parentSkelIdx >= 0 && parentSkelIdx < heroSkeleton.GetBoneCount())
+                    fallbackBi = ResolveBindIdx(heroSkin, heroSkeleton, heroSkeleton.GetBoneName(parentSkelIdx));
+            }
+            if (fallbackBi < 0) fallbackBi = ResolveBindIdx(heroSkin, heroSkeleton, "pelvis");
             if (fallbackBi < 0) fallbackBi = 0;
 
             bool changedAny = false;

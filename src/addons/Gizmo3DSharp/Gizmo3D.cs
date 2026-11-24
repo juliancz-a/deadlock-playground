@@ -437,9 +437,13 @@ public partial class Gizmo3D : Node3D
                     Vector2 point1_2d = PointToScreen(point1_3d);
                     Vector2 point2_2d = PointToScreen(point2_3d);
 
-                    Vector2[] trianglePoints = [center_2d, point1_2d, point2_2d];
-                    Color[] triangleColors = [fillColor, fillColor, fillColor];
-                    CanvasItemAddPolygon(ci, trianglePoints, triangleColors);
+                    float area2 = Mathf.Abs((point1_2d - center_2d).Cross(point2_2d - center_2d));
+                    if (area2 > 0.5f && float.IsFinite(area2))
+                    {
+                        Vector2[] trianglePoints = [center_2d, point1_2d, point2_2d];
+                        Color[] triangleColors = [fillColor, fillColor, fillColor];
+                        CanvasItemAddPolygon(ci, trianglePoints, triangleColors);
+                    }
                 }
 
                 Color edgeColor = Color.FromHsv(handleColor.H, 0.8f, 1.0f, 0.7f);
@@ -584,6 +588,9 @@ public partial class Gizmo3D : Node3D
     /// <param name="target">The node to add.</param>
     public void Select(Node3D target)
     {
+        if (target == null) return;
+        // Prevent leaking RenderingServer selection-box RIDs when re-selecting an already-selected target!
+        if (Selections.ContainsKey(target)) return;
         Selections[target] = GetEditorData();
         EmitSignal(SignalName.SelectionChanged, target, true);
     }
