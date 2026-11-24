@@ -439,7 +439,9 @@ namespace DeadlockPlayground.Animation
                         JiggleDampRatio = prevP.JiggleDampRatio,
                         AngleLimitRad = def.Simulation == SimulationKind.Jiggle
                             ? Mathf.DegToRad(Mathf.Clamp(prevP.JiggleAngleLimitDeg, 6f, 85f))
-                            : Mathf.DegToRad(140f),
+                            : (def.IsSynthetic
+                                ? Mathf.DegToRad(Mathf.Clamp(def.AngleLimitDeg > 1f ? def.AngleLimitDeg : 45f, 12f, 65f) * (i == 0 ? 0.72f : 1.0f))
+                                : Mathf.DegToRad(115f)),
                         EnableRibbonExtrude = def.EnableRibbonExtrude,
                         ClothHingeLimitRad = Mathf.DegToRad(Mathf.Clamp(def.AngleLimitDeg > 1f ? def.AngleLimitDeg : 35f, 5f, 140f)),
                         ExtrudeForwardAxis = def.ExtrudeForwardAxis,
@@ -550,7 +552,9 @@ namespace DeadlockPlayground.Animation
                     st.ExtrudeTwistDeg = match.ExtrudeTwistDeg;
                     st.AngleLimitRad = match.Simulation == SimulationKind.Jiggle
                         ? Mathf.DegToRad(Mathf.Clamp(prevP.JiggleAngleLimitDeg, 6f, 85f))
-                        : Mathf.DegToRad(140f);
+                        : (match.IsSynthetic
+                            ? Mathf.DegToRad(Mathf.Clamp(match.AngleLimitDeg > 1f ? match.AngleLimitDeg : 45f, 12f, 65f) * (i == 0 ? 0.72f : 1.0f))
+                            : Mathf.DegToRad(115f));
                 }
             }
 
@@ -1412,6 +1416,7 @@ namespace DeadlockPlayground.Animation
             foreach (var chain in _chains)
             {
                 bool isJiggle = chain.Simulation == SimulationKind.Jiggle;
+                bool enforceConeLimit = isJiggle || (chain.Definition?.IsSynthetic == true);
                 bool isClothHinge = chain.Simulation == SimulationKind.Cloth && (chain.Definition?.EnableRibbonExtrude == true);
                 for (int i = 0; i < chain.Bones.Count; i++)
                 {
@@ -1449,7 +1454,7 @@ namespace DeadlockPlayground.Animation
                         ? st.TipWorldPos
                         : st.RenderPrevTipWorldPos.Lerp(st.TipWorldPos, renderAlpha);
 
-                    Quaternion finalRot = ApplyBonePoseFromTip(skelGlobal, parentGlobalPose, curHeadWorld, curRestTipWorld, interpTipWorld, st, isJiggle, isClothHinge);
+                    Quaternion finalRot = ApplyBonePoseFromTip(skelGlobal, parentGlobalPose, curHeadWorld, curRestTipWorld, interpTipWorld, st, enforceConeLimit, isClothHinge);
                     Transform3D localCommitted = new Transform3D(new Basis(finalRot).Scaled(st.RestScale), st.RestLocal.Origin);
                     st.CommittedGlobalPose = parentGlobalPose * localCommitted;
                 }
@@ -1528,7 +1533,7 @@ namespace DeadlockPlayground.Animation
 
                 float localDot = Mathf.Clamp(restDirLocal.Dot(curDirLocal), -1f, 1f);
                 float angle = MathF.Acos(localDot);
-                float maxAllowedRad = enforceTightAngleLimit ? st.AngleLimitRad : Mathf.DegToRad(140f);
+                float maxAllowedRad = enforceTightAngleLimit ? st.AngleLimitRad : Mathf.Min(st.AngleLimitRad, Mathf.DegToRad(115f));
                 float clampedAngle = MathF.Min(angle, maxAllowedRad);
 
                 Quaternion swingLocal = Quaternion.Identity;

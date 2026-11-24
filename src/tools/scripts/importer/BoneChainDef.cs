@@ -169,8 +169,12 @@ namespace DeadlockPlayground.Importer
         public Godot.Vector3 SyntheticOriginHeroSpace { get; set; } = Godot.Vector3.Zero;
         public Godot.Vector3 SyntheticDirectionHeroSpace { get; set; } = new Godot.Vector3(0, -1, 0);
         public float SyntheticLengthMeters { get; set; } = 0.45f;
-        public float SyntheticInfluenceRadius { get; set; } = 0.22f;
+        public float SyntheticInfluenceRadius { get; set; } = 0.14f;
         public int SyntheticSegmentCount { get; set; } = 4;
+        /// <summary>When true and TargetMeshName is empty, prevents synthetic cloth chains from stealing weights from unrelated core limbs/face.</summary>
+        public bool SyntheticProtectCoreLimbs { get; set; } = true;
+        /// <summary>Optional user-sculpted Hero-space joint positions (overrides straight-line origin+direction when Count >= 2).</summary>
+        public List<Godot.Vector3> SyntheticJointPositionsHeroSpace { get; set; } = new();
 
         /// <summary>Resolved hero skeleton bone names after appending (parents always before children).</summary>
         public List<string> AppendedHeroBoneNames { get; set; } = new();
@@ -216,6 +220,8 @@ namespace DeadlockPlayground.Importer
                 SyntheticLengthMeters = SyntheticLengthMeters,
                 SyntheticInfluenceRadius = SyntheticInfluenceRadius,
                 SyntheticSegmentCount = SyntheticSegmentCount,
+                SyntheticProtectCoreLimbs = SyntheticProtectCoreLimbs,
+                SyntheticJointPositionsHeroSpace = SyntheticJointPositionsHeroSpace != null ? new List<Godot.Vector3>(SyntheticJointPositionsHeroSpace) : new(),
                 AppendedHeroBoneNames = new List<string>(AppendedHeroBoneNames),
                 JointOverrides = JointOverrides != null ? JointOverrides.ConvertAll(j => j.Clone()) : new List<BoneJointOverride>()
             };

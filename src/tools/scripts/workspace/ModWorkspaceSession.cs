@@ -469,6 +469,10 @@ namespace DeadlockPlayground.Workspace
                         SyntheticLength = c.SyntheticLengthMeters,
                         SyntheticRadius = c.SyntheticInfluenceRadius,
                         SyntheticSegments = c.SyntheticSegmentCount,
+                        SyntheticProtectCoreLimbs = c.SyntheticProtectCoreLimbs,
+                        SyntheticJointPositions = c.SyntheticJointPositionsHeroSpace != null && c.SyntheticJointPositionsHeroSpace.Count > 0
+                            ? c.SyntheticJointPositionsHeroSpace.Select(v => new[] { v.X, v.Y, v.Z }).ToList()
+                            : null,
                         JointOverrides = (c.JointOverrides != null && c.JointOverrides.Count > 0)
                             ? c.JointOverrides.FindAll(j => j != null && j.HasAnyOverride).ConvertAll(j => new WorkspaceBoneJointOverrideEntry
                             {
@@ -873,8 +877,12 @@ namespace DeadlockPlayground.Workspace
                             ? new Vector3(ce.SyntheticDirection[0], ce.SyntheticDirection[1], ce.SyntheticDirection[2])
                             : new Vector3(0, -1, 0),
                         SyntheticLengthMeters = ce.SyntheticLength > 0.01f ? ce.SyntheticLength : 0.45f,
-                        SyntheticInfluenceRadius = ce.SyntheticRadius > 0.01f ? ce.SyntheticRadius : 0.22f,
+                        SyntheticInfluenceRadius = ce.SyntheticRadius > 0.01f ? ce.SyntheticRadius : 0.14f,
                         SyntheticSegmentCount = ce.SyntheticSegments > 0 ? ce.SyntheticSegments : 4,
+                        SyntheticProtectCoreLimbs = ce.SyntheticProtectCoreLimbs,
+                        SyntheticJointPositionsHeroSpace = ce.SyntheticJointPositions != null
+                            ? ce.SyntheticJointPositions.Where(a => a != null && a.Length == 3).Select(a => new Vector3(a[0], a[1], a[2])).ToList()
+                            : new List<Vector3>(),
                         JointOverrides = (ce.JointOverrides != null && ce.JointOverrides.Count > 0)
                             ? ce.JointOverrides.FindAll(j => j != null).ConvertAll(j => new DeadlockPlayground.Importer.BoneJointOverride
                             {
@@ -966,8 +974,10 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("synthetic_origin")] public float[] SyntheticOrigin { get; set; }
         [JsonPropertyName("synthetic_direction")] public float[] SyntheticDirection { get; set; }
         [JsonPropertyName("synthetic_length")] public float SyntheticLength { get; set; } = 0.45f;
-        [JsonPropertyName("synthetic_radius")] public float SyntheticRadius { get; set; } = 0.22f;
+        [JsonPropertyName("synthetic_radius")] public float SyntheticRadius { get; set; } = 0.14f;
         [JsonPropertyName("synthetic_segments")] public int SyntheticSegments { get; set; } = 4;
+        [JsonPropertyName("synthetic_protect_core_limbs")] public bool SyntheticProtectCoreLimbs { get; set; } = true;
+        [JsonPropertyName("synthetic_joint_positions")] public List<float[]> SyntheticJointPositions { get; set; }
         [JsonPropertyName("joint_overrides")] public List<WorkspaceBoneJointOverrideEntry> JointOverrides { get; set; }
     }
 
@@ -2481,6 +2491,121 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
             OnAssetDiscarded?.Invoke(heroId, vpkPath);
         }
 
+        /// <summary>
+        /// Copies a custom 3D model file into <paramref name="destDir"/>. For multi-file <c>.gltf</c> scenes,
+        /// also copies all external <c>buffers[*].uri</c> (e.g. <c>scene.bin</c>) and <c>images[*].uri</c>
+        /// (e.g. <c>textures/*.png</c>) preserving relative paths so packaged <c>.dpp</c> projects are 100% self-contained.
+        /// </summary>
+        private static void StageModelFileWithDependencies(string sourceModelFilePath, string destDir, string stagedFileName)
+        {
+            Directory.CreateDirectory(destDir);
+            string destDiskPath = Path.Combine(destDir, stagedFileName);
+
+            if (!string.Equals(Path.GetFullPath(sourceModelFilePath), Path.GetFullPath(destDiskPath), StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
+            }
+
+            if (!sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            string srcDir = Path.GetDirectoryName(sourceModelFilePath);
+            if (string.IsNullOrEmpty(srcDir) || !Directory.Exists(srcDir))
+                return;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(sourceModelFilePath));
+                var root = doc.RootElement;
+
+                void CopyUriArray(string propName)
+                {
+                    if (!root.TryGetProperty(propName, out var arr) || arr.ValueKind != JsonValueKind.Array)
+                        return;
+
+                    foreach (var item in arr.EnumerateArray())
+                    {
+                        if (!item.TryGetProperty("uri", out var uriProp) || uriProp.ValueKind != JsonValueKind.String)
+                            continue;
+                        string rawUri = uriProp.GetString();
+                        if (string.IsNullOrWhiteSpace(rawUri) ||
+                            rawUri.StartsWith("data:", StringComparison.OrdinalIgnoreCase) ||
+                            rawUri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                            rawUri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        string unescaped = Uri.UnescapeDataString(rawUri).Replace('/', Path.DirectorySeparatorChar);
+                        string srcDep = Path.GetFullPath(Path.Combine(srcDir, unescaped));
+                        if (!File.Exists(srcDep)) continue;
+
+                        string safeRel = unescaped.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        if (safeRel.Contains("..")) continue;
+
+                        string destDep = Path.GetFullPath(Path.Combine(destDir, safeRel));
+                        if (string.Equals(srcDep, destDep, StringComparison.OrdinalIgnoreCase)) continue;
+
+                        string destDepParent = Path.GetDirectoryName(destDep);
+                        if (!string.IsNullOrEmpty(destDepParent))
+                            Directory.CreateDirectory(destDepParent);
+                        File.Copy(srcDep, destDep, overwrite: true);
+                    }
+                }
+
+                CopyUriArray("buffers");
+                CopyUriArray("images");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ModWorkspaceSession] Warning copying external .gltf dependencies for '{sourceModelFilePath}': {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Validates that any external <c>buffers[*].uri</c> referenced by a <c>.gltf</c> file exists on disk.
+        /// Returns false with a user-readable message when a legacy <c>.dpp</c> archive is missing <c>scene.bin</c>.
+        /// </summary>
+        public static bool ValidateModelExternalDependencies(string modelDiskPath, out string errorMessage)
+        {
+            errorMessage = null;
+            if (string.IsNullOrEmpty(modelDiskPath) || !File.Exists(modelDiskPath))
+            {
+                errorMessage = "Model file is missing from the project archive.";
+                return false;
+            }
+            if (!modelDiskPath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            try
+            {
+                string dir = Path.GetDirectoryName(modelDiskPath) ?? "";
+                using var doc = JsonDocument.Parse(File.ReadAllText(modelDiskPath));
+                if (doc.RootElement.TryGetProperty("buffers", out var buffers) && buffers.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var buf in buffers.EnumerateArray())
+                    {
+                        if (!buf.TryGetProperty("uri", out var uriProp) || uriProp.ValueKind != JsonValueKind.String)
+                            continue;
+                        string rawUri = uriProp.GetString();
+                        if (string.IsNullOrWhiteSpace(rawUri) || rawUri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        string unescaped = Uri.UnescapeDataString(rawUri).Replace('/', Path.DirectorySeparatorChar);
+                        string depPath = Path.Combine(dir, unescaped);
+                        if (!File.Exists(depPath))
+                        {
+                            errorMessage = $"'{Path.GetFileName(modelDiskPath)}' is missing external buffer '{rawUri}' (saved by an older version before .gltf bundling). Re-import the original .gltf/.glb and re-save the .dpp.";
+                            return false;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Failed to inspect '{Path.GetFileName(modelDiskPath)}': {ex.Message}";
+                return false;
+            }
+            return true;
+        }
+
         public void StageCustomModel(
             string heroId,
             string heroDisplayName,
@@ -2502,13 +2627,15 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 if (cleanLeaf.StartsWith(safeHero + "_", StringComparison.OrdinalIgnoreCase))
                     cleanLeaf = cleanLeaf[(safeHero.Length + 1)..];
                 string stagedFileName = $"{safeHero}_{cleanLeaf}";
-                string destDiskPath = Path.Combine(CustomModelsDir, stagedFileName);
-                string relPath = Path.Combine("custom_models", stagedFileName).Replace('\\', '/');
 
-                if (!string.Equals(Path.GetFullPath(sourceModelFilePath), Path.GetFullPath(destDiskPath), StringComparison.OrdinalIgnoreCase))
-                {
-                    File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
-                }
+                // Multi-file .gltf scenes get a dedicated per-hero subfolder so external scene.bin / textures never collide.
+                bool isMultiFileGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+                string destDir = isMultiFileGltf ? Path.Combine(CustomModelsDir, $"{safeHero}_model") : CustomModelsDir;
+                string relPath = isMultiFileGltf
+                    ? Path.Combine("custom_models", $"{safeHero}_model", stagedFileName).Replace('\\', '/')
+                    : Path.Combine("custom_models", stagedFileName).Replace('\\', '/');
+
+                StageModelFileWithDependencies(sourceModelFilePath, destDir, stagedFileName);
 
                 if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry == null)
                 {
@@ -2559,13 +2686,9 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 string safeHero = heroId.Replace('/', '_').Replace('\\', '_').Trim('_');
                 string origFileName = Path.GetFileName(sourceModelFilePath);
                 string stagedFileName = $"{safeHero}_{origFileName}";
-                string destDiskPath = Path.Combine(accDir, stagedFileName);
                 string relPath = Path.Combine("custom_models", "accessories", slotId, stagedFileName).Replace('\\', '/');
 
-                if (!string.Equals(Path.GetFullPath(sourceModelFilePath), Path.GetFullPath(destDiskPath), StringComparison.OrdinalIgnoreCase))
-                {
-                    File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
-                }
+                StageModelFileWithDependencies(sourceModelFilePath, accDir, stagedFileName);
 
                 if (!Manifest.Heroes.TryGetValue(heroId, out var heroEntry) || heroEntry == null)
                 {

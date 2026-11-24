@@ -344,6 +344,8 @@ namespace DeadlockPlayground.UI
             _optRigFamilyOverride.AddItem("3ds Max Biped", (int)RigFamily.Biped);
             _optRigFamilyOverride.AddItem("Unreal Mannequin", (int)RigFamily.UnrealMannequin);
             _optRigFamilyOverride.AddItem("Unity Humanoid", (int)RigFamily.UnityHumanoid);
+            _optRigFamilyOverride.AddItem("Roblox R15", (int)RigFamily.RobloxR15);
+            _optRigFamilyOverride.AddItem("Roblox R6", (int)RigFamily.RobloxR6);
             _optRigFamilyOverride.AddItem("Generic Humanoid", (int)RigFamily.Generic);
             _optRigFamilyOverride.ItemSelected += (_) =>
             {
@@ -1401,57 +1403,9 @@ namespace DeadlockPlayground.UI
             }
         }
 
-        private void BuildReferenceRigViewportHud(Control viewportPanel)
+        // Shared 3D Viewport Floating HUD Helpers (reused by Auto-Rig Reference Bones & Synthetic Cloth Chains)
+        private PanelContainer CreateViewportFloatingTopHud(Control viewportPanel, out HBoxContainer row)
         {
-            if (viewportPanel == null) return;
-
-            var (texUnchecked, texChecked) = GetHudCheckboxTextures();
-
-            Button MakeHudBtn(string text, int minW, int minH = 26, bool toggle = false, bool pressed = false, string variation = "ToolbarButton", string tip = "")
-            {
-                var btn = new Button
-                {
-                    Text = text,
-                    ToggleMode = toggle,
-                    ButtonPressed = pressed,
-                    ThemeTypeVariation = variation,
-                    CustomMinimumSize = new Vector2(minW, minH),
-                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                    FocusMode = Control.FocusModeEnum.None,
-                    TooltipText = tip
-                };
-                ImporterStyle.ApplyFontSize(btn, ImporterStyle.FontHint);
-                return btn;
-            }
-
-            CheckBox MakeHudCheckBox(string text, bool pressed, string tip = "")
-            {
-                var chk = new CheckBox
-                {
-                    Text = text,
-                    ButtonPressed = pressed,
-                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                    FocusMode = Control.FocusModeEnum.None,
-                    TooltipText = tip
-                };
-                chk.AddThemeIconOverride("unchecked", texUnchecked);
-                chk.AddThemeIconOverride("checked", texChecked);
-                chk.AddThemeConstantOverride("h_separation", 5);
-                chk.AddThemeColorOverride("font_color", new Color(0.84f, 0.87f, 0.84f));
-                chk.AddThemeColorOverride("font_pressed_color", PlaygroundThemeHelper.Parchment);
-                ImporterStyle.ApplyFontSize(chk, ImporterStyle.FontHint);
-                return chk;
-            }
-
-            VSeparator MakeHudSep() => new VSeparator
-            {
-                CustomMinimumSize = new Vector2(2, 18),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
-            };
-
-            // =========================================================
-            // 1. TOP SLIM BAR (Frosted translucent floating bar, clear logical groups)
-            // =========================================================
             var topOverlayMargin = new MarginContainer
             {
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -1473,7 +1427,6 @@ namespace DeadlockPlayground.UI
             };
             topHud.AddThemeStyleboxOverride("panel", GetHudFloatingPanelStyle());
             topOverlayMargin.AddChild(topHud);
-            _refRigViewportHud = topHud;
 
             var topPad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             topPad.AddThemeConstantOverride("margin_left", 10);
@@ -1482,9 +1435,69 @@ namespace DeadlockPlayground.UI
             topPad.AddThemeConstantOverride("margin_bottom", 5);
             topHud.AddChild(topPad);
 
-            var row1 = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            row1.AddThemeConstantOverride("separation", 6);
-            topPad.AddChild(row1);
+            row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            row.AddThemeConstantOverride("separation", 6);
+            topPad.AddChild(row);
+            return topHud;
+        }
+
+        private static Button CreateViewportHudButton(string text, int minW, int minH = 26, bool toggle = false, bool pressed = false, string variation = "ToolbarButton", string tip = "")
+        {
+            var btn = new Button
+            {
+                Text = text,
+                ToggleMode = toggle,
+                ButtonPressed = pressed,
+                ThemeTypeVariation = variation,
+                CustomMinimumSize = new Vector2(minW, minH),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                FocusMode = Control.FocusModeEnum.None,
+                TooltipText = tip
+            };
+            ImporterStyle.ApplyFontSize(btn, ImporterStyle.FontHint);
+            return btn;
+        }
+
+        private static VSeparator CreateViewportHudSeparator() => new VSeparator
+        {
+            CustomMinimumSize = new Vector2(2, 18),
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+        };
+
+        private void BuildReferenceRigViewportHud(Control viewportPanel)
+        {
+            if (viewportPanel == null) return;
+
+            var (texUnchecked, texChecked) = GetHudCheckboxTextures();
+
+            Button MakeHudBtn(string text, int minW, int minH = 26, bool toggle = false, bool pressed = false, string variation = "ToolbarButton", string tip = "")
+                => CreateViewportHudButton(text, minW, minH, toggle, pressed, variation, tip);
+
+            CheckBox MakeHudCheckBox(string text, bool pressed, string tip = "")
+            {
+                var chk = new CheckBox
+                {
+                    Text = text,
+                    ButtonPressed = pressed,
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                    FocusMode = Control.FocusModeEnum.None,
+                    TooltipText = tip
+                };
+                chk.AddThemeIconOverride("unchecked", texUnchecked);
+                chk.AddThemeIconOverride("checked", texChecked);
+                chk.AddThemeConstantOverride("h_separation", 5);
+                chk.AddThemeColorOverride("font_color", new Color(0.84f, 0.87f, 0.84f));
+                chk.AddThemeColorOverride("font_pressed_color", PlaygroundThemeHelper.Parchment);
+                ImporterStyle.ApplyFontSize(chk, ImporterStyle.FontHint);
+                return chk;
+            }
+
+            VSeparator MakeHudSep() => CreateViewportHudSeparator();
+
+            // =========================================================
+            // 1. TOP SLIM BAR (Frosted translucent floating bar, clear logical groups)
+            // =========================================================
+            _refRigViewportHud = CreateViewportFloatingTopHud(viewportPanel, out var row1);
 
             // Left: Step Prompt + Prev/Next right beside it!
             _lblRefHudSelectedBone = new Label

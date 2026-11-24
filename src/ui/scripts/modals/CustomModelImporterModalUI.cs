@@ -441,6 +441,21 @@ namespace DeadlockPlayground.UI
                         GetViewport().SetInputAsHandled();
                         return;
                     }
+                    if (!key.CtrlPressed && key.Keycode == Key.H)
+                    {
+                        if (key.AltPressed) UnhideAllPaintIslands();
+                        else if (key.ShiftPressed) SoloHoveredPaintIsland();
+                        else HideHoveredPaintIsland();
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
+                    if (key.Keycode == Key.Escape && _isDraggingGradient)
+                    {
+                        _isDraggingGradient = false;
+                        SetBottomStatus("Cancelled weight gradient drag.", StatusTone.Info);
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
                 }
                 else if (IsDeformBrushActive())
                 {
@@ -482,6 +497,15 @@ namespace DeadlockPlayground.UI
             }
 
             bool stressActive = ApplyPhysicsStressTestInProcess(delta);
+
+            if (_isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic && !IsWeightPaintActive())
+            {
+                RedrawSyntheticChainPreview();
+                if (!_isGizmoDragging)
+                {
+                    UpdateGizmoTargetTransform();
+                }
+            }
 
             if (_showColliders && _collidersDebugMesh != null && GodotObject.IsInstanceValid(_collidersDebugMesh) &&
                 _previewHeroSkeleton != null && ((_previewAnimPlayer?.IsPlaying() ?? false) || _isScrubbingAnimTimeline || _collidersDirty || stressActive))
@@ -1118,6 +1142,11 @@ namespace DeadlockPlayground.UI
                 if (_previewAnimPlayer == null) return;
                 if (playing)
                 {
+                    if (_isGizmoEditingSyntheticChain)
+                    {
+                        _synSavedAnimStateValid = false;
+                        SetSyntheticChainGizmoActive(false);
+                    }
                     if (!_previewAnimPlayer.IsPlaying())
                     {
                         string activeAnim = !string.IsNullOrEmpty(_previewAnimPlayer.CurrentAnimation)
@@ -1388,6 +1417,7 @@ namespace DeadlockPlayground.UI
             BuildSelectedBoneBadgeOverlay(viewportPanel);
             BuildWeightPaintViewportHud(viewportPanel);
             BuildReferenceRigViewportHud(viewportPanel);
+            BuildSyntheticChainViewportHud(viewportPanel);
             BuildStressTestViewportPopover(viewportPanel);
 
             // Right Side: Tabbed Configuration Inspector
@@ -1640,6 +1670,7 @@ namespace DeadlockPlayground.UI
             {
                 Name = "PreviewGizmo3D",
                 Visible = false,
+                ShowSelectionBox = false,
                 Layers = 1,
                 Size = 75f
             };
@@ -1668,6 +1699,12 @@ namespace DeadlockPlayground.UI
                 if (HandleWeightPaintInput(@event)) return;
                 if (HandleHeroDeformBrushInput(@event)) return;
                 if (HandlePinInput(@event)) return;
+                if (TryHandleSyntheticJointLeftClick(@event))
+                {
+                    _isOrbiting = false;
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
                 if (TryHandleViewportBoneLeftClick(@event))
                 {
                     _isOrbiting = false;
@@ -4615,6 +4652,13 @@ namespace DeadlockPlayground.UI
                     srcTooltips[b] = FormatSourceBoneTooltip(raw, sourceSkeleton) + $"\nStatus: {weightTag} | Class: {_lastRigAnalysis.Bones[b].Kind}";
                 }
 
+                // Track already-claimed source bones so RigBoneClassifier fallback never creates duplicate conflicts
+                var usedAutoMappedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var v in autoMapByTarget.Values)
+                {
+                    if (!string.IsNullOrEmpty(v)) usedAutoMappedSources.Add(v);
+                }
+
                 foreach (var def in HumanoidBoneMapper.Definitions)
                 {
                     string targetHeroBone = _previewHeroSkeleton != null
@@ -4636,7 +4680,16 @@ namespace DeadlockPlayground.UI
                         _lastRigAnalysis.CanonicalToSource.TryGetValue(def.CanonicalName, out int clsSrcIdx) &&
                         clsSrcIdx >= 0 && clsSrcIdx < srcRawNames.Length)
                     {
-                        matchedBoneName = srcRawNames[clsSrcIdx];
+                        string clsCandidate = srcRawNames[clsSrcIdx];
+                        if (!usedAutoMappedSources.Contains(clsCandidate))
+                        {
+                            matchedBoneName = clsCandidate;
+                            usedAutoMappedSources.Add(clsCandidate);
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(matchedBoneName))
+                    {
+                        usedAutoMappedSources.Add(matchedBoneName);
                     }
                     matchedBoneName ??= "";
                     _autoMappedSnapshot[def.CanonicalName] = matchedBoneName;
@@ -4838,6 +4891,11 @@ namespace DeadlockPlayground.UI
                 RefreshBoneTabDiffSummary();
                 MarkRemapAppliedBadge();
                 ApplyThemeStyling();
+
+                if (!_hasShownInitialMissingBonesPopup)
+                {
+                    CallDeferred(nameof(MaybeShowInitialMissingBonesWarning));
+                }
             }
             else
             {
@@ -6178,6 +6236,27 @@ namespace DeadlockPlayground.UI
         private Button _hudBtnMirror;
         private Button _hudBtnUndo;
         private Button _hudBtnRedo;
+        private Button _hudBtnFrontOnly;
+        private Button _hudBtnSameIsland;
+        private Button _hudBtnPaintThrough;
+        private Button _hudBtnFillIsland;
+        private Button _hudBtnGradientFill;
+        private Button _hudBtnUnhideAll;
+        private HSlider _hudSliderNearClip;
+        private Label _hudLblNearClip;
+        private bool _paintFrontFacingOnly = true;
+        private bool _paintSameIslandOnly = true;
+        private bool _paintThrough = false;
+        private int _paintToolSubMode = 0; // 0 = Brush, 1 = Flood Fill Island, 2 = Gradient Drag
+        private bool _isDraggingGradient = false;
+        private Vector3 _gradientStartWorld;
+        private CustomWeightPaintEditor.SurfaceState _gradientHitSurface;
+        private int _gradientHitIslandId = -1;
+        private CustomWeightPaintEditor.SurfaceState _lastHoveredPaintSurface;
+        private int _lastHoveredPaintVertex = -1;
+        private readonly HashSet<string> _lockedPaintBones = new(StringComparer.OrdinalIgnoreCase);
+        private Texture2D _iconPaintLock;
+        private Texture2D _iconPaintUnlock;
         private LineEdit _txtPaintBoneSearch;
         private int _paintBoneFilterMode = 0; // 0 = Weighted on Mesh, 1 = Physics / Imported, 2 = All Bones
         private readonly Button[] _paintBoneFilterBtns = new Button[3];
@@ -6261,6 +6340,13 @@ namespace DeadlockPlayground.UI
 
         private void OnRightTabChanged(long tabIdx)
         {
+            if (tabIdx != 2)
+            {
+                SetSyntheticPropsExpanded(false);
+                if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+                else ClearSyntheticChainPreview();
+                UpdateSyntheticChainViewportHud();
+            }
             if (tabIdx != 2 && _wasInCollidersSubView)
             {
                 _wasInCollidersSubView = false;
@@ -7645,6 +7731,10 @@ namespace DeadlockPlayground.UI
 
             if (enabled)
             {
+                if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+                else ClearSyntheticChainPreview();
+                UpdateSyntheticChainViewportHud();
+
                 if (_btnDeformBrushToggle != null && _btnDeformBrushToggle.ButtonPressed)
                 {
                     _btnDeformBrushToggle.ButtonPressed = false;
@@ -7667,15 +7757,23 @@ namespace DeadlockPlayground.UI
             else
             {
                 _isPaintingWeights = false;
+                _isDraggingGradient = false;
                 _pendingStrokeSnapshot = null;
                 _strokeDirty = false;
+                if (_previewCamera != null && GodotObject.IsInstanceValid(_previewCamera))
+                    _previewCamera.Near = 0.05f;
+                if (_hudSliderNearClip != null) _hudSliderNearClip.SetValueNoSignal(0.05);
+                if (_hudLblNearClip != null) _hudLblNearClip.Text = "0.05";
                 if (_btnChainWeightPaintToggle != null && _btnChainWeightPaintToggle.ButtonPressed)
                     _btnChainWeightPaintToggle.SetPressedNoSignal(false);
                 // Keep _boxTab3WeightPaintHost visible so the "Paint Bone Weights (Heatmap)" toggle button
                 // remains accessible inside Tab 3 -> Weights after exiting weight paint mode!
                 if (_paintBrushRing != null && GodotObject.IsInstanceValid(_paintBrushRing)) _paintBrushRing.Visible = false;
                 foreach (var s in _paintSurfaces)
+                {
+                    s.HiddenIslands?.Clear();
                     CustomWeightPaintEditor.RefreshSurfaceHeatmap(s, -1, -1, false, null);
+                }
                 _paintSurfaces.Clear();
                 UpdateGizmoTargetTransform();
             }
@@ -7824,6 +7922,140 @@ namespace DeadlockPlayground.UI
             };
             row2.AddChild(_hudBtnMirror);
             root.AddChild(row2);
+
+            // Row 3: Precision masking & buried-vertex tools (Front Only, Same Island, Paint Through, Fill Island, Gradient, Show All, Slice)
+            var row3 = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            row3.AddThemeConstantOverride("h_separation", 5);
+            row3.AddThemeConstantOverride("v_separation", 4);
+
+            _hudBtnFrontOnly = new Button
+            {
+                Text = "Front Only",
+                ToggleMode = true,
+                ButtonPressed = _paintFrontFacingOnly,
+                CustomMinimumSize = new Vector2(74, 22),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Only paint vertices facing the camera (prevents strokes from bleeding through to the back side)."
+            };
+            ImporterStyle.ApplyFontSize(_hudBtnFrontOnly, ImporterStyle.FontHint);
+            _hudBtnFrontOnly.Toggled += on =>
+            {
+                _paintFrontFacingOnly = on;
+                if (on && _paintThrough)
+                {
+                    _paintThrough = false;
+                    _hudBtnPaintThrough?.SetPressedNoSignal(false);
+                }
+            };
+            row3.AddChild(_hudBtnFrontOnly);
+
+            _hudBtnSameIsland = new Button
+            {
+                Text = "Same Island",
+                ToggleMode = true,
+                ButtonPressed = _paintSameIslandOnly,
+                CustomMinimumSize = new Vector2(82, 22),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Geodesic brush: walks connected mesh topology only so strokes never jump air gaps onto nearby hair strands or limbs."
+            };
+            ImporterStyle.ApplyFontSize(_hudBtnSameIsland, ImporterStyle.FontHint);
+            _hudBtnSameIsland.Toggled += on => _paintSameIslandOnly = on;
+            row3.AddChild(_hudBtnSameIsland);
+
+            _hudBtnPaintThrough = new Button
+            {
+                Text = "Paint Through",
+                ToggleMode = true,
+                ButtonPressed = _paintThrough,
+                CustomMinimumSize = new Vector2(90, 22),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Reach buried/occluded back vertices inside dense hair or cloth layers (combine with Same Island to protect other parts)."
+            };
+            ImporterStyle.ApplyFontSize(_hudBtnPaintThrough, ImporterStyle.FontHint);
+            _hudBtnPaintThrough.Toggled += on =>
+            {
+                _paintThrough = on;
+                if (on)
+                {
+                    _paintFrontFacingOnly = false;
+                    _hudBtnFrontOnly?.SetPressedNoSignal(false);
+                }
+            };
+            row3.AddChild(_hudBtnPaintThrough);
+
+            _hudBtnFillIsland = new Button
+            {
+                Text = "Fill Island",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(72, 22),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Click any connected hair strand or mesh island to flood-fill it with the active brush mode (Add / Sub / Solid 1)."
+            };
+            ImporterStyle.ApplyFontSize(_hudBtnFillIsland, ImporterStyle.FontHint);
+            _hudBtnFillIsland.Toggled += on =>
+            {
+                _paintToolSubMode = on ? 1 : (_paintToolSubMode == 1 ? 0 : _paintToolSubMode);
+                if (on) _hudBtnGradientFill?.SetPressedNoSignal(false);
+            };
+            row3.AddChild(_hudBtnFillIsland);
+
+            _hudBtnGradientFill = new Button
+            {
+                Text = "Gradient",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(68, 22),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Drag in 3D from root (0.0) to tip (1.0) to paint a smooth falloff gradient across the clicked island."
+            };
+            ImporterStyle.ApplyFontSize(_hudBtnGradientFill, ImporterStyle.FontHint);
+            _hudBtnGradientFill.Toggled += on =>
+            {
+                _paintToolSubMode = on ? 2 : (_paintToolSubMode == 2 ? 0 : _paintToolSubMode);
+                if (on) _hudBtnFillIsland?.SetPressedNoSignal(false);
+                _isDraggingGradient = false;
+            };
+            row3.AddChild(_hudBtnGradientFill);
+
+            _hudBtnUnhideAll = new Button
+            {
+                Text = "Show All",
+                CustomMinimumSize = new Vector2(68, 22),
+                ThemeTypeVariation = "ToolbarButton",
+                Disabled = true,
+                TooltipText = "Unhide all hidden mesh islands (Shortcuts: H = Hide hovered island, Shift+H = Solo island, Alt+H = Show All)."
+            };
+            ImporterStyle.ApplyFontSize(_hudBtnUnhideAll, ImporterStyle.FontHint);
+            _hudBtnUnhideAll.Pressed += UnhideAllPaintIslands;
+            row3.AddChild(_hudBtnUnhideAll);
+
+            var lblSlice = new Label { Text = "Slice:", VerticalAlignment = VerticalAlignment.Center };
+            ImporterStyle.ApplyFontSize(lblSlice, ImporterStyle.FontHint);
+            row3.AddChild(lblSlice);
+
+            _hudSliderNearClip = new HSlider
+            {
+                MinValue = 0.05,
+                MaxValue = 2.00,
+                Step = 0.02,
+                Value = 0.05,
+                CustomMinimumSize = new Vector2(68, 0),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                TooltipText = "Camera near-clip slice plane: slide right to cut open dense outer layers and inspect/paint buried interior vertices."
+            };
+            _hudLblNearClip = new Label { Text = "0.05", CustomMinimumSize = new Vector2(30, 0), VerticalAlignment = VerticalAlignment.Center };
+            ImporterStyle.ApplyFontSize(_hudLblNearClip, ImporterStyle.FontHint);
+            _hudSliderNearClip.ValueChanged += v =>
+            {
+                if (_previewCamera != null && GodotObject.IsInstanceValid(_previewCamera))
+                    _previewCamera.Near = (float)v;
+                if (_hudLblNearClip != null) _hudLblNearClip.Text = $"{v:F2}";
+            };
+            row3.AddChild(_hudSliderNearClip);
+            row3.AddChild(_hudLblNearClip);
+
+            root.AddChild(row3);
         }
 
         private void SyncWeightPaintHudFromControls()
@@ -7871,7 +8103,7 @@ namespace DeadlockPlayground.UI
 
         private void OnSmoothAllActiveBonePressed()
         {
-            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null || _optPaintBone == null || _optPaintBone.Selected < 0)
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null || _optPaintBone == null || _optPaintBone.Selected < 0)
                 return;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             if (skin == null) return;
@@ -7902,6 +8134,9 @@ namespace DeadlockPlayground.UI
                 ? _optPaintBone.GetItemText(_optPaintBone.Selected)
                 : "";
 
+            _iconPaintLock ??= ResourceLoader.Load<Texture2D>("res://assets/at-icons/lock.svg");
+            _iconPaintUnlock ??= ResourceLoader.Load<Texture2D>("res://assets/at-icons/unlock.svg");
+
             int shown = 0;
             foreach (var entry in _paintBoneCatalog)
             {
@@ -7910,7 +8145,12 @@ namespace DeadlockPlayground.UI
                 if (!string.IsNullOrEmpty(query) && !entry.Name.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
 
                 bool isSel = entry.Name.Equals(activeBone, StringComparison.OrdinalIgnoreCase);
+                bool isLocked = _lockedPaintBones.Contains(entry.Name);
                 string badge = entry.VertCount > 0 ? $"  ★ {entry.VertCount}v" : (entry.IsPhysics ? "  [phys]" : "");
+
+                var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                row.AddThemeConstantOverride("separation", 3);
+
                 var btn = new Button
                 {
                     Text = entry.Name + badge,
@@ -7923,7 +8163,34 @@ namespace DeadlockPlayground.UI
                 };
                 string capName = entry.Name;
                 btn.Pressed += () => SelectPaintBoneInEditor(capName);
-                _boxPaintBoneList.AddChild(btn);
+                row.AddChild(btn);
+
+                var btnLock = new Button
+                {
+                    ToggleMode = true,
+                    ButtonPressed = isLocked,
+                    Icon = isLocked ? _iconPaintLock : _iconPaintUnlock,
+                    IconAlignment = HorizontalAlignment.Center,
+                    ExpandIcon = true,
+                    CustomMinimumSize = new Vector2(24, 24),
+                    ThemeTypeVariation = isLocked ? "PrimaryActionButton" : "IconButton",
+                    TooltipText = isLocked
+                        ? $"Unlock '{entry.Name}' so brushes can modify its weights."
+                        : $"Lock '{entry.Name}' so painting other bones never alters its weights."
+                };
+                if (!isLocked) btnLock.Modulate = new Color(0.70f, 0.76f, 0.80f, 0.65f);
+                btnLock.Toggled += on =>
+                {
+                    if (on) _lockedPaintBones.Add(capName);
+                    else _lockedPaintBones.Remove(capName);
+                    RebuildPaintBoneListUI();
+                    SetBottomStatus(on
+                        ? $"Locked '{capName}' weights — strokes on other bones will not disturb it."
+                        : $"Unlocked '{capName}' weights.", StatusTone.Info);
+                };
+                row.AddChild(btnLock);
+
+                _boxPaintBoneList.AddChild(row);
                 shown++;
                 if (shown >= 80) break;
             }
@@ -8057,9 +8324,97 @@ namespace DeadlockPlayground.UI
             UpdateWeightHistoryUI();
         }
 
+        private bool HasValidPaintSurfaces(bool tryRecapture = true)
+        {
+            if (_paintSurfaces.Count > 0)
+            {
+                bool allValid = true;
+                for (int i = 0; i < _paintSurfaces.Count; i++)
+                {
+                    var mi = _paintSurfaces[i]?.MeshInstance;
+                    if (mi == null || !GodotObject.IsInstanceValid(mi) || mi.IsQueuedForDeletion())
+                    {
+                        allValid = false;
+                        break;
+                    }
+                }
+                if (allValid) return true;
+                _paintSurfaces.Clear();
+            }
+            if (tryRecapture && IsWeightPaintActive() && _previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer))
+            {
+                EnterWeightPaintSurfaces();
+                return _paintSurfaces.Count > 0 && GodotObject.IsInstanceValid(_paintSurfaces[0].MeshInstance);
+            }
+            return false;
+        }
+
+        private HashSet<int> CollectLockedBindIndices(Skin skin)
+        {
+            if (_lockedPaintBones.Count == 0 || skin == null || _previewHeroSkeleton == null) return null;
+            var set = new HashSet<int>();
+            foreach (string bn in _lockedPaintBones)
+            {
+                int bi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, bn);
+                if (bi >= 0) set.Add(bi);
+            }
+            return set.Count > 0 ? set : null;
+        }
+
+        private void UpdateHiddenIslandsButtonVisual()
+        {
+            if (_hudBtnUnhideAll == null || !GodotObject.IsInstanceValid(_hudBtnUnhideAll)) return;
+            int hiddenCount = 0;
+            foreach (var s in _paintSurfaces) hiddenCount += s?.HiddenIslands?.Count ?? 0;
+            _hudBtnUnhideAll.Disabled = hiddenCount == 0;
+            _hudBtnUnhideAll.Text = hiddenCount > 0 ? $"Show All ({hiddenCount})" : "Show All";
+        }
+
+        private void HideHoveredPaintIsland()
+        {
+            if (!HasValidPaintSurfaces() || _lastHoveredPaintSurface == null || _lastHoveredPaintVertex < 0) return;
+            var surf = _lastHoveredPaintSurface;
+            if (surf.IslandIds == null || _lastHoveredPaintVertex >= surf.IslandIds.Length) return;
+            int isl = surf.IslandIds[_lastHoveredPaintVertex];
+            surf.HiddenIslands.Add(isl);
+            UpdateHiddenIslandsButtonVisual();
+            RefreshWeightPaintHeatmap();
+            SetBottomStatus("Hid hovered mesh island (Alt+H to show all).", StatusTone.Info);
+        }
+
+        private void SoloHoveredPaintIsland()
+        {
+            if (!HasValidPaintSurfaces() || _lastHoveredPaintSurface == null || _lastHoveredPaintVertex < 0) return;
+            var surf = _lastHoveredPaintSurface;
+            if (surf.IslandIds == null || _lastHoveredPaintVertex >= surf.IslandIds.Length) return;
+            int keepIsl = surf.IslandIds[_lastHoveredPaintVertex];
+            foreach (var s in _paintSurfaces)
+            {
+                if (s?.IslandIds == null) continue;
+                s.HiddenIslands.Clear();
+                for (int id = 0; id < s.IslandCount; id++)
+                {
+                    if (!ReferenceEquals(s, surf) || id != keepIsl)
+                        s.HiddenIslands.Add(id);
+                }
+            }
+            UpdateHiddenIslandsButtonVisual();
+            RefreshWeightPaintHeatmap();
+            SetBottomStatus("Soloed hovered mesh island (Alt+H to show all).", StatusTone.Success);
+        }
+
+        private void UnhideAllPaintIslands()
+        {
+            if (!HasValidPaintSurfaces()) return;
+            foreach (var s in _paintSurfaces) s?.HiddenIslands?.Clear();
+            UpdateHiddenIslandsButtonVisual();
+            RefreshWeightPaintHeatmap();
+            SetBottomStatus("Restored all hidden mesh islands.", StatusTone.Info);
+        }
+
         private void CommitPaintSurfaceOverrides()
         {
-            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            if (!HasValidPaintSurfaces(tryRecapture: false) || _previewHeroSkeleton == null) return;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             var exported = CustomWeightPaintEditor.ExportOverrides(_paintSurfaces, _previewHeroSkeleton, skin);
             foreach (var (k, v) in exported) _customSkinOverrides[k] = v;
@@ -8070,7 +8425,7 @@ namespace DeadlockPlayground.UI
         {
             if (_baselineSkinOverrides.Count > 0) return true;
 
-            if (_customSkinOverrides.Count == 0 && _paintSurfaces.Count > 0 && _previewHeroSkeleton != null)
+            if (_customSkinOverrides.Count == 0 && HasValidPaintSurfaces(tryRecapture: false) && _previewHeroSkeleton != null)
             {
                 var skin = _paintSurfaces[0].MeshInstance?.Skin;
                 var baseExp = CustomWeightPaintEditor.ExportOverrides(_paintSurfaces, _previewHeroSkeleton, skin);
@@ -8081,43 +8436,61 @@ namespace DeadlockPlayground.UI
             if (_liveImportedScene == null || _previewHeroClone == null || _previewHeroSkeleton == null)
                 return false;
 
+            // CRITICAL: Run the baseline RigAndBind pass on an isolated throwaway duplicate of _previewHeroClone!
+            // Running RigAndBind directly on _previewHeroClone with the same SlotId destroys the live
+            // _previewRiggedContainer and mutates _previewHeroSkeleton, causing the entire model to disappear
+            // and throwing ObjectDisposedException on _paintSurfaces[0].MeshInstance!
             var baselineOpts = GatherRiggingOptions();
             baselineOpts.CustomSkinWeightOverrides = null;
+            baselineOpts.SyntheticChainsToRebind = null;
             baselineOpts.AlignedTransform = BuildCurrentAlignedTransform();
             baselineOpts.IsPreviewOnly = true;
+
+            var tempHeroClone = (Node3D)_previewHeroClone.Duplicate();
+            tempHeroClone.Name = "__TempBaselineHeroClone";
+            tempHeroClone.Visible = false;
+            var hostParent = _previewHeroClone.GetParent() ?? _previewWorldRoot;
+            hostParent?.AddChild(tempHeroClone);
 
             var tempModel = (Node3D)_liveImportedScene.Duplicate();
             _previewModelRoot?.AddChild(tempModel);
             tempModel.Transform = Transform3D.Identity;
             tempModel.Visible = false;
 
-            var res = CustomModelAutoRigger.RigAndBind(tempModel, _previewHeroClone, baselineOpts);
-            if (res.Success && res.ContainerNode != null && GodotObject.IsInstanceValid(res.ContainerNode))
+            try
             {
-                var tmpSurfaces = CustomWeightPaintEditor.CaptureSurfaces(res.ContainerNode);
-                var tmpSkin = tmpSurfaces.Count > 0 ? tmpSurfaces[0].MeshInstance?.Skin : null;
-                if (tmpSkin != null)
+                var tempHeroSkel = CustomModelAutoRigger.FindSkeleton(tempHeroClone);
+                var res = CustomModelAutoRigger.RigAndBind(tempModel, tempHeroClone, baselineOpts);
+                if (res.Success && res.ContainerNode != null && GodotObject.IsInstanceValid(res.ContainerNode) && tempHeroSkel != null)
                 {
-                    var exported = CustomWeightPaintEditor.ExportOverrides(tmpSurfaces, _previewHeroSkeleton, tmpSkin);
-                    foreach (var (k, v) in exported) _baselineSkinOverrides[k] = v;
+                    var tmpSurfaces = CustomWeightPaintEditor.CaptureSurfaces(res.ContainerNode);
+                    var tmpSkin = tmpSurfaces.Count > 0 ? tmpSurfaces[0].MeshInstance?.Skin : null;
+                    if (tmpSkin != null)
+                    {
+                        var exported = CustomWeightPaintEditor.ExportOverrides(tmpSurfaces, tempHeroSkel, tmpSkin);
+                        foreach (var (k, v) in exported) _baselineSkinOverrides[k] = v;
+                    }
                 }
             }
-            if (res.ContainerNode != null && GodotObject.IsInstanceValid(res.ContainerNode))
+            finally
             {
-                res.ContainerNode.GetParent()?.RemoveChild(res.ContainerNode);
-                res.ContainerNode.QueueFree();
-            }
-            if (GodotObject.IsInstanceValid(tempModel))
-            {
-                tempModel.GetParent()?.RemoveChild(tempModel);
-                tempModel.QueueFree();
+                if (GodotObject.IsInstanceValid(tempHeroClone))
+                {
+                    tempHeroClone.GetParent()?.RemoveChild(tempHeroClone);
+                    tempHeroClone.QueueFree();
+                }
+                if (GodotObject.IsInstanceValid(tempModel))
+                {
+                    tempModel.GetParent()?.RemoveChild(tempModel);
+                    tempModel.QueueFree();
+                }
             }
             return _baselineSkinOverrides.Count > 0;
         }
 
         private void OnWeightUndoPressed()
         {
-            if (!IsWeightPaintActive() || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null || _weightUndoStack.Count == 0)
+            if (!IsWeightPaintActive() || !HasValidPaintSurfaces() || _previewHeroSkeleton == null || _weightUndoStack.Count == 0)
                 return;
             int idx = _weightUndoStack.Count - 1;
             var entry = _weightUndoStack[idx];
@@ -8136,7 +8509,7 @@ namespace DeadlockPlayground.UI
 
         private void OnWeightRedoPressed()
         {
-            if (!IsWeightPaintActive() || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null || _weightRedoStack.Count == 0)
+            if (!IsWeightPaintActive() || !HasValidPaintSurfaces() || _previewHeroSkeleton == null || _weightRedoStack.Count == 0)
                 return;
             int idx = _weightRedoStack.Count - 1;
             var entry = _weightRedoStack[idx];
@@ -8155,7 +8528,7 @@ namespace DeadlockPlayground.UI
 
         private void OnSmoothBoundaryWeightsPressed()
         {
-            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null) return;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             if (skin == null) return;
 
@@ -8184,7 +8557,7 @@ namespace DeadlockPlayground.UI
 
         private void OnMirrorSideWeightsPressed(bool leftToRight)
         {
-            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null) return;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             if (skin == null) return;
 
@@ -8208,9 +8581,13 @@ namespace DeadlockPlayground.UI
 
         private void OnResetSelectedBoneWeightsPressed()
         {
-            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null) return;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             if (skin == null || !EnsureBaselineOverrides()) return;
+            // Re-verify paint surfaces are still valid after EnsureBaselineOverrides
+            if (!HasValidPaintSurfaces()) return;
+            skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return;
 
             string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0
                 ? _optPaintBone.GetItemText(_optPaintBone.Selected)
@@ -8331,7 +8708,7 @@ namespace DeadlockPlayground.UI
 
         private void RefreshWeightPaintHeatmap()
         {
-            if (!IsWeightPaintActive() || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return;
+            if (!IsWeightPaintActive() || !HasValidPaintSurfaces() || _previewHeroSkeleton == null) return;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             if (skin == null) return;
 
@@ -8396,7 +8773,7 @@ namespace DeadlockPlayground.UI
 
         private bool HandleWeightPaintInput(InputEvent @event)
         {
-            if (!IsWeightPaintActive() || _previewCamera == null || _paintSurfaces.Count == 0 || _previewHeroSkeleton == null)
+            if (!IsWeightPaintActive() || _previewCamera == null || _previewHeroSkeleton == null || !HasValidPaintSurfaces())
                 return false;
 
             if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
@@ -8408,9 +8785,11 @@ namespace DeadlockPlayground.UI
                     CustomWeightPaintEditor.UpdatePosedVertices(_paintSurfaces, _previewHeroSkeleton, skin);
                     Vector3 orig = _previewCamera.ProjectRayOrigin(mb.Position);
                     Vector3 dir = _previewCamera.ProjectRayNormal(mb.Position);
-                    if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out var hitSurf, out var hitPt, out _) &&
+                    if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out var hitSurf, out var hitPt, out _, out int hitV) &&
                         CustomWeightPaintEditor.PickStrongestBoneAtPoint(hitSurf, hitPt, _previewHeroSkeleton, skin, out string pickedBone, out float pickedW))
                     {
+                        _lastHoveredPaintSurface = hitSurf;
+                        _lastHoveredPaintVertex = hitV;
                         if (!SelectPaintBoneInEditor(pickedBone))
                         {
                             PopulatePaintBoneDropdown();
@@ -8427,17 +8806,64 @@ namespace DeadlockPlayground.UI
                     CustomWeightPaintEditor.UpdatePosedVertices(_paintSurfaces, _previewHeroSkeleton, skin);
                     Vector3 orig = _previewCamera.ProjectRayOrigin(mb.Position);
                     Vector3 dir = _previewCamera.ProjectRayNormal(mb.Position);
-                    if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out _, out var hitPt, out var hitNorm))
+                    if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out var hitSurf, out var hitPt, out var hitNorm, out int hitV))
                     {
+                        _lastHoveredPaintSurface = hitSurf;
+                        _lastHoveredPaintVertex = hitV;
                         string boneLabel = _optPaintBone != null && _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "weight";
+
+                        if (_paintToolSubMode == 1)
+                        {
+                            int isl = (hitSurf.IslandIds != null && hitV >= 0 && hitV < hitSurf.IslandIds.Length) ? hitSurf.IslandIds[hitV] : -1;
+                            if (isl >= 0) ApplyFloodFillIsland(hitSurf, isl, boneLabel);
+                            GetViewport().SetInputAsHandled();
+                            return true;
+                        }
+                        if (_paintToolSubMode == 2)
+                        {
+                            _isDraggingGradient = true;
+                            _gradientStartWorld = hitPt;
+                            _gradientHitSurface = _paintSameIslandOnly ? hitSurf : null;
+                            _gradientHitIslandId = (_paintSameIslandOnly && hitSurf.IslandIds != null && hitV >= 0 && hitV < hitSurf.IslandIds.Length)
+                                ? hitSurf.IslandIds[hitV] : -1;
+                            _isOrbiting = false; _isPanning = false;
+                            SetBottomStatus($"Gradient start placed — drag to tip and release to fill '{boneLabel}' (Esc to cancel).", StatusTone.Info);
+                            GetViewport().SetInputAsHandled();
+                            return true;
+                        }
+
                         _pendingStrokeSnapshot = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, $"Brush ({boneLabel})");
                         _strokeDirty = false;
                         _isPaintingWeights = true;
                         _isOrbiting = false; _isPanning = false;
-                        _strokeDirty |= ApplyBrushAtHit(hitPt, hitNorm);
+                        _strokeDirty |= ApplyBrushAtHit(hitPt, hitNorm, hitSurf, hitV, dir);
                         GetViewport().SetInputAsHandled();
                         return true;
                     }
+                }
+                else if (!mb.Pressed && _isDraggingGradient)
+                {
+                    _isDraggingGradient = false;
+                    var skin = _paintSurfaces[0].MeshInstance?.Skin;
+                    CustomWeightPaintEditor.UpdatePosedVertices(_paintSurfaces, _previewHeroSkeleton, skin);
+                    Vector3 orig = _previewCamera.ProjectRayOrigin(mb.Position);
+                    Vector3 dir = _previewCamera.ProjectRayNormal(mb.Position);
+                    Vector3 endWorld;
+                    if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out _, out var endHitPt, out _, out _))
+                    {
+                        endWorld = endHitPt;
+                    }
+                    else
+                    {
+                        Vector3 planeN = -_previewCamera.GlobalTransform.Basis.Z;
+                        float denom = dir.Dot(planeN);
+                        float t = MathF.Abs(denom) > 1e-5f ? (_gradientStartWorld - orig).Dot(planeN) / denom : 0f;
+                        endWorld = t > 0f ? orig + dir * t : _gradientStartWorld;
+                    }
+                    string boneLabel = _optPaintBone != null && _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "weight";
+                    ApplyGradientDrag(endWorld, boneLabel);
+                    GetViewport().SetInputAsHandled();
+                    return true;
                 }
                 else if (!mb.Pressed && _isPaintingWeights)
                 {
@@ -8460,32 +8886,111 @@ namespace DeadlockPlayground.UI
                 CustomWeightPaintEditor.UpdatePosedVertices(_paintSurfaces, _previewHeroSkeleton, skin);
                 Vector3 orig = _previewCamera.ProjectRayOrigin(mm.Position);
                 Vector3 dir = _previewCamera.ProjectRayNormal(mm.Position);
-                if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out _, out var hitPt, out var hitNorm))
+                if (CustomWeightPaintEditor.RaycastSurfaces(orig, dir, _paintSurfaces, out var hitSurf, out var hitPt, out var hitNorm, out int hitV))
                 {
+                    _lastHoveredPaintSurface = hitSurf;
+                    _lastHoveredPaintVertex = hitV;
                     float r = (float)(_sliderPaintRadius?.Value ?? 0.08);
-                    UpdateBrushRingVisual(hitPt, hitNorm, r, true);
-                    if (_isPaintingWeights)
+                    UpdateBrushRingVisual(hitPt, hitNorm, r, _paintToolSubMode == 0);
+                    if (_isPaintingWeights && _paintToolSubMode == 0)
                     {
-                        _strokeDirty |= ApplyBrushAtHit(hitPt, hitNorm);
+                        _strokeDirty |= ApplyBrushAtHit(hitPt, hitNorm, hitSurf, hitV, dir);
                         GetViewport().SetInputAsHandled();
                         return true;
                     }
                 }
                 else
                 {
+                    _lastHoveredPaintSurface = null;
+                    _lastHoveredPaintVertex = -1;
                     UpdateBrushRingVisual(Vector3.Zero, Vector3.Up, 0.05f, false);
                 }
             }
             return false;
         }
 
-        private bool ApplyBrushAtHit(Vector3 hitPt, Vector3 hitNorm)
+        private bool ApplyFloodFillIsland(CustomWeightPaintEditor.SurfaceState surf, int islandId, string boneName)
         {
-            if (_paintSurfaces.Count == 0 || _previewHeroSkeleton == null) return false;
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null) return false;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return false;
+            if (_lockedPaintBones.Contains(boneName))
+            {
+                SetBottomStatus($"'{boneName}' is locked — unlock it in the bone list to edit its weights.", StatusTone.Warning);
+                return false;
+            }
+            int tgtBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, boneName);
+            if (tgtBi < 0) return false;
+            int pIdx = _previewHeroSkeleton.FindBone(boneName);
+            int parentB = pIdx >= 0 ? _previewHeroSkeleton.GetBoneParent(pIdx) : -1;
+            string parentName = parentB >= 0 ? _previewHeroSkeleton.GetBoneName(parentB) : "pelvis";
+            int fbBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, parentName);
+            if (fbBi < 0) fbBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, "pelvis");
+
+            var mode = _optPaintMode != null && _optPaintMode.Selected >= 0
+                ? (CustomWeightPaintEditor.BrushMode)_optPaintMode.GetItemId(_optPaintMode.Selected)
+                : CustomWeightPaintEditor.BrushMode.SetOne;
+            float strength = (float)(_sliderPaintStrength?.Value ?? 1.0);
+            var locked = CollectLockedBindIndices(skin);
+            var snap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, $"Fill Island ({boneName})");
+            if (CustomWeightPaintEditor.FloodFillIsland(surf, islandId, mode, strength, tgtBi, fbBi, locked))
+            {
+                PushWeightUndoSnapshot(snap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Flood-filled island for '{boneName}' (Ctrl+Z to undo).", StatusTone.Success);
+                return true;
+            }
+            return false;
+        }
+
+        private void ApplyGradientDrag(Vector3 endWorld, string boneName)
+        {
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null) return;
+            var skin = _paintSurfaces[0].MeshInstance?.Skin;
+            if (skin == null) return;
+            if (_lockedPaintBones.Contains(boneName))
+            {
+                SetBottomStatus($"'{boneName}' is locked — unlock it in the bone list to edit its weights.", StatusTone.Warning);
+                return;
+            }
+            int tgtBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, boneName);
+            if (tgtBi < 0) return;
+            int pIdx = _previewHeroSkeleton.FindBone(boneName);
+            int parentB = pIdx >= 0 ? _previewHeroSkeleton.GetBoneParent(pIdx) : -1;
+            string parentName = parentB >= 0 ? _previewHeroSkeleton.GetBoneName(parentB) : "pelvis";
+            int fbBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, parentName);
+            if (fbBi < 0) fbBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, "pelvis");
+
+            float strength = (float)(_sliderPaintStrength?.Value ?? 1.0);
+            var locked = CollectLockedBindIndices(skin);
+            var snap = CustomWeightPaintEditor.CaptureHistoryEntry(_paintSurfaces, $"Gradient ({boneName})");
+            if (CustomWeightPaintEditor.ApplyGradientFill(_paintSurfaces, _gradientHitSurface, _gradientHitIslandId, _gradientStartWorld, endWorld, strength, tgtBi, fbBi, locked))
+            {
+                PushWeightUndoSnapshot(snap);
+                CommitPaintSurfaceOverrides();
+                RefreshWeightPaintHeatmap();
+                SetBottomStatus($"Applied smooth gradient for '{boneName}' (Ctrl+Z to undo).", StatusTone.Success);
+            }
+        }
+
+        private bool ApplyBrushAtHit(
+            Vector3 hitPt,
+            Vector3 hitNorm,
+            CustomWeightPaintEditor.SurfaceState hitSurf = null,
+            int hitVertex = -1,
+            Vector3 cameraRayDir = default)
+        {
+            if (!HasValidPaintSurfaces() || _previewHeroSkeleton == null) return false;
             var skin = _paintSurfaces[0].MeshInstance?.Skin;
             if (skin == null) return false;
 
             string boneName = _optPaintBone != null && _optPaintBone.Selected >= 0 ? _optPaintBone.GetItemText(_optPaintBone.Selected) : "hand_L";
+            if (_lockedPaintBones.Contains(boneName))
+            {
+                SetBottomStatus($"'{boneName}' is locked — unlock it in the bone list to paint it.", StatusTone.Warning);
+                return false;
+            }
             int tgtBi = ResolveSkinBindIndexByBoneName(skin, _previewHeroSkeleton, boneName);
             int pIdx = _previewHeroSkeleton.FindBone(boneName);
             int parentB = pIdx >= 0 ? _previewHeroSkeleton.GetBoneParent(pIdx) : -1;
@@ -8505,8 +9010,19 @@ namespace DeadlockPlayground.UI
             float r = (float)(_sliderPaintRadius?.Value ?? 0.08);
             float strength = (float)(_sliderPaintStrength?.Value ?? 0.35);
 
+            var opts = new CustomWeightPaintEditor.BrushOptions
+            {
+                FrontFacingOnly = _paintFrontFacingOnly,
+                SameIslandOnly = _paintSameIslandOnly,
+                PaintThrough = _paintThrough,
+                HitSurface = hitSurf,
+                HitVertex = hitVertex,
+                CameraRayDir = cameraRayDir,
+                LockedBindIndices = CollectLockedBindIndices(skin)
+            };
+
             UpdateBrushRingVisual(hitPt, hitNorm, r, true);
-            if (CustomWeightPaintEditor.ApplyBrush(_paintSurfaces, hitPt, mode, r, strength, tgtBi, fbBi, mirror, mirBi, mirFbBi))
+            if (CustomWeightPaintEditor.ApplyBrush(_paintSurfaces, hitPt, mode, r, strength, tgtBi, fbBi, mirror, mirBi, mirFbBi, opts))
             {
                 foreach (var s in _paintSurfaces)
                     CustomWeightPaintEditor.RefreshSurfaceHeatmap(s, tgtBi, mirBi, true, _weightHeatmapMaterial);
@@ -8660,6 +9176,13 @@ namespace DeadlockPlayground.UI
         private void OnTestAnimSelected(long index)
         {
             if (_previewHeroSkeleton == null) return;
+            // If user explicitly picks a preview animation while in Bind-Pose 3D synthetic joint edit mode,
+            // exit 3D edit mode cleanly so CustomJiggleBoneDriver resumes and animates all hair/cloth chains live!
+            if (index > 0 && _isGizmoEditingSyntheticChain)
+            {
+                _synSavedAnimStateValid = false;
+                SetSyntheticChainGizmoActive(false);
+            }
             if (index > 0 && _pinsDirtyNeedsRigRebuild)
             {
                 ExecuteLiveRigUpdate();
@@ -8863,6 +9386,7 @@ namespace DeadlockPlayground.UI
                     .Select(c => c.GetMeta("SubmeshName").AsString())
                     .ToList(),
                 CustomBoneRemap = new Dictionary<string, string>(_userBoneRemap),
+                SyntheticChainsToRebind = new HashSet<string>(_dirtySyntheticChainIds, StringComparer.OrdinalIgnoreCase),
                 SmoothingIterations = (int)_spinLaplacian.Value,
                 SearchRadius = (float)_spinKnnRadius.Value,
                 ExcludeClothHairBones = _chkExcludeClothHair.ButtonPressed,
@@ -9053,7 +9577,8 @@ namespace DeadlockPlayground.UI
                 animSpeed = (float)_previewAnimPlayer.SpeedScale;
             }
 
-            // 2. Clean up previous test rig preview
+            // 2. Stop active animation cleanly & reset skeleton to pure Bind Pose (Rest Pose) before rigging
+            _previewAnimPlayer?.Stop();
             if (_previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer))
             {
                 _previewRiggedContainer.QueueFree();
@@ -9098,8 +9623,8 @@ namespace DeadlockPlayground.UI
 
                 SetBottomStatus($"Rigged in real time ({result.TotalVertices:N0} vertices bound).", StatusTone.Success);
 
-                // Resume animation smoothly at exact position, or apply calibrated ghost pose in Bind Pose
-                if (!string.IsNullOrEmpty(currentAnimName) && _previewAnimPlayer != null && _previewAnimPlayer.HasAnimation(currentAnimName))
+                // Resume animation smoothly at exact position ONLY when not in 3D synthetic joint Bind Pose edit mode
+                if (!_isGizmoEditingSyntheticChain && !string.IsNullOrEmpty(currentAnimName) && _previewAnimPlayer != null && _previewAnimPlayer.HasAnimation(currentAnimName))
                 {
                     _previewAnimPlayer.Play(currentAnimName);
                     _previewAnimPlayer.SpeedScale = animSpeed;
@@ -9109,9 +9634,18 @@ namespace DeadlockPlayground.UI
                         _previewAnimPlayer.Pause();
                     }
                 }
-                else
+                else if (!_isGizmoEditingSyntheticChain)
                 {
                     ApplyCalibrationPoseToGhostSkeleton();
+                }
+
+                // Reset jiggle/cloth simulation state AFTER restoring the active animation pose so re-binding
+                // never injects a T-Pose -> Animation teleport velocity spike into synthetic hair/cloth bones!
+                if (_previewHeroClone?.FindChild("CustomJiggleBoneDriver", false, false) is DeadlockPlayground.Animation.CustomJiggleBoneDriver postBindDriver)
+                {
+                    if (_isGizmoEditingSyntheticChain)
+                        postBindDriver.SetSimulationEnabled(false);
+                    postBindDriver.ResetChainsToRestPose();
                 }
 
                 if (!_isGizmoDragging && !(_previewGizmo?.Editing ?? false))
@@ -9119,7 +9653,24 @@ namespace DeadlockPlayground.UI
                     UpdateGizmoTargetTransform();
                 }
                 _paintSurfaces.Clear();
-                if (_customSkinOverrides.Count == 0) _baselineSkinOverrides.Clear();
+                if (_customSkinOverrides.Count == 0)
+                {
+                    _baselineSkinOverrides.Clear();
+                }
+                else if (options.SyntheticChainsToRebind != null && options.SyntheticChainsToRebind.Count > 0 &&
+                         result.ContainerNode != null && GodotObject.IsInstanceValid(result.ContainerNode) && _previewHeroSkeleton != null)
+                {
+                    // Sync newly bound synthetic chain weights back into _customSkinOverrides so subsequent
+                    // re-binds / preset swaps never re-run procedural weighting or dilute overlapping painted chains!
+                    var syncedSurfs = CustomWeightPaintEditor.CaptureSurfaces(result.ContainerNode);
+                    var syncedSkin = syncedSurfs.Count > 0 ? syncedSurfs[0].MeshInstance?.Skin : null;
+                    if (syncedSkin != null)
+                    {
+                        var syncedExp = CustomWeightPaintEditor.ExportOverrides(syncedSurfs, _previewHeroSkeleton, syncedSkin);
+                        foreach (var (k, v) in syncedExp) _customSkinOverrides[k] = v;
+                        UpdatePaintOverrideLabel();
+                    }
+                }
                 ApplyLandmarkPreviewState();
                 RebuildActiveCustomWeightedBoneSet();
                 if (_showBones) RedrawBoneWireframe();
@@ -9245,10 +9796,431 @@ namespace DeadlockPlayground.UI
             UpdateGizmoTargetTransform();
         }
 
+        private bool _isGizmoEditingSyntheticChain = false;
+        private int _selectedSyntheticJointIndex = 0;
+        private bool _showSyntheticWeightRadius = true;
+        private readonly HashSet<string> _dirtySyntheticChainIds = new(StringComparer.OrdinalIgnoreCase);
+
+        private void MarkSyntheticChainDirty(BoneChainDef chain)
+        {
+            if (chain == null || !chain.IsSynthetic) return;
+            string cid = !string.IsNullOrEmpty(chain.ChainId) ? chain.ChainId : (chain.Name ?? "");
+            if (!string.IsNullOrEmpty(cid)) _dirtySyntheticChainIds.Add(cid);
+        }
+
+        private void UnmarkSyntheticChainDirty(BoneChainDef chain)
+        {
+            if (chain == null) return;
+            string cid = !string.IsNullOrEmpty(chain.ChainId) ? chain.ChainId : (chain.Name ?? "");
+            if (!string.IsNullOrEmpty(cid)) _dirtySyntheticChainIds.Remove(cid);
+        }
+
+        private bool IsSyntheticChainDirty(BoneChainDef chain)
+        {
+            if (chain == null || !chain.IsSynthetic) return false;
+            string cid = !string.IsNullOrEmpty(chain.ChainId) ? chain.ChainId : (chain.Name ?? "");
+            return !string.IsNullOrEmpty(cid) && _dirtySyntheticChainIds.Contains(cid);
+        }
+        private bool _synSavedAnimStateValid = false;
+        private string _synSavedAnimName = null;
+        private double _synSavedAnimPos = 0.0;
+        private bool _synSavedAnimWasPlaying = false;
+        private float _synSavedAnimSpeed = 1.0f;
+        private MeshInstance3D _syntheticChainWireframeMesh;
+        private ImmediateMesh _syntheticChainImmediateMesh;
+        private StandardMaterial3D _syntheticChainWireMat;
+
+        private static Basis BuildSyntheticGizmoBasisFromDir(Vector3 dir)
+        {
+            Vector3 downDir = dir.LengthSquared() > 1e-6f ? dir.Normalized() : Vector3.Down;
+            Vector3 upAxis = -downDir;
+            Vector3 refFwd = MathF.Abs(upAxis.Dot(Vector3.Back)) < 0.92f ? Vector3.Back : Vector3.Right;
+            Vector3 xAxis = upAxis.Cross(refFwd).Normalized();
+            Vector3 zAxis = xAxis.Cross(upAxis).Normalized();
+            return new Basis(xAxis, upAxis, zAxis).Orthonormalized();
+        }
+
+        private List<Vector3> EnsureSyntheticJointPositions(BoneChainDef chain)
+        {
+            if (chain == null) return null;
+            int segs = Math.Clamp(chain.SyntheticSegmentCount, 2, 12);
+            int needed = segs + 1;
+            if (chain.SyntheticJointPositionsHeroSpace != null && chain.SyntheticJointPositionsHeroSpace.Count == needed)
+                return chain.SyntheticJointPositionsHeroSpace;
+
+            Vector3 origin = chain.SyntheticOriginHeroSpace;
+            if (origin.LengthSquared() < 1e-6f && _previewHeroSkeleton != null)
+            {
+                int aIdx = _previewHeroSkeleton.FindBone(chain.AnchorHeroBone ?? "spine_3");
+                if (aIdx >= 0) origin = _previewHeroSkeleton.GetBoneGlobalRest(aIdx).Origin;
+                chain.SyntheticOriginHeroSpace = origin;
+            }
+            Vector3 dir = chain.SyntheticDirectionHeroSpace.LengthSquared() > 1e-5f
+                ? chain.SyntheticDirectionHeroSpace.Normalized()
+                : Vector3.Down;
+            float len = Math.Clamp(chain.SyntheticLengthMeters, 0.08f, 2.5f);
+
+            chain.SyntheticJointPositionsHeroSpace ??= new List<Vector3>(needed);
+            chain.SyntheticJointPositionsHeroSpace.Clear();
+            for (int i = 0; i <= segs; i++)
+                chain.SyntheticJointPositionsHeroSpace.Add(origin + dir * (len * i / segs));
+            return chain.SyntheticJointPositionsHeroSpace;
+        }
+
+        private void SetSyntheticChainGizmoActive(bool active)
+        {
+            bool wasActive = _isGizmoEditingSyntheticChain;
+            _isGizmoEditingSyntheticChain = active && _selectedChain != null && _selectedChain.IsSynthetic;
+
+            if (_isGizmoEditingSyntheticChain && !wasActive)
+            {
+                // Entering 3D cloth joint edit: snapshot active animation and freeze in pure Bind Pose (Rest Pose)
+                // so joints are placed & bound against undistorted rest geometry (matching Auto-Rig Reference Bones!).
+                _synSavedAnimStateValid = false;
+                if (_previewAnimPlayer != null && _optTestAnim != null && _optTestAnim.Selected > 0)
+                {
+                    string actAnim = !string.IsNullOrEmpty(_previewAnimPlayer.CurrentAnimation)
+                        ? _previewAnimPlayer.CurrentAnimation
+                        : _previewAnimPlayer.AssignedAnimation;
+                    if (string.IsNullOrEmpty(actAnim) || !_previewAnimPlayer.HasAnimation(actAnim))
+                        actAnim = _optTestAnim.GetItemText(_optTestAnim.Selected);
+                    if (!string.IsNullOrEmpty(actAnim) && _previewAnimPlayer.HasAnimation(actAnim))
+                    {
+                        _synSavedAnimName = actAnim;
+                        _synSavedAnimPos = _previewAnimPlayer.CurrentAnimationPosition;
+                        _synSavedAnimWasPlaying = _previewAnimPlayer.IsPlaying();
+                        _synSavedAnimSpeed = (float)_previewAnimPlayer.SpeedScale;
+                        _synSavedAnimStateValid = true;
+                    }
+                    _previewAnimPlayer.Stop();
+                }
+                if (_previewHeroClone?.FindChild("CustomJiggleBoneDriver", false, false) is DeadlockPlayground.Animation.CustomJiggleBoneDriver drvEnter)
+                {
+                    drvEnter.SetSimulationEnabled(false);
+                    drvEnter.ResetChainsToRestPose();
+                }
+                _previewHeroSkeleton?.ResetBonePoses();
+            }
+            else if (!_isGizmoEditingSyntheticChain && wasActive)
+            {
+                // Exiting 3D cloth joint edit: re-enable physics and restore previous test animation smoothly!
+                if (_previewHeroClone?.FindChild("CustomJiggleBoneDriver", false, false) is DeadlockPlayground.Animation.CustomJiggleBoneDriver drvExit)
+                {
+                    bool masterPhys = _chkPhysicsMasterTab3?.ButtonPressed ?? true;
+                    drvExit.SetSimulationEnabled(masterPhys && !IsWeightPaintActive());
+                    drvExit.ResetChainsToRestPose();
+                }
+                if (_synSavedAnimStateValid && _previewAnimPlayer != null && !string.IsNullOrEmpty(_synSavedAnimName) && _previewAnimPlayer.HasAnimation(_synSavedAnimName))
+                {
+                    _previewAnimPlayer.Play(_synSavedAnimName);
+                    _previewAnimPlayer.SpeedScale = _synSavedAnimSpeed;
+                    _previewAnimPlayer.Seek(_synSavedAnimPos, true);
+                    if (!_synSavedAnimWasPlaying) _previewAnimPlayer.Pause();
+                    if (_previewHeroClone?.FindChild("CustomJiggleBoneDriver", false, false) is DeadlockPlayground.Animation.CustomJiggleBoneDriver drvPost)
+                    {
+                        drvPost.ResetChainsToRestPose();
+                    }
+                }
+                _synSavedAnimStateValid = false;
+            }
+
+            if (_isGizmoEditingSyntheticChain)
+            {
+                _isGizmoEditingRefJoint = false;
+                var pts = EnsureSyntheticJointPositions(_selectedChain);
+                _selectedSyntheticJointIndex = Math.Clamp(_selectedSyntheticJointIndex, 0, Math.Max(0, (pts?.Count ?? 1) - 1));
+            }
+            UpdateGizmoTargetTransform();
+            RedrawSyntheticChainPreview();
+            SyncSyntheticTransformControlsFromSelected();
+            UpdateSyntheticChainViewportHud();
+        }
+
+        private void SelectSyntheticJointIndex(int jointIdx)
+        {
+            if (_selectedChain == null || !_selectedChain.IsSynthetic) return;
+            var pts = EnsureSyntheticJointPositions(_selectedChain);
+            if (pts == null || pts.Count == 0) return;
+            _selectedSyntheticJointIndex = Math.Clamp(jointIdx, 0, pts.Count - 1);
+            if (!_isGizmoEditingSyntheticChain) _isGizmoEditingSyntheticChain = true;
+            UpdateGizmoTargetTransform();
+            RedrawSyntheticChainPreview();
+            SyncSyntheticTransformControlsFromSelected();
+            UpdateSyntheticChainViewportHud();
+        }
+
+        private Transform3D GetSyntheticAnchorAnimDelta(BoneChainDef chain)
+        {
+            if (chain == null || _previewHeroSkeleton == null || !GodotObject.IsInstanceValid(_previewHeroSkeleton))
+                return Transform3D.Identity;
+            int aIdx = _previewHeroSkeleton.FindBone(chain.AnchorHeroBone ?? "spine_3");
+            if (aIdx < 0) return Transform3D.Identity;
+            Transform3D rest = _previewHeroSkeleton.GetBoneGlobalRest(aIdx);
+            Transform3D pose = _previewHeroSkeleton.GetBoneGlobalPose(aIdx);
+            return pose * rest.AffineInverse();
+        }
+
+        private bool TryHandleSyntheticJointLeftClick(InputEvent @event)
+        {
+            if (!_isGizmoEditingSyntheticChain || _selectedChain == null || !_selectedChain.IsSynthetic || IsWeightPaintActive()) return false;
+            if (_previewCamera == null || _subViewportContainer == null) return false;
+            if (_previewGizmo != null && (_previewGizmo.Editing || _previewGizmo.Hovering)) return false;
+            if (@event is not InputEventMouseButton mb || mb.ButtonIndex != MouseButton.Left || !mb.Pressed || mb.ShiftPressed)
+                return false;
+
+            var pts = EnsureSyntheticJointPositions(_selectedChain);
+            if (pts == null || pts.Count == 0) return false;
+
+            Transform3D animDelta = GetSyntheticAnchorAnimDelta(_selectedChain);
+            Vector2 clickPos = mb.Position;
+            int bestIdx = -1;
+            float bestDist = 24f;
+            for (int i = 0; i < pts.Count; i++)
+            {
+                Vector3 wp = animDelta * pts[i];
+                if (_previewCamera.IsPositionBehind(wp)) continue;
+                Vector2 proj = _previewCamera.UnprojectPosition(wp);
+                float d = proj.DistanceTo(clickPos);
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    bestIdx = i;
+                }
+            }
+
+            if (bestIdx >= 0)
+            {
+                SelectSyntheticJointIndex(bestIdx);
+                return true;
+            }
+
+            // Fallback: allow clicking any other visible synthetic chain's joint directly in 3D to switch to it!
+            BoneChainDef bestOtherChain = null;
+            int bestOtherJoint = -1;
+            float bestOtherDist = 22f;
+            foreach (var ch in _boneChains)
+            {
+                if (ch == null || !ch.IsSynthetic || ReferenceEquals(ch, _selectedChain)) continue;
+                var oPts = EnsureSyntheticJointPositions(ch);
+                if (oPts == null || oPts.Count == 0) continue;
+                Transform3D oDelta = GetSyntheticAnchorAnimDelta(ch);
+                for (int i = 0; i < oPts.Count; i++)
+                {
+                    Vector3 wp = oDelta * oPts[i];
+                    if (_previewCamera.IsPositionBehind(wp)) continue;
+                    Vector2 proj = _previewCamera.UnprojectPosition(wp);
+                    float d = proj.DistanceTo(clickPos);
+                    if (d < bestOtherDist)
+                    {
+                        bestOtherDist = d;
+                        bestOtherChain = ch;
+                        bestOtherJoint = i;
+                    }
+                }
+            }
+            if (bestOtherChain != null && bestOtherJoint >= 0)
+            {
+                _selectedChain = bestOtherChain;
+                _selectedSyntheticJointIndex = bestOtherJoint;
+                RefreshClothingChainsPanel();
+                UpdateGizmoTargetTransform();
+                RedrawSyntheticChainPreview();
+                return true;
+            }
+            return false;
+        }
+
+        private void ClearSyntheticChainPreview()
+        {
+            if (_syntheticChainImmediateMesh != null)
+            {
+                _syntheticChainImmediateMesh.ClearSurfaces();
+            }
+            if (_syntheticChainWireframeMesh != null && GodotObject.IsInstanceValid(_syntheticChainWireframeMesh))
+            {
+                _syntheticChainWireframeMesh.Visible = false;
+            }
+        }
+
+        private void RedrawSyntheticChainPreview()
+        {
+            if (_previewWorldRoot == null || !GodotObject.IsInstanceValid(_previewWorldRoot)) return;
+            bool onBonesTab = _rightTabs == null || _rightTabs.CurrentTab == 2;
+            bool inPhysicsSubView = _boxSubViewPhysics == null || _boxSubViewPhysics.Visible;
+            if (!_isGizmoEditingSyntheticChain || _selectedChain == null || !_selectedChain.IsSynthetic || IsWeightPaintActive() || !onBonesTab || !inPhysicsSubView)
+            {
+                ClearSyntheticChainPreview();
+                return;
+            }
+
+            // Reuse a single persistent ImmediateMesh + MeshInstance3D so dragging runs at 60 FPS with zero allocation lag!
+            if (_syntheticChainWireframeMesh == null || !GodotObject.IsInstanceValid(_syntheticChainWireframeMesh))
+            {
+                _syntheticChainImmediateMesh = new ImmediateMesh();
+                _syntheticChainWireMat = new StandardMaterial3D
+                {
+                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                    VertexColorUseAsAlbedo = true,
+                    NoDepthTest = true,
+                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                    Transparency = BaseMaterial3D.TransparencyEnum.Alpha
+                };
+                _syntheticChainWireframeMesh = new MeshInstance3D
+                {
+                    Name = "SyntheticChainPreviewOverlay",
+                    Mesh = _syntheticChainImmediateMesh,
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
+                };
+                // Strictly clear Visual Layer 21 (bit 20)
+                _syntheticChainWireframeMesh.Layers &= ~(1u << 20);
+                _previewWorldRoot.AddChild(_syntheticChainWireframeMesh);
+            }
+
+            _syntheticChainWireframeMesh.Visible = true;
+            _syntheticChainImmediateMesh.ClearSurfaces();
+
+            var pts = EnsureSyntheticJointPositions(_selectedChain);
+            if (pts == null || pts.Count < 2) return;
+            int segs = pts.Count - 1;
+            float rad = Math.Clamp(_selectedChain.SyntheticInfluenceRadius, 0.04f, 1.5f);
+            Transform3D animDelta = GetSyntheticAnchorAnimDelta(_selectedChain);
+
+            var im = _syntheticChainImmediateMesh;
+            im.SurfaceBegin(Mesh.PrimitiveType.Lines, _syntheticChainWireMat);
+
+            // 0. Draw all OTHER synthetic chains subtly so mirrored/multiple chains are visible simultaneously in 3D!
+            foreach (var other in _boneChains)
+            {
+                if (other == null || !other.IsSynthetic || ReferenceEquals(other, _selectedChain)) continue;
+                var oPts = EnsureSyntheticJointPositions(other);
+                if (oPts == null || oPts.Count < 2) continue;
+                int oSegs = oPts.Count - 1;
+                Transform3D oDelta = GetSyntheticAnchorAnimDelta(other);
+                Color oSegCol = new Color(0.45f, 0.78f, 0.74f, 0.52f);
+                Color oJntCol = new Color(0.70f, 0.88f, 0.85f, 0.55f);
+
+                for (int i = 0; i < oSegs; i++)
+                {
+                    im.SurfaceSetColor(oSegCol);
+                    im.SurfaceAddVertex(oDelta * oPts[i]);
+                    im.SurfaceSetColor(oSegCol);
+                    im.SurfaceAddVertex(oDelta * oPts[i + 1]);
+                }
+                for (int i = 0; i <= oSegs; i++)
+                {
+                    float m = 0.014f;
+                    Vector3 jp = oDelta * oPts[i];
+                    Vector3 px = jp + Vector3.Right * m, nx = jp - Vector3.Right * m;
+                    Vector3 py = jp + Vector3.Up * m, ny = jp - Vector3.Up * m;
+                    Vector3 pz = jp + Vector3.Back * m, nz = jp - Vector3.Back * m;
+                    void OEdge(Vector3 a, Vector3 b) { im.SurfaceSetColor(oJntCol); im.SurfaceAddVertex(a); im.SurfaceSetColor(oJntCol); im.SurfaceAddVertex(b); }
+                    OEdge(py, px); OEdge(py, nx); OEdge(py, pz); OEdge(py, nz);
+                    OEdge(ny, px); OEdge(ny, nx); OEdge(ny, pz); OEdge(ny, nz);
+                }
+            }
+
+            // 1. Draw active chain bone segments transformed by live anchor animation pose (gold -> cyan tip)
+            for (int i = 0; i < segs; i++)
+            {
+                float t = i / (float)Math.Max(1, segs - 1);
+                Color col = new Color(1.0f - 0.55f * t, 0.85f + 0.10f * t, 0.25f + 0.70f * t, 0.98f);
+                im.SurfaceSetColor(col);
+                im.SurfaceAddVertex(animDelta * pts[i]);
+                im.SurfaceSetColor(col);
+                im.SurfaceAddVertex(animDelta * pts[i + 1]);
+            }
+
+            // 2. Draw clickable 3D joint diamond markers (selected joint highlighted bright gold/white)
+            for (int i = 0; i <= segs; i++)
+            {
+                bool isSel = _isGizmoEditingSyntheticChain && i == _selectedSyntheticJointIndex;
+                float m = isSel ? 0.032f : 0.020f;
+                Color jCol = isSel ? new Color(1.0f, 0.95f, 0.35f, 1.0f) : new Color(0.95f, 0.95f, 0.95f, 0.90f);
+                Vector3 jp = animDelta * pts[i];
+                Vector3 px = jp + Vector3.Right * m, nx = jp - Vector3.Right * m;
+                Vector3 py = jp + Vector3.Up * m, ny = jp - Vector3.Up * m;
+                Vector3 pz = jp + Vector3.Back * m, nz = jp - Vector3.Back * m;
+
+                void Edge(Vector3 a, Vector3 b) { im.SurfaceSetColor(jCol); im.SurfaceAddVertex(a); im.SurfaceSetColor(jCol); im.SurfaceAddVertex(b); }
+                Edge(py, px); Edge(py, nx); Edge(py, pz); Edge(py, nz);
+                Edge(ny, px); Edge(ny, nx); Edge(ny, pz); Edge(ny, nz);
+                Edge(px, pz); Edge(pz, nx); Edge(nx, nz); Edge(nz, px);
+            }
+
+            // 3. Optional Weight Influence Radius wireframe (clearly labeled, toggleable so it isn't confused with collision)
+            if (_showSyntheticWeightRadius)
+            {
+                Color radCol = new Color(0.25f, 0.88f, 0.95f, 0.38f);
+                const int ringSteps = 16;
+                for (int ri = 0; ri <= segs; ri++)
+                {
+                    Vector3 segDir = ri < segs ? (pts[ri + 1] - pts[ri]) : (pts[segs] - pts[segs - 1]);
+                    Basis ringBasis = (animDelta.Basis * BuildSyntheticGizmoBasisFromDir(segDir)).Orthonormalized();
+                    Vector3 rx = ringBasis.X;
+                    Vector3 rz = ringBasis.Z;
+                    Vector3 center = animDelta * pts[ri];
+                    for (int k = 0; k < ringSteps; k++)
+                    {
+                        float a0 = k * Mathf.Tau / ringSteps;
+                        float a1 = (k + 1) * Mathf.Tau / ringSteps;
+                        Vector3 p0 = center + (rx * MathF.Cos(a0) + rz * MathF.Sin(a0)) * rad;
+                        Vector3 p1 = center + (rx * MathF.Cos(a1) + rz * MathF.Sin(a1)) * rad;
+                        im.SurfaceSetColor(radCol);
+                        im.SurfaceAddVertex(p0);
+                        im.SurfaceSetColor(radCol);
+                        im.SurfaceAddVertex(p1);
+                    }
+                }
+            }
+
+            im.SurfaceEnd();
+        }
+
         private void UpdateGizmoTargetTransform()
         {
             SyncGizmoSpaceButton();
             if (_previewGizmo == null || _previewHeroSkeleton == null) return;
+
+            bool onBonesTab = _rightTabs == null || _rightTabs.CurrentTab == 2;
+            bool inPhysicsSubView = _boxSubViewPhysics == null || _boxSubViewPhysics.Visible;
+            if (_isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic && _previewWorldRoot != null && !IsWeightPaintActive() && onBonesTab && inPhysicsSubView)
+            {
+                _isGizmoUpdatingFromUI = true;
+                var pts = EnsureSyntheticJointPositions(_selectedChain);
+                int jIdx = Math.Clamp(_selectedSyntheticJointIndex, 0, Math.Max(0, (pts?.Count ?? 1) - 1));
+                _selectedSyntheticJointIndex = jIdx;
+
+                // Joint 0 (Root) allows Move + Rotate (moves/aims entire chain); child joints allow free 3D Move!
+                _previewGizmo.Mode = jIdx == 0
+                    ? (Gizmo3D.ToolMode.Move | Gizmo3D.ToolMode.Rotate)
+                    : Gizmo3D.ToolMode.Move;
+
+                if (_gizmoDummyTarget == null || !GodotObject.IsInstanceValid(_gizmoDummyTarget))
+                {
+                    _gizmoDummyTarget = new Node3D { Name = "GizmoDummyTarget" };
+                }
+                if (_gizmoDummyTarget.GetParent() != _previewWorldRoot)
+                {
+                    _gizmoDummyTarget.GetParent()?.RemoveChild(_gizmoDummyTarget);
+                    _previewWorldRoot.AddChild(_gizmoDummyTarget);
+                }
+
+                Transform3D animDelta = GetSyntheticAnchorAnimDelta(_selectedChain);
+                Vector3 jointPosRest = (pts != null && jIdx < pts.Count) ? pts[jIdx] : _selectedChain.SyntheticOriginHeroSpace;
+                Basis synBasisRest = jIdx == 0
+                    ? BuildSyntheticGizmoBasisFromDir(_selectedChain.SyntheticDirectionHeroSpace)
+                    : Basis.Identity;
+                _gizmoDummyTarget.GlobalTransform = new Transform3D((animDelta.Basis * synBasisRest).Orthonormalized(), animDelta * jointPosRest);
+                _previewGizmo.Visible = true;
+                if (!_previewGizmo.IsSelected(_gizmoDummyTarget))
+                {
+                    _previewGizmo.ClearSelection();
+                    _previewGizmo.Select(_gizmoDummyTarget);
+                }
+                _isGizmoUpdatingFromUI = false;
+                return;
+            }
+
             int target = _optGizmoTarget?.Selected >= 0 ? _optGizmoTarget.GetItemId(_optGizmoTarget.Selected) : 0;
             if (_btnAccGizmoToggle != null) _btnAccGizmoToggle.SetPressedNoSignal(target == 3);
 
@@ -9478,6 +10450,15 @@ namespace DeadlockPlayground.UI
         private void OnGizmoTransformEnd(int mode)
         {
             _isGizmoDragging = false;
+            if (_isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic)
+            {
+                // Zero-lag workflow (matching Auto-Rig Reference Bones): do NOT freeze with a full re-rig on mouse release!
+                MarkSyntheticChainDirty(_selectedChain);
+                UpdateSyntheticApplyButtonVisual();
+                RedrawSyntheticChainPreview();
+                SetRigChipStatus("Cloth Bones Modified — Click Apply / Bind Chain", StatusTone.Warning);
+                return;
+            }
             if (_isGizmoEditingRefJoint && IsPinEditActive())
             {
                 _pinsDirtyNeedsRigRebuild = true;
@@ -9516,6 +10497,49 @@ namespace DeadlockPlayground.UI
         private void OnGizmoTransformChanged(int mode, Vector3 value)
         {
             if (_isGizmoUpdatingFromUI || _previewGizmo == null || _gizmoDummyTarget == null) return;
+            if (_isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic)
+            {
+                _isGizmoDragging = true;
+                var pts = EnsureSyntheticJointPositions(_selectedChain);
+                if (pts != null && pts.Count >= 2)
+                {
+                    int jIdx = Math.Clamp(_selectedSyntheticJointIndex, 0, pts.Count - 1);
+                    Transform3D invAnim = GetSyntheticAnchorAnimDelta(_selectedChain).AffineInverse();
+                    Vector3 newPos = invAnim * _gizmoDummyTarget.Position;
+                    if (jIdx == 0)
+                    {
+                        Vector3 oldDir = _selectedChain.SyntheticDirectionHeroSpace.LengthSquared() > 1e-5f
+                            ? _selectedChain.SyntheticDirectionHeroSpace.Normalized()
+                            : Vector3.Down;
+                        Vector3 newDir = (invAnim.Basis * (-_gizmoDummyTarget.Basis.Y)).Normalized();
+                        Quaternion rotDelta = (oldDir.Dot(newDir) < 0.9999f && oldDir.Dot(newDir) > -0.9999f)
+                            ? new Quaternion(oldDir, newDir)
+                            : Quaternion.Identity;
+
+                        Vector3 oldRoot = pts[0];
+                        for (int i = 0; i < pts.Count; i++)
+                        {
+                            pts[i] = newPos + rotDelta * (pts[i] - oldRoot);
+                        }
+                        _selectedChain.SyntheticOriginHeroSpace = newPos;
+                        if (newDir.LengthSquared() > 1e-5f)
+                            _selectedChain.SyntheticDirectionHeroSpace = newDir;
+                    }
+                    else
+                    {
+                        // Move individual mid/tip joint freely in 3D space!
+                        pts[jIdx] = newPos;
+                        Vector3 rootToTip = pts[^1] - pts[0];
+                        if (rootToTip.LengthSquared() > 1e-5f)
+                        {
+                            _selectedChain.SyntheticDirectionHeroSpace = rootToTip.Normalized();
+                        }
+                    }
+                }
+                SyncSyntheticTransformControlsFromSelected();
+                RedrawSyntheticChainPreview();
+                return;
+            }
             if (_isGizmoEditingRefJoint && IsPinEditActive() && !string.IsNullOrEmpty(_selectedPin))
             {
                 _isGizmoDragging = true;
@@ -9790,7 +10814,286 @@ namespace DeadlockPlayground.UI
             return list.Count > 0 ? list[0] : null;
         }
 
+        private bool _hasShownInitialMissingBonesPopup;
+        private Control _missingBonesOverlay;
+
+        private bool EvaluateCriticalBoneHealth(
+            out List<(string Canonical, string Label, string Impact)> missingCritical,
+            out List<string> missingRecommended,
+            out string rigHint)
+        {
+            var critList = new List<(string, string, string)>();
+            missingCritical = critList;
+            missingRecommended = new List<string>();
+            rigHint = "";
+
+            if (_workflowIntent != ImportWorkflowIntent.FullCharacter)
+                return true;
+
+            if (GetCurrentRiggingMethod() != CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap)
+                return true;
+
+            if (_cachedSourceSkeleton == null || _boneRowsByCanonical.Count == 0)
+                return true;
+
+            bool HasMapped(string canonical)
+                => _userBoneRemap.TryGetValue(canonical, out string mapped) && !string.IsNullOrWhiteSpace(mapped);
+
+            void CheckCritical(string canonical, string label, string impact)
+            {
+                if (_boneRowsByCanonical.ContainsKey(canonical) && !HasMapped(canonical))
+                    critList.Add((canonical, label, impact));
+            }
+
+            CheckCritical("pelvis", "Pelvis / Hips", "Legs and torso will detach, collapse, or rotate incorrectly during animations.");
+
+            bool hasAnySpineSlot = _boneRowsByCanonical.ContainsKey("spine_0") || _boneRowsByCanonical.ContainsKey("spine_1")
+                                || _boneRowsByCanonical.ContainsKey("spine_2") || _boneRowsByCanonical.ContainsKey("spine_3");
+            bool hasAnySpineMapped = HasMapped("spine_0") || HasMapped("spine_1") || HasMapped("spine_2") || HasMapped("spine_3");
+            if (hasAnySpineSlot && !hasAnySpineMapped)
+            {
+                critList.Add(("spine_2", "Torso / Spine", "Upper body will stay rigid or detach from the hips during movement."));
+            }
+
+            CheckCritical("head", "Head", "Head will remain frozen or twist unnaturally with the torso.");
+            CheckCritical("arm_upper_L", "Left Upper Arm", "Left arm will collapse into the torso or stretch across the body.");
+            CheckCritical("arm_lower_L", "Left Forearm", "Left elbow cannot bend; arm will deform rigidly or pinch.");
+            CheckCritical("arm_upper_R", "Right Upper Arm", "Right arm will collapse into the torso or stretch across the body.");
+            CheckCritical("arm_lower_R", "Right Forearm", "Right elbow cannot bend; arm will deform rigidly or pinch.");
+            CheckCritical("leg_upper_L", "Left Thigh", "Left leg cannot stride or crouch properly.");
+            CheckCritical("leg_lower_L", "Left Shin / Knee", "Left knee cannot bend; walk/run cycles will break.");
+            CheckCritical("leg_upper_R", "Right Thigh", "Right leg cannot stride or crouch properly.");
+            CheckCritical("leg_lower_R", "Right Shin / Knee", "Right knee cannot bend; walk/run cycles will break.");
+
+            foreach (var (canon, label) in new[]
+            {
+                ("neck_0", "Neck"),
+                ("hand_L", "Left Hand"),
+                ("hand_R", "Right Hand"),
+                ("ankle_L", "Left Foot"),
+                ("ankle_R", "Right Foot")
+            })
+            {
+                if (_boneRowsByCanonical.ContainsKey(canon) && !HasMapped(canon))
+                    missingRecommended.Add(label);
+            }
+
+            if (_lastRigAnalysis?.Family == RigFamily.RobloxR6)
+            {
+                rigHint = "Roblox R6 rig detected: R6 lacks elbows, knees, and a pelvis split. Switching to Auto-Rig (Reference Bones) is strongly recommended so Deadlock animations deform cleanly.";
+            }
+            else if (_lastRigAnalysis?.Family == RigFamily.RobloxR15)
+            {
+                rigHint = "Roblox R15 rig detected: R15 has no neck or clavicle bones (these auto-collapse cleanly), but LowerTorso (Pelvis), UpperTorso (Spine), Head, and all 4 limb chains should be mapped.";
+            }
+
+            return missingCritical.Count == 0;
+        }
+
+        private void MaybeShowInitialMissingBonesWarning()
+        {
+            if (_hasShownInitialMissingBonesPopup || !Visible) return;
+            if (!EvaluateCriticalBoneHealth(out var missingCritical, out var missingRecommended, out var rigHint))
+            {
+                _hasShownInitialMissingBonesPopup = true;
+                ShowMissingCriticalBonesPopup(missingCritical, missingRecommended, rigHint, isConfirmGuard: false);
+            }
+        }
+
+        private void DismissMissingBonesPopup()
+        {
+            if (_missingBonesOverlay != null && GodotObject.IsInstanceValid(_missingBonesOverlay))
+            {
+                _missingBonesOverlay.QueueFree();
+            }
+            _missingBonesOverlay = null;
+        }
+
+        private void ShowMissingCriticalBonesPopup(
+            List<(string Canonical, string Label, string Impact)> missingCritical,
+            List<string> missingRecommended,
+            string rigHint,
+            bool isConfirmGuard)
+        {
+            DismissMissingBonesPopup();
+
+            var backdrop = new ColorRect
+            {
+                Name = "MissingCriticalBonesOverlay",
+                Color = new Color(0f, 0f, 0f, 0.62f),
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+            backdrop.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            AddChild(backdrop);
+            _missingBonesOverlay = backdrop;
+
+            var center = new CenterContainer();
+            center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            backdrop.AddChild(center);
+
+            var panel = new PanelContainer
+            {
+                ThemeTypeVariation = "ModalPanel",
+                CustomMinimumSize = new Vector2(560, 0)
+            };
+            center.AddChild(panel);
+
+            var margin = new MarginContainer();
+            margin.AddThemeConstantOverride("margin_left", 22);
+            margin.AddThemeConstantOverride("margin_right", 22);
+            margin.AddThemeConstantOverride("margin_top", 18);
+            margin.AddThemeConstantOverride("margin_bottom", 18);
+            panel.AddChild(margin);
+
+            var vbox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            vbox.AddThemeConstantOverride("separation", 12);
+            margin.AddChild(vbox);
+
+            var titleLbl = new Label
+            {
+                Text = $"⚠ Missing Critical Bones ({missingCritical.Count})",
+                ThemeTypeVariation = "ModalTitleLabel"
+            };
+            titleLbl.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.SemanticWarning)));
+            vbox.AddChild(titleLbl);
+
+            var introLbl = new Label
+            {
+                Text = "This skeleton is missing core humanoid bones required for Deadlock animation playback. Applying without fixing these bones will cause severe mesh distortion or detached limbs:",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            ImporterStyle.ApplyBodyStyle(introLbl);
+            vbox.AddChild(introLbl);
+
+            if (!string.IsNullOrEmpty(rigHint))
+            {
+                var hintPanel = new PanelContainer { ThemeTypeVariation = "SubPanelContainer" };
+                var hintMargin = new MarginContainer();
+                hintMargin.AddThemeConstantOverride("margin_left", 10);
+                hintMargin.AddThemeConstantOverride("margin_right", 10);
+                hintMargin.AddThemeConstantOverride("margin_top", 8);
+                hintMargin.AddThemeConstantOverride("margin_bottom", 8);
+                hintPanel.AddChild(hintMargin);
+                var hintLbl = new Label
+                {
+                    Text = rigHint,
+                    AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                ImporterStyle.ApplyHintStyle(hintLbl);
+                hintMargin.AddChild(hintLbl);
+                vbox.AddChild(hintPanel);
+            }
+
+            var listScroll = new ScrollContainer
+            {
+                CustomMinimumSize = new Vector2(0, Math.Min(220, Math.Max(90, missingCritical.Count * 38))),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+            };
+            var listBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            listBox.AddThemeConstantOverride("separation", 6);
+            listScroll.AddChild(listBox);
+
+            foreach (var (_, label, impact) in missingCritical)
+            {
+                var itemLbl = new Label
+                {
+                    Text = $"• {label} — {impact}",
+                    AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                ImporterStyle.ApplyFontSize(itemLbl, ImporterStyle.FontHint);
+                itemLbl.AddThemeColorOverride("font_color", ThemeManager.GetColor(nameof(ThemePaletteData.SemanticWarning)));
+                listBox.AddChild(itemLbl);
+            }
+            vbox.AddChild(listScroll);
+
+            if (missingRecommended.Count > 0)
+            {
+                var recLbl = new Label
+                {
+                    Text = $"Also unmapped (optional / auto-collapsed): {string.Join(", ", missingRecommended)}",
+                    AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                ImporterStyle.ApplyHintStyle(recLbl);
+                vbox.AddChild(recLbl);
+            }
+
+            vbox.AddChild(new HSeparator());
+
+            var btnRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            btnRow.AddThemeConstantOverride("separation", 8);
+
+            var btnFixBones = new Button
+            {
+                Text = "Fix in Bones Tab",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(140, 36),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            };
+            btnFixBones.Pressed += () =>
+            {
+                DismissMissingBonesPopup();
+                if (_rightTabs != null && _rightTabs.GetTabCount() > 2)
+                    _rightTabs.CurrentTab = 2;
+                SetBonesSubView(0);
+                if (_btnFilterUnmappedOnly != null)
+                    _btnFilterUnmappedOnly.ButtonPressed = true;
+                ApplyBoneMappingFilter();
+            };
+            btnRow.AddChild(btnFixBones);
+
+            var btnAutoRig = new Button
+            {
+                Text = "Switch to Auto-Rig",
+                ThemeTypeVariation = "ImporterPrimaryButton",
+                CustomMinimumSize = new Vector2(160, 36),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                TooltipText = "Rebuild a complete Deadlock-compatible skeleton using 16 draggable Reference Bones."
+            };
+            btnAutoRig.Pressed += () =>
+            {
+                DismissMissingBonesPopup();
+                SelectRiggingMethodById((int)CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig);
+                if (_rightTabs != null && _rightTabs.GetTabCount() > 1)
+                    _rightTabs.CurrentTab = 1;
+                SetBottomStatus("Switched to Auto-Rig (Reference Bones) — position joints and click Bind.", StatusTone.Info);
+            };
+            btnRow.AddChild(btnAutoRig);
+
+            var btnContinue = new Button
+            {
+                Text = isConfirmGuard ? "Apply Anyway" : "Continue Anyway",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(130, 36)
+            };
+            btnContinue.Pressed += () =>
+            {
+                DismissMissingBonesPopup();
+                if (isConfirmGuard)
+                {
+                    ExecuteConfirmApplyToHero();
+                }
+            };
+            btnRow.AddChild(btnContinue);
+
+            vbox.AddChild(btnRow);
+        }
+
         private void OnConfirmApplyToHero()
+        {
+            if (!EvaluateCriticalBoneHealth(out var missingCritical, out var missingRecommended, out var rigHint))
+            {
+                ShowMissingCriticalBonesPopup(missingCritical, missingRecommended, rigHint, isConfirmGuard: true);
+                return;
+            }
+            ExecuteConfirmApplyToHero();
+        }
+
+        private void ExecuteConfirmApplyToHero()
         {
             _liveRigDebounceTimer?.Stop();
             if (_liveHeroNode == null || _liveImportedScene == null)

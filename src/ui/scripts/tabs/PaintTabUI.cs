@@ -1132,7 +1132,29 @@ public partial class PaintTabUI : VBoxContainer
                         vpkLoader.CurrentHeroNode != null)
                     {
                         var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
-                        charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, targetHero);
+                        bool restoredCustom = charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, targetHero) ?? false;
+
+                        // Wait one frame so newly bound custom MeshInstance3D nodes and deferred HeroLoaded callbacks settle,
+                        // then immediately hydrate staged painted textures/layers so custom models never appear white on load.
+                        if (restoredCustom)
+                        {
+                            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                            if (vpkLoader.CurrentHeroNode != null && GodotObject.IsInstanceValid(vpkLoader.CurrentHeroNode))
+                            {
+                                bool hasStagedPaint = restoredHeroEntry.Assets != null && restoredHeroEntry.Assets.Any(a =>
+                                    a != null && ((a.ModifiedTextures != null && a.ModifiedTextures.Count > 0) ||
+                                                  (a.Materials != null && a.Materials.Count > 0)));
+                                if (hasStagedPaint)
+                                {
+                                    SetHero(vpkLoader.CurrentHeroNode);
+                                    _layerManager?.ApplyOverlayParametersToMeshes();
+                                    if (!IsTabActive)
+                                    {
+                                        _meshHierarchy?.ApplyToonShading(true);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
