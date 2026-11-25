@@ -631,7 +631,7 @@ namespace DeadlockPlayground.UI
         private bool TryHandleViewportBoneLeftClick(InputEvent @event)
         {
             if ((!_showBones && !_showColliders) || _previewCamera == null || _previewHeroSkeleton == null) return false;
-            if (IsWeightPaintActive() || IsDeformBrushActive() || IsPinEditActive()) return false;
+            if (IsMeshCutActive() || IsWeightPaintActive() || IsDeformBrushActive() || IsImportedSculptActive() || IsPinEditActive()) return false;
             if (@event is not InputEventMouseButton mb || mb.ButtonIndex != MouseButton.Left) return false;
 
             if (mb.Pressed)

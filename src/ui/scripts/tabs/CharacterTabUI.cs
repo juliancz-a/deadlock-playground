@@ -568,7 +568,7 @@ public partial class CharacterTabUI : VBoxContainer
         _customModelFileDialog.PopupCentered(new Vector2I(850, 550));
     }
 
-    private void RefreshAfterModelOrAccessoryChange(Node3D activeHero, bool clearPaintCache = false)
+    private void RefreshAfterModelOrAccessoryChange(Node3D activeHero, bool clearPaintCache = false, bool skipSkeletonReset = false)
     {
         if (activeHero == null) return;
 
@@ -589,15 +589,18 @@ public partial class CharacterTabUI : VBoxContainer
                       ?? GetTree()?.Root?.FindChild("ShadingTabUI", true, false) as ShadingTabUI;
         shadingTab?.SetHero(activeHero);
 
-        var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
-        if (skeleton != null)
+        if (!skipSkeletonReset)
         {
-            var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
-                         ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
-            playerTab?.SetSkeleton(skeleton);
+            var skeleton = CustomModelAutoRigger.FindSkeleton(activeHero);
+            if (skeleton != null)
+            {
+                var playerTab = GetTree()?.Root?.FindChild("PoseTab", true, false) as PlayerTabUI
+                             ?? GetTree()?.Root?.FindChild("PlayerTabUI", true, false) as PlayerTabUI;
+                playerTab?.SetSkeleton(skeleton);
 
-            var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as DeadlockPlayground.UI.AnimationStudioDock;
-            animDock?.SetSkeleton(skeleton);
+                var animDock = GetTree()?.Root?.FindChild("AnimationStudioDock", true, false) as DeadlockPlayground.UI.AnimationStudioDock;
+                animDock?.SetSkeleton(skeleton);
+            }
         }
 
         UpdateContextualButtonsVisibility();
@@ -901,6 +904,10 @@ public partial class CharacterTabUI : VBoxContainer
                 {
                     existingContainer.Visible = true;
                 }
+                if (hero != null && GodotObject.IsInstanceValid(hero))
+                {
+                    CustomModelAutoRigger.RecomputeHeroReplacementVisibility(hero);
+                }
             };
 
             modal.RiggingConfirmed += () =>
@@ -973,6 +980,10 @@ public partial class CharacterTabUI : VBoxContainer
                 {
                     existingContainer.Visible = prevVis;
                 }
+                if (hero != null && GodotObject.IsInstanceValid(hero))
+                {
+                    CustomModelAutoRigger.RecomputeHeroReplacementVisibility(hero);
+                }
             };
 
             modal.RiggingConfirmed += () =>
@@ -1022,6 +1033,14 @@ public partial class CharacterTabUI : VBoxContainer
         if (string.IsNullOrEmpty(diskPath) || !File.Exists(diskPath))
         {
             GD.PrintErr($"[CharacterTabUI] Cannot duplicate/mirror '{slotId}': staged source file not found.");
+            return;
+        }
+
+        var dupReport = ImporterMemoryGuard.Evaluate(diskPath, hero);
+        if (dupReport.Verdict == ImporterMemoryGuard.Verdict.Critical && !ImporterMemoryGuard.SuppressPromptForSession)
+        {
+            GD.PushWarning($"[CharacterTabUI] Blocked mirror/duplicate due to critical RAM: {dupReport.Message}");
+            ShowImporterNotice("Low Memory Warning", dupReport.Message);
             return;
         }
 
@@ -1252,11 +1271,23 @@ public partial class CharacterTabUI : VBoxContainer
             {
                 if (!GodotObject.IsInstanceValid(container)) return;
                 bool nextVis = !container.Visible;
+                var hierarchy = GetTree()?.Root?.FindChild("HeroMeshHierarchy", true, false) as HeroMeshHierarchy;
+                // Tear down split _surf_* clones first so RecomputeHeroDeformations restores/re-applies cuts
+                // cleanly on pristine composite parent meshes before ScanHero re-splits them.
+                hierarchy?.CleanupGeneratedSubmeshes();
                 container.Visible = nextVis;
+                foreach (var accMi in CustomModelAutoRigger.CollectMeshes(container))
+                {
+                    if (accMi != null && GodotObject.IsInstanceValid(accMi))
+                    {
+                        accMi.Visible = nextVis;
+                        accMi.SetMeta("UserVisibility", nextVis);
+                    }
+                }
                 if (!string.IsNullOrEmpty(heroId))
                     session?.SetAccessoryVisibility(heroId, slotId, nextVis);
                 CustomModelAutoRigger.RecomputeHeroReplacementVisibility(hero);
-                RefreshAfterModelOrAccessoryChange(hero);
+                RefreshAfterModelOrAccessoryChange(hero, clearPaintCache: false, skipSkeletonReset: true);
             };
             hbox.AddChild(btnVis);
 
@@ -1399,6 +1430,93 @@ public partial class CharacterTabUI : VBoxContainer
 
         string displayName = _vpkLoader?.LastLoadedHeroEntry?.DisplayName ?? heroId;
         DeadlockPlayground.Workspace.ModWorkspaceSession.Instance.StageCustomModel(heroId, displayName, modelFilePath, options);
+    }
+
+    /// <summary>
+    /// Async wrapper around <see cref="RestoreCustomModelFromWorkspace"/> that runs a pre-flight
+    /// <see cref="ImporterMemoryGuard"/> check across all staged custom models/accessories in the .dpp
+    /// and prompts the user before loading if free RAM or Windows commit headroom is critically low.
+    /// </summary>
+    public async System.Threading.Tasks.Task<bool> RestoreCustomModelFromWorkspaceAsync(Node3D heroNode, string heroId)
+    {
+        if (heroNode == null || string.IsNullOrEmpty(heroId)) return false;
+        var session = DeadlockPlayground.Workspace.ModWorkspaceSession.Instance;
+        if (session?.Manifest?.Heroes == null ||
+            !session.Manifest.Heroes.TryGetValue(heroId, out var heroEntry) ||
+            heroEntry == null)
+            return false;
+
+        var modelPaths = new List<string>();
+        if (heroEntry.CustomModel != null)
+        {
+            string p = session.ResolveCustomModelDiskPath(heroEntry.CustomModel);
+            if (!string.IsNullOrEmpty(p)) modelPaths.Add(p);
+        }
+        if (heroEntry.Accessories != null)
+        {
+            foreach (var acc in heroEntry.Accessories)
+            {
+                if (acc?.ModelConfig == null) continue;
+                string p = session.ResolveCustomModelDiskPath(acc.ModelConfig);
+                if (!string.IsNullOrEmpty(p)) modelPaths.Add(p);
+            }
+        }
+        if (modelPaths.Count == 0) return false;
+
+        ImporterMemoryGuard.Log("before .dpp custom model restore");
+        var report = ImporterMemoryGuard.EvaluateBatch(modelPaths, heroNode);
+        if (report.Verdict == ImporterMemoryGuard.Verdict.Critical && !ImporterMemoryGuard.SuppressPromptForSession)
+        {
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<int>();
+            var dlg = new AcceptDialog
+            {
+                Title = "Low Memory Warning — Loading Project Models",
+                OkButtonText = "Continue (Light Mode)",
+                Exclusive = false
+            };
+
+            var body = new VBoxContainer();
+            body.AddThemeConstantOverride("separation", 10);
+            body.AddChild(new Label
+            {
+                Text = report.Message,
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                CustomMinimumSize = new Vector2(460, 0)
+            });
+            var chkSuppress = new CheckBox { Text = "Don't warn again this session" };
+            body.AddChild(chkSuppress);
+            dlg.AddChild(body);
+            dlg.AddCancelButton("Skip Custom Models");
+
+            dlg.Confirmed += () =>
+            {
+                if (chkSuppress.ButtonPressed) ImporterMemoryGuard.SuppressPromptForSession = true;
+                ImporterMemoryGuard.LightMode = true;
+                tcs.TrySetResult(1);
+                dlg.QueueFree();
+            };
+            dlg.Canceled += () =>
+            {
+                tcs.TrySetResult(0);
+                dlg.QueueFree();
+            };
+
+            GetTree()?.Root?.AddChild(dlg);
+            dlg.PopupCentered(new Vector2I(520, 220));
+
+            int choice = await tcs.Task;
+            if (choice == 0)
+            {
+                GD.PushWarning("[CharacterTabUI] User skipped restoring custom models due to low memory.");
+                return false;
+            }
+        }
+        else if (report.Verdict == ImporterMemoryGuard.Verdict.LowMemory)
+        {
+            ImporterMemoryGuard.LightMode = true;
+        }
+
+        return RestoreCustomModelFromWorkspace(heroNode, heroId);
     }
 
     public bool RestoreCustomModelFromWorkspace(Node3D heroNode, string heroId)
@@ -2144,6 +2262,27 @@ public partial class CharacterTabUI : VBoxContainer
         if (mesh == null || !GodotObject.IsInstanceValid(mesh)) return;
 
         bool hiddenByCustom = mesh.HasMeta("UserHiddenByCustomModel") && mesh.GetMeta("UserHiddenByCustomModel").AsBool();
+        // If the user explicitly clicks the eye icon ON to recover an original vanilla mesh hidden by an accessory slot,
+        // clear UserHiddenByCustomModel and remove it from sibling accessory SlotHiddenTargets so it can ALWAYS be recovered!
+        if (pressed && hiddenByCustom)
+        {
+            mesh.RemoveMeta("UserHiddenByCustomModel");
+            hiddenByCustom = false;
+            Node3D activeHero = null;
+            for (Node cur = mesh.GetParent(); cur is Node3D n3; cur = cur.GetParent())
+            {
+                activeHero = n3;
+                if (CustomModelAutoRigger.CollectCustomContainers(n3).Count > 0) break;
+            }
+            if (activeHero != null && GodotObject.IsInstanceValid(activeHero))
+            {
+                string meshKey = mesh.Name.ToString();
+                string parentKey = mesh.HasMeta("ParentCompositeMesh") && mesh.GetMeta("ParentCompositeMesh").As<MeshInstance3D>() is MeshInstance3D pMi
+                    ? CustomModelAutoRigger.MakeSurfaceKeepKey(pMi.Name.ToString(), mesh.HasMeta("SurfaceIndex") ? mesh.GetMeta("SurfaceIndex").AsInt32() : 0)
+                    : CustomModelAutoRigger.MakeSurfaceKeepKey(meshKey, 0);
+                CustomModelAutoRigger.ClearTargetFromAccessoryHiddenLists(activeHero, meshKey, parentKey);
+            }
+        }
         if (!mesh.HasMeta("IsHiddenComposite"))
         {
             mesh.Visible = pressed && !hiddenByCustom;

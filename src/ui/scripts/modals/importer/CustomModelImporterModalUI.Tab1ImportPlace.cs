@@ -82,6 +82,21 @@ namespace DeadlockPlayground.UI
             _optAccBoneMode.Select(0);
             _optAccBoneMode.ItemSelected += (_) =>
             {
+                var accMode = _optAccBoneMode.Selected >= 0
+                    ? (AccessoryBoneMode)_optAccBoneMode.GetItemId(_optAccBoneMode.Selected)
+                    : AccessoryBoneMode.RigidToOneBone;
+                var srcSkel = GetValidSourceSkeleton();
+                bool hasSrcRig = srcSkel != null && srcSkel.GetBoneCount() > 0;
+                if (accMode == AccessoryBoneMode.SkinToHero && !hasSrcRig &&
+                    GetCurrentRiggingMethod() == CustomModelAutoRigger.RiggingMethod.RigidSingleBone)
+                {
+                    SelectRiggingMethodById((int)CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig);
+                }
+                else if (accMode == AccessoryBoneMode.RigidToOneBone &&
+                         GetCurrentRiggingMethod() != CustomModelAutoRigger.RiggingMethod.RigidSingleBone)
+                {
+                    SelectRiggingMethodById((int)CustomModelAutoRigger.RiggingMethod.RigidSingleBone);
+                }
                 UpdateAccessoryRigVisibility();
                 TriggerRealtimeRigUpdate();
             };
@@ -92,24 +107,24 @@ namespace DeadlockPlayground.UI
             intentRow.AddThemeConstantOverride("separation", 6);
             _btnAccIntentAdd = new Button
             {
-                Text = "+ Add New Accessory",
+                Text = "Keep All Hero Parts",
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = true,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 CustomMinimumSize = new Vector2(0, 34),
-                TooltipText = "Keep all existing hero meshes and attach a new accessory (hat, glasses, backpack, weapon)."
+                TooltipText = "Keep all original vanilla hero meshes visible and layer this accessory on top.\n(To import another accessory file, use 'Import Accessory' on the main Character tab.)"
             };
-            SetButtonIcon(_btnAccIntentAdd, "res://assets/at-icons/sparkles.svg", 18, StatusTone.Success);
+            SetButtonIcon(_btnAccIntentAdd, "res://assets/at-icons/eye.svg", 18, StatusTone.Success);
             _btnAccIntentReplace = new Button
             {
-                Text = "⇄ Replace Hero Part(s)",
+                Text = "Hide / Replace Hero Parts",
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = false,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 CustomMinimumSize = new Vector2(0, 34),
-                TooltipText = "Hide one or more vanilla hero meshes/surfaces and replace them with this imported part."
+                TooltipText = "Choose specific vanilla hero meshes/surfaces to hide and replace with this accessory."
             };
             SetButtonIcon(_btnAccIntentReplace, "res://assets/at-icons/layers.svg", 18);
             _btnAccIntentAdd.Pressed += () => SetAccessoryIntent(CustomModelAutoRigger.AccessoryIntent.AddAccessory);
@@ -421,7 +436,12 @@ namespace DeadlockPlayground.UI
 
             tBody.AddChild(new Label { Text = "Uniform Scale Factor:" });
             var scaleHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            _spinScale = new SpinBox { MinValue = 0.0001, MaxValue = 500.0, Step = 0.001, Value = 1.0, CustomMinimumSize = new Vector2(90, 0) };
+            _spinScale = new SpinBox
+            {
+                MinValue = 0.0001, MaxValue = 500.0, Step = 0.0001, CustomArrowStep = 0.005, Value = 1.0,
+                CustomMinimumSize = new Vector2(104, 0),
+                TooltipText = "Uniform scale multiplier (4-decimal precision; arrows nudge by 0.005)."
+            };
             _spinScale.ValueChanged += (v) =>
             {
                 _userModifiedTransform = true;
@@ -430,7 +450,12 @@ namespace DeadlockPlayground.UI
             };
             scaleHBox.AddChild(_spinScale);
 
-            _sliderScale = new HSlider { MinValue = 0.001, MaxValue = 10.0, Step = 0.001, Value = 1.0, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            _sliderScale = new HSlider
+            {
+                MinValue = 0.001, MaxValue = 10.0, Step = 0.0005, Value = 1.0, ExpEdit = true,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+            };
             _sliderScale.ValueChanged += (v) =>
             {
                 _userModifiedTransform = true;
@@ -464,6 +489,9 @@ namespace DeadlockPlayground.UI
             _spinRotYaw.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
             _spinRotRoll.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
 
+            // Card B: Reshape / 3D Sculpt Imported Mesh (Sweaters / Clothing / Accessories)
+            vBox.AddChild(BuildImportedSculptCard());
+
             // Progressive Disclosure Toggle for Advanced Placement & Pose Calibration
             _btnTab1AdvancedToggle = new Button
             {
@@ -491,9 +519,10 @@ namespace DeadlockPlayground.UI
             advScaleBody.AddChild(new Label { Text = "Deform Scale (X, Y, Z multiplier):" });
             var scaleXyzHBox = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             scaleXyzHBox.AddThemeConstantOverride("separation", 4);
-            _spinScaleX = CreateCoordSpinBox(0.05, 10.0, 0.01, "SX");
-            _spinScaleY = CreateCoordSpinBox(0.05, 10.0, 0.01, "SY");
-            _spinScaleZ = CreateCoordSpinBox(0.05, 10.0, 0.01, "SZ");
+            _spinScaleX = CreateCoordSpinBox(0.05, 10.0, 0.001, "SX");
+            _spinScaleY = CreateCoordSpinBox(0.05, 10.0, 0.001, "SY");
+            _spinScaleZ = CreateCoordSpinBox(0.05, 10.0, 0.001, "SZ");
+            _spinScaleX.CustomArrowStep = 0.01; _spinScaleY.CustomArrowStep = 0.01; _spinScaleZ.CustomArrowStep = 0.01;
             _spinScaleX.SetValueNoSignal(1.0); _spinScaleY.SetValueNoSignal(1.0); _spinScaleZ.SetValueNoSignal(1.0);
             _spinScaleX.ValueChanged += (_) => { _userModifiedTransform = true; ApplyScaleChangeKeepingCenter(); };
             _spinScaleY.ValueChanged += (_) => { _userModifiedTransform = true; ApplyScaleChangeKeepingCenter(); };

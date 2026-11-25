@@ -257,6 +257,21 @@ public static class StandardPbrMaterialBuilder
             if (matResource.VectorParams.TryGetValue("TextureMetalness1", out var mVec)) metallic = mVec.X;
             else if (matResource.VectorParams.TryGetValue("TextureMetalness", out var mVec0)) metallic = mVec0.X;
             else if (matResource.FloatParams.TryGetValue("g_flMetalnessScale1", out float mScale)) metallic = mScale;
+
+            // Custom unlit / full-albedo self-illum materials (e.g. Roblox Neon / outline-flagged hair with
+            // F_SELF_ILLUM=1, g_flSelfIllumAlbedoFactor=1.0, white self-illum mask, and glTF default TextureMetalness1=1.0)
+            // render bright in Source 2 via self-illumination but turn pure solid black in Godot Forward+ when Metallic=1.0
+            // without a metalness map or reflection probe. Zero scalar metallic on such full-albedo self-illum materials!
+            bool hasFullAlbedoSelfIllum =
+                matResource.IntParams.TryGetValue("F_SELF_ILLUM", out long siFlag) && siFlag == 1 &&
+                selfIllumParams.AlbedoFactor >= 0.85f &&
+                selfIllumParams.EnergyMultiplier >= 0.5f &&
+                !string.IsNullOrEmpty(selfIllumParams.MaskTexturePath) &&
+                selfIllumParams.MaskTexturePath.Contains("default_white", StringComparison.OrdinalIgnoreCase);
+            if (hasFullAlbedoSelfIllum && metallic >= 0.99f && !isWeapon && !isDedicatedGlow)
+            {
+                metallic = 0.0f;
+            }
             godotMat.Metallic = metallic;
         }
 

@@ -439,6 +439,8 @@ namespace DeadlockPlayground.Importer
                             rawIndices = new int[vCount];
                             for (int k = 0; k < vCount; k++) rawIndices[k] = k;
                         }
+                        rawIndices = MeshCutEditorCore.StripDegenerateTriangles(rawIndices);
+                        if (rawIndices.Length < 3) continue;
 
                         int[] rawBones = arrays.Count > (int)Mesh.ArrayType.Bones && arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil
                             ? arrays[(int)Mesh.ArrayType.Bones].AsInt32Array()
@@ -531,9 +533,11 @@ namespace DeadlockPlayground.Importer
 
                             roughScalar = Mathf.Clamp(stdMat.Roughness, 0.05f, 1.0f);
                             metalScalar = Mathf.Clamp(stdMat.Metallic, 0.0f, 1.0f);
-                            if (recoveredFromEmission && stdMat.MetallicTexture == null && metalScalar >= 0.99f)
+                            if (stdMat.MetallicTexture == null && metalScalar >= 0.99f &&
+                                (recoveredFromEmission || isOutlineShell || isUnlit || stdMat.EmissionEnabled ||
+                                 stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded || roughScalar >= 0.85f))
                             {
-                                // glTF omits metallicFactor (defaulting to 1.0) on pure emissive / Roblox Neon materials.
+                                // glTF omits metallicFactor (defaulting to 1.0) on pure emissive / unlit / matte Roblox Neon materials.
                                 metalScalar = 0.0f;
                             }
                             isTranslucent = effTransp == BaseMaterial3D.TransparencyEnum.Alpha ||
@@ -989,6 +993,8 @@ namespace DeadlockPlayground.Importer
                         rawIndices = new int[vCount];
                         for (int k = 0; k < vCount; k++) rawIndices[k] = k;
                     }
+                    rawIndices = MeshCutEditorCore.StripDegenerateTriangles(rawIndices);
+                    if (rawIndices.Length < 3) continue;
 
                     int[] rawBones = arrays.Count > (int)Mesh.ArrayType.Bones && arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil
                         ? arrays[(int)Mesh.ArrayType.Bones].AsInt32Array()
@@ -5684,6 +5690,8 @@ namespace DeadlockPlayground.Importer
                     int i1 = sub.Indices[t + 1];
                     int i2 = sub.Indices[t + 2];
                     if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
+                        continue;
+                    if (i0 == i1 || i1 == i2 || i2 == i0)
                         continue;
 
                     // In Godot ArrayMesh (imported via GltfDocument), triangle indices (i0, i1, i2) are stored CW,

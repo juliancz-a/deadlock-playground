@@ -288,6 +288,12 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("kept_part_transforms")]
         public Dictionary<string, WorkspaceKeptPartTransformEntry> KeptOriginalPartTransforms { get; set; }
 
+        [JsonPropertyName("original_mesh_cut_masks")]
+        public Dictionary<string, int[]> OriginalMeshCutMasks { get; set; }
+
+        [JsonPropertyName("imported_mesh_cut_masks")]
+        public Dictionary<string, int[]> ImportedMeshCutMasks { get; set; }
+
         [JsonPropertyName("rig_family_override")]
         public int? RigFamilyOverride { get; set; }
 
@@ -338,6 +344,45 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("extra_twist_bones")]
         public bool ExtraTwistBones { get; set; } = false;
+
+        [JsonPropertyName("partial_body_region")]
+        public int PartialBodyRegion { get; set; } = 0;
+
+        [JsonPropertyName("partial_body_engine")]
+        public int PartialBodyEngine { get; set; } = 0;
+
+        [JsonPropertyName("partial_include_spine")]
+        public bool PartialIncludeSpine { get; set; } = true;
+
+        [JsonPropertyName("partial_include_arms")]
+        public bool PartialIncludeArms { get; set; } = true;
+
+        [JsonPropertyName("partial_include_hands")]
+        public bool PartialIncludeHands { get; set; } = false;
+
+        [JsonPropertyName("partial_include_legs")]
+        public bool PartialIncludeLegs { get; set; } = false;
+
+        [JsonPropertyName("partial_include_feet")]
+        public bool PartialIncludeFeet { get; set; } = false;
+
+        [JsonPropertyName("partial_include_neck")]
+        public bool PartialIncludeNeck { get; set; } = false;
+
+        [JsonPropertyName("partial_include_head")]
+        public bool PartialIncludeHead { get; set; } = false;
+
+        [JsonPropertyName("imported_mesh_bottom_flare")]
+        public float ImportedMeshBottomFlare { get; set; } = 0f;
+
+        [JsonPropertyName("imported_mesh_top_flare")]
+        public float ImportedMeshTopFlare { get; set; } = 0f;
+
+        [JsonPropertyName("imported_mesh_inflate_meters")]
+        public float ImportedMeshInflateMeters { get; set; } = 0f;
+
+        [JsonPropertyName("imported_mesh_sculpt_deltas")]
+        public Dictionary<string, WorkspaceHeroSculptEntry> ImportedMeshSculptDeltas { get; set; } = new();
 
         public static WorkspaceCustomModelEntry FromRiggingOptions(
             string relativeModelPath,
@@ -421,8 +466,44 @@ namespace DeadlockPlayground.Workspace
                 FitSpine = o.FitSpine,
                 ConformToSkeleton = o.ConformToSkeleton,
                 LooseMeshesRigid = o.LooseMeshesRigid,
-                ExtraTwistBones = o.ExtraTwistBones
+                ExtraTwistBones = o.ExtraTwistBones,
+                PartialBodyRegion = (int)o.PartialRegion,
+                PartialBodyEngine = (int)o.PartialEngine,
+                PartialIncludeSpine = o.PartialIncludeSpine,
+                PartialIncludeArms = o.PartialIncludeArms,
+                PartialIncludeHands = o.PartialIncludeHands,
+                PartialIncludeLegs = o.PartialIncludeLegs,
+                PartialIncludeFeet = o.PartialIncludeFeet,
+                PartialIncludeNeck = o.PartialIncludeNeck,
+                PartialIncludeHead = o.PartialIncludeHead,
+                ImportedMeshBottomFlare = o.ImportedMeshBottomFlare,
+                ImportedMeshTopFlare = o.ImportedMeshTopFlare,
+                ImportedMeshInflateMeters = o.ImportedMeshInflateMeters
             };
+
+            if (o.ImportedMeshSculptDeltas != null && o.ImportedMeshSculptDeltas.Count > 0)
+            {
+                foreach (var kv in o.ImportedMeshSculptDeltas)
+                {
+                    if (kv.Value == null || kv.Value.Count == 0) continue;
+                    var idxArr = new int[kv.Value.Count];
+                    var deltaArr = new float[kv.Value.Count * 3];
+                    int k = 0;
+                    foreach (var vkv in kv.Value)
+                    {
+                        idxArr[k] = vkv.Key;
+                        deltaArr[k * 3 + 0] = vkv.Value.X;
+                        deltaArr[k * 3 + 1] = vkv.Value.Y;
+                        deltaArr[k * 3 + 2] = vkv.Value.Z;
+                        k++;
+                    }
+                    entry.ImportedMeshSculptDeltas[kv.Key] = new WorkspaceHeroSculptEntry
+                    {
+                        VertexIndices = idxArr,
+                        DeltasXyz = deltaArr
+                    };
+                }
+            }
 
             if (o.BoneChains != null && o.BoneChains.Count > 0)
             {
@@ -529,6 +610,24 @@ namespace DeadlockPlayground.Workspace
                         Rot = new[] { kv.Value.RotationDeg.X, kv.Value.RotationDeg.Y, kv.Value.RotationDeg.Z },
                         Scale = kv.Value.Scale > 0.001f ? kv.Value.Scale : 1.0f
                     };
+                }
+            }
+            if (o.OriginalMeshCutMasks != null && o.OriginalMeshCutMasks.Count > 0)
+            {
+                entry.OriginalMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in o.OriginalMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        entry.OriginalMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
+                }
+            }
+            if (o.ImportedMeshCutMasks != null && o.ImportedMeshCutMasks.Count > 0)
+            {
+                entry.ImportedMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in o.ImportedMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        entry.ImportedMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
                 }
             }
 
@@ -701,6 +800,24 @@ namespace DeadlockPlayground.Workspace
                         Scale = kv.Value.Scale > 0.001f ? kv.Value.Scale : 1.0f
                     };
                     if (!xf.IsIdentity) o.KeptOriginalPartTransforms[kv.Key] = xf;
+                }
+            }
+            if (OriginalMeshCutMasks != null && OriginalMeshCutMasks.Count > 0)
+            {
+                o.OriginalMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in OriginalMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        o.OriginalMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
+                }
+            }
+            if (ImportedMeshCutMasks != null && ImportedMeshCutMasks.Count > 0)
+            {
+                o.ImportedMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in ImportedMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        o.ImportedMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
                 }
             }
 
@@ -906,6 +1023,37 @@ namespace DeadlockPlayground.Workspace
             o.ConformToSkeleton = ConformToSkeleton;
             o.LooseMeshesRigid = LooseMeshesRigid;
             o.ExtraTwistBones = ExtraTwistBones;
+            o.PartialRegion = (DeadlockPlayground.Importer.CustomModelAutoRigger.PartialBodyRegion)PartialBodyRegion;
+            o.PartialEngine = (DeadlockPlayground.Importer.CustomModelAutoRigger.PartialBodyEngine)PartialBodyEngine;
+            o.PartialIncludeSpine = PartialIncludeSpine;
+            o.PartialIncludeArms = PartialIncludeArms;
+            o.PartialIncludeHands = PartialIncludeHands;
+            o.PartialIncludeLegs = PartialIncludeLegs;
+            o.PartialIncludeFeet = PartialIncludeFeet;
+            o.PartialIncludeNeck = PartialIncludeNeck;
+            o.PartialIncludeHead = PartialIncludeHead;
+            o.ImportedMeshBottomFlare = ImportedMeshBottomFlare;
+            o.ImportedMeshTopFlare = ImportedMeshTopFlare;
+            o.ImportedMeshInflateMeters = ImportedMeshInflateMeters;
+            if (ImportedMeshSculptDeltas != null && ImportedMeshSculptDeltas.Count > 0)
+            {
+                o.ImportedMeshSculptDeltas = new Dictionary<string, Dictionary<int, Vector3>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in ImportedMeshSculptDeltas)
+                {
+                    if (string.IsNullOrEmpty(kv.Key) || kv.Value?.VertexIndices == null || kv.Value.DeltasXyz == null) continue;
+                    int count = Math.Min(kv.Value.VertexIndices.Length, kv.Value.DeltasXyz.Length / 3);
+                    if (count <= 0) continue;
+                    var map = new Dictionary<int, Vector3>(count);
+                    for (int k = 0; k < count; k++)
+                    {
+                        map[kv.Value.VertexIndices[k]] = new Vector3(
+                            kv.Value.DeltasXyz[k * 3 + 0],
+                            kv.Value.DeltasXyz[k * 3 + 1],
+                            kv.Value.DeltasXyz[k * 3 + 2]);
+                    }
+                    o.ImportedMeshSculptDeltas[kv.Key] = map;
+                }
+            }
             if (BodyCollisionCapsules != null)
             {
                 foreach (var cap in BodyCollisionCapsules)

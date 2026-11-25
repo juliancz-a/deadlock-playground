@@ -1037,6 +1037,338 @@ namespace DeadlockPlayground.Importer
             return clean;
         }
 
+        /// <summary>
+        /// Garment-aware partial-body pin estimator: seeds every landmark from the target hero skeleton's
+        /// rest joints, then snaps active region joints onto the actual clothing geometry (for example,
+        /// detecting straight-down sleeves on a sweater or leg tubes on pants) before mapping back to model space.
+        /// </summary>
+        public static Dictionary<string, Vector3> EstimatePartialRegionPins(
+            Node3D scene,
+            IEnumerable<MeshInstance3D> meshes,
+            Skeleton3D heroSkeleton,
+            Transform3D alignedTransform,
+            CustomModelAutoRigger.RiggingOptions options)
+        {
+            var surfaces = GatherSurfaces(scene, meshes);
+            if (surfaces.Count == 0 || heroSkeleton == null)
+                return EstimateLandmarks(scene, meshes);
+
+            Transform3D A = alignedTransform;
+            Transform3D Ainv = A.AffineInverse();
+            var heroPts = new List<Vector3>(4096);
+            Vector3 gMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 gMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            foreach (var sd in surfaces)
+            {
+                foreach (var v in sd.SceneVerts)
+                {
+                    Vector3 hp = A * v;
+                    heroPts.Add(hp);
+                    if (hp.X < gMin.X) gMin.X = hp.X; if (hp.Y < gMin.Y) gMin.Y = hp.Y; if (hp.Z < gMin.Z) gMin.Z = hp.Z;
+                    if (hp.X > gMax.X) gMax.X = hp.X; if (hp.Y > gMax.Y) gMax.Y = hp.Y; if (hp.Z > gMax.Z) gMax.Z = hp.Z;
+                }
+            }
+            if (heroPts.Count == 0)
+                return EstimateLandmarks(scene, meshes);
+
+            float heroH = CustomModelAutoRigger.ComputeHeroHeight(heroSkeleton);
+
+            Vector3 HeroBone(string[] names, Vector3 fallback)
+            {
+                foreach (string n in names)
+                {
+                    int idx = heroSkeleton.FindBone(n);
+                    if (idx >= 0) return heroSkeleton.GetBoneGlobalRest(idx).Origin;
+                }
+                return fallback;
+            }
+
+            Vector3 pelvis = HeroBone(new[] { "pelvis", "hips", "root_motion" }, new Vector3(0f, 0.52f * heroH, 0f));
+            Vector3 chest = HeroBone(new[] { "spine_2", "spine_3", "spine_1" }, pelvis + Vector3.Up * 0.22f * heroH);
+            Vector3 neck = HeroBone(new[] { "neck_0", "neck", "spine_3" }, chest + Vector3.Up * 0.14f * heroH);
+            Vector3 head = HeroBone(new[] { "head" }, neck + Vector3.Up * 0.10f * heroH);
+            Vector3 chin = neck.Lerp(head, 0.55f);
+
+            Vector3 shL = HeroBone(new[] { "arm_upper_L" }, chest + new Vector3(0.11f * heroH, 0.08f * heroH, 0f));
+            Vector3 elL = HeroBone(new[] { "arm_lower_L" }, shL + new Vector3(0.14f * heroH, -0.10f * heroH, 0f));
+            Vector3 wrL = HeroBone(new[] { "hand_L" }, elL + new Vector3(0.12f * heroH, -0.10f * heroH, 0f));
+
+            Vector3 shR = HeroBone(new[] { "arm_upper_R" }, chest + new Vector3(-0.11f * heroH, 0.08f * heroH, 0f));
+            Vector3 elR = HeroBone(new[] { "arm_lower_R" }, shR + new Vector3(-0.14f * heroH, -0.10f * heroH, 0f));
+            Vector3 wrR = HeroBone(new[] { "hand_R" }, elR + new Vector3(-0.12f * heroH, -0.10f * heroH, 0f));
+
+            Vector3 hipL = HeroBone(new[] { "leg_upper_L" }, pelvis + new Vector3(0.065f * heroH, -0.04f * heroH, 0f));
+            Vector3 knL = HeroBone(new[] { "leg_lower_L" }, hipL - Vector3.Up * 0.24f * heroH);
+            Vector3 akL = HeroBone(new[] { "ankle_L", "foot_L" }, knL - Vector3.Up * 0.23f * heroH);
+
+            Vector3 hipR = HeroBone(new[] { "leg_upper_R" }, pelvis + new Vector3(-0.065f * heroH, -0.04f * heroH, 0f));
+            Vector3 knR = HeroBone(new[] { "leg_lower_R" }, hipR - Vector3.Up * 0.24f * heroH);
+            Vector3 akR = HeroBone(new[] { "ankle_R", "foot_R" }, knR - Vector3.Up * 0.23f * heroH);
+
+            float cx = 0.5f * (shL.X + shR.X);
+            if (MathF.Abs(shL.X - shR.X) < 0.02f) cx = 0.5f * (gMin.X + gMax.X);
+            float shHalfSpan = MathF.Max(0.08f * heroH, 0.5f * MathF.Abs(shL.X - shR.X));
+            float leftSign = shL.X >= shR.X ? 1f : -1f;
+
+            var mask = CustomModelAutoRigger.GetPartialBodyRigMask(options);
+
+            // Helper: centroid of garment vertices inside a horizontal Y band & optional lateral filter
+            bool TryBandCentroid(float yTarget, float yHalf, float minLat, float maxLat, float sideSign, out Vector3 center)
+            {
+                Vector3 sum = Vector3.Zero;
+                int cnt = 0;
+                foreach (var p in heroPts)
+                {
+                    if (MathF.Abs(p.Y - yTarget) > yHalf) continue;
+                    float lat = (p.X - cx) * sideSign;
+                    if (lat < minLat || lat > maxLat) continue;
+                    sum += p;
+                    cnt++;
+                }
+                if (cnt >= 4)
+                {
+                    center = sum / cnt;
+                    return true;
+                }
+                center = Vector3.Zero;
+                return false;
+            }
+
+            // 1. Refine torso pins into the garment's central spine corridor
+            if (mask.IncludeSpine || mask.IncludePelvisAnchor || mask.IncludeCollarSpineAnchor)
+            {
+                float gSpanY = MathF.Max(0.05f, gMax.Y - gMin.Y);
+                if (mask.IncludeSpine && !mask.IncludeLegs)
+                {
+                    // Clamp waist/pelvis anchor inside lower hem if garment ends above hero pelvis
+                    float hemAnchorY = MathF.Max(pelvis.Y, gMin.Y + MathF.Min(0.06f, gSpanY * 0.10f));
+                    if (hemAnchorY < neck.Y - 0.12f)
+                        pelvis.Y = hemAnchorY;
+                    // Clamp collar top slightly inside garment maxY if garment is strapless/low-collar
+                    if (gMax.Y < neck.Y && gMax.Y > pelvis.Y + 0.18f)
+                        neck.Y = gMax.Y - 0.015f;
+                    chest.Y = Mathf.Lerp(pelvis.Y, neck.Y, 0.62f);
+                }
+
+                if (TryBandCentroid(pelvis.Y, 0.045f * heroH, -shHalfSpan * 0.75f, shHalfSpan * 0.75f, 1f, out var pCent))
+                    pelvis = new Vector3(cx, pelvis.Y, pCent.Z);
+                if (TryBandCentroid(chest.Y, 0.045f * heroH, -shHalfSpan * 0.75f, shHalfSpan * 0.75f, 1f, out var cCent))
+                    chest = new Vector3(cx, chest.Y, cCent.Z);
+                if (TryBandCentroid(neck.Y, 0.045f * heroH, -shHalfSpan * 0.55f, shHalfSpan * 0.55f, 1f, out var nCent))
+                    neck = new Vector3(cx, neck.Y, nCent.Z);
+            }
+
+            // 2. Sleeve-aware Arm Pin Snapping (detects hanging sleeves, A-pose sleeves, OR T-pose sleeves!)
+            if (mask.IncludeArms || mask.IncludeHands)
+            {
+                (Vector3 sh, Vector3 el, Vector3 wr) SnapArmSide(Vector3 heroSh, Vector3 heroEl, Vector3 heroWr, float sideSign)
+                {
+                    float heroUpperLen = MathF.Max(0.10f, heroSh.DistanceTo(heroEl));
+                    float heroLowerLen = MathF.Max(0.10f, heroEl.DistanceTo(heroWr));
+                    float heroArmLen = heroUpperLen + heroLowerLen;
+
+                    // Snap shoulder Z/Y gently into the garment's shoulder band
+                    Vector3 sh = heroSh;
+                    if (TryBandCentroid(heroSh.Y, 0.045f * heroH, shHalfSpan * 0.65f, shHalfSpan * 1.45f, sideSign, out var shCent))
+                    {
+                        sh = new Vector3(Mathf.Lerp(heroSh.X, shCent.X, 0.45f), heroSh.Y, shCent.Z);
+                    }
+
+                    // Collect candidate sleeve vertices laterally outside the ribcage/torso core
+                    // Measure ribcage outer radius at mid-chest to distinguish sleeve from torso even on straight-down sweaters
+                    float torsoOuterLat = shHalfSpan * 0.78f;
+                    var sleevePts = new List<(Vector3 P, float DistFromSh)>();
+                    foreach (var p in heroPts)
+                    {
+                        float lat = (p.X - cx) * sideSign;
+                        if (lat < torsoOuterLat) continue;
+                        if (p.Y > sh.Y + 0.14f * heroH) continue;
+                        float d = p.DistanceTo(sh);
+                        if (d > heroArmLen * 1.38f) continue;
+                        sleevePts.Add((p, d));
+                    }
+
+                    if (sleevePts.Count < 16)
+                    {
+                        // Retry with slightly looser lateral gate for very narrow/tucked sleeves
+                        sleevePts.Clear();
+                        foreach (var p in heroPts)
+                        {
+                            float lat = (p.X - cx) * sideSign;
+                            if (lat < shHalfSpan * 0.62f) continue;
+                            if (p.Y > sh.Y + 0.14f * heroH) continue;
+                            float d = p.DistanceTo(sh);
+                            if (d > heroArmLen * 1.38f) continue;
+                            sleevePts.Add((p, d));
+                        }
+                    }
+
+                    if (sleevePts.Count < 12)
+                        return (sh, heroEl, heroWr);
+
+                    sleevePts.Sort((a, b) => a.DistFromSh.CompareTo(b.DistFromSh));
+                    int cuffStart = Math.Max(0, (int)(sleevePts.Count * 0.85f));
+                    Vector3 cuffCenter = Vector3.Zero;
+                    for (int i = cuffStart; i < sleevePts.Count; i++) cuffCenter += sleevePts[i].P;
+                    cuffCenter /= Math.Max(1, sleevePts.Count - cuffStart);
+
+                    Vector3 sleeveVec = cuffCenter - sh;
+                    float detectedLen = sleeveVec.Length();
+                    if (detectedLen < 0.06f)
+                        return (sh, heroEl, heroWr);
+
+                    Vector3 sleeveDir = sleeveVec / detectedLen;
+                    // For short sleeves (< 55% of hero arm), keep wrist projected along the sleeve direction at hero arm length
+                    // so ArmSegmentRegistration measures the exact sleeve direction without over-scaling axial length!
+                    float usedLen = detectedLen >= heroArmLen * 0.55f ? detectedLen : heroArmLen;
+                    Vector3 wr = detectedLen >= heroArmLen * 0.55f ? cuffCenter : (sh + sleeveDir * usedLen);
+
+                    // Find elbow centroid inside the middle band (38%..62% along sh -> cuffCenter)
+                    float midTarget = MathF.Min(detectedLen * 0.52f, heroUpperLen);
+                    float bandHalf = MathF.Max(0.035f * heroH, detectedLen * 0.12f);
+                    Vector3 elSum = Vector3.Zero;
+                    int elCnt = 0;
+                    foreach (var (p, _) in sleevePts)
+                    {
+                        float proj = (p - sh).Dot(sleeveDir);
+                        if (MathF.Abs(proj - midTarget) <= bandHalf)
+                        {
+                            elSum += p;
+                            elCnt++;
+                        }
+                    }
+                    Vector3 el = elCnt >= 4 ? (elSum / elCnt) : sh.Lerp(wr, heroUpperLen / heroArmLen);
+                    return (sh, el, wr);
+                }
+
+                (shL, elL, wrL) = SnapArmSide(shL, elL, wrL, leftSign);
+                (shR, elR, wrR) = SnapArmSide(shR, elR, wrR, -leftSign);
+            }
+
+            // 3. Leg / Pants / Skirt / Boot Pin Snapping (detects wide-stance pants, straight legs, shorts, and boots!)
+            if (mask.IncludeLegs)
+            {
+                (Vector3 hip, Vector3 kn, Vector3 ak) SnapLegSide(Vector3 heroHip, Vector3 heroKn, Vector3 heroAk, float sideSign)
+                {
+                    float heroUpperLen = MathF.Max(0.12f, heroHip.DistanceTo(heroKn));
+                    float heroLowerLen = MathF.Max(0.12f, heroKn.DistanceTo(heroAk));
+                    float heroLegLen = heroUpperLen + heroLowerLen;
+
+                    // Snap hip gently into the upper thigh band
+                    Vector3 hip = heroHip;
+                    if (!mask.LowerLegsOnly &&
+                        TryBandCentroid(heroHip.Y, 0.05f * heroH, 0.005f * heroH, 0.35f * heroH, sideSign, out var hipCent))
+                    {
+                        hip = new Vector3(Mathf.Lerp(heroHip.X, hipCent.X, 0.55f), heroHip.Y, hipCent.Z);
+                    }
+
+                    // Gather leg/pant/boot vertices on this side below the hip (or below knee for boots)
+                    float yTopGate = mask.LowerLegsOnly ? (heroKn.Y + 0.06f * heroH) : (hip.Y + 0.03f * heroH);
+                    var legPts = new List<(Vector3 P, float DropDist)>();
+                    foreach (var p in heroPts)
+                    {
+                        if (p.Y > yTopGate) continue;
+                        float lat = (p.X - cx) * sideSign;
+                        if (lat < 0.004f * heroH || lat > 0.45f * heroH) continue;
+                        float d = mask.LowerLegsOnly ? p.DistanceTo(heroKn) : p.DistanceTo(hip);
+                        if (d > heroLegLen * 1.38f) continue;
+                        legPts.Add((p, d));
+                    }
+
+                    if (legPts.Count < 12)
+                    {
+                        // Fallback to horizontal band centroid snapping
+                        Vector3 knFb = TryBandCentroid(heroKn.Y, 0.045f * heroH, 0.01f * heroH, 0.35f * heroH, sideSign, out var kc)
+                            ? new Vector3(kc.X, heroKn.Y, kc.Z) : heroKn;
+                        Vector3 akFb = TryBandCentroid(heroAk.Y, 0.045f * heroH, 0.01f * heroH, 0.35f * heroH, sideSign, out var ac)
+                            ? new Vector3(ac.X, heroAk.Y, ac.Z) : heroAk;
+                        return (hip, knFb, akFb);
+                    }
+
+                    // Distal leg cuff (lowest 15% of vertices by Y)
+                    legPts.Sort((a, b) => a.P.Y.CompareTo(b.P.Y));
+                    int cuffCount = Math.Max(4, (int)(legPts.Count * 0.15f));
+                    Vector3 cuffCenter = Vector3.Zero;
+                    for (int i = 0; i < cuffCount; i++) cuffCenter += legPts[i].P;
+                    cuffCenter /= cuffCount;
+
+                    if (mask.LowerLegsOnly)
+                    {
+                        Vector3 kn = TryBandCentroid(heroKn.Y, 0.045f * heroH, 0.01f * heroH, 0.35f * heroH, sideSign, out var kc)
+                            ? new Vector3(kc.X, heroKn.Y, kc.Z) : heroKn;
+                        Vector3 ak = cuffCenter.Y < heroKn.Y - 0.08f ? cuffCenter : heroAk;
+                        return (hip, kn, ak);
+                    }
+
+                    Vector3 legVec = cuffCenter - hip;
+                    float detectedLen = legVec.Length();
+                    if (detectedLen < 0.08f)
+                        return (hip, heroKn, heroAk);
+
+                    Vector3 legDir = legVec / detectedLen;
+                    // For shorts / mini-skirts (< 55% of hero leg length), project Ankle along the detected thigh direction
+                    // at hero leg length so LegSegmentRegistration matches stance angle without axial distortion!
+                    bool isShortGarment = detectedLen < heroLegLen * 0.55f;
+                    Vector3 akRes = isShortGarment ? (hip + legDir * heroLegLen) : cuffCenter;
+
+                    // Mid-leg knee centroid inside middle band along hip -> cuff
+                    float midTarget = MathF.Min(detectedLen * 0.52f, heroUpperLen);
+                    float bandHalf = MathF.Max(0.035f * heroH, detectedLen * 0.12f);
+                    Vector3 knSum = Vector3.Zero;
+                    int knCnt = 0;
+                    foreach (var (p, _) in legPts)
+                    {
+                        float proj = (p - hip).Dot(legDir);
+                        if (MathF.Abs(proj - midTarget) <= bandHalf)
+                        {
+                            knSum += p;
+                            knCnt++;
+                        }
+                    }
+                    Vector3 knRes = knCnt >= 4 && !isShortGarment
+                        ? (knSum / knCnt)
+                        : hip.Lerp(akRes, heroUpperLen / heroLegLen);
+
+                    return (hip, knRes, akRes);
+                }
+
+                (hipL, knL, akL) = SnapLegSide(hipL, knL, akL, leftSign);
+                (hipR, knR, akR) = SnapLegSide(hipR, knR, akR, -leftSign);
+            }
+
+            // 4. Head / Hood Pin Snapping
+            if (mask.IncludeHead)
+            {
+                if (TryBandCentroid(head.Y, 0.06f * heroH, -0.25f * heroH, 0.25f * heroH, 1f, out var hCent))
+                {
+                    head = new Vector3(cx, head.Y, hCent.Z);
+                    chin = neck.Lerp(head, 0.55f);
+                }
+            }
+
+            var pinsHero = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Pelvis"] = pelvis,
+                ["Chest"] = chest,
+                ["Neck"] = neck,
+                ["Chin"] = chin,
+                ["Head"] = head,
+                ["ShoulderL"] = shL, ["ElbowL"] = elL, ["WristL"] = wrL,
+                ["ShoulderR"] = shR, ["ElbowR"] = elR, ["WristR"] = wrR,
+                ["HipL"] = hipL, ["KneeL"] = knL, ["AnkleL"] = akL,
+                ["HipR"] = hipR, ["KneeR"] = knR, ["AnkleR"] = akR
+            };
+            Vector3 armDirL = (wrL - elL).LengthSquared() > 1e-6f ? (wrL - elL).Normalized() : new Vector3(leftSign, 0f, 0f);
+            Vector3 armDirR = (wrR - elR).LengthSquared() > 1e-6f ? (wrR - elR).Normalized() : new Vector3(-leftSign, 0f, 0f);
+            pinsHero["HandTipL"] = wrL + armDirL * (0.095f * heroH);
+            pinsHero["HandTipR"] = wrR + armDirR * (0.095f * heroH);
+
+            var pinsModel = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in pinsHero)
+                pinsModel[kv.Key] = Ainv * kv.Value;
+            return pinsModel;
+        }
+
         // ------------------------------------------------------------------
         // Synthetic rig construction (temporarily mutates the imported scene)
         // ------------------------------------------------------------------
@@ -1059,18 +1391,37 @@ namespace DeadlockPlayground.Importer
             var surfaces = GatherSurfaces(scene, meshes);
             if (surfaces.Count == 0) throw new InvalidOperationException("Landmark rig: no mesh surfaces to bind.");
 
+            bool isPartial = options.Method == CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig;
+            ReferenceRigDef.PartialBodyRigMask? partialMask = isPartial
+                ? CustomModelAutoRigger.GetPartialBodyRigMask(options)
+                : (ReferenceRigDef.PartialBodyRigMask?)null;
+
             ReferenceRigDef refRig = options.ReferenceRig?.Clone();
             if (refRig == null)
             {
-                var pinsModel = options.LandmarkPins != null && PinNames.All(options.LandmarkPins.ContainsKey)
-                    ? new Dictionary<string, Vector3>(options.LandmarkPins)
-                    : EstimateLandmarks(scene, meshes);
+                Dictionary<string, Vector3> pinsModel;
+                if (options.LandmarkPins != null && PinNames.All(options.LandmarkPins.ContainsKey))
+                {
+                    pinsModel = new Dictionary<string, Vector3>(options.LandmarkPins);
+                }
+                else if (isPartial && heroSkeleton != null)
+                {
+                    pinsModel = EstimatePartialRegionPins(scene, meshes, heroSkeleton, options.AlignedTransform, options);
+                }
+                else
+                {
+                    pinsModel = EstimateLandmarks(scene, meshes);
+                }
                 if (!PinNames.All(pinsModel.ContainsKey)) throw new InvalidOperationException("Landmark rig: could not estimate landmark pins.");
                 refRig = new ReferenceRigDef { Joints = new Dictionary<string, Vector3>(pinsModel, StringComparer.OrdinalIgnoreCase) };
+                if (isPartial && partialMask.HasValue && !partialMask.Value.IncludeHands)
+                    refRig.FingerMode = ReferenceFingerRigMode.RigidMitten;
             }
             else if (!PinNames.All(refRig.Joints.ContainsKey))
             {
-                var est = EstimateLandmarks(scene, meshes);
+                var est = (isPartial && heroSkeleton != null)
+                    ? EstimatePartialRegionPins(scene, meshes, heroSkeleton, options.AlignedTransform, options)
+                    : EstimateLandmarks(scene, meshes);
                 foreach (var kv in est)
                     if (!refRig.Joints.ContainsKey(kv.Key)) refRig.Joints[kv.Key] = kv.Value;
             }
@@ -1078,7 +1429,7 @@ namespace DeadlockPlayground.Importer
             Transform3D A = options.AlignedTransform;
             Transform3D Ainv = A.AffineInverse();
 
-            // Body metrics in aligned space.
+            // Body metrics in aligned space (for partial clothing, use hero skeleton's anatomical height so capsule radii stay true to scale!).
             float minY = float.MaxValue, maxY = float.MinValue;
             foreach (var sd in surfaces)
                 foreach (var v in sd.SceneVerts)
@@ -1086,7 +1437,9 @@ namespace DeadlockPlayground.Importer
                     float y = (A * v).Y;
                     minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
                 }
-            float H = Math.Max(0.1f, maxY - minY);
+            float H = isPartial && heroSkeleton != null
+                ? CustomModelAutoRigger.ComputeHeroHeight(heroSkeleton)
+                : Math.Max(0.1f, maxY - minY);
             refRig.EnsureDefaultJoints(H);
 
             // Auto-correct left/right labelling against the hero skeleton.
@@ -1098,19 +1451,30 @@ namespace DeadlockPlayground.Importer
                 float myX = (A * shLm).X - (A * shRm).X;
                 if (heroX * myX < 0f) swapLR = true;
             }
+            else if (isPartial && heroSkeleton.FindBone("leg_upper_L") >= 0 &&
+                     refRig.Joints.TryGetValue("HipL", out var hLm) && refRig.Joints.TryGetValue("HipR", out var hRm))
+            {
+                float heroX = heroSkeleton.GetBoneGlobalRest(heroSkeleton.FindBone("leg_upper_L")).Origin.X;
+                float myX = (A * hLm).X - (A * hRm).X;
+                if (heroX * myX < 0f) swapLR = true;
+            }
 
             // Foot forward direction from the lowest vertices relative to the ankles.
-            float ankleZ = ((A * refRig.Joints["AnkleL"]).Z + (A * refRig.Joints["AnkleR"]).Z) * 0.5f;
-            double sumZ = 0; int cntZ = 0;
-            foreach (var sd in surfaces)
-                foreach (var v in sd.SceneVerts)
-                {
-                    var w = A * v;
-                    if (w.Y < minY + 0.06f * H) { sumZ += w.Z; cntZ++; }
-                }
-            float footFwd = cntZ > 0 && (sumZ / cntZ) < ankleZ ? -1f : 1f;
+            float footFwd = 1f;
+            if (refRig.Joints.TryGetValue("AnkleL", out var anL) && refRig.Joints.TryGetValue("AnkleR", out var anR))
+            {
+                float ankleZ = ((A * anL).Z + (A * anR).Z) * 0.5f;
+                double sumZ = 0; int cntZ = 0;
+                foreach (var sd in surfaces)
+                    foreach (var v in sd.SceneVerts)
+                    {
+                        var w = A * v;
+                        if (w.Y < minY + 0.06f * H) { sumZ += w.Z; cntZ++; }
+                    }
+                footFwd = cntZ > 0 && (sumZ / cntZ) < ankleZ ? -1f : 1f;
+            }
 
-            var specs = refRig.BuildResolvedBones(A, H, footFwd, swapLeftRight: swapLR);
+            var specs = refRig.BuildResolvedBones(A, H, footFwd, swapLeftRight: swapLR, partialMask: partialMask);
             var pinsAligned = refRig.Joints.ToDictionary(kv => kv.Key, kv => A * kv.Value, StringComparer.OrdinalIgnoreCase);
 
             var alignedVerts = new List<Vector3[]>();
@@ -1124,7 +1488,10 @@ namespace DeadlockPlayground.Importer
                 indices.Add(sd.Indices);
                 surfaceMeshNames.Add(sd.Mi?.Name.ToString() ?? "");
             }
-            float? chinPlaneY = pinsAligned.TryGetValue("Chin", out var chinAligned) ? chinAligned.Y : (float?)null;
+            float? chinPlaneY = (!isPartial || (partialMask.HasValue && partialMask.Value.IncludeHead)) &&
+                                pinsAligned.TryGetValue("Chin", out var chinAligned)
+                ? chinAligned.Y
+                : (float?)null;
             var swHeat = System.Diagnostics.Stopwatch.StartNew();
             List<int[]> bonesPer;
             List<float[]> weightsPer;
