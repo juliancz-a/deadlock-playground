@@ -358,11 +358,13 @@ namespace DeadlockPlayground.Importer
                     {
                         byte[] rawGlb = File.ReadAllBytes(filePath);
                         byte[] patchedGlb = PreprocessGlbBytesForUnlitAndEmissiveMaterials(rawGlb);
+                        rawGlb = null; // Release raw buffer promptly so peak RAM stays minimal
                         var glbManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.ParseGlbManifest(patchedGlb);
                         var gltfDoc = new GltfDocument();
                         var gltfState = new GltfState();
                         if (gltfDoc.AppendFromBuffer(patchedGlb, baseDir, gltfState) == Error.Ok)
                         {
+                            patchedGlb = null;
                             importedScene = gltfDoc.GenerateScene(gltfState);
                             if (importedScene != null)
                             {
@@ -408,6 +410,7 @@ namespace DeadlockPlayground.Importer
             if (!string.IsNullOrEmpty(filePath))
             {
                 sceneRoot.SetMeta("ImportedSourceBaseDir", Path.GetDirectoryName(filePath) ?? "");
+                sceneRoot.SetMeta("ImportedSourceFilePath", filePath);
             }
 
             SanitizeImportedModelMaterials(sceneRoot);
@@ -627,7 +630,19 @@ namespace DeadlockPlayground.Importer
             var assignedMatNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var matToUniqueName = new Dictionary<Material, string>();
             var glbManifest = DeadlockPlayground.Materials.MaterialChannelDiscovery.TryGetGlbManifest(sceneRoot);
-            var externalTexturePool = CollectSiblingExternalTextures(sceneRoot);
+
+            // Only scan sibling external textures lazily when the source is .fbx/.gltf or a material lacks AlbedoTexture,
+            // avoiding decoding up to 48 unrelated images from Downloads/staging folders for self-contained .glb files!
+            string srcPathMeta = sceneRoot.HasMeta("ImportedSourceFilePath") ? sceneRoot.GetMeta("ImportedSourceFilePath").AsString() : "";
+            bool isFbxOrGltf = srcPathMeta.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) ||
+                               srcPathMeta.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+            List<Texture2D> externalTexturePool = null;
+            List<Texture2D> GetExternalTexturePool()
+            {
+                if (externalTexturePool == null)
+                    externalTexturePool = CollectSiblingExternalTextures(sceneRoot);
+                return externalTexturePool;
+            }
 
             var meshes = CollectMeshes(sceneRoot);
             foreach (var mi in meshes)
@@ -642,16 +657,21 @@ namespace DeadlockPlayground.Importer
                     if (mat == null) continue;
 
                     // Disambiguate material name across distinct material instances so generic names
-                    // (like "material", "Material", "default") never collide between meshes (e.g. eye vs pistol)
+                    // (like "material", "Material.001", "lambert1", "default") never collide between meshes/surfaces
                     if (!matToUniqueName.TryGetValue(mat, out string uniqueMatName))
                     {
                         string rawMatName = mat.ResourceName?.Trim();
-                        if (string.IsNullOrWhiteSpace(rawMatName) ||
-                            rawMatName.Equals("material", StringComparison.OrdinalIgnoreCase) ||
-                            rawMatName.Equals("default", StringComparison.OrdinalIgnoreCase) ||
-                            rawMatName.Equals("custom_mat", StringComparison.OrdinalIgnoreCase))
+                        string lowerRaw = (rawMatName ?? "").ToLowerInvariant();
+                        bool isGenericMat = string.IsNullOrWhiteSpace(rawMatName) ||
+                            lowerRaw == "material" || lowerRaw.StartsWith("material.") || lowerRaw.StartsWith("material_") ||
+                            lowerRaw == "default" || lowerRaw == "defaultmaterial" || lowerRaw == "custom_mat" ||
+                            lowerRaw.StartsWith("lambert") || lowerRaw.StartsWith("phong") || lowerRaw.StartsWith("blinn") ||
+                            lowerRaw == "standard" || lowerRaw.StartsWith("standard.");
+
+                        if (isGenericMat)
                         {
-                            rawMatName = $"{rawMeshName}_mat";
+                            string suffixTag = string.IsNullOrWhiteSpace(rawMatName) ? "mat" : rawMatName.Replace('.', '_').Replace(' ', '_');
+                            rawMatName = surfCount > 1 ? $"{rawMeshName}_s{s}_{suffixTag}" : $"{rawMeshName}_{suffixTag}";
                         }
 
                         uniqueMatName = rawMatName;
@@ -666,7 +686,8 @@ namespace DeadlockPlayground.Importer
                         mat.ResourceName = uniqueMatName;
                     }
 
-                    mi.SetMeta("SourceMaterialName", uniqueMatName);
+                    mi.SetMeta($"SourceMaterialName_{s}", uniqueMatName);
+                    if (s == 0) mi.SetMeta("SourceMaterialName", uniqueMatName);
                     mat.SetMeta("MaterialName", uniqueMatName);
 
                     // Check if vertex color array is all black/zero
@@ -710,6 +731,18 @@ namespace DeadlockPlayground.Importer
                         if (stdMat.AlbedoTexture == null && stdMat.EmissionTexture != null)
                         {
                             stdMat.AlbedoTexture = stdMat.EmissionTexture;
+                        }
+
+                        // For FBX/GLTF materials where Godot left AlbedoTexture null (e.g. external .fbm / Textures/ files
+                        // referenced by absolute artist paths), try matching a sibling color texture before baking solid white!
+                        if (stdMat.AlbedoTexture == null && isFbxOrGltf)
+                        {
+                            var matchedAlbedo = TryMatchSiblingAlbedoTexture(GetExternalTexturePool(), uniqueMatName, rawMeshName);
+                            if (matchedAlbedo != null)
+                            {
+                                stdMat.AlbedoTexture = matchedAlbedo;
+                                GD.Print($"[CustomModelAutoRigger] Bound sibling albedo texture '{matchedAlbedo.ResourceName}' to FBX/GLTF material '{uniqueMatName}'.");
+                            }
                         }
 
                         // If material has no AlbedoTexture, bake its solid AlbedoColor into a 16x16 solid-color ImageTexture!
@@ -798,7 +831,7 @@ namespace DeadlockPlayground.Importer
                             mat,
                             uniqueMatName,
                             matchedSlot,
-                            externalTexturePool);
+                            isFbxOrGltf ? GetExternalTexturePool() : null);
                         DeadlockPlayground.Materials.MaterialChannelDiscovery.RegisterChannelSet(mat, discovered);
 
                         if (mat is StandardMaterial3D stdMeta)

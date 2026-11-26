@@ -1144,10 +1144,16 @@ namespace DeadlockPlayground.Painter
                 {
                     name = name.Substring(lastSlash + 1);
                 }
-                int dot = name.IndexOf('.');
-                if (dot > 0)
+                // Strip only known material/resource extensions so dotted material names
+                // (e.g. Blender/FBX "Material.001" vs "Material.002" or "Char.Face" vs "Char.Body")
+                // are NEVER truncated into the same MaterialGroup key.
+                foreach (string ext in new[] { ".vmat_c", ".vmat", ".tres", ".res", ".mat" })
                 {
-                    name = name.Substring(0, dot);
+                    if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase) && name.Length > ext.Length)
+                    {
+                        name = name.Substring(0, name.Length - ext.Length);
+                        break;
+                    }
                 }
                 return name;
             }
