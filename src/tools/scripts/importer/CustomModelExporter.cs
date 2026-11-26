@@ -6045,7 +6045,8 @@ namespace DeadlockPlayground.Importer
 
                     positions.Add(new System.Numerics.Vector3(p.X, p.Y, p.Z));
                     normals.Add(new System.Numerics.Vector3(n.X, n.Y, n.Z));
-                    uvs.Add(new System.Numerics.Vector2(uv.X, 1.0f - uv.Y));
+                    // Source 2 DMX with flipVCoordinates = false expects DirectX/glTF top-left V directly (do NOT 1-v flip like SMD!)
+                    uvs.Add(new System.Numerics.Vector2(uv.X, uv.Y));
 
                     if (hasSubColors)
                     {

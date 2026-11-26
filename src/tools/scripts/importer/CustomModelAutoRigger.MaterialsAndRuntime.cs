@@ -352,7 +352,23 @@ namespace DeadlockPlayground.Importer
                     }
                 }
 
-                if (importedScene == null && ext == ".glb")
+                bool isBinaryGlb = ext == ".glb";
+                if (!isBinaryGlb && ext == ".gltf")
+                {
+                    try
+                    {
+                        using var fs = new FileStream(filePath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite);
+                        if (fs.Length >= 12)
+                        {
+                            Span<byte> hdr = stackalloc byte[4];
+                            if (fs.Read(hdr) == 4 && hdr[0] == (byte)'g' && hdr[1] == (byte)'l' && hdr[2] == (byte)'T' && hdr[3] == (byte)'F')
+                                isBinaryGlb = true;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (importedScene == null && isBinaryGlb)
                 {
                     try
                     {
