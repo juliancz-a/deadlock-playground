@@ -2675,6 +2675,20 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
         /// also copies all external <c>buffers[*].uri</c> (e.g. <c>scene.bin</c>) and <c>images[*].uri</c>
         /// (e.g. <c>textures/*.png</c>) preserving relative paths so packaged <c>.dpp</c> projects are 100% self-contained.
         /// </summary>
+        private static bool IsBinaryGlbFile(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return false;
+            try
+            {
+                using var fs = new FileStream(filePath, FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite);
+                if (fs.Length < 12) return false;
+                Span<byte> hdr = stackalloc byte[4];
+                if (fs.Read(hdr) != 4) return false;
+                return hdr[0] == (byte)'g' && hdr[1] == (byte)'l' && hdr[2] == (byte)'T' && hdr[3] == (byte)'F';
+            }
+            catch { return false; }
+        }
+
         private static void StageModelFileWithDependencies(string sourceModelFilePath, string destDir, string stagedFileName)
         {
             Directory.CreateDirectory(destDir);
@@ -2685,7 +2699,7 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
             }
 
-            bool isGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+            bool isGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase) && !IsBinaryGlbFile(sourceModelFilePath);
             bool isFbx = sourceModelFilePath.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase);
             if (!isGltf && !isFbx)
                 return;
@@ -2793,6 +2807,10 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 return false;
             }
             if (!modelDiskPath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Binary GLB files misnamed with a .gltf extension (magic bytes "glTF") are self-contained and not UTF-8 JSON.
+            if (IsBinaryGlbFile(modelDiskPath))
                 return true;
 
             try
