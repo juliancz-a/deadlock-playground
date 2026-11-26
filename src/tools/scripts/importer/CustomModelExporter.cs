@@ -3049,6 +3049,11 @@ namespace DeadlockPlayground.Importer
                 var boneRotSrc = System.Numerics.Quaternion.Normalize(
                     GltfToSourceRootQuat * new System.Numerics.Quaternion(qGd.X, qGd.Y, qGd.Z, qGd.W));
 
+                // Source 2 FeJiggleBone ALWAYS simulates its tip along local +X (Forward = matrix.X).
+                // Reorient preserved SimulationKind.Jiggle bones so local +X points along the bone's anatomical
+                // aim axis (child direction or Blender +Y outward axis) while keeping world position & SMD bind skinning exact.
+                boneRotSrc = ResolveJiggleAimRotationSrc(bName, parentName, bundle, srcWorldByName, bonePosSrc, boneRotSrc);
+
                 if (isRootBone)
                 {
                     if (srcWorldByName != null) srcWorldByName[bName] = (bonePosSrc, boneRotSrc);
@@ -3101,6 +3106,150 @@ namespace DeadlockPlayground.Importer
                 }
             }
             return resolved;
+        }
+
+        private static System.Numerics.Quaternion BuildSourceXForwardQuaternion(Vector3 aimDirSrc)
+        {
+            var fwd = new System.Numerics.Vector3(aimDirSrc.X, aimDirSrc.Y, aimDirSrc.Z);
+            float len = fwd.Length();
+            if (len < 1e-5f) return System.Numerics.Quaternion.Identity;
+            fwd /= len;
+
+            // Source 2 world Up is +Z; choose a stable reference up vector not collinear with fwd
+            var refUp = MathF.Abs(fwd.Z) < 0.95f
+                ? System.Numerics.Vector3.UnitZ
+                : System.Numerics.Vector3.UnitX;
+            var left = System.Numerics.Vector3.Cross(refUp, fwd);
+            float leftLen = left.Length();
+            if (leftLen < 1e-5f) return System.Numerics.Quaternion.Identity;
+            left /= leftLen;
+            var up = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(fwd, left));
+
+            // Row-vector rotation matrix: Row1 = +X (Forward), Row2 = +Y (Left), Row3 = +Z (Up)
+            var m = new System.Numerics.Matrix4x4(
+                fwd.X, fwd.Y, fwd.Z, 0f,
+                left.X, left.Y, left.Z, 0f,
+                up.X, up.Y, up.Z, 0f,
+                0f, 0f, 0f, 1f);
+            return System.Numerics.Quaternion.Normalize(System.Numerics.Quaternion.CreateFromRotationMatrix(m));
+        }
+
+        private static System.Numerics.Quaternion ResolveJiggleAimRotationSrc(
+            string bName,
+            string parentName,
+            CustomModelExportBundle bundle,
+            Dictionary<string, (Vector3 Pos, System.Numerics.Quaternion Rot)> srcWorldByName,
+            Vector3 bonePosSrc,
+            System.Numerics.Quaternion origRotSrc)
+        {
+            if (bundle?.PreservedChains == null || bundle.PreservedChains.Count == 0)
+                return origRotSrc;
+
+            BoneChainDef matchChain = null;
+            List<string> chainBones = null;
+            int idx = -1;
+            for (int ci = 0; ci < bundle.PreservedChains.Count; ci++)
+            {
+                var ch = bundle.PreservedChains[ci];
+                if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain || ch.Simulation != SimulationKind.Jiggle)
+                    continue;
+                var bones = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
+                    ? ch.AppendedHeroBoneNames
+                    : ch.SourceBoneNames;
+                if (bones == null || bones.Count == 0) continue;
+                int found = bones.FindIndex(n => string.Equals(n, bName, StringComparison.OrdinalIgnoreCase));
+                if (found >= 0)
+                {
+                    matchChain = ch;
+                    chainBones = bones;
+                    idx = found;
+                    break;
+                }
+            }
+
+            if (matchChain == null || chainBones == null || idx < 0)
+                return origRotSrc;
+
+            bool TryGetSrcPos(string name, out Vector3 pos)
+            {
+                if (srcWorldByName != null && srcWorldByName.TryGetValue(name, out var xf))
+                {
+                    pos = xf.Pos;
+                    return true;
+                }
+                if (bundle.BoneRestTransforms != null && bundle.BoneRestTransforms.TryGetValue(name, out Transform3D gdXf))
+                {
+                    pos = GodotToSourcePosition(gdXf.Origin);
+                    return true;
+                }
+                pos = Vector3.Zero;
+                return false;
+            }
+
+            Vector3 aimDirSrc = Vector3.Zero;
+
+            // 1. Next non-co-located child in the same jiggle chain
+            for (int k = idx + 1; k < chainBones.Count; k++)
+            {
+                if (TryGetSrcPos(chainBones[k], out Vector3 childPos))
+                {
+                    Vector3 delta = childPos - bonePosSrc;
+                    if (delta.LengthSquared() > 0.0225f) // > 0.15 in
+                    {
+                        aimDirSrc = delta.Normalized();
+                        break;
+                    }
+                }
+            }
+
+            // 2. Leaf bone: continue along the chain from the nearest non-co-located upstream bone
+            if (aimDirSrc.LengthSquared() < 0.5f)
+            {
+                for (int k = idx - 1; k >= 0; k--)
+                {
+                    if (TryGetSrcPos(chainBones[k], out Vector3 prevPos))
+                    {
+                        Vector3 delta = bonePosSrc - prevPos;
+                        if (delta.LengthSquared() > 0.0225f)
+                        {
+                            aimDirSrc = delta.Normalized();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. Co-located child bone (e.g. Breast_01 with T=[0,0,0] under c_Breast_root): inherit chain parent's +X aim
+            if (aimDirSrc.LengthSquared() < 0.5f && idx > 0 &&
+                srcWorldByName != null && srcWorldByName.TryGetValue(chainBones[idx - 1], out var chainParentXf))
+            {
+                aimDirSrc = RotateVecBySysQuat(chainParentXf.Rot, Vector3.Right);
+            }
+
+            // 4. Single-bone or co-located-pair root: distinguish native +X-forward rigs vs Blender/glTF +Y-forward rigs
+            if (aimDirSrc.LengthSquared() < 0.5f)
+            {
+                Vector3 xAxis = RotateVecBySysQuat(origRotSrc, Vector3.Right);
+                Vector3 yAxis = RotateVecBySysQuat(origRotSrc, Vector3.Up);
+                if (!string.IsNullOrEmpty(parentName) && TryGetSrcPos(parentName, out Vector3 parentPos))
+                {
+                    Vector3 outward = bonePosSrc - parentPos;
+                    if (outward.LengthSquared() > 0.0225f)
+                    {
+                        Vector3 outDir = outward.Normalized();
+                        if (xAxis.Dot(outDir) > 0.70f)
+                            aimDirSrc = xAxis;
+                        else if (yAxis.Dot(outDir) > 0.25f)
+                            aimDirSrc = yAxis;
+                        else
+                            aimDirSrc = outDir;
+                    }
+                }
+                if (aimDirSrc.LengthSquared() < 0.5f)
+                    aimDirSrc = yAxis.LengthSquared() > 0.5f ? yAxis : xAxis;
+            }
+
+            return BuildSourceXForwardQuaternion(aimDirSrc);
         }
 
         private static (Vector3 OriginIn, System.Numerics.Quaternion ParentRot, Vector3 AnglesDeg) GodotLocalBoneToSource(
@@ -3855,7 +4004,6 @@ namespace DeadlockPlayground.Importer
                     float perJointAngle = jp.AngleLimitDeg;
 
                     float boneLen = 2.5f;
-                    Vector3 point1Local = new Vector3(boneLen, 0f, 0f);
                     if (srcWorldByName != null && srcWorldByName.TryGetValue(bName, out var bXf))
                     {
                         Vector3 dirSrcW = Vector3.Zero;
@@ -3873,21 +4021,20 @@ namespace DeadlockPlayground.Importer
 
                         if (dirSrcW.LengthSquared() > 0.0025f)
                         {
-                            float rawLen = dirSrcW.Length();
-                            boneLen = Mathf.Clamp(rawLen, 1.5f, 8.0f);
-                            var qInv = System.Numerics.Quaternion.Inverse(bXf.Rot);
-                            Vector3 localDir = RotateVecBySysQuat(qInv, dirSrcW / rawLen);
-                            point1Local = localDir * boneLen;
+                            boneLen = Mathf.Clamp(dirSrcW.Length(), 1.5f, 8.0f);
                         }
                     }
+                    // Because ResolveJiggleAimRotationSrc aligns every JiggleBone's local +X onto its aim axis,
+                    // point1 lies cleanly along +X at [ boneLen, 0, 0 ].
+                    Vector3 point1Local = new Vector3(boneLen, 0f, 0f);
 
                     entries.AppendLine("\t\t\t\t\t{");
                     entries.AppendLine("\t\t\t\t\t\t_class = \"JiggleBone\"");
                     entries.AppendLine($"\t\t\t\t\t\tname = \"jiggle_{EscapeKvString(bName)}\"");
                     entries.AppendLine($"\t\t\t\t\t\tjiggle_root_bone = \"{EscapeKvString(bName)}\"");
-                    entries.AppendLine("\t\t\t\t\t\tjiggle_type = 0");
+                    entries.AppendLine("\t\t\t\t\t\tjiggle_type = 1"); // 1 = Flexible (enables Yaw/Pitch stiffness & damping spring return; 0 = Rigid pendulum with no spring!)
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tlength = {0:F3}", boneLen));
-                    entries.AppendLine("\t\t\t\t\t\ttip_mass = 1.000");
+                    entries.AppendLine(string.Format(ic, "\t\t\t\t\t\ttip_mass = {0:F3}", jp.TipMass));
                     entries.AppendLine("\t\t\t\t\t\thas_yaw_constraint = true");
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tmin_yaw = -{0:F1}", perJointAngle));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tmax_yaw = {0:F1}", perJointAngle));
@@ -3896,11 +4043,12 @@ namespace DeadlockPlayground.Importer
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tmax_pitch = {0:F1}", perJointAngle));
                     entries.AppendLine("\t\t\t\t\t\thas_angle_constraint = true");
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tangle_limit = {0:F1}", perJointAngle));
+                    entries.AppendLine("\t\t\t\t\t\thas_length_constraint = true");
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tyaw_stiffness = {0:F2}", stiff));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tpitch_stiffness = {0:F2}", stiff));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tyaw_damping = {0:F2}", damp));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tpitch_damping = {0:F2}", damp));
-                    entries.AppendLine(string.Format(ic, "\t\t\t\t\t\talong_stiffness = {0:F2}", Mathf.Clamp(stiff * 0.85f, 35f, 800f)));
+                    entries.AppendLine(string.Format(ic, "\t\t\t\t\t\talong_stiffness = {0:F2}", jp.AlongStiffness));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\talong_damping = {0:F2}", damp));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tpoint1 = [ {0:F3}, {1:F3}, {2:F3} ]", point1Local.X, point1Local.Y, point1Local.Z));
                     entries.AppendLine("\t\t\t\t\t},");

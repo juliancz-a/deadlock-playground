@@ -161,13 +161,26 @@ namespace DeadlockPlayground.Importer
             public readonly float AlongStiffness;
             public readonly float Damping;
             public readonly float AngleLimitDeg;
+            public readonly float TipMass;
+            public readonly float Omega;
+            public readonly float DampingRatio;
 
-            public ResolvedJiggleNodeParams(float stiffness, float alongStiffness, float damping, float angleLimitDeg)
+            public ResolvedJiggleNodeParams(
+                float stiffness,
+                float alongStiffness,
+                float damping,
+                float angleLimitDeg,
+                float tipMass = 0f,
+                float omega = 14f,
+                float dampingRatio = 0.55f)
             {
                 Stiffness = stiffness;
                 AlongStiffness = alongStiffness;
                 Damping = damping;
                 AngleLimitDeg = angleLimitDeg;
+                TipMass = tipMass;
+                Omega = omega;
+                DampingRatio = dampingRatio;
             }
         }
 
@@ -381,6 +394,9 @@ namespace DeadlockPlayground.Importer
 
         /// <summary>
         /// Resolves Source 2 <c>JiggleBone</c> parameters for rigid bounce chains (glutes, bust, props).
+        /// Calibrates <c>Damping</c> directly to physical critical damping (<c>2 * zeta * sqrt(stiffness)</c>)
+        /// so UI Damping (0..1) maps identically to Source 2's symplectic Euler <c>FeJiggleBone</c> runtime
+        /// and Godot's live preview without low-damping ringing or 3x preview over-damping.
         /// </summary>
         public static ResolvedJiggleNodeParams ResolveJiggleNode(BoneChainDef ch, float t, int chainBoneCount)
         {
@@ -388,18 +404,30 @@ namespace DeadlockPlayground.Importer
             float s = Mathf.Lerp(Mathf.Clamp(ch?.StiffnessRoot ?? 0.85f, 0f, 1f),
                                  Mathf.Clamp(ch?.StiffnessTip ?? 0.65f, 0f, 1f), t);
             float stiff = Mathf.Clamp(s * 420f, 20f, 800f);
-            float damp = Mathf.Clamp((ch?.Damping ?? 0.50f) * 14f, 1.0f, 30f);
+            float omega = MathF.Sqrt(stiff);
+            float damp01 = Mathf.Clamp(ch?.Damping ?? 0.50f, 0f, 1f);
+            float zeta = Mathf.Lerp(0.18f, 1.05f, damp01);
+            float damp = Mathf.Clamp(2.0f * zeta * omega, 1.5f, 45.0f);
             float baseAngle = Mathf.Clamp((ch?.AngleLimitDeg ?? 22f) > 1f ? ch.AngleLimitDeg : 22f, 6f, 60f);
             float angle = chainBoneCount > 1
                 ? Mathf.Clamp(baseAngle / MathF.Sqrt(chainBoneCount), 6f, 45f)
                 : baseAngle;
-            return new ResolvedJiggleNodeParams(stiff, Mathf.Clamp(stiff * 0.85f, 20f, 800f), damp, angle);
+            float grav = Mathf.Clamp(ch?.Gravity ?? 0f, 0f, 4f);
+            float tipMass = grav <= 0.01f ? 0.0f : grav;
+            return new ResolvedJiggleNodeParams(
+                stiffness: stiff,
+                alongStiffness: Mathf.Clamp(stiff * 0.85f, 20f, 800f),
+                damping: damp,
+                angleLimitDeg: angle,
+                tipMass: tipMass,
+                omega: omega,
+                dampingRatio: zeta);
         }
 
         /// <summary>
         /// Resolves Godot live preview (<c>CustomJiggleBoneDriver</c>) parameters directly from
         /// Source 2 <c>FeModel</c> / <c>FeJiggleBone</c> semantics so the 60 Hz Verlet PBD cloth
-        /// solver and semi-implicit Jiggle solver closely match in-game Source 2 behavior.
+        /// solver and Source 2-matched Jiggle solver closely match in-game Source 2 behavior.
         /// </summary>
         public static ResolvedPreviewBoneParams ResolvePreviewBone(
             BoneChainDef ch,
@@ -414,17 +442,17 @@ namespace DeadlockPlayground.Importer
             bool isJiggle = ch?.Simulation == SimulationKind.Jiggle;
             float pointDamping = ResolveCompiledPointDamping(ch?.Damping ?? 0.25f);
 
-            // Semi-implicit JiggleBone frequency/damping mapped directly from Source 2 ResolveJiggleNode:
-            // stiffness 20..800 -> omega = sqrt(stiffness) ≈ 4.5..28.3 rad/s
-            // damping 1..30 -> zeta = damping / (2 * omega) clamped to [0.18, 1.15] so high stiffness never rings or explodes.
-            float jiggleOmega = MathF.Sqrt(MathF.Max(20f, jig.Stiffness));
-            float jiggleDampRatio = Mathf.Clamp(jig.Damping / MathF.Max(2f, 0.7f * jiggleOmega), 0.18f, 1.15f);
+            // Exact 1:1 frequency and damping ratio with Source 2 FeJiggleBone (ResolveJiggleNode)
+            float jiggleOmega = jig.Omega;
+            float jiggleDampRatio = jig.DampingRatio;
 
-            float springK = isJiggle ? (jiggleOmega * jiggleOmega) : (cloth.GoalForce * 220f);
-            float dampK = isJiggle ? (2f * jiggleDampRatio * jiggleOmega) : pointDamping;
+            float springK = isJiggle ? jig.Stiffness : (cloth.GoalForce * 220f);
+            float dampK = isJiggle ? jig.Damping : pointDamping;
 
-            // Source 2 FeJiggleBone has ZERO gravity — match that in preview so bust/buttocks don't droop.
-            float gravMeters = isJiggle ? 0.0f : (StandardGravityMetersPerSecSq * cloth.GravityScale);
+            // Source 2 FeJiggleBone applies -TipMass (in/s^2) on Z when tip_mass > 0; honor Gravity honestly in preview.
+            float gravMeters = isJiggle
+                ? (jig.TipMass * InchesToMeters)
+                : (StandardGravityMetersPerSecSq * cloth.GravityScale);
             float colMeters = MathF.Max(0.005f, cloth.CollisionRadiusInches * InchesToMeters);
             float strayMeters = cloth.StrayRadiusInches < 0f ? -1.0f : cloth.StrayRadiusInches * InchesToMeters;
 
