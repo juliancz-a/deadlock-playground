@@ -43,6 +43,7 @@ public partial class ChangelogModalUI : PanelContainer
     private string _websiteUrl = DefaultWebsiteUrl;
     private string _discordUrl = DefaultDiscordUrl;
     private bool _isLoading = false;
+    private bool _pendingForceRefresh = false;
 
     public string ActiveVersion => _activeVersion;
 
@@ -93,7 +94,11 @@ public partial class ChangelogModalUI : PanelContainer
 
     public async Task RefreshFeedAsync(bool forceRefresh)
     {
-        if (_isLoading) return;
+        if (_isLoading)
+        {
+            if (forceRefresh) _pendingForceRefresh = true;
+            return;
+        }
         _isLoading = true;
 
         if (_statusBadge != null)
@@ -107,9 +112,10 @@ public partial class ChangelogModalUI : PanelContainer
             var payload = await ChangelogFeedService.GetChangelogAsync(forceRefresh).ConfigureAwait(true);
             if (payload != null)
             {
-                if (!string.IsNullOrEmpty(payload.Markdown))
+                string displayMarkdown = ResolveDisplayMarkdown(payload);
+                if (!string.IsNullOrEmpty(displayMarkdown))
                 {
-                    SetChangelogContent(payload.Markdown);
+                    SetChangelogContent(displayMarkdown);
                 }
 
                 if (!string.IsNullOrEmpty(payload.Title) && _titleLabel != null)
@@ -178,7 +184,73 @@ public partial class ChangelogModalUI : PanelContainer
         finally
         {
             _isLoading = false;
+            if (_pendingForceRefresh)
+            {
+                _pendingForceRefresh = false;
+                _ = RefreshFeedAsync(true);
+            }
         }
+    }
+
+    /// <summary>
+    /// Resolves the markdown body to display from a changelog payload.
+    /// If <see cref="ChangelogPayload.Markdown"/> is empty or only contains a single title line
+    /// while <see cref="ChangelogPayload.History"/> has structured highlights, synthesizes the full markdown body.
+    /// </summary>
+    private static string ResolveDisplayMarkdown(ChangelogPayload payload)
+    {
+        string rawMd = payload.Markdown?.Trim() ?? "";
+        var latestEntry = payload.History is { Count: > 0 } ? payload.History[0] : null;
+        bool hasHighlights = latestEntry?.Highlights is { Count: > 0 };
+
+        if (!string.IsNullOrEmpty(rawMd))
+        {
+            // Check whether rawMd actually has body content beyond a single heading line
+            string[] nonEmptyLines = rawMd.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (nonEmptyLines.Length > 1 || !hasHighlights)
+            {
+                return rawMd;
+            }
+        }
+
+        if (hasHighlights && latestEntry != null)
+        {
+            var sb = new System.Text.StringBuilder();
+            string header = !string.IsNullOrEmpty(latestEntry.Title)
+                ? latestEntry.Title
+                : (!string.IsNullOrEmpty(payload.Title) ? payload.Title : $"Version {payload.LatestVersion}");
+            sb.AppendLine($"### {header}");
+            sb.AppendLine();
+
+            foreach (string rawLine in latestEntry.Highlights)
+            {
+                if (string.IsNullOrWhiteSpace(rawLine)) continue;
+                string trimmed = rawLine.Trim();
+                // Normalize accidental missing space after hashes (e.g. "####Heading" -> "#### Heading")
+                trimmed = Regex.Replace(trimmed, @"^(#{1,6})(?=[^\s#])", "$1 ");
+
+                if (trimmed.StartsWith("#", StringComparison.Ordinal) ||
+                    Regex.IsMatch(trimmed, @"^(?:-{3,}|={3,}|\*{3,}|_{3,})$") ||
+                    trimmed.StartsWith(">", StringComparison.Ordinal) ||
+                    trimmed.StartsWith("```", StringComparison.Ordinal))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine(trimmed);
+                }
+                else if (Regex.IsMatch(rawLine, @"^\s*[-*+•]\s+"))
+                {
+                    sb.AppendLine(rawLine.TrimEnd());
+                }
+                else
+                {
+                    sb.AppendLine($"* {trimmed}");
+                }
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        return rawMd;
     }
 
     public void SetChangelogContent(string markdown)

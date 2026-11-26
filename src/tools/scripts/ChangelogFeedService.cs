@@ -25,6 +25,9 @@ public sealed class ChangelogEntry
 
     [JsonPropertyName("markdown")]
     public string Markdown { get; set; } = "";
+
+    [JsonPropertyName("highlights")]
+    public List<string> Highlights { get; set; } = new();
 }
 
 public sealed class ChangelogPayload

@@ -531,7 +531,9 @@ def execute_pipeline(payload):
                 changelog_data["latestVersion"] = version
                 changelog_data["publishedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 changelog_data["title"] = full_title
-                changelog_data["markdown"] = markdown or (f"### {full_title}\n\n" + highlights_to_markdown(clean_highlights))
+                md_lines = [l for l in markdown.splitlines() if l.strip()] if markdown else []
+                has_real_markdown_body = len(md_lines) > 1 or (len(md_lines) == 1 and not md_lines[0].strip().startswith("#"))
+                changelog_data["markdown"] = markdown if has_real_markdown_body else (f"### {full_title}\n\n" + highlights_to_markdown(clean_highlights))
                     
             history.insert(0, new_history_item)
             changelog_data["history"] = history
