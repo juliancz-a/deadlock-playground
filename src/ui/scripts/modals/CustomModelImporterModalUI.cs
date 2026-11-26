@@ -474,6 +474,11 @@ namespace DeadlockPlayground.UI
                 }
                 else if (IsImportedSculptActive() && !isTypingInTextField)
                 {
+                    if (IsFaceEditActive() && HandleFaceEditKeyShortcut(key))
+                    {
+                        GetViewport().SetInputAsHandled();
+                        return;
+                    }
                     if (key.CtrlPressed && key.Keycode == Key.Z && !key.ShiftPressed)
                     {
                         OnImportedSculptUndoPressed();
@@ -501,10 +506,16 @@ namespace DeadlockPlayground.UI
                     }
                     if (key.Keycode == Key.Escape)
                     {
-                        if (_btnImpSculptToggle != null) _btnImpSculptToggle.ButtonPressed = false;
+                        ExitImportedSculptMode();
                         GetViewport().SetInputAsHandled();
                         return;
                     }
+                }
+                else if (IsWeaponSocketHudActive() && !isTypingInTextField && key.Keycode == Key.Escape)
+                {
+                    ExitWeaponSocketHud();
+                    GetViewport().SetInputAsHandled();
+                    return;
                 }
                 else if (IsDeformBrushActive())
                 {
@@ -943,18 +954,19 @@ namespace DeadlockPlayground.UI
             tbRow2.AddThemeConstantOverride("v_separation", 4);
             tbVBox.AddChild(tbRow2);
 
-            // --- Row 1: Viewport Display, X-Ray & 3D Transform Gizmo ---
+            // --- Row 1: Grouped Viewport Display | Rig Diagnostics | 3D Gizmo ---
+            // Group A: Viewport Display Overlays
             _btnToggleGhost = new Button
             {
                 Text = "Ghost",
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = true,
-                CustomMinimumSize = new Vector2(86, 32),
+                CustomMinimumSize = new Vector2(80, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Toggle reference hero ghost mannequin visibility"
             };
-            SetButtonIcon(_btnToggleGhost, "res://assets/at-icons/eye.svg", 20);
+            SetButtonIcon(_btnToggleGhost, "res://assets/at-icons/eye.svg", 18);
             _btnToggleGhost.Toggled += (t) => SetHeroGhostEnabled(t);
             tbRow1.AddChild(_btnToggleGhost);
 
@@ -964,7 +976,7 @@ namespace DeadlockPlayground.UI
                 MaxValue = 1.0,
                 Step = 0.05,
                 Value = 0.35,
-                CustomMinimumSize = new Vector2(58, 24),
+                CustomMinimumSize = new Vector2(54, 24),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Reference hero ghost opacity"
             };
@@ -978,24 +990,68 @@ namespace DeadlockPlayground.UI
             };
             tbRow1.AddChild(_sliderGhostOpacity);
 
+            _btnToggleXRay = new Button
+            {
+                Text = "X-Ray",
+                ThemeTypeVariation = "ToolbarButton",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(74, 30),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                TooltipText = "See-through translucent mesh + X-Ray wireframe to inspect internal bones and back-side vertices"
+            };
+            SetButtonIcon(_btnToggleXRay, "res://assets/at-icons/eye.svg", 16);
+            _btnToggleXRay.Toggled += (t) =>
+            {
+                _isXRayMode = t;
+                if (IsWeightPaintActive()) RefreshWeightPaintHeatmap();
+                else RefreshViewportShadingAndWireframes();
+            };
+            tbRow1.AddChild(_btnToggleXRay);
+
+            _optViewportShading = new OptionButton
+            {
+                CustomMinimumSize = new Vector2(118, 30),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                TooltipText = "Viewport mesh shading mode: Textured, Solid + Wireframe overlay, or Wireframe cage"
+            };
+            ConfigureOptionButton(_optViewportShading, 118);
+            _optViewportShading.AddItem("Textured", (int)CustomWeightPaintEditor.ViewportShadingMode.Textured);
+            _optViewportShading.AddItem("Solid + Wire", (int)CustomWeightPaintEditor.ViewportShadingMode.SolidWire);
+            _optViewportShading.AddItem("Wireframe", (int)CustomWeightPaintEditor.ViewportShadingMode.Wireframe);
+            _optViewportShading.Select(0);
+            _optViewportShading.ItemSelected += (idx) =>
+            {
+                _viewportShadingMode = (CustomWeightPaintEditor.ViewportShadingMode)_optViewportShading.GetItemId((int)idx);
+                RefreshViewportShadingAndWireframes();
+            };
+            tbRow1.AddChild(_optViewportShading);
+
+            tbRow1.AddChild(new VSeparator { CustomMinimumSize = new Vector2(2, 20), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter });
+
+            // Group B: Rig & Physics Diagnostics
             _btnToggleBones = new Button
             {
                 Text = "Bones",
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = false,
-                CustomMinimumSize = new Vector2(80, 32),
+                CustomMinimumSize = new Vector2(76, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Toggle skeleton bone wireframe overlay (Left-click bone to select, Right-click bone to disable/enable)"
             };
-            SetButtonIcon(_btnToggleBones, "res://assets/at-icons/bone.svg", 20);
+            SetButtonIcon(_btnToggleBones, "res://assets/at-icons/bone.svg", 18);
             _btnToggleBones.Toggled += (t) =>
             {
                 _showBones = t;
                 if (_bonesDebugMesh != null) _bonesDebugMesh.Visible = t;
                 if (_bonesJointPointsMesh != null && GodotObject.IsInstanceValid(_bonesJointPointsMesh)) _bonesJointPointsMesh.Visible = t;
                 if (_boneLegendRow != null) _boneLegendRow.Visible = t;
-                if (_btnToggleBonesOnTop != null) _btnToggleBonesOnTop.Disabled = !t;
+                if (_btnToggleBonesOnTop != null)
+                {
+                    _btnToggleBonesOnTop.Disabled = !t;
+                    _btnToggleBonesOnTop.Visible = t;
+                }
                 if (t) RedrawBoneWireframe();
             };
             tbRow1.AddChild(_btnToggleBones);
@@ -1007,11 +1063,12 @@ namespace DeadlockPlayground.UI
                 ToggleMode = true,
                 ButtonPressed = _bonesOnTop,
                 Disabled = true,
-                CustomMinimumSize = new Vector2(68, 32),
+                Visible = false,
+                CustomMinimumSize = new Vector2(68, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Render bone wireframe & joint points on top of meshes (NoDepthTest)"
             };
-            SetButtonIcon(_btnToggleBonesOnTop, "res://assets/at-icons/eye.svg", 16);
+            SetButtonIcon(_btnToggleBonesOnTop, "res://assets/at-icons/eye.svg", 14);
             _btnToggleBonesOnTop.Toggled += (on) =>
             {
                 _bonesOnTop = on;
@@ -1025,11 +1082,11 @@ namespace DeadlockPlayground.UI
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = _showColliders,
-                CustomMinimumSize = new Vector2(96, 32),
+                CustomMinimumSize = new Vector2(90, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Show / hide mesh-fitted body collision capsules (used by preview & Source 2 cloth physics)"
             };
-            SetButtonIcon(_btnToggleColliders, "res://assets/at-icons/circle.svg", 16);
+            SetButtonIcon(_btnToggleColliders, "res://assets/at-icons/circle.svg", 14);
             _btnToggleColliders.Toggled += (t) =>
             {
                 _showColliders = t;
@@ -1044,86 +1101,31 @@ namespace DeadlockPlayground.UI
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = false,
-                CustomMinimumSize = new Vector2(106, 32),
+                CustomMinimumSize = new Vector2(98, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Open floating Look Up / Crouch / Walk Back physics stress-test controls"
             };
-            SetButtonIcon(_btnStressTestPopover, "res://assets/at-icons/signal_wave.svg", 16);
+            SetButtonIcon(_btnStressTestPopover, "res://assets/at-icons/signal_wave.svg", 14);
             _btnStressTestPopover.Toggled += (open) =>
             {
                 if (_boxStressTestPopover != null) _boxStressTestPopover.Visible = open;
             };
             tbRow1.AddChild(_btnStressTestPopover);
 
-            foreach (string camPreset in new[] { "Front", "Side", "3/4", "Frame" })
-            {
-                var btnCam = new Button
-                {
-                    Text = camPreset,
-                    ThemeTypeVariation = "ToolbarButton",
-                    CustomMinimumSize = new Vector2(46, 30),
-                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                    TooltipText = $"Snap preview camera to {camPreset} view"
-                };
-                string capturedCam = camPreset;
-                btnCam.Pressed += () => SetCameraPreset(capturedCam);
-                tbRow1.AddChild(btnCam);
-            }
+            tbRow1.AddChild(new VSeparator { CustomMinimumSize = new Vector2(2, 20), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter });
 
-            _btnToggleXRay = new Button
-            {
-                Text = "X-Ray",
-                ThemeTypeVariation = "ToolbarButton",
-                ToggleMode = true,
-                ButtonPressed = false,
-                CustomMinimumSize = new Vector2(78, 32),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                TooltipText = "See-through translucent mesh + X-Ray wireframe to inspect internal bones and back-side vertices"
-            };
-            SetButtonIcon(_btnToggleXRay, "res://assets/at-icons/eye.svg", 18);
-            _btnToggleXRay.Toggled += (t) =>
-            {
-                _isXRayMode = t;
-                if (IsWeightPaintActive()) RefreshWeightPaintHeatmap();
-                else RefreshViewportShadingAndWireframes();
-            };
-            tbRow1.AddChild(_btnToggleXRay);
-
-            var lblShading = new Label { Text = "View:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            _secondaryLabels.Add(lblShading);
-            tbRow1.AddChild(lblShading);
-
-            _optViewportShading = new OptionButton
-            {
-                CustomMinimumSize = new Vector2(128, 32),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                TooltipText = "Viewport mesh shading mode: Textured, Solid + Wireframe overlay, or Wireframe cage"
-            };
-            ConfigureOptionButton(_optViewportShading, 128);
-            _optViewportShading.AddItem("Textured", (int)CustomWeightPaintEditor.ViewportShadingMode.Textured);
-            _optViewportShading.AddItem("Solid + Wire", (int)CustomWeightPaintEditor.ViewportShadingMode.SolidWire);
-            _optViewportShading.AddItem("Wireframe", (int)CustomWeightPaintEditor.ViewportShadingMode.Wireframe);
-            _optViewportShading.Select(0);
-            _optViewportShading.ItemSelected += (idx) =>
-            {
-                _viewportShadingMode = (CustomWeightPaintEditor.ViewportShadingMode)_optViewportShading.GetItemId((int)idx);
-                RefreshViewportShadingAndWireframes();
-            };
-            tbRow1.AddChild(_optViewportShading);
-
-            tbRow1.AddChild(new VSeparator());
-
+            // Group C: 3D Gizmo
             var lblGizmo = new Label { Text = "Gizmo:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
             _secondaryLabels.Add(lblGizmo);
             tbRow1.AddChild(lblGizmo);
 
             _optGizmoTarget = new OptionButton
             {
-                CustomMinimumSize = new Vector2(142, 32),
+                CustomMinimumSize = new Vector2(132, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Select which target the interactive 3D move/rotate gizmo controls"
             };
-            ConfigureOptionButton(_optGizmoTarget, 142);
+            ConfigureOptionButton(_optGizmoTarget, 132);
             _optGizmoTarget.AddItem("Off", 0);
             _optGizmoTarget.AddItem("Weapon (R)", 1);
             _optGizmoTarget.AddItem("Weapon (L)", 2);
@@ -1139,36 +1141,12 @@ namespace DeadlockPlayground.UI
                 ToggleMode = true,
                 ButtonPressed = false,
                 Disabled = true,
-                CustomMinimumSize = new Vector2(68, 32),
+                CustomMinimumSize = new Vector2(64, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Toggle gizmo axes between Global (world X/Y/Z) and Local (object X/Y/Z)"
             };
             _btnGizmoLocalSpace.Toggled += (_) => SyncGizmoSpaceButton();
             tbRow1.AddChild(_btnGizmoLocalSpace);
-
-            _btnSnapGripPalm = new Button
-            {
-                Text = "Snap Grip",
-                ThemeTypeVariation = "ToolbarButton",
-                CustomMinimumSize = new Vector2(104, 32),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                TooltipText = "Align active weapon grip into the hero's hand palm with forward rotation"
-            };
-            SetButtonIcon(_btnSnapGripPalm, "res://assets/at-icons/sparkles.svg", 18);
-            _btnSnapGripPalm.Pressed += OnSnapGripToPalmPressed;
-            tbRow1.AddChild(_btnSnapGripPalm);
-
-            _btnStraightenWeapon = new Button
-            {
-                Text = "Straighten",
-                ThemeTypeVariation = "ToolbarButton",
-                CustomMinimumSize = new Vector2(104, 32),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                TooltipText = "Auto-detect weapon barrel axis and straighten forward (+Z)"
-            };
-            SetButtonIcon(_btnStraightenWeapon, "res://assets/at-icons/sparkles.svg", 18);
-            _btnStraightenWeapon.Pressed += OnStraightenWeaponPressed;
-            tbRow1.AddChild(_btnStraightenWeapon);
 
             // --- Row 2: Animation Preview Playback ---
             var lblAnim = new Label { Text = "Preview Anim:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
@@ -1478,9 +1456,11 @@ namespace DeadlockPlayground.UI
             BuildWeightPaintViewportHud(viewportPanel);
             BuildMeshCutViewportHud(viewportPanel);
             BuildImportedSculptViewportHud(viewportPanel);
+            BuildWeaponSocketViewportHud(viewportPanel);
             BuildReferenceRigViewportHud(viewportPanel);
             BuildSyntheticChainViewportHud(viewportPanel);
             BuildStressTestViewportPopover(viewportPanel);
+            BuildViewportCameraPill(viewportPanel);
 
             // Right Side: Tabbed Configuration Inspector
             var rightPanel = new PanelContainer

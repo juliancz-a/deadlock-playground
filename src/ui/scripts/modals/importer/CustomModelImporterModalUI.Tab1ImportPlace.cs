@@ -489,8 +489,8 @@ namespace DeadlockPlayground.UI
             _spinRotYaw.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
             _spinRotRoll.ValueChanged += (_) => { _userModifiedTransform = true; ApplyTransformToPreviewModel(); };
 
-            // Card B: Reshape / 3D Sculpt Imported Mesh (Sweaters / Clothing / Accessories)
-            vBox.AddChild(BuildImportedSculptCard());
+            // Sculpt card moved to per-mesh [Sculpt] button in 4. Meshes (floating 3D Sculpt HUD);
+            // keep global Non-Uniform Deform Scale inside Advanced Placement below!
 
             // Progressive Disclosure Toggle for Advanced Placement & Pose Calibration
             _btnTab1AdvancedToggle = new Button

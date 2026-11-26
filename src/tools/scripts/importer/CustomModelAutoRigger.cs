@@ -211,10 +211,14 @@ namespace DeadlockPlayground.Importer
             public bool PartialIncludeNeck { get; set; } = false;
             public bool PartialIncludeHead { get; set; } = false;
 
-            // --- Imported Mesh Reshape & 3D Fit Sculpt (Sweaters / Clothing / Accessories) ---
+            // --- Imported Mesh Reshape & 3D Fit Sculpt (Global + Per-Mesh Non-Uniform Scale & Parametric Fit) ---
             public float ImportedMeshBottomFlare { get; set; } = 0f;
             public float ImportedMeshTopFlare { get; set; } = 0f;
             public float ImportedMeshInflateMeters { get; set; } = 0f;
+            public Dictionary<string, Vector3> PerMeshScaleXYZ { get; set; } = null;
+            public Dictionary<string, float> PerMeshBottomFlare { get; set; } = null;
+            public Dictionary<string, float> PerMeshTopFlare { get; set; } = null;
+            public Dictionary<string, float> PerMeshInflateMeters { get; set; } = null;
             public Dictionary<string, Dictionary<int, Vector3>> ImportedMeshSculptDeltas { get; set; } = null;
         }
 
@@ -1779,11 +1783,15 @@ namespace DeadlockPlayground.Importer
             if (importedScene == null || !GodotObject.IsInstanceValid(importedScene) || options == null)
                 return null;
 
-            bool hasParam = MathF.Abs(options.ImportedMeshBottomFlare) > 1e-4f ||
-                            MathF.Abs(options.ImportedMeshTopFlare) > 1e-4f ||
-                            MathF.Abs(options.ImportedMeshInflateMeters) > 1e-5f;
+            bool hasGlobalParam = MathF.Abs(options.ImportedMeshBottomFlare) > 1e-4f ||
+                                  MathF.Abs(options.ImportedMeshTopFlare) > 1e-4f ||
+                                  MathF.Abs(options.ImportedMeshInflateMeters) > 1e-5f;
+            bool hasPerMeshParam = (options.PerMeshScaleXYZ != null && options.PerMeshScaleXYZ.Count > 0) ||
+                                   (options.PerMeshBottomFlare != null && options.PerMeshBottomFlare.Count > 0) ||
+                                   (options.PerMeshTopFlare != null && options.PerMeshTopFlare.Count > 0) ||
+                                   (options.PerMeshInflateMeters != null && options.PerMeshInflateMeters.Count > 0);
             bool hasDeltas = options.ImportedMeshSculptDeltas != null && options.ImportedMeshSculptDeltas.Count > 0;
-            if (!hasParam && !hasDeltas) return null;
+            if (!hasGlobalParam && !hasPerMeshParam && !hasDeltas) return null;
 
             var meshes = CollectMeshes(importedScene);
             if (meshes.Count == 0) return null;
@@ -1792,11 +1800,11 @@ namespace DeadlockPlayground.Importer
                 ? new HashSet<string>(options.IncludedImportedSubmeshNames, StringComparer.OrdinalIgnoreCase)
                 : null;
 
-            // Compute garment scene-space bounding box for parametric Bottom/Top Flare
-            float minY = float.MaxValue, maxY = float.MinValue;
-            float minX = float.MaxValue, maxX = float.MinValue;
-            float minZ = float.MaxValue, maxZ = float.MinValue;
-            if (hasParam)
+            // Compute global scene-space bounding box (used when global parametric sliders are active)
+            float gMinY = float.MaxValue, gMaxY = float.MinValue;
+            float gMinX = float.MaxValue, gMaxX = float.MinValue;
+            float gMinZ = float.MaxValue, gMaxZ = float.MinValue;
+            if (hasGlobalParam)
             {
                 foreach (var mi in meshes)
                 {
@@ -1811,18 +1819,17 @@ namespace DeadlockPlayground.Importer
                         for (int i = 0; i < verts.Length; i++)
                         {
                             Vector3 p = toScene * verts[i];
-                            if (p.X < minX) minX = p.X; if (p.X > maxX) maxX = p.X;
-                            if (p.Y < minY) minY = p.Y; if (p.Y > maxY) maxY = p.Y;
-                            if (p.Z < minZ) minZ = p.Z; if (p.Z > maxZ) maxZ = p.Z;
+                            if (p.X < gMinX) gMinX = p.X; if (p.X > gMaxX) gMaxX = p.X;
+                            if (p.Y < gMinY) gMinY = p.Y; if (p.Y > gMaxY) gMaxY = p.Y;
+                            if (p.Z < gMinZ) gMinZ = p.Z; if (p.Z > gMaxZ) gMaxZ = p.Z;
                         }
                     }
                 }
             }
-            float spanY = MathF.Max(1e-4f, maxY - minY);
-            float centerX = minX < maxX ? 0.5f * (minX + maxX) : 0f;
-            float centerZ = minZ < maxZ ? 0.5f * (minZ + maxZ) : 0f;
+            float gSpanY = MathF.Max(1e-4f, gMaxY - gMinY);
+            float gCenterX = gMinX < gMaxX ? 0.5f * (gMinX + gMaxX) : 0f;
+            float gCenterZ = gMinZ < gMaxZ ? 0.5f * (gMinZ + gMaxZ) : 0f;
             float rootScaleApprox = MathF.Max(1e-4f, options.RootScale > 1e-4f ? options.RootScale : options.AlignedTransform.Basis.Scale.Length() / MathF.Sqrt(3f));
-            float inflateScene = options.ImportedMeshInflateMeters / rootScaleApprox;
 
             var originals = new List<(MeshInstance3D Mi, Mesh OrigMesh)>();
             foreach (var mi in meshes)
@@ -1831,9 +1838,16 @@ namespace DeadlockPlayground.Importer
                 string mName = mi.Name.ToString();
                 if (includedFilter != null && !includedFilter.Contains(mName)) continue;
 
+                float perBot = options.PerMeshBottomFlare != null && options.PerMeshBottomFlare.TryGetValue(mName, out var pb) ? pb : 0f;
+                float perTop = options.PerMeshTopFlare != null && options.PerMeshTopFlare.TryGetValue(mName, out var pt) ? pt : 0f;
+                float perInf = options.PerMeshInflateMeters != null && options.PerMeshInflateMeters.TryGetValue(mName, out var pi) ? pi : 0f;
+                Vector3 perScale = options.PerMeshScaleXYZ != null && options.PerMeshScaleXYZ.TryGetValue(mName, out var ps) ? ps : Vector3.One;
+                bool hasMeshScale = !perScale.IsEqualApprox(Vector3.One);
+                bool hasMeshParam = MathF.Abs(perBot) > 1e-4f || MathF.Abs(perTop) > 1e-4f || MathF.Abs(perInf) > 1e-5f || hasMeshScale;
+
                 Mesh srcMesh = mi.Mesh;
                 int surfCount = srcMesh.GetSurfaceCount();
-                bool anySurfChanged = hasParam;
+                bool anySurfChanged = hasGlobalParam || hasMeshParam;
                 if (!anySurfChanged && hasDeltas)
                 {
                     for (int s = 0; s < surfCount; s++)
@@ -1851,6 +1865,32 @@ namespace DeadlockPlayground.Importer
                 Transform3D toScene = ComputeTransformRelativeToRoot(mi, importedScene);
                 Transform3D sceneToLocal = toScene.AffineInverse();
                 Basis normToScene = MathF.Abs(toScene.Basis.Determinant()) > 1e-8f ? toScene.Basis.Inverse().Transposed() : toScene.Basis;
+
+                // Per-mesh bounding box so per-mesh Scale/Flare pivots cleanly around THIS mesh's own center
+                float mMinX = float.MaxValue, mMaxX = float.MinValue;
+                float mMinY = float.MaxValue, mMaxY = float.MinValue;
+                float mMinZ = float.MaxValue, mMaxZ = float.MinValue;
+                if (hasMeshParam)
+                {
+                    for (int s = 0; s < surfCount; s++)
+                    {
+                        var arr = srcMesh.SurfaceGetArrays(s);
+                        var verts = arr != null && arr.Count > (int)Mesh.ArrayType.Vertex ? GetVector3Array(arr[(int)Mesh.ArrayType.Vertex]) : null;
+                        if (verts == null) continue;
+                        for (int i = 0; i < verts.Length; i++)
+                        {
+                            Vector3 p = toScene * verts[i];
+                            if (p.X < mMinX) mMinX = p.X; if (p.X > mMaxX) mMaxX = p.X;
+                            if (p.Y < mMinY) mMinY = p.Y; if (p.Y > mMaxY) mMaxY = p.Y;
+                            if (p.Z < mMinZ) mMinZ = p.Z; if (p.Z > mMaxZ) mMaxZ = p.Z;
+                        }
+                    }
+                }
+                float mSpanY = MathF.Max(1e-4f, mMaxY - mMinY);
+                Vector3 mCenter = mMinX < mMaxX
+                    ? new Vector3(0.5f * (mMinX + mMaxX), 0.5f * (mMinY + mMaxY), 0.5f * (mMinZ + mMaxZ))
+                    : Vector3.Zero;
+                float totalInfScene = (options.ImportedMeshInflateMeters + perInf) / rootScaleApprox;
 
                 var rebuilt = new ArrayMesh();
                 for (int s = 0; s < surfCount; s++)
@@ -1870,21 +1910,35 @@ namespace DeadlockPlayground.Importer
                     for (int v = 0; v < outVerts.Length; v++)
                     {
                         Vector3 localP = outVerts[v];
-                        if (hasParam)
+                        if (hasGlobalParam || hasMeshParam)
                         {
                             Vector3 sp = toScene * localP;
-                            float t = Math.Clamp((sp.Y - minY) / spanY, 0f, 1f);
-                            float wBot = (1f - t) * (1f - t);
-                            float wTop = t * t;
-                            float scaleXZ = MathF.Max(0.25f, 1f + options.ImportedMeshBottomFlare * wBot + options.ImportedMeshTopFlare * wTop);
-                            sp.X = centerX + (sp.X - centerX) * scaleXZ;
-                            sp.Z = centerZ + (sp.Z - centerZ) * scaleXZ;
-
-                            if (MathF.Abs(inflateScene) > 1e-6f && norms != null && v < norms.Length)
+                            if (hasMeshScale)
+                            {
+                                sp = new Vector3(
+                                    mCenter.X + (sp.X - mCenter.X) * perScale.X,
+                                    mCenter.Y + (sp.Y - mCenter.Y) * perScale.Y,
+                                    mCenter.Z + (sp.Z - mCenter.Z) * perScale.Z);
+                            }
+                            if (hasGlobalParam)
+                            {
+                                float t = Math.Clamp((sp.Y - gMinY) / gSpanY, 0f, 1f);
+                                float scaleXZ = MathF.Max(0.25f, 1f + options.ImportedMeshBottomFlare * (1f - t) * (1f - t) + options.ImportedMeshTopFlare * t * t);
+                                sp.X = gCenterX + (sp.X - gCenterX) * scaleXZ;
+                                sp.Z = gCenterZ + (sp.Z - gCenterZ) * scaleXZ;
+                            }
+                            if (MathF.Abs(perBot) > 1e-4f || MathF.Abs(perTop) > 1e-4f)
+                            {
+                                float t = Math.Clamp((sp.Y - mMinY) / mSpanY, 0f, 1f);
+                                float scaleXZ = MathF.Max(0.25f, 1f + perBot * (1f - t) * (1f - t) + perTop * t * t);
+                                sp.X = mCenter.X + (sp.X - mCenter.X) * scaleXZ;
+                                sp.Z = mCenter.Z + (sp.Z - mCenter.Z) * scaleXZ;
+                            }
+                            if (MathF.Abs(totalInfScene) > 1e-6f && norms != null && v < norms.Length)
                             {
                                 Vector3 sn = normToScene * norms[v];
                                 if (sn.LengthSquared() > 1e-8f)
-                                    sp += sn.Normalized() * inflateScene;
+                                    sp += sn.Normalized() * totalInfScene;
                             }
                             localP = sceneToLocal * sp;
                         }

@@ -326,9 +326,13 @@ namespace DeadlockPlayground.UI
                 PartialIncludeFeet = _chkPartialFeet?.ButtonPressed ?? false,
                 PartialIncludeNeck = _chkPartialNeck?.ButtonPressed ?? false,
                 PartialIncludeHead = _chkPartialHead?.ButtonPressed ?? false,
-                ImportedMeshBottomFlare = (float)(_sliderImpBottomFlare?.Value ?? 0.0),
-                ImportedMeshTopFlare = (float)(_sliderImpTopFlare?.Value ?? 0.0),
-                ImportedMeshInflateMeters = (float)(_sliderImpInflate?.Value ?? 0.0),
+                ImportedMeshBottomFlare = _globalImpBottomFlare,
+                ImportedMeshTopFlare = _globalImpTopFlare,
+                ImportedMeshInflateMeters = _globalImpInflateMeters,
+                PerMeshScaleXYZ = _perMeshScaleXyz.Count > 0 ? new Dictionary<string, Vector3>(_perMeshScaleXyz, StringComparer.OrdinalIgnoreCase) : null,
+                PerMeshBottomFlare = _perMeshBottomFlare.Count > 0 ? new Dictionary<string, float>(_perMeshBottomFlare, StringComparer.OrdinalIgnoreCase) : null,
+                PerMeshTopFlare = _perMeshTopFlare.Count > 0 ? new Dictionary<string, float>(_perMeshTopFlare, StringComparer.OrdinalIgnoreCase) : null,
+                PerMeshInflateMeters = _perMeshInflateMeters.Count > 0 ? new Dictionary<string, float>(_perMeshInflateMeters, StringComparer.OrdinalIgnoreCase) : null,
                 ImportedMeshSculptDeltas = CloneImportedSculptDeltas(_importedSculptDeltas),
                 LandmarkPins = ((method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig ||
                                 (method == CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig && _partialBodyEngine == CustomModelAutoRigger.PartialBodyEngine.SemiBodyPins)) &&
@@ -1681,13 +1685,20 @@ namespace DeadlockPlayground.UI
             }
             if (list.Count == 0)
             {
-                string fallback = socketBone.Contains("_L") ? "hand_L" : "hand_R";
-                foreach (var (meshName, socket) in _submeshSocketAssignments)
+                bool isLeft = socketBone.Contains("_L", StringComparison.OrdinalIgnoreCase);
+                string[] fallbacks = isLeft
+                    ? new[] { "weaponHand_L", "hand_L" }
+                    : new[] { "weaponHand_R", "weapon_bone", "hand_R" };
+                foreach (string fb in fallbacks)
                 {
-                    if (socket.Equals(fallback, StringComparison.OrdinalIgnoreCase))
+                    foreach (var (meshName, socket) in _submeshSocketAssignments)
                     {
-                        list.Add(meshName);
+                        if (socket.Equals(fb, StringComparison.OrdinalIgnoreCase) && !list.Contains(meshName))
+                        {
+                            list.Add(meshName);
+                        }
                     }
+                    if (list.Count > 0) break;
                 }
             }
             return list;

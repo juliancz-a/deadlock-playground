@@ -143,6 +143,12 @@ namespace DeadlockPlayground.Animation
 
         [Export] public bool EnableSimulation { get; set; } = true;
 
+        /// <summary>
+        /// When true, runs Valve's exact 1-pass Rubikon solver (<c>ExtraIterations = 0</c>) instead of the
+        /// 3-pass smooth preview so high-speed vent tunneling is exposed honestly in the importer.
+        /// </summary>
+        public bool StrictValveSingleIterationMode { get; set; } = false;
+
         private Skeleton3D _skeleton;
         private readonly List<ActiveChain> _chains = new();
         private readonly List<ProxyNeighborLink> _proxyLinks = new();
@@ -150,6 +156,28 @@ namespace DeadlockPlayground.Animation
         private readonly List<WorldCapsule> _worldCapsulesCache = new();
         private readonly List<WorldBox> _worldBoxesCache = new();
         private float _simAccumulator;
+        private Vector3 _virtualHeroVelWorld = Vector3.Zero;
+        private Vector3 _prevVirtualHeroVelWorld = Vector3.Zero;
+        private bool _hasVirtualHeroVel = false;
+
+        /// <summary>
+        /// Injects a virtual hero world-space velocity (m/s, Godot world axes) for high-speed stress testing
+        /// (e.g. Deadlock air vents at 28–42 m/s) while keeping the hero visually centered in the viewport.
+        /// Produces the exact fictitious launch impulse, ballistic free-fall float, aerodynamic drag, and
+        /// landing deceleration of real world-space translation in Source 2's Rubikon <c>FeNodeIntegrator</c>.
+        /// </summary>
+        public void SetVirtualHeroVelocity(Vector3 worldVelocityMetersPerSec, bool active)
+        {
+            if (!active)
+            {
+                _virtualHeroVelWorld = Vector3.Zero;
+                _prevVirtualHeroVelWorld = Vector3.Zero;
+                _hasVirtualHeroVel = false;
+                return;
+            }
+            _virtualHeroVelWorld = worldVelocityMetersPerSec;
+            _hasVirtualHeroVel = true;
+        }
 
         public int ActiveChainCount => _chains.Count;
         public int ActiveProxyLinkCount => _proxyLinks.Count;
@@ -963,7 +991,8 @@ namespace DeadlockPlayground.Animation
                     st.AnimTipWorld = skelGlobal * (st.AnimGlobalPose * (st.AimAxisLocal * st.BoneLength));
                     st.CurWorldBoneLength = MathF.Max(0.02f, st.AnimTipWorld.DistanceTo(st.AnimHeadWorld));
 
-                    if (!st.Initialized || (st.AnimTipWorld - st.TipWorldPos).LengthSquared() > 2.25f)
+                    float maxLagSq = _hasVirtualHeroVel ? 16.0f : 2.25f;
+                    if (!st.Initialized || (st.AnimTipWorld - st.TipWorldPos).LengthSquared() > maxLagSq)
                     {
                         st.TipWorldPos = st.AnimTipWorld;
                         st.PrevTipWorldPos = st.AnimTipWorld;
@@ -1034,7 +1063,8 @@ namespace DeadlockPlayground.Animation
                 }
             }
 
-            // 2. planarize_back: claim closest spine_2 / spine_3 capsule at bind pose (matching unicorn.vmdl_c)
+            // 2. planarize_back: claim closest neck_0 / spine_1 / spine_2 / spine_3 capsule at bind pose
+            //    using CSDK13's exact closest-point outward normal (zero hidden normal override so preview is 1:1 honest).
             if (st.IsBackSideOfTorso)
             {
                 int bestBoneIdx = -1;
@@ -1045,7 +1075,9 @@ namespace DeadlockPlayground.Animation
                 foreach (var c in _colliders)
                 {
                     if (c.Shape != ColliderShapeKind.Capsule || c.BoneIdx < 0 || c.BoneIdx >= boneCount) continue;
-                    bool isSpineBack = c.BoneName.Equals("spine_2", StringComparison.OrdinalIgnoreCase) ||
+                    bool isSpineBack = c.BoneName.Equals("neck_0", StringComparison.OrdinalIgnoreCase) ||
+                                       c.BoneName.Equals("spine_1", StringComparison.OrdinalIgnoreCase) ||
+                                       c.BoneName.Equals("spine_2", StringComparison.OrdinalIgnoreCase) ||
                                        c.BoneName.Equals("spine_3", StringComparison.OrdinalIgnoreCase);
                     if (!isSpineBack) continue;
 
@@ -1056,14 +1088,6 @@ namespace DeadlockPlayground.Animation
                     {
                         Vector3 backLocal = (capRestSkel.Basis.Orthonormalized().Inverse() * new Vector3(0f, 0f, -1f)).Normalized();
                         Vector3 nLocal = dist > 1e-5f ? outwardLocal : backLocal;
-                        float backDot = nLocal.Dot(backLocal);
-                        // For back/shoulder-blade hair & capes (backDot >= -0.05), keep the barrier normal biased
-                        // toward the back half-space so looking up never flips hair into the chest.
-                        // For front/side framing strands (backDot < -0.05), preserve their actual bind-pose outward
-                        // tangent normal (exact Source 2 planarize=true behavior) so front hair is NEVER slammed
-                        // backward through the neck/chest on Frame 1!
-                        if (backDot >= -0.05f && backDot < 0.25f)
-                            nLocal = backLocal;
                         bestDist = dist;
                         bestBoneIdx = c.BoneIdx;
                         bestNormalLocal = nLocal;
@@ -1085,6 +1109,9 @@ namespace DeadlockPlayground.Animation
 
         private void StepFixedSubstep()
         {
+            Vector3 dHPrev = _prevVirtualHeroVelWorld * FixedDt;
+            Vector3 dHNext = _hasVirtualHeroVel ? (_virtualHeroVelWorld * FixedDt) : Vector3.Zero;
+
             // 1. Integrate all particles (Verlet PBD for Cloth/ProxyCloth; Implicit Spring for Jiggle)
             foreach (var chain in _chains)
             {
@@ -1102,22 +1129,24 @@ namespace DeadlockPlayground.Animation
 
                     if (isJiggle)
                     {
-                        StepJiggleSubstep(st);
+                        StepJiggleSubstep(st, dHPrev, dHNext);
                     }
                     else
                     {
-                        StepClothVerletSubstep(st);
+                        StepClothVerletSubstep(st, dHPrev, dHNext);
                     }
                 }
             }
+
+            _prevVirtualHeroVelWorld = _hasVirtualHeroVel ? _virtualHeroVelWorld : Vector3.Zero;
 
             // 2. Source 2 FeModel Constraint Solver:
             //    Symmetric Weight0 = 0.500 dynamic-dynamic / 0.000 static-dynamic rods (RelaxationFactor = 1.0),
             //    compressible MinDist bend rods (VRF ClothExtract.BendPaint.cs), one-sided suspenders, stray leash,
             //    bind-pose FeCollisionPlanes, and exact TaperedCapsuleRigid / BoxRigid collisions.
-            //    Run >= 3 PBD passes so multi-bone skirts & long hair preserve exact bone lengths and woven sheet width
-            //    after collision pushout instead of drifting/kinking before CommitFinalBonePoses.
-            int rodIterations = Math.Max(3, 1 + Math.Max(0, PhysicsParamResolver.ValveBaselineClothParams.ExtraIterations));
+            //    StrictValveSingleIterationMode honors ExtraIterations = 0 (1 pass) for honest high-speed stress tests.
+            int baseValveIters = 1 + Math.Max(0, PhysicsParamResolver.ValveBaselineClothParams.ExtraIterations);
+            int rodIterations = StrictValveSingleIterationMode ? Math.Max(1, baseValveIters) : Math.Max(3, baseValveIters);
             Transform3D skelGlobal = _skeleton.IsInsideTree() ? _skeleton.GlobalTransform : Transform3D.Identity;
             int boneCount = _skeleton.GetBoneCount();
 
@@ -1266,13 +1295,13 @@ namespace DeadlockPlayground.Animation
             }
         }
 
-        private void StepClothVerletSubstep(JiggleBoneState st)
+        private void StepClothVerletSubstep(JiggleBoneState st, Vector3 dHPrev, Vector3 dHNext)
         {
             // Exact Source 2 Rubikon FeNodeIntegrator (60 Hz, dt = 1/60):
             //   fa = AnimationForceAttraction, va = AnimationVertexAttraction, pd = PointDamping, g = 9.144 m/s^2 (360 in/s^2).
-            //   x_{n+1} = g_{n+1} + (1 - fa)*(x_n - g_n) + (1 - va)*(v_prev - v_goal) + (1 - fa)*gravity*dt^2
-            // Guarantees exact Source 2 static sag ((1 - fa)/fa) * g * dt^2 and exact damping discriminant 4*q^2*(d^2 - fa^2),
-            // unconditionally stable for all fa, va in [0, 1] with zero artificial world air-drag lag.
+            //   x_{n+1} = g_{n+1} + (1 - fa)*(x_n - g_n) + (1 - va)*(v_prev - v_goal + dH_prev*exp(-pd*dt) - dH_next) + (1 - fa)*gravity*dt^2
+            // Guarantees exact Source 2 static sag ((1 - fa)/fa) * g * dt^2, exact damping discriminant 4*q^2*(d^2 - fa^2),
+            // and exact fictitious inertial impulses during high-speed vent stress testing.
             Vector3 gPrev = st.SubstepAnimPos;
             Vector3 gNext = gPrev + st.SubstepAnimDelta;
             st.SubstepAnimPos = gNext;
@@ -1280,6 +1309,7 @@ namespace DeadlockPlayground.Animation
             float pointDamp = MathF.Exp(-st.PointDamping * FixedDt);
             Vector3 vPrev = (st.TipWorldPos - st.PrevTipWorldPos) * pointDamp;
             Vector3 vGoal = st.SubstepAnimDelta;
+            Vector3 inertialDelta = dHPrev * pointDamp - dHNext;
 
             float fa = st.GoalForce;
             float va = st.GoalVertexAttraction;
@@ -1292,18 +1322,19 @@ namespace DeadlockPlayground.Animation
             Vector3 gravStep = new Vector3(0f, -st.GravityMetersPerSecSq * (FixedDt * FixedDt) * (1.0f - fa), 0f);
             Vector3 nextPos = gNext
                             + (1.0f - fa) * (st.TipWorldPos - gPrev)
-                            + (1.0f - va) * (vPrev - vGoal)
+                            + (1.0f - va) * (vPrev - vGoal + inertialDelta)
                             + gravStep;
 
-            // Cap extreme velocities (> 12 m/s) to prevent teleport bursts; sleep micro-jitter cleanly
+            // Allow full Deadlock vent speeds (up to 60 m/s) during active inertial stress tests;
+            // keep 12 m/s safety cap for normal idle/posing so teleport edits never explode.
             Vector3 stepDelta = nextPos - st.TipWorldPos;
-            float maxStep = 12.0f * FixedDt;
+            float maxStep = (_hasVirtualHeroVel ? 60.0f : 12.0f) * FixedDt;
             float stepSq = stepDelta.LengthSquared();
             if (stepSq > maxStep * maxStep)
             {
                 nextPos = st.TipWorldPos + stepDelta * (maxStep / MathF.Sqrt(stepSq));
             }
-            else if (stepSq < 1e-10f && (gNext - st.TipWorldPos).LengthSquared() < 1e-10f)
+            else if (stepSq < 1e-10f && (gNext - st.TipWorldPos).LengthSquared() < 1e-10f && inertialDelta.LengthSquared() < 1e-10f)
             {
                 nextPos = st.TipWorldPos;
             }
@@ -1312,9 +1343,14 @@ namespace DeadlockPlayground.Animation
             st.TipWorldPos = nextPos;
         }
 
-        private void StepJiggleSubstep(JiggleBoneState st)
+        private void StepJiggleSubstep(JiggleBoneState st, Vector3 dHPrev, Vector3 dHNext)
         {
             // Unconditionally stable implicit damped harmonic oscillator (ZERO gravity — exact FeJiggleBone)
+            Vector3 dvHero = (dHNext - dHPrev) / FixedDt;
+            if (dvHero.LengthSquared() > 1e-8f)
+            {
+                st.Velocity -= dvHero;
+            }
             float w = st.JiggleOmega;
             float w2 = w * w;
             float denom = 1.0f + 2.0f * st.JiggleDampRatio * w * FixedDt + w2 * FixedDt * FixedDt;

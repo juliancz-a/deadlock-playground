@@ -381,6 +381,18 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("imported_mesh_inflate_meters")]
         public float ImportedMeshInflateMeters { get; set; } = 0f;
 
+        [JsonPropertyName("per_mesh_scale_xyz")]
+        public Dictionary<string, float[]> PerMeshScaleXYZ { get; set; } = new();
+
+        [JsonPropertyName("per_mesh_bottom_flare")]
+        public Dictionary<string, float> PerMeshBottomFlare { get; set; } = new();
+
+        [JsonPropertyName("per_mesh_top_flare")]
+        public Dictionary<string, float> PerMeshTopFlare { get; set; } = new();
+
+        [JsonPropertyName("per_mesh_inflate_meters")]
+        public Dictionary<string, float> PerMeshInflateMeters { get; set; } = new();
+
         [JsonPropertyName("imported_mesh_sculpt_deltas")]
         public Dictionary<string, WorkspaceHeroSculptEntry> ImportedMeshSculptDeltas { get; set; } = new();
 
@@ -478,7 +490,13 @@ namespace DeadlockPlayground.Workspace
                 PartialIncludeHead = o.PartialIncludeHead,
                 ImportedMeshBottomFlare = o.ImportedMeshBottomFlare,
                 ImportedMeshTopFlare = o.ImportedMeshTopFlare,
-                ImportedMeshInflateMeters = o.ImportedMeshInflateMeters
+                ImportedMeshInflateMeters = o.ImportedMeshInflateMeters,
+                PerMeshScaleXYZ = o.PerMeshScaleXYZ != null
+                    ? o.PerMeshScaleXYZ.ToDictionary(kv => kv.Key, kv => new[] { kv.Value.X, kv.Value.Y, kv.Value.Z })
+                    : new(),
+                PerMeshBottomFlare = o.PerMeshBottomFlare != null ? new Dictionary<string, float>(o.PerMeshBottomFlare) : new(),
+                PerMeshTopFlare = o.PerMeshTopFlare != null ? new Dictionary<string, float>(o.PerMeshTopFlare) : new(),
+                PerMeshInflateMeters = o.PerMeshInflateMeters != null ? new Dictionary<string, float>(o.PerMeshInflateMeters) : new()
             };
 
             if (o.ImportedMeshSculptDeltas != null && o.ImportedMeshSculptDeltas.Count > 0)
@@ -1035,6 +1053,19 @@ namespace DeadlockPlayground.Workspace
             o.ImportedMeshBottomFlare = ImportedMeshBottomFlare;
             o.ImportedMeshTopFlare = ImportedMeshTopFlare;
             o.ImportedMeshInflateMeters = ImportedMeshInflateMeters;
+            if (PerMeshScaleXYZ != null && PerMeshScaleXYZ.Count > 0)
+            {
+                o.PerMeshScaleXYZ = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (k, arr) in PerMeshScaleXYZ)
+                    if (arr != null && arr.Length >= 3)
+                        o.PerMeshScaleXYZ[k] = new Vector3(arr[0], arr[1], arr[2]);
+            }
+            if (PerMeshBottomFlare != null && PerMeshBottomFlare.Count > 0)
+                o.PerMeshBottomFlare = new Dictionary<string, float>(PerMeshBottomFlare, StringComparer.OrdinalIgnoreCase);
+            if (PerMeshTopFlare != null && PerMeshTopFlare.Count > 0)
+                o.PerMeshTopFlare = new Dictionary<string, float>(PerMeshTopFlare, StringComparer.OrdinalIgnoreCase);
+            if (PerMeshInflateMeters != null && PerMeshInflateMeters.Count > 0)
+                o.PerMeshInflateMeters = new Dictionary<string, float>(PerMeshInflateMeters, StringComparer.OrdinalIgnoreCase);
             if (ImportedMeshSculptDeltas != null && ImportedMeshSculptDeltas.Count > 0)
             {
                 o.ImportedMeshSculptDeltas = new Dictionary<string, Dictionary<int, Vector3>>(StringComparer.OrdinalIgnoreCase);
@@ -2654,12 +2685,53 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
             }
 
-            if (!sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+            bool isGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+            bool isFbx = sourceModelFilePath.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase);
+            if (!isGltf && !isFbx)
                 return;
 
             string srcDir = Path.GetDirectoryName(sourceModelFilePath);
             if (string.IsNullOrEmpty(srcDir) || !Directory.Exists(srcDir))
                 return;
+
+            if (isFbx)
+            {
+                // Bundle external FBX texture sidecars (<model>.fbm, textures/, Textures/, and sibling image files)
+                // so saved .dpp projects remain 100% self-contained and never turn white on reload.
+                try
+                {
+                    var imgExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                        { ".png", ".tga", ".jpg", ".jpeg", ".webp", ".bmp", ".dds" };
+
+                    void CopyImageDir(string srcSubDir, string destSubDir, int maxFiles)
+                    {
+                        if (!Directory.Exists(srcSubDir)) return;
+                        int copied = 0;
+                        foreach (string file in Directory.EnumerateFiles(srcSubDir))
+                        {
+                            if (copied >= maxFiles) break;
+                            if (!imgExts.Contains(Path.GetExtension(file))) continue;
+                            Directory.CreateDirectory(destSubDir);
+                            string target = Path.Combine(destSubDir, Path.GetFileName(file));
+                            if (!string.Equals(Path.GetFullPath(file), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+                                File.Copy(file, target, overwrite: true);
+                            copied++;
+                        }
+                    }
+
+                    string srcStem = Path.GetFileNameWithoutExtension(sourceModelFilePath);
+                    string stagedStem = Path.GetFileNameWithoutExtension(stagedFileName);
+                    CopyImageDir(Path.Combine(srcDir, srcStem + ".fbm"), Path.Combine(destDir, stagedStem + ".fbm"), 48);
+                    CopyImageDir(Path.Combine(srcDir, "textures"), Path.Combine(destDir, "textures"), 48);
+                    CopyImageDir(Path.Combine(srcDir, "Textures"), Path.Combine(destDir, "Textures"), 48);
+                    CopyImageDir(srcDir, destDir, 32);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[ModWorkspaceSession] Warning copying external .fbx textures for '{sourceModelFilePath}': {ex.Message}");
+                }
+                return;
+            }
 
             try
             {
@@ -2776,10 +2848,11 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                     cleanLeaf = cleanLeaf[(safeHero.Length + 1)..];
                 string stagedFileName = $"{safeHero}_{cleanLeaf}";
 
-                // Multi-file .gltf scenes get a dedicated per-hero subfolder so external scene.bin / textures never collide.
-                bool isMultiFileGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
-                string destDir = isMultiFileGltf ? Path.Combine(CustomModelsDir, $"{safeHero}_model") : CustomModelsDir;
-                string relPath = isMultiFileGltf
+                // Multi-file .gltf and .fbx scenes get a dedicated per-hero subfolder so external scene.bin / textures never collide.
+                bool needsSubfolder = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase) ||
+                                      sourceModelFilePath.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase);
+                string destDir = needsSubfolder ? Path.Combine(CustomModelsDir, $"{safeHero}_model") : CustomModelsDir;
+                string relPath = needsSubfolder
                     ? Path.Combine("custom_models", $"{safeHero}_model", stagedFileName).Replace('\\', '/')
                     : Path.Combine("custom_models", stagedFileName).Replace('\\', '/');
 

@@ -19,10 +19,53 @@ namespace DeadlockPlayground.UI
     public partial class CustomModelImporterModalUI
     {
         // =========================================================================
-        // Imported Accessory / Clothing Reshape & Interactive 3D Fit Sculpt Brush
+        // Per-Mesh Reshape, Non-Uniform Scale, 3D Sculpt Brush & Face Edit HUD
         // =========================================================================
 
-        private Control _boxImportedSculptCard;
+        private bool _isImpSculptModeActive;
+        private string _activeImpSculptTargetMesh; // null or empty = All Active Meshes
+        private bool _impSculptIsolateTarget;
+        private bool _impSculptShowShapeDrawer;
+
+        private Control _importedSculptViewportHud;
+        private Button _btnHudSculptModeBrush;
+        private Button _btnHudSculptModeFaces;
+        private OptionButton _optHudSculptTarget;
+        private Button _btnHudSculptIsolate;
+
+        private HBoxContainer _boxHudBrushTools;
+        private HBoxContainer _boxHudFaceTools;
+        private HBoxContainer _boxHudBrushSubRow;
+        private HBoxContainer _boxHudFaceSubRow;
+        private HBoxContainer _boxHudShapeScaleRow;
+
+        private readonly Button[] _hudSculptModeBtns = new Button[5];
+        private readonly Button[] _hudFaceSelectBtns = new Button[4];
+        private readonly Button[] _hudFaceTransformBtns = new Button[3];
+        private readonly Button[] _hudFaceAxisBtns = new Button[4];
+        private readonly Button[] _hudSculptHeroVisBtns = new Button[3];
+
+        private ImportedSculptBrushMode _activeImpSculptMode = ImportedSculptBrushMode.Grab;
+        private HSlider _sliderImpSculptRadius;
+        private Label _lblImpSculptRadiusVal;
+        private HSlider _sliderImpSculptStrength;
+        private Label _lblImpSculptStrengthVal;
+        private Button _btnImpSculptMirror;
+        private Button _btnHudShapeDrawerToggle;
+        private Button _btnImpSculptUndo;
+        private Button _btnImpSculptReset;
+
+        // Face Edit sub-row controls
+        private Button _btnFaceSelThrough;
+        private Button _btnFacePropEdit;
+        private HSlider _sliderFacePropRadius;
+        private Label _lblFacePropRadiusVal;
+        private Label _lblFaceSelCount;
+
+        // Per-mesh Non-Uniform Scale & Parametric Fit controls inside Shape & Scale drawer
+        private SpinBox _spinMeshScaleX;
+        private SpinBox _spinMeshScaleY;
+        private SpinBox _spinMeshScaleZ;
         private HSlider _sliderImpBottomFlare;
         private Label _lblImpBottomFlareVal;
         private HSlider _sliderImpTopFlare;
@@ -30,27 +73,21 @@ namespace DeadlockPlayground.UI
         private HSlider _sliderImpInflate;
         private Label _lblImpInflateVal;
 
-        private Button _btnImpSculptToggle;
-        private Control _importedSculptViewportHud;
-        private readonly Button[] _hudSculptModeBtns = new Button[5];
-        private readonly Button[] _hudSculptHeroVisBtns = new Button[3];
-        private ImportedSculptBrushMode _activeImpSculptMode = ImportedSculptBrushMode.Grab;
-        private HSlider _sliderImpSculptRadius;
-        private Label _lblImpSculptRadiusVal;
-        private HSlider _sliderImpSculptStrength;
-        private Label _lblImpSculptStrengthVal;
-        private Button _btnImpSculptMirror;
-        private Button _btnImpSculptUndo;
-        private Button _btnImpSculptReset;
-        private Button _btnImpSculptCardReset;
-        private Label _lblImpSculptStatus;
-        private Action _impSculptOriginalMeshRestore;
+        // Global fallback parametric values (backward compat with older .dpp) + Per-Mesh dictionaries
+        private float _globalImpBottomFlare;
+        private float _globalImpTopFlare;
+        private float _globalImpInflateMeters;
+        private readonly Dictionary<string, Vector3> _perMeshScaleXyz = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, float> _perMeshBottomFlare = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, float> _perMeshTopFlare = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, float> _perMeshInflateMeters = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly Dictionary<string, Dictionary<int, Vector3>> _importedSculptDeltas = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<Dictionary<string, Dictionary<int, Vector3>>> _importedSculptUndoStack = new();
         private Dictionary<string, Dictionary<int, Vector3>> _pendingImpSculptUndoSnapshot;
         private bool _isImpSculptBrushing;
         private bool _isSyncingImpSculptUi;
+        private Action _impSculptOriginalMeshRestore;
 
         // Live grab-drag state
         private Vector3 _impGrabStartWorld;
@@ -60,8 +97,8 @@ namespace DeadlockPlayground.UI
 
         private sealed class ImpSculptSurfaceCache
         {
-            public MeshInstance3D SourceMi;      // mesh inside _previewModelInstance
-            public MeshInstance3D DisplayMi;     // live mesh in _previewRiggedContainer (if bound) or SourceMi
+            public MeshInstance3D SourceMi;
+            public MeshInstance3D DisplayMi;
             public int SurfaceIndex;
             public string SurfaceKey;
             public Transform3D LocalToWorld;
@@ -75,8 +112,7 @@ namespace DeadlockPlayground.UI
 
         private readonly List<ImpSculptSurfaceCache> _impSculptCaches = new();
 
-        private bool IsImportedSculptActive() =>
-            _btnImpSculptToggle != null && _btnImpSculptToggle.ButtonPressed;
+        private bool IsImportedSculptActive() => _isImpSculptModeActive;
 
         private static Dictionary<string, Dictionary<int, Vector3>> CloneImportedSculptDeltas(
             Dictionary<string, Dictionary<int, Vector3>> src)
@@ -91,207 +127,466 @@ namespace DeadlockPlayground.UI
             return copy.Count > 0 ? copy : null;
         }
 
-        private Control BuildImportedSculptCard()
-        {
-            var (card, body) = CreateInspectorCard(
-                "Reshape / Fit Imported Mesh",
-                "Widen the bottom of a sweater/skirt, puff out tight spots, or sculpt directly in 3D so clothing fits cleanly over the hero.");
-            _boxImportedSculptCard = card;
-
-            // --- Quick Parametric Shape Sliders ---
-            (HSlider sld, Label lbl) AddShapeSlider(string label, double min, double max, double step, string formatSuffix, bool asPercent, string tip)
-            {
-                var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-                var l = new Label { Text = label, CustomMinimumSize = new Vector2(106, 0), TooltipText = tip };
-                ImporterStyle.ApplyFontSize(l, ImporterStyle.FontHint);
-                var s = new HSlider
-                {
-                    MinValue = min, MaxValue = max, Step = step, Value = 0.0,
-                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                    TooltipText = tip
-                };
-                var v = new Label
-                {
-                    Text = asPercent ? "0%" : $"0.0{formatSuffix}",
-                    CustomMinimumSize = new Vector2(52, 0),
-                    HorizontalAlignment = HorizontalAlignment.Right
-                };
-                ImporterStyle.ApplyFontSize(v, ImporterStyle.FontHint);
-                s.ValueChanged += (val) =>
-                {
-                    v.Text = asPercent
-                        ? $"{(val > 0 ? "+" : "")}{Mathf.RoundToInt((float)val * 100)}%"
-                        : $"{(val > 0 ? "+" : "")}{val * 100.0:F1}cm";
-                    if (!_isSyncingImpSculptUi)
-                    {
-                        UpdateImportedSculptStatusLabel();
-                        if (IsImportedSculptActive())
-                            RefreshImportedSculptPreviewFromCurrentSettings();
-                        else
-                            ScheduleDebouncedLiveRigUpdate();
-                    }
-                };
-                row.AddChild(l);
-                row.AddChild(s);
-                row.AddChild(v);
-                body.AddChild(row);
-                return (s, v);
-            }
-
-            (_sliderImpBottomFlare, _lblImpBottomFlareVal) = AddShapeSlider(
-                "Bottom Flare:", -0.50, 0.80, 0.01, "%", asPercent: true,
-                "Smoothly widens (+) or narrows (-) the bottom hem of a sweater, jacket, skirt, or pants.");
-            (_sliderImpTopFlare, _lblImpTopFlareVal) = AddShapeSlider(
-                "Top Width:", -0.50, 0.80, 0.01, "%", asPercent: true,
-                "Smoothly widens (+) or narrows (-) the upper shoulders/chest/collar area.");
-            (_sliderImpInflate, _lblImpInflateVal) = AddShapeSlider(
-                "Inflate / Expand:", -0.05, 0.10, 0.002, "cm", asPercent: false,
-                "Uniformly pushes vertices outward (+) or inward (-) along surface normals to eliminate body clipping.");
-
-            body.AddChild(new HSeparator());
-
-            // --- Compact Action Row: Launch Floating 3D Sculpt HUD + Reset ---
-            var launchRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-            launchRow.AddThemeConstantOverride("separation", 6);
-
-            _btnImpSculptToggle = new Button
-            {
-                Text = "Sculpt Mesh in 3D",
-                ToggleMode = true,
-                ButtonPressed = false,
-                ThemeTypeVariation = "ToolbarButton",
-                CustomMinimumSize = new Vector2(0, 34),
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                TooltipText = "Opens the floating 3D Sculpt HUD and switches to live Sculpt Pose so Grab / Inflate / Shrink / Smooth strokes update at 60 FPS without Auto-Snap interference.\nPress Esc or Done to bake back onto the rigged mesh."
-            };
-            SetButtonIcon(_btnImpSculptToggle, "res://assets/at-icons/mesh_select.svg", 16);
-            ImporterStyle.ApplyFontSize(_btnImpSculptToggle, ImporterStyle.FontBody);
-            _btnImpSculptToggle.Toggled += OnImportedSculptModeToggled;
-            launchRow.AddChild(_btnImpSculptToggle);
-
-            _btnImpSculptCardReset = new Button
-            {
-                Text = "Reset",
-                ThemeTypeVariation = "ToolbarButton",
-                Disabled = true,
-                CustomMinimumSize = new Vector2(68, 34),
-                TooltipText = "Reset all parametric reshape sliders and sculpted vertex offsets."
-            };
-            ImporterStyle.ApplyFontSize(_btnImpSculptCardReset, ImporterStyle.FontHint);
-            _btnImpSculptCardReset.Pressed += OnImportedSculptResetPressed;
-            launchRow.AddChild(_btnImpSculptCardReset);
-            body.AddChild(launchRow);
-
-            _lblImpSculptStatus = new Label { Text = "Original mesh dimensions (no reshape applied).", AutowrapMode = TextServer.AutowrapMode.WordSmart };
-            ImporterStyle.ApplyHintStyle(_lblImpSculptStatus);
-            _secondaryLabels.Add(_lblImpSculptStatus);
-            body.AddChild(_lblImpSculptStatus);
-
-            return card;
-        }
-
         private void BuildImportedSculptViewportHud(Control viewportPanel)
         {
             if (viewportPanel == null) return;
 
-            _importedSculptViewportHud = CreateViewportFloatingTopHud(viewportPanel, out var row);
+            var margin = new MarginContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            margin.AddThemeConstantOverride("margin_left", 10);
+            margin.AddThemeConstantOverride("margin_right", 10);
+            margin.AddThemeConstantOverride("margin_top", 10);
+            viewportPanel.AddChild(margin);
 
-            // Brush Mode Chips
+            var panel = new PanelContainer
+            {
+                Visible = false,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+            panel.AddThemeStyleboxOverride("panel", GetHudFloatingPanelStyle());
+            margin.AddChild(panel);
+            _importedSculptViewportHud = panel;
+
+            var pad = new MarginContainer();
+            pad.AddThemeConstantOverride("margin_left", 10);
+            pad.AddThemeConstantOverride("margin_right", 10);
+            pad.AddThemeConstantOverride("margin_top", 6);
+            pad.AddThemeConstantOverride("margin_bottom", 6);
+            panel.AddChild(pad);
+
+            var root = new VBoxContainer();
+            root.AddThemeConstantOverride("separation", 5);
+            pad.AddChild(root);
+
+            // =====================================================================
+            // ROW 1: [Brush | Edit Faces] | Target + Isolate | Tools | Mirror | Shape&Scale | Hero | Undo | Reset | Done
+            // =====================================================================
+            var row1 = new HBoxContainer();
+            row1.AddThemeConstantOverride("separation", 5);
+            root.AddChild(row1);
+
+            _btnHudSculptModeBrush = CreateViewportHudButton("Brush", 48, 24, toggle: true, pressed: true, tip: "Freeform 3D sculpt brushes (Grab, Inflate, Shrink, Smooth, Erase)");
+            _btnHudSculptModeBrush.Pressed += () => SetSculptSubMode(faceEdit: false);
+            row1.AddChild(_btnHudSculptModeBrush);
+
+            _btnHudSculptModeFaces = CreateViewportHudButton("Edit Faces", 68, 24, toggle: true, pressed: false, tip: "Blender-style Face Selection & Proportional Drag (Lasso/Box/Paint/Island + G/S/Alt+S)");
+            _btnHudSculptModeFaces.Pressed += () => SetSculptSubMode(faceEdit: true);
+            row1.AddChild(_btnHudSculptModeFaces);
+
+            row1.AddChild(CreateViewportHudSeparator());
+
+            _optHudSculptTarget = new OptionButton { CustomMinimumSize = new Vector2(108, 24), FocusMode = Control.FocusModeEnum.None, TooltipText = "Mesh targeted by Sculpt, Face Edit, and per-mesh Scale/Reshape" };
+            ConfigureOptionButton(_optHudSculptTarget, 108);
+            _optHudSculptTarget.ItemSelected += (idx) =>
+            {
+                if (_isSyncingImpSculptUi) return;
+                string meta = _optHudSculptTarget.GetItemMetadata((int)idx).AsString();
+                _activeImpSculptTargetMesh = string.IsNullOrEmpty(meta) ? null : meta;
+                ClearFaceEditSelection(refreshVisual: false);
+                ApplyImpSculptIsolationVisibility();
+                RefreshImportedSculptPreviewFromCurrentSettings();
+                SyncShapeScaleControlsFromTarget();
+                SyncImportedSculptViewportHud();
+            };
+            row1.AddChild(_optHudSculptTarget);
+
+            _btnHudSculptIsolate = CreateViewportHudButton("Isolate", 50, 24, toggle: true, pressed: false, tip: "Temporarily hide other submeshes while editing this mesh");
+            _btnHudSculptIsolate.Toggled += (on) =>
+            {
+                _impSculptIsolateTarget = on;
+                ApplyImpSculptIsolationVisibility();
+                ApplyHudSubtleToggleVisual(_btnHudSculptIsolate, on);
+            };
+            row1.AddChild(_btnHudSculptIsolate);
+
+            row1.AddChild(CreateViewportHudSeparator());
+
+            // Brush tool chips
+            _boxHudBrushTools = new HBoxContainer();
+            _boxHudBrushTools.AddThemeConstantOverride("separation", 4);
             string[] modeLabels = { "Grab", "Inflate", "Shrink", "Smooth", "Erase" };
             string[] modeTips =
             {
-                "Grab / Pull — drag vertices freely to widen or stretch hems",
+                "Grab / Pull — drag vertices freely",
                 "Inflate — push vertices outward along normals",
                 "Shrink — tuck vertices inward along normals",
-                "Smooth — relax sharp creases",
-                "Erase — restore sculpted vertices back to original"
+                "Smooth — relax creases",
+                "Erase — restore sculpted vertices"
             };
             for (int i = 0; i < 5; i++)
             {
                 int cap = i;
-                var mb = CreateViewportHudButton(modeLabels[i], 46, 24, toggle: true, pressed: i == 0, tip: modeTips[i]);
+                var mb = CreateViewportHudButton(modeLabels[i], 44, 24, toggle: true, pressed: i == 0, tip: modeTips[i]);
                 mb.Pressed += () => SetActiveImportedSculptMode((ImportedSculptBrushMode)cap);
                 _hudSculptModeBtns[i] = mb;
-                row.AddChild(mb);
+                _boxHudBrushTools.AddChild(mb);
             }
+            row1.AddChild(_boxHudBrushTools);
 
-            row.AddChild(CreateViewportHudSeparator());
-
-            // Compact Size & Power sliders
-            var lblSz = new Label { Text = "Size:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            ImporterStyle.ApplyHintStyle(lblSz, wrap: false);
-            row.AddChild(lblSz);
-            _sliderImpSculptRadius = new HSlider
+            // Face Edit tool chips
+            _boxHudFaceTools = new HBoxContainer { Visible = false };
+            _boxHudFaceTools.AddThemeConstantOverride("separation", 4);
+            string[] fSelLabels = { "Lasso", "Box", "Paint", "Island" };
+            string[] fSelTips = { "Lasso face select (L)", "Box face select (B)", "Brush paint select (C)", "Linked island select (I)" };
+            for (int i = 0; i < 4; i++)
             {
-                MinValue = 0.03, MaxValue = 0.35, Step = 0.005, Value = 0.12,
-                CustomMinimumSize = new Vector2(72, 20),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                FocusMode = Control.FocusModeEnum.None,
-                TooltipText = "Brush radius in meters ([ / ] keys)"
-            };
-            _lblImpSculptRadiusVal = new Label { Text = "0.12m", CustomMinimumSize = new Vector2(38, 0), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            ImporterStyle.ApplyHintStyle(_lblImpSculptRadiusVal, wrap: false);
-            _sliderImpSculptRadius.ValueChanged += (v) => { if (_lblImpSculptRadiusVal != null) _lblImpSculptRadiusVal.Text = $"{v:F2}m"; };
-            row.AddChild(_sliderImpSculptRadius);
-            row.AddChild(_lblImpSculptRadiusVal);
-
-            var lblPw = new Label { Text = "Pwr:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            ImporterStyle.ApplyHintStyle(lblPw, wrap: false);
-            row.AddChild(lblPw);
-            _sliderImpSculptStrength = new HSlider
+                int cap = i;
+                var fb = CreateViewportHudButton(fSelLabels[i], 44, 24, toggle: true, pressed: i == 0, tip: fSelTips[i]);
+                fb.Pressed += () => { _faceEditSelectTool = (FaceEditSelectTool)cap; SyncImportedSculptViewportHud(); };
+                _hudFaceSelectBtns[i] = fb;
+                _boxHudFaceTools.AddChild(fb);
+            }
+            _boxHudFaceTools.AddChild(CreateViewportHudSeparator());
+            string[] fTrLabels = { "Move (G)", "Scale (S)", "Inflate" };
+            string[] fTrTips = { "Move selected faces (G) — X/Y/Z axis lock", "Scale selected faces (S) — X/Y/Z axis lock", "Inflate/Shrink selected faces along normals (Alt+S)" };
+            for (int i = 0; i < 3; i++)
             {
-                MinValue = 0.05, MaxValue = 1.0, Step = 0.01, Value = 0.55,
-                CustomMinimumSize = new Vector2(60, 20),
-                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-                FocusMode = Control.FocusModeEnum.None,
-                TooltipText = "Brush strength"
-            };
-            _lblImpSculptStrengthVal = new Label { Text = "55%", CustomMinimumSize = new Vector2(32, 0), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-            ImporterStyle.ApplyHintStyle(_lblImpSculptStrengthVal, wrap: false);
-            _sliderImpSculptStrength.ValueChanged += (v) => { if (_lblImpSculptStrengthVal != null) _lblImpSculptStrengthVal.Text = $"{Mathf.RoundToInt((float)v * 100)}%"; };
-            row.AddChild(_sliderImpSculptStrength);
-            row.AddChild(_lblImpSculptStrengthVal);
+                int cap = i + 1;
+                var tb = CreateViewportHudButton(fTrLabels[i], 54, 24, toggle: true, pressed: false, tip: fTrTips[i]);
+                tb.Pressed += () => BeginFaceEditTransform((FaceEditTransformMode)cap);
+                _hudFaceTransformBtns[i] = tb;
+                _boxHudFaceTools.AddChild(tb);
+            }
+            row1.AddChild(_boxHudFaceTools);
 
-            _btnImpSculptMirror = CreateViewportHudButton("Mirror", 48, 24, toggle: true, pressed: true, tip: "Mirror sculpt strokes across X");
+            row1.AddChild(CreateViewportHudSeparator());
+
+            _btnImpSculptMirror = CreateViewportHudButton("Mirror", 46, 24, toggle: true, pressed: true, tip: "Mirror strokes & face selections across X");
             _btnImpSculptMirror.Toggled += (on) => ApplyHudSubtleToggleVisual(_btnImpSculptMirror, on);
-            row.AddChild(_btnImpSculptMirror);
+            row1.AddChild(_btnImpSculptMirror);
 
-            row.AddChild(CreateViewportHudSeparator());
+            _btnHudShapeDrawerToggle = CreateViewportHudButton("Scale/Fit ▾", 70, 24, toggle: true, pressed: false, tip: "Toggle per-mesh Non-Uniform Scale (SX/SY/SZ) and Bottom Flare / Top Width / Inflate sliders");
+            _btnHudShapeDrawerToggle.Toggled += (on) =>
+            {
+                _impSculptShowShapeDrawer = on;
+                if (_boxHudShapeScaleRow != null) _boxHudShapeScaleRow.Visible = on;
+                ApplyHudSubtleToggleVisual(_btnHudShapeDrawerToggle, on);
+            };
+            row1.AddChild(_btnHudShapeDrawerToggle);
+
+            row1.AddChild(CreateViewportHudSeparator());
 
             // Hero Visibility (Show | Ghost | Hide)
             string[] hvLabels = { "Show", "Ghost", "Hide" };
             for (int hv = 0; hv < 3; hv++)
             {
                 int modeIdx = hv;
-                var hb = CreateViewportHudButton(hvLabels[hv], hv == 1 ? 42 : 38, 24, toggle: true, pressed: hv == _pinEditHeroVisMode, tip: "Original hero mesh visibility while sculpting (Shortcut: H)");
-                hb.Pressed += () =>
-                {
-                    SetPinEditHeroVisMode(modeIdx);
-                    SyncImportedSculptViewportHud();
-                };
+                var hb = CreateViewportHudButton(hvLabels[hv], hv == 1 ? 42 : 38, 24, toggle: true, pressed: hv == _pinEditHeroVisMode, tip: "Original hero mesh visibility (Shortcut: H)");
+                hb.Pressed += () => { SetPinEditHeroVisMode(modeIdx); SyncImportedSculptViewportHud(); };
                 _hudSculptHeroVisBtns[hv] = hb;
-                row.AddChild(hb);
+                row1.AddChild(hb);
             }
 
-            row.AddChild(CreateViewportHudSeparator());
+            row1.AddChild(CreateViewportHudSeparator());
 
-            _btnImpSculptUndo = CreateViewportHudButton("", 26, 24, tip: "Undo last sculpt stroke (Ctrl+Z)");
+            _btnImpSculptUndo = CreateViewportHudButton("", 26, 24, tip: "Undo last sculpt/face transform (Ctrl+Z)");
             SetButtonIcon(_btnImpSculptUndo, "res://assets/at-icons/undo.svg", 14);
             _btnImpSculptUndo.Disabled = true;
             _btnImpSculptUndo.Pressed += OnImportedSculptUndoPressed;
-            row.AddChild(_btnImpSculptUndo);
+            row1.AddChild(_btnImpSculptUndo);
 
-            _btnImpSculptReset = CreateViewportHudButton("Reset", 46, 24, tip: "Reset all reshape & sculpt offsets");
+            _btnImpSculptReset = CreateViewportHudButton("Reset", 44, 24, tip: "Reset reshape, non-uniform scale & sculpt offsets on current target");
             _btnImpSculptReset.Disabled = true;
             _btnImpSculptReset.Pressed += OnImportedSculptResetPressed;
-            row.AddChild(_btnImpSculptReset);
+            row1.AddChild(_btnImpSculptReset);
 
-            var btnDone = CreateViewportHudButton("Done ✓", 58, 24, variation: "ImporterPrimaryButton", tip: "Finish sculpting and bake onto the rigged mesh (Esc)");
-            btnDone.Pressed += () => { if (_btnImpSculptToggle != null) _btnImpSculptToggle.ButtonPressed = false; };
-            row.AddChild(btnDone);
+            var btnDone = CreateViewportHudButton("Done ✓", 56, 24, variation: "ImporterPrimaryButton", tip: "Finish sculpting and bake onto the hero rig (Esc)");
+            btnDone.Pressed += ExitImportedSculptMode;
+            row1.AddChild(btnDone);
+
+            // =====================================================================
+            // ROW 2A: Brush Size & Power (shown in Brush mode)
+            // =====================================================================
+            _boxHudBrushSubRow = new HBoxContainer();
+            _boxHudBrushSubRow.AddThemeConstantOverride("separation", 6);
+            root.AddChild(_boxHudBrushSubRow);
+
+            var lblSz = new Label { Text = "Brush Size:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(lblSz, wrap: false);
+            _boxHudBrushSubRow.AddChild(lblSz);
+            _sliderImpSculptRadius = new HSlider
+            {
+                MinValue = 0.03, MaxValue = 0.35, Step = 0.005, Value = 0.12,
+                CustomMinimumSize = new Vector2(110, 20),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                FocusMode = Control.FocusModeEnum.None
+            };
+            _lblImpSculptRadiusVal = new Label { Text = "0.12m", CustomMinimumSize = new Vector2(40, 0), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(_lblImpSculptRadiusVal, wrap: false);
+            _sliderImpSculptRadius.ValueChanged += (v) => { if (_lblImpSculptRadiusVal != null) _lblImpSculptRadiusVal.Text = $"{v:F2}m"; };
+            _boxHudBrushSubRow.AddChild(_sliderImpSculptRadius);
+            _boxHudBrushSubRow.AddChild(_lblImpSculptRadiusVal);
+
+            _boxHudBrushSubRow.AddChild(CreateViewportHudSeparator());
+
+            var lblPw = new Label { Text = "Power:", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(lblPw, wrap: false);
+            _boxHudBrushSubRow.AddChild(lblPw);
+            _sliderImpSculptStrength = new HSlider
+            {
+                MinValue = 0.05, MaxValue = 1.0, Step = 0.01, Value = 0.55,
+                CustomMinimumSize = new Vector2(100, 20),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                FocusMode = Control.FocusModeEnum.None
+            };
+            _lblImpSculptStrengthVal = new Label { Text = "55%", CustomMinimumSize = new Vector2(34, 0), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(_lblImpSculptStrengthVal, wrap: false);
+            _sliderImpSculptStrength.ValueChanged += (v) => { if (_lblImpSculptStrengthVal != null) _lblImpSculptStrengthVal.Text = $"{Mathf.RoundToInt((float)v * 100)}%"; };
+            _boxHudBrushSubRow.AddChild(_sliderImpSculptStrength);
+            _boxHudBrushSubRow.AddChild(_lblImpSculptStrengthVal);
+
+            // =====================================================================
+            // ROW 2B: Face Edit Controls (Proportional Editing, Axis Lock, Grow/Shrink)
+            // =====================================================================
+            _boxHudFaceSubRow = new HBoxContainer { Visible = false };
+            _boxHudFaceSubRow.AddThemeConstantOverride("separation", 5);
+            root.AddChild(_boxHudFaceSubRow);
+
+            _btnFaceSelThrough = CreateViewportHudButton("Through (T)", 72, 22, toggle: true, pressed: true, tip: "Select faces through front & back sides (T)");
+            _btnFaceSelThrough.Toggled += (on) => { _faceEditSelectThrough = on; RefreshFaceEditOverlay3D(); ApplyHudSubtleToggleVisual(_btnFaceSelThrough, on); };
+            _boxHudFaceSubRow.AddChild(_btnFaceSelThrough);
+
+            var btnGrow = CreateViewportHudButton("Grow +", 50, 22, tip: "Grow selection (+)");
+            btnGrow.Pressed += () => GrowOrShrinkFaceSelection(true);
+            var btnShrink = CreateViewportHudButton("Shrink -", 54, 22, tip: "Shrink selection (-)");
+            btnShrink.Pressed += () => GrowOrShrinkFaceSelection(false);
+            var btnClearSel = CreateViewportHudButton("Clear", 42, 22, tip: "Clear face selection (Ctrl+D)");
+            btnClearSel.Pressed += () => ClearFaceEditSelection();
+            _boxHudFaceSubRow.AddChild(btnGrow);
+            _boxHudFaceSubRow.AddChild(btnShrink);
+            _boxHudFaceSubRow.AddChild(btnClearSel);
+
+            _boxHudFaceSubRow.AddChild(CreateViewportHudSeparator());
+
+            _btnFacePropEdit = CreateViewportHudButton("Prop. Edit (O)", 82, 22, toggle: true, pressed: true, tip: "Proportional Editing (O) — smoothly pulls nearby vertices within falloff radius");
+            _btnFacePropEdit.Toggled += (on) => { _faceEditProportional = on; ApplyHudSubtleToggleVisual(_btnFacePropEdit, on); };
+            _boxHudFaceSubRow.AddChild(_btnFacePropEdit);
+
+            _sliderFacePropRadius = new HSlider
+            {
+                MinValue = 0.02, MaxValue = 0.50, Step = 0.005, Value = _faceEditPropRadius,
+                CustomMinimumSize = new Vector2(80, 20),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                FocusMode = Control.FocusModeEnum.None,
+                TooltipText = "Proportional falloff radius in meters (scroll wheel while dragging)"
+            };
+            _lblFacePropRadiusVal = new Label { Text = "0.14m", CustomMinimumSize = new Vector2(38, 0), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(_lblFacePropRadiusVal, wrap: false);
+            _sliderFacePropRadius.ValueChanged += (v) => { _faceEditPropRadius = (float)v; if (_lblFacePropRadiusVal != null) _lblFacePropRadiusVal.Text = $"{v:F2}m"; };
+            _boxHudFaceSubRow.AddChild(_sliderFacePropRadius);
+            _boxHudFaceSubRow.AddChild(_lblFacePropRadiusVal);
+
+            _boxHudFaceSubRow.AddChild(CreateViewportHudSeparator());
+
+            string[] axisLabels = { "Free", "X", "Y", "Z" };
+            for (int a = 0; a < 4; a++)
+            {
+                int cap = a;
+                var ab = CreateViewportHudButton(axisLabels[a], a == 0 ? 36 : 24, 22, toggle: true, pressed: a == 0, tip: $"Axis lock: {axisLabels[a]}");
+                ab.Pressed += () => { _faceEditAxisLock = cap; UpdateFaceEditAxisGuideVisual(); SyncImportedSculptViewportHud(); };
+                _hudFaceAxisBtns[a] = ab;
+                _boxHudFaceSubRow.AddChild(ab);
+            }
+
+            _lblFaceSelCount = new Label { Text = "0 faces", SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            ImporterStyle.ApplyHintStyle(_lblFaceSelCount, wrap: false);
+            _boxHudFaceSubRow.AddChild(_lblFaceSelCount);
+
+            // =====================================================================
+            // ROW 3: Per-Mesh Non-Uniform Scale (SX/SY/SZ) + Parametric Fit Drawer
+            // =====================================================================
+            _boxHudShapeScaleRow = new HBoxContainer { Visible = false };
+            _boxHudShapeScaleRow.AddThemeConstantOverride("separation", 5);
+            root.AddChild(_boxHudShapeScaleRow);
+
+            SpinBox MakeMeshScaleSpin(string prefix)
+            {
+                var sb = new SpinBox
+                {
+                    MinValue = 0.05, MaxValue = 5.0, Step = 0.001, CustomArrowStep = 0.01, Value = 1.0,
+                    Prefix = prefix, CustomMinimumSize = new Vector2(72, 24),
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+                };
+                ImporterStyle.ApplyFontSize(sb, ImporterStyle.FontHint);
+                sb.ValueChanged += (_) => OnPerMeshScaleOrParamChanged();
+                return sb;
+            }
+
+            _spinMeshScaleX = MakeMeshScaleSpin("SX:");
+            _spinMeshScaleY = MakeMeshScaleSpin("SY:");
+            _spinMeshScaleZ = MakeMeshScaleSpin("SZ:");
+            _boxHudShapeScaleRow.AddChild(_spinMeshScaleX);
+            _boxHudShapeScaleRow.AddChild(_spinMeshScaleY);
+            _boxHudShapeScaleRow.AddChild(_spinMeshScaleZ);
+
+            var btnScale11 = CreateViewportHudButton("1:1", 30, 24, tip: "Reset non-uniform scale on this mesh to 1:1:1");
+            btnScale11.Pressed += () =>
+            {
+                _isSyncingImpSculptUi = true;
+                _spinMeshScaleX.SetValueNoSignal(1.0);
+                _spinMeshScaleY.SetValueNoSignal(1.0);
+                _spinMeshScaleZ.SetValueNoSignal(1.0);
+                _isSyncingImpSculptUi = false;
+                OnPerMeshScaleOrParamChanged();
+            };
+            _boxHudShapeScaleRow.AddChild(btnScale11);
+
+            _boxHudShapeScaleRow.AddChild(CreateViewportHudSeparator());
+
+            (HSlider sld, Label val) AddCompactParam(string lbl, double min, double max, double step, bool pct)
+            {
+                var l = new Label { Text = lbl, SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+                ImporterStyle.ApplyHintStyle(l, wrap: false);
+                var s = new HSlider { MinValue = min, MaxValue = max, Step = step, Value = 0.0, CustomMinimumSize = new Vector2(72, 20), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter, FocusMode = Control.FocusModeEnum.None };
+                var v = new Label { Text = pct ? "0%" : "0.0cm", CustomMinimumSize = new Vector2(40, 0), SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+                ImporterStyle.ApplyHintStyle(v, wrap: false);
+                s.ValueChanged += (nv) =>
+                {
+                    v.Text = pct ? $"{(nv > 0 ? "+" : "")}{Mathf.RoundToInt((float)nv * 100)}%" : $"{(nv > 0 ? "+" : "")}{nv * 100.0:F1}cm";
+                    OnPerMeshScaleOrParamChanged();
+                };
+                _boxHudShapeScaleRow.AddChild(l);
+                _boxHudShapeScaleRow.AddChild(s);
+                _boxHudShapeScaleRow.AddChild(v);
+                return (s, v);
+            }
+
+            (_sliderImpBottomFlare, _lblImpBottomFlareVal) = AddCompactParam("Bot:", -0.50, 0.80, 0.01, true);
+            (_sliderImpTopFlare, _lblImpTopFlareVal) = AddCompactParam("Top:", -0.50, 0.80, 0.01, true);
+            (_sliderImpInflate, _lblImpInflateVal) = AddCompactParam("Inf:", -0.05, 0.10, 0.002, false);
 
             SyncImportedSculptViewportHud();
+        }
+
+        private void PopulateSculptTargetDropdown()
+        {
+            if (_optHudSculptTarget == null) return;
+            bool prev = _isSyncingImpSculptUi;
+            _isSyncingImpSculptUi = true;
+            try
+            {
+                _optHudSculptTarget.Clear();
+                _optHudSculptTarget.AddItem("All Active Meshes", 0);
+                _optHudSculptTarget.SetItemMetadata(0, "");
+
+                int selIdx = 0;
+                int id = 1;
+                foreach (var chk in _importedSubmeshCheckboxes)
+                {
+                    if (!GodotObject.IsInstanceValid(chk) || !chk.ButtonPressed || !chk.HasMeta("SubmeshName")) continue;
+                    string mName = chk.GetMeta("SubmeshName").AsString();
+                    _optHudSculptTarget.AddItem(mName, id);
+                    _optHudSculptTarget.SetItemMetadata(id, mName);
+                    if (!string.IsNullOrEmpty(_activeImpSculptTargetMesh) &&
+                        string.Equals(_activeImpSculptTargetMesh, mName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selIdx = id;
+                    }
+                    id++;
+                }
+                _optHudSculptTarget.Select(selIdx);
+                if (selIdx == 0) _activeImpSculptTargetMesh = null;
+            }
+            finally
+            {
+                _isSyncingImpSculptUi = prev;
+            }
+        }
+
+        private void SyncShapeScaleControlsFromTarget()
+        {
+            bool prev = _isSyncingImpSculptUi;
+            _isSyncingImpSculptUi = true;
+            try
+            {
+                Vector3 sc = Vector3.One;
+                float bot = _globalImpBottomFlare, top = _globalImpTopFlare, inf = _globalImpInflateMeters;
+                if (!string.IsNullOrEmpty(_activeImpSculptTargetMesh))
+                {
+                    if (_perMeshScaleXyz.TryGetValue(_activeImpSculptTargetMesh, out var ps)) sc = ps;
+                    bot = _perMeshBottomFlare.TryGetValue(_activeImpSculptTargetMesh, out var pb) ? pb : 0f;
+                    top = _perMeshTopFlare.TryGetValue(_activeImpSculptTargetMesh, out var pt) ? pt : 0f;
+                    inf = _perMeshInflateMeters.TryGetValue(_activeImpSculptTargetMesh, out var pi) ? pi : 0f;
+                }
+                _spinMeshScaleX?.SetValueNoSignal(sc.X);
+                _spinMeshScaleY?.SetValueNoSignal(sc.Y);
+                _spinMeshScaleZ?.SetValueNoSignal(sc.Z);
+                _sliderImpBottomFlare?.SetValueNoSignal(bot);
+                if (_lblImpBottomFlareVal != null) _lblImpBottomFlareVal.Text = $"{(bot > 0 ? "+" : "")}{Mathf.RoundToInt(bot * 100)}%";
+                _sliderImpTopFlare?.SetValueNoSignal(top);
+                if (_lblImpTopFlareVal != null) _lblImpTopFlareVal.Text = $"{(top > 0 ? "+" : "")}{Mathf.RoundToInt(top * 100)}%";
+                _sliderImpInflate?.SetValueNoSignal(inf);
+                if (_lblImpInflateVal != null) _lblImpInflateVal.Text = $"{(inf > 0 ? "+" : "")}{inf * 100f:F1}cm";
+            }
+            finally
+            {
+                _isSyncingImpSculptUi = prev;
+            }
+        }
+
+        private void OnPerMeshScaleOrParamChanged()
+        {
+            if (_isSyncingImpSculptUi) return;
+            Vector3 sc = new Vector3(
+                (float)(_spinMeshScaleX?.Value ?? 1.0),
+                (float)(_spinMeshScaleY?.Value ?? 1.0),
+                (float)(_spinMeshScaleZ?.Value ?? 1.0));
+            float bot = (float)(_sliderImpBottomFlare?.Value ?? 0.0);
+            float top = (float)(_sliderImpTopFlare?.Value ?? 0.0);
+            float inf = (float)(_sliderImpInflate?.Value ?? 0.0);
+
+            if (!string.IsNullOrEmpty(_activeImpSculptTargetMesh))
+            {
+                if (sc.IsEqualApprox(Vector3.One)) _perMeshScaleXyz.Remove(_activeImpSculptTargetMesh);
+                else _perMeshScaleXyz[_activeImpSculptTargetMesh] = sc;
+
+                if (MathF.Abs(bot) < 1e-4f) _perMeshBottomFlare.Remove(_activeImpSculptTargetMesh);
+                else _perMeshBottomFlare[_activeImpSculptTargetMesh] = bot;
+
+                if (MathF.Abs(top) < 1e-4f) _perMeshTopFlare.Remove(_activeImpSculptTargetMesh);
+                else _perMeshTopFlare[_activeImpSculptTargetMesh] = top;
+
+                if (MathF.Abs(inf) < 1e-5f) _perMeshInflateMeters.Remove(_activeImpSculptTargetMesh);
+                else _perMeshInflateMeters[_activeImpSculptTargetMesh] = inf;
+            }
+            else
+            {
+                // Apply to all active meshes when "All Active Meshes" is selected
+                _globalImpBottomFlare = bot;
+                _globalImpTopFlare = top;
+                _globalImpInflateMeters = inf;
+                if (!sc.IsEqualApprox(Vector3.One))
+                {
+                    foreach (var chk in _importedSubmeshCheckboxes)
+                        if (GodotObject.IsInstanceValid(chk) && chk.ButtonPressed && chk.HasMeta("SubmeshName"))
+                            _perMeshScaleXyz[chk.GetMeta("SubmeshName").AsString()] = sc;
+                }
+            }
+
+            UpdateImportedSculptStatusLabel();
+            if (IsImportedSculptActive())
+                RefreshImportedSculptPreviewFromCurrentSettings();
+            else
+                ScheduleDebouncedLiveRigUpdate();
+        }
+
+        private void SetSculptSubMode(bool faceEdit)
+        {
+            if (_isFaceEditSubMode == faceEdit) return;
+            CancelFaceEditTransform(restore: true);
+            _isFaceEditSubMode = faceEdit;
+            if (!faceEdit) ClearFaceEditSelection(refreshVisual: false);
+            RefreshFaceEditOverlay3D();
+            SyncImportedSculptViewportHud();
+            SetBottomStatus(faceEdit
+                ? "Edit Faces — Select faces (Lasso/Box/Paint/Island), then press G (Move), S (Scale), or Alt+S (Inflate) with X/Y/Z axis lock & O Proportional Edit."
+                : "Brush Sculpt — Left-drag to sculpt live (Grab/Inflate/Shrink/Smooth/Erase). [ / ] resizes brush.", StatusTone.Info);
         }
 
         private void SetActiveImportedSculptMode(ImportedSculptBrushMode mode)
@@ -302,53 +597,109 @@ namespace DeadlockPlayground.UI
 
         private void SyncImportedSculptViewportHud()
         {
+            ApplyHudSubtleToggleVisual(_btnHudSculptModeBrush, !_isFaceEditSubMode);
+            ApplyHudSubtleToggleVisual(_btnHudSculptModeFaces, _isFaceEditSubMode);
+            if (_boxHudBrushTools != null) _boxHudBrushTools.Visible = !_isFaceEditSubMode;
+            if (_boxHudFaceTools != null) _boxHudFaceTools.Visible = _isFaceEditSubMode;
+            if (_boxHudBrushSubRow != null) _boxHudBrushSubRow.Visible = !_isFaceEditSubMode;
+            if (_boxHudFaceSubRow != null) _boxHudFaceSubRow.Visible = _isFaceEditSubMode;
+            if (_boxHudShapeScaleRow != null) _boxHudShapeScaleRow.Visible = _impSculptShowShapeDrawer;
+
             for (int i = 0; i < _hudSculptModeBtns.Length; i++)
                 ApplyHudSubtleToggleVisual(_hudSculptModeBtns[i], i == (int)_activeImpSculptMode);
+            for (int i = 0; i < _hudFaceSelectBtns.Length; i++)
+                ApplyHudSubtleToggleVisual(_hudFaceSelectBtns[i], i == (int)_faceEditSelectTool);
+            for (int i = 0; i < _hudFaceTransformBtns.Length; i++)
+                ApplyHudSubtleToggleVisual(_hudFaceTransformBtns[i], (i + 1) == (int)_faceEditTransformMode);
+            for (int a = 0; a < _hudFaceAxisBtns.Length; a++)
+                ApplyHudSubtleToggleVisual(_hudFaceAxisBtns[a], a == _faceEditAxisLock);
+
             ApplyHudSubtleToggleVisual(_btnImpSculptMirror, _btnImpSculptMirror?.ButtonPressed ?? true);
+            ApplyHudSubtleToggleVisual(_btnHudSculptIsolate, _impSculptIsolateTarget);
+            ApplyHudSubtleToggleVisual(_btnHudShapeDrawerToggle, _impSculptShowShapeDrawer);
+            ApplyHudSubtleToggleVisual(_btnFaceSelThrough, _faceEditSelectThrough);
+            ApplyHudSubtleToggleVisual(_btnFacePropEdit, _faceEditProportional);
+            if (_sliderFacePropRadius != null) _sliderFacePropRadius.SetValueNoSignal(_faceEditPropRadius);
+            if (_lblFacePropRadiusVal != null) _lblFacePropRadiusVal.Text = $"{_faceEditPropRadius:F2}m";
+            if (_lblFaceSelCount != null) _lblFaceSelCount.Text = $"{GetFaceEditSelectedTriCount():N0} faces";
+
             for (int hv = 0; hv < _hudSculptHeroVisBtns.Length; hv++)
                 ApplyHudSubtleToggleVisual(_hudSculptHeroVisBtns[hv], hv == _pinEditHeroVisMode);
         }
 
-        private void OnImportedSculptModeToggled(bool enabled)
+        private void ApplyImpSculptIsolationVisibility()
         {
-            if (_btnImpSculptToggle != null)
-                _btnImpSculptToggle.ThemeTypeVariation = enabled ? "ImporterPrimaryButton" : "ToolbarButton";
-
-            if (enabled)
+            if (_previewModelInstance == null || !GodotObject.IsInstanceValid(_previewModelInstance)) return;
+            var filter = GetActiveImportedSubmeshFilter();
+            foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
             {
-                if (_isMeshCutModeActive) ExitMeshCutMode();
-                if (_btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
-                    _btnWeightPaintMode.ButtonPressed = false;
-                if (_btnDeformBrushToggle != null && _btnDeformBrushToggle.ButtonPressed)
-                    _btnDeformBrushToggle.ButtonPressed = false;
-                if (_isEditReferenceBonesMode)
-                    _isEditReferenceBonesMode = false;
-                if (_optGizmoTarget != null) SelectGizmoTargetById(0);
-
-                // Automatically switch preview into live Sculpt Pose (unposed _previewModelRoot visible, _previewRiggedContainer hidden)
-                ApplyLandmarkPreviewState();
-                RefreshImportedSculptPreviewFromCurrentSettings();
-                if (_importedSculptViewportHud != null) _importedSculptViewportHud.Visible = true;
-                SyncImportedSculptViewportHud();
-                SetBottomStatus("3D Sculpt Mode active — Left-drag to sculpt live (Grab/Inflate/Shrink/Smooth/Erase). Press H for Hero Ghost, Esc or Done to bake.", StatusTone.Info);
+                string mName = mi.Name.ToString();
+                bool active = filter == null || filter.Contains(mName);
+                if (!active) { mi.Visible = false; continue; }
+                if (_isImpSculptModeActive && _impSculptIsolateTarget && !string.IsNullOrEmpty(_activeImpSculptTargetMesh))
+                    mi.Visible = string.Equals(mName, _activeImpSculptTargetMesh, StringComparison.OrdinalIgnoreCase);
+                else
+                    mi.Visible = true;
             }
-            else
-            {
-                _isImpSculptBrushing = false;
-                _impGrabVerts.Clear();
-                _impGrabInitialDeltas.Clear();
-                UpdateBrushRingVisual(Vector3.Zero, Vector3.Up, 0.05f, false);
-                if (_importedSculptViewportHud != null) _importedSculptViewportHud.Visible = false;
+        }
 
-                // Restore pristine un-baked preview mesh before ExecuteLiveRigUpdate bakes final sculpts into rigged mesh!
-                _impSculptOriginalMeshRestore?.Invoke();
-                _impSculptOriginalMeshRestore = null;
-                _impSculptCaches.Clear();
+        private void EnterImportedSculptModeForMesh(string meshName)
+        {
+            if (_isMeshCutModeActive) ExitMeshCutMode();
+            if (IsWeaponSocketHudActive()) ExitWeaponSocketHud();
+            if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+            if (_btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
+                _btnWeightPaintMode.ButtonPressed = false;
+            if (_btnDeformBrushToggle != null && _btnDeformBrushToggle.ButtonPressed)
+                _btnDeformBrushToggle.ButtonPressed = false;
+            if (_isEditReferenceBonesMode)
+                _isEditReferenceBonesMode = false;
+            if (_optGizmoTarget != null) SelectGizmoTargetById(0);
 
-                ExecuteLiveRigUpdate();
-                ApplyLandmarkPreviewState();
-                SetBottomStatus("Baked sculpted mesh onto hero rig.", StatusTone.Success);
-            }
+            _activeImpSculptTargetMesh = string.IsNullOrEmpty(meshName) ? null : meshName;
+            _isImpSculptModeActive = true;
+            ClearFaceEditSelection(refreshVisual: false);
+
+            PopulateSculptTargetDropdown();
+            SyncShapeScaleControlsFromTarget();
+
+            // Automatically switch preview into live Sculpt Pose (unposed _previewModelRoot visible, _previewRiggedContainer hidden)
+            ApplyLandmarkPreviewState();
+            ApplyImpSculptIsolationVisibility();
+            RefreshImportedSculptPreviewFromCurrentSettings();
+            if (_importedSculptViewportHud != null) _importedSculptViewportHud.Visible = true;
+            UpdateImportedSculptStatusLabel();
+            SyncImportedSculptViewportHud();
+
+            string scopeLbl = string.IsNullOrEmpty(_activeImpSculptTargetMesh) ? "All Meshes" : _activeImpSculptTargetMesh;
+            SetBottomStatus($"3D Sculpt & Face Edit ({scopeLbl}) — Brush or Edit Faces (G/S/Alt+S), Scale/Fit drawer, H for Hero Ghost, Esc or Done to bake.", StatusTone.Info);
+        }
+
+        private void ExitImportedSculptMode()
+        {
+            if (!_isImpSculptModeActive) return;
+            CancelFaceEditTransform(restore: true);
+            ClearFaceEditSelection(refreshVisual: false);
+            DestroyFaceEditOverlays3D();
+            _meshCutOverlay2D?.Cancel();
+
+            _isImpSculptModeActive = false;
+            _isImpSculptBrushing = false;
+            _impSculptIsolateTarget = false;
+            _impGrabVerts.Clear();
+            _impGrabInitialDeltas.Clear();
+            UpdateBrushRingVisual(Vector3.Zero, Vector3.Up, 0.05f, false);
+            if (_importedSculptViewportHud != null) _importedSculptViewportHud.Visible = false;
+
+            _impSculptOriginalMeshRestore?.Invoke();
+            _impSculptOriginalMeshRestore = null;
+            _impSculptCaches.Clear();
+            SyncPreviewModelMeshVisibility();
+
+            ExecuteLiveRigUpdate();
+            ApplyLandmarkPreviewState();
+            RefreshAllMeshSculptCardBadges();
+            SetBottomStatus("Baked sculpted & scaled mesh onto hero rig.", StatusTone.Success);
         }
 
         private void RefreshImportedSculptPreviewFromCurrentSettings()
@@ -358,42 +709,39 @@ namespace DeadlockPlayground.UI
             if (_previewModelInstance == null || !GodotObject.IsInstanceValid(_previewModelInstance)) return;
 
             var opts = GatherRiggingOptions();
-            // Keep the sculpted preview applied directly on _previewModelInstance while sculpting so every stroke & slider is 100% visible!
             _impSculptOriginalMeshRestore = CustomModelAutoRigger.ApplyImportedMeshSculptToScene(_previewModelInstance, opts);
             RebuildImportedSculptCaches();
+            RefreshFaceEditOverlay3D();
         }
 
-        private void JumpToImportedSculptFromMeshesTab()
+        private void RefreshAllMeshSculptCardBadges()
         {
-            if (_isMeshCutModeActive) ExitMeshCutMode();
-            if (_rightTabs != null && _rightTabs.GetTabCount() > 0)
-                _rightTabs.CurrentTab = 0;
-            if (_btnImpSculptToggle != null && !_btnImpSculptToggle.ButtonPressed)
-                _btnImpSculptToggle.ButtonPressed = true;
+            foreach (var (chk, card) in _importedSubmeshCards)
+            {
+                if (!GodotObject.IsInstanceValid(chk) || !GodotObject.IsInstanceValid(card) || !chk.HasMeta("SubmeshName"))
+                    continue;
+                string mName = chk.GetMeta("SubmeshName").AsString();
+                bool hasScale = _perMeshScaleXyz.TryGetValue(mName, out var sc) && !sc.IsEqualApprox(Vector3.One);
+                bool hasParam = (_perMeshBottomFlare.TryGetValue(mName, out var pb) && MathF.Abs(pb) > 1e-4f) ||
+                                (_perMeshTopFlare.TryGetValue(mName, out var pt) && MathF.Abs(pt) > 1e-4f) ||
+                                (_perMeshInflateMeters.TryGetValue(mName, out var pi) && MathF.Abs(pi) > 1e-5f);
+                bool hasSculpt = _importedSculptDeltas.Keys.Any(k => k.StartsWith(mName + CustomModelAutoRigger.SurfaceKeepSeparator, StringComparison.OrdinalIgnoreCase));
+                card.SetSculptBadge(hasScale || hasParam || hasSculpt);
+            }
         }
 
         private void UpdateImportedSculptStatusLabel()
         {
             int vCnt = 0;
             foreach (var map in _importedSculptDeltas.Values) vCnt += map.Count;
-            bool hasParam = MathF.Abs((float)(_sliderImpBottomFlare?.Value ?? 0.0)) > 0.001f ||
-                            MathF.Abs((float)(_sliderImpTopFlare?.Value ?? 0.0)) > 0.001f ||
-                            MathF.Abs((float)(_sliderImpInflate?.Value ?? 0.0)) > 0.0005f;
-            if (_lblImpSculptStatus != null)
-            {
-                if (vCnt > 0 && hasParam)
-                    _lblImpSculptStatus.Text = $"Parametric fit + {vCnt:N0} sculpted vertex offset(s) active.";
-                else if (vCnt > 0)
-                    _lblImpSculptStatus.Text = $"Sculpted {vCnt:N0} vertex offset(s) across {_importedSculptDeltas.Count} surface(s).";
-                else if (hasParam)
-                    _lblImpSculptStatus.Text = "Parametric reshape active (Bottom Flare / Top Width / Inflate).";
-                else
-                    _lblImpSculptStatus.Text = "Original mesh dimensions (no reshape applied).";
-            }
+            bool hasParam = MathF.Abs(_globalImpBottomFlare) > 0.001f ||
+                            MathF.Abs(_globalImpTopFlare) > 0.001f ||
+                            MathF.Abs(_globalImpInflateMeters) > 0.0005f ||
+                            _perMeshScaleXyz.Count > 0 || _perMeshBottomFlare.Count > 0 ||
+                            _perMeshTopFlare.Count > 0 || _perMeshInflateMeters.Count > 0;
             if (_btnImpSculptUndo != null) _btnImpSculptUndo.Disabled = _importedSculptUndoStack.Count == 0;
-            bool canReset = vCnt > 0 || hasParam;
-            if (_btnImpSculptReset != null) _btnImpSculptReset.Disabled = !canReset;
-            if (_btnImpSculptCardReset != null) _btnImpSculptCardReset.Disabled = !canReset;
+            if (_btnImpSculptReset != null) _btnImpSculptReset.Disabled = vCnt == 0 && !hasParam;
+            RefreshAllMeshSculptCardBadges();
         }
 
         private void OnImportedSculptUndoPressed()
@@ -417,21 +765,29 @@ namespace DeadlockPlayground.UI
                 _importedSculptUndoStack.Add(CloneImportedSculptDeltas(_importedSculptDeltas) ?? new());
                 if (_importedSculptUndoStack.Count > 30) _importedSculptUndoStack.RemoveAt(0);
             }
-            _importedSculptDeltas.Clear();
-            _isSyncingImpSculptUi = true;
-            try
+
+            if (!string.IsNullOrEmpty(_activeImpSculptTargetMesh))
             {
-                _sliderImpBottomFlare?.SetValueNoSignal(0.0);
-                if (_lblImpBottomFlareVal != null) _lblImpBottomFlareVal.Text = "0%";
-                _sliderImpTopFlare?.SetValueNoSignal(0.0);
-                if (_lblImpTopFlareVal != null) _lblImpTopFlareVal.Text = "0%";
-                _sliderImpInflate?.SetValueNoSignal(0.0);
-                if (_lblImpInflateVal != null) _lblImpInflateVal.Text = "0.0cm";
+                _perMeshScaleXyz.Remove(_activeImpSculptTargetMesh);
+                _perMeshBottomFlare.Remove(_activeImpSculptTargetMesh);
+                _perMeshTopFlare.Remove(_activeImpSculptTargetMesh);
+                _perMeshInflateMeters.Remove(_activeImpSculptTargetMesh);
+                foreach (var k in _importedSculptDeltas.Keys.Where(k => k.StartsWith(_activeImpSculptTargetMesh + CustomModelAutoRigger.SurfaceKeepSeparator, StringComparison.OrdinalIgnoreCase)).ToList())
+                    _importedSculptDeltas.Remove(k);
             }
-            finally
+            else
             {
-                _isSyncingImpSculptUi = false;
+                _importedSculptDeltas.Clear();
+                _perMeshScaleXyz.Clear();
+                _perMeshBottomFlare.Clear();
+                _perMeshTopFlare.Clear();
+                _perMeshInflateMeters.Clear();
+                _globalImpBottomFlare = 0f;
+                _globalImpTopFlare = 0f;
+                _globalImpInflateMeters = 0f;
             }
+
+            SyncShapeScaleControlsFromTarget();
             UpdateImportedSculptStatusLabel();
             if (IsImportedSculptActive())
                 RefreshImportedSculptPreviewFromCurrentSettings();
@@ -443,67 +799,58 @@ namespace DeadlockPlayground.UI
         {
             _impSculptOriginalMeshRestore?.Invoke();
             _impSculptOriginalMeshRestore = null;
+            DestroyFaceEditOverlays3D();
+            _isImpSculptModeActive = false;
+            _activeImpSculptTargetMesh = null;
+            _impSculptIsolateTarget = false;
+            _isFaceEditSubMode = false;
+            _faceEditSelectedTris.Clear();
+            _faceEditTransformMode = FaceEditTransformMode.None;
+            _globalImpBottomFlare = 0f;
+            _globalImpTopFlare = 0f;
+            _globalImpInflateMeters = 0f;
+            _perMeshScaleXyz.Clear();
+            _perMeshBottomFlare.Clear();
+            _perMeshTopFlare.Clear();
+            _perMeshInflateMeters.Clear();
             _importedSculptDeltas.Clear();
             _importedSculptUndoStack.Clear();
             _impSculptCaches.Clear();
             _isImpSculptBrushing = false;
             _pendingImpSculptUndoSnapshot = null;
             if (_importedSculptViewportHud != null) _importedSculptViewportHud.Visible = false;
-            _isSyncingImpSculptUi = true;
-            try
-            {
-                _btnImpSculptToggle?.SetPressedNoSignal(false);
-                if (_btnImpSculptToggle != null) _btnImpSculptToggle.ThemeTypeVariation = "ToolbarButton";
-                _sliderImpBottomFlare?.SetValueNoSignal(0.0);
-                if (_lblImpBottomFlareVal != null) _lblImpBottomFlareVal.Text = "0%";
-                _sliderImpTopFlare?.SetValueNoSignal(0.0);
-                if (_lblImpTopFlareVal != null) _lblImpTopFlareVal.Text = "0%";
-                _sliderImpInflate?.SetValueNoSignal(0.0);
-                if (_lblImpInflateVal != null) _lblImpInflateVal.Text = "0.0cm";
-            }
-            finally
-            {
-                _isSyncingImpSculptUi = false;
-            }
+            SyncShapeScaleControlsFromTarget();
             UpdateImportedSculptStatusLabel();
         }
 
         private void RestoreImportedSculptOptions(CustomModelAutoRigger.RiggingOptions options)
         {
             if (options == null) return;
+            _globalImpBottomFlare = options.ImportedMeshBottomFlare;
+            _globalImpTopFlare = options.ImportedMeshTopFlare;
+            _globalImpInflateMeters = options.ImportedMeshInflateMeters;
+
+            _perMeshScaleXyz.Clear();
+            if (options.PerMeshScaleXYZ != null)
+                foreach (var (k, v) in options.PerMeshScaleXYZ) _perMeshScaleXyz[k] = v;
+            _perMeshBottomFlare.Clear();
+            if (options.PerMeshBottomFlare != null)
+                foreach (var (k, v) in options.PerMeshBottomFlare) _perMeshBottomFlare[k] = v;
+            _perMeshTopFlare.Clear();
+            if (options.PerMeshTopFlare != null)
+                foreach (var (k, v) in options.PerMeshTopFlare) _perMeshTopFlare[k] = v;
+            _perMeshInflateMeters.Clear();
+            if (options.PerMeshInflateMeters != null)
+                foreach (var (k, v) in options.PerMeshInflateMeters) _perMeshInflateMeters[k] = v;
+
             _importedSculptDeltas.Clear();
-            _importedSculptUndoStack.Clear();
             if (options.ImportedMeshSculptDeltas != null)
             {
                 foreach (var (sk, vMap) in options.ImportedMeshSculptDeltas)
-                {
                     if (!string.IsNullOrEmpty(sk) && vMap != null && vMap.Count > 0)
                         _importedSculptDeltas[sk] = new Dictionary<int, Vector3>(vMap);
-                }
             }
-            _isSyncingImpSculptUi = true;
-            try
-            {
-                if (_sliderImpBottomFlare != null)
-                {
-                    _sliderImpBottomFlare.SetValueNoSignal(options.ImportedMeshBottomFlare);
-                    if (_lblImpBottomFlareVal != null) _lblImpBottomFlareVal.Text = $"{(options.ImportedMeshBottomFlare > 0 ? "+" : "")}{Mathf.RoundToInt(options.ImportedMeshBottomFlare * 100)}%";
-                }
-                if (_sliderImpTopFlare != null)
-                {
-                    _sliderImpTopFlare.SetValueNoSignal(options.ImportedMeshTopFlare);
-                    if (_lblImpTopFlareVal != null) _lblImpTopFlareVal.Text = $"{(options.ImportedMeshTopFlare > 0 ? "+" : "")}{Mathf.RoundToInt(options.ImportedMeshTopFlare * 100)}%";
-                }
-                if (_sliderImpInflate != null)
-                {
-                    _sliderImpInflate.SetValueNoSignal(options.ImportedMeshInflateMeters);
-                    if (_lblImpInflateVal != null) _lblImpInflateVal.Text = $"{(options.ImportedMeshInflateMeters > 0 ? "+" : "")}{options.ImportedMeshInflateMeters * 100f:F1}cm";
-                }
-            }
-            finally
-            {
-                _isSyncingImpSculptUi = false;
-            }
+            SyncShapeScaleControlsFromTarget();
             UpdateImportedSculptStatusLabel();
         }
 
@@ -517,27 +864,16 @@ namespace DeadlockPlayground.UI
                 ? _previewWorldRoot.GlobalTransform
                 : Transform3D.Identity;
 
-            var riggedByKey = new Dictionary<string, MeshInstance3D>(StringComparer.OrdinalIgnoreCase);
-            if (_previewRiggedContainer != null && GodotObject.IsInstanceValid(_previewRiggedContainer) && _previewRiggedContainer.Visible)
-            {
-                foreach (var rmi in CustomModelAutoRigger.CollectMeshes(_previewRiggedContainer))
-                {
-                    if (rmi?.Mesh == null) continue;
-                    string srcName = rmi.HasMeta("SourceMeshName") ? rmi.GetMeta("SourceMeshName").AsString() : rmi.Name.ToString();
-                    int srcSurf = rmi.HasMeta("SourceSurfaceIndex") ? rmi.GetMeta("SourceSurfaceIndex").AsInt32() : 0;
-                    riggedByKey[CustomModelAutoRigger.MakeSurfaceKeepKey(srcName, srcSurf)] = rmi;
-                }
-            }
-
             var activeFilter = GetActiveImportedSubmeshFilter();
             var srcMeshes = CustomModelAutoRigger.CollectMeshes(_previewModelInstance);
-            // In Sculpt Mode, _previewModelInstance already has parametric + current sculpt deltas applied via RefreshImportedSculptPreviewFromCurrentSettings()!
-            // Store BaseLocalVerts = current local verts MINUS existing _importedSculptDeltas so subsequent dabs accumulate cleanly with zero double-offset.
             foreach (var srcMi in srcMeshes)
             {
                 if (srcMi?.Mesh == null) continue;
                 string mName = srcMi.Name.ToString();
                 if (activeFilter != null && activeFilter.Count > 0 && !activeFilter.Contains(mName)) continue;
+                if (!string.IsNullOrEmpty(_activeImpSculptTargetMesh) &&
+                    !string.Equals(mName, _activeImpSculptTargetMesh, StringComparison.OrdinalIgnoreCase))
+                    continue;
 
                 Transform3D localToHero = CustomModelAutoRigger.ComputeImportedMeshToHeroTransform(srcMi, _previewModelInstance, alignedXf);
                 Transform3D localToWorld = worldRootXf * localToHero;
@@ -574,7 +910,6 @@ namespace DeadlockPlayground.UI
                         wNorms[v] = n.LengthSquared() > 1e-8f ? n.Normalized() : Vector3.Up;
                     }
 
-                    // Build 1-ring vertex adjacency for Smooth brush
                     var adjSets = new HashSet<int>[verts.Length];
                     for (int t = 0; t + 2 < idx.Length; t += 3)
                     {
@@ -591,7 +926,7 @@ namespace DeadlockPlayground.UI
                     _impSculptCaches.Add(new ImpSculptSurfaceCache
                     {
                         SourceMi = srcMi,
-                        DisplayMi = srcMi, // Always update visible _previewModelInstance directly at 60 FPS!
+                        DisplayMi = srcMi,
                         SurfaceIndex = s,
                         SurfaceKey = surfKey,
                         LocalToWorld = localToWorld,
@@ -608,38 +943,13 @@ namespace DeadlockPlayground.UI
 
         private bool RaycastImportedSculpt(Vector2 mousePos, out ImpSculptSurfaceCache hitCache, out Vector3 hitWorld, out Vector3 hitNorm)
         {
-            hitCache = null;
-            hitWorld = Vector3.Zero;
-            hitNorm = Vector3.Up;
-            if (_previewCamera == null || _impSculptCaches.Count == 0) return false;
-
-            Vector3 rayOrig = _previewCamera.ProjectRayOrigin(mousePos);
-            Vector3 rayDir = _previewCamera.ProjectRayNormal(mousePos);
-            float bestT = float.MaxValue;
-
-            foreach (var c in _impSculptCaches)
-            {
-                var verts = c.CurrentWorldVerts;
-                var idx = c.Indices;
-                for (int t = 0; t + 2 < idx.Length; t += 3)
-                {
-                    int a = idx[t], b = idx[t + 1], d = idx[t + 2];
-                    if (CustomWeightPaintEditor.RayTriangle(rayOrig, rayDir, verts[a], verts[b], verts[d], out float hitT) && hitT < bestT)
-                    {
-                        bestT = hitT;
-                        hitCache = c;
-                        hitWorld = rayOrig + rayDir * hitT;
-                        Vector3 n = c.CurrentWorldNorms[a] + c.CurrentWorldNorms[b] + c.CurrentWorldNorms[d];
-                        hitNorm = n.LengthSquared() > 1e-8f ? n.Normalized() : Vector3.Up;
-                    }
-                }
-            }
-            return hitCache != null;
+            return RaycastImportedSculptTriangle(mousePos, out hitCache, out _, out hitWorld, out hitNorm);
         }
 
         private bool HandleImportedSculptInput(InputEvent @event)
         {
             if (!IsImportedSculptActive() || _previewCamera == null) return false;
+            if (IsFaceEditActive()) return HandleFaceEditInput(@event);
 
             if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
             {
@@ -653,16 +963,11 @@ namespace DeadlockPlayground.UI
                         _isImpSculptBrushing = true;
                         _pendingImpSculptUndoSnapshot = CloneImportedSculptDeltas(_importedSculptDeltas) ?? new();
 
-                        var mode = _activeImpSculptMode;
-
-                        if (mode == ImportedSculptBrushMode.Grab)
-                        {
+                        if (_activeImpSculptMode == ImportedSculptBrushMode.Grab)
                             BeginImportedGrabStroke(hitPt);
-                        }
                         else
-                        {
-                            ApplyImportedSculptDab(hitPt, hitNorm, mode);
-                        }
+                            ApplyImportedSculptDab(hitPt, hitNorm, _activeImpSculptMode);
+
                         UpdateBrushRingVisual(hitPt, hitNorm, (float)(_sliderImpSculptRadius?.Value ?? 0.12), true);
                         GetViewport().SetInputAsHandled();
                         return true;
@@ -680,8 +985,6 @@ namespace DeadlockPlayground.UI
                         _pendingImpSculptUndoSnapshot = null;
                     }
                     UpdateImportedSculptStatusLabel();
-                    // Stay seamlessly in live Sculpt Pose without Auto-Snap resetting the view!
-                    // Final rig bake runs automatically when exiting Sculpt Mode (Done / Esc).
                     GetViewport().SetInputAsHandled();
                     return true;
                 }
@@ -693,15 +996,11 @@ namespace DeadlockPlayground.UI
 
                 if (_isImpSculptBrushing)
                 {
-                    var mode = _activeImpSculptMode;
-
-                    if (mode == ImportedSculptBrushMode.Grab)
-                    {
+                    if (_activeImpSculptMode == ImportedSculptBrushMode.Grab)
                         UpdateImportedGrabStroke(mm.Position);
-                    }
                     else if (RaycastImportedSculpt(mm.Position, out _, out var hitPt, out var hitNorm))
                     {
-                        ApplyImportedSculptDab(hitPt, hitNorm, mode);
+                        ApplyImportedSculptDab(hitPt, hitNorm, _activeImpSculptMode);
                         UpdateBrushRingVisual(hitPt, hitNorm, radius, true);
                     }
                     GetViewport().SetInputAsHandled();
@@ -885,15 +1184,14 @@ namespace DeadlockPlayground.UI
             foreach (var c in dirtyCaches)
             {
                 if (c.DisplayMi == null || !GodotObject.IsInstanceValid(c.DisplayMi) || c.DisplayMi.Mesh == null) continue;
-                if (!_importedSculptDeltas.TryGetValue(c.SurfaceKey, out var map)) continue;
+                _importedSculptDeltas.TryGetValue(c.SurfaceKey, out var map);
 
                 for (int v = 0; v < c.BaseLocalVerts.Length; v++)
                 {
-                    Vector3 d = map.TryGetValue(v, out var dl) ? dl : Vector3.Zero;
+                    Vector3 d = (map != null && map.TryGetValue(v, out var dl)) ? dl : Vector3.Zero;
                     c.CurrentWorldVerts[v] = c.LocalToWorld * (c.BaseLocalVerts[v] + d);
                 }
 
-                // Instant 60 FPS visual update directly on DisplayMi while dragging (re-rigged cleanly on release)
                 int targetSurf = c.DisplayMi == c.SourceMi ? c.SurfaceIndex : 0;
                 if (targetSurf < c.DisplayMi.Mesh.GetSurfaceCount())
                 {

@@ -117,7 +117,10 @@ namespace DeadlockPlayground.UI
         private int _selectedChainJointIndex = -1;
         private bool _isUpdatingJointEditor;
 
-        // Physics Stress Test (Look Up / Crouch / Walk Backwards)
+        // Physics Stress Test (Look Up / Crouch / Walk Backwards / Deadlock Air Vent)
+        private enum VentStressMode { None = 0, MidMap1000 = 1, Endgame1200 = 2 }
+        private const float DeadlockPlayerGravityMetersPerSecSq = 800.0f * 0.0254f; // 20.32 m/s² (sv_gravity = 800 in/s²)
+
         private float _stressHeadPitchDeg = 0f;
         private float _stressCrouchLeanDeg = 0f;
         private float _stressCurHeadPitchDeg = 0f;
@@ -127,11 +130,20 @@ namespace DeadlockPlayground.UI
         private bool _stressPoseWasActive = false;
         private Vector3 _stressSavedHeroPos = Vector3.Zero;
         private bool _stressHasSavedHeroPos = false;
+        private VentStressMode _stressVentMode = VentStressMode.None;
+        private int _stressVentDirIndex = 0; // 0=Back+Up (worst case), 1=Fwd+Up, 2=Side+Up, 3=Vertical Burst
+        private bool _stressStrictValve1Pass = true;
+        private float _stressVentTimer = 0f;
         private HSlider _sliderStressHeadPitch;
         private Label _lblValStressHeadPitch;
         private HSlider _sliderStressCrouchLean;
         private Label _lblValStressCrouchLean;
         private Button _btnStressWalkShake;
+        private Button _btnStressVentMid;
+        private Button _btnStressVentEndgame;
+        private OptionButton _optStressVentDir;
+        private CheckBox _chkStressStrictValve;
+        private Label _lblStressVentTelemetry;
 
         // Mesh-Fitted Body Colliders (anti-clipping capsules)
         private readonly List<BodyCollisionCapsuleDef> _bodyCollisionCapsules = new();
@@ -2757,7 +2769,7 @@ namespace DeadlockPlayground.UI
             RefreshChainJointListUI();
         }
 
-        private void SetPhysicsStressTestPose(float headPitchDeg, float crouchLeanDeg, bool walkShake)
+        private void SetPhysicsStressTestPose(float headPitchDeg, float crouchLeanDeg, bool walkShake, bool stopVent = false)
         {
             _stressHeadPitchDeg = headPitchDeg;
             _stressCrouchLeanDeg = crouchLeanDeg;
@@ -2767,6 +2779,10 @@ namespace DeadlockPlayground.UI
             _sliderStressCrouchLean?.SetValueNoSignal(crouchLeanDeg);
             if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = $"{crouchLeanDeg:F0}°";
             _btnStressWalkShake?.SetPressedNoSignal(walkShake);
+            if (stopVent)
+            {
+                SetVentStressMode(VentStressMode.None);
+            }
             if (!walkShake && _stressHasSavedHeroPos && _previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
             {
                 _previewHeroClone.Position = _stressSavedHeroPos;
@@ -2774,10 +2790,32 @@ namespace DeadlockPlayground.UI
             }
         }
 
+        private void SetVentStressMode(VentStressMode mode)
+        {
+            _stressVentMode = mode;
+            _stressVentTimer = 0f;
+            _btnStressVentMid?.SetPressedNoSignal(mode == VentStressMode.MidMap1000);
+            _btnStressVentEndgame?.SetPressedNoSignal(mode == VentStressMode.Endgame1200);
+            if (mode == VentStressMode.None)
+            {
+                var drv = DeadlockPlayground.Animation.CustomJiggleBoneDriver.FindOn(_previewHeroClone);
+                if (drv != null)
+                {
+                    drv.SetVirtualHeroVelocity(Vector3.Zero, active: false);
+                    drv.StrictValveSingleIterationMode = false;
+                }
+                if (_lblStressVentTelemetry != null)
+                {
+                    _lblStressVentTelemetry.Text = "Idle — Launch a Deadlock air vent (35–42 m/s) to test high-speed tunneling.";
+                    _lblStressVentTelemetry.AddThemeColorOverride("font_color", ImporterStyle.HintColor);
+                }
+            }
+        }
+
         /// <summary>
-        /// Applies procedural Look Up / Crouch Forward Lean / Backward-Walk oscillation in _Process
-        /// so artists can stress-test hair/cloth physics and body capsules live without launching Deadlock.
-        /// Returns true if any stress-test pose or motion is currently active.
+        /// Applies procedural Look Up / Crouch Forward Lean / Backward-Walk oscillation / Deadlock Air Vent
+        /// ballistic launch impulses in _Process so artists can stress-test hair/cloth physics and body capsules
+        /// live without launching Deadlock. Returns true if any stress-test pose or motion is currently active.
         /// </summary>
         private bool ApplyPhysicsStressTestInProcess(double delta)
         {
@@ -2793,13 +2831,20 @@ namespace DeadlockPlayground.UI
                              MathF.Abs(_stressCrouchLeanDeg) > 0.25f ||
                              MathF.Abs(_stressCurHeadPitchDeg) > 0.25f ||
                              MathF.Abs(_stressCurCrouchLeanDeg) > 0.25f ||
-                             _stressWalkBackShake;
+                             _stressWalkBackShake ||
+                             _stressVentMode != VentStressMode.None;
 
             if (!anyActive)
             {
                 if (_stressPoseWasActive)
                 {
                     _stressPoseWasActive = false;
+                    var drv = DeadlockPlayground.Animation.CustomJiggleBoneDriver.FindOn(_previewHeroClone);
+                    if (drv != null)
+                    {
+                        drv.SetVirtualHeroVelocity(Vector3.Zero, active: false);
+                        drv.StrictValveSingleIterationMode = false;
+                    }
                     if (_stressHasSavedHeroPos && _previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
                     {
                         _previewHeroClone.Position = _stressSavedHeroPos;
@@ -2832,6 +2877,80 @@ namespace DeadlockPlayground.UI
                     // Smooth back-and-forth surge (~0.45 m) to induce backward-walk inertial swing
                     float zOff = MathF.Sin(_stressShakePhase) * 0.45f;
                     _previewHeroClone.Position = _stressSavedHeroPos + new Vector3(0f, 0f, zOff);
+                }
+
+                // 1b. Deadlock Air Vent (trigger_catapult) ballistic simulation via exact inertial frame injection
+                var jiggleDrv = DeadlockPlayground.Animation.CustomJiggleBoneDriver.FindOn(_previewHeroClone);
+                if (jiggleDrv != null)
+                {
+                    if (_stressVentMode != VentStressMode.None)
+                    {
+                        // Exact dl_midtown.vpk trigger_catapult profiles under sv_gravity = 800 in/s² (20.32 m/s²):
+                        //   MidMap1000:  vh = 1000 in/s (25.40 m/s), vz = 929 in/s (23.60 m/s) -> |v0| = 34.7 m/s (1365 in/s)
+                        //   Endgame1200: vh = 1200 in/s (30.48 m/s), vz = 1142 in/s (29.00 m/s) -> |v0| = 42.1 m/s (1657 in/s)
+                        bool isEndgame = _stressVentMode == VentStressMode.Endgame1200;
+                        float vHoriz = isEndgame ? 30.48f : 25.40f;
+                        float vUp = _stressVentDirIndex == 3
+                            ? (isEndgame ? 38.00f : 31.50f)
+                            : (isEndgame ? 29.00f : 23.60f);
+                        float flightDuration = (2.0f * vUp) / DeadlockPlayerGravityMetersPerSecSq;
+                        const float settleDuration = 0.75f;
+
+                        Vector3 localHorizDir = _stressVentDirIndex switch
+                        {
+                            1 => new Vector3(0f, 0f, 1f),   // Forward + Up (+Z, +Y)
+                            2 => new Vector3(1f, 0f, 0f),   // Side + Up (+X, +Y)
+                            3 => Vector3.Zero,              // Pure Vertical Burst (+Y)
+                            _ => new Vector3(0f, 0f, -1f)   // Backward + Up (-Z, +Y) — worst case for back hair!
+                        };
+
+                        Basis heroBasis = _previewHeroClone.GlobalTransform.Basis.Orthonormalized();
+                        jiggleDrv.StrictValveSingleIterationMode = _stressStrictValve1Pass;
+
+                        if (_stressVentTimer < flightDuration)
+                        {
+                            float vy = vUp - DeadlockPlayerGravityMetersPerSecSq * _stressVentTimer;
+                            Vector3 localVel = localHorizDir * vHoriz + new Vector3(0f, vy, 0f);
+                            Vector3 worldVel = heroBasis * localVel;
+                            jiggleDrv.SetVirtualHeroVelocity(worldVel, active: true);
+
+                            if (_lblStressVentTelemetry != null)
+                            {
+                                float speedMs = localVel.Length();
+                                float speedInS = speedMs / 0.0254f;
+                                string phase = _stressVentTimer < 0.08f ? "LAUNCH IMPULSE!" : "BALLISTIC FLIGHT";
+                                _lblStressVentTelemetry.Text = $"{phase}  |  {speedMs:F1} m/s ({speedInS:F0} in/s)  |  vy: {vy:+0.0;-0.0} m/s  |  t: {_stressVentTimer:F2}/{flightDuration:F2}s";
+                                _lblStressVentTelemetry.AddThemeColorOverride("font_color",
+                                    _stressVentTimer < 0.08f ? new Color(1.0f, 0.58f, 0.24f) : new Color(0.45f, 0.88f, 0.98f));
+                            }
+                        }
+                        else if (_stressVentTimer < flightDuration + settleDuration)
+                        {
+                            // Keep active=true with Zero velocity so the first landing substep delivers the exact
+                            // 1-tick landing impact deceleration impulse (+v_land * dt), then settles cleanly.
+                            jiggleDrv.SetVirtualHeroVelocity(Vector3.Zero, active: true);
+                            if (_lblStressVentTelemetry != null)
+                            {
+                                bool isImpact = (_stressVentTimer - flightDuration) < 0.10f;
+                                _lblStressVentTelemetry.Text = isImpact
+                                    ? "LANDING IMPACT!  |  0.0 m/s  |  Checking post-impact clipping..."
+                                    : "SETTLING  |  0.0 m/s  |  Looping next launch...";
+                                _lblStressVentTelemetry.AddThemeColorOverride("font_color",
+                                    isImpact ? new Color(1.0f, 0.42f, 0.42f) : ImporterStyle.HintColor);
+                            }
+                        }
+
+                        _stressVentTimer += (float)delta;
+                        if (_stressVentTimer >= flightDuration + settleDuration)
+                        {
+                            _stressVentTimer = 0f;
+                        }
+                    }
+                    else
+                    {
+                        jiggleDrv.SetVirtualHeroVelocity(Vector3.Zero, active: false);
+                        jiggleDrv.StrictValveSingleIterationMode = false;
+                    }
                 }
             }
 
@@ -4433,7 +4552,10 @@ namespace DeadlockPlayground.UI
             if (_syntheticChainViewportHud == null || !GodotObject.IsInstanceValid(_syntheticChainViewportHud)) return;
             bool onBonesTab = _rightTabs == null || _rightTabs.CurrentTab == 2;
             bool inPhysicsSubView = _boxSubViewPhysics != null && _boxSubViewPhysics.Visible;
-            bool show = _isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic && onBonesTab && inPhysicsSubView && !IsWeightPaintActive();
+            bool show = _isGizmoEditingSyntheticChain && _selectedChain != null && _selectedChain.IsSynthetic
+                && onBonesTab && inPhysicsSubView
+                && !IsWeightPaintActive() && !IsMeshCutActive() && !IsImportedSculptActive()
+                && !IsWeaponSocketHudActive() && !IsPinEditActive();
             _syntheticChainViewportHud.Visible = show;
             if (!show) return;
 

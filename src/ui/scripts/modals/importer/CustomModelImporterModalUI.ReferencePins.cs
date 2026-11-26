@@ -218,9 +218,13 @@ namespace DeadlockPlayground.UI
 
         private void OnRightTabChanged(long tabIdx)
         {
-            if (tabIdx != 0 && IsImportedSculptActive() && _btnImpSculptToggle != null)
+            if (tabIdx != 0 && tabIdx != 3 && IsImportedSculptActive())
             {
-                _btnImpSculptToggle.ButtonPressed = false;
+                ExitImportedSculptMode();
+            }
+            if (tabIdx != 3 && IsWeaponSocketHudActive())
+            {
+                ExitWeaponSocketHud();
             }
             if (tabIdx != 2)
             {

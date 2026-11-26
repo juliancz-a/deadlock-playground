@@ -659,6 +659,14 @@ namespace DeadlockPlayground.UI
         {
             // Exit any conflicting viewport edit modes cleanly
             if (_isMeshCutModeActive) ExitMeshCutMode();
+            if (IsImportedSculptActive()) ExitImportedSculptMode();
+            if (IsWeaponSocketHudActive()) ExitWeaponSocketHud();
+            if (_isGizmoEditingSyntheticChain) SetSyntheticChainGizmoActive(false);
+            if (_isEditReferenceBonesMode)
+            {
+                _isEditReferenceBonesMode = false;
+                ApplyLandmarkPreviewState();
+            }
             if (_btnWeightPaintMode != null && _btnWeightPaintMode.ButtonPressed)
                 _btnWeightPaintMode.ButtonPressed = false;
             if (_btnDeformBrushToggle != null && _btnDeformBrushToggle.ButtonPressed)

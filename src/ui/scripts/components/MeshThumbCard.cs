@@ -17,6 +17,7 @@ namespace DeadlockPlayground.UI
         private Button _btnToggle;
         private Button _btnIsolate;
         private Button _btnCut;
+        private Button _btnSculpt;
         private StyleBoxFlat _normalStyle;
         private StyleBoxFlat _activeStyle;
         private bool _isActive;
@@ -26,6 +27,7 @@ namespace DeadlockPlayground.UI
         public event Action<bool> Toggled;
         public event Action IsolatePressed;
         public event Action CutPressed;
+        public event Action SculptPressed;
         public event Action<bool> HoveredChanged;
 
         public MeshThumbCard() { }
@@ -221,6 +223,28 @@ namespace DeadlockPlayground.UI
             _btnCut.Pressed += () => CutPressed?.Invoke();
             btnRow.AddChild(_btnCut);
 
+            if (!isHeroKeepMode)
+            {
+                _btnSculpt = new Button
+                {
+                    Text = "Sculpt",
+                    ThemeTypeVariation = "ToolbarButton",
+                    CustomMinimumSize = new Vector2(58, 34),
+                    TooltipText = "Reshape, non-uniform scale, brush sculpt, or edit faces on this specific mesh in 3D"
+                };
+                var scIcon = GD.Load<Texture2D>("res://assets/at-icons/mesh_select.svg");
+                if (scIcon != null)
+                {
+                    _btnSculpt.Icon = scIcon;
+                    _btnSculpt.ExpandIcon = true;
+                    _btnSculpt.AddThemeConstantOverride("icon_max_width", 13);
+                    _btnSculpt.AddThemeConstantOverride("h_separation", 4);
+                }
+                ImporterStyle.ApplyFontSize(_btnSculpt, ImporterStyle.FontHint);
+                _btnSculpt.Pressed += () => SculptPressed?.Invoke();
+                btnRow.AddChild(_btnSculpt);
+            }
+
             vBox.AddChild(btnRow);
 
             ExtraContent = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
@@ -286,6 +310,27 @@ namespace DeadlockPlayground.UI
         {
             if (_btnCut != null && GodotObject.IsInstanceValid(_btnCut))
                 _btnCut.Visible = visible;
+        }
+
+        public void SetSculptBadge(bool hasEdits, string tooltipSummary = "")
+        {
+            if (_btnSculpt == null || !GodotObject.IsInstanceValid(_btnSculpt)) return;
+            if (hasEdits)
+            {
+                _btnSculpt.Text = "Sculpt •";
+                _btnSculpt.TooltipText = string.IsNullOrEmpty(tooltipSummary)
+                    ? "Custom reshape / non-uniform scale active on this mesh. Click to edit in 3D."
+                    : tooltipSummary;
+                _btnSculpt.AddThemeColorOverride("font_color", new Color(0.45f, 0.88f, 1.0f));
+                _btnSculpt.AddThemeColorOverride("icon_normal_color", new Color(0.45f, 0.88f, 1.0f));
+            }
+            else
+            {
+                _btnSculpt.Text = "Sculpt";
+                _btnSculpt.TooltipText = "Reshape, non-uniform scale, brush sculpt, or edit faces on this specific mesh in 3D";
+                _btnSculpt.RemoveThemeColorOverride("font_color");
+                _btnSculpt.RemoveThemeColorOverride("icon_normal_color");
+            }
         }
 
         public void SetActive(bool active)

@@ -779,8 +779,15 @@ namespace DeadlockPlayground.Importer
                             }
                         }
 
-                        // Clear redundant unlit Emission so Toon Shader doesn't add (1,1,1) white emission on top of Albedo
-                        if (stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded && stdMat.EmissionEnabled)
+                        // Clear redundant unlit Emission so Toon Shader doesn't add (1,1,1) white emission on top of Albedo.
+                        // Also clear unmasked flat Emission (EmissionTexture == null) on textured materials (e.g. FBX/Unity/ZZZ
+                        // exports like MAT_Anbi_Hair_UI / MAT_Anbi_Weapon_Fire_UI where EmissiveColor=(1,1,1) was meant to be
+                        // masked by a custom shader channel), which otherwise washes out the entire AlbedoTexture to solid white!
+                        bool isBakedSolidAlbedo = stdMat.AlbedoTexture != null &&
+                            (stdMat.AlbedoTexture.ResourceName?.EndsWith("_solid_tex", StringComparison.OrdinalIgnoreCase) ?? false);
+                        if (stdMat.EmissionEnabled &&
+                            (stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded ||
+                             (stdMat.EmissionTexture == null && stdMat.AlbedoTexture != null && !isBakedSolidAlbedo)))
                         {
                             stdMat.EmissionEnabled = false;
                             stdMat.Emission = Colors.Black;
@@ -868,6 +875,47 @@ namespace DeadlockPlayground.Importer
             return arrays.Count > (int)Mesh.ArrayType.TexUV ? GetVector2Array(arrays[(int)Mesh.ArrayType.TexUV]) : null;
         }
 
+        private static Texture2D TryMatchSiblingAlbedoTexture(List<Texture2D> pool, string matName, string meshName)
+        {
+            if (pool == null || pool.Count == 0) return null;
+            static string Norm(string s) => (s ?? "").ToLowerInvariant().Replace(" ", "").Replace("_", "").Replace("-", "").Replace(".", "");
+            static bool IsNonColorSuffix(string lower) =>
+                lower.Contains("normal") || lower.Contains("_nrm") || lower.Contains("_nor") || lower.Contains("bump") ||
+                lower.Contains("rough") || lower.Contains("metal") || lower.Contains("_orm") || lower.Contains("_arm") ||
+                lower.Contains("_ao") || lower.Contains("occlusion") || lower.Contains("spec") || lower.Contains("mask") ||
+                lower.Contains("emiss") || lower.Contains("height") || lower.Contains("disp") || lower.Contains("opacity");
+
+            string nMat = Norm(matName);
+            string nMesh = Norm(meshName);
+            Texture2D best = null;
+            int bestScore = 0;
+
+            foreach (var tex in pool)
+            {
+                if (tex == null) continue;
+                string stem = Path.GetFileNameWithoutExtension(tex.ResourceName ?? "");
+                string lower = stem.ToLowerInvariant();
+                if (IsNonColorSuffix(lower)) continue;
+                string nTex = Norm(stem);
+                if (string.IsNullOrEmpty(nTex)) continue;
+
+                int score = 0;
+                if (!string.IsNullOrEmpty(nMat) && nTex == nMat) score = 100;
+                else if (!string.IsNullOrEmpty(nMat) && (nTex.Contains(nMat) || nMat.Contains(nTex))) score = 70;
+                else if (!string.IsNullOrEmpty(nMesh) && nMesh.Length >= 3 && (nTex.Contains(nMesh) || nMesh.Contains(nTex))) score = 50;
+
+                if (score > 0 && (lower.Contains("albedo") || lower.Contains("diffuse") || lower.Contains("color") || lower.Contains("basecolor") || lower.Contains("_d") || lower.Contains("_c")))
+                    score += 15;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = tex;
+                }
+            }
+            return bestScore >= 50 ? best : null;
+        }
+
         private static List<Texture2D> CollectSiblingExternalTextures(Node3D sceneRoot)
         {
             var pool = new List<Texture2D>();
@@ -876,6 +924,16 @@ namespace DeadlockPlayground.Importer
             if (string.IsNullOrEmpty(baseDir) || !Directory.Exists(baseDir)) return pool;
 
             var searchDirs = new List<string> { baseDir };
+            // Autodesk FBX extracted-media sidecar folder (<modelName>.fbm)
+            if (sceneRoot.HasMeta("ImportedSourceFilePath"))
+            {
+                string srcFile = sceneRoot.GetMeta("ImportedSourceFilePath").AsString();
+                if (!string.IsNullOrEmpty(srcFile))
+                {
+                    string fbmDir = Path.Combine(baseDir, Path.GetFileNameWithoutExtension(srcFile) + ".fbm");
+                    if (Directory.Exists(fbmDir)) searchDirs.Insert(0, fbmDir);
+                }
+            }
             string texSub = Path.Combine(baseDir, "textures");
             if (Directory.Exists(texSub)) searchDirs.Add(texSub);
             string texCapSub = Path.Combine(baseDir, "Textures");

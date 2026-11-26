@@ -1659,7 +1659,7 @@ namespace DeadlockPlayground.UI
             bottomOverlayMargin.AddThemeConstantOverride("margin_left", 12);
             bottomOverlayMargin.AddThemeConstantOverride("margin_right", 12);
             bottomOverlayMargin.AddThemeConstantOverride("margin_top", 8);
-            bottomOverlayMargin.AddThemeConstantOverride("margin_bottom", 10);
+            bottomOverlayMargin.AddThemeConstantOverride("margin_bottom", 48);
             viewportPanel.AddChild(bottomOverlayMargin);
 
             var bottomHud = new PanelContainer

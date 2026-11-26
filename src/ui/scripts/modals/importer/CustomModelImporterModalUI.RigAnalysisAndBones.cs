@@ -226,6 +226,7 @@ namespace DeadlockPlayground.UI
             foreach (var c in _importedSubmeshCheckboxes) c.QueueFree();
             _importedSubmeshCheckboxes.Clear();
             _importedSubmeshCards.Clear();
+            _weaponCardSummaryLabels.Clear();
             foreach (Node child in _boxImportedSubmeshes.GetChildren()) child.QueueFree();
             foreach (Node child in _boxHeroSubmeshes.GetChildren()) child.QueueFree();
 
@@ -507,6 +508,30 @@ namespace DeadlockPlayground.UI
                                       meshNameLower.Contains("holster") || meshNameLower.Contains("shotgun") ||
                                       meshNameLower.Contains("cannon");
 
+                // If this weapon mesh is already skinned onto a source skeleton that shares a matching weapon bone
+                // with the target hero skeleton (e.g. pre-rigged Deadlock hero model like hornet_gun -> weapon_bone),
+                // keep it as Skinned Body by default so we never hijack its native bone binding & rotation!
+                bool hasNativeSkinnedWeaponBone = false;
+                if (isLikelyWeapon && mi.Skin != null && mi.Skin.GetBindCount() > 0 &&
+                    _cachedSourceSkeleton != null && _previewHeroSkeleton != null)
+                {
+                    int srcBoneCount = _cachedSourceSkeleton.GetBoneCount();
+                    for (int bi = 0; bi < srcBoneCount; bi++)
+                    {
+                        string bn = _cachedSourceSkeleton.GetBoneName(bi);
+                        string bnl = bn.ToLowerInvariant();
+                        if ((bnl.Contains("weapon") || bnl.Contains("gun")) && _previewHeroSkeleton.FindBone(bn) >= 0)
+                        {
+                            hasNativeSkinnedWeaponBone = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasNativeSkinnedWeaponBone)
+                {
+                    isLikelyWeapon = false;
+                }
+
                 bool isLeftWeapon = false;
                 if (isLikelyWeapon)
                 {
@@ -557,6 +582,7 @@ namespace DeadlockPlayground.UI
                 };
                 card.IsolatePressed += () => IsolateSubmeshIn3D(rawMeshName);
                 card.CutPressed += () => EnterMeshCutModeForImportedMesh(rawMeshName, rawMeshName);
+                card.SculptPressed += () => EnterImportedSculptModeForMesh(rawMeshName);
                 _importedSubmeshCheckboxes.Add(chk);
                 _importedSubmeshCards[chk] = card;
                 cardVBox.AddChild(chk);
@@ -613,14 +639,51 @@ namespace DeadlockPlayground.UI
                 optRole.AddItem("Socket / Weapon (Rigid Attachment to Bone)", 1);
                 roleRow.AddChild(optRole);
 
-                // Row 3: Socket & Replacement Config
+                // Compact Weapon Fit summary + Floating HUD launcher (replaces bulky inline weapon form!)
+                var weaponCompactBox = new VBoxContainer
+                {
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    Visible = isLikelyWeapon
+                };
+                weaponCompactBox.AddThemeConstantOverride("separation", 4);
+                cardVBox.AddChild(weaponCompactBox);
+
+                var lblWeaponSummary = new Label
+                {
+                    Text = $"Socket: {(isLeftWeapon ? "weapon_hand_L" : "weapon_hand_R")}",
+                    ClipText = true,
+                    TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+                };
+                ImporterStyle.ApplyHintStyle(lblWeaponSummary);
+                _weaponCardSummaryLabels[rawMeshName] = lblWeaponSummary;
+                weaponCompactBox.AddChild(lblWeaponSummary);
+
+                var btnFitWeaponHud = new Button
+                {
+                    Text = "Fit Weapon / Socket in 3D",
+                    ThemeTypeVariation = "ImporterPrimaryButton",
+                    SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                    CustomMinimumSize = new Vector2(0, 30),
+                    TooltipText = "Opens the floating 3D Weapon Socket overlay (Bone, Replaces, Snap Grip, Straighten, Pos/Rot/Scale + 3D Gizmo)"
+                };
+                SetButtonIcon(btnFitWeaponHud, "res://assets/at-icons/wrench.svg", 14);
+                ImporterStyle.ApplyFontSize(btnFitWeaponHud, ImporterStyle.FontHint);
+                btnFitWeaponHud.Pressed += () => OpenWeaponSocketHud(rawMeshName);
+                weaponCompactBox.AddChild(btnFitWeaponHud);
+
+                // Keep backing socket controls in a hidden container so all existing Gizmo, Preset, and Restore bindings stay 100% intact!
+                var hiddenSocketBacking = new VBoxContainer { Visible = false };
+                cardVBox.AddChild(hiddenSocketBacking);
+
+                // Row 3: Socket & Replacement Config (backing controls for Floating Weapon HUD)
                 var socketRow = new HBoxContainer
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                     Visible = isLikelyWeapon
                 };
                 socketRow.AddThemeConstantOverride("separation", 6);
-                cardVBox.AddChild(socketRow);
+                hiddenSocketBacking.AddChild(socketRow);
 
                 var lblSocket = new Label
                 {
@@ -701,14 +764,14 @@ namespace DeadlockPlayground.UI
                 optReplaces.Select(selectedReplIdx);
                 socketRow.AddChild(optReplaces);
 
-                // Row 4: Placement Row (Snap to Joint vs Keep Authored Position)
+                // Row 4: Placement Row (backing controls for Floating Weapon HUD)
                 var placementRow = new HBoxContainer
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                     Visible = isLikelyWeapon
                 };
                 placementRow.AddThemeConstantOverride("separation", 6);
-                cardVBox.AddChild(placementRow);
+                hiddenSocketBacking.AddChild(placementRow);
 
                 var lblPlacement = new Label
                 {
@@ -727,14 +790,14 @@ namespace DeadlockPlayground.UI
                 optPlacement.AddItem("Snap to Bone Joint (e.g. Grip in Hand)", 1);
                 placementRow.AddChild(optPlacement);
 
-                // Row 5: Weapon Socket Transform & Alignment Box
+                // Row 5: Weapon Socket Transform & Alignment Box (backing controls for Floating Weapon HUD)
                 var weaponTransformBox = new VBoxContainer
                 {
                     SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                     Visible = isLikelyWeapon
                 };
                 weaponTransformBox.AddThemeConstantOverride("separation", 4);
-                cardVBox.AddChild(weaponTransformBox);
+                hiddenSocketBacking.AddChild(weaponTransformBox);
 
                 // Rotations: Pitch, Yaw, Roll
                 var rotRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -909,9 +972,11 @@ namespace DeadlockPlayground.UI
                 optRole.ItemSelected += (idx) =>
                 {
                     bool isSocket = (idx == 1);
+                    weaponCompactBox.Visible = isSocket;
                     socketRow.Visible = isSocket;
                     placementRow.Visible = isSocket;
                     weaponTransformBox.Visible = isSocket;
+                    UpdateWeaponCardSummary(rawMeshName);
                     if (isSocket)
                     {
                         string bName = optSocket.GetItemText(optSocket.Selected).Replace("★ ", "");
@@ -960,11 +1025,6 @@ namespace DeadlockPlayground.UI
                     {
                         string bName = optSocket.GetItemText((int)idx).Replace("★ ", "");
                         _submeshSocketAssignments[rawMeshName] = bName;
-                        if (bName.Contains("hand"))
-                        {
-                            optPlacement.Select(1);
-                            _submeshSnapToSocket[rawMeshName] = true;
-                        }
 
                         if (_chkLinkWeaponSubmeshes?.ButtonPressed ?? true)
                         {
@@ -973,11 +1033,6 @@ namespace DeadlockPlayground.UI
                                 if (otherName == rawMeshName || ctrl.Role.Selected != 1) continue;
                                 ctrl.Socket.Select((int)idx);
                                 _submeshSocketAssignments[otherName] = bName;
-                                if (bName.Contains("hand"))
-                                {
-                                    ctrl.Placement.Select(1);
-                                    _submeshSnapToSocket[otherName] = true;
-                                }
                             }
                         }
                         TriggerRealtimeRigUpdate();

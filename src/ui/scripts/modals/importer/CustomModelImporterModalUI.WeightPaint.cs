@@ -271,9 +271,11 @@ namespace DeadlockPlayground.UI
 
         private void OnWeightPaintModeToggled(bool enabled)
         {
-            if (enabled && IsMeshCutActive())
+            if (enabled)
             {
-                ExitMeshCutMode();
+                if (IsMeshCutActive()) ExitMeshCutMode();
+                if (IsImportedSculptActive()) ExitImportedSculptMode();
+                if (IsWeaponSocketHudActive()) ExitWeaponSocketHud();
             }
             if (_btnLandmarkStepPins != null) _btnLandmarkStepPins.SetPressedNoSignal(!enabled);
             if (_btnLandmarkStepPaint != null) _btnLandmarkStepPaint.SetPressedNoSignal(enabled);

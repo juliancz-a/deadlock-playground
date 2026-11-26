@@ -860,6 +860,15 @@ namespace DeadlockPlayground.UI
             UpdatePreviewHeroKeepAndGhostMaterials();
 
             // 6. Restore Submesh weapon / socket configurations
+            // Clear auto-detected fresh-import defaults first so saved Skinned Body choices and custom
+            // socket bone / rotation edits are faithfully restored instead of being overwritten!
+            _submeshSocketAssignments.Clear();
+            _submeshHeroReplacements.Clear();
+            _submeshSnapToSocket.Clear();
+            _submeshSocketOffsetPos.Clear();
+            _submeshSocketOffsetRot.Clear();
+            _submeshSocketScale.Clear();
+
             if (options.SubmeshAttachmentSockets != null)
             {
                 foreach (var (k, v) in options.SubmeshAttachmentSockets) _submeshSocketAssignments[k] = v;
@@ -896,10 +905,12 @@ namespace DeadlockPlayground.UI
                     if (socketParent != null) socketParent.Visible = true;
                     var placementParent = ctrl.Placement.GetParent() as Control;
                     if (placementParent != null) placementParent.Visible = true;
+                    var transformBox = ctrl.Pitch?.GetParent()?.GetParent() as Control;
+                    if (transformBox != null) transformBox.Visible = true;
 
                     for (int i = 0; i < ctrl.Socket.ItemCount; i++)
                     {
-                        if (ctrl.Socket.GetItemText(i).Replace("★ ", "") == bName)
+                        if (string.Equals(ctrl.Socket.GetItemText(i).Replace("★ ", ""), bName, StringComparison.OrdinalIgnoreCase))
                         {
                             ctrl.Socket.Select(i);
                             break;
@@ -936,6 +947,17 @@ namespace DeadlockPlayground.UI
                     {
                         ctrl.Scale.SetValueNoSignal(s);
                     }
+                }
+                else
+                {
+                    // Explicitly reset to Skinned Body if saved options did not assign a rigid socket
+                    ctrl.Role.Select(0);
+                    var socketParent = ctrl.Socket.GetParent() as Control;
+                    if (socketParent != null) socketParent.Visible = false;
+                    var placementParent = ctrl.Placement.GetParent() as Control;
+                    if (placementParent != null) placementParent.Visible = false;
+                    var transformBox = ctrl.Pitch?.GetParent()?.GetParent() as Control;
+                    if (transformBox != null) transformBox.Visible = false;
                 }
             }
             _isGizmoUpdatingFromUI = false;

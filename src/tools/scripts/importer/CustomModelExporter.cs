@@ -67,6 +67,7 @@ namespace DeadlockPlayground.Importer
                 public Vector3[] Vertices { get; set; } = Array.Empty<Vector3>();
                 public Vector3[] Normals { get; set; } = Array.Empty<Vector3>();
                 public Vector2[] UVs { get; set; } = Array.Empty<Vector2>();
+                public Color[] VertexColors { get; set; } = null;
                 public int[] Indices { get; set; } = Array.Empty<int>();
                 public int[] BoneIndices { get; set; } = Array.Empty<int>(); // 4 skeleton bone indices per vertex
                 public float[] BoneWeights { get; set; } = Array.Empty<float>(); // 4 floats per vertex (sum = 1.0)
@@ -977,6 +978,10 @@ namespace DeadlockPlayground.Importer
                     Vector2[] rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV && arrays[(int)Mesh.ArrayType.TexUV].VariantType != Variant.Type.Nil
                         ? arrays[(int)Mesh.ArrayType.TexUV].AsVector2Array()
                         : null;
+                    Color[] rawColors = arrays.Count > (int)Mesh.ArrayType.Color && arrays[(int)Mesh.ArrayType.Color].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.Color].AsColorArray()
+                        : null;
+                    if (rawColors != null && rawColors.Length != vCount) rawColors = null;
                     int[] rawIndices = arrays.Count > (int)Mesh.ArrayType.Index && arrays[(int)Mesh.ArrayType.Index].VariantType != Variant.Type.Nil
                         ? arrays[(int)Mesh.ArrayType.Index].AsInt32Array()
                         : null;
@@ -1037,6 +1042,7 @@ namespace DeadlockPlayground.Importer
                         Vertices = rawVerts,
                         Normals = rawNorms,
                         UVs = rawUvs,
+                        VertexColors = rawColors,
                         Indices = rawIndices,
                         BoneIndices = cappedBones,
                         BoneWeights = cappedWeights
@@ -1566,10 +1572,6 @@ namespace DeadlockPlayground.Importer
                         ? $"{modelBaseName}_custom_accessories"
                         : primaryBodyMeshName;
 
-                    string smdFileName = $"{modelBaseName}_body_custom.smd";
-                    string smdFullPath = Path.Combine(contentModelDir, smdFileName);
-                    string smdRelPath = $"{modelFolderRel}/{smdFileName}";
-
                     // Merge kept composite vanilla surfaces (e.g. Doorman's gun/weapon split out of the hero's
                     // main body mesh) directly into the primary RenderMeshFile so they stay inside the hero's
                     // single body mesh and never disappear under Deadlock's online server-side BodyGroupList!
@@ -1580,8 +1582,25 @@ namespace DeadlockPlayground.Importer
                         unifiedPrimarySubmeshes.AddRange(bundle.PreservedVanillaSubmeshes);
                     }
 
-                    progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 bind-pose SMD '{smdFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
-                    WriteSourceSpaceSmd(smdFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
+                    // Valve SMD format does NOT support vertex colors (COLOR_0). When any preserved vanilla mesh
+                    // (such as cropped Vindicta head using vindicta_headv2.vmat) or custom mesh carries vertex colors,
+                    // emit a Source 2 DMX mesh with color$0 so resourcecompiler.exe compiles the COLOR stream
+                    // instead of defaulting vertex colors to solid black!
+                    bool hasVertexColors = unifiedPrimarySubmeshes.Any(s => s?.VertexColors != null && s.VertexColors.Length > 0);
+                    string primaryMeshFileName = hasVertexColors ? $"{modelBaseName}_body_custom.dmx" : $"{modelBaseName}_body_custom.smd";
+                    string primaryMeshFullPath = Path.Combine(contentModelDir, primaryMeshFileName);
+                    string primaryMeshRelPath = $"{modelFolderRel}/{primaryMeshFileName}";
+
+                    if (hasVertexColors)
+                    {
+                        progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 vertex-color DMX '{primaryMeshFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
+                        WriteSourceSpaceDmx(primaryMeshFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
+                    }
+                    else
+                    {
+                        progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 bind-pose SMD '{primaryMeshFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
+                        WriteSourceSpaceSmd(primaryMeshFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
+                    }
 
                     string animBindFileName = $"{modelBaseName}_anim_bind.smd";
                     string animBindFullPath = Path.Combine(contentModelDir, animBindFileName);
@@ -1589,7 +1608,7 @@ namespace DeadlockPlayground.Importer
 
                     var customRenderMeshes = new List<(string MeshName, string SmdRelativePath)>
                     {
-                        (customSmdMeshName, smdRelPath)
+                        (customSmdMeshName, primaryMeshRelPath)
                     };
 
                     // Hybrid physics export: ProxyCloth chains stitch into a single-sided ClothProxyMeshFile DMX sheet,
@@ -4668,9 +4687,12 @@ namespace DeadlockPlayground.Importer
 
                 // CSDK13-verified CollisionPlanes recipe (matching Valve's unicorn.vmdl_c):
                 // A planarized capsule is consumed out of TaperedCapsuleRigids into per-node FeCollisionPlane entries,
-                // so emit a dedicated planarized back barrier on spine_2 / spine_3 alongside the normal capsule.
+                // so emit a dedicated planarized back barrier on neck_0 / spine_1 / spine_2 / spine_3 alongside the
+                // normal capsule — covering neck-height hair roots through waist-length tips with true horizontal normals.
                 if (hasPlanarizeBackMap &&
-                    (cap.ParentBone.Equals("spine_2", StringComparison.OrdinalIgnoreCase) ||
+                    (cap.ParentBone.Equals("neck_0", StringComparison.OrdinalIgnoreCase) ||
+                     cap.ParentBone.Equals("spine_1", StringComparison.OrdinalIgnoreCase) ||
+                     cap.ParentBone.Equals("spine_2", StringComparison.OrdinalIgnoreCase) ||
                      cap.ParentBone.Equals("spine_3", StringComparison.OrdinalIgnoreCase)))
                 {
                     var pb = new StringBuilder();
@@ -5758,6 +5780,265 @@ namespace DeadlockPlayground.Importer
 
             sb.AppendLine("end");
             File.WriteAllText(outputSmdPath, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        /// <summary>
+        /// Writes a Source 2 KeyValues2 DMX (<c>DmeModel</c> / <c>DmeMesh</c>) in authentic Source 2 bind space
+        /// with full 4-bone skinning and <c>color$0</c> vertex colors so cropped/preserved vanilla meshes that rely
+        /// on vertex-color materials (e.g. Vindicta's <c>vindicta_headv2.vmat</c>) compile with intact colors
+        /// instead of turning solid black in SMD format.
+        /// </summary>
+        public static void WriteSourceSpaceDmx(
+            string outputDmxPath,
+            CustomModelExportBundle bundle,
+            List<CustomModelExportBundle.SubmeshData> submeshesToWrite = null,
+            List<VmdlSkeletonBone> vmdlSkeletonBones = null)
+        {
+            submeshesToWrite ??= bundle.Submeshes;
+            List<VmdlSkeletonBone> smdBones = ResolveSmdSkeletonBones(bundle, vmdlSkeletonBones);
+
+            var smdBoneNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < smdBones.Count; i++)
+                smdBoneNameToIndex[smdBones[i].Name] = i;
+
+            int pelvisSmdIdx = smdBoneNameToIndex.TryGetValue("pelvis", out int pSmd) ? pSmd : 0;
+
+            int[] godotBoneToSmdBone = new int[Math.Max(1, bundle.BoneNames.Count)];
+            for (int b = 0; b < bundle.BoneNames.Count; b++)
+            {
+                string bName = bundle.BoneNames[b];
+                int resolved = -1;
+                string curr = bName;
+                int guard = 0;
+                while (!string.IsNullOrEmpty(curr) && guard++ < 64)
+                {
+                    bool allowCloth = bundle.PreservedCustomBoneNames.Contains(curr);
+                    if ((!IsClothBoneName(curr) || allowCloth) && smdBoneNameToIndex.TryGetValue(curr, out int idx))
+                    {
+                        resolved = idx;
+                        break;
+                    }
+                    if (!bundle.BoneHierarchy.TryGetValue(curr, out curr))
+                        break;
+                }
+                godotBoneToSmdBone[b] = resolved >= 0 ? resolved : pelvisSmdIdx;
+            }
+
+            var dm = new Datamodel.Datamodel("model", 22);
+            string stem = Path.GetFileNameWithoutExtension(outputDmxPath);
+
+            var dmeModel = new Datamodel.Element(dm, stem, null, "DmeModel");
+            var modelXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
+            modelXf["position"] = System.Numerics.Vector3.Zero;
+            modelXf["orientation"] = System.Numerics.Quaternion.Identity;
+            dmeModel["transform"] = modelXf;
+            dmeModel["shape"] = null;
+            dmeModel["visible"] = true;
+            dmeModel["axisSystem"] = CreateDefaultAxisSystem(dm);
+
+            var dmeJoints = new Datamodel.Element[smdBones.Count];
+            var jointChildren = new Datamodel.ElementArray[smdBones.Count];
+            for (int i = 0; i < smdBones.Count; i++)
+            {
+                var b = smdBones[i];
+                var jEl = new Datamodel.Element(dm, b.Name, null, "DmeJoint");
+                var jXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
+                jXf["position"] = new System.Numerics.Vector3(b.Origin.X, b.Origin.Y, b.Origin.Z);
+                var q = b.HasParentRot
+                    ? System.Numerics.Quaternion.Normalize(b.ParentRot)
+                    : SourceQAngleDegreesToQuaternion(b.AnglesDeg);
+                jXf["orientation"] = q;
+                jEl["transform"] = jXf;
+                jEl["visible"] = true;
+                var chArr = new Datamodel.ElementArray();
+                jEl["children"] = chArr;
+                dmeJoints[i] = jEl;
+                jointChildren[i] = chArr;
+            }
+
+            var modelChildren = new Datamodel.ElementArray();
+            var jointList = new Datamodel.ElementArray();
+            for (int i = 0; i < smdBones.Count; i++)
+            {
+                jointList.Add(dmeJoints[i]);
+                int p = smdBones[i].ParentIndex;
+                if (p >= 0 && p < smdBones.Count && p != i)
+                    jointChildren[p].Add(dmeJoints[i]);
+                else
+                    modelChildren.Add(dmeJoints[i]);
+            }
+
+            var positions = new Datamodel.Vector3Array();
+            var normals = new Datamodel.Vector3Array();
+            var uvs = new Datamodel.Vector2Array();
+            var colors = new Datamodel.ColorArray();
+            var vertIndices = new Datamodel.IntArray();
+            var blendIndices = new Datamodel.IntArray();
+            var blendWeights = new Datamodel.FloatArray();
+            var faceSets = new Datamodel.ElementArray();
+            var mergedWeights = new Dictionary<int, float>(4);
+            var whiteByteCol = new Datamodel.Color(255, 255, 255, 255);
+
+            int globalVertOffset = 0;
+            int subIdx = 0;
+            foreach (var sub in submeshesToWrite)
+            {
+                if (sub?.Vertices == null || sub.Vertices.Length == 0 || sub.Indices == null || sub.Indices.Length < 3)
+                    continue;
+
+                int vCount = sub.Vertices.Length;
+                bool hasSubColors = sub.VertexColors != null && sub.VertexColors.Length == vCount;
+
+                for (int vi = 0; vi < vCount; vi++)
+                {
+                    Vector3 p = GodotToSourcePosition(sub.Vertices[vi]);
+                    Vector3 n = GodotToSourceNormal(vi < sub.Normals.Length ? sub.Normals[vi] : Vector3.Up);
+                    Vector2 uv = vi < sub.UVs.Length ? sub.UVs[vi] : Vector2.Zero;
+
+                    positions.Add(new System.Numerics.Vector3(p.X, p.Y, p.Z));
+                    normals.Add(new System.Numerics.Vector3(n.X, n.Y, n.Z));
+                    uvs.Add(new System.Numerics.Vector2(uv.X, 1.0f - uv.Y));
+
+                    if (hasSubColors)
+                    {
+                        Color vc = sub.VertexColors[vi];
+                        byte cr = (byte)Math.Clamp((int)MathF.Round(vc.R * 255f), 0, 255);
+                        byte cg = (byte)Math.Clamp((int)MathF.Round(vc.G * 255f), 0, 255);
+                        byte cb = (byte)Math.Clamp((int)MathF.Round(vc.B * 255f), 0, 255);
+                        byte ca = (byte)Math.Clamp((int)MathF.Round(vc.A * 255f), 0, 255);
+                        colors.Add(new Datamodel.Color(cr, cg, cb, ca));
+                    }
+                    else
+                    {
+                        colors.Add(whiteByteCol);
+                    }
+
+                    vertIndices.Add(globalVertOffset + vi);
+
+                    mergedWeights.Clear();
+                    if (sub.BoneIndices != null && sub.BoneWeights != null && sub.BoneIndices.Length >= (vi + 1) * 4)
+                    {
+                        for (int k = 0; k < 4; k++)
+                        {
+                            float w = sub.BoneWeights[vi * 4 + k];
+                            if (w <= 0.0001f) continue;
+                            int gBone = sub.BoneIndices[vi * 4 + k];
+                            int smdBone = (gBone >= 0 && gBone < godotBoneToSmdBone.Length)
+                                ? godotBoneToSmdBone[gBone]
+                                : pelvisSmdIdx;
+                            mergedWeights[smdBone] = mergedWeights.GetValueOrDefault(smdBone, 0f) + w;
+                        }
+                    }
+                    if (mergedWeights.Count == 0)
+                        mergedWeights[pelvisSmdIdx] = 1.0f;
+
+                    var links = mergedWeights.OrderByDescending(kv => kv.Value).Take(4).ToList();
+                    float wSum = 0f;
+                    for (int l = 0; l < links.Count; l++) wSum += links[l].Value;
+                    if (wSum <= 0.0001f) wSum = 1.0f;
+
+                    float assigned = 0f;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (k < links.Count)
+                        {
+                            float nw = (k == links.Count - 1)
+                                ? Math.Max(0f, 1.0f - assigned)
+                                : (links[k].Value / wSum);
+                            assigned += nw;
+                            blendIndices.Add(links[k].Key);
+                            blendWeights.Add(nw);
+                        }
+                        else
+                        {
+                            blendIndices.Add(links[0].Key);
+                            blendWeights.Add(0f);
+                        }
+                    }
+                }
+
+                var faces = new Datamodel.IntArray();
+                for (int t = 0; t + 2 < sub.Indices.Length; t += 3)
+                {
+                    int i0 = sub.Indices[t];
+                    int i1 = sub.Indices[t + 1];
+                    int i2 = sub.Indices[t + 2];
+                    if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
+                        continue;
+                    if (i0 == i1 || i1 == i2 || i2 == i0)
+                        continue;
+
+                    // Right-handed CCW winding matching WriteSourceSpaceSmd (i0, i2, i1)
+                    faces.Add(globalVertOffset + i0);
+                    faces.Add(globalVertOffset + i2);
+                    faces.Add(globalVertOffset + i1);
+                    faces.Add(-1);
+                }
+
+                if (faces.Count > 0)
+                {
+                    string matName = SanitizeMaterialName(sub.MaterialName);
+                    var faceMat = new Datamodel.Element(dm, $"{matName}_mat_{subIdx}", null, "DmeMaterial");
+                    faceMat["mtlName"] = $"{matName}.vmat";
+
+                    var faceSet = new Datamodel.Element(dm, $"{matName}_{subIdx}", null, "DmeFaceSet");
+                    faceSet["faces"] = faces;
+                    faceSet["material"] = faceMat;
+                    faceSets.Add(faceSet);
+                }
+
+                globalVertOffset += vCount;
+                subIdx++;
+            }
+
+            var vertexData = new Datamodel.Element(dm, "bind", null, "DmeVertexData");
+            vertexData["vertexFormat"] = new Datamodel.StringArray
+            {
+                "position$0", "normal$0", "texcoord$0", "color$0", "blendindices$0", "blendweights$0"
+            };
+            vertexData["jointCount"] = 4;
+            vertexData["flipVCoordinates"] = false;
+            vertexData["position$0"] = positions;
+            vertexData["position$0Indices"] = vertIndices;
+            vertexData["normal$0"] = normals;
+            vertexData["normal$0Indices"] = vertIndices;
+            vertexData["texcoord$0"] = uvs;
+            vertexData["texcoord$0Indices"] = vertIndices;
+            vertexData["color$0"] = colors;
+            vertexData["color$0Indices"] = vertIndices;
+            vertexData["blendindices$0"] = blendIndices;
+            vertexData["blendweights$0"] = blendWeights;
+
+            var dmeMesh = new Datamodel.Element(dm, stem, null, "DmeMesh");
+            dmeMesh["visible"] = true;
+            dmeMesh["bindState"] = vertexData;
+            dmeMesh["currentState"] = vertexData;
+            dmeMesh["baseStates"] = new Datamodel.ElementArray { vertexData };
+            dmeMesh["deltaStates"] = new Datamodel.ElementArray();
+            dmeMesh["faceSets"] = faceSets;
+
+            var meshDag = new Datamodel.Element(dm, stem, null, "DmeDag");
+            var meshDagXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
+            meshDagXf["position"] = System.Numerics.Vector3.Zero;
+            meshDagXf["orientation"] = System.Numerics.Quaternion.Identity;
+            meshDag["transform"] = meshDagXf;
+            meshDag["shape"] = dmeMesh;
+            meshDag["visible"] = true;
+            meshDag["children"] = new Datamodel.ElementArray();
+            modelChildren.Add(meshDag);
+
+            dmeModel["children"] = modelChildren;
+            dmeModel["jointList"] = jointList;
+            dmeModel["baseStates"] = new Datamodel.ElementArray();
+
+            var rootEl = new Datamodel.Element(dm, "root", null, "DmElement");
+            rootEl["skeleton"] = dmeModel;
+            rootEl["model"] = dmeModel;
+            dm.Root = rootEl;
+
+            string dir = Path.GetDirectoryName(outputDmxPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            dm.Save(outputDmxPath, "keyvalues2", 4);
         }
 
         /// <summary>

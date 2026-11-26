@@ -269,7 +269,7 @@ namespace DeadlockPlayground.UI
             };
             SetButtonIcon(btnSculptImported, "res://assets/at-icons/mesh_select.svg", 14);
             ImporterStyle.ApplyFontSize(btnSculptImported, ImporterStyle.FontHint);
-            btnSculptImported.Pressed += JumpToImportedSculptFromMeshesTab;
+            btnSculptImported.Pressed += () => EnterImportedSculptModeForMesh(null);
             partsHeaderRow.AddChild(btnSculptImported);
             vBox.AddChild(partsHeaderRow);
 
