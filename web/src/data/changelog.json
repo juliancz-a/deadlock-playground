@@ -2,7 +2,7 @@
   "latestVersion": "1.3.7.1",
   "publishedAt": "2026-11-26T20:34:00Z",
   "title": "Version 1.3.7.1 — Fixed Wrong/White/Transparent Exported Textures on Vertex-Colored Heroes",
-  "markdown": "### Version 1.3.7.1 — Fixed Wrong/White/Transparent Exported Textures on Vertex-Colored Heroes\n\n* Fixed a v1.3.7 regression in the new Source 2 DMX exporter (WriteSourceSpaceDmx) where UVs were flipped (1 - v) while flipVCoordinates = false was set, causing upside-down UVs in-game on Graves and any hero exporting kept/cropped vertex-colored vanilla surfaces.",
+  "markdown": "### Version 1.3.7.1 — Fixed Wrong/White/Transparent Exported Textures on Vertex-Colored Heroes\n\n## New Discord\nIve set up a Discord server where you can share bug reports and ideas for the future of the app. It would help me keep everything more organized. You’re all invited to join!\nLink: https://discord.gg/tWHuT6ywV\n\n* Fixed a v1.3.7 regression in the new Source 2 DMX exporter (WriteSourceSpaceDmx) where UVs were flipped (1 - v) while flipVCoordinates = false was set, causing upside-down UVs in-game on Graves and any hero exporting kept/cropped vertex-colored vanilla surfaces.",
   "history": [
     {
       "version": "1.3.7.1",
@@ -12,6 +12,9 @@
       "badgeType": "gold",
       "videoUrl": "",
       "highlights": [
+        "## New Discord",
+        "Ive set up a Discord server where you can share bug reports and ideas for the future of the app. It would help me keep everything more organized. You’re all invited to join!",
+        "Link: https://discord.gg/tWHuT6ywV",
         "Fixed a v1.3.7 regression in the new Source 2 DMX exporter (WriteSourceSpaceDmx) where UVs were flipped (1 - v) while flipVCoordinates = false was set, causing upside-down UVs in-game on Graves and any hero exporting kept/cropped vertex-colored vanilla surfaces."
       ]
     },
