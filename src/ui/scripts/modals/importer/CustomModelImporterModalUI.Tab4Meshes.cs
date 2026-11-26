@@ -259,6 +259,18 @@ namespace DeadlockPlayground.UI
                 UpdateImportedPartsCountBadge();
             };
             partsHeaderRow.AddChild(btnNoneParts);
+
+            var btnSculptImported = new Button
+            {
+                Text = "Reshape / Sculpt",
+                ThemeTypeVariation = "ToolbarButton",
+                CustomMinimumSize = new Vector2(110, 26),
+                TooltipText = "Open Bottom Flare / Top Width / Inflate sliders and 3D Fit Sculpt Brush to reshape your sweater or accessory"
+            };
+            SetButtonIcon(btnSculptImported, "res://assets/at-icons/mesh_select.svg", 14);
+            ImporterStyle.ApplyFontSize(btnSculptImported, ImporterStyle.FontHint);
+            btnSculptImported.Pressed += () => EnterImportedSculptModeForMesh(null);
+            partsHeaderRow.AddChild(btnSculptImported);
             vBox.AddChild(partsHeaderRow);
 
             // Filter search + chip filters above the scrollable mesh grid
@@ -898,6 +910,7 @@ namespace DeadlockPlayground.UI
                         new Color(0.45f, 0.78f, 0.96f),
                         isAlreadyAdded,
                         isHeroKeepMode: true);
+                    dCard.SetCutButtonVisible(false);
 
                     MeshInstance3D capturedMi = mi;
                     int capturedSurf = s;
@@ -1190,6 +1203,8 @@ namespace DeadlockPlayground.UI
                 _submeshIsOutlineShell.Remove(addedName);
                 _submeshOutlineCheckboxes.Remove(addedName);
                 _submeshOutlineBadges.Remove(addedName);
+                _importedMeshCutMasks.Remove(addedName);
+                _importedMeshCutMasks.Remove(CustomModelAutoRigger.MakeSurfaceKeepKey(addedName, 0));
 
                 RefreshDonorEditTargetDropdown();
                 UpdateImportedPartsCountBadge();

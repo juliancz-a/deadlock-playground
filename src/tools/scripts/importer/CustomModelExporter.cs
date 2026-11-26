@@ -67,6 +67,7 @@ namespace DeadlockPlayground.Importer
                 public Vector3[] Vertices { get; set; } = Array.Empty<Vector3>();
                 public Vector3[] Normals { get; set; } = Array.Empty<Vector3>();
                 public Vector2[] UVs { get; set; } = Array.Empty<Vector2>();
+                public Color[] VertexColors { get; set; } = null;
                 public int[] Indices { get; set; } = Array.Empty<int>();
                 public int[] BoneIndices { get; set; } = Array.Empty<int>(); // 4 skeleton bone indices per vertex
                 public float[] BoneWeights { get; set; } = Array.Empty<float>(); // 4 floats per vertex (sum = 1.0)
@@ -439,6 +440,8 @@ namespace DeadlockPlayground.Importer
                             rawIndices = new int[vCount];
                             for (int k = 0; k < vCount; k++) rawIndices[k] = k;
                         }
+                        rawIndices = MeshCutEditorCore.StripDegenerateTriangles(rawIndices);
+                        if (rawIndices.Length < 3) continue;
 
                         int[] rawBones = arrays.Count > (int)Mesh.ArrayType.Bones && arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil
                             ? arrays[(int)Mesh.ArrayType.Bones].AsInt32Array()
@@ -531,9 +534,11 @@ namespace DeadlockPlayground.Importer
 
                             roughScalar = Mathf.Clamp(stdMat.Roughness, 0.05f, 1.0f);
                             metalScalar = Mathf.Clamp(stdMat.Metallic, 0.0f, 1.0f);
-                            if (recoveredFromEmission && stdMat.MetallicTexture == null && metalScalar >= 0.99f)
+                            if (stdMat.MetallicTexture == null && metalScalar >= 0.99f &&
+                                (recoveredFromEmission || isOutlineShell || isUnlit || stdMat.EmissionEnabled ||
+                                 stdMat.ShadingMode == BaseMaterial3D.ShadingModeEnum.Unshaded || roughScalar >= 0.85f))
                             {
-                                // glTF omits metallicFactor (defaulting to 1.0) on pure emissive / Roblox Neon materials.
+                                // glTF omits metallicFactor (defaulting to 1.0) on pure emissive / unlit / matte Roblox Neon materials.
                                 metalScalar = 0.0f;
                             }
                             isTranslucent = effTransp == BaseMaterial3D.TransparencyEnum.Alpha ||
@@ -973,6 +978,10 @@ namespace DeadlockPlayground.Importer
                     Vector2[] rawUvs = arrays.Count > (int)Mesh.ArrayType.TexUV && arrays[(int)Mesh.ArrayType.TexUV].VariantType != Variant.Type.Nil
                         ? arrays[(int)Mesh.ArrayType.TexUV].AsVector2Array()
                         : null;
+                    Color[] rawColors = arrays.Count > (int)Mesh.ArrayType.Color && arrays[(int)Mesh.ArrayType.Color].VariantType != Variant.Type.Nil
+                        ? arrays[(int)Mesh.ArrayType.Color].AsColorArray()
+                        : null;
+                    if (rawColors != null && rawColors.Length != vCount) rawColors = null;
                     int[] rawIndices = arrays.Count > (int)Mesh.ArrayType.Index && arrays[(int)Mesh.ArrayType.Index].VariantType != Variant.Type.Nil
                         ? arrays[(int)Mesh.ArrayType.Index].AsInt32Array()
                         : null;
@@ -989,6 +998,8 @@ namespace DeadlockPlayground.Importer
                         rawIndices = new int[vCount];
                         for (int k = 0; k < vCount; k++) rawIndices[k] = k;
                     }
+                    rawIndices = MeshCutEditorCore.StripDegenerateTriangles(rawIndices);
+                    if (rawIndices.Length < 3) continue;
 
                     int[] rawBones = arrays.Count > (int)Mesh.ArrayType.Bones && arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil
                         ? arrays[(int)Mesh.ArrayType.Bones].AsInt32Array()
@@ -1031,6 +1042,7 @@ namespace DeadlockPlayground.Importer
                         Vertices = rawVerts,
                         Normals = rawNorms,
                         UVs = rawUvs,
+                        VertexColors = rawColors,
                         Indices = rawIndices,
                         BoneIndices = cappedBones,
                         BoneWeights = cappedWeights
@@ -1560,10 +1572,6 @@ namespace DeadlockPlayground.Importer
                         ? $"{modelBaseName}_custom_accessories"
                         : primaryBodyMeshName;
 
-                    string smdFileName = $"{modelBaseName}_body_custom.smd";
-                    string smdFullPath = Path.Combine(contentModelDir, smdFileName);
-                    string smdRelPath = $"{modelFolderRel}/{smdFileName}";
-
                     // Merge kept composite vanilla surfaces (e.g. Doorman's gun/weapon split out of the hero's
                     // main body mesh) directly into the primary RenderMeshFile so they stay inside the hero's
                     // single body mesh and never disappear under Deadlock's online server-side BodyGroupList!
@@ -1574,8 +1582,25 @@ namespace DeadlockPlayground.Importer
                         unifiedPrimarySubmeshes.AddRange(bundle.PreservedVanillaSubmeshes);
                     }
 
-                    progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 bind-pose SMD '{smdFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
-                    WriteSourceSpaceSmd(smdFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
+                    // Valve SMD format does NOT support vertex colors (COLOR_0). When any preserved vanilla mesh
+                    // (such as cropped Vindicta head using vindicta_headv2.vmat) or custom mesh carries vertex colors,
+                    // emit a Source 2 DMX mesh with color$0 so resourcecompiler.exe compiles the COLOR stream
+                    // instead of defaulting vertex colors to solid black!
+                    bool hasVertexColors = unifiedPrimarySubmeshes.Any(s => s?.VertexColors != null && s.VertexColors.Length > 0);
+                    string primaryMeshFileName = hasVertexColors ? $"{modelBaseName}_body_custom.dmx" : $"{modelBaseName}_body_custom.smd";
+                    string primaryMeshFullPath = Path.Combine(contentModelDir, primaryMeshFileName);
+                    string primaryMeshRelPath = $"{modelFolderRel}/{primaryMeshFileName}";
+
+                    if (hasVertexColors)
+                    {
+                        progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 vertex-color DMX '{primaryMeshFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
+                        WriteSourceSpaceDmx(primaryMeshFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
+                    }
+                    else
+                    {
+                        progress?.Report(new ExportProgressReport(0.38f, $"[INFO] Writing unified Source 2 bind-pose SMD '{primaryMeshFileName}' ({bundle.Submeshes.Count} custom + {bundle.PreservedVanillaSubmeshes.Count} kept vanilla surface(s))..."));
+                        WriteSourceSpaceSmd(primaryMeshFullPath, bundle, unifiedPrimarySubmeshes, targetSkeletonBones);
+                    }
 
                     string animBindFileName = $"{modelBaseName}_anim_bind.smd";
                     string animBindFullPath = Path.Combine(contentModelDir, animBindFileName);
@@ -1583,7 +1608,7 @@ namespace DeadlockPlayground.Importer
 
                     var customRenderMeshes = new List<(string MeshName, string SmdRelativePath)>
                     {
-                        (customSmdMeshName, smdRelPath)
+                        (customSmdMeshName, primaryMeshRelPath)
                     };
 
                     // Hybrid physics export: ProxyCloth chains stitch into a single-sided ClothProxyMeshFile DMX sheet,
@@ -3024,6 +3049,11 @@ namespace DeadlockPlayground.Importer
                 var boneRotSrc = System.Numerics.Quaternion.Normalize(
                     GltfToSourceRootQuat * new System.Numerics.Quaternion(qGd.X, qGd.Y, qGd.Z, qGd.W));
 
+                // Source 2 FeJiggleBone ALWAYS simulates its tip along local +X (Forward = matrix.X).
+                // Reorient preserved SimulationKind.Jiggle bones so local +X points along the bone's anatomical
+                // aim axis (child direction or Blender +Y outward axis) while keeping world position & SMD bind skinning exact.
+                boneRotSrc = ResolveJiggleAimRotationSrc(bName, parentName, bundle, srcWorldByName, bonePosSrc, boneRotSrc);
+
                 if (isRootBone)
                 {
                     if (srcWorldByName != null) srcWorldByName[bName] = (bonePosSrc, boneRotSrc);
@@ -3076,6 +3106,150 @@ namespace DeadlockPlayground.Importer
                 }
             }
             return resolved;
+        }
+
+        private static System.Numerics.Quaternion BuildSourceXForwardQuaternion(Vector3 aimDirSrc)
+        {
+            var fwd = new System.Numerics.Vector3(aimDirSrc.X, aimDirSrc.Y, aimDirSrc.Z);
+            float len = fwd.Length();
+            if (len < 1e-5f) return System.Numerics.Quaternion.Identity;
+            fwd /= len;
+
+            // Source 2 world Up is +Z; choose a stable reference up vector not collinear with fwd
+            var refUp = MathF.Abs(fwd.Z) < 0.95f
+                ? System.Numerics.Vector3.UnitZ
+                : System.Numerics.Vector3.UnitX;
+            var left = System.Numerics.Vector3.Cross(refUp, fwd);
+            float leftLen = left.Length();
+            if (leftLen < 1e-5f) return System.Numerics.Quaternion.Identity;
+            left /= leftLen;
+            var up = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(fwd, left));
+
+            // Row-vector rotation matrix: Row1 = +X (Forward), Row2 = +Y (Left), Row3 = +Z (Up)
+            var m = new System.Numerics.Matrix4x4(
+                fwd.X, fwd.Y, fwd.Z, 0f,
+                left.X, left.Y, left.Z, 0f,
+                up.X, up.Y, up.Z, 0f,
+                0f, 0f, 0f, 1f);
+            return System.Numerics.Quaternion.Normalize(System.Numerics.Quaternion.CreateFromRotationMatrix(m));
+        }
+
+        private static System.Numerics.Quaternion ResolveJiggleAimRotationSrc(
+            string bName,
+            string parentName,
+            CustomModelExportBundle bundle,
+            Dictionary<string, (Vector3 Pos, System.Numerics.Quaternion Rot)> srcWorldByName,
+            Vector3 bonePosSrc,
+            System.Numerics.Quaternion origRotSrc)
+        {
+            if (bundle?.PreservedChains == null || bundle.PreservedChains.Count == 0)
+                return origRotSrc;
+
+            BoneChainDef matchChain = null;
+            List<string> chainBones = null;
+            int idx = -1;
+            for (int ci = 0; ci < bundle.PreservedChains.Count; ci++)
+            {
+                var ch = bundle.PreservedChains[ci];
+                if (ch == null || ch.Policy != ChainPolicy.PreservePhysicsChain || ch.Simulation != SimulationKind.Jiggle)
+                    continue;
+                var bones = (ch.AppendedHeroBoneNames != null && ch.AppendedHeroBoneNames.Count > 0)
+                    ? ch.AppendedHeroBoneNames
+                    : ch.SourceBoneNames;
+                if (bones == null || bones.Count == 0) continue;
+                int found = bones.FindIndex(n => string.Equals(n, bName, StringComparison.OrdinalIgnoreCase));
+                if (found >= 0)
+                {
+                    matchChain = ch;
+                    chainBones = bones;
+                    idx = found;
+                    break;
+                }
+            }
+
+            if (matchChain == null || chainBones == null || idx < 0)
+                return origRotSrc;
+
+            bool TryGetSrcPos(string name, out Vector3 pos)
+            {
+                if (srcWorldByName != null && srcWorldByName.TryGetValue(name, out var xf))
+                {
+                    pos = xf.Pos;
+                    return true;
+                }
+                if (bundle.BoneRestTransforms != null && bundle.BoneRestTransforms.TryGetValue(name, out Transform3D gdXf))
+                {
+                    pos = GodotToSourcePosition(gdXf.Origin);
+                    return true;
+                }
+                pos = Vector3.Zero;
+                return false;
+            }
+
+            Vector3 aimDirSrc = Vector3.Zero;
+
+            // 1. Next non-co-located child in the same jiggle chain
+            for (int k = idx + 1; k < chainBones.Count; k++)
+            {
+                if (TryGetSrcPos(chainBones[k], out Vector3 childPos))
+                {
+                    Vector3 delta = childPos - bonePosSrc;
+                    if (delta.LengthSquared() > 0.0225f) // > 0.15 in
+                    {
+                        aimDirSrc = delta.Normalized();
+                        break;
+                    }
+                }
+            }
+
+            // 2. Leaf bone: continue along the chain from the nearest non-co-located upstream bone
+            if (aimDirSrc.LengthSquared() < 0.5f)
+            {
+                for (int k = idx - 1; k >= 0; k--)
+                {
+                    if (TryGetSrcPos(chainBones[k], out Vector3 prevPos))
+                    {
+                        Vector3 delta = bonePosSrc - prevPos;
+                        if (delta.LengthSquared() > 0.0225f)
+                        {
+                            aimDirSrc = delta.Normalized();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. Co-located child bone (e.g. Breast_01 with T=[0,0,0] under c_Breast_root): inherit chain parent's +X aim
+            if (aimDirSrc.LengthSquared() < 0.5f && idx > 0 &&
+                srcWorldByName != null && srcWorldByName.TryGetValue(chainBones[idx - 1], out var chainParentXf))
+            {
+                aimDirSrc = RotateVecBySysQuat(chainParentXf.Rot, Vector3.Right);
+            }
+
+            // 4. Single-bone or co-located-pair root: distinguish native +X-forward rigs vs Blender/glTF +Y-forward rigs
+            if (aimDirSrc.LengthSquared() < 0.5f)
+            {
+                Vector3 xAxis = RotateVecBySysQuat(origRotSrc, Vector3.Right);
+                Vector3 yAxis = RotateVecBySysQuat(origRotSrc, Vector3.Up);
+                if (!string.IsNullOrEmpty(parentName) && TryGetSrcPos(parentName, out Vector3 parentPos))
+                {
+                    Vector3 outward = bonePosSrc - parentPos;
+                    if (outward.LengthSquared() > 0.0225f)
+                    {
+                        Vector3 outDir = outward.Normalized();
+                        if (xAxis.Dot(outDir) > 0.70f)
+                            aimDirSrc = xAxis;
+                        else if (yAxis.Dot(outDir) > 0.25f)
+                            aimDirSrc = yAxis;
+                        else
+                            aimDirSrc = outDir;
+                    }
+                }
+                if (aimDirSrc.LengthSquared() < 0.5f)
+                    aimDirSrc = yAxis.LengthSquared() > 0.5f ? yAxis : xAxis;
+            }
+
+            return BuildSourceXForwardQuaternion(aimDirSrc);
         }
 
         private static (Vector3 OriginIn, System.Numerics.Quaternion ParentRot, Vector3 AnglesDeg) GodotLocalBoneToSource(
@@ -3830,7 +4004,6 @@ namespace DeadlockPlayground.Importer
                     float perJointAngle = jp.AngleLimitDeg;
 
                     float boneLen = 2.5f;
-                    Vector3 point1Local = new Vector3(boneLen, 0f, 0f);
                     if (srcWorldByName != null && srcWorldByName.TryGetValue(bName, out var bXf))
                     {
                         Vector3 dirSrcW = Vector3.Zero;
@@ -3848,21 +4021,20 @@ namespace DeadlockPlayground.Importer
 
                         if (dirSrcW.LengthSquared() > 0.0025f)
                         {
-                            float rawLen = dirSrcW.Length();
-                            boneLen = Mathf.Clamp(rawLen, 1.5f, 8.0f);
-                            var qInv = System.Numerics.Quaternion.Inverse(bXf.Rot);
-                            Vector3 localDir = RotateVecBySysQuat(qInv, dirSrcW / rawLen);
-                            point1Local = localDir * boneLen;
+                            boneLen = Mathf.Clamp(dirSrcW.Length(), 1.5f, 8.0f);
                         }
                     }
+                    // Because ResolveJiggleAimRotationSrc aligns every JiggleBone's local +X onto its aim axis,
+                    // point1 lies cleanly along +X at [ boneLen, 0, 0 ].
+                    Vector3 point1Local = new Vector3(boneLen, 0f, 0f);
 
                     entries.AppendLine("\t\t\t\t\t{");
                     entries.AppendLine("\t\t\t\t\t\t_class = \"JiggleBone\"");
                     entries.AppendLine($"\t\t\t\t\t\tname = \"jiggle_{EscapeKvString(bName)}\"");
                     entries.AppendLine($"\t\t\t\t\t\tjiggle_root_bone = \"{EscapeKvString(bName)}\"");
-                    entries.AppendLine("\t\t\t\t\t\tjiggle_type = 0");
+                    entries.AppendLine("\t\t\t\t\t\tjiggle_type = 1"); // 1 = Flexible (enables Yaw/Pitch stiffness & damping spring return; 0 = Rigid pendulum with no spring!)
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tlength = {0:F3}", boneLen));
-                    entries.AppendLine("\t\t\t\t\t\ttip_mass = 1.000");
+                    entries.AppendLine(string.Format(ic, "\t\t\t\t\t\ttip_mass = {0:F3}", jp.TipMass));
                     entries.AppendLine("\t\t\t\t\t\thas_yaw_constraint = true");
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tmin_yaw = -{0:F1}", perJointAngle));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tmax_yaw = {0:F1}", perJointAngle));
@@ -3871,11 +4043,12 @@ namespace DeadlockPlayground.Importer
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tmax_pitch = {0:F1}", perJointAngle));
                     entries.AppendLine("\t\t\t\t\t\thas_angle_constraint = true");
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tangle_limit = {0:F1}", perJointAngle));
+                    entries.AppendLine("\t\t\t\t\t\thas_length_constraint = true");
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tyaw_stiffness = {0:F2}", stiff));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tpitch_stiffness = {0:F2}", stiff));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tyaw_damping = {0:F2}", damp));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tpitch_damping = {0:F2}", damp));
-                    entries.AppendLine(string.Format(ic, "\t\t\t\t\t\talong_stiffness = {0:F2}", Mathf.Clamp(stiff * 0.85f, 35f, 800f)));
+                    entries.AppendLine(string.Format(ic, "\t\t\t\t\t\talong_stiffness = {0:F2}", jp.AlongStiffness));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\talong_damping = {0:F2}", damp));
                     entries.AppendLine(string.Format(ic, "\t\t\t\t\t\tpoint1 = [ {0:F3}, {1:F3}, {2:F3} ]", point1Local.X, point1Local.Y, point1Local.Z));
                     entries.AppendLine("\t\t\t\t\t},");
@@ -4662,9 +4835,12 @@ namespace DeadlockPlayground.Importer
 
                 // CSDK13-verified CollisionPlanes recipe (matching Valve's unicorn.vmdl_c):
                 // A planarized capsule is consumed out of TaperedCapsuleRigids into per-node FeCollisionPlane entries,
-                // so emit a dedicated planarized back barrier on spine_2 / spine_3 alongside the normal capsule.
+                // so emit a dedicated planarized back barrier on neck_0 / spine_1 / spine_2 / spine_3 alongside the
+                // normal capsule — covering neck-height hair roots through waist-length tips with true horizontal normals.
                 if (hasPlanarizeBackMap &&
-                    (cap.ParentBone.Equals("spine_2", StringComparison.OrdinalIgnoreCase) ||
+                    (cap.ParentBone.Equals("neck_0", StringComparison.OrdinalIgnoreCase) ||
+                     cap.ParentBone.Equals("spine_1", StringComparison.OrdinalIgnoreCase) ||
+                     cap.ParentBone.Equals("spine_2", StringComparison.OrdinalIgnoreCase) ||
                      cap.ParentBone.Equals("spine_3", StringComparison.OrdinalIgnoreCase)))
                 {
                     var pb = new StringBuilder();
@@ -5685,6 +5861,8 @@ namespace DeadlockPlayground.Importer
                     int i2 = sub.Indices[t + 2];
                     if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
                         continue;
+                    if (i0 == i1 || i1 == i2 || i2 == i0)
+                        continue;
 
                     // In Godot ArrayMesh (imported via GltfDocument), triangle indices (i0, i1, i2) are stored CW,
                     // whereas Source 2 .smd expects right-handed CCW winding (i0, i2, i1).
@@ -5750,6 +5928,265 @@ namespace DeadlockPlayground.Importer
 
             sb.AppendLine("end");
             File.WriteAllText(outputSmdPath, sb.ToString(), new UTF8Encoding(false));
+        }
+
+        /// <summary>
+        /// Writes a Source 2 KeyValues2 DMX (<c>DmeModel</c> / <c>DmeMesh</c>) in authentic Source 2 bind space
+        /// with full 4-bone skinning and <c>color$0</c> vertex colors so cropped/preserved vanilla meshes that rely
+        /// on vertex-color materials (e.g. Vindicta's <c>vindicta_headv2.vmat</c>) compile with intact colors
+        /// instead of turning solid black in SMD format.
+        /// </summary>
+        public static void WriteSourceSpaceDmx(
+            string outputDmxPath,
+            CustomModelExportBundle bundle,
+            List<CustomModelExportBundle.SubmeshData> submeshesToWrite = null,
+            List<VmdlSkeletonBone> vmdlSkeletonBones = null)
+        {
+            submeshesToWrite ??= bundle.Submeshes;
+            List<VmdlSkeletonBone> smdBones = ResolveSmdSkeletonBones(bundle, vmdlSkeletonBones);
+
+            var smdBoneNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < smdBones.Count; i++)
+                smdBoneNameToIndex[smdBones[i].Name] = i;
+
+            int pelvisSmdIdx = smdBoneNameToIndex.TryGetValue("pelvis", out int pSmd) ? pSmd : 0;
+
+            int[] godotBoneToSmdBone = new int[Math.Max(1, bundle.BoneNames.Count)];
+            for (int b = 0; b < bundle.BoneNames.Count; b++)
+            {
+                string bName = bundle.BoneNames[b];
+                int resolved = -1;
+                string curr = bName;
+                int guard = 0;
+                while (!string.IsNullOrEmpty(curr) && guard++ < 64)
+                {
+                    bool allowCloth = bundle.PreservedCustomBoneNames.Contains(curr);
+                    if ((!IsClothBoneName(curr) || allowCloth) && smdBoneNameToIndex.TryGetValue(curr, out int idx))
+                    {
+                        resolved = idx;
+                        break;
+                    }
+                    if (!bundle.BoneHierarchy.TryGetValue(curr, out curr))
+                        break;
+                }
+                godotBoneToSmdBone[b] = resolved >= 0 ? resolved : pelvisSmdIdx;
+            }
+
+            var dm = new Datamodel.Datamodel("model", 22);
+            string stem = Path.GetFileNameWithoutExtension(outputDmxPath);
+
+            var dmeModel = new Datamodel.Element(dm, stem, null, "DmeModel");
+            var modelXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
+            modelXf["position"] = System.Numerics.Vector3.Zero;
+            modelXf["orientation"] = System.Numerics.Quaternion.Identity;
+            dmeModel["transform"] = modelXf;
+            dmeModel["shape"] = null;
+            dmeModel["visible"] = true;
+            dmeModel["axisSystem"] = CreateDefaultAxisSystem(dm);
+
+            var dmeJoints = new Datamodel.Element[smdBones.Count];
+            var jointChildren = new Datamodel.ElementArray[smdBones.Count];
+            for (int i = 0; i < smdBones.Count; i++)
+            {
+                var b = smdBones[i];
+                var jEl = new Datamodel.Element(dm, b.Name, null, "DmeJoint");
+                var jXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
+                jXf["position"] = new System.Numerics.Vector3(b.Origin.X, b.Origin.Y, b.Origin.Z);
+                var q = b.HasParentRot
+                    ? System.Numerics.Quaternion.Normalize(b.ParentRot)
+                    : SourceQAngleDegreesToQuaternion(b.AnglesDeg);
+                jXf["orientation"] = q;
+                jEl["transform"] = jXf;
+                jEl["visible"] = true;
+                var chArr = new Datamodel.ElementArray();
+                jEl["children"] = chArr;
+                dmeJoints[i] = jEl;
+                jointChildren[i] = chArr;
+            }
+
+            var modelChildren = new Datamodel.ElementArray();
+            var jointList = new Datamodel.ElementArray();
+            for (int i = 0; i < smdBones.Count; i++)
+            {
+                jointList.Add(dmeJoints[i]);
+                int p = smdBones[i].ParentIndex;
+                if (p >= 0 && p < smdBones.Count && p != i)
+                    jointChildren[p].Add(dmeJoints[i]);
+                else
+                    modelChildren.Add(dmeJoints[i]);
+            }
+
+            var positions = new Datamodel.Vector3Array();
+            var normals = new Datamodel.Vector3Array();
+            var uvs = new Datamodel.Vector2Array();
+            var colors = new Datamodel.ColorArray();
+            var vertIndices = new Datamodel.IntArray();
+            var blendIndices = new Datamodel.IntArray();
+            var blendWeights = new Datamodel.FloatArray();
+            var faceSets = new Datamodel.ElementArray();
+            var mergedWeights = new Dictionary<int, float>(4);
+            var whiteByteCol = new Datamodel.Color(255, 255, 255, 255);
+
+            int globalVertOffset = 0;
+            int subIdx = 0;
+            foreach (var sub in submeshesToWrite)
+            {
+                if (sub?.Vertices == null || sub.Vertices.Length == 0 || sub.Indices == null || sub.Indices.Length < 3)
+                    continue;
+
+                int vCount = sub.Vertices.Length;
+                bool hasSubColors = sub.VertexColors != null && sub.VertexColors.Length == vCount;
+
+                for (int vi = 0; vi < vCount; vi++)
+                {
+                    Vector3 p = GodotToSourcePosition(sub.Vertices[vi]);
+                    Vector3 n = GodotToSourceNormal(vi < sub.Normals.Length ? sub.Normals[vi] : Vector3.Up);
+                    Vector2 uv = vi < sub.UVs.Length ? sub.UVs[vi] : Vector2.Zero;
+
+                    positions.Add(new System.Numerics.Vector3(p.X, p.Y, p.Z));
+                    normals.Add(new System.Numerics.Vector3(n.X, n.Y, n.Z));
+                    uvs.Add(new System.Numerics.Vector2(uv.X, 1.0f - uv.Y));
+
+                    if (hasSubColors)
+                    {
+                        Color vc = sub.VertexColors[vi];
+                        byte cr = (byte)Math.Clamp((int)MathF.Round(vc.R * 255f), 0, 255);
+                        byte cg = (byte)Math.Clamp((int)MathF.Round(vc.G * 255f), 0, 255);
+                        byte cb = (byte)Math.Clamp((int)MathF.Round(vc.B * 255f), 0, 255);
+                        byte ca = (byte)Math.Clamp((int)MathF.Round(vc.A * 255f), 0, 255);
+                        colors.Add(new Datamodel.Color(cr, cg, cb, ca));
+                    }
+                    else
+                    {
+                        colors.Add(whiteByteCol);
+                    }
+
+                    vertIndices.Add(globalVertOffset + vi);
+
+                    mergedWeights.Clear();
+                    if (sub.BoneIndices != null && sub.BoneWeights != null && sub.BoneIndices.Length >= (vi + 1) * 4)
+                    {
+                        for (int k = 0; k < 4; k++)
+                        {
+                            float w = sub.BoneWeights[vi * 4 + k];
+                            if (w <= 0.0001f) continue;
+                            int gBone = sub.BoneIndices[vi * 4 + k];
+                            int smdBone = (gBone >= 0 && gBone < godotBoneToSmdBone.Length)
+                                ? godotBoneToSmdBone[gBone]
+                                : pelvisSmdIdx;
+                            mergedWeights[smdBone] = mergedWeights.GetValueOrDefault(smdBone, 0f) + w;
+                        }
+                    }
+                    if (mergedWeights.Count == 0)
+                        mergedWeights[pelvisSmdIdx] = 1.0f;
+
+                    var links = mergedWeights.OrderByDescending(kv => kv.Value).Take(4).ToList();
+                    float wSum = 0f;
+                    for (int l = 0; l < links.Count; l++) wSum += links[l].Value;
+                    if (wSum <= 0.0001f) wSum = 1.0f;
+
+                    float assigned = 0f;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (k < links.Count)
+                        {
+                            float nw = (k == links.Count - 1)
+                                ? Math.Max(0f, 1.0f - assigned)
+                                : (links[k].Value / wSum);
+                            assigned += nw;
+                            blendIndices.Add(links[k].Key);
+                            blendWeights.Add(nw);
+                        }
+                        else
+                        {
+                            blendIndices.Add(links[0].Key);
+                            blendWeights.Add(0f);
+                        }
+                    }
+                }
+
+                var faces = new Datamodel.IntArray();
+                for (int t = 0; t + 2 < sub.Indices.Length; t += 3)
+                {
+                    int i0 = sub.Indices[t];
+                    int i1 = sub.Indices[t + 1];
+                    int i2 = sub.Indices[t + 2];
+                    if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
+                        continue;
+                    if (i0 == i1 || i1 == i2 || i2 == i0)
+                        continue;
+
+                    // Right-handed CCW winding matching WriteSourceSpaceSmd (i0, i2, i1)
+                    faces.Add(globalVertOffset + i0);
+                    faces.Add(globalVertOffset + i2);
+                    faces.Add(globalVertOffset + i1);
+                    faces.Add(-1);
+                }
+
+                if (faces.Count > 0)
+                {
+                    string matName = SanitizeMaterialName(sub.MaterialName);
+                    var faceMat = new Datamodel.Element(dm, $"{matName}_mat_{subIdx}", null, "DmeMaterial");
+                    faceMat["mtlName"] = $"{matName}.vmat";
+
+                    var faceSet = new Datamodel.Element(dm, $"{matName}_{subIdx}", null, "DmeFaceSet");
+                    faceSet["faces"] = faces;
+                    faceSet["material"] = faceMat;
+                    faceSets.Add(faceSet);
+                }
+
+                globalVertOffset += vCount;
+                subIdx++;
+            }
+
+            var vertexData = new Datamodel.Element(dm, "bind", null, "DmeVertexData");
+            vertexData["vertexFormat"] = new Datamodel.StringArray
+            {
+                "position$0", "normal$0", "texcoord$0", "color$0", "blendindices$0", "blendweights$0"
+            };
+            vertexData["jointCount"] = 4;
+            vertexData["flipVCoordinates"] = false;
+            vertexData["position$0"] = positions;
+            vertexData["position$0Indices"] = vertIndices;
+            vertexData["normal$0"] = normals;
+            vertexData["normal$0Indices"] = vertIndices;
+            vertexData["texcoord$0"] = uvs;
+            vertexData["texcoord$0Indices"] = vertIndices;
+            vertexData["color$0"] = colors;
+            vertexData["color$0Indices"] = vertIndices;
+            vertexData["blendindices$0"] = blendIndices;
+            vertexData["blendweights$0"] = blendWeights;
+
+            var dmeMesh = new Datamodel.Element(dm, stem, null, "DmeMesh");
+            dmeMesh["visible"] = true;
+            dmeMesh["bindState"] = vertexData;
+            dmeMesh["currentState"] = vertexData;
+            dmeMesh["baseStates"] = new Datamodel.ElementArray { vertexData };
+            dmeMesh["deltaStates"] = new Datamodel.ElementArray();
+            dmeMesh["faceSets"] = faceSets;
+
+            var meshDag = new Datamodel.Element(dm, stem, null, "DmeDag");
+            var meshDagXf = new Datamodel.Element(dm, "transform", null, "DmeTransform");
+            meshDagXf["position"] = System.Numerics.Vector3.Zero;
+            meshDagXf["orientation"] = System.Numerics.Quaternion.Identity;
+            meshDag["transform"] = meshDagXf;
+            meshDag["shape"] = dmeMesh;
+            meshDag["visible"] = true;
+            meshDag["children"] = new Datamodel.ElementArray();
+            modelChildren.Add(meshDag);
+
+            dmeModel["children"] = modelChildren;
+            dmeModel["jointList"] = jointList;
+            dmeModel["baseStates"] = new Datamodel.ElementArray();
+
+            var rootEl = new Datamodel.Element(dm, "root", null, "DmElement");
+            rootEl["skeleton"] = dmeModel;
+            rootEl["model"] = dmeModel;
+            dm.Root = rootEl;
+
+            string dir = Path.GetDirectoryName(outputDmxPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            dm.Save(outputDmxPath, "keyvalues2", 4);
         }
 
         /// <summary>

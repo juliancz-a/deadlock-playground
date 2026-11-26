@@ -49,6 +49,7 @@ namespace DeadlockPlayground.Tests
                 TestWeightPaintPause();
                 TestClothVerletDrapeAndMonotonicity();
                 TestJiggleZeroGravityAndImplicitStability();
+                TestBlenderJiggleBoneXAxisReorientationAndCsdk13Parity();
                 TestProxyClothOpenSheetVsClosedSkirt();
                 TestPlanarizedTorsoBackBarrier();
                 TestCustomPropBoxColliderAndJsonRoundTrip();
@@ -224,7 +225,7 @@ namespace DeadlockPlayground.Tests
         {
             var (root, skel, driver) = BuildTestRig("pelvis", new Vector3(0, 0.9f, 0), 1, 2, new Vector3(0, 0, -1), 0.09f, false);
             Root.AddChild(root);
-            driver.RegisterChains("jiggle", MakeChainDefs("pelvis", 1, 2, SimulationKind.Jiggle, 0.95f, 0.85f, 0.50f, 1.0f, angleLimitDeg: 20f));
+            driver.RegisterChains("jiggle", MakeChainDefs("pelvis", 1, 2, SimulationKind.Jiggle, 0.95f, 0.85f, 0.50f, 0.0f, angleLimitDeg: 20f));
 
             // 1. At rest: zero gravity droop
             for (int f = 0; f < 60; f++) driver.StepSimulation(1f / 60f);
@@ -250,6 +251,191 @@ namespace DeadlockPlayground.Tests
             Check(settledDeg < 1.0f, $"JiggleBone settles cleanly back to rest after impulse (settled={settledDeg:F2} deg)");
 
             root.QueueFree();
+        }
+
+        private void TestBlenderJiggleBoneXAxisReorientationAndCsdk13Parity()
+        {
+            GD.Print("--- Blender +Y JiggleBone -> Source 2 +X Reorientation & CSDK13 FeJiggleBone Parity ---");
+
+            // Exact Blender/glTF chest bone setup from test_jiggle.dpp:
+            //   c_Breast_root_r has local +Y pointing forward out of chest (Godot +Z) and local +X pointing sideways (Godot +X),
+            //   with co-located child Breast_01_r at T=[0,0,0].
+            var skel = new Skeleton3D { Name = "BlenderChestSkel" };
+            int bRoot = skel.AddBone("root_motion");
+            skel.SetBoneRest(bRoot, Transform3D.Identity);
+            int bPelvis = skel.AddBone("pelvis");
+            skel.SetBoneParent(bPelvis, bRoot);
+            skel.SetBoneRest(bPelvis, new Transform3D(Basis.Identity, new Vector3(0f, 1.00f, 0f)));
+            int bSpine2 = skel.AddBone("spine_2");
+            skel.SetBoneParent(bSpine2, bPelvis);
+            skel.SetBoneRest(bSpine2, new Transform3D(Basis.Identity, new Vector3(0f, 0.30f, 0f)));
+
+            // Exact quaternion from magician_Dupin_NOCLOTHING_Deadlock.glb c_Breast_root_dupli_002.r:
+            // world +X = [0.897, 0.027, 0.442] (SIDEWAYS), world +Y = [-0.411, 0.422, 0.808] (FORWARD OUT OF CHEST)
+            Quaternion blenderBreastQ = new Quaternion(0.6931f, -0.2095f, 0.0879f, 0.6842f).Normalized();
+            int bBreastRoot = skel.AddBone("c_breast_root_r");
+            skel.SetBoneParent(bBreastRoot, bSpine2);
+            skel.SetBoneRest(bBreastRoot, new Transform3D(new Basis(blenderBreastQ), new Vector3(-0.08f, 0.04f, 0.09f)));
+
+            int bBreastChild = skel.AddBone("breast_01_r");
+            skel.SetBoneParent(bBreastChild, bBreastRoot);
+            skel.SetBoneRest(bBreastChild, Transform3D.Identity); // Co-located child T=[0,0,0]
+
+            var chestChain = new BoneChainDef
+            {
+                ChainId = "c_breast_r",
+                Name = "c_breast_root_r",
+                RootSourceBone = "c_breast_root_r",
+                AnchorHeroBone = "spine_2",
+                Policy = ChainPolicy.PreservePhysicsChain,
+                Simulation = SimulationKind.Jiggle,
+                StiffnessRoot = 0.88f,
+                StiffnessTip = 0.56f,
+                Damping = 0.20f,
+                Gravity = 0.0f,
+                AngleLimitDeg = 30f,
+                SourceBoneNames = new List<string> { "c_breast_root_r", "breast_01_r" },
+                AppendedHeroBoneNames = new List<string> { "c_breast_root_r", "breast_01_r" }
+            };
+
+            var bundle = CustomModelExporter.BuildExportBundle(
+                new List<MeshInstance3D>(),
+                skel,
+                "magician",
+                preservedChains: new[] { chestChain });
+
+            Vector3 pelSrc = CustomModelExporter.GodotToSourcePosition(skel.GetBoneGlobalRest(bPelvis).Origin);
+            Vector3 sp2Src = CustomModelExporter.GodotToSourcePosition(skel.GetBoneGlobalRest(bSpine2).Origin);
+            Vector3 sp2Local = sp2Src - pelSrc;
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            string vmdlTemplate =
+                "<!-- kv3 encoding:text:version{e21c7f3c-8a33-41c5-9977-a76d3a32aa0d} format:modeldoc39:version{1ceecb0d-4093-4729-ab18-b76886c64cde} -->\r\n" +
+                "{\r\n\trootNode = \r\n\t{\r\n\t\t_class = \"RootNode\"\r\n\t\tchildren = \r\n\t\t[\r\n" +
+                "\t\t\t{\r\n\t\t\t\t_class = \"Skeleton\"\r\n\t\t\t\tchildren = \r\n\t\t\t\t[\r\n" +
+                "\t\t\t\t\t{\r\n\t\t\t\t\t\t_class = \"Bone\"\r\n\t\t\t\t\t\tname = \"root_motion\"\r\n\t\t\t\t\t\torigin = [ 0.0, 0.0, 0.0 ]\r\n\t\t\t\t\t\tangles = [ 0.0, 0.0, 0.0 ]\r\n\t\t\t\t\t\tchildren = \r\n\t\t\t\t\t\t[\r\n" +
+                "\t\t\t\t\t\t\t{\r\n\t\t\t\t\t\t\t\t_class = \"Bone\"\r\n\t\t\t\t\t\t\t\tname = \"pelvis\"\r\n" +
+                string.Format(ic, "\t\t\t\t\t\t\t\torigin = [ {0:F4}, {1:F4}, {2:F4} ]\r\n", pelSrc.X, pelSrc.Y, pelSrc.Z) +
+                "\t\t\t\t\t\t\t\tangles = [ 0.0, 0.0, 0.0 ]\r\n\t\t\t\t\t\t\t\tchildren = \r\n\t\t\t\t\t\t\t\t[\r\n" +
+                "\t\t\t\t\t\t\t\t\t{\r\n\t\t\t\t\t\t\t\t\t\t_class = \"Bone\"\r\n\t\t\t\t\t\t\t\t\t\tname = \"spine_2\"\r\n" +
+                string.Format(ic, "\t\t\t\t\t\t\t\t\t\torigin = [ {0:F4}, {1:F4}, {2:F4} ]\r\n", sp2Local.X, sp2Local.Y, sp2Local.Z) +
+                "\t\t\t\t\t\t\t\t\t\tangles = [ 0.0, 0.0, 0.0 ]\r\n\t\t\t\t\t\t\t\t\t},\r\n" +
+                "\t\t\t\t\t\t\t\t]\r\n\t\t\t\t\t\t\t},\r\n" +
+                "\t\t\t\t\t\t]\r\n\t\t\t\t\t},\r\n" +
+                "\t\t\t\t]\r\n\t\t\t},\r\n\t\t]\r\n\t}\r\n}\r\n";
+
+            string patchedVmdl = CustomModelExporter.GeneratePatchedVmdl(
+                vmdlTemplate, bundle, "models/test_jiggle_x", "materials/test_jiggle_x",
+                new List<(string, string)> { ("body", "models/test_jiggle_x/body.smd") },
+                new List<string> { "mat" }, new HashSet<string>(), includeAnimGraph2Nodes: false);
+
+            var exportedBones = CustomModelExporter.ParseSkeletonBonesFromVmdlText(patchedVmdl);
+            Check(patchedVmdl.Contains("tip_mass = 0.000"),
+                "Zero-gravity JiggleBone emits tip_mass = 0.000 (zero static droop/sideways twist)");
+            Check(patchedVmdl.Contains("has_length_constraint = true"),
+                "JiggleBone emits has_length_constraint = true matching preview sphere projection");
+
+            string csdkRc = @"D:\Reduced_CSDK_13\game\bin\win64\resourcecompiler.exe";
+            if (File.Exists(csdkRc))
+            {
+                string tmpSrc = @"D:\Reduced_CSDK_13\content\citadel_addons\_dp_verify_jiggle_x\models\test_jiggle_x";
+                string tmpDst = @"D:\Reduced_CSDK_13\game\citadel_addons\_dp_verify_jiggle_x\models\test_jiggle_x";
+                try
+                {
+                    Directory.CreateDirectory(tmpSrc);
+                    bundle.Submeshes.Add(new CustomModelExporter.CustomModelExportBundle.SubmeshData
+                    {
+                        SubmeshName = "chest_mesh",
+                        MaterialName = "mat",
+                        Vertices = new[]
+                        {
+                            skel.GetBoneGlobalRest(bBreastRoot).Origin,
+                            skel.GetBoneGlobalRest(bBreastRoot).Origin + new Vector3(0.02f, 0f, 0.04f),
+                            skel.GetBoneGlobalRest(bBreastRoot).Origin + new Vector3(0f, 0.03f, 0.04f)
+                        },
+                        Normals = new[] { Vector3.Back, Vector3.Back, Vector3.Back },
+                        UVs = new[] { Vector2.Zero, Vector2.Right, Vector2.One },
+                        Indices = new[] { 0, 1, 2 },
+                        BoneIndices = new[] { bBreastRoot, 0, 0, 0, bBreastChild, 0, 0, 0, bBreastRoot, 0, 0, 0 },
+                        BoneWeights = new[] { 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f }
+                    });
+                    CustomModelExporter.WriteSourceSpaceSmd(Path.Combine(tmpSrc, "body.smd"), bundle, bundle.Submeshes, exportedBones);
+                    CustomModelExporter.WriteRestBindAnimationSmd(Path.Combine(tmpSrc, "magician_anim_bind.smd"), bundle, exportedBones);
+                    string vmdlPath = Path.Combine(tmpSrc, "magician.vmdl");
+                    File.WriteAllText(vmdlPath, patchedVmdl);
+
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = csdkRc,
+                        Arguments = $"-i \"{vmdlPath}\"",
+                        WorkingDirectory = Path.GetDirectoryName(csdkRc),
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    };
+                    var proc = System.Diagnostics.Process.Start(psi);
+                    string rcOut = proc.StandardOutput.ReadToEnd() + "\n" + proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+
+                    string vmdlC = Path.Combine(tmpDst, "magician.vmdl_c");
+                    bool compiledOk = proc.ExitCode == 0 && File.Exists(vmdlC);
+                    if (!compiledOk) GD.PrintErr($"[CSDK13 JIGGLE X FAIL]\n{rcOut}");
+
+                    float forwardAlignDot = -1f;
+                    float compiledTipMass = -1f;
+                    float compiledYawDamp = -1f;
+                    string compiledFlags = "";
+                    bool hasFlexible = false;
+                    bool hasLengthConstraint = false;
+                    if (compiledOk)
+                    {
+                        using var res = new ValveResourceFormat.Resource { FileName = vmdlC };
+                        res.Read(vmdlC);
+                        var mdl = res.DataBlock as Model;
+                        var fe = mdl?.GetEmbeddedPhys()?.FeModel;
+                        if (mdl != null && fe != null && fe.JiggleBones != null && fe.JiggleBones.Length > 0)
+                        {
+                            // Expected Source 2 forward direction = GodotToSourceDirection(blenderBreastQ * Vector3.Up)
+                            Vector3 expectedGd = (new Basis(blenderBreastQ) * Vector3.Up).Normalized();
+                            Vector3 expectedSrc = CustomModelExporter.GodotToSourcePosition(expectedGd).Normalized();
+                            var expSys = new System.Numerics.Vector3(expectedSrc.X, expectedSrc.Y, expectedSrc.Z);
+
+                            int bIdx = Array.FindIndex(mdl.Skeleton.Bones, b => b.Name.Equals("c_breast_root_r", StringComparison.OrdinalIgnoreCase));
+                            if (bIdx >= 0)
+                            {
+                                var worldMat = mdl.Skeleton.Bones[bIdx].BindPose;
+                                var actualSrcX = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(worldMat.M11, worldMat.M12, worldMat.M13));
+                                forwardAlignDot = System.Numerics.Vector3.Dot(actualSrcX, expSys);
+                            }
+
+                            var jb = fe.JiggleBones[0].JiggleBone;
+                            compiledTipMass = jb.TipMass;
+                            compiledYawDamp = jb.YawDamping;
+                            compiledFlags = jb.BoneFlags.ToString();
+                            hasFlexible = compiledFlags.Contains("Flexible", StringComparison.OrdinalIgnoreCase);
+                            hasLengthConstraint = compiledFlags.Contains("LengthConstraint", StringComparison.OrdinalIgnoreCase);
+                            GD.Print($"  [CSDK13 FeJiggleBone] Count={fe.JiggleBones.Length} Flags={compiledFlags} " +
+                                     $"TipMass={compiledTipMass:F3} YawStiff={jb.YawStiffness:F1} YawDamp={compiledYawDamp:F2} " +
+                                     $"ForwardAlignDot={forwardAlignDot:F4}");
+                        }
+                    }
+
+                    Check(compiledOk && forwardAlignDot > 0.99f,
+                        $"CSDK13 compiled Blender +Y chest bone with local +X aimed forward out of chest (dot={forwardAlignDot:F4}, vs sideways before!)");
+                    Check(compiledOk && hasFlexible && hasLengthConstraint,
+                        $"CSDK13 compiled Flexible + LengthConstraint spring-damper flags (flags={compiledFlags})");
+                    Check(compiledOk && compiledTipMass == 0f,
+                        $"CSDK13 compiled zero-gravity JiggleBone with TipMass=0 (got {compiledTipMass:F3})");
+                    Check(compiledOk && compiledYawDamp > 10f,
+                        $"CSDK13 compiled critically-calibrated YawDamping for damping=0.20 (got {compiledYawDamp:F2}, vs 2.8 underdamped ringing before!)");
+                }
+                finally
+                {
+                    try { Directory.Delete(@"D:\Reduced_CSDK_13\content\citadel_addons\_dp_verify_jiggle_x", true); } catch { }
+                    try { Directory.Delete(@"D:\Reduced_CSDK_13\game\citadel_addons\_dp_verify_jiggle_x", true); } catch { }
+                }
+            }
+
+            skel.Free();
         }
 
         private void TestProxyClothOpenSheetVsClosedSkirt()

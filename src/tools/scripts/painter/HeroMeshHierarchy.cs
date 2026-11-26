@@ -272,11 +272,26 @@ namespace DeadlockPlayground.Painter
                             display = (s == 0) ? clean : $"{clean} [{s}]";
                         }
 
-                        // Extract surface geometry into an isolated MeshInstance3D sharing skin & skeleton
+                        // Extract surface geometry into an isolated MeshInstance3D sharing skin & skeleton.
+                        // Never copy raw SurfaceGetFormat(s) (which may include compression/custom flags that
+                        // corrupt uncompressed SurfaceGetArrays bone weights); set only FlagUse8BoneWeights when 8-bone.
                         var origMat = GetAuthenticMaterial(mi, s);
                         var newMesh = new ArrayMesh();
                         var arrays = mi.Mesh.SurfaceGetArrays(s);
-                        newMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                        Mesh.ArrayFormat surfFmt = default;
+                        if (arrays != null && arrays.Count > (int)Mesh.ArrayType.Vertex &&
+                            arrays[(int)Mesh.ArrayType.Vertex].VariantType != Variant.Type.Nil &&
+                            arrays.Count > (int)Mesh.ArrayType.Bones &&
+                            arrays[(int)Mesh.ArrayType.Bones].VariantType != Variant.Type.Nil)
+                        {
+                            var vertsArr = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+                            var bonesArr = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
+                            if (vertsArr != null && bonesArr != null && vertsArr.Length > 0 && bonesArr.Length == vertsArr.Length * 8)
+                            {
+                                surfFmt |= Mesh.ArrayFormat.FlagUse8BoneWeights;
+                            }
+                        }
+                        newMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, surfFmt);
                         if (origMat != null)
                         {
                             newMesh.SurfaceSetMaterial(0, origMat);
@@ -1129,10 +1144,16 @@ namespace DeadlockPlayground.Painter
                 {
                     name = name.Substring(lastSlash + 1);
                 }
-                int dot = name.IndexOf('.');
-                if (dot > 0)
+                // Strip only known material/resource extensions so dotted material names
+                // (e.g. Blender/FBX "Material.001" vs "Material.002" or "Char.Face" vs "Char.Body")
+                // are NEVER truncated into the same MaterialGroup key.
+                foreach (string ext in new[] { ".vmat_c", ".vmat", ".tres", ".res", ".mat" })
                 {
-                    name = name.Substring(0, dot);
+                    if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase) && name.Length > ext.Length)
+                    {
+                        name = name.Substring(0, name.Length - ext.Length);
+                        break;
+                    }
                 }
                 return name;
             }

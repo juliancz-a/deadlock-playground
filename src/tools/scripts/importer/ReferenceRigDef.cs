@@ -791,13 +791,48 @@ namespace DeadlockPlayground.Importer
             public string ClothTargetMeshName = "";
         }
 
+        public readonly struct PartialBodyRigMask
+        {
+            public bool IncludePelvisAnchor { get; init; }
+            public bool IncludeSpine { get; init; }
+            public bool IncludeCollarSpineAnchor { get; init; }
+            public bool IncludeClavicles { get; init; }
+            public bool IncludeArms { get; init; }
+            public bool IncludeHands { get; init; }
+            public bool IncludeLegs { get; init; }
+            public bool LowerLegsOnly { get; init; }
+            public bool IncludeFeet { get; init; }
+            public bool IncludeNeck { get; init; }
+            public bool IncludeHead { get; init; }
+        }
+
         /// <summary>
         /// Builds the complete modular bone hierarchy from this <see cref="ReferenceRigDef"/> in
         /// transformed space (pass <see cref="Transform3D.Identity"/> for model-space preview or
         /// <c>options.AlignedTransform</c> for hero-space weight solving).
+        /// When <paramref name="partialMask"/> is supplied, emits strictly the bones belonging to the
+        /// selected clothing/accessory body region so unrelated limbs never steal geodesic/voxel heat weights.
         /// </summary>
-        public List<ResolvedBoneSpec> BuildResolvedBones(Transform3D xf, float H, float footFwdZ, bool swapLeftRight = false)
+        public List<ResolvedBoneSpec> BuildResolvedBones(
+            Transform3D xf,
+            float H,
+            float footFwdZ,
+            bool swapLeftRight = false,
+            PartialBodyRigMask? partialMask = null)
         {
+            bool isPartial = partialMask.HasValue;
+            bool incPelvis = !isPartial || partialMask.Value.IncludePelvisAnchor;
+            bool incSpine = !isPartial || partialMask.Value.IncludeSpine;
+            bool incCollarSpine = isPartial && partialMask.Value.IncludeCollarSpineAnchor && !incSpine;
+            bool incClavicles = (!isPartial || partialMask.Value.IncludeClavicles) && HasClavicles;
+            bool incArms = !isPartial || partialMask.Value.IncludeArms || partialMask.Value.IncludeHands;
+            bool incHands = !isPartial || partialMask.Value.IncludeHands;
+            bool incLegs = !isPartial || partialMask.Value.IncludeLegs;
+            bool lowerLegsOnly = isPartial && partialMask.Value.LowerLegsOnly;
+            bool incFeet = !isPartial || partialMask.Value.IncludeFeet;
+            bool incHead = !isPartial || partialMask.Value.IncludeHead;
+            bool incNeck = !isPartial || partialMask.Value.IncludeNeck || incHead;
+
             Vector3 GetJ(string key, Vector3 fallback)
             {
                 string k = key;
@@ -865,39 +900,65 @@ namespace DeadlockPlayground.Importer
             Vector3 firstSpineOrigin = spineNames.Length == 1
                 ? pelvis.Lerp(neck, 0.48f)
                 : pelvis.Lerp(neck, 0.30f);
-            AddBone("pelvis", null, ReferenceBoneRole.Core, pelvis, midHip - Vector3.Up * (0.025f * H), firstSpineOrigin, 0.088f * H, allowBelow: true, headKey: "Pelvis");
 
-            string prevTorso = "pelvis";
-            for (int si = 0; si < spineNames.Length; si++)
+            string prevTorso = null;
+            if (incPelvis)
             {
-                float t0 = spineNames.Length == 1
-                    ? 0.48f
-                    : Mathf.Lerp(0.30f, 0.80f, si / (float)(spineNames.Length - 1));
-                float t1 = si == spineNames.Length - 1
-                    ? (HasNeck ? 0.90f : 1.0f)
-                    : Mathf.Lerp(0.30f, 0.80f, (si + 1) / (float)(spineNames.Length - 1));
-                Vector3 spOrig = pelvis.Lerp(neck, t0);
-                Vector3 spEnd = pelvis.Lerp(neck, t1);
-                AddBone(spineNames[si], prevTorso, ReferenceBoneRole.Core, spOrig, spOrig, spEnd, 0.098f * H,
-                    headKey: si == spineNames.Length - 1 ? "Chest" : "");
-                prevTorso = spineNames[si];
+                Vector3 pelStart = incLegs ? (midHip - Vector3.Up * (0.025f * H)) : pelvis;
+                Vector3 pelEnd = incSpine ? firstSpineOrigin : (pelvis + Vector3.Up * (0.08f * H));
+                AddBone("pelvis", null, ReferenceBoneRole.Core, pelvis, pelStart, pelEnd, 0.088f * H,
+                    allowBelow: true, allowBeyond: !incSpine, headKey: "Pelvis");
+                prevTorso = "pelvis";
+            }
+
+            if (incSpine)
+            {
+                for (int si = 0; si < spineNames.Length; si++)
+                {
+                    float t0 = spineNames.Length == 1
+                        ? 0.48f
+                        : Mathf.Lerp(0.30f, 0.80f, si / (float)(spineNames.Length - 1));
+                    float t1 = si == spineNames.Length - 1
+                        ? ((HasNeck && incHead) ? 0.90f : 1.0f)
+                        : Mathf.Lerp(0.30f, 0.80f, (si + 1) / (float)(spineNames.Length - 1));
+                    Vector3 spOrig = pelvis.Lerp(neck, t0);
+                    Vector3 spEnd = pelvis.Lerp(neck, t1);
+                    AddBone(spineNames[si], prevTorso, ReferenceBoneRole.Core, spOrig, spOrig, spEnd, 0.098f * H,
+                        allowBelow: !incPelvis && si == 0,
+                        allowBeyond: !incHead && si == spineNames.Length - 1,
+                        headKey: si == spineNames.Length - 1 ? "Chest" : "",
+                        tailKey: (!incHead && si == spineNames.Length - 1) ? "Neck" : "");
+                    prevTorso = spineNames[si];
+                }
+            }
+            else if (incCollarSpine)
+            {
+                AddBone("spine_3", prevTorso, ReferenceBoneRole.Core, chest, chest, neck, 0.088f * H,
+                    allowBelow: true, headKey: "Chest", tailKey: "Neck");
+                prevTorso = "spine_3";
             }
             string upperTorso = prevTorso;
 
-            // 2. Optional Neck + Head (derived from Chin landmark: neck spans collar -> skull base with balanced
-            // radius so spine_3 / head never swallow neck_0 weights, while head pivots at skull base & owns the jaw/chin!)
-            string headParent = upperTorso;
-            float chinY = MathF.Max(neck.Y + 0.018f * H, chinPin.Y);
-            float skullPivotY = MathF.Max(neck.Y + 0.032f * H, chinY + 0.022f * H);
-            Vector3 headOrig = HasNeck
-                ? new Vector3(neck.X, skullPivotY, Mathf.Lerp(neck.Z, chinPin.Z, 0.25f))
-                : neck;
-            if (HasNeck)
+            // 2. Optional Neck + Head (derived from Chin landmark)
+            if (incNeck || incHead)
             {
-                AddBone("neck_0", upperTorso, ReferenceBoneRole.Core, neck, neck, headOrig, 0.058f * H, headKey: "Neck");
-                headParent = "neck_0";
+                string headParent = upperTorso;
+                float chinY = MathF.Max(neck.Y + 0.018f * H, chinPin.Y);
+                float skullPivotY = MathF.Max(neck.Y + 0.032f * H, chinY + 0.022f * H);
+                Vector3 headOrig = (HasNeck || (incNeck && !incHead))
+                    ? new Vector3(neck.X, skullPivotY, Mathf.Lerp(neck.Z, chinPin.Z, 0.25f))
+                    : neck;
+                if (HasNeck || (incNeck && !incHead))
+                {
+                    AddBone("neck_0", upperTorso, ReferenceBoneRole.Core, neck, neck, headOrig, 0.058f * H,
+                        allowBeyond: !incHead, headKey: "Neck");
+                    headParent = "neck_0";
+                }
+                if (incHead)
+                {
+                    AddBone("head", headParent, ReferenceBoneRole.Core, headOrig, headOrig, headOrig + Vector3.Up * (0.14f * H), 0.075f * H, allowBeyond: true, headKey: "Chin");
+                }
             }
-            AddBone("head", headParent, ReferenceBoneRole.Core, headOrig, headOrig, headOrig + Vector3.Up * (0.14f * H), 0.075f * H, allowBeyond: true, headKey: "Chin");
 
             // 3. Arms, Hands, Optional Clavicles, Optional Articulated Fingers & Legs/Toes
             int phalanges = Math.Clamp(PhalanxCount, 2, 3);
@@ -912,104 +973,135 @@ namespace DeadlockPlayground.Importer
                 Vector3 ak = GetJ("Ankle" + s, kn - Vector3.Up * 0.22f * H);
 
                 string armParent = upperTorso;
-                if (HasClavicles)
+                if (incClavicles && (incSpine || incArms))
                 {
                     Vector3 clavOrig = neck + (sh - neck) * 0.22f;
-                    AddBone("clavicle_" + s, upperTorso, ReferenceBoneRole.Core, clavOrig, clavOrig, sh, 0.035f * H);
+                    AddBone("clavicle_" + s, upperTorso, ReferenceBoneRole.Core, clavOrig, clavOrig, sh, 0.035f * H,
+                        tailKey: !incArms ? ("Shoulder" + s) : "");
                     armParent = "clavicle_" + s;
                 }
-                AddBone("arm_upper_" + s, armParent, ReferenceBoneRole.Core, sh, sh, el, 0.035f * H, headKey: "Shoulder" + s, tailKey: "Elbow" + s);
-                AddBone("arm_lower_" + s, "arm_upper_" + s, ReferenceBoneRole.Core, el, el, wr, 0.030f * H, headKey: "Elbow" + s, tailKey: "Wrist" + s);
 
-                Vector3 handDir = (wr - el).LengthSquared() > 1e-6f ? (wr - el).Normalized() : -Vector3.Up;
-                bool hasFingers = FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
-                Vector3 handEnd = wr + handDir * (hasFingers ? 0.042f * H : 0.11f * H);
-                if (hasFingers)
+                if (incArms)
                 {
-                    // Anchor hand capsule across the proximal half of the palm so hand_L/R gives the central palm
-                    // cohesive structural support while transitioning smoothly into the 4 metacarpals toward the knuckles.
-                    Vector3 knuckleSum = Vector3.Zero;
-                    int knuckleCnt = 0;
-                    foreach (string fn in new[] { "index", "middle", "ring", "pinky" })
+                    AddBone("arm_upper_" + s, armParent, ReferenceBoneRole.Core, sh, sh, el, 0.035f * H, headKey: "Shoulder" + s, tailKey: "Elbow" + s);
+                    AddBone("arm_lower_" + s, "arm_upper_" + s, ReferenceBoneRole.Core, el, el, wr, 0.030f * H,
+                        allowBeyond: !incHands, headKey: "Elbow" + s, tailKey: "Wrist" + s);
+
+                    Vector3 handDir = (wr - el).LengthSquared() > 1e-6f ? (wr - el).Normalized() : -Vector3.Up;
+                    bool hasFingers = incHands && FingerMode == ReferenceFingerRigMode.ArticulatedFingers;
+                    Vector3 handEnd = incHands
+                        ? wr + handDir * (hasFingers ? 0.042f * H : 0.11f * H)
+                        : wr + handDir * (0.022f * H); // Compact wrist cuff anchor so ArmSegmentRegistration knows exact Cs=Wrist without leaking hand weights down sleeves!
+                    if (hasFingers)
                     {
-                        string kKey = $"finger_{fn}_0_{s}";
-                        if (Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(kKey) ?? kKey) : kKey))
+                        Vector3 knuckleSum = Vector3.Zero;
+                        int knuckleCnt = 0;
+                        foreach (string fn in new[] { "index", "middle", "ring", "pinky" })
                         {
-                            knuckleSum += GetJ(kKey, handEnd);
-                            knuckleCnt++;
+                            string kKey = $"finger_{fn}_0_{s}";
+                            if (Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(kKey) ?? kKey) : kKey))
+                            {
+                                knuckleSum += GetJ(kKey, handEnd);
+                                knuckleCnt++;
+                            }
+                        }
+                        if (knuckleCnt > 0)
+                            handEnd = wr.Lerp(knuckleSum / knuckleCnt, 0.52f);
+                    }
+                    float handRad = !incHands ? 0.022f * H : (hasFingers ? 0.022f * H : 0.042f * H);
+                    AddBone("hand_" + s, "arm_lower_" + s, ReferenceBoneRole.Core, wr, wr, handEnd, handRad,
+                        allowBelow: incHands, allowBeyond: incHands && !hasFingers, headKey: "Wrist" + s);
+
+                    // Individual Articulated Fingers (matching DeadlockRigs finger_{name}_meta_{L|R} + finger_{name}_{0..2}_{L|R})
+                    if (hasFingers)
+                    {
+                        foreach (string fName in FingerNames)
+                        {
+                            if (!IsFingerEnabled(fName)) continue;
+                            string prevF = "hand_" + s;
+
+                            string firstHk = $"finger_{fName}_0_{s}";
+                            if (fName != "thumb" && Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(firstHk) ?? firstHk) : firstHk))
+                            {
+                                Vector3 k0 = GetJ(firstHk, handEnd);
+                                Vector3 metaOrig = wr.Lerp(k0, 0.35f);
+                                string metaName = $"finger_{fName}_meta_{s}";
+                                AddBone(metaName, prevF, ReferenceBoneRole.Finger, metaOrig, metaOrig, k0, MathF.Max(0.008f, 0.014f * H),
+                                    allowBelow: false, allowBeyond: false, headKey: "Wrist" + s, tailKey: firstHk);
+                                prevF = metaName;
+                            }
+
+                            for (int j = 0; j < phalanges; j++)
+                            {
+                                string hk = $"finger_{fName}_{j}_{s}";
+                                string tk = $"finger_{fName}_{j + 1}_{s}";
+                                if (!Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(hk) ?? hk) : hk) ||
+                                    !Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(tk) ?? tk) : tk))
+                                    break;
+                                Vector3 jHead = GetJ(hk, handEnd);
+                                Vector3 jTail = GetJ(tk, jHead + handDir * 0.02f * H);
+                                float fRad = MathF.Max(0.005f, (fName == "thumb" ? 0.0095f : 0.0075f) * H);
+                                string bName = $"finger_{fName}_{j}_{s}";
+                                AddBone(bName, prevF, ReferenceBoneRole.Finger, jHead, jHead, jTail, fRad,
+                                    allowBelow: j == 0, allowBeyond: j == phalanges - 1, headKey: hk, tailKey: tk);
+                                prevF = bName;
+                            }
                         }
                     }
-                    if (knuckleCnt > 0)
-                        handEnd = wr.Lerp(knuckleSum / knuckleCnt, 0.52f);
                 }
-                AddBone("hand_" + s, "arm_lower_" + s, ReferenceBoneRole.Core, wr, wr, handEnd, hasFingers ? 0.022f * H : 0.042f * H,
-                    allowBelow: true, allowBeyond: !hasFingers, headKey: "Wrist" + s);
 
-                // Individual Articulated Fingers (matching DeadlockRigs finger_{name}_meta_{L|R} + finger_{name}_{0..2}_{L|R})
-                if (hasFingers)
+                // Legs & optional Feet / Toes
+                if (incLegs)
                 {
-                    foreach (string fName in FingerNames)
+                    string lowerLegParent = null;
+                    if (!lowerLegsOnly)
                     {
-                        if (!IsFingerEnabled(fName)) continue;
-                        string prevF = "hand_" + s;
+                        AddBone("leg_upper_" + s, incPelvis ? "pelvis" : null, ReferenceBoneRole.Core, hip, hip, kn, 0.058f * H,
+                            allowBelow: !incPelvis, headKey: "Hip" + s, tailKey: "Knee" + s);
+                        lowerLegParent = "leg_upper_" + s;
+                    }
+                    AddBone("leg_lower_" + s, lowerLegParent, ReferenceBoneRole.Core, kn, kn, ak, 0.040f * H,
+                        allowBelow: lowerLegsOnly, allowBeyond: !incFeet, headKey: "Knee" + s, tailKey: "Ankle" + s);
 
-                        // Emit metacarpal bone (finger_{name}_meta_{L|R}) for the 4 non-thumb fingers with softer
-                        // palm radius so metacarpals blend smoothly with hand_L/R and adjacent metacarpals across the palm.
-                        string firstHk = $"finger_{fName}_0_{s}";
-                        if (fName != "thumb" && Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(firstHk) ?? firstHk) : firstHk))
-                        {
-                            Vector3 k0 = GetJ(firstHk, handEnd);
-                            Vector3 metaOrig = wr.Lerp(k0, 0.35f);
-                            string metaName = $"finger_{fName}_meta_{s}";
-                            AddBone(metaName, prevF, ReferenceBoneRole.Finger, metaOrig, metaOrig, k0, MathF.Max(0.008f, 0.014f * H),
-                                allowBelow: false, allowBeyond: false, headKey: "Wrist" + s, tailKey: firstHk);
-                            prevF = metaName;
-                        }
+                    bool emitToes = incFeet && HasToes;
+                    Vector3 footEnd = incFeet
+                        ? (emitToes
+                            ? GetJ("Toe" + s, new Vector3(ak.X, ak.Y - 0.035f * H, ak.Z + footFwdZ * 0.10f * H))
+                            : new Vector3(ak.X, ak.Y - 0.04f * H, ak.Z + footFwdZ * 0.145f * H))
+                        : new Vector3(ak.X, ak.Y - 0.022f * H, ak.Z + footFwdZ * 0.025f * H); // Compact ankle cuff anchor for pants/shorts so LegSegmentRegistration knows exact ankle position without bleeding foot weights!
+                    float ankleRad = incFeet ? 0.055f * H : 0.024f * H;
+                    AddBone("ankle_" + s, "leg_lower_" + s, ReferenceBoneRole.Core, ak, ak, footEnd, ankleRad,
+                        allowBelow: incFeet, allowBeyond: incFeet && !emitToes, headKey: "Ankle" + s, tailKey: emitToes ? "Toe" + s : "");
 
-                        for (int j = 0; j < phalanges; j++)
-                        {
-                            string hk = $"finger_{fName}_{j}_{s}";
-                            string tk = $"finger_{fName}_{j + 1}_{s}";
-                            if (!Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(hk) ?? hk) : hk) ||
-                                !Joints.ContainsKey(swapLeftRight ? (MirrorJointKey(tk) ?? tk) : tk))
-                                break;
-                            Vector3 jHead = GetJ(hk, handEnd);
-                            Vector3 jTail = GetJ(tk, jHead + handDir * 0.02f * H);
-                            float fRad = MathF.Max(0.005f, (fName == "thumb" ? 0.0095f : 0.0075f) * H);
-                            string bName = $"finger_{fName}_{j}_{s}";
-                            AddBone(bName, prevF, ReferenceBoneRole.Finger, jHead, jHead, jTail, fRad,
-                                allowBelow: j == 0, allowBeyond: j == phalanges - 1, headKey: hk, tailKey: tk);
-                            prevF = bName;
-                        }
+                    if (emitToes)
+                    {
+                        Vector3 toeFwd = (footEnd - ak);
+                        toeFwd.Y = 0f;
+                        toeFwd = toeFwd.LengthSquared() > 1e-6f ? toeFwd.Normalized() : new Vector3(0f, 0f, footFwdZ);
+                        AddBone("toe_" + s, "ankle_" + s, ReferenceBoneRole.Core, footEnd, footEnd, footEnd + toeFwd * 0.055f * H, 0.035f * H,
+                            allowBelow: true, allowBeyond: true, headKey: "Toe" + s);
                     }
                 }
+            }
 
-                // Legs & optional Toes (balanced hip radius so pelvis & thighs blend smoothly across glute/shorts seams)
-                AddBone("leg_upper_" + s, "pelvis", ReferenceBoneRole.Core, hip, hip, kn, 0.058f * H, headKey: "Hip" + s, tailKey: "Knee" + s);
-                AddBone("leg_lower_" + s, "leg_upper_" + s, ReferenceBoneRole.Core, kn, kn, ak, 0.040f * H, headKey: "Knee" + s, tailKey: "Ankle" + s);
-                Vector3 footEnd = HasToes
-                    ? GetJ("Toe" + s, new Vector3(ak.X, ak.Y - 0.035f * H, ak.Z + footFwdZ * 0.10f * H))
-                    : new Vector3(ak.X, ak.Y - 0.04f * H, ak.Z + footFwdZ * 0.145f * H);
-                AddBone("ankle_" + s, "leg_lower_" + s, ReferenceBoneRole.Core, ak, ak, footEnd, 0.055f * H,
-                    allowBelow: true, allowBeyond: !HasToes, headKey: "Ankle" + s, tailKey: HasToes ? "Toe" + s : "");
-
-                if (HasToes)
-                {
-                    Vector3 toeFwd = (footEnd - ak);
-                    toeFwd.Y = 0f;
-                    toeFwd = toeFwd.LengthSquared() > 1e-6f ? toeFwd.Normalized() : new Vector3(0f, 0f, footFwdZ);
-                    AddBone("toe_" + s, "ankle_" + s, ReferenceBoneRole.Core, footEnd, footEnd, footEnd + toeFwd * 0.055f * H, 0.035f * H,
-                        allowBelow: true, allowBeyond: true, headKey: "Toe" + s);
-                }
+            // Guarantee at least one fallback bone if a Custom partial mask has every region disabled
+            if (list.Count == 0)
+            {
+                AddBone("spine_2", null, ReferenceBoneRole.Core, chest, pelvis, neck, 0.10f * H,
+                    allowBelow: true, allowBeyond: true, headKey: "Chest");
+                upperTorso = "spine_2";
             }
 
             // 4. Authored Cloth Bone Chains
             if (ClothChains != null)
             {
+                string defaultClothParent = !string.IsNullOrEmpty(upperTorso) && byName.ContainsKey(upperTorso)
+                    ? upperTorso
+                    : list[0].Name;
                 foreach (var cc in ClothChains)
                 {
                     if (cc == null || cc.JointPositions == null || cc.JointPositions.Count < 2) continue;
-                    string parentBone = byName.ContainsKey(cc.ParentBoneName ?? "") ? cc.ParentBoneName : upperTorso;
+                    string parentBone = byName.ContainsKey(cc.ParentBoneName ?? "") ? cc.ParentBoneName : defaultClothParent;
                     string safeName = string.IsNullOrWhiteSpace(cc.Name) ? "cloth" : cc.Name.Trim().Replace(" ", "_");
                     int segs = cc.JointPositions.Count - 1;
                     string prevCloth = parentBone;

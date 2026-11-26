@@ -13,8 +13,9 @@ public partial class ChangelogModalUI : PanelContainer
     public const string ConfigPath = "user://settings.cfg";
     public const string ConfigSection = "News";
     public const string ConfigKey = "LastReadVersion";
+    public const string LastSeenAppVersionKey = "LastSeenAppVersion";
     public const string DefaultWebsiteUrl = "https://deadlock-playground.top/";
-    public const string DiscordUsername = "juliancz_";
+    public const string DefaultDiscordUrl = "https://discord.gg/tWHuT6ywV";
 
     public const string InitialChangelogMarkdown = @"### Version 1.0.1 — New Heroes & Topbar Menu
 
@@ -38,10 +39,12 @@ public partial class ChangelogModalUI : PanelContainer
     private Label? _titleLabel;
     private Label? _statusBadge;
 
-    private string _activeVersion = CurrentVersion;
+    private string _activeVersion = GetNormalizedLocalVersion();
     private string _websiteUrl = DefaultWebsiteUrl;
-    private string _discordUsername = DiscordUsername;
+    private string _discordUrl = DefaultDiscordUrl;
     private bool _isLoading = false;
+
+    public string ActiveVersion => _activeVersion;
 
     public override void _Ready()
     {
@@ -69,8 +72,8 @@ public partial class ChangelogModalUI : PanelContainer
         if (_btnDiscord != null)
         {
             _btnDiscord.Pressed += OnDiscordClicked;
-            _btnDiscord.Text = $"Discord: {_discordUsername}";
-            _btnDiscord.TooltipText = $"Click to copy Discord username: {_discordUsername}";
+            _btnDiscord.Text = "Discord";
+            _btnDiscord.TooltipText = $"Join the official Deadlock Playground Discord ({_discordUrl})";
         }
 
         if (_richTextLabel != null)
@@ -125,13 +128,13 @@ public partial class ChangelogModalUI : PanelContainer
                 {
                     _websiteUrl = webUrl;
                 }
-                if (payload.Links.TryGetValue("discord", out var discUser) && !string.IsNullOrEmpty(discUser))
+                if (payload.Links.TryGetValue("discord", out var discUrl) && !string.IsNullOrEmpty(discUrl))
                 {
-                    _discordUsername = discUser.Replace("https://discord.gg/", "").Trim();
+                    _discordUrl = discUrl.Trim();
                     if (_btnDiscord != null)
                     {
-                        _btnDiscord.Text = $"Discord: {_discordUsername}";
-                        _btnDiscord.TooltipText = $"Click to copy Discord username: {_discordUsername}";
+                        _btnDiscord.Text = "Discord";
+                        _btnDiscord.TooltipText = $"Join the official Deadlock Playground Discord ({_discordUrl})";
                     }
                 }
 
@@ -354,16 +357,7 @@ public partial class ChangelogModalUI : PanelContainer
 
     private void OnDiscordClicked()
     {
-        DisplayServer.ClipboardSet(_discordUsername);
-        if (_btnDiscord != null)
-        {
-            _btnDiscord.Text = "✓ Copied!";
-            GetTree().CreateTimer(2.0).Timeout += () =>
-            {
-                if (GodotObject.IsInstanceValid(_btnDiscord))
-                    _btnDiscord.Text = $"💬 Discord: {_discordUsername}";
-            };
-        }
+        OS.ShellOpen(_discordUrl);
     }
 
     private void OnMetaClicked(Variant meta)
@@ -384,13 +378,14 @@ public partial class ChangelogModalUI : PanelContainer
         Input.SetDefaultCursorShape(Input.CursorShape.Arrow);
     }
 
-    public void Open()
+    public void Open(bool forceRefresh = false)
     {
         Visible = true;
         MoveToFront();
         MarkVersionAsRead(_activeVersion);
+        MarkAppVersionSeen();
         StudioUIManager.Instance?.UpdateNewsBadgeState();
-        _ = RefreshFeedAsync(false);
+        _ = RefreshFeedAsync(forceRefresh);
     }
 
     public void Close()
@@ -399,22 +394,105 @@ public partial class ChangelogModalUI : PanelContainer
         EmitSignal(SignalName.DialogClosed);
     }
 
-    public static bool HasUnreadChangelog(string targetVersion = CurrentVersion)
+    public static string GetNormalizedLocalVersion()
     {
+        string local = UpdateChecker.GetLocalVersion();
+        if (string.IsNullOrWhiteSpace(local))
+        {
+            return CurrentVersion;
+        }
+        local = local.Trim();
+        return local.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? local : $"v{local}";
+    }
+
+    /// <summary>
+    /// Evaluates at startup whether the application was updated since the last launch
+    /// (via either the in-app updater or a manual update) and should automatically show the changelog once.
+    /// Must be called before first-run settings are written so fresh installs are not treated as updates.
+    /// </summary>
+    public static bool EvaluatePendingUpdateAutoOpen()
+    {
+        string currentVersion = GetNormalizedLocalVersion();
+
+        if (UpdateChecker.IsPostUpdateLaunch)
+        {
+            return true;
+        }
+
+        var config = new ConfigFile();
+        bool configExists = config.Load(ConfigPath) == Error.Ok;
+        if (!configExists)
+        {
+            // Fresh install: record current version so future updates trigger auto-open,
+            // without popping up the changelog on first launch.
+            MarkAppVersionSeen(currentVersion);
+            return false;
+        }
+
+        string lastSeen = (string)config.GetValue(ConfigSection, LastSeenAppVersionKey, "");
+        if (string.IsNullOrWhiteSpace(lastSeen))
+        {
+            // Existing user upgrading from a build prior to LastSeenAppVersion tracking.
+            string lastRead = (string)config.GetValue(ConfigSection, ConfigKey, "");
+            if (currentVersion.Equals(lastRead, StringComparison.OrdinalIgnoreCase))
+            {
+                MarkAppVersionSeen(currentVersion);
+                return false;
+            }
+            return true;
+        }
+
+        if (SemanticVersion.TryParse(currentVersion, out var currentSemVer) &&
+            SemanticVersion.TryParse(lastSeen, out var lastSeenSemVer))
+        {
+            if (currentSemVer > lastSeenSemVer)
+            {
+                return true;
+            }
+            if (currentSemVer < lastSeenSemVer)
+            {
+                // Keep stored version aligned if user intentionally switched builds
+                MarkAppVersionSeen(currentVersion);
+            }
+            return false;
+        }
+
+        return !currentVersion.Equals(lastSeen, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static void MarkAppVersionSeen(string? targetVersion = null)
+    {
+        string effectiveVersion = string.IsNullOrWhiteSpace(targetVersion)
+            ? GetNormalizedLocalVersion()
+            : targetVersion.Trim();
+        var config = new ConfigFile();
+        config.Load(ConfigPath);
+        config.SetValue(ConfigSection, LastSeenAppVersionKey, effectiveVersion);
+        config.Save(ConfigPath);
+    }
+
+    public static bool HasUnreadChangelog(string? targetVersion = null)
+    {
+        string effectiveVersion = string.IsNullOrWhiteSpace(targetVersion)
+            ? GetNormalizedLocalVersion()
+            : targetVersion;
         var config = new ConfigFile();
         if (config.Load(ConfigPath) == Error.Ok)
         {
             string lastRead = (string)config.GetValue(ConfigSection, ConfigKey, "");
-            return !targetVersion.Equals(lastRead, StringComparison.OrdinalIgnoreCase);
+            return !effectiveVersion.Equals(lastRead, StringComparison.OrdinalIgnoreCase);
         }
         return true;
     }
 
-    public static void MarkVersionAsRead(string targetVersion = CurrentVersion)
+    public static void MarkVersionAsRead(string? targetVersion = null)
     {
+        string effectiveVersion = string.IsNullOrWhiteSpace(targetVersion)
+            ? GetNormalizedLocalVersion()
+            : targetVersion;
         var config = new ConfigFile();
         config.Load(ConfigPath);
-        config.SetValue(ConfigSection, ConfigKey, targetVersion);
+        config.SetValue(ConfigSection, ConfigKey, effectiveVersion);
         config.Save(ConfigPath);
     }
 }

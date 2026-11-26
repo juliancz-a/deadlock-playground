@@ -33,6 +33,72 @@ namespace DeadlockPlayground.UI
         private CheckBox _chkBoneFilterCore;
         private CheckBox _chkBoneFilterFingers;
         private CheckBox _chkBoneFilterPhysics;
+
+        private VBoxContainer _viewportBottomRightStack;
+        private PanelContainer _viewportCameraPill;
+
+        private VBoxContainer EnsureViewportBottomRightStack(Control viewportPanel)
+        {
+            if (_viewportBottomRightStack != null && GodotObject.IsInstanceValid(_viewportBottomRightStack))
+                return _viewportBottomRightStack;
+
+            var margin = new MarginContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            margin.AddThemeConstantOverride("margin_left", 10);
+            margin.AddThemeConstantOverride("margin_right", 10);
+            margin.AddThemeConstantOverride("margin_top", 10);
+            margin.AddThemeConstantOverride("margin_bottom", 10);
+            viewportPanel.AddChild(margin);
+
+            _viewportBottomRightStack = new VBoxContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkEnd,
+                MouseFilter = Control.MouseFilterEnum.Ignore
+            };
+            _viewportBottomRightStack.AddThemeConstantOverride("separation", 8);
+            margin.AddChild(_viewportBottomRightStack);
+            return _viewportBottomRightStack;
+        }
+
+        private void BuildViewportCameraPill(Control viewportPanel)
+        {
+            if (viewportPanel == null) return;
+            var stack = EnsureViewportBottomRightStack(viewportPanel);
+
+            var pill = new PanelContainer
+            {
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkEnd,
+                MouseFilter = Control.MouseFilterEnum.Stop
+            };
+            pill.AddThemeStyleboxOverride("panel", GetHudFloatingPanelStyle());
+            stack.AddChild(pill);
+            _viewportCameraPill = pill;
+
+            var pad = new MarginContainer();
+            pad.AddThemeConstantOverride("margin_left", 6);
+            pad.AddThemeConstantOverride("margin_right", 6);
+            pad.AddThemeConstantOverride("margin_top", 4);
+            pad.AddThemeConstantOverride("margin_bottom", 4);
+            pill.AddChild(pad);
+
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 4);
+            pad.AddChild(row);
+
+            foreach (string camPreset in new[] { "Front", "Side", "3/4", "Frame" })
+            {
+                var btnCam = CreateViewportHudButton(camPreset, 42, 24, tip: $"Snap preview camera to {camPreset} view");
+                string capturedCam = camPreset;
+                btnCam.Pressed += () => SetCameraPreset(capturedCam);
+                row.AddChild(btnCam);
+            }
+        }
         private CheckBox _chkBoneFilterAccessory;
         private CheckBox _chkBoneFilterDisabled;
         private CheckBox _chkBoneFilterVanilla;
@@ -390,28 +456,20 @@ namespace DeadlockPlayground.UI
         {
             if (viewportPanel == null) return;
 
-            var overlayMargin = new MarginContainer
-            {
-                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-                SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-                MouseFilter = Control.MouseFilterEnum.Ignore
-            };
-            overlayMargin.AddThemeConstantOverride("margin_left", 10);
-            overlayMargin.AddThemeConstantOverride("margin_right", 10);
-            overlayMargin.AddThemeConstantOverride("margin_top", 10);
-            overlayMargin.AddThemeConstantOverride("margin_bottom", 10);
-            viewportPanel.AddChild(overlayMargin);
+            var stack = EnsureViewportBottomRightStack(viewportPanel);
 
             _boxStressTestPopover = new PanelContainer
             {
                 ThemeTypeVariation = "InspectorSectionPanel",
-                SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
-                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkEnd,
                 CustomMinimumSize = new Vector2(310, 0),
                 Visible = false,
                 MouseFilter = Control.MouseFilterEnum.Stop
             };
-            overlayMargin.AddChild(_boxStressTestPopover);
+            stack.AddChild(_boxStressTestPopover);
+            // Always keep Stress Test popover stacked above the Camera Pill
+            stack.MoveChild(_boxStressTestPopover, 0);
 
             var pad = new MarginContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             pad.AddThemeConstantOverride("margin_left", 10);
@@ -455,7 +513,7 @@ namespace DeadlockPlayground.UI
             stressPresetRow.AddThemeConstantOverride("v_separation", 6);
 
             var btnStressReset = new Button { Text = "Normal", CustomMinimumSize = new Vector2(68, 28), ThemeTypeVariation = "ToolbarButton" };
-            btnStressReset.Pressed += () => SetPhysicsStressTestPose(0f, 0f, false);
+            btnStressReset.Pressed += () => SetPhysicsStressTestPose(0f, 0f, false, stopVent: true);
 
             var btnStressLookUp = new Button { Text = "Look Up (+65°)", CustomMinimumSize = new Vector2(110, 28), ThemeTypeVariation = "ToolbarButton" };
             btnStressLookUp.Pressed += () => SetPhysicsStressTestPose(65f, 0f, _stressWalkBackShake);
@@ -517,6 +575,86 @@ namespace DeadlockPlayground.UI
                 });
             _sliderStressCrouchLean.SetValueNoSignal(0.0);
             if (_lblValStressCrouchLean != null) _lblValStressCrouchLean.Text = "0°";
+
+            // Deadlock Air Vent (trigger_catapult) High-Speed Ballistic Stress Test
+            stressBody.AddChild(new HSeparator());
+
+            var lblVentHdr = new Label
+            {
+                Text = "DEADLOCK AIR VENT SIMULATION (trigger_catapult)",
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            lblVentHdr.AddThemeFontSizeOverride("font_size", 11);
+            lblVentHdr.AddThemeColorOverride("font_color", ImporterStyle.HintColor);
+            stressBody.AddChild(lblVentHdr);
+
+            var ventBtnRow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            ventBtnRow.AddThemeConstantOverride("h_separation", 6);
+            ventBtnRow.AddThemeConstantOverride("v_separation", 6);
+
+            _btnStressVentMid = new Button
+            {
+                Text = "Vent Mid (35 m/s)",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(130, 28),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Simulates a standard dl_midtown air vent (launch_speed=1000 in/s -> 34.7 m/s ballistic arc + landing stop)."
+            };
+            _btnStressVentMid.Toggled += (on) =>
+                SetVentStressMode(on ? VentStressMode.MidMap1000 : VentStressMode.None);
+
+            _btnStressVentEndgame = new Button
+            {
+                Text = "Vent Endgame (42 m/s)",
+                ToggleMode = true,
+                ButtonPressed = false,
+                CustomMinimumSize = new Vector2(152, 28),
+                ThemeTypeVariation = "ToolbarButton",
+                TooltipText = "Simulates an extreme base/endgame air vent (launch_speed=1200 in/s -> 42.1 m/s ballistic arc + landing stop)."
+            };
+            _btnStressVentEndgame.Toggled += (on) =>
+                SetVentStressMode(on ? VentStressMode.Endgame1200 : VentStressMode.None);
+
+            _optStressVentDir = new OptionButton
+            {
+                CustomMinimumSize = new Vector2(160, 28),
+                TooltipText = "Launch direction relative to hero facing. Backward+Up is the worst case for back hair clipping into neck/chest."
+            };
+            _optStressVentDir.AddItem("Back + Up (Worst Case)", 0);
+            _optStressVentDir.AddItem("Forward + Up", 1);
+            _optStressVentDir.AddItem("Side + Up", 2);
+            _optStressVentDir.AddItem("Vertical Burst", 3);
+            _optStressVentDir.Selected = 0;
+            _optStressVentDir.ItemSelected += (idx) =>
+            {
+                _stressVentDirIndex = (int)idx;
+                _stressVentTimer = 0f;
+            };
+
+            ventBtnRow.AddChild(_btnStressVentMid);
+            ventBtnRow.AddChild(_btnStressVentEndgame);
+            ventBtnRow.AddChild(_optStressVentDir);
+            stressBody.AddChild(ventBtnRow);
+
+            _chkStressStrictValve = new CheckBox
+            {
+                Text = "Strict 1-Pass Valve Solver (ExtraIterations = 0)",
+                ButtonPressed = _stressStrictValve1Pass,
+                TooltipText = "Matches Deadlock's compiled 1-pass Rubikon cloth solver during vent launches so tunneling shows up honestly."
+            };
+            _chkStressStrictValve.AddThemeFontSizeOverride("font_size", 11);
+            _chkStressStrictValve.Toggled += (on) => _stressStrictValve1Pass = on;
+            stressBody.AddChild(_chkStressStrictValve);
+
+            _lblStressVentTelemetry = new Label
+            {
+                Text = "Idle — Launch a Deadlock air vent (35–42 m/s) to test high-speed tunneling.",
+                AutowrapMode = TextServer.AutowrapMode.WordSmart
+            };
+            _lblStressVentTelemetry.AddThemeFontSizeOverride("font_size", 11);
+            _lblStressVentTelemetry.AddThemeColorOverride("font_color", ImporterStyle.HintColor);
+            stressBody.AddChild(_lblStressVentTelemetry);
         }
 
         private void SelectPaintBoneByName(string boneName)
@@ -631,7 +769,7 @@ namespace DeadlockPlayground.UI
         private bool TryHandleViewportBoneLeftClick(InputEvent @event)
         {
             if ((!_showBones && !_showColliders) || _previewCamera == null || _previewHeroSkeleton == null) return false;
-            if (IsWeightPaintActive() || IsDeformBrushActive() || IsPinEditActive()) return false;
+            if (IsMeshCutActive() || IsWeightPaintActive() || IsDeformBrushActive() || IsImportedSculptActive() || IsPinEditActive()) return false;
             if (@event is not InputEventMouseButton mb || mb.ButtonIndex != MouseButton.Left) return false;
 
             if (mb.Pressed)

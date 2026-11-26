@@ -42,12 +42,12 @@ namespace DeadlockPlayground.Importer
         /// <summary>When true, skips the Critical RAM confirmation prompt for the remainder of the app session.</summary>
         public static bool SuppressPromptForSession { get; set; }
 
-        // Tunables (calibrated so users with ~1.0–1.5 GB free RAM can enter smoothly without nagging popups)
-        private const long BaseOverheadBytes = 350L * 1024 * 1024;       // preview viewport, GPU staging
-        private const long SafetyMarginBytes = 512L * 1024 * 1024;       // leave ~512 MB safety buffer
-        private const long CriticalMinFreeBytes = 900L * 1024 * 1024;    // below ~0.9 GB free -> Critical warning
-        private const long LightModeFreeBytes = 1536L * 1024 * 1024;     // below ~1.5 GB free -> non-blocking Light Mode hint
-        private const double FileExpansionFactor = 3.5;                  // decoded geometry + textures vs. file size
+        // Tunables (calibrated to warn BEFORE Windows commit/native Godot OOM aborts the process)
+        private const long BaseOverheadBytes = 500L * 1024 * 1024;       // preview viewport, GPU staging, hero clone
+        private const long SafetyMarginBytes = 640L * 1024 * 1024;       // leave ~640 MB safety buffer
+        private const long CriticalMinFreeBytes = 1024L * 1024 * 1024;   // below ~1.0 GB free physical or commit -> Critical warning
+        private const long LightModeFreeBytes = 1792L * 1024 * 1024;     // below ~1.75 GB free -> non-blocking Light Mode hint
+        private const double FileExpansionFactor = 8.0;                  // decoded geometry + uncompressed RGBA textures + native staging vs. file size
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
         private class MemoryStatusEx
@@ -135,31 +135,61 @@ namespace DeadlockPlayground.Importer
             return BaseOverheadBytes + heroBytes * 2 + (long)(fileSize * FileExpansionFactor);
         }
 
+        public static long EstimateBatchBytes(IEnumerable<string> filePaths, Node3D heroNode = null)
+        {
+            long totalFileSize = 0;
+            if (filePaths != null)
+            {
+                foreach (var fp in filePaths)
+                {
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(fp) && File.Exists(fp))
+                            totalFileSize += new FileInfo(fp).Length;
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+            long heroBytes = EstimateHeroGeometryBytes(heroNode);
+            return BaseOverheadBytes + heroBytes * 2 + (long)(totalFileSize * FileExpansionFactor);
+        }
+
         public static Report Evaluate(string filePath, Node3D heroNode = null)
         {
-            long estimate = EstimateBytes(filePath, heroNode);
+            return EvaluateBatch(string.IsNullOrEmpty(filePath) ? Array.Empty<string>() : new[] { filePath }, heroNode);
+        }
+
+        public static Report EvaluateBatch(IEnumerable<string> filePaths, Node3D heroNode = null)
+        {
+            long estimate = EstimateBatchBytes(filePaths, heroNode);
             if (!TryQueryMemory(out long free, out long total, out long commitFree))
             {
                 LightMode = false;
                 return new Report(Verdict.Ok, 0, 0, 0, estimate, "Memory status unavailable; continuing.");
             }
 
-            long effectiveHeadroom = commitFree > 0 ? Math.Max(free, Math.Min(commitFree, free + 512L * 1024 * 1024)) : free;
+            // On Windows, native C++ / D3D12 allocations fail immediately when EITHER physical RAM
+            // OR page-file commit headroom (ullAvailPageFile) is exhausted. Always bound by the minimum!
+            long effectiveHeadroom = commitFree > 0 ? Math.Min(free, commitFree) : free;
             string freeGb = $"{free / 1073741824.0:F1} GB";
+            string commitGb = $"{commitFree / 1073741824.0:F1} GB";
             string needGb = $"{estimate / 1073741824.0:F1} GB";
 
-            if (free < CriticalMinFreeBytes || estimate + SafetyMarginBytes > effectiveHeadroom)
+            if (effectiveHeadroom < CriticalMinFreeBytes || estimate + SafetyMarginBytes > effectiveHeadroom)
             {
+                string detail = commitFree > 0 && commitFree < free
+                    ? $"Available Windows virtual memory / commit headroom is critically low ({commitGb} commit free, {freeGb} physical free, ~{needGb} estimated)."
+                    : $"Free physical RAM is critically low ({freeGb} free, {commitGb} commit free, ~{needGb} estimated).";
                 return new Report(Verdict.Critical, free, total, commitFree, estimate,
-                    $"Free physical RAM is very low ({freeGb} free, ~{needGb} estimated).\n" +
-                    "Heavy background apps (e.g. Blender, browsers) may cause an out-of-memory crash.\n\n" +
-                    "Light Mode disables the hero ghost and realtime re-rig to save RAM.");
+                    $"{detail}\n" +
+                    "Heavy background apps (e.g. Blender, browsers, Deadlock) may cause an immediate out-of-memory crash.\n\n" +
+                    "Close other apps or use Light Mode (disables hero ghost & realtime re-rig) to save RAM.");
             }
 
-            if (free < LightModeFreeBytes)
+            if (effectiveHeadroom < LightModeFreeBytes)
             {
                 return new Report(Verdict.LowMemory, free, total, commitFree, estimate,
-                    $"Low RAM ({freeGb} free) — Light Mode is available in the footer if performance is tight.");
+                    $"Low RAM ({freeGb} free, {commitGb} commit free) — Light Mode is available in the footer if performance is tight.");
             }
 
             LightMode = false;
@@ -231,7 +261,9 @@ namespace DeadlockPlayground.Importer
                     Transform = srcMi.Transform,
                     Visible = srcMi.Visible,
                     Mesh = srcMi.Mesh,       // shared read-only!
-                    Skin = srcMi.Skin,       // shared read-only!
+                    // Always duplicate Skin (tiny ~15 KB resource) so preview rig updates/bone removals
+                    // can NEVER mutate the live hero's Skin bind indices or inverse bind poses on Cancel!
+                    Skin = srcMi.Skin != null ? (Skin)srcMi.Skin.Duplicate() : null,
                     Skeleton = srcMi.Skeleton,
                     Layers = srcMi.Layers,
                     MaterialOverride = srcMi.MaterialOverride
@@ -299,7 +331,13 @@ namespace DeadlockPlayground.Importer
         {
             foreach (var meta in src.GetMetaList())
             {
-                dst.SetMeta(meta, src.GetMeta(meta));
+                Variant v = src.GetMeta(meta);
+                // Deep-duplicate Godot Dictionary/Array metadata so preview edits never mutate live hero metadata!
+                if (v.VariantType == Variant.Type.Dictionary)
+                    v = v.AsGodotDictionary().Duplicate(true);
+                else if (v.VariantType == Variant.Type.Array)
+                    v = v.AsGodotArray().Duplicate(true);
+                dst.SetMeta(meta, v);
             }
         }
 

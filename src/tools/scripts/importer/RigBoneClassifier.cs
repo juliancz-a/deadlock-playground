@@ -1060,17 +1060,33 @@ namespace DeadlockPlayground.Importer
                 if (t.Contains("sole") || HasAny(t, "heel")) { Set(BoneKind.Helper, "sole/heel helper"); return; }
                 role = "ankle";
             }
-            else if (HasAny(t, "calf", "shin", "knee", "lowerleg") || (hasLeg && HasAny(t, "lower")))
+            else if (HasAny(t, "calf", "shin", "lowerleg") || (hasLeg && HasAny(t, "lower")))
             {
                 role = "leg_lower";
+                priority = 0;
+            }
+            else if (t.Contains("knee"))
+            {
+                // Fallback only (priority 2) for Cats/VRChat/MMD rigs that name the shin "Left knee"
+                // so real calf/shin/lowerleg bones ALWAYS beat corrective/joint "knee" helpers.
+                role = "leg_lower";
+                priority = 2;
             }
             else if (HasAny(t, "thigh", "upleg", "upperleg") || (hasLeg && HasAny(t, "upper", "up")))
             {
                 role = "leg_upper";
             }
-            else if (HasAny(t, "forearm", "lowerarm") || (hasArm && HasAny(t, "lower", "fore")) || t.Contains("elbow"))
+            else if (HasAny(t, "forearm", "lowerarm") || (hasArm && HasAny(t, "lower", "fore")))
             {
                 role = "arm_lower";
+                priority = 0;
+            }
+            else if (t.Contains("elbow"))
+            {
+                // Fallback only (priority 2) for Cats/VRChat/MMD rigs that name the forearm "Left elbow"
+                // so real forearm/lowerarm bones ALWAYS beat corrective/joint "elbow" helpers.
+                role = "arm_lower";
+                priority = 2;
             }
             else if (HasAny(t, "upperarm", "uparm") || (hasArm && HasAny(t, "upper", "up")))
             {

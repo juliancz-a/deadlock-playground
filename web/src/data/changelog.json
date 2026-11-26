@@ -1,15 +1,47 @@
 {
-  "latestVersion": "1.3.6",
-  "publishedAt": "2026-11-24T06:28:57Z",
-  "title": "Version 1.3.6 — Bug Fix Update, Rigged Models Cloth Editor & New Weight Painting Tools",
-  "markdown": "### Version 1.3.6 — Bug Fix Update, Rigged Models Cloth Editor & New Weight Painting Tools\n\n### Bug Fixes\n\n#### Cloth, Hair & Weight Persistence Fixes\n* **Fixed Weight Editor `Reset <bone>` Crash & Disappearing Model**: Fixed an `ObjectDisposedException` on `MeshInstance3D` where clicking `Reset <bone>` destroyed the live preview mesh container. Baseline generation now runs on an isolated throwaway hero clone, and per-bone resets fall back to the bone's own anchor/parent instead of `pelvis`.\n* **Fixed Re-Binding or Swapping Presets Resetting Other Bones' Weights**: Replaced the shared dirty flag with per-chain dirty tracking (`_dirtySyntheticChainIds`). Re-binding one chain now touches only the chain(s) you actually edited, preserves intentionally erased (0-weight) chains, and borrows weight strictly from the anchor bone first so overlapping painted chains are never diluted or overwritten.\n\n#### Bone Mapping & Rigging Fixes\n* **Fixed Finger-to-Toe Bone Mis-Mapping (`C_INDEX2.R` vs. `C_TOES_INDEX2.R`)**: Added strict anatomical foot-vs-hand subtree and token isolation across `RigBoneClassifier`, `HumanoidBoneMapper`, and `BuildHumanoidBoneMap` so articulated toe bones (e.g., Auto-Rig Pro rigs) can never hijack hand finger slots—including when toggling **Static All**.\n* **Fixed Duplicate Spine Remap Conflicts & Skirt Alignment**: Prevented duplicate `spine_2`/`spine_3` mappings on auto-analysis and ensured pelvis/lower-spine synthetic skirt chains inherit their anchor's alignment offset.\n\n#### Export, Materials, Hero Visibility & `.DPP` Workspace Fixes\n* **Fixed Missing In-Game Animations After Model Replacement**: Extracted authentic `.vnmskel` and `.vnmgraph` references directly from vanilla `.vmdl_c` `RERL` blocks (fixing broken animations on Drifter and other heroes), auto-routed 1-bone `ProxyCloth` chains to `Jiggle`, and added vanilla animation fallback in the Mod Gallery.\n* **Fixed Drifter Invisibility in Shop & Hero Selection**: Prevented `DetectPrimaryBodyGroupMeshName` from assigning custom bodies to facial expression toggle groups (`drifter_head_neutral`), keeping custom models always visible.\n* **Fixed Black Hair & Shoes on Exported VPKs / Mod Gallery Reload**: Fixed glTF default `metallicFactor = 1.0` turning dielectric/emissive materials (such as Roblox shoes and Neon hair) solid black by extracting actual metalness channel maps (`TextureMetalness1`) and zeroing scalar metalness on emission-recovered albedo.\n* **Fixed False Outline-Shell Detection on Multi-Surface Meshes**: Outline shell detection now inspects per-surface material names instead of shared parent mesh names.\n* **Fixed `.DPP` Custom Models Loading Untextured White**: Staged painted layers and toon shading now auto-hydrate immediately on `.dpp` load without having to open the Paint tab first.\n* **Fixed Multi-File `.gltf` Bundling in `.DPP` Projects**: Staging now bundles external `.bin` buffers and texture files alongside `.gltf` models and displays a clear notification if external dependencies are missing.\n\n---\n\n### New Features & Workflow Improvements\n\n#### Precision Weight Painting Toolkit\n* **Front Only & Same Island (Geodesic Brush)**: Prevent strokes from bleeding through to back faces or jumping tiny air gaps onto adjacent hair strands, arms, or face meshes.\n* **Buried Vertex Isolation**: Press **`H`** to hide a hovered mesh island, **`Shift+H`** to solo it, **`Alt+H`** (or **Show All**) to restore all islands, use **Paint Through** to reach dense interior volumes, or drag the **Slice** near-clip slider to cut open overlapping layers.\n* **Per-Bone Weight Lock**: Lock finished bones directly in the Weight Paint bone list so subsequent strokes, fills, smoothing, or gradients never disturb them.\n* **1-Click Fill Island & 3D Gradient Fill**: Flood-fill an entire connected hair lock/accessory in one click, or drag from root to tip in 3D to paint a smooth falloff gradient.\n\n#### Synthetic Cloth & Hair Bone Editor + Roblox Rigs Support\n* **Integrated `+ Add Cloth Chain ▾` Workflow**: Spawn templates (`Front Bangs`, `Back Hair / Ponytail`, `Side Hair L`, `Cape / Cloak`, `Skirt Flap`, or `Custom Chain` on any hero bone), drag individual joints in 3D via the streamlined floating HUD, mirror chains with both left/right chains visible simultaneously, and manage **Bind** / **Delete** cleanly from the right-side inspector.\n* **Roblox R15 & R6 Auto-Rigging + Missing Critical Bones Popup**: Native `RobloxR15` / `RobloxR6` rig detection and bone remapping (`HumanoidRootPart → pelvis`, `LowerTorso → spine_0`, `UpperTorso → spine_3`), plus a pre-confirm warning popup whenever critical animation bones are unmapped.",
+  "latestVersion": "1.3.7",
+  "publishedAt": "2026-11-26T04:28:47Z",
+  "title": "Version 1.3.7 — Per-Mesh Sculpt & Blender-Style Face Edit,  Physics Parity & Bug Fixes",
+  "markdown": "### Version 1.3.7 — Per-Mesh Sculpt &  Blender-Style Face Edit,  Physics Parity & Bug Fixes",
   "history": [
+    {
+      "version": "1.3.7",
+      "date": "November 26, 2026",
+      "title": "Version 1.3.7 — Per-Mesh Sculpt & Blender-Style Face Edit,  Physics Parity & Bug Fixes",
+      "badge": "Latest Release",
+      "badgeType": "gold",
+      "videoUrl": "",
+      "highlights": [
+        "## New Discord",
+        "Ive set up a Discord server where you can share bug reports and ideas for the future of the app. It would help me keep everything more organized. You’re all invited to join!",
+        "Link: https://discord.gg/tWHuT6ywV",
+        "### New Features & UI Improvements",
+        "#### Redesigned 3D Importer Viewport & Floating Overlays",
+        "**Grouped Top Bar**: Reorganized the global viewport toolbar into grouped **Display**, **Rig Diagnostics**, and **3D Gizmo** sections with contextual `On Top` visibility. Moved `Front | Side | 3/4 | Frame` into a compact **Bottom-Right Camera Pill** stacked cleanly below the **Physics Stress Test** popover.",
+        "**Floating 3D Weapon / Socket Fit HUD**: Slimmed `Socket / Weapon` cards in `4. Meshes` to a compact summary + **Fit Weapon / Socket in 3D** button that opens a dedicated floating viewport overlay (`Bone`, `Replaces`, `Fit`, `Snap Grip`, `Straighten`, live `Pitch/Yaw/Roll`, `X/Y/Z`, `Scale`, and quick presets) with automatic 3D Weapon Gizmo activation.",
+        "#### Per-Mesh 3D Sculpt, Non-Uniform Scale & Blender-Style Face Edit",
+        "**Per-Mesh `Sculpt` & `Scale/Fit ▾` Drawer**: Launch 3D Sculpt Mode directly from any submesh card (`MeshThumbCard`) with an active-edits badge, live `Target` selector, `Isolate` toggle, and a collapsible **`Scale/Fit ▾`** drawer for per-mesh Non-Uniform Scale (`SX/SY/SZ`), Bottom Flare, Top Width, and Inflate—all persisted in `.dpp` projects.",
+        "**Blender-Style `Edit Faces` Mode**: Switch between **Brush** and **Edit Faces** inside the floating Sculpt HUD to select faces with **Lasso (`L`)**, **Box (`B`)**, **Paint (`C`)**, and **Island (`I`)**, refine with **Grow (`+`)** / **Shrink (`-`)** / **Select Through (`T`)** / **Mirror X**, and deform using modal **Move (`G`)**, **Scale (`S`)**, and **Inflate (`Alt+S`)** with live **`X` / `Y` / `Z` axis lock**, **Proportional Editing (`O`)**, and `Ctrl+Z` undo.",
+        "#### Expanded Semi-Body Auto-Rig & Air Vent Physics Stress Test",
+        "**Legs & Optional Parts for Semi-Body Rigging**: Added **Coat / Dress** (`Torso + Legs`) and **Full Outfit** presets, an always-visible optional parts row (`Spine`, `Arms`, `Hands`, `Legs`, `Feet`, `Neck`, `Head`), wide-stance leg pin snapping, independent `Conform Arms` / `Conform Legs` toggles, and a compact 3-state **`Hero: Show | Ghost | Hide`** (`H`) toggle in Pin Edit mode.",
+        "**Deadlock Air Vent (`trigger_catapult`) Stress Test**: Added ballistic vent presets (**Vent Mid 35 m/s**, **Vent Endgame 42 m/s**), directional launch modes, and a **Strict 1-Pass Valve Solver** toggle calibrated directly from `dl_midtown.vpk` air vents.",
+        "---",
+        "### Bug Fixes",
+        "####Multi-Accessory Stability",
+        "**Fixed Reference Bone Resets & Stuck Hidden Vanilla Meshes**: Toggling accessory submeshes or exiting Mesh Cut Mode no longer resets manually adjusted Reference Bones; stacked accessories now preserve sibling previews and cuts, and hidden vanilla hero meshes can always be restored.",
+        "#### Physics, Materials & Export Fixes",
+        "**Source 2 `FeJiggleBone` & Collision Parity**: Aligned exported JiggleBone axes, flags, and damping with Source 2 `FeJiggleBone`, expanded `planarize_back` `FeCollisionPlane` coverage across `neck_0` and `spine_1..3`, and enabled Valve-calibrated `AnimStrayRadii` hair leashes.",
+        "**Vertex-Color DMX Export & FBX/Bone Mapping Fixes**: Routed cropped vanilla meshes carrying vertex colors through Source 2 DMX export (`WriteSourceSpaceDmx`), fixed dotted FBX material name separation and sidecar texture discovery, and prioritized `calf`/`forearm` over `knee`/`elbow` during auto-remapping.",
+        "### Known Issues",
+        "** Vanilla Hero Material(s) Turning White on Custom Model Reset** (bug seen on Vindicta's dress)"
+      ]
+    },
     {
       "version": "1.3.6",
       "date": "November 24, 2026",
       "title": "Version 1.3.6 — Bug Fix Update, Rigged Models Cloth Editor & New Weight Painting Tools",
-      "badge": "Latest Release",
-      "badgeType": "gold",
+      "badge": "Release",
+      "badgeType": "slate",
       "videoUrl": "",
       "highlights": [
         "### Bug Fixes",
@@ -219,6 +251,7 @@
     "website": "https://deadlock-playground.pages.dev",
     "github": "https://github.com/juliancz-a/deadlock-playground",
     "releases": "https://github.com/juliancz-a/deadlock-playground/releases",
-    "gamebanana": "https://gamebanana.com/tools/24316"
+    "gamebanana": "https://gamebanana.com/tools/24316",
+    "discord": "https://discord.gg/tWHuT6ywV"
   }
 }

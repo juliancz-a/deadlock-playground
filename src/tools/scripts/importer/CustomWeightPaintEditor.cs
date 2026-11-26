@@ -57,6 +57,7 @@ namespace DeadlockPlayground.Importer
             public bool PaintThrough;
             public SurfaceState HitSurface;
             public int HitVertex;
+            public Vector3 CameraRayOrigin;
             public Vector3 CameraRayDir;
             public HashSet<int> LockedBindIndices;
         }
@@ -500,7 +501,21 @@ namespace DeadlockPlayground.Importer
             Vector3 viewToCam = enforceFrontFacing ? (-options.CameraRayDir.Normalized()) : Vector3.Zero;
             if (isMirrorPass && enforceFrontFacing) viewToCam = new Vector3(-viewToCam.X, viewToCam.Y, viewToCam.Z);
 
+            // True projected X-Ray Paint Through: when PaintThrough is enabled, measure perpendicular distance
+            // to the camera view ray (infinite-depth cylinder like Blender's Projected falloff) so dense/thick
+            // hair or cloth volumes paint all the way through front + interior + back layers!
+            bool useProjectedRay = options.PaintThrough && options.CameraRayDir.LengthSquared() > 1e-6f;
+            Vector3 rayDirNorm = useProjectedRay ? options.CameraRayDir.Normalized() : Vector3.Zero;
+            Vector3 rayOrig = options.CameraRayOrigin;
+            if (useProjectedRay && isMirrorPass)
+            {
+                rayOrig = new Vector3(-rayOrig.X, rayOrig.Y, rayOrig.Z);
+                rayDirNorm = new Vector3(-rayDirNorm.X, rayDirNorm.Y, rayDirNorm.Z).Normalized();
+            }
+
             // Optional Geodesic / Same-Island candidate set (prevents brush from jumping air gaps onto adjacent strands!)
+            // When PaintThrough is ON, keep Same-Island island ID restriction (if enabled) but skip the short
+            // 1.45*r surface-walk cap so back/interior vertices of the same island are always reachable!
             HashSet<int> geodesicAllowed = null;
             int requiredIslandId = -1;
             SurfaceState restrictedSurface = null;
@@ -511,7 +526,10 @@ namespace DeadlockPlayground.Importer
                 requiredIslandId = (restrictedSurface.IslandIds != null && options.HitVertex < restrictedSurface.IslandIds.Length)
                     ? restrictedSurface.IslandIds[options.HitVertex]
                     : -1;
-                geodesicAllowed = CollectGeodesicVertices(restrictedSurface, options.HitVertex, radius * 1.45f);
+                if (!options.PaintThrough)
+                {
+                    geodesicAllowed = CollectGeodesicVertices(restrictedSurface, options.HitVertex, radius * 1.45f);
+                }
             }
 
             foreach (var s in surfaces)
@@ -533,7 +551,19 @@ namespace DeadlockPlayground.Importer
                     if (requiredIslandId >= 0 && s.IslandIds != null && s.IslandIds[v] != requiredIslandId) continue;
                     if (geodesicAllowed != null && !geodesicAllowed.Contains(v)) continue;
 
-                    float dSq = (s.PosedVerts[v] - center).LengthSquared();
+                    float dSq;
+                    if (useProjectedRay)
+                    {
+                        Vector3 rel = s.PosedVerts[v] - rayOrig;
+                        float along = rel.Dot(rayDirNorm);
+                        if (along <= 0.01f) continue; // behind camera
+                        Vector3 perp = rel - rayDirNorm * along;
+                        dSq = perp.LengthSquared();
+                    }
+                    else
+                    {
+                        dSq = (s.PosedVerts[v] - center).LengthSquared();
+                    }
                     if (dSq > rSq) continue;
 
                     if (enforceFrontFacing && s.PosedNorms != null && v < s.PosedNorms.Length &&

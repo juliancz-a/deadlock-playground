@@ -288,6 +288,12 @@ namespace DeadlockPlayground.Workspace
         [JsonPropertyName("kept_part_transforms")]
         public Dictionary<string, WorkspaceKeptPartTransformEntry> KeptOriginalPartTransforms { get; set; }
 
+        [JsonPropertyName("original_mesh_cut_masks")]
+        public Dictionary<string, int[]> OriginalMeshCutMasks { get; set; }
+
+        [JsonPropertyName("imported_mesh_cut_masks")]
+        public Dictionary<string, int[]> ImportedMeshCutMasks { get; set; }
+
         [JsonPropertyName("rig_family_override")]
         public int? RigFamilyOverride { get; set; }
 
@@ -338,6 +344,57 @@ namespace DeadlockPlayground.Workspace
 
         [JsonPropertyName("extra_twist_bones")]
         public bool ExtraTwistBones { get; set; } = false;
+
+        [JsonPropertyName("partial_body_region")]
+        public int PartialBodyRegion { get; set; } = 0;
+
+        [JsonPropertyName("partial_body_engine")]
+        public int PartialBodyEngine { get; set; } = 0;
+
+        [JsonPropertyName("partial_include_spine")]
+        public bool PartialIncludeSpine { get; set; } = true;
+
+        [JsonPropertyName("partial_include_arms")]
+        public bool PartialIncludeArms { get; set; } = true;
+
+        [JsonPropertyName("partial_include_hands")]
+        public bool PartialIncludeHands { get; set; } = false;
+
+        [JsonPropertyName("partial_include_legs")]
+        public bool PartialIncludeLegs { get; set; } = false;
+
+        [JsonPropertyName("partial_include_feet")]
+        public bool PartialIncludeFeet { get; set; } = false;
+
+        [JsonPropertyName("partial_include_neck")]
+        public bool PartialIncludeNeck { get; set; } = false;
+
+        [JsonPropertyName("partial_include_head")]
+        public bool PartialIncludeHead { get; set; } = false;
+
+        [JsonPropertyName("imported_mesh_bottom_flare")]
+        public float ImportedMeshBottomFlare { get; set; } = 0f;
+
+        [JsonPropertyName("imported_mesh_top_flare")]
+        public float ImportedMeshTopFlare { get; set; } = 0f;
+
+        [JsonPropertyName("imported_mesh_inflate_meters")]
+        public float ImportedMeshInflateMeters { get; set; } = 0f;
+
+        [JsonPropertyName("per_mesh_scale_xyz")]
+        public Dictionary<string, float[]> PerMeshScaleXYZ { get; set; } = new();
+
+        [JsonPropertyName("per_mesh_bottom_flare")]
+        public Dictionary<string, float> PerMeshBottomFlare { get; set; } = new();
+
+        [JsonPropertyName("per_mesh_top_flare")]
+        public Dictionary<string, float> PerMeshTopFlare { get; set; } = new();
+
+        [JsonPropertyName("per_mesh_inflate_meters")]
+        public Dictionary<string, float> PerMeshInflateMeters { get; set; } = new();
+
+        [JsonPropertyName("imported_mesh_sculpt_deltas")]
+        public Dictionary<string, WorkspaceHeroSculptEntry> ImportedMeshSculptDeltas { get; set; } = new();
 
         public static WorkspaceCustomModelEntry FromRiggingOptions(
             string relativeModelPath,
@@ -421,8 +478,50 @@ namespace DeadlockPlayground.Workspace
                 FitSpine = o.FitSpine,
                 ConformToSkeleton = o.ConformToSkeleton,
                 LooseMeshesRigid = o.LooseMeshesRigid,
-                ExtraTwistBones = o.ExtraTwistBones
+                ExtraTwistBones = o.ExtraTwistBones,
+                PartialBodyRegion = (int)o.PartialRegion,
+                PartialBodyEngine = (int)o.PartialEngine,
+                PartialIncludeSpine = o.PartialIncludeSpine,
+                PartialIncludeArms = o.PartialIncludeArms,
+                PartialIncludeHands = o.PartialIncludeHands,
+                PartialIncludeLegs = o.PartialIncludeLegs,
+                PartialIncludeFeet = o.PartialIncludeFeet,
+                PartialIncludeNeck = o.PartialIncludeNeck,
+                PartialIncludeHead = o.PartialIncludeHead,
+                ImportedMeshBottomFlare = o.ImportedMeshBottomFlare,
+                ImportedMeshTopFlare = o.ImportedMeshTopFlare,
+                ImportedMeshInflateMeters = o.ImportedMeshInflateMeters,
+                PerMeshScaleXYZ = o.PerMeshScaleXYZ != null
+                    ? o.PerMeshScaleXYZ.ToDictionary(kv => kv.Key, kv => new[] { kv.Value.X, kv.Value.Y, kv.Value.Z })
+                    : new(),
+                PerMeshBottomFlare = o.PerMeshBottomFlare != null ? new Dictionary<string, float>(o.PerMeshBottomFlare) : new(),
+                PerMeshTopFlare = o.PerMeshTopFlare != null ? new Dictionary<string, float>(o.PerMeshTopFlare) : new(),
+                PerMeshInflateMeters = o.PerMeshInflateMeters != null ? new Dictionary<string, float>(o.PerMeshInflateMeters) : new()
             };
+
+            if (o.ImportedMeshSculptDeltas != null && o.ImportedMeshSculptDeltas.Count > 0)
+            {
+                foreach (var kv in o.ImportedMeshSculptDeltas)
+                {
+                    if (kv.Value == null || kv.Value.Count == 0) continue;
+                    var idxArr = new int[kv.Value.Count];
+                    var deltaArr = new float[kv.Value.Count * 3];
+                    int k = 0;
+                    foreach (var vkv in kv.Value)
+                    {
+                        idxArr[k] = vkv.Key;
+                        deltaArr[k * 3 + 0] = vkv.Value.X;
+                        deltaArr[k * 3 + 1] = vkv.Value.Y;
+                        deltaArr[k * 3 + 2] = vkv.Value.Z;
+                        k++;
+                    }
+                    entry.ImportedMeshSculptDeltas[kv.Key] = new WorkspaceHeroSculptEntry
+                    {
+                        VertexIndices = idxArr,
+                        DeltasXyz = deltaArr
+                    };
+                }
+            }
 
             if (o.BoneChains != null && o.BoneChains.Count > 0)
             {
@@ -529,6 +628,24 @@ namespace DeadlockPlayground.Workspace
                         Rot = new[] { kv.Value.RotationDeg.X, kv.Value.RotationDeg.Y, kv.Value.RotationDeg.Z },
                         Scale = kv.Value.Scale > 0.001f ? kv.Value.Scale : 1.0f
                     };
+                }
+            }
+            if (o.OriginalMeshCutMasks != null && o.OriginalMeshCutMasks.Count > 0)
+            {
+                entry.OriginalMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in o.OriginalMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        entry.OriginalMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
+                }
+            }
+            if (o.ImportedMeshCutMasks != null && o.ImportedMeshCutMasks.Count > 0)
+            {
+                entry.ImportedMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in o.ImportedMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        entry.ImportedMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
                 }
             }
 
@@ -701,6 +818,24 @@ namespace DeadlockPlayground.Workspace
                         Scale = kv.Value.Scale > 0.001f ? kv.Value.Scale : 1.0f
                     };
                     if (!xf.IsIdentity) o.KeptOriginalPartTransforms[kv.Key] = xf;
+                }
+            }
+            if (OriginalMeshCutMasks != null && OriginalMeshCutMasks.Count > 0)
+            {
+                o.OriginalMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in OriginalMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        o.OriginalMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
+                }
+            }
+            if (ImportedMeshCutMasks != null && ImportedMeshCutMasks.Count > 0)
+            {
+                o.ImportedMeshCutMasks = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in ImportedMeshCutMasks)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Length >= 2)
+                        o.ImportedMeshCutMasks[kv.Key] = (int[])kv.Value.Clone();
                 }
             }
 
@@ -906,6 +1041,50 @@ namespace DeadlockPlayground.Workspace
             o.ConformToSkeleton = ConformToSkeleton;
             o.LooseMeshesRigid = LooseMeshesRigid;
             o.ExtraTwistBones = ExtraTwistBones;
+            o.PartialRegion = (DeadlockPlayground.Importer.CustomModelAutoRigger.PartialBodyRegion)PartialBodyRegion;
+            o.PartialEngine = (DeadlockPlayground.Importer.CustomModelAutoRigger.PartialBodyEngine)PartialBodyEngine;
+            o.PartialIncludeSpine = PartialIncludeSpine;
+            o.PartialIncludeArms = PartialIncludeArms;
+            o.PartialIncludeHands = PartialIncludeHands;
+            o.PartialIncludeLegs = PartialIncludeLegs;
+            o.PartialIncludeFeet = PartialIncludeFeet;
+            o.PartialIncludeNeck = PartialIncludeNeck;
+            o.PartialIncludeHead = PartialIncludeHead;
+            o.ImportedMeshBottomFlare = ImportedMeshBottomFlare;
+            o.ImportedMeshTopFlare = ImportedMeshTopFlare;
+            o.ImportedMeshInflateMeters = ImportedMeshInflateMeters;
+            if (PerMeshScaleXYZ != null && PerMeshScaleXYZ.Count > 0)
+            {
+                o.PerMeshScaleXYZ = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (k, arr) in PerMeshScaleXYZ)
+                    if (arr != null && arr.Length >= 3)
+                        o.PerMeshScaleXYZ[k] = new Vector3(arr[0], arr[1], arr[2]);
+            }
+            if (PerMeshBottomFlare != null && PerMeshBottomFlare.Count > 0)
+                o.PerMeshBottomFlare = new Dictionary<string, float>(PerMeshBottomFlare, StringComparer.OrdinalIgnoreCase);
+            if (PerMeshTopFlare != null && PerMeshTopFlare.Count > 0)
+                o.PerMeshTopFlare = new Dictionary<string, float>(PerMeshTopFlare, StringComparer.OrdinalIgnoreCase);
+            if (PerMeshInflateMeters != null && PerMeshInflateMeters.Count > 0)
+                o.PerMeshInflateMeters = new Dictionary<string, float>(PerMeshInflateMeters, StringComparer.OrdinalIgnoreCase);
+            if (ImportedMeshSculptDeltas != null && ImportedMeshSculptDeltas.Count > 0)
+            {
+                o.ImportedMeshSculptDeltas = new Dictionary<string, Dictionary<int, Vector3>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in ImportedMeshSculptDeltas)
+                {
+                    if (string.IsNullOrEmpty(kv.Key) || kv.Value?.VertexIndices == null || kv.Value.DeltasXyz == null) continue;
+                    int count = Math.Min(kv.Value.VertexIndices.Length, kv.Value.DeltasXyz.Length / 3);
+                    if (count <= 0) continue;
+                    var map = new Dictionary<int, Vector3>(count);
+                    for (int k = 0; k < count; k++)
+                    {
+                        map[kv.Value.VertexIndices[k]] = new Vector3(
+                            kv.Value.DeltasXyz[k * 3 + 0],
+                            kv.Value.DeltasXyz[k * 3 + 1],
+                            kv.Value.DeltasXyz[k * 3 + 2]);
+                    }
+                    o.ImportedMeshSculptDeltas[kv.Key] = map;
+                }
+            }
             if (BodyCollisionCapsules != null)
             {
                 foreach (var cap in BodyCollisionCapsules)
@@ -2506,12 +2685,53 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                 File.Copy(sourceModelFilePath, destDiskPath, overwrite: true);
             }
 
-            if (!sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+            bool isGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+            bool isFbx = sourceModelFilePath.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase);
+            if (!isGltf && !isFbx)
                 return;
 
             string srcDir = Path.GetDirectoryName(sourceModelFilePath);
             if (string.IsNullOrEmpty(srcDir) || !Directory.Exists(srcDir))
                 return;
+
+            if (isFbx)
+            {
+                // Bundle external FBX texture sidecars (<model>.fbm, textures/, Textures/, and sibling image files)
+                // so saved .dpp projects remain 100% self-contained and never turn white on reload.
+                try
+                {
+                    var imgExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                        { ".png", ".tga", ".jpg", ".jpeg", ".webp", ".bmp", ".dds" };
+
+                    void CopyImageDir(string srcSubDir, string destSubDir, int maxFiles)
+                    {
+                        if (!Directory.Exists(srcSubDir)) return;
+                        int copied = 0;
+                        foreach (string file in Directory.EnumerateFiles(srcSubDir))
+                        {
+                            if (copied >= maxFiles) break;
+                            if (!imgExts.Contains(Path.GetExtension(file))) continue;
+                            Directory.CreateDirectory(destSubDir);
+                            string target = Path.Combine(destSubDir, Path.GetFileName(file));
+                            if (!string.Equals(Path.GetFullPath(file), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+                                File.Copy(file, target, overwrite: true);
+                            copied++;
+                        }
+                    }
+
+                    string srcStem = Path.GetFileNameWithoutExtension(sourceModelFilePath);
+                    string stagedStem = Path.GetFileNameWithoutExtension(stagedFileName);
+                    CopyImageDir(Path.Combine(srcDir, srcStem + ".fbm"), Path.Combine(destDir, stagedStem + ".fbm"), 48);
+                    CopyImageDir(Path.Combine(srcDir, "textures"), Path.Combine(destDir, "textures"), 48);
+                    CopyImageDir(Path.Combine(srcDir, "Textures"), Path.Combine(destDir, "Textures"), 48);
+                    CopyImageDir(srcDir, destDir, 32);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[ModWorkspaceSession] Warning copying external .fbx textures for '{sourceModelFilePath}': {ex.Message}");
+                }
+                return;
+            }
 
             try
             {
@@ -2628,10 +2848,11 @@ public Godot.Animation LoadStagedAnimationToGodot(WorkspaceAnimationEntry entry,
                     cleanLeaf = cleanLeaf[(safeHero.Length + 1)..];
                 string stagedFileName = $"{safeHero}_{cleanLeaf}";
 
-                // Multi-file .gltf scenes get a dedicated per-hero subfolder so external scene.bin / textures never collide.
-                bool isMultiFileGltf = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
-                string destDir = isMultiFileGltf ? Path.Combine(CustomModelsDir, $"{safeHero}_model") : CustomModelsDir;
-                string relPath = isMultiFileGltf
+                // Multi-file .gltf and .fbx scenes get a dedicated per-hero subfolder so external scene.bin / textures never collide.
+                bool needsSubfolder = sourceModelFilePath.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase) ||
+                                      sourceModelFilePath.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase);
+                string destDir = needsSubfolder ? Path.Combine(CustomModelsDir, $"{safeHero}_model") : CustomModelsDir;
+                string relPath = needsSubfolder
                     ? Path.Combine("custom_models", $"{safeHero}_model", stagedFileName).Replace('\\', '/')
                     : Path.Combine("custom_models", stagedFileName).Replace('\\', '/');
 

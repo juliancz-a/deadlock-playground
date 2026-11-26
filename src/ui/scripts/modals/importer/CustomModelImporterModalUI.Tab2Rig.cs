@@ -160,7 +160,7 @@ namespace DeadlockPlayground.UI
             accRigBtnRow.AddThemeConstantOverride("separation", 8);
             var btnJumpPhys = new Button { Text = "Configure Physics Chains →", ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(0, 36), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             btnJumpPhys.Pressed += () => { if (_rightTabs != null && _rightTabs.GetTabCount() > 2) _rightTabs.CurrentTab = 2; SetBonesSubView(2); };
-            var btnEnableSkin = new Button { Text = "Use Full-Body Skinning", ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(0, 36), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            var btnEnableSkin = new Button { Text = "Use Clothing / Partial-Body Rig", ThemeTypeVariation = "ToolbarButton", CustomMinimumSize = new Vector2(0, 36), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             btnEnableSkin.Pressed += () =>
             {
                 if (_optAccBoneMode != null)
@@ -170,6 +170,12 @@ namespace DeadlockPlayground.UI
                         if (_optAccBoneMode.GetItemId(i) == (int)AccessoryBoneMode.SkinToHero)
                         {
                             _optAccBoneMode.Select(i);
+                            var srcSkel = GetValidSourceSkeleton();
+                            bool hasSrcRig = srcSkel != null && srcSkel.GetBoneCount() > 0;
+                            if (!hasSrcRig && GetCurrentRiggingMethod() == CustomModelAutoRigger.RiggingMethod.RigidSingleBone)
+                            {
+                                SelectRiggingMethodById((int)CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig);
+                            }
                             UpdateAccessoryRigVisibility();
                             TriggerRealtimeRigUpdate();
                             break;
@@ -397,6 +403,10 @@ namespace DeadlockPlayground.UI
             AddQuickBoneChip("Hand L", "hand_L", "weapon_hand_L");
             rigidBody.AddChild(quickBoneFlow);
             box.AddChild(rigidCard);
+
+            // Clothing / Partial-Body Auto-Rig Setup Card (shown when PartialBodyAutoRig is selected)
+            _boxPartialBodyPanel = BuildPartialBodyRigPanel();
+            box.AddChild(_boxPartialBodyPanel);
 
             return box;
         }
@@ -1268,6 +1278,24 @@ namespace DeadlockPlayground.UI
         private void SetTab2SubView(int idx)
         {
             _tab2SubView = Math.Clamp(idx, 0, 3);
+            var method = GetCurrentRiggingMethod();
+            bool supportsPins = method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig ||
+                                (method == CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig &&
+                                 _partialBodyEngine == CustomModelAutoRigger.PartialBodyEngine.SemiBodyPins);
+            if (supportsPins)
+            {
+                if (_tab2SubView == 1)
+                {
+                    _isEditReferenceBonesMode = true;
+                    EnsureReferenceRigInitialized(false);
+                }
+                else if (_tab2SubView == 0 || _tab2SubView == 3)
+                {
+                    _isEditReferenceBonesMode = false;
+                }
+                SyncPartialBodyUiState();
+                ApplyLandmarkPreviewState();
+            }
             UpdateTab2SectionVisibility();
         }
 
@@ -1585,6 +1613,35 @@ namespace DeadlockPlayground.UI
 
             row1.AddChild(MakeHudSep());
 
+            // Group C2: Compact 3-state Original Hero Mesh visibility toggle (Show | Ghost | Hide, shortcut: H)
+            var lblHeroVis = new Label
+            {
+                Text = "Hero:",
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                AutowrapMode = TextServer.AutowrapMode.Off,
+                TooltipText = "Original hero mesh visibility while editing pins (Shortcut: H)"
+            };
+            ImporterStyle.ApplyHintStyle(lblHeroVis, wrap: false);
+            row1.AddChild(lblHeroVis);
+
+            string[] heroVisLabels = { "Show", "Ghost", "Hide" };
+            string[] heroVisTips =
+            {
+                "Show original hero mesh in full color (Shortcut: H)",
+                "Show original hero mesh as translucent ghost silhouette (Shortcut: H)",
+                "Hide original hero mesh completely for unobstructed pin editing (Shortcut: H)"
+            };
+            for (int hv = 0; hv < 3; hv++)
+            {
+                int modeIdx = hv;
+                var hb = MakeHudBtn(heroVisLabels[hv], hv == 1 ? 44 : 40, 24, toggle: true, pressed: hv == _pinEditHeroVisMode, tip: heroVisTips[hv]);
+                hb.Pressed += () => SetPinEditHeroVisMode(modeIdx);
+                _hudHeroVisBtns[hv] = hb;
+                row1.AddChild(hb);
+            }
+
+            row1.AddChild(MakeHudSep());
+
             // Group D: Primary Action (Bind — highlighted green only once placement is ready!)
             _btnRefHudBind = MakeHudBtn("Bind", 58, 26, variation: "ImporterPrimaryButton", tip: "Compute geodesic weights and bind the character to Deadlock.");
             _btnRefHudBind.Pressed += OnBindReferenceRigPressed;
@@ -1602,7 +1659,7 @@ namespace DeadlockPlayground.UI
             bottomOverlayMargin.AddThemeConstantOverride("margin_left", 12);
             bottomOverlayMargin.AddThemeConstantOverride("margin_right", 12);
             bottomOverlayMargin.AddThemeConstantOverride("margin_top", 8);
-            bottomOverlayMargin.AddThemeConstantOverride("margin_bottom", 10);
+            bottomOverlayMargin.AddThemeConstantOverride("margin_bottom", 48);
             viewportPanel.AddChild(bottomOverlayMargin);
 
             var bottomHud = new PanelContainer
@@ -1792,6 +1849,10 @@ namespace DeadlockPlayground.UI
             if (_btnRefHudUndo != null) _btnRefHudUndo.Disabled = _refRigUndoStack.Count == 0;
             if (_btnRefHudRedo != null) _btnRefHudRedo.Disabled = _refRigRedoStack.Count == 0;
             ApplyHudSubtleToggleVisual(_btnRefHudMirror, _chkMirrorPins?.ButtonPressed ?? true);
+            for (int hv = 0; hv < _hudHeroVisBtns.Length; hv++)
+            {
+                ApplyHudSubtleToggleVisual(_hudHeroVisBtns[hv], hv == _pinEditHeroVisMode);
+            }
 
             bool prev = _isSyncingRefRigUi;
             _isSyncingRefRigUi = true;
@@ -1847,18 +1908,23 @@ namespace DeadlockPlayground.UI
             var method = GetCurrentRiggingMethod();
             bool isPreRigged = method == CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap;
             bool isAutoRig = method == CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig;
+            bool isPartialBody = method == CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig;
+            bool isPartialPins = isPartialBody && _partialBodyEngine == CustomModelAutoRigger.PartialBodyEngine.SemiBodyPins;
             bool isRigid = method == CustomModelAutoRigger.RiggingMethod.RigidSingleBone;
             bool isKnn = method == CustomModelAutoRigger.RiggingMethod.KnnSurfaceProjection;
 
             if (_boxRigFamilyRow != null) _boxRigFamilyRow.Visible = isPreRigged;
             if (_boxRigidBone != null) _boxRigidBone.Visible = isRigid;
+            if (_boxPartialBodyPanel != null) _boxPartialBodyPanel.Visible = isPartialBody;
             if (_boxKnnParameters != null) _boxKnnParameters.Visible = isKnn;
 
             // Update sticky top bar buttons dynamically for the active rigging mode
-            if (_boxTab2SubNav != null) _boxTab2SubNav.Visible = !isRigid;
-            if (isAutoRig)
+            if (_boxTab2SubNav != null) _boxTab2SubNav.Visible = !isRigid && !(isPartialBody && !isPartialPins);
+            if (isAutoRig || isPartialPins)
             {
-                string[] labels = { "Mode", "Reference Rig", "Cloth", "Pose Fit" };
+                string[] labels = isPartialPins
+                    ? new[] { "Mode & Region", "Region Pins", "Cloth", "Pose Fit" }
+                    : new[] { "Mode", "Reference Rig", "Cloth", "Pose Fit" };
                 for (int i = 0; i < 4; i++)
                 {
                     if (_tab2SubButtons[i] == null) continue;
@@ -1874,6 +1940,16 @@ namespace DeadlockPlayground.UI
                 if (_boxTab2PagePoseFit != null) _boxTab2PagePoseFit.Visible = _tab2SubView == 3;
                 if (_boxTab2PageHandsPreRigged != null) _boxTab2PageHandsPreRigged.Visible = false;
                 if (_boxTab2PageFooterLinks != null) _boxTab2PageFooterLinks.Visible = _tab2SubView == 0;
+            }
+            else if (isPartialBody) // PartialBodyAutoRig + HeroBodyTransfer (all controls inline on Mode page)
+            {
+                _tab2SubView = 0;
+                if (_boxTab2PageMode != null) _boxTab2PageMode.Visible = true;
+                if (_boxRefRigWorkspace != null) _boxRefRigWorkspace.Visible = false;
+                if (_boxTab2PageRefCloth != null) _boxTab2PageRefCloth.Visible = false;
+                if (_boxTab2PagePoseFit != null) _boxTab2PagePoseFit.Visible = false;
+                if (_boxTab2PageHandsPreRigged != null) _boxTab2PageHandsPreRigged.Visible = false;
+                if (_boxTab2PageFooterLinks != null) _boxTab2PageFooterLinks.Visible = true;
             }
             else if (isPreRigged || isKnn)
             {
@@ -1911,6 +1987,7 @@ namespace DeadlockPlayground.UI
             if (_rigMethodCards != null && !isKnn)
                 _rigMethodCards.Select((int)method);
             SyncEditBindButtonVisuals();
+            SyncPartialBodyUiState();
         }
 
         private void OnPoseFitPresetSelected(long idx)
@@ -1933,6 +2010,7 @@ namespace DeadlockPlayground.UI
             var selectedMethod = _optRiggingMethod != null && _optRiggingMethod.Selected >= 0
                 ? (CustomModelAutoRigger.RiggingMethod)_optRiggingMethod.GetItemId(_optRiggingMethod.Selected)
                 : (hasRig ? CustomModelAutoRigger.RiggingMethod.PreRiggedSkeletonRemap : CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig);
+            bool isAccessoryFlow = _workflowIntent == ImportWorkflowIntent.AccessoryAddOrReplace;
 
             var options = new List<OptionCardGroup.OptionDef>();
             if (hasRig)
@@ -1948,11 +2026,19 @@ namespace DeadlockPlayground.UI
             }
             options.Add(new OptionCardGroup.OptionDef
             {
+                Id = (int)CustomModelAutoRigger.RiggingMethod.PartialBodyAutoRig,
+                Title = "Clothing / Partial-Body Auto-Rig",
+                Description = "Best for sweaters, jackets, pants & armor: semi-body 3D pins or region-scoped hero transfer.",
+                IconPath = "res://assets/at-icons/layers.svg",
+                Recommended = !hasRig && isAccessoryFlow
+            });
+            options.Add(new OptionCardGroup.OptionDef
+            {
                 Id = (int)CustomModelAutoRigger.RiggingMethod.LandmarkAutoRig,
-                Title = "Auto-Rig (Reference Bones)",
-                Description = "Auto-Rig Pro workflow: edit modular spine, fingers & cloth bones in 3D, then Bind.",
+                Title = "Auto-Rig (Full Body Reference Bones)",
+                Description = "Auto-Rig Pro workflow: edit full-body spine, fingers & cloth bones in 3D, then Bind.",
                 IconPath = "res://assets/at-icons/sparkles.svg",
-                Recommended = !hasRig
+                Recommended = !hasRig && !isAccessoryFlow
             });
             options.Add(new OptionCardGroup.OptionDef
             {

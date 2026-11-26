@@ -884,7 +884,9 @@ namespace DeadlockPlayground.Animation
                     string cLeg = CleanBoneName(sourceSkeleton.GetBoneName(legIdx), stripTrailingGltfIndex: true);
                     if (cLeg != legToken && cLeg != legToken.Replace("_", "")) continue;
 
-                    // Look for a direct or nested child matching knee/calf/shin under this bare "Left/Right leg"
+                    // Look for a direct or nested child matching calf/shin/lowerleg (preferred) or knee (fallback)
+                    // under this bare "Left/Right leg"
+                    int preferredIdx = -1;
                     int kneeIdx = -1;
                     var q = new Queue<int>();
                     foreach (int ch in children[legIdx]) q.Enqueue(ch);
@@ -892,19 +894,23 @@ namespace DeadlockPlayground.Animation
                     {
                         int cur = q.Dequeue();
                         string cc = CleanBoneName(sourceSkeleton.GetBoneName(cur), stripTrailingGltfIndex: true);
-                        if (cc == kneeToken || cc == kneeToken.Replace("_", "") || cc == calfToken ||
-                            cc.Contains("knee") || cc.Contains("shin") || cc.Contains("calf"))
+                        if (cc.Contains("shin") || cc.Contains("calf") || cc.Contains("lowerleg") || cc.Contains("lower_leg"))
+                        {
+                            preferredIdx = cur;
+                            break;
+                        }
+                        if (kneeIdx < 0 && (cc == kneeToken || cc == kneeToken.Replace("_", "") || cc == calfToken || cc.Contains("knee")))
                         {
                             kneeIdx = cur;
-                            break;
                         }
                         foreach (int ch in children[cur]) q.Enqueue(ch);
                     }
 
-                    if (kneeIdx >= 0)
+                    int chosenLower = preferredIdx >= 0 ? preferredIdx : kneeIdx;
+                    if (chosenLower >= 0)
                     {
                         mapping[tgtUpper] = sourceSkeleton.GetBoneName(legIdx);
-                        mapping[tgtLower] = sourceSkeleton.GetBoneName(kneeIdx);
+                        mapping[tgtLower] = sourceSkeleton.GetBoneName(chosenLower);
                         break;
                     }
                 }

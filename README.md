@@ -43,7 +43,7 @@
 
 **Deadlock Playground** is a free, open-source desktop workspace built in **Godot 4.7.2 (.NET 11 / C#)** that runs 100% locally and offline. Designed for *Deadlock* modders, skin artists, 3D modelers, animators, and content creators, it connects directly to your local Deadlock installation (`pak01_dir.vpk` and installed `.vpk` addons) without requiring manual decompilation into Blender just to paint skins, attach hats/outfits, swap hero models, tweak animations, or compile `.vpk` mods.
 
-> *AI assistance was used while developing the codebase for this project. Features are actively evolving—please report bugs or edge cases via GitHub Issues or on Discord (`juliancz_`).*
+> *AI assistance was used while developing the codebase for this project. Features are actively evolving—please report bugs or edge cases via GitHub Issues or on our [official Discord](https://discord.gg/tWHuT6ywV).*
 
 ---
 

@@ -1067,7 +1067,9 @@ public partial class PaintTabUI : VBoxContainer
             _layerManager?.CleanupHeroAtlas();
 
             var prevLoader = GetVpkLoader();
-            prevLoader?.ReleaseAddonFileLocks();
+            // Clear any previously mounted Mod Gallery addon VPK so loading a .dpp project
+            // loads the authentic vanilla base hero (never mounting a stale replacement VPK as the ghost!).
+            prevLoader?.SetActiveAddon(null, null);
             _layerManager?.ClearAllLayers();
 
             // 2. Descomprimir el proyecto limpio en el workspace
@@ -1098,6 +1100,16 @@ public partial class PaintTabUI : VBoxContainer
             var vpkLoader = GetVpkLoader();
             if (vpkLoader != null && !string.IsNullOrEmpty(targetHero))
             {
+                // Restore the project's own source addon VPK ONLY if explicitly saved on this hero entry
+                // (leaving AddonVpkPath empty for standard vanilla-base custom model projects like bajimodel3.dpp).
+                if (manifest?.Heroes != null &&
+                    manifest.Heroes.TryGetValue(targetHero, out var targetHeroMeta) &&
+                    !string.IsNullOrWhiteSpace(targetHeroMeta?.SourceAddonVpkPath) &&
+                    System.IO.File.Exists(targetHeroMeta.SourceAddonVpkPath))
+                {
+                    vpkLoader.SetActiveAddon(targetHeroMeta.SourceAddonVpkPath);
+                }
+
                 var stage = GetOrCreateParticleStage();
                 if (stage != null && stage.HasActiveParticle)
                 {
@@ -1132,26 +1144,23 @@ public partial class PaintTabUI : VBoxContainer
                         vpkLoader.CurrentHeroNode != null)
                     {
                         var charTab = GetTree()?.Root?.FindChild("CharacterTab", true, false) as CharacterTabUI;
-                        bool restoredCustom = charTab?.RestoreCustomModelFromWorkspace(vpkLoader.CurrentHeroNode, targetHero) ?? false;
+                        bool restoredCustom = charTab != null
+                            ? await charTab.RestoreCustomModelFromWorkspaceAsync(vpkLoader.CurrentHeroNode, targetHero)
+                            : false;
 
                         // Wait one frame so newly bound custom MeshInstance3D nodes and deferred HeroLoaded callbacks settle,
-                        // then immediately hydrate staged painted textures/layers so custom models never appear white on load.
+                        // then re-initialize the material hierarchy and hydrate any staged painted textures/layers
+                        // so custom models (including FBX) always keep distinct submeshes & textures on .dpp reload.
                         if (restoredCustom)
                         {
                             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                             if (vpkLoader.CurrentHeroNode != null && GodotObject.IsInstanceValid(vpkLoader.CurrentHeroNode))
                             {
-                                bool hasStagedPaint = restoredHeroEntry.Assets != null && restoredHeroEntry.Assets.Any(a =>
-                                    a != null && ((a.ModifiedTextures != null && a.ModifiedTextures.Count > 0) ||
-                                                  (a.Materials != null && a.Materials.Count > 0)));
-                                if (hasStagedPaint)
+                                SetHero(vpkLoader.CurrentHeroNode);
+                                _layerManager?.ApplyOverlayParametersToMeshes();
+                                if (!IsTabActive)
                                 {
-                                    SetHero(vpkLoader.CurrentHeroNode);
-                                    _layerManager?.ApplyOverlayParametersToMeshes();
-                                    if (!IsTabActive)
-                                    {
-                                        _meshHierarchy?.ApplyToonShading(true);
-                                    }
+                                    _meshHierarchy?.ApplyToonShading(true);
                                 }
                             }
                         }
