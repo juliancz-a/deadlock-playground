@@ -1,15 +1,26 @@
 {
-  "latestVersion": "1.3.7",
-  "publishedAt": "2026-11-26T04:28:47Z",
-  "title": "Version 1.3.7 — Per-Mesh Sculpt & Blender-Style Face Edit,  Physics Parity & Bug Fixes",
-  "markdown": "### Version 1.3.7 — Per-Mesh Sculpt & Blender-Style Face Edit, Physics Parity & Bug Fixes\n\n## New Discord\nI've set up a Discord server where you can share bug reports and ideas for the future of the app. It would help me keep everything more organized. You’re all invited to join!\n* Link: [https://discord.gg/tWHuT6ywV](https://discord.gg/tWHuT6ywV)\n\n### New Features & UI Improvements\n\n#### Redesigned 3D Importer Viewport & Floating Overlays\n* **Grouped Top Bar**: Reorganized the global viewport toolbar into grouped **Display**, **Rig Diagnostics**, and **3D Gizmo** sections with contextual `On Top` visibility. Moved `Front | Side | 3/4 | Frame` into a compact **Bottom-Right Camera Pill** stacked cleanly below the **Physics Stress Test** popover.\n* **Floating 3D Weapon / Socket Fit HUD**: Slimmed `Socket / Weapon` cards in `4. Meshes` to a compact summary + **Fit Weapon / Socket in 3D** button that opens a dedicated floating viewport overlay (`Bone`, `Replaces`, `Fit`, `Snap Grip`, `Straighten`, live `Pitch/Yaw/Roll`, `X/Y/Z`, `Scale`, and quick presets) with automatic 3D Weapon Gizmo activation.\n\n#### Per-Mesh 3D Sculpt, Non-Uniform Scale & Blender-Style Face Edit\n* **Per-Mesh `Sculpt` & `Scale/Fit ▾` Drawer**: Launch 3D Sculpt Mode directly from any submesh card (`MeshThumbCard`) with an active-edits badge, live `Target` selector, `Isolate` toggle, and a collapsible **`Scale/Fit ▾`** drawer for per-mesh Non-Uniform Scale (`SX/SY/SZ`), Bottom Flare, Top Width, and Inflate—all persisted in `.dpp` projects.\n* **Blender-Style `Edit Faces` Mode**: Switch between **Brush** and **Edit Faces** inside the floating Sculpt HUD to select faces with **Lasso (`L`)**, **Box (`B`)**, **Paint (`C`)**, and **Island (`I`)**, refine with **Grow (`+`)** / **Shrink (`-`)** / **Select Through (`T`)** / **Mirror X**, and deform using modal **Move (`G`)**, **Scale (`S`)**, and **Inflate (`Alt+S`)** with live **`X` / `Y` / `Z` axis lock**, **Proportional Editing (`O`)**, and `Ctrl+Z` undo.\n\n#### Expanded Semi-Body Auto-Rig & Air Vent Physics Stress Test\n* **Legs & Optional Parts for Semi-Body Rigging**: Added **Coat / Dress** (`Torso + Legs`) and **Full Outfit** presets, an always-visible optional parts row (`Spine`, `Arms`, `Hands`, `Legs`, `Feet`, `Neck`, `Head`), wide-stance leg pin snapping, independent `Conform Arms` / `Conform Legs` toggles, and a compact 3-state **`Hero: Show | Ghost | Hide`** (`H`) toggle in Pin Edit mode.\n* **Deadlock Air Vent (`trigger_catapult`) Stress Test**: Added ballistic vent presets (**Vent Mid 35 m/s**, **Vent Endgame 42 m/s**), directional launch modes, and a **Strict 1-Pass Valve Solver** toggle calibrated directly from `dl_midtown.vpk` air vents.\n\n---\n\n### Bug Fixes\n\n#### Multi-Accessory Stability\n* **Fixed Reference Bone Resets & Stuck Hidden Vanilla Meshes**: Toggling accessory submeshes or exiting Mesh Cut Mode no longer resets manually adjusted Reference Bones; stacked accessories now preserve sibling previews and cuts, and hidden vanilla hero meshes can always be restored.\n\n#### Physics, Materials & Export Fixes\n* **Source 2 `FeJiggleBone` & Collision Parity**: Aligned exported JiggleBone axes, flags, and damping with Source 2 `FeJiggleBone`, expanded `planarize_back` `FeCollisionPlane` coverage across `neck_0` and `spine_1..3`, and enabled Valve-calibrated `AnimStrayRadii` hair leashes.\n* **Vertex-Color DMX Export & FBX/Bone Mapping Fixes**: Routed cropped vanilla meshes carrying vertex colors through Source 2 DMX export (`WriteSourceSpaceDmx`), fixed dotted FBX material name separation and sidecar texture discovery, and prioritized `calf`/`forearm` over `knee`/`elbow` during auto-remapping.\n\n### Known Issues\n* **Vanilla Hero Material(s) Turning White on Custom Model Reset** (bug seen on Vindicta's dress)",
+  "latestVersion": "1.3.7.1",
+  "publishedAt": "2026-11-26T20:34:00Z",
+  "title": "Version 1.3.7.1 — Fixed Wrong/White/Transparent Exported Textures on Vertex-Colored Heroes",
+  "markdown": "### Version 1.3.7.1 — Fixed Wrong/White/Transparent Exported Textures on Vertex-Colored Heroes\n\n* Fixed a v1.3.7 regression in the new Source 2 DMX exporter (WriteSourceSpaceDmx) where UVs were flipped (1 - v) while flipVCoordinates = false was set, causing upside-down UVs in-game on Graves and any hero exporting kept/cropped vertex-colored vanilla surfaces.",
   "history": [
+    {
+      "version": "1.3.7.1",
+      "date": "November 26, 2026",
+      "title": "Version 1.3.7.1 — Fixed Wrong/White/Transparent Exported Textures on Vertex-Colored Heroes",
+      "badge": "Latest Release",
+      "badgeType": "gold",
+      "videoUrl": "",
+      "highlights": [
+        "Fixed a v1.3.7 regression in the new Source 2 DMX exporter (WriteSourceSpaceDmx) where UVs were flipped (1 - v) while flipVCoordinates = false was set, causing upside-down UVs in-game on Graves and any hero exporting kept/cropped vertex-colored vanilla surfaces."
+      ]
+    },
     {
       "version": "1.3.7",
       "date": "November 26, 2026",
       "title": "Version 1.3.7 — Per-Mesh Sculpt & Blender-Style Face Edit,  Physics Parity & Bug Fixes",
-      "badge": "Latest Release",
-      "badgeType": "gold",
+      "badge": "Release",
+      "badgeType": "slate",
       "videoUrl": "",
       "highlights": [
         "## New Discord",
