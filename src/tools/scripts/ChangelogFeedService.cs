@@ -165,7 +165,8 @@ public static class ChangelogFeedService
             {
                 ["website"] = "https://deadlock-playground.top/",
                 ["github"] = "https://github.com/juliancz-a/deadlock-playground",
-                ["gamebanana"] = "https://gamebanana.com/tools/24316"
+                ["gamebanana"] = "https://gamebanana.com/tools/24316",
+                ["discord"] = ChangelogModalUI.DefaultDiscordUrl
             }
         };
 

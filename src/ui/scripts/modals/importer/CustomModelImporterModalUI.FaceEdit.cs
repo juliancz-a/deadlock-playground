@@ -48,8 +48,11 @@ namespace DeadlockPlayground.UI
         private Vector3 _faceEditTransformPivotWorld;
         private Vector3 _faceEditTransformStartHitWorld;
         private Vector3 _faceEditTransformPlaneNormal;
+        private bool _faceEditTransformNeedsAnchor;
+        private bool _faceEditMirrorMoveSymmetric;
+        private float _faceEditMirrorDragSign = 1f;
         private Dictionary<string, Dictionary<int, Vector3>> _faceEditPreTransformDeltas;
-        private readonly List<(ImpSculptSurfaceCache Cache, int VertIdx, float Weight, Vector3 InitialDelta, Vector3 StartWorldPos, Vector3 StartWorldNorm)> _faceEditAffectedVerts = new();
+        private readonly List<(ImpSculptSurfaceCache Cache, int VertIdx, float Weight, Vector3 InitialDelta, Vector3 StartWorldPos, Vector3 StartWorldNorm, float HeroX)> _faceEditAffectedVerts = new();
 
         private MeshInstance3D _faceEditOverlay3D;
         private MeshInstance3D _faceEditAxisLine3D;
@@ -237,11 +240,12 @@ namespace DeadlockPlayground.UI
                 : Transform3D.Identity;
             Transform3D heroInv = heroGlobal.AffineInverse();
 
-            // Gather selected vertices & compute centroid
+            // Gather selected vertices (including coincident UV-seam twins so seams NEVER tear!) & compute centroid
             var selectedVertsByCache = new Dictionary<ImpSculptSurfaceCache, HashSet<int>>();
             var selWorldPts = new List<Vector3>();
             Vector3 pivotSum = Vector3.Zero;
             int pivotCnt = 0;
+            bool hasPosHeroX = false, hasNegHeroX = false;
 
             foreach (var (c, triSet) in _faceEditSelectedTris)
             {
@@ -251,9 +255,15 @@ namespace DeadlockPlayground.UI
                 {
                     int o = t * 3;
                     if (o + 2 >= c.Indices.Length) continue;
-                    vSet.Add(c.Indices[o]);
-                    vSet.Add(c.Indices[o + 1]);
-                    vSet.Add(c.Indices[o + 2]);
+                    for (int k = 0; k < 3; k++)
+                    {
+                        int vi = c.Indices[o + k];
+                        if (vSet.Add(vi) && c.WeldSiblings != null && (uint)vi < (uint)c.WeldSiblings.Length)
+                        {
+                            var sibs = c.WeldSiblings[vi];
+                            for (int si = 0; si < sibs.Length; si++) vSet.Add(sibs[si]);
+                        }
+                    }
                 }
                 selectedVertsByCache[c] = vSet;
                 foreach (int v in vSet)
@@ -264,6 +274,9 @@ namespace DeadlockPlayground.UI
                         pivotSum += wp;
                         pivotCnt++;
                         selWorldPts.Add(wp);
+                        float hx = (heroInv * wp).X;
+                        if (hx > 0.015f) hasPosHeroX = true;
+                        else if (hx < -0.015f) hasNegHeroX = true;
                     }
                 }
             }
@@ -273,8 +286,9 @@ namespace DeadlockPlayground.UI
                 return;
             }
             _faceEditTransformPivotWorld = pivotSum / pivotCnt;
+            _faceEditMirrorMoveSymmetric = mirrorX && hasPosHeroX && hasNegHeroX;
 
-            // Compute proportional falloff weights (1.0 on selected verts, smoothstep within _faceEditPropRadius if Proportional Editing is ON)
+            // Compute proportional falloff weights (1.0 on selected verts & their seam twins, smoothstep within _faceEditPropRadius if Proportional Editing is ON)
             float propR = MathF.Max(0.01f, _faceEditPropRadius);
             float propRSq = propR * propR;
             foreach (var c in _impSculptCaches)
@@ -308,20 +322,28 @@ namespace DeadlockPlayground.UI
                     if (w > 1e-4f)
                     {
                         Vector3 initD = (existingMap != null && existingMap.TryGetValue(v, out var d)) ? d : Vector3.Zero;
-                        _faceEditAffectedVerts.Add((c, v, w, initD, c.CurrentWorldVerts[v], c.CurrentWorldNorms[v]));
+                        Vector3 wn = (c.WeldedWorldNorms != null && v < c.WeldedWorldNorms.Length)
+                            ? c.WeldedWorldNorms[v]
+                            : c.CurrentWorldNorms[v];
+                        float hx = (heroInv * c.CurrentWorldVerts[v]).X;
+                        _faceEditAffectedVerts.Add((c, v, w, initD, c.CurrentWorldVerts[v], wn, hx));
                     }
                 }
             }
 
-            Vector2 mousePos = startMouseOverride ?? _subViewportContainer?.GetLocalMousePosition() ?? Vector2.Zero;
-            _faceEditTransformStartMouse = mousePos;
             _faceEditTransformPlaneNormal = (-_previewCamera.GlobalTransform.Basis.Z).Normalized();
-            Vector3 rOrig = _previewCamera.ProjectRayOrigin(mousePos);
-            Vector3 rDir = _previewCamera.ProjectRayNormal(mousePos);
-            float denom = rDir.Dot(_faceEditTransformPlaneNormal);
-            _faceEditTransformStartHitWorld = MathF.Abs(denom) > 1e-5f
-                ? rOrig + rDir * ((_faceEditTransformPivotWorld - rOrig).Dot(_faceEditTransformPlaneNormal) / denom)
-                : _faceEditTransformPivotWorld;
+            if (startMouseOverride.HasValue)
+            {
+                _faceEditTransformNeedsAnchor = false;
+                AnchorFaceEditTransformMouse(startMouseOverride.Value);
+            }
+            else
+            {
+                // Anchor on first viewport mouse motion so clicking the top HUD Move/Scale/Inflate button never causes an instant jump!
+                _faceEditTransformNeedsAnchor = true;
+                _faceEditTransformStartMouse = Vector2.Zero;
+                _faceEditTransformStartHitWorld = _faceEditTransformPivotWorld;
+            }
 
             RefreshFaceEditOverlay3D();
             UpdateFaceEditAxisGuideVisual();
@@ -329,10 +351,34 @@ namespace DeadlockPlayground.UI
             SetBottomStatus($"{mode} Faces — Drag mouse, press X/Y/Z for axis lock, O for Proportional, Left-click to apply, Right-click/Esc to cancel.", StatusTone.Info);
         }
 
+        private void AnchorFaceEditTransformMouse(Vector2 mousePos)
+        {
+            _faceEditTransformStartMouse = mousePos;
+            Vector3 rOrig = _previewCamera.ProjectRayOrigin(mousePos);
+            Vector3 rDir = _previewCamera.ProjectRayNormal(mousePos);
+            float denom = rDir.Dot(_faceEditTransformPlaneNormal);
+            _faceEditTransformStartHitWorld = MathF.Abs(denom) > 1e-5f
+                ? rOrig + rDir * ((_faceEditTransformPivotWorld - rOrig).Dot(_faceEditTransformPlaneNormal) / denom)
+                : _faceEditTransformPivotWorld;
+
+            Transform3D heroInv = (_previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+                ? _previewHeroClone.GlobalTransform.AffineInverse()
+                : Transform3D.Identity;
+            float startHeroX = (heroInv * _faceEditTransformStartHitWorld).X;
+            _faceEditMirrorDragSign = startHeroX < 0f ? -1f : 1f;
+        }
+
         private void UpdateFaceEditTransform(Vector2 mousePos)
         {
             if (_faceEditTransformMode == FaceEditTransformMode.None || _previewCamera == null || _faceEditAffectedVerts.Count == 0)
                 return;
+
+            if (_faceEditTransformNeedsAnchor)
+            {
+                _faceEditTransformNeedsAnchor = false;
+                AnchorFaceEditTransformMouse(mousePos);
+                return;
+            }
 
             Vector3 rOrig = _previewCamera.ProjectRayOrigin(mousePos);
             Vector3 rDir = _previewCamera.ProjectRayNormal(mousePos);
@@ -345,6 +391,13 @@ namespace DeadlockPlayground.UI
             if (_faceEditAxisLock == 1) deltaWorld = new Vector3(deltaWorld.X, 0f, 0f);
             else if (_faceEditAxisLock == 2) deltaWorld = new Vector3(0f, deltaWorld.Y, 0f);
             else if (_faceEditAxisLock == 3) deltaWorld = new Vector3(0f, 0f, deltaWorld.Z);
+
+            Transform3D heroGlobal = (_previewHeroClone != null && GodotObject.IsInstanceValid(_previewHeroClone))
+                ? _previewHeroClone.GlobalTransform
+                : Transform3D.Identity;
+            Transform3D heroInv = heroGlobal.AffineInverse();
+            Vector3 deltaHero = heroInv.Basis * deltaWorld;
+            Vector3 mirDeltaWorld = heroGlobal.Basis * new Vector3(-deltaHero.X, deltaHero.Y, deltaHero.Z);
 
             float mouseDx = (mousePos.X - _faceEditTransformStartMouse.X) * 0.0045f;
             float scaleFactor = Math.Clamp(1f + mouseDx, 0.15f, 3.0f);
@@ -362,7 +415,8 @@ namespace DeadlockPlayground.UI
                 Vector3 shiftWorld = Vector3.Zero;
                 if (_faceEditTransformMode == FaceEditTransformMode.Move)
                 {
-                    shiftWorld = deltaWorld * item.Weight;
+                    bool useMirrored = _faceEditMirrorMoveSymmetric && (item.HeroX * _faceEditMirrorDragSign < 0f);
+                    shiftWorld = (useMirrored ? mirDeltaWorld : deltaWorld) * item.Weight;
                 }
                 else if (_faceEditTransformMode == FaceEditTransformMode.Scale)
                 {

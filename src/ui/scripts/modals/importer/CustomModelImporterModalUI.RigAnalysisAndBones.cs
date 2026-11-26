@@ -972,11 +972,9 @@ namespace DeadlockPlayground.UI
                 optRole.ItemSelected += (idx) =>
                 {
                     bool isSocket = (idx == 1);
-                    weaponCompactBox.Visible = isSocket;
                     socketRow.Visible = isSocket;
                     placementRow.Visible = isSocket;
                     weaponTransformBox.Visible = isSocket;
-                    UpdateWeaponCardSummary(rawMeshName);
                     if (isSocket)
                     {
                         string bName = optSocket.GetItemText(optSocket.Selected).Replace("★ ", "");
@@ -1002,6 +1000,7 @@ namespace DeadlockPlayground.UI
                         _submeshSocketScale.Remove(rawMeshName);
                         TriggerRealtimeRigUpdate();
                     }
+                    SetWeaponCardCompactVisible(rawMeshName, isSocket);
                 };
 
                 optPlacement.ItemSelected += (pIdx) =>

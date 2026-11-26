@@ -86,15 +86,16 @@ const currentVersion = `v${changelogData.latestVersion}`;
           <span>GameBanana</span>
         </a>
         <span class="sublink-sep">•</span>
-        <button 
-          id="overviewDiscordBtn" 
-          class="sublink-item discord-copy-action"
-          data-discord="juliancz_"
-          title="Click to copy Discord username: juliancz_"
+        <a 
+          href="https://discord.gg/tWHuT6ywV" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          class="sublink-item"
+          title="Join the official Deadlock Playground Discord"
         >
           <Icon name="brand-discord" size={14} color="#818cf8" />
-          <span id="overviewDiscordText">Discord: juliancz_</span>
-        </button>
+          <span>Official Discord</span>
+        </a>
       </div>
     </div>
 
@@ -831,23 +832,6 @@ const currentVersion = `v${changelogData.latestVersion}`;
 </style>
 
 <script>
-  // Discord copy username action in overview
-  const ovDiscordBtn = document.getElementById('overviewDiscordBtn');
-  const ovDiscordText = document.getElementById('overviewDiscordText');
-  if (ovDiscordBtn && ovDiscordText) {
-    ovDiscordBtn.addEventListener('click', () => {
-      const username = ovDiscordBtn.getAttribute('data-discord') || 'juliancz_';
-      navigator.clipboard.writeText(username).then(() => {
-        ovDiscordText.textContent = `Copied: ${username}!`;
-        ovDiscordText.style.color = 'var(--dl-accent-sage)';
-        setTimeout(() => {
-          ovDiscordText.textContent = `Discord: ${username}`;
-          ovDiscordText.style.color = '';
-        }, 2200);
-      });
-    });
-  }
-
   // Cross-tab switching buttons (e.g. "What's New", "Explore Showcase")
   document.querySelectorAll('[data-switch-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {

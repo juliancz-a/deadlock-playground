@@ -88,6 +88,7 @@ namespace DeadlockPlayground.UI
         private bool _isImpSculptBrushing;
         private bool _isSyncingImpSculptUi;
         private Action _impSculptOriginalMeshRestore;
+        private readonly Dictionary<MeshInstance3D, Mesh> _impSculptPristineMeshes = new();
 
         // Live grab-drag state
         private Vector3 _impGrabStartWorld;
@@ -106,6 +107,8 @@ namespace DeadlockPlayground.UI
             public Vector3[] BaseLocalVerts;
             public Vector3[] CurrentWorldVerts;
             public Vector3[] CurrentWorldNorms;
+            public Vector3[] WeldedWorldNorms;
+            public int[][] WeldSiblings;
             public int[] Indices;
             public int[][] Neighbors;
         }
@@ -664,6 +667,7 @@ namespace DeadlockPlayground.UI
             SyncShapeScaleControlsFromTarget();
 
             // Automatically switch preview into live Sculpt Pose (unposed _previewModelRoot visible, _previewRiggedContainer hidden)
+            CapturePristineImportedSculptMeshes();
             ApplyLandmarkPreviewState();
             ApplyImpSculptIsolationVisibility();
             RefreshImportedSculptPreviewFromCurrentSettings();
@@ -673,6 +677,30 @@ namespace DeadlockPlayground.UI
 
             string scopeLbl = string.IsNullOrEmpty(_activeImpSculptTargetMesh) ? "All Meshes" : _activeImpSculptTargetMesh;
             SetBottomStatus($"3D Sculpt & Face Edit ({scopeLbl}) — Brush or Edit Faces (G/S/Alt+S), Scale/Fit drawer, H for Hero Ghost, Esc or Done to bake.", StatusTone.Info);
+        }
+
+        private void CapturePristineImportedSculptMeshes()
+        {
+            if (_impSculptPristineMeshes.Count > 0) return;
+            if (_previewModelInstance == null || !GodotObject.IsInstanceValid(_previewModelInstance)) return;
+            foreach (var mi in CustomModelAutoRigger.CollectMeshes(_previewModelInstance))
+            {
+                if (mi?.Mesh != null && GodotObject.IsInstanceValid(mi))
+                    _impSculptPristineMeshes[mi] = mi.Mesh;
+            }
+        }
+
+        private void RestorePristineImportedSculptMeshes(bool clearAfter)
+        {
+            _impSculptOriginalMeshRestore?.Invoke();
+            _impSculptOriginalMeshRestore = null;
+            foreach (var (mi, origMesh) in _impSculptPristineMeshes)
+            {
+                if (mi != null && GodotObject.IsInstanceValid(mi) && origMesh != null)
+                    mi.Mesh = origMesh;
+            }
+            if (clearAfter)
+                _impSculptPristineMeshes.Clear();
         }
 
         private void ExitImportedSculptMode()
@@ -691,8 +719,7 @@ namespace DeadlockPlayground.UI
             UpdateBrushRingVisual(Vector3.Zero, Vector3.Up, 0.05f, false);
             if (_importedSculptViewportHud != null) _importedSculptViewportHud.Visible = false;
 
-            _impSculptOriginalMeshRestore?.Invoke();
-            _impSculptOriginalMeshRestore = null;
+            RestorePristineImportedSculptMeshes(clearAfter: true);
             _impSculptCaches.Clear();
             SyncPreviewModelMeshVisibility();
 
@@ -704,9 +731,10 @@ namespace DeadlockPlayground.UI
 
         private void RefreshImportedSculptPreviewFromCurrentSettings()
         {
-            _impSculptOriginalMeshRestore?.Invoke();
-            _impSculptOriginalMeshRestore = null;
+            // Always restore true pristine meshes first so Undo back to 0 strokes cleanly reverts liveMesh edits!
+            RestorePristineImportedSculptMeshes(clearAfter: false);
             if (_previewModelInstance == null || !GodotObject.IsInstanceValid(_previewModelInstance)) return;
+            CapturePristineImportedSculptMeshes();
 
             var opts = GatherRiggingOptions();
             _impSculptOriginalMeshRestore = CustomModelAutoRigger.ApplyImportedMeshSculptToScene(_previewModelInstance, opts);
@@ -797,8 +825,7 @@ namespace DeadlockPlayground.UI
 
         private void ResetImportedSculptStateForModalOpen()
         {
-            _impSculptOriginalMeshRestore?.Invoke();
-            _impSculptOriginalMeshRestore = null;
+            RestorePristineImportedSculptMeshes(clearAfter: true);
             DestroyFaceEditOverlays3D();
             _isImpSculptModeActive = false;
             _activeImpSculptTargetMesh = null;
@@ -923,6 +950,44 @@ namespace DeadlockPlayground.UI
                     for (int v = 0; v < verts.Length; v++)
                         neighbors[v] = adjSets[v] != null ? adjSets[v].ToArray() : Array.Empty<int>();
 
+                    // Weld coincident UV-seam / hard-edge duplicate vertices (0.5mm grid) so Inflate & Face Edit never tear seams into spikes!
+                    var weldBuckets = new Dictionary<(int, int, int), List<int>>(verts.Length);
+                    for (int v = 0; v < wVerts.Length; v++)
+                    {
+                        var p = wVerts[v];
+                        var key = (Mathf.RoundToInt(p.X * 2000f), Mathf.RoundToInt(p.Y * 2000f), Mathf.RoundToInt(p.Z * 2000f));
+                        if (!weldBuckets.TryGetValue(key, out var list))
+                        {
+                            list = new List<int>(2);
+                            weldBuckets[key] = list;
+                        }
+                        list.Add(v);
+                    }
+                    var weldedNorms = new Vector3[wVerts.Length];
+                    var weldSiblings = new int[wVerts.Length][];
+                    foreach (var group in weldBuckets.Values)
+                    {
+                        if (group.Count == 1)
+                        {
+                            int vi = group[0];
+                            weldedNorms[vi] = wNorms[vi];
+                            weldSiblings[vi] = Array.Empty<int>();
+                        }
+                        else
+                        {
+                            Vector3 avgN = Vector3.Zero;
+                            for (int i = 0; i < group.Count; i++) avgN += wNorms[group[i]];
+                            avgN = avgN.LengthSquared() > 1e-8f ? avgN.Normalized() : wNorms[group[0]];
+                            int[] grpArr = group.ToArray();
+                            for (int i = 0; i < group.Count; i++)
+                            {
+                                int vi = group[i];
+                                weldedNorms[vi] = avgN;
+                                weldSiblings[vi] = grpArr;
+                            }
+                        }
+                    }
+
                     _impSculptCaches.Add(new ImpSculptSurfaceCache
                     {
                         SourceMi = srcMi,
@@ -934,6 +999,8 @@ namespace DeadlockPlayground.UI
                         BaseLocalVerts = baseLocalVerts,
                         CurrentWorldVerts = wVerts,
                         CurrentWorldNorms = wNorms,
+                        WeldedWorldNorms = weldedNorms,
+                        WeldSiblings = weldSiblings,
                         Indices = idx,
                         Neighbors = neighbors
                     });
@@ -1160,7 +1227,9 @@ namespace DeadlockPlayground.UI
                     else
                     {
                         float sign = mode == ImportedSculptBrushMode.Shrink ? -1f : 1f;
-                        Vector3 wn = c.CurrentWorldNorms[v];
+                        Vector3 wn = (c.WeldedWorldNorms != null && v < c.WeldedWorldNorms.Length)
+                            ? c.WeldedWorldNorms[v]
+                            : c.CurrentWorldNorms[v];
                         Vector3 shiftWorld = wn * (sign * stepMeters * falloff);
                         map[v] = curDelta + (c.WorldToLocal.Basis * shiftWorld);
                         touched = true;

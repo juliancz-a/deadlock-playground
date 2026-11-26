@@ -947,6 +947,7 @@ namespace DeadlockPlayground.UI
                     {
                         ctrl.Scale.SetValueNoSignal(s);
                     }
+                    SetWeaponCardCompactVisible(mName, true);
                 }
                 else
                 {
@@ -958,6 +959,7 @@ namespace DeadlockPlayground.UI
                     if (placementParent != null) placementParent.Visible = false;
                     var transformBox = ctrl.Pitch?.GetParent()?.GetParent() as Control;
                     if (transformBox != null) transformBox.Visible = false;
+                    SetWeaponCardCompactVisible(mName, false);
                 }
             }
             _isGizmoUpdatingFromUI = false;

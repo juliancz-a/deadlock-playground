@@ -142,27 +142,28 @@ alignment = 1
 [node name="LabelTitle" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1527859074]
 layout_mode = 2
 theme_type_variation = &"SectionHeaderLabel"
-text = "My Discord"
+text = "Official Discord"
 autowrap_mode = 3
 
 [node name="LabelSub" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=808491072]
 layout_mode = 2
 theme_type_variation = &"MutedLabel"
-text = "Username: juliancz_"
+text = "Join the community for help, feedback, and showcases"
 autowrap_mode = 3
 
 [node name="LblDiscordCopied" type="Label" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox/VBox" unique_id=1080933265]
 visible = false
 layout_mode = 2
 theme_type_variation = &"BadgeLabelSuccess"
-text = "Username copied to clipboard!"
+text = ""
 autowrap_mode = 3
 
 [node name="BtnCopyDiscord" type="Button" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=457214055]
 custom_minimum_size = Vector2(150, 36)
 layout_mode = 2
 size_flags_vertical = 4
-text = "Copy Username"
+tooltip_text = "Open the official Deadlock Playground Discord server"
+text = "Join Discord"
 
 [node name="Spacer" type="Control" parent="MarginContainer/VBoxContainer/ContentBox/DiscordCard/HBox" unique_id=138434628]
 custom_minimum_size = Vector2(6, 0)

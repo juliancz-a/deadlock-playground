@@ -342,7 +342,9 @@ namespace DeadlockPlayground.UI
             ctrl.PosX.SetValueNoSignal(_spinWpHudPosX.Value);
             ctrl.PosY.SetValueNoSignal(_spinWpHudPosY.Value);
             ctrl.PosZ.SetValueNoSignal(_spinWpHudPosZ.Value);
-            ctrl.Scale.Value = _spinWpHudScale.Value; // triggers UpdateWeaponOffsets() once cleanly!
+            ctrl.Scale.SetValueNoSignal(_spinWpHudScale.Value);
+            // Explicitly emit ValueChanged so UpdateWeaponOffsets() always fires even when Scale itself didn't change!
+            ctrl.Scale.EmitSignal(Godot.Range.SignalName.ValueChanged, ctrl.Scale.Value);
         }
 
         private void UpdateWeaponCardSummary(string meshName)
@@ -352,6 +354,31 @@ namespace DeadlockPlayground.UI
             string bone = _submeshSocketAssignments.TryGetValue(meshName, out var b) ? b : "hand_R";
             string rep = _submeshHeroReplacements.TryGetValue(meshName, out var r) && !string.IsNullOrEmpty(r) ? r : "";
             lbl.Text = string.IsNullOrEmpty(rep) ? $"Socket: {bone}" : $"Socket: {bone} · replaces {rep}";
+        }
+
+        private void SetWeaponCardCompactVisible(string meshName, bool isSocket)
+        {
+            if (_weaponCardSummaryLabels.TryGetValue(meshName, out var lbl) && GodotObject.IsInstanceValid(lbl))
+            {
+                if (lbl.GetParent() is Control compactBox && GodotObject.IsInstanceValid(compactBox))
+                    compactBox.Visible = isSocket;
+            }
+            if (isSocket) UpdateWeaponCardSummary(meshName);
+
+            // Sync top-right role badge on the MeshThumbCard (Body vs Prop, preserving Outline)
+            bool isOutline = _submeshIsOutlineShell.TryGetValue(meshName, out bool outFlag) && outFlag;
+            foreach (var chk in _importedSubmeshCheckboxes)
+            {
+                if (!GodotObject.IsInstanceValid(chk) || !chk.HasMeta("SubmeshName")) continue;
+                if (!string.Equals(chk.GetMeta("SubmeshName").AsString(), meshName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (_importedSubmeshCards.TryGetValue(chk, out var card) && GodotObject.IsInstanceValid(card))
+                {
+                    card.SetRoleBadge(
+                        isOutline ? "Outline" : (isSocket ? "Prop" : "Body"),
+                        isOutline ? new Color(0.85f, 0.65f, 0.25f) : (isSocket ? new Color(0.45f, 0.72f, 0.96f) : new Color(0.45f, 0.85f, 0.62f)));
+                }
+                break;
+            }
         }
     }
 }

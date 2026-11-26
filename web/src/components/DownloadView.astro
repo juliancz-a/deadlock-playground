@@ -98,24 +98,25 @@ const currentVersion = `v${changelogData.latestVersion}`;
         </div>
       </a>
 
-      <!-- Discord Copy Username Card -->
-      <div 
-        id="downloadDiscordCard" 
+      <!-- Official Discord Card -->
+      <a 
+        href="https://discord.gg/tWHuT6ywV" 
+        target="_blank" 
+        rel="noopener noreferrer" 
         class="hub-card card-panel discord-hub-card"
-        data-discord="juliancz_"
-        title="Click to copy Discord username: juliancz_"
+        title="Join the official Deadlock Playground Discord"
       >
         <div class="hub-icon-box discord">
           <Icon name="brand-discord" size={24} />
         </div>
         <div class="hub-info">
           <div class="hub-title-row">
-            <h3 class="font-heading">Discord Contact</h3>
-            <span class="copy-badge" id="downloadDiscordBadge">Click to Copy</span>
+            <h3 class="font-heading">Official Discord</h3>
+            <Icon name="external-link" size={15} color="#818cf8" />
           </div>
-          <p id="downloadDiscordDesc">Direct message for help and feedback: <strong class="font-code">juliancz_</strong></p>
+          <p>Join the Deadlock Playground community server for help, feedback, and showcases.</p>
         </div>
-      </div>
+      </a>
 
       <!-- GitHub Repository Card -->
       <a 
@@ -351,28 +352,3 @@ const currentVersion = `v${changelogData.latestVersion}`;
     }
   }
 </style>
-
-<script>
-  // Discord copy username card handler in Download tab
-  const dlDiscordCard = document.getElementById('downloadDiscordCard');
-  const dlDiscordBadge = document.getElementById('downloadDiscordBadge');
-  const dlDiscordDesc = document.getElementById('downloadDiscordDesc');
-
-  if (dlDiscordCard && dlDiscordBadge && dlDiscordDesc) {
-    dlDiscordCard.addEventListener('click', () => {
-      const username = dlDiscordCard.getAttribute('data-discord') || 'juliancz_';
-      navigator.clipboard.writeText(username).then(() => {
-        dlDiscordBadge.textContent = 'Copied!';
-        dlDiscordBadge.style.background = '#72947f';
-        dlDiscordBadge.style.color = '#0c100e';
-        dlDiscordDesc.innerHTML = `<span style="color:#72947f; font-weight:700;">Copied username: ${username} to clipboard!</span>`;
-        setTimeout(() => {
-          dlDiscordBadge.textContent = 'Click to Copy';
-          dlDiscordBadge.style.background = '';
-          dlDiscordBadge.style.color = '';
-          dlDiscordDesc.innerHTML = `Direct message for help and feedback: <strong class="font-code">${username}</strong>`;
-        }, 2500);
-      });
-    });
-  }
-</script>

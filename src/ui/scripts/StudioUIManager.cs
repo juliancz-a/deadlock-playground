@@ -66,6 +66,7 @@ public partial class StudioUIManager : CanvasLayer
     [Export] private FeedbackDialog _feedbackModal;
     [Export] private PanelContainer _aboutModal;
     [Export] private ChangelogModalUI _changelogModal;
+    private bool _pendingPostUpdateChangelog;
     [Export] private PanelContainer _loadingOverlay;
     [Export] private Label _loadingLabel;
     [Export] private Label _loadingLogLabel;
@@ -153,6 +154,10 @@ public partial class StudioUIManager : CanvasLayer
         {
             ShowToast("Deadlock Playground updated successfully!");
         }
+
+        // Evaluate whether to auto-open the changelog modal once for this app update
+        // (checked before InitializePaths potentially writes settings.cfg on a fresh install)
+        _pendingPostUpdateChangelog = ChangelogModalUI.EvaluatePendingUpdateAutoOpen();
 
         CreateUpdateNotificationUI();
         CreateFallbackDialog();
@@ -2096,8 +2101,20 @@ public partial class StudioUIManager : CanvasLayer
     {
         if (_unreadBadge != null)
         {
-            _unreadBadge.Visible = ChangelogModalUI.HasUnreadChangelog();
+            _unreadBadge.Visible = ChangelogModalUI.HasUnreadChangelog(_changelogModal?.ActiveVersion);
         }
+    }
+
+    private void TryAutoOpenPostUpdateChangelog()
+    {
+        if (!_pendingPostUpdateChangelog || _changelogModal == null) return;
+        if (IsAnyModalOpen()) return;
+
+        _pendingPostUpdateChangelog = false;
+        ChangelogModalUI.MarkAppVersionSeen();
+        _changelogModal.Open(forceRefresh: true);
+        UpdateModalsState();
+        UpdateNewsBadgeState();
     }
 
     private void HandleQuitRequested()
@@ -2700,6 +2717,7 @@ public partial class StudioUIManager : CanvasLayer
         UpdateVpkLoaderPath(_pathManager.CurrentGamePath);
         ShowLoading(false);
         StartupDiagnosticTracker.Mark("MainUI: InitializePaths done");
+        Callable.From(TryAutoOpenPostUpdateChangelog).CallDeferred();
     }
 
     private void UpdateVpkLoaderPath(string basePath)

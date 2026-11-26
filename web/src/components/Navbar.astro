@@ -54,16 +54,17 @@ const currentVersion = `v${changelogData.latestVersion}`;
         <img src="/logo_gamebanana.jpg" alt="GameBanana" class="gb-logo-img" />
       </a>
 
-      <!-- Discord Copy Username Button -->
-      <button 
-        id="discordCopyBtn" 
+      <!-- Official Discord Link -->
+      <a 
+        href="https://discord.gg/tWHuT6ywV" 
+        target="_blank" 
+        rel="noopener noreferrer" 
         class="icon-btn discord-btn" 
-        title="Click to copy Discord username: juliancz_"
-        data-discord="juliancz_"
+        title="Join the official Deadlock Playground Discord"
       >
         <Icon name="brand-discord" size={18} />
-        <span class="discord-tooltip" id="discordTooltip">Copy Discord</span>
-      </button>
+        <span class="discord-tooltip">Join Discord</span>
+      </a>
 
       <!-- GitHub Link -->
       <a 
@@ -157,14 +158,15 @@ const currentVersion = `v${changelogData.latestVersion}`;
         <span>GameBanana</span>
       </a>
 
-      <button 
-        id="mobileDiscordBtn" 
-        class="drawer-link-btn" 
-        data-discord="juliancz_"
+      <a 
+        href="https://discord.gg/tWHuT6ywV" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="drawer-link-btn"
       >
         <Icon name="brand-discord" size={18} color="#818cf8" />
-        <span id="mobileDiscordText">Discord: juliancz_</span>
-      </button>
+        <span>Official Discord</span>
+      </a>
 
       <a 
         href="https://github.com/juliancz-a/deadlock-playground" 
@@ -588,32 +590,6 @@ const currentVersion = `v${changelogData.latestVersion}`;
 </style>
 
 <script>
-  // Discord copy username handler
-  const discordBtn = document.getElementById('discordCopyBtn');
-  const tooltip = document.getElementById('discordTooltip');
-  const mobileDiscordBtn = document.getElementById('mobileDiscordBtn');
-  const mobileDiscordText = document.getElementById('mobileDiscordText');
-
-  function handleDiscordCopy(btn: HTMLElement | null, textElem: HTMLElement | null, defaultText: string) {
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      const username = btn.getAttribute('data-discord') || 'juliancz_';
-      navigator.clipboard.writeText(username).then(() => {
-        if (textElem) {
-          textElem.textContent = `Copied: ${username}!`;
-          textElem.style.color = '#72947f';
-          setTimeout(() => {
-            textElem.textContent = defaultText;
-            textElem.style.color = '';
-          }, 2200);
-        }
-      });
-    });
-  }
-
-  handleDiscordCopy(discordBtn, tooltip, 'Copy Discord');
-  handleDiscordCopy(mobileDiscordBtn, mobileDiscordText, 'Discord: juliancz_');
-
   // Hamburger Menu Drawer Controller
   const hamburgerBtn = document.getElementById('hamburgerBtn');
   const mobileDrawer = document.getElementById('mobileDrawer');

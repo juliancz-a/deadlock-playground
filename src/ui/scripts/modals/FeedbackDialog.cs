@@ -13,7 +13,7 @@ public partial class FeedbackDialog : PanelContainer
     private Label _lblDiscordCopied;
 
     private const string GithubUrl = "https://github.com/juliancz-a/deadlock-playground";
-    private const string DiscordUsername = "juliancz_";
+    private const string DiscordUrl = "https://discord.gg/tWHuT6ywV";
 
     public override void _Ready()
     {
@@ -34,35 +34,18 @@ public partial class FeedbackDialog : PanelContainer
 
         if (_btnDiscord != null)
         {
-            _btnDiscord.Pressed += OnCopyDiscordPressed;
+            _btnDiscord.Pressed += OnOpenDiscordPressed;
         }
 
         if (_btnCopyDiscord != null)
         {
-            _btnCopyDiscord.Pressed += OnCopyDiscordPressed;
+            _btnCopyDiscord.Pressed += OnOpenDiscordPressed;
         }
     }
 
-    private void OnCopyDiscordPressed()
+    private void OnOpenDiscordPressed()
     {
-        DisplayServer.ClipboardSet(DiscordUsername);
-        if (_lblDiscordCopied != null)
-        {
-            _lblDiscordCopied.Visible = true;
-            _lblDiscordCopied.Text = "Username copied to clipboard!";
-            
-            var timer = GetTree()?.CreateTimer(2.5f);
-            if (timer != null)
-            {
-                timer.Timeout += () =>
-                {
-                    if (GodotObject.IsInstanceValid(_lblDiscordCopied))
-                    {
-                        _lblDiscordCopied.Visible = false;
-                    }
-                };
-            }
-        }
+        OS.ShellOpen(DiscordUrl);
     }
 
     public void Open()

@@ -229,7 +229,7 @@ namespace DeadlockPlayground.UI
                 {
                     Text = "Sculpt",
                     ThemeTypeVariation = "ToolbarButton",
-                    CustomMinimumSize = new Vector2(58, 34),
+                    CustomMinimumSize = new Vector2(76, 34),
                     TooltipText = "Reshape, non-uniform scale, brush sculpt, or edit faces on this specific mesh in 3D"
                 };
                 var scIcon = GD.Load<Texture2D>("res://assets/at-icons/mesh_select.svg");
@@ -237,8 +237,8 @@ namespace DeadlockPlayground.UI
                 {
                     _btnSculpt.Icon = scIcon;
                     _btnSculpt.ExpandIcon = true;
-                    _btnSculpt.AddThemeConstantOverride("icon_max_width", 13);
-                    _btnSculpt.AddThemeConstantOverride("h_separation", 4);
+                    _btnSculpt.AddThemeConstantOverride("icon_max_width", 16);
+                    _btnSculpt.AddThemeConstantOverride("h_separation", 5);
                 }
                 ImporterStyle.ApplyFontSize(_btnSculpt, ImporterStyle.FontHint);
                 _btnSculpt.Pressed += () => SculptPressed?.Invoke();

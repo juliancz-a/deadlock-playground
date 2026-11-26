@@ -476,13 +476,19 @@ namespace DeadlockPlayground.Importer
                             string surfKey = MakeSurfaceKeepKey(rawName, s);
                             bool keepSurf = !wholeMeshHidden && !combinedHiddenTargets.Contains(surfKey);
                             mi.SetMeta($"SurfaceKept_{s}", keepSurf);
+                            var curOverride = mi.GetSurfaceOverrideMaterial(s);
                             if (keepSurf)
                             {
                                 Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
-                                mi.SetSurfaceOverrideMaterial(s, origMat);
+                                if (origMat != null)
+                                    mi.SetSurfaceOverrideMaterial(s, origMat);
+                                else if (curOverride != null && curOverride.HasMeta("IsHiddenSurfaceMaterial"))
+                                    mi.SetSurfaceOverrideMaterial(s, null);
                             }
                             else
                             {
+                                if (!mi.HasMeta($"OriginalMaterial_{s}") && curOverride != null && !curOverride.HasMeta("IsHiddenSurfaceMaterial"))
+                                    mi.SetMeta($"OriginalMaterial_{s}", curOverride);
                                 mi.SetSurfaceOverrideMaterial(s, hiddenMat);
                             }
                         }
@@ -495,7 +501,11 @@ namespace DeadlockPlayground.Importer
                             if (allKept)
                             {
                                 Material origMat = mi.HasMeta($"OriginalMaterial_{s}") ? mi.GetMeta($"OriginalMaterial_{s}").As<Material>() : null;
-                                mi.SetSurfaceOverrideMaterial(s, origMat);
+                                var curOverride = mi.GetSurfaceOverrideMaterial(s);
+                                if (origMat != null)
+                                    mi.SetSurfaceOverrideMaterial(s, origMat);
+                                else if (curOverride != null && curOverride.HasMeta("IsHiddenSurfaceMaterial"))
+                                    mi.SetSurfaceOverrideMaterial(s, null);
                             }
                         }
                     }

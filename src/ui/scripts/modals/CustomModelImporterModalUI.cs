@@ -1101,11 +1101,11 @@ namespace DeadlockPlayground.UI
                 ThemeTypeVariation = "ToolbarButton",
                 ToggleMode = true,
                 ButtonPressed = false,
-                CustomMinimumSize = new Vector2(98, 30),
+                CustomMinimumSize = new Vector2(114, 30),
                 SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
                 TooltipText = "Open floating Look Up / Crouch / Walk Back physics stress-test controls"
             };
-            SetButtonIcon(_btnStressTestPopover, "res://assets/at-icons/signal_wave.svg", 14);
+            SetButtonIcon(_btnStressTestPopover, "res://assets/at-icons/signal_wave.svg", 18);
             _btnStressTestPopover.Toggled += (open) =>
             {
                 if (_boxStressTestPopover != null) _boxStressTestPopover.Visible = open;
